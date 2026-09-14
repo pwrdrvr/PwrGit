@@ -100,6 +100,7 @@ export function RepoRow({
   onLocateTag,
   onRevealWorktree,
   onCreateWorktreeFromRef,
+  onForkRepo,
   arrangeable,
   dragProps,
   dragging,
@@ -157,6 +158,9 @@ export function RepoRow({
     newBranch: boolean,
     startPoint?: string
   ) => void;
+  /** Open the fork prompt for this repository — raised by the read-only mark,
+   *  which is the row that knows the account cannot push here. */
+  onForkRepo: () => void;
   /** The current lens is one the user can arrange by hand (Pinned only). */
   arrangeable: boolean;
   /** Repo-level drag handlers from the sidebar's useListReorder. */
@@ -560,6 +564,7 @@ export function RepoRow({
             identity={repo.identity}
             repoId={repo.id}
             profileId={repo.profileId}
+            onFork={onForkRepo}
           />
         )}
         {wtCount > 0 && (
@@ -771,6 +776,7 @@ export function RepoRow({
 
           <RepoRefsSections
             onLocateTag={onLocateTag}
+            onFork={onForkRepo}
             repo={repo}
             now={now}
             // Only when the working target lives in THIS repo. That is what

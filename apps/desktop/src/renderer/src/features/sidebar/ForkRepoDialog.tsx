@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
   forgeProductOrAssumed,
+  isForgeKind,
   type CloneDestination,
   type CloneCatalog,
   type CloneProtocol,
@@ -55,11 +56,18 @@ function destinationMeta(destination: CloneDestination): string {
 
 export function ForkRepoDialog({
   profile,
+  initialSource,
   onForked,
   onReveal,
   onClose
 }: {
   profile: Profile;
+  /** A repository to open on, instead of an empty search box — the one the
+   *  sidebar had selected when Fork… was pressed. Pressing a button labelled
+   *  Fork and being asked what to fork is the gap this closes. Preflight
+   *  upgrades it the same way it upgrades a pasted slug, so an identity-shaped
+   *  placeholder is enough. */
+  initialSource?: CloneRepository;
   onForked: (repo: Repo) => void;
   onReveal: (path: string) => void;
   onClose: () => void;
@@ -68,11 +76,19 @@ export function ForkRepoDialog({
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [destinations, setDestinations] = useState<CloneDestination[]>([]);
   const [destinationsLoading, setDestinationsLoading] = useState(true);
-  const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceQuery, setSourceQuery] = useState(
+    initialSource?.nameWithOwner ?? ""
+  );
   const [sourceSelection, setSourceSelection] = useState(0);
-  const [host, setHost] = useState<ForgeKind>("github");
+  const [host, setHost] = useState<ForgeKind>(
+    // The seed's own forge, so the picker does not open on a tab that cannot
+    // fork it. `other` is not a ForgeKind and falls back like an empty open.
+    initialSource !== undefined && isForgeKind(initialSource.host)
+      ? initialSource.host
+      : "github"
+  );
   const [selectedSource, setSelectedSource] = useState<CloneRepository | null>(
-    null
+    initialSource ?? null
   );
   const [preflight, setPreflight] = useState<ForkPreflight | null>(null);
   const [checking, setChecking] = useState(false);
@@ -162,9 +178,18 @@ export function ForkRepoDialog({
     .map((status) => status.kind);
 
   useEffect(() => {
-    if (usableHosts.length > 0 && !usableHosts.includes(host)) {
-      setHost(usableHosts[0]!);
-    }
+    if (usableHosts.length === 0 || usableHosts.includes(host)) return;
+    setHost(usableHosts[0]!);
+    // And drop a selection that belonged to the forge we just left. Before the
+    // dialog could be seeded this effect had nothing to contradict — it only
+    // ever ran with `selectedSource` still null. A seed makes the correction
+    // reachable with a source already in hand, and leaving it would produce
+    // exactly the state `selectHost` clears state to prevent: the picker
+    // reading GITLAB while the targets, preflight and upstream all describe a
+    // GitHub repository.
+    setSelectedSource(null);
+    setPreflight(null);
+    setSourceQuery("");
   }, [usableHosts.join(","), host]);
 
   // Fork targets follow the forge actually in play, not the catalog: they are
@@ -220,7 +245,15 @@ export function ForkRepoDialog({
     profileId: profile.id,
     query: sourceQuery,
     host,
-    enabled: usableHosts.includes(host)
+    // Nothing to search for while the box already names the chosen source.
+    // That is every keystroke-free moment after a pick — and, now that the
+    // dialog can open seeded, the whole of a seeded open: searching there
+    // spent a forge round trip re-finding the repository the user had just
+    // come from, and `exactRepository` then listed an `unknown`-visibility
+    // duplicate of it beneath the real one.
+    enabled:
+      usableHosts.includes(host) &&
+      (selectedSource === null || sourceQuery !== selectedSource.nameWithOwner)
   });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);

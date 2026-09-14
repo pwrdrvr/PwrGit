@@ -2,12 +2,21 @@ import { dispatch } from "../../lib/pwrgit";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { TagSummary, Lens, Profile, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import type {
+  CloneRepository,
+  TagSummary,
+  Lens,
+  Profile,
+  Repo,
+  Worktree,
+  WorktreeSort
+} from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import type { ReadState } from "../../state/readState";
 import type { RemoveWorktreesOptions } from "../../state/useRepoTree";
@@ -26,6 +35,7 @@ import {
   recordFocusVisit,
   type FocusVisits
 } from "./focus-visits";
+import { forkSeedFromRepo } from "./fork-dialog";
 import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
@@ -171,6 +181,7 @@ export function Sidebar({
   onRefreshPullRequest,
   onCloneRepo,
   onForkRepo,
+  onForkCheckout,
   onAddFolder,
   onOpenSearch,
   onExpandRepo,
@@ -208,7 +219,14 @@ export function Sidebar({
   onRefreshRepo: (repo: Repo) => void;
   onRefreshPullRequest: (repoId: string, branch: string) => void;
   onCloneRepo: () => void;
-  onForkRepo: () => void;
+  /** Open the fork-and-clone dialog. Carries the repository the sidebar had
+   *  selected, so the dialog opens on it rather than on an empty search box —
+   *  null when nothing is selected or its identity has not been read. */
+  onForkRepo: (seed: CloneRepository | null) => void;
+  /** Fork the repository a row is about and re-point that checkout at the
+   *  fork. Distinct from `onForkRepo`, which starts from a search and ends in
+   *  a new clone: this one starts from a repo already on disk. */
+  onForkCheckout: (repo: Repo) => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
@@ -509,6 +527,18 @@ export function Sidebar({
     repos.length > 0 &&
     repoLoadState.status !== "loading";
   const arrangeable = lensIsArrangeable(lens);
+  /** What "Fork…" should open on: the repository holding the current
+   *  selection. Computed here rather than in App because the sidebar is what
+   *  owns the notion of a selected row. */
+  const selectedForkSeed = useMemo(
+    () =>
+      forkSeedFromRepo(
+        repos.find((repo) =>
+          repo.worktrees.some((worktree) => worktree.id === selectedWorktreeId)
+        )
+      ),
+    [repos, selectedWorktreeId]
+  );
   const filteredIds = filtered.map((repo) => repo.id);
 
   const roots = activeProfile?.roots ?? [];
@@ -821,6 +851,7 @@ export function Sidebar({
           onPersistOrder(repo.id, ids);
         }}
         onNewWorktree={() => setNewWorktree({ repo })}
+        onForkRepo={() => onForkCheckout(repo)}
         onRevealWorktree={(worktreeId) => {
           const worktree = repo.worktrees.find(
             (candidate) => candidate.id === worktreeId
@@ -948,7 +979,7 @@ export function Sidebar({
             </button>
             <button
               className="fork-repo"
-              onClick={onForkRepo}
+              onClick={() => onForkRepo(selectedForkSeed)}
               disabled={
                 activeProfile === null || activeProfile.roots.length === 0
               }

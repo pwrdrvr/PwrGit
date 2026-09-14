@@ -238,18 +238,25 @@ for (const host of ["github", "gitlab"] as const) {
       `git@${host === "github" ? "github.com" : "gitlab.com"}:${sourceSlug}.git`
     );
     await expectIndexedAndSelected(window, name);
+    // By accessible name, not by `title`. These 12px marks speak through
+    // `useViewportTooltip` now — a `title` could not be dismissed (SC 1.4.13)
+    // and, on these particular elements, never rendered at all. The name is
+    // what a screen reader gets and what this asserts.
     await expect(
-      repoBlock(window, name).locator(`[title^="Fork of ${sourceSlug}"]`)
+      repoBlock(window, name).getByRole("img", {
+        name: new RegExp(`^Fork of ${sourceSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
+      })
     ).toBeVisible();
+    // The visibility control names the state it is about as well as the action
+    // it performs, so one assertion covers both.
     const visibility = repoBlock(window, name).getByRole("button", {
-      name: "Refresh repository visibility",
+      name:
+        host === "github"
+          ? "private on github.com. Refresh repository visibility"
+          : "private on gitlab.com. Refresh repository visibility",
       exact: true
     });
     await expect(visibility).toBeVisible();
-    await expect(visibility).toHaveAttribute(
-      "title",
-      host === "github" ? /^private on github\.com\./ : /^private on gitlab\.com\./
-    );
     expect(await recordedPhases(window)).toEqual(
       expect.arrayContaining([
         "starting",

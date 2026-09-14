@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type {
   CloneRepository,
+  Repo,
   ForgeOwner,
   ForgeStatus,
   ForkPreflight
 } from "@pwrgit/shared";
 import {
   cliProtocolLabel,
+  forkSeedFromRepo,
   forgeCanAnswerAnywhere,
   forgeCanAnswerDialog,
   defaultForkTarget,
@@ -538,5 +540,91 @@ describe("which instance a dialog may ask", () => {
     expect(forgeCanAnswerAnywhere({ ...enterpriseOnly, installed: false })).toBe(
       false
     );
+  });
+});
+
+describe("forkSeedFromRepo", () => {
+  // `forkSeedFromRepo` reads `identity` and nothing else, so the fixture only
+  // has to be a Repo in that respect — spelling out every field would pin this
+  // test to the shape of a type it does not touch.
+  const repo = (identity?: Repo["identity"]): Repo =>
+    ({
+      id: "repo-1",
+      profileId: "profile-1",
+      name: "dugite",
+      path: "/src/dugite",
+      worktrees: [],
+      ...(identity === undefined ? {} : { identity })
+    }) as unknown as Repo;
+
+  it("carries what PwrGit already knows, so the row reads right on open", () => {
+    // Not the `unknown` placeholder a pasted slug gets: the identity is a real
+    // read of `origin`, and the read-only chip is the whole reason the user
+    // pressed Fork.
+    expect(
+      forkSeedFromRepo(
+        repo({
+          host: "github",
+          hostname: "github.com",
+          owner: "desktop",
+          name: "dugite",
+          nameWithOwner: "desktop/dugite",
+          visibility: "public",
+          viewerCanPush: false
+        })
+      )
+    ).toEqual({
+      name: "dugite",
+      owner: "desktop",
+      nameWithOwner: "desktop/dugite",
+      visibility: "public",
+      host: "github",
+      hostname: "github.com",
+      sshUrl: "",
+      httpsUrl: "",
+      localPaths: [],
+      viewerCanPush: false
+    });
+  });
+
+  it("keeps a three-state answer absent rather than guessing it", () => {
+    const seed = forkSeedFromRepo(
+      repo({
+        host: "github",
+        hostname: "github.com",
+        owner: "desktop",
+        name: "dugite",
+        nameWithOwner: "desktop/dugite",
+        visibility: "public"
+      })
+    );
+    expect(seed).not.toBeNull();
+    expect("viewerCanPush" in seed!).toBe(false);
+  });
+
+  it("seeds nothing for a repo nobody has asked the forge about", () => {
+    // Inventing a hostname from a folder name would open the dialog on the
+    // wrong instance, which is worse than opening it empty.
+    expect(forkSeedFromRepo(repo())).toBeNull();
+    expect(forkSeedFromRepo(undefined)).toBeNull();
+  });
+
+  it("carries fork lineage through, so upstream choices are right at once", () => {
+    const seed = forkSeedFromRepo(
+      repo({
+        host: "github",
+        hostname: "github.com",
+        owner: "octo-dev",
+        name: "widget-core",
+        nameWithOwner: "octo-dev/widget-core",
+        visibility: "public",
+        parent: {
+          nameWithOwner: "acme/widget-core",
+          url: "https://github.com/acme/widget-core"
+        }
+      })
+    );
+    expect(seed?.parent?.nameWithOwner).toBe("acme/widget-core");
+    expect(seed?.root).toBeUndefined();
   });
 });

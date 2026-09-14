@@ -9,7 +9,8 @@ import {
   type ForgeOwner,
   type ForgeStatus,
   type ForkPreflight,
-  type ForkProgress
+  type ForkProgress,
+  type Repo
 } from "@pwrgit/shared";
 
 export const FORK_PROGRESS_LABELS: Record<ForkProgress["phase"], string> = {
@@ -256,4 +257,42 @@ export function repositoriesOnHost(
   host: ForgeHost
 ): CloneRepository[] {
   return repositories.filter((repository) => repository.host === host);
+}
+
+/**
+ * The repository the fork dialog should open on, built from a row already in
+ * the sidebar.
+ *
+ * Pressing a button labelled "Fork…" with a repository selected and being
+ * asked to type its name is the gap this closes. The identity is what PwrGit
+ * already knows about `origin`, so the seed carries the real visibility,
+ * lineage and push access rather than the `unknown` placeholder a pasted slug
+ * gets — the preflight still upgrades it, but the row reads correctly in the
+ * meantime, read-only chip included.
+ *
+ * Null when there is nothing to seed with: no repository selected, or one
+ * whose identity has never been read (absent is "not looked up", and inventing
+ * a hostname from a name would point the dialog at the wrong instance).
+ * `sshUrl` / `httpsUrl` are blank for the same reason — the dialog never
+ * clones the SOURCE, and a fabricated URL is a URL something could follow.
+ */
+export function forkSeedFromRepo(repo: Repo | undefined): CloneRepository | null {
+  const identity = repo?.identity;
+  if (identity === undefined) return null;
+  return {
+    name: identity.name,
+    owner: identity.owner,
+    nameWithOwner: identity.nameWithOwner,
+    visibility: identity.visibility,
+    host: identity.host,
+    hostname: identity.hostname,
+    sshUrl: "",
+    httpsUrl: "",
+    localPaths: [],
+    ...(identity.viewerCanPush === undefined
+      ? {}
+      : { viewerCanPush: identity.viewerCanPush }),
+    ...(identity.parent === undefined ? {} : { parent: identity.parent }),
+    ...(identity.root === undefined ? {} : { root: identity.root })
+  };
 }

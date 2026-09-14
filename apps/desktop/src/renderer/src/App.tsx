@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  CloneRepository,
   BranchReveal,
   Commit,
   FileInsightContext,
@@ -28,6 +29,7 @@ import { ProfileModal } from "./features/sidebar/ProfileModal";
 import { OnboardingWizard } from "./features/onboarding/OnboardingWizard";
 import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
 import { ForkRepoDialog } from "./features/sidebar/ForkRepoDialog";
+import { ForkCheckoutDialog } from "./features/sidebar/ForkCheckoutDialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import {
@@ -57,7 +59,18 @@ export function App() {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
-  const [forkOpen, setForkOpen] = useState(false);
+  /** null = closed. Open carries a `seed`: a CloneRepository opens the dialog
+   *  on the repository the sidebar had selected, and `seed: null` opens it
+   *  empty — which is what a selection with no read identity yields. */
+  const [forkOpen, setForkOpen] = useState<
+    { seed: CloneRepository | null } | null
+  >(null);
+  /** The repository whose checkout is being re-pointed at a fork, raised from
+   *  the sidebar's read-only mark. Held here rather than in the row so the
+   *  dialog outlives a re-render of the tree beneath it. */
+  const [forkCheckout, setForkCheckout] = useState<
+    { profileId: string; repoId: string; repoName: string } | null
+  >(null);
   // A ⌘F pick on a branch with no worktree — the New worktree modal, primed to
   // branch from a fetched ref (remote-only) or to check the branch out (local).
   const [searchNewWorktree, setSearchNewWorktree] = useState<{
@@ -699,7 +712,14 @@ export function App() {
             refreshPullRequest(repoId, branch, "user")
           }
           onCloneRepo={() => setCloneOpen(true)}
-          onForkRepo={() => setForkOpen(true)}
+          onForkRepo={(seed) => setForkOpen({ seed })}
+          onForkCheckout={(repo) =>
+            setForkCheckout({
+              profileId: repo.profileId,
+              repoId: repo.id,
+              repoName: repo.identity?.nameWithOwner ?? repo.name
+            })
+          }
           onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
@@ -969,11 +989,12 @@ export function App() {
         />
       )}
 
-      {forkOpen && activeProfile !== null && (
+      {forkOpen !== null && activeProfile !== null && (
         <ForkRepoDialog
           profile={activeProfile}
+          {...(forkOpen.seed === null ? {} : { initialSource: forkOpen.seed })}
           onForked={(repo) => {
-            setForkOpen(false);
+            setForkOpen(null);
             setPendingReveal({
               repoId: repo.id,
               worktreeId: null,
@@ -981,10 +1002,20 @@ export function App() {
             });
           }}
           onReveal={(path) => {
-            setForkOpen(false);
+            setForkOpen(null);
             void dispatch("shell:revealPath", { path });
           }}
-          onClose={() => setForkOpen(false)}
+          onClose={() => setForkOpen(null)}
+        />
+      )}
+
+      {forkCheckout !== null && (
+        <ForkCheckoutDialog
+          profileId={forkCheckout.profileId}
+          repoId={forkCheckout.repoId}
+          repoName={forkCheckout.repoName}
+          onClose={() => setForkCheckout(null)}
+          onForked={() => setForkCheckout(null)}
         />
       )}
 

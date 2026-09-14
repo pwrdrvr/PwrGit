@@ -48,6 +48,46 @@ of where it entered the trigger, **or** slowed below
 does not hold still — a 10px tremor reads as 0.5 px/ms and would never open a
 card. A sweep satisfies neither, so the extra path costs no suppression.
 
+## A 12px mark in a list gets `useViewportTooltip`, not `title`
+
+`ForgeChip` carries a native `title` and shows one; the `.repo-mark` glyphs
+beside it carried one and did not, so the read-only mark and the
+public/private/internal mark were both mute. The cause was never pinned down —
+nothing sets `pointer-events` on either, and the only structural difference is
+that the chip has padding and a border while a mark is a bare 12×12 box around
+an SVG with `fill="none"`.
+
+Don't chase it. A bare `title` cannot satisfy the Escape rule below anyway, and
+the hook is what every other hover surface in the sidebar already uses —
+including `RepoRow`'s own refresh button, three sections down the same row.
+Reach for it for any new mark, and let the row's `aria-describedby` (built from
+`identityDescription`) carry the words for a screen reader.
+
+**Use `hoverTooltip(tip, content)`, not four hand-written handlers.** It is
+exported beside the hook and returns
+`onMouseEnter`/`onMouseLeave`/`onFocus`/`onBlur` together, because the two
+halves are not optional separately: a mark that opens on hover but not on focus
+is a mark a keyboard user never sees, and every hand-rolled copy eventually
+drops one. The component owns the `useViewportTooltip()` and renders
+`tip.tooltipNode`; the helper adds no state.
+
+**The mixed-tooltip problem is the visible one.** A native `title` renders as
+the OS tooltip — dark, square, bottom-right of the pointer — beside the light
+card every other surface draws, so one 320px column ends up speaking in two
+voices. The REMOTES list and the repo row are converted (`ForgeChip`, the
+remote disclosure row, both fetch buttons, the fork verb, all three repo
+marks); the rest of the renderer is not, and the sweep is tracked separately.
+When you touch a surface that still has a `title`, convert it rather than
+matching it.
+
+**A `title` is not an accessible name.** On a `span` it is advisory and
+unreliable. When you take one away, ask what it was carrying: if it was the
+element's only name, replace it with `aria-label` (plus `role="img"` for a
+meaningful glyph), and if the element sits INSIDE a control that already has a
+name, make it `aria-hidden` — an `aria-label` there is spliced into the parent
+button's name rather than read as its own, which is how `origin` became
+"origin You can't push to desktop/dugite. Fork it to contribute. default".
+
 ## Popups shown on hover must be dismissible
 
 `useViewportTooltip` handles Escape (WCAG 2.1 SC 1.4.13) and returns focus to

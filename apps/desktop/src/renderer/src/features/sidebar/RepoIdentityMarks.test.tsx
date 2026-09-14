@@ -39,9 +39,14 @@ it("retries only this repo, blocks duplicate clicks, and explains an unresolved 
       profileId: "profile-1", repoId: "repo-1", force: true
     });
     expect(toggleRow).not.toHaveBeenCalled();
-    expect(button.disabled).toBe(true);
-    await act(async () => resolve(ok({ changed: 0, outcomes: [{ repoId: "repo-1", status: "unknown" }] })));
+    // `aria-disabled`, never `disabled`: Chromium blurs an element the moment
+    // it becomes disabled, so a refresh started from the keyboard threw focus
+    // to <body> until it returned (SC 2.4.3). The duplicate click above is
+    // blocked by the component, which is what the single dispatch proves.
+    expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(button.disabled).toBe(false);
+    await act(async () => resolve(ok({ changed: 0, outcomes: [{ repoId: "repo-1", status: "unknown" }] })));
+    expect(button.getAttribute("aria-disabled")).toBe("false");
     expect(showErrorToast).toHaveBeenCalledWith({
       title: "Repository visibility",
       message: "Visibility is still unknown. Check Settings → Forges or Logs."
@@ -183,7 +188,8 @@ it("marks a repo you cannot push to, and stays silent about the other two states
   };
   const container = document.createElement("div");
   const root = createRoot(container);
-  const marks = (viewerCanPush?: boolean) => (
+  const forks: number[] = [];
+  const marks = (viewerCanPush?: boolean, onFork?: () => void) => (
     <RepoIdentityGlyphs
       repoId="repo-1"
       profileId="profile-1"
@@ -191,6 +197,7 @@ it("marks a repo you cannot push to, and stays silent about the other two states
         ...identity,
         ...(viewerCanPush === undefined ? {} : { viewerCanPush })
       }}
+      {...(onFork === undefined ? {} : { onFork })}
     />
   );
   try {
@@ -198,14 +205,39 @@ it("marks a repo you cannot push to, and stays silent about the other two states
     expect(container.querySelector(".repo-mark--nopush")).toBeNull();
     await act(async () => root.render(marks(true)));
     expect(container.querySelector(".repo-mark--nopush")).toBeNull();
+
+    // No `title`: these 12px marks speak through `useViewportTooltip`, like
+    // the refresh button further down the same row. The sentence a screen
+    // reader gets is `identityDescription`, on the row's aria-describedby.
     await act(async () => root.render(marks(false)));
-    expect(
-      container.querySelector(".repo-mark--nopush")?.getAttribute("title")
-    ).toBe("You can't push to desktop/dugite. Fork it to contribute.");
-    // A list says what is true; the verb lives where the user acts on it.
-    expect(
-      container.querySelector(".repo-mark--nopush")?.tagName.toLowerCase()
-    ).toBe("span");
+    const passive = container.querySelector(".repo-mark--nopush");
+    // No `title` — these marks speak through `useViewportTooltip`. The name a
+    // screen reader (and the e2e suite) gets is the aria-label, which a
+    // `title` on a span never reliably supplied.
+    expect(passive?.getAttribute("title")).toBeNull();
+    expect(passive?.getAttribute("role")).toBe("img");
+    expect(passive?.getAttribute("aria-label")).toBe(
+      "You can't push to desktop/dugite. Fork it to contribute."
+    );
+    // Passive with nowhere to send the user — a button that goes nowhere is
+    // worse than a statement.
+    expect(passive?.tagName.toLowerCase()).toBe("span");
+
+    // With a destination it becomes the verb.
+    await act(async () =>
+      root.render(marks(false, () => forks.push(1)))
+    );
+    const actionable = container.querySelector<HTMLButtonElement>(
+      ".repo-mark--nopush"
+    );
+    expect(actionable?.tagName.toLowerCase()).toBe("button");
+    expect(actionable?.getAttribute("aria-label")).toBe(
+      "You can't push to desktop/dugite. Fork it to contribute. Fork it now."
+    );
+    await act(async () => {
+      actionable?.click();
+    });
+    expect(forks).toHaveLength(1);
   } finally {
     await act(async () => root.unmount());
   }

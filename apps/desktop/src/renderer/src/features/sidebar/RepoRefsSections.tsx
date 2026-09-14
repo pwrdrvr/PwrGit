@@ -13,8 +13,10 @@ import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { SwitchGlyph } from "../../lib/SwitchGlyph";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useForgeNaming } from "../../state/useForgeNaming";
 import { CopyTarget } from "../shell/CopyTarget";
+import { GitForkIcon, NoPushMark } from "./RepoIdentityMarks";
 import { switchWorktreeToBranch } from "../shell/branchSwitch";
 import {
   branchActivation,
@@ -25,6 +27,7 @@ import {
 } from "./branch-focus";
 import { remoteForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
+import { remoteUrlLines, remoteWebUrl, remoteWhere } from "./remote-info";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 import {
   localBranchForRemote,
@@ -79,7 +82,8 @@ export function RepoRefsSections({
   focusedWorktree,
   onLocateTag,
   onRevealWorktree,
-  onCreateWorktree
+  onCreateWorktree,
+  onFork
 }: {
   repo: Repo;
   now: number;
@@ -94,8 +98,17 @@ export function RepoRefsSections({
     newBranch: boolean,
     startPoint?: string
   ) => void;
+  /** Fork what `origin` points at and re-point this checkout at the fork. */
+  onFork: () => void;
 }) {
   const forgeNaming = useForgeNaming();
+  /** One card for every hover surface in this tree. Native `title` is what the
+   *  marks beside these rows moved off (`lib/AGENTS.md`), and two tooltip
+   *  styles in one 320px column is the part a user actually notices. */
+  const tip = useViewportTooltip();
+  /** Asked once. The mark and the fork verb below are two renderings of this
+   *  single fact, and spelling it twice is how they drift apart. */
+  const cannotPush = repo.identity?.viewerCanPush === false;
   /**
    * Null whenever a chip would say nothing — one forge host on, or a remote
    * no product claims. Same gate the repo row uses, so the two surfaces cannot
@@ -683,7 +696,7 @@ export function RepoRefsSections({
             className="ref-fetch-all"
             aria-label={`Fetch all remotes for ${repo.name}`}
             aria-busy={fetching === "*"}
-            title="Fetch all remotes and prune deleted branches"
+            {...hoverTooltip(tip, "Fetch all remotes and prune deleted branches")}
             /* `disabled` stays for the static case (there is nothing to fetch),
                but NOT for the in-flight one: Chromium blurs an element the
                moment it becomes disabled, so a fetch started from the keyboard
@@ -705,13 +718,31 @@ export function RepoRefsSections({
           <div className="ref-section__body">
             {refs?.remotes.map((remote) => {
               const open = openRemotes.has(remote.name);
+              // Where it lives, said in words rather than left for the user to
+              // read out of a URL. The `title` this replaces was the raw fetch
+              // URL and rendered as the OS tooltip, two styles away from every
+              // other card in this column.
+              const where = remoteWhere(remote.fetchUrl);
+              const webUrl = remoteWebUrl(remote.fetchUrl, forgeNaming.overrides);
+              const urlLines = remoteUrlLines(remote);
               return (
                 <div className="ref-remote" key={remote.name}>
                   <div className="ref-remote__row">
                     <button
                       className="ref-remote__main"
                       aria-expanded={open}
-                      title={remote.fetchUrl}
+                      {...hoverTooltip(
+                        tip,
+                        <span className="ref-remote__tip">
+                          <strong>{where}</strong>
+                          {urlLines.map((line) => (
+                            <span key={line.label}>
+                              {urlLines.length > 1 && `${line.label}: `}
+                              {line.url}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                       onClick={(event) => {
                         event.stopPropagation();
                         setOpenRemotes((previous) => {
@@ -729,6 +760,22 @@ export function RepoRefsSections({
                           to one forge and mirrors to another says which is
                           which. Silent for a remote no product claims. */}
                       {forgeChipsFor(remote)}
+                      {/* The read-only fact belongs to a REMOTE, and this is
+                          the remote it is about — `origin` is what `git push`
+                          uses and what the repo row's mark is really saying.
+                          Only here: `upstream` being unwritable is the normal
+                          shape of a fork, not news. */}
+                      {remote.name === "origin" &&
+                        repo.identity !== undefined && (
+                          <NoPushMark
+                            identity={repo.identity}
+                            size={11}
+                            // Inside this button, so its words would be spliced
+                            // into the button's own name. The fork control
+                            // beside it is where they are said out loud.
+                            decorative
+                          />
+                        )}
                       <small>
                         {remote.name === "origin"
                           ? "default"
@@ -737,10 +784,39 @@ export function RepoRefsSections({
                             : `${remote.branchCount} refs`}
                       </small>
                     </button>
+                    {/* A direct action rather than a menu holding one item.
+                        Offered whenever this checkout cannot push, without
+                        first asking the forge whether a fork already exists:
+                        that answer costs a round trip per row, and the dialog
+                        resolves it anyway — it says "Switch origin to my fork"
+                        instead of "Fork" when the fork is already there. */}
+                    {remote.name === "origin" && cannotPush && (
+                      <button
+                        type="button"
+                        className="ref-mini-action ref-mini-action--fork"
+                        // The constraint and the verb in one name: the mark
+                        // beside it is `aria-hidden` inside the disclosure
+                        // button, so this is where the fact is said out loud.
+                        aria-label={`You can't push to ${repo.identity?.nameWithOwner ?? remote.name}. Fork it and point origin at your fork`}
+                        {...hoverTooltip(
+                          tip,
+                          `Fork ${repo.identity?.nameWithOwner ?? remote.name} — origin moves to your copy, the original is kept as upstream`
+                        )}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          tip.hide();
+                          onFork();
+                        }}
+                      >
+                        <GitForkIcon size={12} />
+                      </button>
+                    )}
                     <button
+                      type="button"
                       className="ref-mini-action"
                       aria-label={`Fetch ${remote.name}`}
                       aria-busy={fetching === remote.name}
+                      {...hoverTooltip(tip, `Fetch ${remote.name} and prune deleted branches`)}
                       /* Busy, not unavailable — see .ref-fetch-all above. */
                       aria-disabled={fetching !== null}
                       onClick={(event) => {
@@ -754,6 +830,57 @@ export function RepoRefsSections({
                   </div>
                   {open && (
                     <div className="ref-remote__branches">
+                      {/* What the remote actually IS, before the refs it
+                          carries. Expanding a remote used to jump straight to
+                          branch names, so the two things a person opens a
+                          remote to check — how git reaches it, and the URL
+                          that is configured — were nowhere on screen: the URL
+                          lived only in a `title` on the row above, which is
+                          the OS tooltip rather than one of ours. */}
+                      <div className="ref-remote__info">
+                        {/* Wire and web link share the line: both are one
+                            short phrase, and the link repeated on its own row
+                            per remote reads louder than the refs below it. */}
+                        <div className="ref-remote__info-head">
+                          <span className="ref-remote__wire">{where}</span>
+                          {webUrl !== null && (
+                            <button
+                              type="button"
+                              className="ref-remote__open"
+                              {...hoverTooltip(tip, `Open ${webUrl}`)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                tip.hide();
+                                void dispatch("shell:openExternal", {
+                                  url: webUrl
+                                });
+                              }}
+                            >
+                              Open on the web
+                            </button>
+                          )}
+                        </div>
+                        {urlLines.map((line) => (
+                          <span className="ref-remote__url" key={line.label}>
+                            {urlLines.length > 1 && (
+                              <span className="ref-remote__url-label">
+                                {line.label}
+                              </span>
+                            )}
+                            {/* Copyable rather than selectable: this is the
+                                string people paste into a terminal, and a
+                                sidebar row is a bad place to drag-select. */}
+                            <CopyTarget
+                              value={line.url}
+                              label={`${remote.name} ${line.label.toLowerCase()} URL`}
+                            >
+                              <span className="ref-remote__url-text">
+                                {line.url}
+                              </span>
+                            </CopyTarget>
+                          </span>
+                        ))}
+                      </div>
                       {remote.previewBranches.map((branch) => {
                         const local = localBranchForRemote(refs, branch);
                         const checkedOutId = local?.checkedOutWorktreeIds[0];

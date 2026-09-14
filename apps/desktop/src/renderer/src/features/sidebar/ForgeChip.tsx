@@ -1,3 +1,4 @@
+import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import type { ForgeChipView } from "./forge-chip";
 import { ForgeMark } from "./ForgeMark";
 
@@ -9,8 +10,12 @@ import { ForgeMark } from "./ForgeMark";
  * cannot answer alone: two hosts of one product, a name the user typed, or a
  * host no product has a mark for.
  *
- * Not a `title` on some wrapper: the chip is the abbreviation, so the full
- * hostname belongs on the chip itself, where the pointer already is.
+ * The full hostname belongs on the chip itself, where the pointer already is
+ * — but through `useViewportTooltip`, not a native `title`. The chip sits one
+ * glyph away from marks that draw the house card, and a chip that answers with
+ * the OS tooltip instead makes one row speak in two voices. (It is also the
+ * only one of these that ever rendered its `title`, which is why the mismatch
+ * was visible rather than theoretical.)
  *
  * `aria-hidden` because the row that contains it already states the same facts
  * in its description (`identityDescription`) — announcing "gitlab.com" twice,
@@ -40,11 +45,12 @@ import { ForgeMark } from "./ForgeMark";
  */
 const MARK_SIZE = { bare: 12, inPill: 11 } as const;
 export function ForgeChip({ chip }: { chip: ForgeChipView }) {
+  const tip = useViewportTooltip();
   return (
     <span
       aria-hidden="true"
       className={`forge-chip${chip.name === null ? " forge-chip--mark" : ""}`}
-      title={chip.title}
+      {...hoverTooltip(tip, chip.title)}
     >
       {chip.kind !== null && (
         <ForgeMark
@@ -58,6 +64,7 @@ export function ForgeChip({ chip }: { chip: ForgeChipView }) {
       {chip.others > 0 && (
         <span className="forge-chip__more">+{chip.others}</span>
       )}
+      {tip.tooltipNode}
     </span>
   );
 }
