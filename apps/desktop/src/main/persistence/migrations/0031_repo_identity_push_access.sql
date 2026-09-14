@@ -1,0 +1,13 @@
+-- Whether the signed-in account may push to a repository's `origin`.
+--
+-- Both forges already answer it in the payload the identity refresh reads —
+-- GitHub's `permissions.push`, GitLab's project/group `access_level` — so this
+-- costs no extra request. It is stored because the sidebar paints the mark on
+-- every row at launch, for the same reason visibility is.
+--
+-- NULL is meaningful and distinct from 0: NULL is "not known" — a row written
+-- before this column existed, a forge that does not report it, a read that was
+-- not authenticated — and draws nothing. 0 is the forge saying no, which is
+-- what the read-only mark and the offer to fork are built on. Never widen NULL
+-- to 0: that would offer to fork repositories nobody was ever asked about.
+ALTER TABLE repo_identity ADD COLUMN viewer_can_push INTEGER;

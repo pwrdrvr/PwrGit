@@ -522,7 +522,15 @@ provider or reach a real forge.
 - **Three states, not two.** No `repo_identity` row means *never looked up*;
   `visibility: "unknown"` means *asked, and the forge would not say*. They
   render differently, and neither collapses into `public` — that would
-  understate where code can go. A signed-out CLI writes **no** row (signing in
+  understate where code can go. `viewerCanPush` follows the same rule in its
+  own shape: absent is "we could not tell" (a forge that does not report it, an
+  unauthenticated read, a row written before the column existed) and never
+  `false`. Only a forge that actually said no draws the read-only mark or
+  raises the offer to fork — widening the absence would offer to fork every
+  repository nobody was ever asked about. Both forges answer it in the payload
+  the refresh already reads (GitHub's `permissions.push`, GitLab's
+  project/group `access_level`), so it costs no extra request; GitCafe does not
+  report it and stays absent. A signed-out CLI writes **no** row (signing in
   should produce a fresh read); a 404 writes `unknown` (re-asking every pass is
   noise). Successful fetches/pulls request a background refresh under the same
   TTL as profile loads: six hours for known visibility, five minutes for

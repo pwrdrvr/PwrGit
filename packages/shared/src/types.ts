@@ -785,6 +785,11 @@ export type RepoIdentity = {
   name: string;
   nameWithOwner: string;
   visibility: RepoVisibility;
+  /** Whether the signed-in account may push to `origin`. Same three states as
+   *  `CloneRepository.viewerCanPush`, and stored the same way: absent is "not
+   *  known", which draws nothing, while `false` is what the read-only mark and
+   *  the offer to fork are drawn from. */
+  viewerCanPush?: boolean;
   /** Present only when this repo is a fork — its immediate parent. */
   parent?: ForgeRepoRef;
   /** Root of the fork network, when that is not the immediate parent. A fork
@@ -865,6 +870,15 @@ export type CloneRepository = {
   visibility: RepoVisibility;
   host: ForgeHost;
   hostname: string;
+  /** Whether the signed-in account may push to this repository.
+   *
+   *  Three states, like `visibility`: absent is *we could not tell* — a forge
+   *  that does not report it, a search row that carries no permissions, an
+   *  unauthenticated read — and is NOT `false`. Only a forge that answered
+   *  writes the boolean, because "you cannot push here" is the sentence an
+   *  offer to fork is built on and guessing it would offer to fork a
+   *  repository the user can already push to. */
+  viewerCanPush?: boolean;
   /** Immediate parent when this repository is a fork; absent on a source. */
   parent?: ForgeRepoRef;
   /** Fork-network root, when it differs from `parent`. */
@@ -928,7 +942,11 @@ export type ForkProgress = {
     | "creating"
     | "awaiting_fork"
     | CloneProgress["phase"]
-    | "adding_upstream";
+    | "adding_upstream"
+    /** Forking an existing checkout only: `origin` is being re-pointed at the
+     *  fork. Its own step rather than part of `adding_upstream`, because it is
+     *  the one that changes where this checkout pushes. */
+    | "repointing_origin";
   percent: number | null;
   completedObjects?: number;
   totalObjects?: number;
@@ -958,6 +976,40 @@ export type ForkPreflight = {
       | "unsupported_host";
     message: string;
   };
+};
+
+/**
+ * What forking an **already-cloned** repository would do, answered before
+ * anything is created.
+ *
+ * The fork half is `ForkPreflight` verbatim — the same two forge reads answer
+ * the same questions whether the checkout exists yet or not. Everything else
+ * here is about this checkout: which remote is being re-pointed, in which
+ * protocol, and where the original ends up. The dialog prints them so the user
+ * confirms the remote layout rather than discovering it afterwards.
+ */
+export type ForkCheckoutPreflight = {
+  fork: ForkPreflight;
+  /** `origin` as this checkout has it now: the repository being forked, and
+   *  the remote that will point at the fork afterwards. */
+  origin: { url: string; nameWithOwner: string };
+  /** The protocol `origin` already speaks, and the one the fork's URL is
+   *  written in. Not asked: a checkout that authenticates over SSH must not
+   *  quietly start asking for a password, and `cli` is not a remote URL. */
+  protocol: "ssh" | "https";
+  /** Where the repository named in `upstreamFor` is kept once `origin` is the
+   *  fork.
+   *
+   *  `existing` means a remote already points there, so the rewire adds
+   *  nothing — its name is used as-is. Otherwise `upstream`, or a suffixed
+   *  variant when that name is taken by some other URL; nothing is clobbered. */
+  upstreamRemote: { name: string; existing: boolean };
+  /** Which repository `upstreamRemote` was answered about — the one the
+   *  request asked about, or `origin`'s own when it asked about none. It
+   *  matters only where `fork.upstreamChoices` has more than one entry, and
+   *  there a name answered about the wrong repository would describe a remote
+   *  the rewire is not going to make. */
+  upstreamFor: string;
 };
 
 /** Result of reconciling one indexed repo with `git worktree list`. Both

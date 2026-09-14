@@ -25,6 +25,7 @@ import type {
   ForgeHost,
   ForgeKind,
   ForgeOwner,
+  ForkCheckoutPreflight,
   ForkPreflight,
   ForkProgress,
   RepoIdentity,
@@ -909,6 +910,48 @@ export interface Commands {
   "repo:cancelFork": {
     req: { operationId: string };
     res: null;
+  };
+  /**
+   * The same questions as `repo:forkPreflight`, asked about a repository that
+   * is already cloned — plus what this checkout's own remotes decide: which
+   * URL `origin` holds, which protocol it speaks, and what the remote keeping
+   * the original will be called.
+   */
+  "repo:forkCheckoutPreflight": {
+    req: {
+      profileId: ProfileId;
+      repoId: RepoId;
+      /** Account to fork into; defaults to the signed-in user. */
+      targetOwner?: string;
+      /** Name the fork will be given; defaults to the source's. */
+      targetName?: string;
+      /** The `upstream` the dialog is currently showing, so the remote name it
+       *  prints is answered about the repository it names. */
+      upstream?: string;
+    };
+    res: ForkCheckoutPreflight;
+  };
+  /**
+   * Fork what this checkout was cloned from and point the checkout at the
+   * fork: `origin` becomes the fork, the original is kept under `upstream`,
+   * and both are fetched. Nothing is cloned and nothing moves on disk.
+   *
+   * Progress and cancellation ride the same `repo:forkProgress` /
+   * `repo:cancelFork` channels as `repo:fork` — it is the same forge call in
+   * front, and one operation id.
+   */
+  "repo:forkCheckout": {
+    req: {
+      operationId: string;
+      profileId: ProfileId;
+      repoId: RepoId;
+      targetOwner: string;
+      targetOwnerKind: "user" | "organization";
+      targetName: string;
+      /** `owner/name` the original is kept under, or null to add no remote. */
+      upstream: string | null;
+    };
+    res: Repo;
   };
   /** Re-read forge identity (visibility, fork lineage) for a profile's repos.
    *  Answers the changed rows; the rest of the tree is left alone. */

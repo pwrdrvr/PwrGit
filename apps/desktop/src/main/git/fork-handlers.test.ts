@@ -78,4 +78,67 @@ describe("fork handlers", () => {
     });
     expect(emitEvent).not.toHaveBeenCalled();
   });
+
+  it("re-reads the branch index, the tree and the identity after a rewire", async () => {
+    // `repo:fork` needs none of this — its repository did not exist a moment
+    // ago. This one changed three things about a repository already on screen,
+    // and each has its own reader.
+    const repo = { id: "repo-1", profileId: "profile-1" };
+    const refreshRepoRemoteBranches = vi.fn(async () => ok(undefined));
+    const refresh = vi.fn(async () => [{ repoId: "repo-1", identity: {} }]);
+    const refreshRepoWorktrees = vi.fn();
+    const bus = new CommandBus();
+    registerForkHandlers(
+      bus,
+      { forkCheckout: async () => ok(repo) } as unknown as ForkService,
+      { refresh } as unknown as IdentityService,
+      { refreshRepoRemoteBranches } as unknown as RepoIndexer,
+      { refreshRepoWorktrees }
+    );
+
+    await bus.dispatch("repo:forkCheckout", {
+      operationId: "rewire-1",
+      profileId: "profile-1",
+      repoId: "repo-1",
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "dugite",
+      upstream: "desktop/dugite"
+    });
+
+    expect(refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith("repo-1");
+    expect(refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith("repo-1");
+    expect(refresh).toHaveBeenCalledExactlyOnceWith([repo], { force: true });
+    expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+      profileId: "profile-1"
+    });
+  });
+
+  it("touches nothing when the rewire failed", async () => {
+    const refreshRepoRemoteBranches = vi.fn(async () => ok(undefined));
+    const bus = new CommandBus();
+    registerForkHandlers(
+      bus,
+      {
+        forkCheckout: async () =>
+          err({ kind: "remote", code: "fork_failed", message: "no" })
+      } as unknown as ForkService,
+      {} as IdentityService,
+      { refreshRepoRemoteBranches } as unknown as RepoIndexer
+    );
+
+    const result = await bus.dispatch("repo:forkCheckout", {
+      operationId: "rewire-2",
+      profileId: "profile-1",
+      repoId: "repo-1",
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "dugite",
+      upstream: null
+    });
+
+    expect(result.ok).toBe(false);
+    expect(refreshRepoRemoteBranches).not.toHaveBeenCalled();
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
 });

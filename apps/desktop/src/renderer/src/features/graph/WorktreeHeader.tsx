@@ -19,6 +19,8 @@ import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
+import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
+import { pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -103,7 +105,10 @@ export function WorktreeHeader({
   worktree,
   state
 }: {
-  repo: Pick<Repo, "id" | "name" | "path">;
+  /** `profileId` and `identity` are here for the fork prompt: the first is
+   *  what the fork command is scoped to, the second is what says this checkout
+   *  cannot be pushed to. */
+  repo: Pick<Repo, "id" | "name" | "path" | "profileId" | "identity">;
   worktree: Worktree;
   state: WorktreeState | null;
 }) {
@@ -111,6 +116,9 @@ export function WorktreeHeader({
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
   const [sshRecovery, setSshRecovery] = useState<SshRemoteRecovery | null>(null);
+  /** The fork prompt, and why it opened. `{}` is the user asking for it from
+   *  the read-only chip; a `reason` is a push the forge just refused. */
+  const [forkPrompt, setForkPrompt] = useState<{ reason?: string } | null>(null);
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
   const pullOperation = useRef(0);
@@ -130,6 +138,7 @@ export function WorktreeHeader({
     setDivergence(null);
     setRecoveryBusy(null);
     setSshRecovery(null);
+    setForkPrompt(null);
   }, [worktree.id]);
 
   // Phase, Git's output and the cancel all ride on one live record, scoped to
@@ -302,13 +311,31 @@ export function WorktreeHeader({
     );
   };
   const onPush = (): void => {
-    void run(
-      "push",
-      () => dispatch("remote:push", { worktreeId: id }),
-      { text: "pushed", tone: "ok" },
-      "Push"
-    );
+    const worktreeId = id;
+    setBusy("push");
+    void dispatch("remote:push", { worktreeId }).then((result) => {
+      if (activeWorktreeId.current !== worktreeId) return;
+      setBusy(null);
+      if (result.ok) {
+        showFlash({ text: "pushed", tone: "ok" }, 1600);
+        return;
+      }
+      // The one push failure with a remedy inside PwrGit. Git has just said
+      // the account may not write there, which is better evidence than any
+      // stored permission — so this path does not consult `identity`, and
+      // works on a checkout nothing has ever asked the forge about.
+      if (result.error.code === "push_denied") {
+        showFlash({ text: "push denied", tone: "warn" }, 2400);
+        setForkPrompt({ reason: result.error.message.split("\n")[0] });
+        return;
+      }
+      flashError("Push", result.error);
+    });
   };
+
+  // One sentence, defined beside the sidebar mark that also shows it.
+  const noPushTitle =
+    repo.identity === undefined ? null : pushAccessTitle(repo.identity);
 
   // What is running, from either side: `busy` covers this header's own
   // dispatch before main has registered it, the activity covers an operation
@@ -418,6 +445,21 @@ export function WorktreeHeader({
           repoPath={repo.path}
           worktreeId={worktree.id}
         />
+        {/* The one repo-level fact the action buttons cannot act on: this
+            account may not push here. A button, unlike the sidebar's mark,
+            because this is where the push it is about lives. Hidden while an
+            operation runs, like the drift chip beside it — the progress label
+            needs that width. */}
+        {noPushTitle !== null && running === null && (
+          <button
+            type="button"
+            className="sync-chip sync-chip--readonly"
+            title={noPushTitle}
+            onClick={() => setForkPrompt({})}
+          >
+            read-only
+          </button>
+        )}
         <span style={{ flex: 1 }} />
         {/* Left of the sync chip, which stays adjacent to the buttons it maps
             onto. Hidden while ANY remote operation runs (not just a pull, as
@@ -573,6 +615,23 @@ export function WorktreeHeader({
               { text: `${sshRecovery.remote} now uses SSH`, tone: "ok" },
               2400
             );
+          }}
+        />
+      )}
+      {forkPrompt !== null && (
+        <ForkCheckoutDialog
+          profileId={repo.profileId}
+          repoId={repo.id}
+          repoName={repo.identity?.nameWithOwner ?? repo.name}
+          {...(forkPrompt.reason === undefined
+            ? {}
+            : { reason: forkPrompt.reason })}
+          onClose={() => setForkPrompt(null)}
+          onForked={() => {
+            setForkPrompt(null);
+            // The repo row is unchanged — same folder, same name — so the
+            // flash names the thing that did move.
+            showFlash({ text: "origin is now your fork", tone: "ok" }, 2600);
           }}
         />
       )}

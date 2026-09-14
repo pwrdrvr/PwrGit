@@ -9,6 +9,7 @@ import {
   parseRepoRefRows,
   parseUnappliedUpstreams,
   parseWorktreeList,
+  pushWasDenied,
   readChanges,
   readCheckoutDirtyCount,
   readCommit,
@@ -519,5 +520,60 @@ describe("parseChanges", () => {
     };
 
     await expect(readCheckoutDirtyCount(git, "/repo")).resolves.toEqual(ok(1));
+  });
+});
+
+describe("pushWasDenied", () => {
+  it("recognizes GitHub over both transports", () => {
+    expect(
+      pushWasDenied(
+        "ERROR: Permission to desktop/dugite.git denied to huntharo.\n" +
+          "fatal: Could not read from remote repository."
+      )
+    ).toBe(true);
+    expect(
+      pushWasDenied(
+        "remote: Permission to desktop/dugite.git denied to huntharo.\n" +
+          "fatal: unable to access 'https://github.com/desktop/dugite/': " +
+          "The requested URL returned error: 403"
+      )
+    ).toBe(true);
+  });
+
+  it("recognizes GitLab, which words it differently", () => {
+    expect(
+      pushWasDenied(
+        "GitLab: You are not allowed to push code to this project.\n" +
+          "fatal: Could not read from remote repository."
+      )
+    ).toBe(true);
+  });
+
+  it("does not answer a protected branch, which is the opposite fact", () => {
+    // The account CAN push — just not to that branch. Offering to fork there
+    // would send a maintainer off to copy their own repository.
+    expect(
+      pushWasDenied(
+        "remote: error: GH006: Protected branch update failed for refs/heads/main.\n" +
+          " ! [remote rejected] main -> main (protected branch hook declined)"
+      )
+    ).toBe(false);
+    expect(
+      pushWasDenied(
+        "GitLab: You are not allowed to push code to protected branches on this project."
+      )
+    ).toBe(false);
+  });
+
+  it("leaves the ordinary refusals alone", () => {
+    expect(
+      pushWasDenied(
+        " ! [rejected] main -> main (non-fast-forward)\n" +
+          "error: failed to push some refs"
+      )
+    ).toBe(false);
+    expect(pushWasDenied("fatal: The current branch main has no upstream branch.")).toBe(
+      false
+    );
   });
 });

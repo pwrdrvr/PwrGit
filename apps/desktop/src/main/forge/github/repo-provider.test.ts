@@ -135,6 +135,48 @@ describe("parseGhRestRepo", () => {
   });
 });
 
+describe("push access", () => {
+  it("reads `permissions.push` when REST reported it", () => {
+    expect(
+      parseGhRestRepo(
+        JSON.stringify({
+          full_name: "desktop/dugite",
+          permissions: { admin: false, push: false, pull: true }
+        })
+      )?.viewerCanPush
+    ).toBe(false);
+    expect(
+      parseGhRestRepo(
+        JSON.stringify({
+          full_name: "pwrdrvr/PwrGit",
+          permissions: { admin: true, push: true, pull: true }
+        })
+      )?.viewerCanPush
+    ).toBe(true);
+  });
+
+  it("stays silent when nobody was asked", () => {
+    // `permissions` is absent on an unauthenticated read. Defaulting it to
+    // false would offer to fork every repository read without a token.
+    expect(
+      parseGhRestRepo(JSON.stringify({ full_name: "desktop/dugite" }))
+        ?.viewerCanPush
+    ).toBeUndefined();
+    expect(
+      parseGhRestRepo(
+        JSON.stringify({ full_name: "desktop/dugite", permissions: {} })
+      )?.viewerCanPush
+    ).toBeUndefined();
+  });
+
+  it("says nothing from a search row, which carries no permissions", () => {
+    const rows = parseGhSearchRepos(
+      JSON.stringify([{ fullName: "desktop/dugite", visibility: "public" }])
+    );
+    expect(rows[0]?.viewerCanPush).toBeUndefined();
+  });
+});
+
 describe("account parsing", () => {
   it("reads the login and the org list", () => {
     expect(parseGhLogin('{"login":"huntharo"}')).toBe("huntharo");

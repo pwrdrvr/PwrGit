@@ -49,6 +49,43 @@ function visibilityFrom(raw: unknown): RepoVisibility {
     : "unknown";
 }
 
+/** The access level that can push to an unprotected branch. GitLab's ladder is
+ *  Guest 10, Reporter 20, Developer 30, Maintainer 40, Owner 50. */
+const DEVELOPER_ACCESS_LEVEL = 30;
+
+function accessLevel(raw: unknown): number | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const level = (raw as Record<string, unknown>)["access_level"];
+  return typeof level === "number" ? level : undefined;
+}
+
+/**
+ * Whether GitLab says the signed-in account may push.
+ *
+ * `permissions` carries the caller's project membership and their group
+ * membership, either of which may be null; the higher of the two is what
+ * GitLab enforces. An absent `permissions` object is *we could not tell* and
+ * stays absent — but both members null is an answer, not a gap: an
+ * authenticated read of a project you are not a member of is exactly how "you
+ * cannot push here" is spelled.
+ *
+ * Protected branches sit on top of this and are deliberately not modelled: a
+ * Developer who cannot push to `main` can still push the branch they are about
+ * to open a merge request from, which is the question the fork offer asks.
+ */
+export function projectViewerCanPush(
+  row: Record<string, unknown>
+): boolean | undefined {
+  const permissions = row["permissions"];
+  if (permissions === null || typeof permissions !== "object") return undefined;
+  const scopes = permissions as Record<string, unknown>;
+  const levels = [
+    accessLevel(scopes["project_access"]),
+    accessLevel(scopes["group_access"])
+  ].filter((level): level is number => level !== undefined);
+  return levels.some((level) => level >= DEVELOPER_ACCESS_LEVEL);
+}
+
 /** The hostname a project actually lives on, read from its own web URL so a
  *  self-hosted instance is named correctly rather than as gitlab.com. */
 function hostnameFrom(webUrl: string | undefined, fallback: string): string {
@@ -91,6 +128,8 @@ export function parseGitLabProject(
   if (description !== undefined) repository.description = description;
   const updatedAt = text(row["last_activity_at"]) ?? text(row["updated_at"]);
   if (updatedAt !== undefined) repository.updatedAt = updatedAt;
+  const viewerCanPush = projectViewerCanPush(row);
+  if (viewerCanPush !== undefined) repository.viewerCanPush = viewerCanPush;
 
   const forkedFrom = row["forked_from_project"];
   if (forkedFrom !== null && typeof forkedFrom === "object") {

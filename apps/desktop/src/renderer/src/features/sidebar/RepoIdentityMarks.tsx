@@ -169,6 +169,55 @@ function VisibilityIcon({
 }
 
 /**
+ * Lucide `ban`.
+ *
+ * Deliberately the simplest glyph that says "not allowed" rather than a
+ * pencil-with-a-slash: this is drawn at 12px in a row of other 12px marks, and
+ * a circle and one stroke survive that size where a pencil does not. What it
+ * means comes from the title beside it, which names the repository.
+ */
+function NoPushIcon({ size }: { size: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="m4.9 4.9 14.2 14.2" />
+    </svg>
+  );
+}
+
+/**
+ * What to say about push access, or null when there is nothing to say.
+ *
+ * The ONE spelling of this sentence. Three surfaces show it — the sidebar
+ * glyph, the clone/fork row chip, and the worktree header's button — and a
+ * second copy is a second thing to keep in step with the verb it names.
+ *
+ * Three states and only one of them draws: `true` is the ordinary case and a
+ * mark on every row you CAN push to costs a column to say nothing, while
+ * `undefined` is "not known" and must stay silent — a forge that does not
+ * report it, or a row written before PwrGit asked. Only a forge that said no
+ * gets a glyph.
+ */
+export function pushAccessTitle(
+  /** `RepoIdentity` or `CloneRepository` — both carry the same two fields, and
+   *  the question is the same about either. */
+  identity: Pick<RepoIdentity, "viewerCanPush" | "nameWithOwner">
+): string | null {
+  if (identity.viewerCanPush !== false) return null;
+  return `You can't push to ${identity.nameWithOwner}. Fork it to contribute.`;
+}
+
+/**
  * The dense variant: glyphs only, for the 320px sidebar. The parent slug has
  * nowhere to go at this width, so it lives in the title — the row already
  * relies on titles for the same reason its name does (SC 1.4.4).
@@ -231,8 +280,17 @@ export function RepoIdentityGlyphs({
       setBusy(false);
     }
   };
+  const noPush = pushAccessTitle(identity);
   return (
     <>
+      {noPush !== null && (
+        // Not a button. The sidebar is a list: it says what is true and the
+        // verb lives where the user acts on it — the worktree header, beside
+        // the push control this is about.
+        <span className="repo-mark repo-mark--nopush" title={noPush}>
+          <NoPushIcon size={12} />
+        </span>
+      )}
       {identity.parent !== undefined && (
         <span
           className="repo-mark repo-mark--fork"
@@ -280,6 +338,7 @@ export function RepoIdentityChips({
 }: {
   repository: CloneRepository;
 }) {
+  const noPush = pushAccessTitle(repository);
   return (
     <>
       <span
@@ -295,6 +354,12 @@ export function RepoIdentityChips({
         <VisibilityIcon visibility={repository.visibility} size={10} />
         {VISIBILITY_LABEL[repository.visibility]}
       </span>
+      {noPush !== null && (
+        <span className="clone-chip clone-chip--nopush" title={noPush}>
+          <NoPushIcon size={10} />
+          read-only
+        </span>
+      )}
       {repository.parent !== undefined && (
         <span
           className="clone-chip clone-chip--muted clone-chip--fork"
@@ -330,6 +395,7 @@ export function identityDescription(identity: RepoIdentity): string {
   if (others.length > 0) {
     parts.push(`also has remotes on ${others.join(", ")}`);
   }
+  if (identity.viewerCanPush === false) parts.push("read-only, you cannot push");
   if (identity.parent !== undefined) {
     parts.push(`fork of ${identity.parent.nameWithOwner}`);
   }

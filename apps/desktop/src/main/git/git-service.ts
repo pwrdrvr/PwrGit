@@ -4431,6 +4431,28 @@ export async function pushPlannedRefs(
   return ok(results);
 }
 
+/**
+ * Whether a failed push was refused because the account may not write there —
+ * as opposed to any of the other reasons a push is refused.
+ *
+ * Both forges say it in two spellings, one per transport: GitHub's `Permission
+ * to owner/repo denied to user` over SSH and a bare HTTP 403 over HTTPS,
+ * GitLab's `You are not allowed to push code to this project` over both.
+ *
+ * A protected branch is deliberately excluded, and is the reason this is a
+ * function rather than one alternation. It reads almost identically on GitLab
+ * ("not allowed to push code to protected branches") and means the opposite
+ * thing about access: the account can push, just not to that branch — and
+ * answering it with an offer to fork would send someone who is already a
+ * maintainer off to make a copy of their own repository.
+ */
+export function pushWasDenied(stderr: string): boolean {
+  if (/protected branch/i.test(stderr)) return false;
+  return /permission to .+ denied|not allowed to push code|returned error: 403|\b403 forbidden\b/i.test(
+    stderr
+  );
+}
+
 /** Push the current branch to its upstream. */
 export async function pushRemote(
   git: GitExec,
@@ -4444,11 +4466,15 @@ export async function pushRemote(
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
     const message = raw.value.stderr.trim();
-    const code = /non-fast-forward|rejected/i.test(message)
-      ? "rejected"
-      : /no upstream|has no upstream/i.test(message)
-        ? "no_upstream"
-        : "push_failed";
+    // Before `rejected`: a denial carries no "rejected" line today, but the
+    // two are asked in the order of how specific they are, not how likely.
+    const code = pushWasDenied(message)
+      ? "push_denied"
+      : /non-fast-forward|rejected/i.test(message)
+        ? "rejected"
+        : /no upstream|has no upstream/i.test(message)
+          ? "no_upstream"
+          : "push_failed";
     return err({
       kind: "remote",
       code,
