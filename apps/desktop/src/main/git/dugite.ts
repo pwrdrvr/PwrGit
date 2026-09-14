@@ -4,6 +4,7 @@ import type { ExecFileOptions } from "node:child_process";
 import { tmpdir } from "node:os";
 import dugite from "dugite";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
+import { beginGitDiagnostic } from "./git-diagnostics";
 import { logMain } from "../logs";
 
 const { exec, spawn: spawnGit } = dugite;
@@ -175,6 +176,7 @@ export type GitExec = (
 export const execGit: GitExec = async (args, cwd, options) => {
   const alreadyAborted = abortedSignal(options);
   if (alreadyAborted !== null) return err(abortError(alreadyAborted));
+  const diagnostic = beginGitDiagnostic("dugite-exec", args, cwd);
   try {
     const invocation = gitProcessInvocation(args, cwd);
     const result = await exec(invocation.args, invocation.processCwd, {
@@ -184,13 +186,19 @@ export const execGit: GitExec = async (args, cwd, options) => {
         ? { killSignal: options.killSignal }
         : {}),
       processCallback: (child) => {
-        child.stdout?.on("data", () => options?.onActivity?.());
+        diagnostic?.attach(child);
+        child.stdout?.on("data", (chunk: Buffer | string) => {
+          diagnostic?.output("stdout", chunk);
+          options?.onActivity?.();
+        });
         child.stderr?.on("data", (chunk: Buffer | string) => {
+          diagnostic?.output("stderr", chunk);
           options?.onActivity?.();
           options?.onStderr?.(chunk.toString());
         });
       }
     });
+    diagnostic?.settle("resolved");
     const aborted = abortedSignal(options);
     if (aborted !== null) return err(abortError(aborted));
     // Non-zero exits are logged at debug: many are routine probes (cat-file
@@ -210,6 +218,7 @@ export const execGit: GitExec = async (args, cwd, options) => {
       exitCode: result.exitCode
     });
   } catch (cause) {
+    diagnostic?.settle("rejected");
     const aborted = abortedSignal(options);
     if (aborted !== null) return err(abortError(aborted));
     logMain(
@@ -239,6 +248,7 @@ const MAX_STREAM_STDERR_CHARS = 32_768;
  */
 export const execGitRecords: GitRecordExec = (args, cwd, options) =>
   new Promise((resolveResult) => {
+    const diagnostic = beginGitDiagnostic("dugite-records", args, cwd);
     let child: ReturnType<typeof spawnGit>;
     try {
       const invocation = gitProcessInvocation(args, cwd);
@@ -246,6 +256,8 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
         env: gitExecutionEnvironment(options.env)
       });
     } catch (cause) {
+      diagnostic?.event("spawn-throw");
+      diagnostic?.settle("resolved");
       resolveResult(
         err({
           kind: "git",
@@ -257,6 +269,7 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
       return;
     }
 
+    diagnostic?.attach(child);
     const records: string[] = [];
     let retainedChars = 0;
     let remainder = "";
@@ -267,12 +280,14 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
     const finish = (result: Result<GitRecordOutput, PwrGitError>): void => {
       if (settled) return;
       settled = true;
+      diagnostic?.settle("resolved");
       resolveResult(result);
     };
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
+      diagnostic?.output("stdout", chunk);
       // Once intentionally truncated, keep draining the pipe until the process
       // exits but retain no more bytes if termination is not instantaneous.
       if (truncated) return;
@@ -304,6 +319,7 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
       }
     });
     child.stderr.on("data", (chunk: string) => {
+      diagnostic?.output("stderr", chunk);
       stderr = `${stderr}${chunk}`.slice(-MAX_STREAM_STDERR_CHARS);
     });
     child.on("error", (cause) => {
@@ -348,18 +364,25 @@ export type GitExecBinary = (
 
 /** Production GitExecBinary backed by dugite's bundled git binary. */
 export const execGitBinary: GitExecBinary = async (args, cwd) => {
+  const diagnostic = beginGitDiagnostic("dugite-binary", args, cwd);
   try {
     const invocation = gitProcessInvocation(args, cwd);
     const result = await exec(invocation.args, invocation.processCwd, {
       encoding: "buffer",
-      env: gitExecutionEnvironment(NO_OPTIONAL_LOCKS.env)
+      env: gitExecutionEnvironment(NO_OPTIONAL_LOCKS.env),
+      processCallback: (child) => {
+        diagnostic?.attach(child);
+        diagnostic?.observeExecFileOutput(child);
+      }
     });
+    diagnostic?.settle("resolved");
     return ok({
       stdout: result.stdout,
       stderr: result.stderr.toString(),
       exitCode: result.exitCode
     });
   } catch (cause) {
+    diagnostic?.settle("rejected");
     logMain(
       "error",
       "git",

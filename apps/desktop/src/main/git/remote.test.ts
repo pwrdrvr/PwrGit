@@ -33,14 +33,15 @@ import {
   updateRemote
 } from "./git-service";
 import { createSystemGit } from "./test-support/system-git";
+import { diagnoseSyncGit } from "./test-support/diagnostic-sync";
 
 const systemGit: GitExec = createSystemGit();
 
 function git(dir: string, args: string[]): void {
-  execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  diagnoseSyncGit(args, dir, () => execFileSync("git", args, { cwd: dir, stdio: "ignore" }));
 }
 function gitOut(dir: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  return diagnoseSyncGit(args, dir, () => execFileSync("git", args, { cwd: dir, encoding: "utf8" })).trim();
 }
 function fileText(dir: string, file: string): string {
   return readFileSync(join(dir, file), "utf8").replaceAll("\r\n", "\n");

@@ -15,17 +15,17 @@ fail on the Windows runner, so a green local run proves nothing about them:
   `git -C <repo>` (use `gitProcessInvocation` in `dugite.ts`).
 
 - **Get the `GitExec` from `test-support/system-git.ts`; never hand-roll one.**
-  A spawned git must be awaited on `exit`, not `close`. `close` waits for every
-  process still holding the child's inherited stdio pipes, and the launcher
-  handoff above means a grandchild can hold them after git itself has exited —
-  so the helper waits out the stranger rather than the command. A 4ms git call
-  becomes a multi-second hang, and the test dies on the Vitest timeout having
-  never learned what git did. It is bimodal by nature (the handoff either
-  lingers or it doesn't), so it reads as a flake and raising the timeout only
-  buys the hang more room. Twenty-four copies of that helper each carried the
-  bug; there is one now, and it takes a base env if your suite needs one. It
-  also honours `signal` / `killSignal` / `onStderr` / `onActivity` the way
-  production's `execGit` does, so a cancelling test cancels for real.
+  Its existing completion policy waits for exit and stream end, with a 250ms
+  post-exit drain grace. That policy can truncate output from inherited pipes;
+  it is not evidence that inherited pipes caused the historical Windows flakes.
+  `git-diagnostics.ts` observes lifecycle events without changing this policy.
+  The Vitest setup enables a 5s diagnostic trigger for known-fast Git fixtures,
+  with active/recent calls in slow-test reports. It never replaces test timeouts.
+  Use `PWRGIT_GIT_DIAGNOSTICS_DIR` to retain JSONL reports (CI uploads them).
+  Arguments, output, environment and raw cwd are deliberately excluded; cwd is
+  represented by a correlation hash. A `killed` flag means a signal was sent,
+  not confirmed termination. Timer lateness cannot by itself establish why the
+  event loop stalled. Synchronous fixture commands can only report after return.
 
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of
   HEAD comes back with CRLF, and a test comparing file *contents* against the

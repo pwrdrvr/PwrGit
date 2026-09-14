@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { beginGitDiagnostic } from "../git-diagnostics";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import {
   gitExecutionEnvironment,
@@ -10,32 +11,10 @@ import {
   type GitOutput
 } from "../dugite";
 
-/**
- * The `GitExec` the main-process suites run against real `git`.
- *
- * It exists as one module because twenty-four hand-rolled copies of it each
- * carried the same defect, and a defect with twenty-four homes gets fixed once
- * or not at all. A twenty-fifth copy (`bulk-sync.test.ts`) was built on
- * `execFile` and never had the bug; it routes through here anyway, because a
- * surviving hand-rolled helper is the template the next one gets copied from.
- *
- * **Settle on `exit`, never on `close`.** `close` fires only after every
- * process holding the child's inherited stdio pipes has let go of them, which
- * is not the same question as "did git finish". Git-for-Windows' `cmd\git.exe`
- * hands execution to another process — ../dugite.ts documents the same
- * behavior biting `git worktree remove` — and a handed-off grandchild keeps
- * those pipes open after git itself has exited. A helper awaiting `close`
- * therefore waits out the stranger, not the command: a millisecond-scale git
- * call becomes a multi-second hang, and the test dies on the Vitest timeout
- * having never learned what git did. That is bimodal by nature — the handoff
- * either lingers or it doesn't — which is why it read as a flake, and why
- * raising the timeout only bought the hang more room.
- *
- * So we resolve once git has exited *and* its own streams have ended, and
- * never wait more than FLUSH_GRACE_MS past exit for a stream some grandchild
- * is holding open. The child's own output has already been delivered by then;
- * a 300KB stdout survives the grace path intact.
- */
+/** Shared real-Git test executor. The existing policy allows at most 250ms
+ * of output draining after exit. Diagnostics record grace expiry before the
+ * streams are destroyed; inherited-pipe causality for CI timeouts is unproven.
+ * This investigation deliberately preserves that policy. */
 const FLUSH_GRACE_MS = 250;
 
 export type SystemGitOptions = {
@@ -69,6 +48,7 @@ function runGit(
   options?: GitExecOptions
 ): Promise<Result<Collected, PwrGitError>> {
   return new Promise((resolve) => {
+    const diagnostic = beginGitDiagnostic("system-git", args, cwd);
     const invocation = gitProcessInvocation(args, cwd);
     const spawnFailed = (cause: Error): Result<Collected, PwrGitError> =>
       err({ kind: "git", code: "spawn_failed", message: cause.message });
@@ -93,10 +73,13 @@ function runGit(
     } catch (cause) {
       // spawn throws synchronously on bad options; dugite.ts guards its own
       // spawn the same way rather than rejecting out of a Result-returning API.
+      diagnostic?.event("spawn-throw");
+      diagnostic?.settle("resolved");
       resolve(spawnFailed(cause instanceof Error ? cause : new Error(String(cause))));
       return;
     }
     const child = proc;
+    diagnostic?.attach(child);
 
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -115,9 +98,11 @@ function runGit(
       // A grandchild can hold these pipes open long after we have answered.
       // Left attached, they keep appending to buffers nobody will read and
       // keep the child and its streams alive for the stranger's lifetime.
+      diagnostic?.event("helper-stream-destroy");
       child.stdout?.destroy();
       child.stderr?.destroy();
       child.unref();
+      diagnostic?.settle("resolved");
       resolve(result);
     };
     const finish = (): void => settle(ok({ stdout, stderr, exitCode }));
@@ -126,10 +111,12 @@ function runGit(
     };
 
     child.stdout.on("data", (chunk: Buffer) => {
+      diagnostic?.output("stdout", chunk);
       stdout.push(chunk);
       options?.onActivity?.();
     });
     child.stderr.on("data", (chunk: Buffer) => {
+      diagnostic?.output("stderr", chunk);
       stderr.push(chunk);
       options?.onActivity?.();
       if (options?.onStderr) options.onStderr(chunk.toString());
@@ -147,7 +134,11 @@ function runGit(
     child.on("exit", (code) => {
       exited = true;
       if (code !== null) exitCode = code;
-      grace = setTimeout(finish, FLUSH_GRACE_MS);
+      grace = setTimeout(() => {
+        diagnostic?.event("helper-flush-grace-expired");
+        diagnostic?.flag("helper-flush-grace-expired");
+        finish();
+      }, FLUSH_GRACE_MS);
       grace.unref?.();
       finishWhenDrained();
     });

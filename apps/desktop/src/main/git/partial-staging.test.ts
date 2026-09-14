@@ -23,17 +23,18 @@ import {
   partialFileDiff
 } from "./partial-staging";
 import { createSystemGit, createSystemGitBinary } from "./test-support/system-git";
+import { diagnoseSyncGit } from "./test-support/diagnostic-sync";
 
 const systemGit: GitExec = createSystemGit();
 
 const systemGitBinary: GitExecBinary = createSystemGitBinary();
 
 function git(repo: string, ...args: string[]): string {
-  return execFileSync("git", args, {
+  return diagnoseSyncGit(args, repo, () => execFileSync("git", args, {
     cwd: repo,
     encoding: "utf8",
     env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" }
-  }).trimEnd();
+  })).trimEnd();
 }
 
 const allLineIds = (
