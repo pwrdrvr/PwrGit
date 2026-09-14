@@ -14,8 +14,10 @@ fail on the Windows runner, so a green local run proves nothing about them:
   `EBUSY`. Keep the process cwd in a stable directory and address the repo with
   `git -C <repo>` (use `gitProcessInvocation` in `dugite.ts`).
 
-- **Get the `GitExec` from `test-support/system-git.ts`; never hand-roll one.**
-  A spawned git must be awaited on `exit`, not `close`. `close` waits for every
+- **Await a spawned Git on `exit`, not `close` — `settleOnGitExit` does it.**
+  In tests that means taking the `GitExec` from `test-support/system-git.ts`
+  rather than hand-rolling one; in `src/main` it means routing any new
+  `spawn`-based Git through `settleOnGitExit` in `dugite.ts`. `close` waits for every
   process still holding the child's inherited stdio pipes, and the launcher
   handoff above means a grandchild can hold them after git itself has exited —
   so the helper waits out the stranger rather than the command. A 4ms git call
@@ -26,6 +28,18 @@ fail on the Windows runner, so a green local run proves nothing about them:
   bug; there is one now, and it takes a base env if your suite needs one. It
   also honours `signal` / `killSignal` / `onStderr` / `onActivity` the way
   production's `execGit` does, so a cancelling test cancels for real.
+
+  This is not only a test concern: `execGitRecords` carried the same wait, so
+  a submodule scan could stall in the app itself. `dugite.test.ts` pins the
+  behaviour with a process that exits while a descendant holds its pipes —
+  that test fails at ~4s against a `close` implementation.
+
+  One exposure is NOT fixed: `execGit` goes through dugite's `exec`, which is
+  Node's `execFile`, whose callback fires on `close`. Measured: a command that
+  prints and exits immediately calls back at 4016ms when a grandchild holds
+  the pipes. Closing that means not using dugite's `exec`, so it is deliberately
+  left alone — don't assume `execGit` is immune because this file's other two
+  execs are.
 
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of
   HEAD comes back with CRLF, and a test comparing file *contents* against the
