@@ -1,8 +1,9 @@
 import type { RepoRefs, WorktreeId } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
-import { holderWorktreeId } from "../sidebar/branch-focus";
-import { confirmDialog } from "./dialogs";
+import { holderWorktreeId, isBranchSentinel } from "../sidebar/branch-focus";
+import { nudgeToCommit } from "./commitNudge";
+import { chooseDialog } from "./dialogs";
 
 /**
  * The guarded checkout every branch-switch entry point goes through.
@@ -49,8 +50,8 @@ export async function readDirtyState(
     : { kind: "clean" };
 }
 
-/** The confirm's body. Named separately so the wording is testable without a
- *  dialog host, and so both entry points say the same thing. */
+/** The prompt's body. Named separately so the wording is testable without a
+ *  dialog host, and so every entry point says the same thing. */
 export function dirtySwitchMessage(
   dirty: DirtyState,
   worktreeLabel: string,
@@ -60,14 +61,95 @@ export function dirtySwitchMessage(
     dirty.kind === "dirty"
       ? `${dirty.files} uncommitted ${dirty.files === 1 ? "change" : "changes"}`
       : "uncommitted changes PwrGit could not count";
-  return (
-    `${worktreeLabel} has ${changes}. Switching to ${branch} carries them over `
-    + `to that branch instead of leaving them here.`
-  );
+  return `${worktreeLabel} has ${changes}, and ${branch} is a different branch. What did you mean to do with them?`;
+}
+
+/** What the reader said the uncommitted work was for. */
+export type DirtyIntent = "carry" | "commit_first" | "cancel";
+
+/**
+ * Ask what the uncommitted work is for, rather than assuming.
+ *
+ * PwrGit used to offer one answer — "Carry changes over" — against Cancel,
+ * which made a two-button dialog out of a question with three real answers.
+ * Worse, it named the *mechanism* (`git switch` carries non-conflicting changes)
+ * instead of the intent, so the reader had to already know git's behaviour to
+ * know what the button would do, and the answer "these belong on the branch I am
+ * leaving" had nowhere to go but Cancel.
+ *
+ * `commit_first` deliberately performs no git at all. Committing is a decision
+ * with a message attached; making it from a modal that is really about
+ * switching would be a worse place to write one than the commit box the rail
+ * already has.
+ */
+export async function askDirtyIntent(
+  dirty: DirtyState,
+  worktreeLabel: string,
+  fromBranch: string,
+  branch: string,
+  facts: string[] = []
+): Promise<DirtyIntent> {
+  // `branch-focus` owns the rule for which `Worktree.branch` values are not
+  // branch names — a second copy here would drift the first time a sentinel is
+  // added, and print it at the reader as though it were a branch.
+  const here =
+    fromBranch !== "" && !isBranchSentinel(fromBranch)
+      ? fromBranch
+      : "this checkout";
+  const answer = await chooseDialog({
+    title: `Switch to ${branch}?`,
+    message: dirtySwitchMessage(dirty, worktreeLabel, branch),
+    facts,
+    choices: [
+      {
+        id: "carry",
+        label: `Bring them to ${branch}`,
+        detail: `PwrGit saves them, switches, and restores them on ${branch}. If they cannot be applied there, nothing moves — you stay on ${here} with them untouched.`
+      },
+      {
+        id: "commit_first",
+        label: `Commit on ${here} first`,
+        detail: "Stays here and opens the commit box. Nothing is switched."
+      }
+    ],
+    cancelLabel: "Cancel"
+  });
+  if (answer === "carry") return "carry";
+  if (answer === "commit_first") return "commit_first";
+  return "cancel";
+}
+
+/** The handful of paths the prompt lists, so "7 changes" is something the
+ *  reader can actually judge. Best-effort: a failed read costs the list, not
+ *  the prompt. */
+export async function dirtyFacts(
+  worktreeId: WorktreeId,
+  limit = 5
+): Promise<string[]> {
+  const result = await dispatch("changes:list", { worktreeId });
+  if (!result.ok) return [];
+  const { staged, unstaged, truncated } = result.value;
+  const unique = [
+    ...new Set([
+      ...staged.map((file) => file.path),
+      ...unstaged.map((file) => file.path)
+    ])
+  ];
+  // `changes:list` caps its rows and reports the real totals separately, so a
+  // remainder counted off the returned array undercounts exactly when it
+  // matters most — a regenerated lockfile, a reformatted tree. The cap applies
+  // per list, so a file appearing in both is double-counted here; the number is
+  // an "at least", which is the honest direction for it to be wrong in.
+  const total =
+    truncated === undefined
+      ? unique.length
+      : truncated.staged + truncated.unstaged;
+  if (total <= limit) return unique.slice(0, limit);
+  return [...unique.slice(0, limit), `…and ${total - limit} more`];
 }
 
 export type SwitchOutcome =
-  | { kind: "switched" }
+  | { kind: "switched"; carried: boolean }
   | { kind: "cancelled" }
   /** The refs snapshot was stale and another worktree holds the branch. Not an
    *  error: the caller re-lists and reveals that worktree, which is what the
@@ -89,35 +171,50 @@ export type SwitchOutcome =
 export async function guardedSwitchBranch({
   worktreeId,
   worktreeLabel,
+  fromBranch,
   branch,
   skipDirtyConfirm = false
 }: {
   worktreeId: WorktreeId;
-  /** How the confirm names the checkout being moved — its folder, not its
+  /** How the prompt names the checkout being moved — its folder, not its
    *  branch, which the destination already names. */
   worktreeLabel: string;
+  /** The branch being left, for "Commit on <x> first". */
+  fromBranch: string;
   branch: string;
-  /** Set when the caller has already confirmed with the user. */
+  /** Set when the caller has already asked the user. */
   skipDirtyConfirm?: boolean;
 }): Promise<SwitchOutcome> {
+  let carryChanges = false;
   if (!skipDirtyConfirm) {
     const dirty = await readDirtyState(worktreeId);
     if (dirty.kind === "missing") {
       return { kind: "failed", code: "worktree_missing", message: dirty.message };
     }
     if (dirty.kind !== "clean") {
-      const proceed = await confirmDialog({
-        title: `Switch ${worktreeLabel} to ${branch}?`,
-        message: dirtySwitchMessage(dirty, worktreeLabel, branch),
-        confirmLabel: "Carry changes over",
-        cancelLabel: "Cancel"
-      });
-      if (!proceed) return { kind: "cancelled" };
+      const facts = await dirtyFacts(worktreeId);
+      const intent = await askDirtyIntent(
+        dirty,
+        worktreeLabel,
+        fromBranch,
+        branch,
+        facts
+      );
+      if (intent === "cancel") return { kind: "cancelled" };
+      if (intent === "commit_first") {
+        nudgeToCommit();
+        return { kind: "cancelled" };
+      }
+      carryChanges = true;
     }
   }
 
-  const result = await dispatch("branch:switch", { worktreeId, branch });
-  if (result.ok) return { kind: "switched" };
+  const result = await dispatch("branch:switch", {
+    worktreeId,
+    branch,
+    ...(carryChanges ? { carryChanges: true } : {})
+  });
+  if (result.ok) return { kind: "switched", carried: result.value.carried };
 
   if (result.error.code === "checked_out_elsewhere") return { kind: "held" };
   return {
@@ -147,14 +244,17 @@ export async function switchWorktreeToBranch({
   repoId,
   worktreeId,
   worktreeLabel,
+  fromBranch,
   branch,
   onRevealWorktree,
   onRefs
 }: {
   repoId: string;
   worktreeId: WorktreeId;
-  /** How the dirty confirm names the checkout being moved — its folder. */
+  /** How the dirty prompt names the checkout being moved — its folder. */
   worktreeLabel: string;
+  /** The branch being left, for "Commit on <x> first". */
+  fromBranch: string;
   branch: string;
   onRevealWorktree: (worktreeId: WorktreeId) => void;
   /** Receives a snapshot read during `held` recovery, when one was read. */
@@ -163,6 +263,7 @@ export async function switchWorktreeToBranch({
   const outcome = await guardedSwitchBranch({
     worktreeId,
     worktreeLabel,
+    fromBranch,
     branch
   });
   if (outcome.kind === "switched") return "switched";
@@ -188,7 +289,10 @@ export async function switchWorktreeToBranch({
   }
 
   showErrorToast({
-    title: "Switch failed",
+    title:
+      outcome.code === "carry_conflicts"
+        ? "Your changes stayed put"
+        : "Switch failed",
     message:
       outcome.code === "dirty"
         ? `${branch} could not be checked out without overwriting local changes. Commit or stash them first.`

@@ -3802,6 +3802,287 @@ export async function switchBranch(
   return ok(undefined);
 }
 
+/**
+ * The stash entry `sha` currently sits at, as a selector `git stash` accepts.
+ *
+ * A stash is a reflog: positions shift when anything else pushes or drops one,
+ * and a terminal in the same checkout is outside `WorktreeOperationQueue`. So
+ * every touch AFTER the entry is made resolves it by commit identity rather
+ * than by position — the same rule the repository's agent guidance gives humans
+ * and the one PwrGit's multi-stash work (#150) applies to every stash action.
+ *
+ * What this does NOT cover is the capture itself: the sha comes from
+ * `rev-parse refs/stash` immediately after our own `stash push`, which is a
+ * positional read of the top of the stack. A stash pushed from a terminal in
+ * that sub-millisecond window would hand us their commit. Closing it properly
+ * means `stash create` + `stash store`, which does not clean the worktree and
+ * so trades this race for a riskier hand-rolled reset — not obviously a better
+ * deal. Stated rather than papered over.
+ *
+ * `null` means the entry is gone. `"ambiguous"` means the same commit appears
+ * more than once in the reflog — identical content under two occurrences, which
+ * `apply` could serve but `pop` and `drop` cannot, because reflog occurrences
+ * carry no immutable identity. Both are refusals, not guesses.
+ */
+async function stashSelectorFor(
+  git: GitExec,
+  cwd: string,
+  sha: string
+): Promise<Result<string | null | "ambiguous">> {
+  const args = ["stash", "list", "--format=%H %gd"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  const matches = checked.value.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(`${sha} `))
+    .map((line) => line.slice(sha.length + 1).trim())
+    .filter((selector) => selector !== "");
+  if (matches.length === 0) return ok(null);
+  if (matches.length > 1) return ok("ambiguous");
+  return ok(matches[0] ?? null);
+}
+
+/** Paths the stash holds as UNTRACKED files, which is what `reset --hard` will
+ *  not clean up after a conflicted reapply. `^3` is the untracked-files parent
+ *  `stash push -u` writes; a stash made without untracked work has none. */
+async function stashUntrackedPaths(
+  git: GitExec,
+  cwd: string,
+  sha: string
+): Promise<Result<string[]>> {
+  const probe = await git(["rev-parse", "--verify", "--quiet", `${sha}^3`], cwd);
+  if (!probe.ok) return probe;
+  if (probe.value.exitCode !== 0) return ok([]);
+  const args = ["ls-tree", "-r", "--name-only", "-z", `${sha}^3`];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(checked.value.stdout.split("\0").filter((path) => path !== ""));
+}
+
+/**
+ * Reapply the stash at `sha` into the current checkout, staged/unstaged split
+ * and all, and drop it.
+ *
+ * `--index` restores what was staged as staged. When git rejects that *before
+ * touching the tree* — it refuses rather than guess how to stage a conflict —
+ * a plain reapply is retried, which is the same two-step `pullFastForward`
+ * uses. The retry is gated on the tree still being clean so a partial apply is
+ * never layered over.
+ */
+async function reapplyStash(
+  git: GitExec,
+  cwd: string,
+  sha: string
+): Promise<Result<{ reapplied: boolean; detail: string }>> {
+  const selector = await stashSelectorFor(git, cwd, sha);
+  if (!selector.ok) return selector;
+  if (selector.value === null) {
+    return ok({ reapplied: false, detail: "The saved changes are no longer in the stash." });
+  }
+  if (selector.value === "ambiguous") {
+    return ok({
+      reapplied: false,
+      detail:
+        "The saved changes appear more than once in the stash, so PwrGit cannot tell which entry to restore."
+    });
+  }
+
+  let pop = await git(["stash", "pop", "--index", selector.value], cwd);
+  if (!pop.ok) return pop;
+  if (pop.value.exitCode !== 0) {
+    const statusArgs = ["status", "--porcelain"];
+    const statusRaw = await git(statusArgs, cwd);
+    if (!statusRaw.ok) return statusRaw;
+    const status = requireExit0(statusRaw.value, statusArgs);
+    if (!status.ok) return status;
+    if (status.value.stdout.trim() === "") {
+      // The selector may have shifted if --index dropped nothing; re-resolve.
+      const again = await stashSelectorFor(git, cwd, sha);
+      if (!again.ok) return again;
+      if (typeof again.value === "string" && again.value !== "ambiguous") {
+        pop = await git(["stash", "pop", again.value], cwd);
+        if (!pop.ok) return pop;
+      }
+    }
+  }
+  if (pop.value.exitCode === 0) return ok({ reapplied: true, detail: "" });
+  return ok({
+    reapplied: false,
+    detail: `${pop.value.stderr}\n${pop.value.stdout}`.trim()
+  });
+}
+
+/** `git clean -fd` over an explicit, chunked pathset — never repository-wide.
+ *  Files created concurrently by something else must survive a rollback. */
+async function cleanPaths(
+  git: GitExec,
+  cwd: string,
+  paths: readonly string[]
+): Promise<Result<void>> {
+  const prefix = ["--literal-pathspecs", "clean", "-fd", "--"];
+  let args = [...prefix];
+  let length = args.join(" ").length;
+  const flush = async (): Promise<Result<void>> => {
+    if (args.length === prefix.length) return ok(undefined);
+    const raw = await git(args, cwd);
+    args = [...prefix];
+    length = args.join(" ").length;
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, ["clean"]);
+    return checked.ok ? ok(undefined) : checked;
+  };
+  for (const path of paths) {
+    if (args.length > prefix.length && length + path.length + 1 > 24_000) {
+      const flushed = await flush();
+      if (!flushed.ok) return flushed;
+    }
+    args.push(path);
+    length += path.length + 1;
+  }
+  return flush();
+}
+
+/** What the checkout was sitting on before a carrying switch, so a rollback has
+ *  somewhere to put it back. A detached HEAD is named by its commit. */
+async function currentCheckoutRef(
+  git: GitExec,
+  cwd: string
+): Promise<Result<string>> {
+  const symbolic = await git(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd);
+  if (!symbolic.ok) return symbolic;
+  if (symbolic.value.exitCode === 0) {
+    const name = symbolic.value.stdout.trim();
+    if (name !== "") return ok(name);
+  }
+  const args = ["rev-parse", "--verify", "HEAD"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(checked.value.stdout.trim());
+}
+
+/**
+ * Check out `branch`, bringing the checkout's uncommitted work with it — and
+ * putting everything back if that work cannot land there.
+ *
+ * A plain `git switch` carries non-conflicting changes and refuses outright the
+ * moment one of them would be overwritten, which is where it leaves the user:
+ * a wall of git text, still on the old branch, with nothing attempted. Saving
+ * the work first and restoring it after lands in cases a plain switch refuses,
+ * and turns the remaining failures into something reversible.
+ *
+ * The contract this owes its callers is exactly two outcomes. Either the work
+ * is on `branch`, or the checkout is back where it started with the work
+ * untouched — never a tree full of conflict markers on a branch the user did
+ * not mean to be standing on. `carry_rollback_failed` is the one case that
+ * breaks it, and it says so rather than pretending: the work is still in the
+ * stash, and the message names it.
+ */
+export async function switchBranchCarryingChanges(
+  git: GitExec,
+  cwd: string,
+  branch: string
+): Promise<Result<{ carried: boolean }>> {
+  const origin = await currentCheckoutRef(git, cwd);
+  if (!origin.ok) return origin;
+
+  const stashArgs = [
+    "stash",
+    "push",
+    "--include-untracked",
+    "-m",
+    `pwrgit: carrying changes to ${branch}`
+  ];
+  const stashRaw = await git(stashArgs, cwd);
+  if (!stashRaw.ok) return stashRaw;
+  const stash = requireExit0(stashRaw.value, stashArgs);
+  if (!stash.ok) return stash;
+  // The tree went clean between the caller's probe and this operation. There is
+  // nothing to carry, and `carried: false` is what stops the UI claiming there
+  // was.
+  if (/no local changes to save/i.test(stash.value.stdout)) {
+    const plain = await switchBranch(git, cwd, branch);
+    return plain.ok ? ok({ carried: false }) : plain;
+  }
+
+  const shaArgs = ["rev-parse", "--verify", "refs/stash"];
+  const shaRaw = await git(shaArgs, cwd);
+  if (!shaRaw.ok) return shaRaw;
+  const shaResult = requireExit0(shaRaw.value, shaArgs);
+  if (!shaResult.ok) return shaResult;
+  const sha = shaResult.value.stdout.trim();
+
+  /** Put the work back where it came from, on the branch it came from. */
+  const rollback = async (): Promise<string | null> => {
+    const reset = await git(["reset", "--hard", "HEAD"], cwd);
+    if (!reset.ok || reset.value.exitCode !== 0) {
+      return "the destination could not be cleared";
+    }
+    // Only the rollback path needs this, and a conflicted reapply KEEPS the
+    // entry, so `^3` is still resolvable here — reading it lazily saves two
+    // process spawns on every successful carry.
+    const untracked = await stashUntrackedPaths(git, cwd, sha);
+    if (!untracked.ok) return "the saved changes could not be inspected";
+    const cleaned = await cleanPaths(git, cwd, untracked.value);
+    if (!cleaned.ok) return "the files it restored could not be cleaned up";
+    // `checkout`, not `switch`: `origin` is a raw commit when the checkout was
+    // detached, and `git switch` refuses one without `--detach` — it exits 128
+    // with "a branch is expected, got commit". That turned every rollback from
+    // a detached HEAD into a broken promise, stranding the work in the stash on
+    // a branch the reader never chose. `checkout --force` takes both a branch
+    // name and a commit.
+    const back = await git(["checkout", "--force", origin.value], cwd);
+    if (!back.ok || back.value.exitCode !== 0) {
+      return `the checkout could not be moved back to ${origin.value}`;
+    }
+    const restored = await reapplyStash(git, cwd, sha);
+    if (!restored.ok) return "the saved changes could not be restored";
+    return restored.value.reapplied ? null : restored.value.detail;
+  };
+
+  const switched = await switchBranch(git, cwd, branch);
+  if (!switched.ok) {
+    // Nothing has moved except the stash, and we are still on `origin`, so the
+    // repair is just the reapply — and the ORIGINAL refusal is what the caller
+    // needs to see, including `checked_out_elsewhere`, which is not an error at
+    // all upstream.
+    const restored = await reapplyStash(git, cwd, sha);
+    if (restored.ok && restored.value.reapplied) return switched;
+    return err({
+      kind: "repo",
+      code: "carry_rollback_failed",
+      message: `${switched.error.message}\n\nYour changes were saved to the stash first and could not be restored: ${
+        restored.ok ? restored.value.detail : restored.error.message
+      } They are kept in the stash as "pwrgit: carrying changes to ${branch}".`
+    });
+  }
+
+  const reapplied = await reapplyStash(git, cwd, sha);
+  if (reapplied.ok && reapplied.value.reapplied) return ok({ carried: true });
+
+  const detail = reapplied.ok ? reapplied.value.detail : reapplied.error.message;
+  const failure = await rollback();
+  if (failure === null) {
+    return err({
+      kind: "repo",
+      code: "carry_conflicts",
+      message: `Your changes conflict with ${branch}, so they could not be brought over. Nothing moved: you are still on ${origin.value} with your changes exactly as they were.`,
+      ...(detail === "" ? {} : { cause: detail })
+    });
+  }
+  return err({
+    kind: "repo",
+    code: "carry_rollback_failed",
+    message: `Your changes could not be brought over to ${branch}, and PwrGit could not put the checkout back: ${failure}. Your work is kept in the stash as "pwrgit: carrying changes to ${branch}".`
+  });
+}
+
 async function checkedDestinationBranch(
   git: GitExec,
   cwd: string,

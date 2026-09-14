@@ -1,19 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dispatch = vi.hoisted(() => vi.fn());
-const confirmDialog = vi.hoisted(() => vi.fn());
+const chooseDialog = vi.hoisted(() => vi.fn());
 const showErrorToast = vi.hoisted(() => vi.fn());
+const nudgeToCommit = vi.hoisted(() => vi.fn());
 
 vi.mock("../../lib/pwrgit", () => ({ dispatch }));
-vi.mock("./dialogs", () => ({ confirmDialog }));
+vi.mock("./dialogs", () => ({ chooseDialog }));
+vi.mock("./commitNudge", () => ({ nudgeToCommit }));
 vi.mock("../../lib/toast", () => ({ showErrorToast }));
 
 const {
+  askDirtyIntent,
+  dirtyFacts,
   dirtySwitchMessage,
   guardedSwitchBranch,
   readDirtyState,
   switchWorktreeToBranch
 } = await import("./branchSwitch");
+
+/** `changes:list`, which the prompt reads to name the files at stake. */
+const changeSet = (...paths: string[]) => ({
+  ok: true as const,
+  value: { staged: [], unstaged: paths.map((path) => ({ path })) }
+});
 
 const dirtyResult = (dirty: number) => ({
   ok: true as const,
@@ -22,8 +32,9 @@ const dirtyResult = (dirty: number) => ({
 
 beforeEach(() => {
   dispatch.mockReset();
-  confirmDialog.mockReset();
+  chooseDialog.mockReset();
   showErrorToast.mockReset();
+  nudgeToCommit.mockReset();
 });
 
 describe("readDirtyState", () => {
@@ -57,17 +68,19 @@ describe("readDirtyState", () => {
 });
 
 describe("dirtySwitchMessage", () => {
-  it("says what carrying changes over means", () => {
+  // It asks rather than announces: the mechanism ("carries them over") is git
+  // behaviour the reader would have to already know to predict the outcome of.
+  it("asks what the changes were for", () => {
     expect(dirtySwitchMessage({ kind: "dirty", files: 3 }, "PwrSnap", "main"))
       .toBe(
-        "PwrSnap has 3 uncommitted changes. Switching to main carries them over to that branch instead of leaving them here."
+        "PwrSnap has 3 uncommitted changes, and main is a different branch. What did you mean to do with them?"
       );
   });
 
   it("keeps the count singular for one file", () => {
     expect(
       dirtySwitchMessage({ kind: "dirty", files: 1 }, "PwrSnap", "main")
-    ).toContain("1 uncommitted change.");
+    ).toContain("1 uncommitted change,");
   });
 
   it("admits when it could not count", () => {
@@ -81,60 +94,110 @@ describe("guardedSwitchBranch", () => {
   const args = {
     worktreeId: "wt-1",
     worktreeLabel: "PwrSnap",
+    fromBranch: "main",
     branch: "feature/x"
   };
 
-  it("switches without a dialog when the tree is clean", async () => {
+  const switched = (carried: boolean) => ({
+    ok: true as const,
+    value: { carried }
+  });
+  /** The dispatch order on a dirty switch: probe, list the files, then act. */
+  const dirtyRun = (files: number) =>
     dispatch
-      .mockResolvedValueOnce(dirtyResult(0))
-      .mockResolvedValueOnce({ ok: true, value: null });
+      .mockResolvedValueOnce(dirtyResult(files))
+      .mockResolvedValueOnce(changeSet("a.ts", "b.ts"))
+      .mockResolvedValueOnce(switched(true));
+
+  it("switches without a prompt when the tree is clean", async () => {
+    dispatch.mockResolvedValueOnce(dirtyResult(0)).mockResolvedValueOnce(switched(false));
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
-      kind: "switched"
+      kind: "switched",
+      carried: false
     });
-    expect(confirmDialog).not.toHaveBeenCalled();
+    expect(chooseDialog).not.toHaveBeenCalled();
+    // No `carryChanges` on a clean tree: there is nothing to carry, and asking
+    // main to stash anyway would cost two git commands to move nothing.
     expect(dispatch).toHaveBeenLastCalledWith("branch:switch", {
       worktreeId: "wt-1",
       branch: "feature/x"
     });
   });
 
-  it("confirms before carrying uncommitted changes over", async () => {
-    dispatch
-      .mockResolvedValueOnce(dirtyResult(4))
-      .mockResolvedValueOnce({ ok: true, value: null });
-    confirmDialog.mockResolvedValueOnce(true);
+  it("carries the changes when that is what the reader picked", async () => {
+    dirtyRun(4);
+    chooseDialog.mockResolvedValueOnce("carry");
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
-      kind: "switched"
+      kind: "switched",
+      carried: true
     });
-    expect(confirmDialog).toHaveBeenCalledOnce();
+    expect(chooseDialog).toHaveBeenCalledOnce();
+    expect(dispatch).toHaveBeenLastCalledWith("branch:switch", {
+      worktreeId: "wt-1",
+      branch: "feature/x",
+      carryChanges: true
+    });
   });
 
-  it("does not switch when the confirm is declined", async () => {
-    dispatch.mockResolvedValueOnce(dirtyResult(4));
-    confirmDialog.mockResolvedValueOnce(false);
+  // Cancelling and "commit first" both leave the checkout alone, and the caller
+  // cannot tell them apart — but only one of them owes the reader a destination.
+  it("does not switch when the prompt is dismissed", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(4))
+      .mockResolvedValueOnce(changeSet("a.ts"));
+    chooseDialog.mockResolvedValueOnce(null);
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
       kind: "cancelled"
     });
-    expect(dispatch).toHaveBeenCalledOnce();
+    expect(dispatch).not.toHaveBeenCalledWith("branch:switch", expect.anything());
+    expect(nudgeToCommit).not.toHaveBeenCalled();
   });
 
-  it("confirms when dirtiness could not be read", async () => {
+  it("sends the reader to the commit box instead of switching", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(4))
+      .mockResolvedValueOnce(changeSet("a.ts"));
+    chooseDialog.mockResolvedValueOnce("commit_first");
+    await expect(guardedSwitchBranch(args)).resolves.toEqual({
+      kind: "cancelled"
+    });
+    expect(nudgeToCommit).toHaveBeenCalledOnce();
+    expect(dispatch).not.toHaveBeenCalledWith("branch:switch", expect.anything());
+  });
+
+  it("asks when dirtiness could not be read", async () => {
     dispatch
       .mockResolvedValueOnce({
         ok: false,
         error: { kind: "git", code: "exit_128", message: "status failed" }
       })
-      .mockResolvedValueOnce({ ok: true, value: null });
-    confirmDialog.mockResolvedValueOnce(true);
+      .mockResolvedValueOnce(changeSet("a.ts"))
+      .mockResolvedValueOnce(switched(true));
+    chooseDialog.mockResolvedValueOnce("carry");
     await expect(guardedSwitchBranch(args)).resolves.toEqual({
-      kind: "switched"
+      kind: "switched",
+      carried: true
     });
-    expect(confirmDialog).toHaveBeenCalledOnce();
+    expect(chooseDialog).toHaveBeenCalledOnce();
   });
 
-  // "Carry changes over" is the wrong question for a directory that does not
-  // exist; the answer was a confirm followed by the switch's own refusal.
-  it("refuses a gone checkout without offering to carry changes over", async () => {
+  // The tree went clean between the probe and the operation. Reporting
+  // `carried: true` there would credit a move that never happened.
+  it("reports what main says was carried, not what the probe expected", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(4))
+      .mockResolvedValueOnce(changeSet("a.ts"))
+      .mockResolvedValueOnce(switched(false));
+    chooseDialog.mockResolvedValueOnce("carry");
+    await expect(guardedSwitchBranch(args)).resolves.toEqual({
+      kind: "switched",
+      carried: false
+    });
+  });
+
+  // Every answer is the wrong question for a directory that does not exist:
+  // there is nothing to switch and nothing to carry.
+  it("refuses a gone checkout without asking anything", async () => {
     dispatch.mockResolvedValueOnce({
       ok: false,
       error: {
@@ -148,15 +211,15 @@ describe("guardedSwitchBranch", () => {
       code: "worktree_missing",
       message: "This worktree's folder no longer exists: /wt/gone."
     });
-    expect(confirmDialog).not.toHaveBeenCalled();
+    expect(chooseDialog).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
-  it("skips the state read entirely when the caller already confirmed", async () => {
-    dispatch.mockResolvedValueOnce({ ok: true, value: null });
+  it("skips the state read entirely when the caller already asked", async () => {
+    dispatch.mockResolvedValueOnce({ ok: true, value: { carried: false } });
     await expect(
       guardedSwitchBranch({ ...args, skipDirtyConfirm: true })
-    ).resolves.toEqual({ kind: "switched" });
+    ).resolves.toEqual({ kind: "switched", carried: false });
     expect(dispatch).toHaveBeenCalledOnce();
     expect(dispatch).toHaveBeenCalledWith("branch:switch", {
       worktreeId: "wt-1",
@@ -204,6 +267,7 @@ describe("switchWorktreeToBranch", () => {
     repoId: "repo-1",
     worktreeId: "wt-1",
     worktreeLabel: "PwrSnap",
+    fromBranch: "main",
     branch: "feature/x",
     onRevealWorktree,
     onRefs
@@ -237,7 +301,7 @@ describe("switchWorktreeToBranch", () => {
   it("reports a clean switch and raises nothing", async () => {
     dispatch
       .mockResolvedValueOnce(dirtyResult(0))
-      .mockResolvedValueOnce({ ok: true, value: null });
+      .mockResolvedValueOnce({ ok: true, value: { carried: false } });
     await expect(switchWorktreeToBranch(args)).resolves.toBe("switched");
     expect(showErrorToast).not.toHaveBeenCalled();
     expect(onRevealWorktree).not.toHaveBeenCalled();
@@ -308,11 +372,139 @@ describe("switchWorktreeToBranch", () => {
     );
   });
 
-  it("stays quiet when the dirty confirm is declined", async () => {
-    dispatch.mockResolvedValueOnce(dirtyResult(3));
-    confirmDialog.mockResolvedValueOnce(false);
+  it("stays quiet when the dirty prompt is dismissed", async () => {
+    dispatch
+      .mockResolvedValueOnce(dirtyResult(3))
+      .mockResolvedValueOnce(changeSet("a.ts"));
+    chooseDialog.mockResolvedValueOnce(null);
     await expect(switchWorktreeToBranch(args)).resolves.toBe("cancelled");
     expect(showErrorToast).not.toHaveBeenCalled();
     expect(onRevealWorktree).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The question itself. Its whole job is to name the three things the reader
+ * might have meant, so the wording is the feature — a choice labelled with a
+ * git mechanism instead of an intent is the defect this replaced.
+ */
+describe("askDirtyIntent", () => {
+  const ask = (from = "main") =>
+    askDirtyIntent({ kind: "dirty", files: 3 }, "PwrSnap", from, "feature/x", [
+      "src/a.ts"
+    ]);
+
+  it("offers both destinations by name, and what each one costs", async () => {
+    chooseDialog.mockResolvedValueOnce("carry");
+    await ask();
+    const opts = chooseDialog.mock.calls[0]?.[0];
+    expect(opts.title).toBe("Switch to feature/x?");
+    expect(opts.facts).toEqual(["src/a.ts"]);
+    expect(opts.choices.map((c: { label: string }) => c.label)).toEqual([
+      "Bring them to feature/x",
+      "Commit on main first"
+    ]);
+    // The promise the carrying switch is built to keep, stated before the
+    // reader commits to it rather than discovered afterwards.
+    expect(opts.choices[0].detail).toContain("nothing moves");
+    expect(opts.choices[0].detail).toContain("you stay on main");
+  });
+
+  it.each([
+    ["carry", "carry"],
+    ["commit_first", "commit_first"]
+  ])("passes %s through", async (answer, expected) => {
+    chooseDialog.mockResolvedValueOnce(answer);
+    await expect(ask()).resolves.toBe(expected);
+  });
+
+  // Escape, the backdrop, and the Cancel button all arrive as null.
+  it("treats a dismissed prompt as cancel", async () => {
+    chooseDialog.mockResolvedValueOnce(null);
+    await expect(ask()).resolves.toBe("cancel");
+  });
+
+  // `Worktree.branch` is not always a branch name. "Commit on detached@ab12 first"
+  // would be printing a sentinel at the reader as if it were one.
+  it.each(["detached@ab12cd", "(bare)", "(unknown)"])(
+    "does not print the %s sentinel as a branch",
+    async (sentinel) => {
+      chooseDialog.mockResolvedValueOnce(null);
+      await ask(sentinel);
+      const opts = chooseDialog.mock.calls[0]?.[0];
+      expect(opts.choices[1].label).toBe("Commit on this checkout first");
+      expect(opts.choices[0].detail).toContain("you stay on this checkout");
+    }
+  );
+});
+
+describe("dirtyFacts", () => {
+  it("names the files at stake, staged ones first", async () => {
+    dispatch.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        staged: [{ path: "src/staged.ts" }],
+        unstaged: [{ path: "src/loose.ts" }]
+      }
+    });
+    await expect(dirtyFacts("wt-1")).resolves.toEqual([
+      "src/staged.ts",
+      "src/loose.ts"
+    ]);
+  });
+
+  // A file that is both staged and further modified is one file to the reader.
+  it("counts a partially staged file once", async () => {
+    dispatch.mockResolvedValueOnce({
+      ok: true,
+      value: { staged: [{ path: "both.ts" }], unstaged: [{ path: "both.ts" }] }
+    });
+    await expect(dirtyFacts("wt-1")).resolves.toEqual(["both.ts"]);
+  });
+
+  // `changes:list` caps its rows and carries the real totals in `truncated`.
+  // Counting the remainder off the capped array undercounts exactly when the
+  // number matters — a regenerated lockfile, a reformatted tree.
+  it("counts the overflow from the real totals, not the capped rows", async () => {
+    dispatch.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        staged: [],
+        unstaged: ["a", "b", "c", "d", "e", "f"].map((path) => ({ path })),
+        truncated: { staged: 0, unstaged: 500, largestUntrackedFolder: null }
+      }
+    });
+    await expect(dirtyFacts("wt-1", 5)).resolves.toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "…and 495 more"
+    ]);
+  });
+
+  it("says how many it is not listing", async () => {
+    dispatch.mockResolvedValueOnce(
+      changeSet("a", "b", "c", "d", "e", "f", "g")
+    );
+    await expect(dirtyFacts("wt-1", 5)).resolves.toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "…and 2 more"
+    ]);
+  });
+
+  // Best-effort: losing the list must not lose the prompt, which is the part
+  // that actually protects the work.
+  it("costs the list and not the prompt when it cannot be read", async () => {
+    dispatch.mockResolvedValueOnce({
+      ok: false,
+      error: { kind: "git", code: "exit_128", message: "no" }
+    });
+    await expect(dirtyFacts("wt-1")).resolves.toEqual([]);
   });
 });

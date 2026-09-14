@@ -16,6 +16,7 @@ import {
   listRepoRefs,
   readCheckoutDirtyCount,
   switchBranch,
+  switchBranchCarryingChanges,
   worktreeAdd
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
@@ -257,18 +258,30 @@ export function registerBranchHandlers(
     const live = rowOf(req.worktreeId);
     if (!live.ok) return live;
     const row = live.value;
+    // Both halves run inside ONE queued operation. The carrying switch is four
+    // git commands with a rollback hanging off each, and a second operation
+    // landing between the stash and the reapply — a pull's own auto-stash, say —
+    // would leave the two reaching for each other's entry.
     const result = await operations.run(req.worktreeId, () =>
-      switchBranch(execGit, row.path, req.branch)
+      req.carryChanges === true
+        ? switchBranchCarryingChanges(execGit, row.path, req.branch)
+        : switchBranch(execGit, row.path, req.branch).then((r) =>
+            r.ok ? ok({ carried: false }) : r
+          )
     );
     if (!result.ok) return result;
-    logMain("info", "branch", `switched ${row.path} to ${req.branch}`);
+    logMain(
+      "info",
+      "branch",
+      `switched ${row.path} to ${req.branch}${result.value.carried ? " carrying uncommitted changes" : ""}`
+    );
     // The worktree's branch column is now stale — re-list (branch is keyed by
     // path, so the id is stable) and recompute state so the header, graph, and
     // sidebar all reflect the new checkout.
     await indexer.refreshRepoWorktrees(row.repo_id);
     refresher.refreshWorktree(req.worktreeId);
     emitEvent("repo:changed", { profileId: row.profile_id });
-    return ok(null);
+    return ok({ carried: result.value.carried });
   });
 
   bus.register("branch:rename", async (req) => {

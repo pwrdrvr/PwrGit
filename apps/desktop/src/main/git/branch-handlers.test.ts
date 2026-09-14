@@ -9,6 +9,7 @@ import {
   createBranchAt,
   readCheckoutDirtyCount,
   switchBranch,
+  switchBranchCarryingChanges,
   worktreeAdd
 } from "./git-service";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
@@ -27,6 +28,7 @@ vi.mock("./git-service", async (importOriginal) => {
   return {
     ...actual,
     switchBranch: vi.fn(),
+    switchBranchCarryingChanges: vi.fn(),
     createBranchAt: vi.fn(),
     checkoutNewBranchAt: vi.fn(),
     worktreeAdd: vi.fn(),
@@ -134,7 +136,7 @@ describe("branch handlers", () => {
     expect(statusStarted).toBe(false);
 
     finishSwitch();
-    await expect(switching).resolves.toEqual(ok(null));
+    await expect(switching).resolves.toEqual(ok({ carried: false }));
     await status;
     expect(statusStarted).toBe(true);
     expect(indexer.refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(
@@ -143,6 +145,70 @@ describe("branch handlers", () => {
     expect(refresher.refreshWorktree).toHaveBeenCalledExactlyOnceWith(
       "worktree-1"
     );
+  });
+
+  // The carrying switch is four git commands with a rollback hanging off each.
+  // Running it outside the queue would let another operation — a pull taking
+  // its own auto-stash, say — land between the stash and the reapply, and the
+  // two would reach for each other's entry.
+  it("runs the carrying switch inside the same queue, not beside it", async () => {
+    const { bus, operations } = harness();
+    let finish!: () => void;
+    vi.mocked(switchBranchCarryingChanges).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve(ok({ carried: true }));
+      })
+    );
+
+    const switching = bus.dispatch("branch:switch", {
+      worktreeId: "worktree-1",
+      branch: "feature",
+      carryChanges: true
+    });
+    await vi.waitFor(() =>
+      expect(switchBranchCarryingChanges).toHaveBeenCalledOnce()
+    );
+    expect(switchBranch).not.toHaveBeenCalled();
+
+    let queued = false;
+    const behind = operations.run("worktree-1", async () => {
+      queued = true;
+    });
+    await Promise.resolve();
+    expect(queued).toBe(false);
+
+    finish();
+    await expect(switching).resolves.toEqual(ok({ carried: true }));
+    await behind;
+    expect(queued).toBe(true);
+  });
+
+  // `carried` is main's answer, not the renderer's expectation: a tree that
+  // went clean in between carries nothing, and the UI must not say otherwise.
+  it("reports carrying nothing when there was nothing to carry", async () => {
+    const { bus } = harness();
+    vi.mocked(switchBranchCarryingChanges).mockResolvedValueOnce(
+      ok({ carried: false })
+    );
+    await expect(
+      bus.dispatch("branch:switch", {
+        worktreeId: "worktree-1",
+        branch: "feature",
+        carryChanges: true
+      })
+    ).resolves.toEqual(ok({ carried: false }));
+  });
+
+  it("leaves a plain switch plain when no carry was asked for", async () => {
+    const { bus } = harness();
+    vi.mocked(switchBranch).mockResolvedValueOnce(ok(undefined));
+    await expect(
+      bus.dispatch("branch:switch", {
+        worktreeId: "worktree-1",
+        branch: "feature"
+      })
+    ).resolves.toEqual(ok({ carried: false }));
+    expect(switchBranchCarryingChanges).not.toHaveBeenCalled();
   });
 
   describe("branch:create", () => {

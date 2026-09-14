@@ -825,6 +825,7 @@ export function LineageGraph({
     const outcome = await guardedSwitchBranch({
       worktreeId,
       worktreeLabel: lastSegment(worktreePath),
+      fromBranch: viewingBranch,
       branch: target.branch
     });
     if (outcome.kind === "cancelled") return;

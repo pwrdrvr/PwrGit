@@ -368,6 +368,7 @@ export function RepoRefsModal({
       repoId: repo.id,
       worktreeId: focusedWorktree.id,
       worktreeLabel: lastSegment(focusedWorktree.path),
+      fromBranch: focusedWorktree.branch,
       branch: branchName,
       onRevealWorktree
     });

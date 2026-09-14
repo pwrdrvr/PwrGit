@@ -1110,7 +1110,24 @@ export interface Commands {
    * carries across IPC to answer it.
    */
   "branch:localNames": { req: { worktreeId: string }; res: string[] };
-  "branch:switch": { req: { worktreeId: string; branch: string }; res: null };
+  /**
+   * Move one worktree onto `branch`.
+   *
+   * `carryChanges` is the caller's answer to "what did you mean by the
+   * uncommitted work in this checkout" — never a guess. Without it the switch
+   * is a plain `git switch`, which is correct for the clean tree the caller
+   * just probed. With it, the changes are saved, carried across, and restored
+   * on the destination; if they cannot be restored there, the checkout is put
+   * back exactly as it was, on the branch it started on, with the work intact.
+   *
+   * `carried` says whether any work actually moved. A tree that went clean
+   * between the probe and the operation switches with nothing to carry, and the
+   * caller must not then claim it brought changes along.
+   */
+  "branch:switch": {
+    req: { worktreeId: string; branch: string; carryChanges?: boolean };
+    res: { carried: boolean };
+  };
   /**
    * Create a branch at an arbitrary commit and optionally check it out. The
    * worktree supplies the git directory the branch is written to, and is also

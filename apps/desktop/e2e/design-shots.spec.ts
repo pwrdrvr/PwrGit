@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type Page } from "@playwright/test";
@@ -212,4 +212,46 @@ test("branch lists and the refs browser, on a contrived repository", async () =>
   await browser.waitFor();
   await window.waitForTimeout(500);
   await browser.screenshot({ path: join(OUT, "branch-switch-browser.png") });
+});
+
+
+/**
+ * The dirty-switch prompt, for the branch-switching artboard and its PR.
+ *
+ * 100% contrived, same rules as the capture above: a fixture repository under a
+ * temp dir, the seeded default profile, and invented file names.
+ */
+test("the uncommitted-changes prompt, on a contrived repository", async () => {
+  mkdirSync(OUT, { recursive: true });
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const repo = box.makeRepo("northwind-labs");
+  box.commit(repo.path, "capture-window.ts", "base");
+  box.commit(repo.path, "capture-audio.ts", "base");
+  box.git(repo.path, "switch", "-c", "feat/lineage-scope");
+  box.commit(repo.path, "capture-window.ts", "rewritten on the branch");
+  box.git(repo.path, "switch", "main");
+  for (const file of [
+    "capture-audio.ts",
+    "capture-session.ts",
+    "tray-menu.ts"
+  ]) {
+    writeFileSync(join(repo.path, file), "work in progress\n");
+  }
+
+  handle = await launchApp({ theme: "dark" });
+  const { app, window } = handle;
+  await app.evaluate(async ({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
+  }, WINDOW);
+
+  await addRootAndExpand(window, handle, box, "northwind-labs");
+  await branchRow(window, "main").first().click();
+  await expandBranchesSection(window, "northwind-labs");
+  await refBranchRow(window, "feat/lineage-scope").dblclick();
+  const prompt = window.locator(".modal--choice");
+  await prompt.waitFor();
+  await window.mouse.move(6, 6);
+  await window.waitForTimeout(400);
+  await prompt.screenshot({ path: join(OUT, "dirty-switch-prompt.png") });
 });
