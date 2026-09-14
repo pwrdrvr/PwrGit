@@ -1,11 +1,9 @@
-import { appendFile, rename, stat } from "node:fs/promises";
+import { rename, stat } from "node:fs/promises";
+import electronLog from "electron-log/main.js";
 import type { LogEntry, LogSnapshot } from "@pwrgit/shared";
 
-// In-memory app log (PwrAgnt's Logs-system shape): a ring buffer the Logs
-// window snapshots on open and follows live via the `logs:entry` event, plus
-// a plain on-disk file for post-mortems. No electron imports here — the file
-// path is injected from index.ts after app-ready — so unit tests can exercise
-// the buffer without an Electron runtime.
+// electron-log owns console output, file writes, and rotation. The rings and
+// listeners below supply Help → Logs snapshots and live events.
 
 const MAX_BUFFERED_LOG_ENTRIES = 5000;
 // Debug is dominated by routine git probes (upstream checks, cat-file -e
@@ -63,47 +61,20 @@ const listeners = new Set<LogListener>();
 let nextSequence = 1;
 
 let logFilePath: string | null = null;
-// Serialize appends so lines never interleave; errors disable file logging
-// rather than cascading (the in-memory buffer keeps working regardless).
-let fileChain: Promise<void> = Promise.resolve();
-let fileBroken = false;
-
-/**
- * Start mirroring log lines to `path`. Called once from index.ts after
- * app-ready. A file already over the size cap is rotated to `<path>.old`
- * first so the log can't grow without bound. `legacyPath`, when given, is a
- * previous location this log lived at: it and its rotated `.old` sibling are
- * moved into place once, so the history from before the move isn't stranded
- * where nobody looks for it.
- */
-export function initLogFile(path: string, legacyPath?: string): void {
+/** Preserve the pre-0.14 log location, then let electron-log own persistence. */
+export async function initLogFile(path: string, legacyPath?: string): Promise<void> {
+  if (legacyPath !== undefined && legacyPath !== path) {
+    const absent = await stat(path).then(
+      () => false,
+      (cause: NodeJS.ErrnoException) => cause.code === "ENOENT"
+    );
+    if (absent) {
+      await rename(legacyPath, path).catch(() => undefined);
+      await rename(`${legacyPath}.old`, `${path}.old`).catch(() => undefined);
+    }
+  }
+  electronLog.transports.file.resolvePathFn = () => path;
   logFilePath = path;
-  fileChain = fileChain.then(async () => {
-    if (legacyPath !== undefined && legacyPath !== path) {
-      // Only a missing file means "nothing here yet": adopting on any other
-      // stat error (a permissions change, a stale mount) would rename the old
-      // log over a live one and lose this session's history.
-      const absent = await stat(path).then(
-        () => false,
-        (cause: NodeJS.ErrnoException) => cause.code === "ENOENT"
-      );
-      if (absent) {
-        // Take the rotated sibling too, so nothing is left in the old location.
-        await rename(legacyPath, path).catch(() => undefined);
-        await rename(`${legacyPath}.old`, `${path}.old`).catch(() => undefined);
-      }
-    }
-    try {
-      const info = await stat(path);
-      if (info.size > MAX_LOG_FILE_BYTES) await rename(path, `${path}.old`);
-    } catch {
-      // Missing file (first run) — nothing to rotate.
-    }
-  });
-}
-
-export function getLogFilePath(): string | null {
-  return logFilePath;
 }
 
 function formatTimestamp(date: Date): string {
@@ -126,40 +97,44 @@ function formatPart(value: unknown): string {
   }
 }
 
-/** Append a line to the app log; fans out to buffer, file, and listeners. */
-export function logMain(
-  level: LogLevel,
-  scope: string,
-  ...parts: unknown[]
-): LogEntry {
-  const timestamp = Date.now();
-  const text = parts.map(formatPart).join(" ");
-  const line = `[${formatTimestamp(new Date(timestamp))}] [${level.padEnd(5)}] (${scope}) ${text}`;
+type LogMessage = Parameters<(typeof electronLog.hooks)[number]>[0];
 
+function formatLogLine(message: LogMessage): string {
+  return `[${formatTimestamp(message.date)}] [${message.level.padEnd(5)}] (${message.scope ?? "app"}) ${message.data.map(formatPart).join(" ")}`;
+}
+
+// Match the siblings: scoped electron-log calls feed console/file transports,
+// with a file hook supplying the app's Logs window exactly once per message.
+// Keep PwrGit's debug collection and separate ring quota intact.
+electronLog.transports.console.level = false;
+electronLog.transports.console.format = ({ message }) => [formatLogLine(message)];
+electronLog.transports.file.level = "debug";
+electronLog.transports.file.maxSize = MAX_LOG_FILE_BYTES;
+electronLog.transports.file.format = ({ message }) => [formatLogLine(message)];
+if (electronLog.transports.ipc) electronLog.transports.ipc.level = false;
+electronLog.transports.remote.level = false;
+electronLog.scope.labelPadding = false;
+electronLog.hooks.push((message, _transport, transportName) => {
+  if (transportName !== "file") return message;
+  const level: LogLevel = message.level === "error" || message.level === "warn" || message.level === "info"
+    ? message.level : "debug";
   const entry: LogEntry = {
-    sequence: nextSequence,
-    timestamp,
+    sequence: nextSequence++,
+    timestamp: message.date.getTime(),
     level,
-    scope,
-    line
+    scope: message.scope ?? "app",
+    line: formatLogLine(message)
   };
-  nextSequence += 1;
-
   (level === "debug" ? debugRing : mainRing).push(entry);
-
-  if (logFilePath !== null && !fileBroken) {
-    const path = logFilePath;
-    fileChain = fileChain.then(async () => {
-      try {
-        await appendFile(path, `${line}\n`);
-      } catch {
-        fileBroken = true;
-      }
-    });
-  }
-
   for (const listener of listeners) listener(entry);
-  return entry;
+  // Startup messages and unit tests still reach the buffer before a file is
+  // configured, without opening Electron's default file under another app name.
+  return logFilePath === null ? false : message;
+});
+
+/** Compatibility facade for existing callers; electron-log dispatches outputs. */
+export function logMain(level: LogLevel, scope: string, ...parts: unknown[]): void {
+  electronLog.scope(scope)[level](...parts);
 }
 
 export function readLogSnapshot(): LogSnapshot {
@@ -194,5 +169,4 @@ export function _resetLogsForTests(): void {
   listeners.clear();
   nextSequence = 1;
   logFilePath = null;
-  fileBroken = false;
 }

@@ -18,15 +18,16 @@ describe("app console logging", () => {
     const write = vi.spyOn(electronLog.transports.console, "writeFn").mockImplementation(() => {});
     stop = initLogConsole();
     expect(initLogConsole()).toBe(stop);
-    const entries = (["debug", "info", "warn", "error"] as const).map((level) =>
+    (["debug", "info", "warn", "error"] as const).forEach((level) =>
       logMain(level, "fixture", `message at ${level}`)
     );
+    const entries = readLogSnapshot().entries;
     expect(write.mock.calls.map(([options]) => options.message.level)).toEqual(["info", "warn", "error"]);
     expect(write.mock.calls.map(([options]) => options.message.data)).toEqual(
       entries.slice(1).map((entry) => [entry.line])
     );
     expect(readLogSnapshot().entries).toEqual(entries);
-    expect(electronLog.transports.file.level).toBe(false);
+    expect(electronLog.transports.file.level).toBe("debug");
     if (electronLog.transports.ipc) expect(electronLog.transports.ipc.level).toBe(false);
     expect(electronLog.transports.remote.level).toBe(false);
   });
