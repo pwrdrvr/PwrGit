@@ -191,7 +191,7 @@ jobs:
         run: pnpm run test
 
   desktop-e2e:
-    name: Desktop E2E (${{ matrix.shard }}/2)
+    name: Linux Desktop E2E (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     needs: [changes, install-deps]
     if: needs.changes.outputs.code_impacting == 'true'
@@ -229,24 +229,99 @@ jobs:
             apps/desktop/test-results/
           retention-days: 30
 
+  macos-install-deps:
+    name: Install Dependencies (macOS)
+    # Prime the macOS/ARM64 cache on hosted Apple Silicon for the Tart guests.
+    runs-on: macos-26
+    needs: changes
+    if: >-
+      needs.changes.outputs.code_impacting == 'true' &&
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+          lookup-only: "true"
+
+  macos-e2e:
+    name: macOS Desktop E2E (${{ matrix.shard }}/4)
+    # Same restricted Tart runner pool as PwrAgnt. PwrGit must be allowed in
+    # the organization runner group. Never run public fork code on this pool.
+    runs-on: [self-hosted, macOS, ARM64, pwrdrvr-macos]
+    needs: [changes, macos-install-deps]
+    if: >-
+      needs.changes.outputs.code_impacting == 'true' &&
+      (github.event_name == 'push' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        timeout-minutes: 10
+
+      - name: Install Node.js and dependencies
+        uses: pwrdrvr/configure-nodejs@v1
+        timeout-minutes: 10
+        with:
+          node-version: 24.x
+
+      - name: Clear leftover Electron state from previous jobs
+        shell: bash
+        timeout-minutes: 5
+        run: bash ./scripts/ci/macos-e2e-pre-run-cleanup.sh
+
+      - name: Run desktop Electron E2E specs (macOS)
+        # Tart provides the desktop. Software rendering avoids the virtual
+        # AppleParavirtGPU resets observed in PwrAgnt's macOS E2E runs.
+        timeout-minutes: 20
+        env:
+          PWRGIT_E2E_DISABLE_GPU: "1"
+        run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4
+
+      - name: Upload desktop Playwright artifacts
+        uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: macos-desktop-e2e-artifacts-${{ matrix.shard }}
+          path: |
+            apps/desktop/playwright-report/
+            apps/desktop/test-results/
+          retention-days: 30
+
   desktop-e2e-result:
-    # Preserve the required status-check context while the work runs as two
-    # independently named matrix jobs. `always()` is required so a failed
+    # Preserve the required status-check context across Linux and macOS
+    # matrix jobs. `always()` is required so a failed
     # shard reaches this job and cannot turn the aggregate check into a skip.
     name: Desktop E2E
     runs-on: ubuntu-latest
-    needs: [changes, desktop-e2e]
+    needs: [changes, desktop-e2e, macos-e2e]
     if: >-
       always() &&
       needs.changes.outputs.code_impacting == 'true'
     timeout-minutes: 5
     steps:
-      - name: Require both Linux Desktop E2E shards
+      - name: Require Linux and eligible macOS Desktop E2E shards
         env:
           LINUX_E2E_RESULT: ${{ needs.desktop-e2e.result }}
+          MACOS_E2E_RESULT: ${{ needs.macos-e2e.result }}
+          MACOS_REQUIRED: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           if [[ "$LINUX_E2E_RESULT" != "success" ]]; then
             echo "Linux Desktop E2E matrix result: $LINUX_E2E_RESULT"
+            exit 1
+          fi
+          if [[ "$MACOS_REQUIRED" == "true" && "$MACOS_E2E_RESULT" != "success" ]]; then
+            echo "macOS Desktop E2E matrix result: $MACOS_E2E_RESULT"
             exit 1
           fi
 

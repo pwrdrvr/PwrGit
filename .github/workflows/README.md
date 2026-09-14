@@ -4,9 +4,27 @@
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |
+| `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + macOS + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on Linux build, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. Labeled same-repo PRs run the real Windows prepare/sign/Authenticode path and upload workflow artifacts only. |
+
+## macOS desktop E2E
+
+Four shards run on the same self-hosted ARM64 Tart pool as PwrAgnt, selected
+by `[self-hosted, macOS, ARM64, pwrdrvr-macos]`. Add `pwrdrvr/PwrGit` to that
+organization runner group's selected repositories before enabling the jobs;
+otherwise they remain queued. Guests need a logged-in desktop session.
+The hosted `macos-26` install job primes the matching macOS/ARM64 cache.
+
+Mac jobs run on main pushes and code-impacting same-repository PRs. Fork PRs
+skip both Mac jobs so untrusted fork code never reaches the persistent guests.
+The existing required `Desktop E2E` check requires Linux and, for eligible
+runs, all Mac shards; Windows retains its separate checks.
+
+Each shard uses one Playwright worker and uploads its own artifacts. The Mac
+lane uses software rendering to avoid Tart virtual GPU resets and clears
+workspace-scoped orphaned Electron processes plus dev Electron saved window
+state before testing, following PwrAgnt's persistent-runner cleanup.
 
 ## macOS Icon Composer runner
 
@@ -24,7 +42,8 @@ to an incompatible runner.
 changed path (and `previous_filename` on a rename) is under `docs/` or ends
 with `.md` (case-insensitive), Classify Changes sets `code_impacting=false`
 and these jobs skip: `install-deps`, `windows-install-deps`, `typecheck`,
-`build`, `test`, `desktop-e2e`, `desktop-e2e-result`, `windows`,
+`macos-install-deps`, `macos-e2e`, `build`, `test`, `desktop-e2e`,
+`desktop-e2e-result`, `windows`,
 `windows-e2e`. Push/main events, API errors, and incomplete file lists still
 run full CI.
 

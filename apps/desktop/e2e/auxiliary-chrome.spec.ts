@@ -10,21 +10,42 @@ test.afterEach(async () => {
 
 async function openMenuItem(
   app: AppHandle["app"],
-  label: string
+  label: string,
+  opener?: Page
 ): Promise<Page> {
   const windowPromise = app.waitForEvent("window");
-  await app.evaluate(({ Menu }, requestedLabel) => {
+  await app.evaluate(({ Menu, BrowserWindow }, request) => {
+    const openerWindow = request.openerUrl === undefined
+      ? undefined
+      : BrowserWindow.getAllWindows().find(
+        (candidate) => candidate.webContents.getURL() === request.openerUrl
+      );
+    if (request.openerUrl !== undefined && openerWindow === undefined) {
+      throw new Error("Menu opener window not found");
+    }
     for (const top of Menu.getApplicationMenu()?.items ?? []) {
       const item = top.submenu?.items.find(
-        (candidate) => candidate.label === requestedLabel
+        (candidate) => candidate.label === request.label
       );
       if (item !== undefined) {
-        item.click();
+        // This suite tests palette inheritance, not WindowServer activation.
+        // Tart can render windows without granting them focus. Supply only
+        // the native opener lookup while the real menu handler runs; leave
+        // appearance resolution, window creation and rendering untouched.
+        const getFocusedWindow = BrowserWindow.getFocusedWindow;
+        try {
+          if (openerWindow !== undefined) {
+            BrowserWindow.getFocusedWindow = () => openerWindow;
+          }
+          item.click();
+        } finally {
+          BrowserWindow.getFocusedWindow = getFocusedWindow;
+        }
         return;
       }
     }
-    throw new Error(`Menu item not found: ${requestedLabel}`);
-  }, label);
+    throw new Error(`Menu item not found: ${request.label}`);
+  }, { label, openerUrl: opener?.url() });
   return windowPromise;
 }
 
@@ -187,13 +208,14 @@ test("secondary windows borrow the palette of the window that opened them", asyn
   expect(await frameBackground(app, logs)).toBe("#FFFFFF");
   await logs.close();
 
-  // From the menu: Electron hands the click the focused window.
-  await app.evaluate(({ BrowserWindow }, url) => {
-    BrowserWindow.getAllWindows()
-      .find((candidate) => candidate.webContents.getURL() === url)
-      ?.focus();
-  }, mainWindow.url());
-  const settings = await openMenuItem(app, "Settings…");
+  // Keep the app inactive to exercise the Tart runner case. The menu
+  // helper supplies the opener without depending on native focus.
+  await app.evaluate(({ app: electronApp }) => {
+    if (process.platform === "darwin") electronApp.hide();
+  });
+
+  // The real menu callback borrows this profile window's palette.
+  const settings = await openMenuItem(app, "Settings…", mainWindow);
   await expectAuxiliaryChrome(app, settings, "General", "rgb(247, 244, 239)");
   // The borrowed palette has to survive the renderer's own boot-time read,
   // which used to answer with the app default and snap the window back.
