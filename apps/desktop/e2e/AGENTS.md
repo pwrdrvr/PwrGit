@@ -51,7 +51,9 @@ the Electron build.
   `--disable-gpu`.** GPU rendering and media codecs are separate. PwrSnap
   #366 and PwrAgent #1168 measured VideoToolbox kernel-client leaks in Tart
   guests that eventually stall Electron teardown. The codec switches prevent
-  accumulation; they do not repair an already-degraded guest. CI records
+  accumulation; they do not repair an already-degraded guest. The separate
+  `PWRGIT_E2E_DISABLE_GPU` gate must call `app.disableHardwareAcceleration()`
+  before ready (PwrAgent #1656), as well as passing `--disable-gpu`. CI records
   `ioclasscount AppleVideoToolboxParavirtualizationUserClient` before and after
   each shard. Reboot degraded guests only after their active jobs finish.
 

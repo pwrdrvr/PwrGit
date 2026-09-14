@@ -147,6 +147,14 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
+// Match PwrAgent #1656: disable the broader AppleParavirtGPU path before
+// Electron becomes ready. The fixture's codec switches separately prevent
+// VideoToolbox leaks; software rendering alone does not cover those codecs.
+if (process.env["PWRGIT_E2E_DISABLE_GPU"] === "1") {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-gpu");
+}
+
 // Playwright launches the built main entry directly, so Electron cannot find
 // apps/desktop/package.json and otherwise identifies the process as the generic
 // "Electron" app. Establish PwrGit's runtime identity before userData is
