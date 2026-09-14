@@ -150,7 +150,10 @@ export async function launchApp(
   const seedOnboarding = opts.seedOnboarding ?? true;
 
   const app = await electron.launch({
-    args: [MAIN],
+    args: [
+      ...(process.env.PWRGIT_E2E_DISABLE_GPU === "1" ? ["--disable-gpu"] : []),
+      MAIN
+    ],
     env: cleanEnv({
       ...(opts.agentAccess ? { PWRGIT_E2E_AGENT_ACCESS_PORT: "0" } : {}),
       PWRGIT_USER_DATA_DIR: userData,
