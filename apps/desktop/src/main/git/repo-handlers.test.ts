@@ -46,7 +46,9 @@ describe("repo handlers", () => {
     vi.clearAllMocks();
   });
 
-  it.each(["new worktree", "existing worktree switches"])(
+  it.each([
+    "new worktree", "existing worktree switches", "old branch deleted"
+  ])(
     "search discovers an externally assigned branch: %s",
     async (scenario) => {
       const root = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-search-live-")));
@@ -64,7 +66,7 @@ describe("repo handlers", () => {
         git(["branch", "fix/search-target"]);
         git(["branch", "fix/still-free"]);
         const checkout = join(root, "linked");
-        if (scenario === "existing worktree switches") {
+        if (scenario !== "new worktree") {
           git(["worktree", "add", "-b", "old-branch", checkout]);
         }
         const profiles = new ProfileService(db);
@@ -80,6 +82,11 @@ describe("repo handlers", () => {
           git(["worktree", "add", checkout, "fix/search-target"]);
         } else {
           git(["-C", checkout, "switch", "fix/search-target"]);
+          if (scenario === "old branch deleted") {
+            git(["branch", "-D", "old-branch"]);
+            // A prefix match must not resurrect the deleted parent branch.
+            git(["branch", "old-branch/child"]);
+          }
         }
         // Git canonicalizes separators and expands Windows short paths; the
         // filesystem spelling used to create the checkout is not its Git path.
@@ -97,9 +104,23 @@ describe("repo handlers", () => {
         const result = await bus.dispatch("search:branchWorktree", {
           repoId: indexed.value.id, branch: "fix/search-target"
         });
-        expect(runGit).toHaveBeenCalledExactlyOnceWith(
-          ["worktree", "list", "--porcelain"], indexed.value.path
+        const oldBranchHits = indexer.searchAll("old-branch");
+        if (scenario === "existing worktree switches") {
+          expect(oldBranchHits).toEqual([expect.objectContaining({
+            kind: "local_branch", name: "old-branch", repoId: indexed.value.id
+          })]);
+        } else {
+          expect(oldBranchHits.some((hit) => hit.name === "old-branch")).toBe(false);
+        }
+        expect(runGit.mock.calls.map(([args]) => args)).toEqual(
+          scenario === "new worktree"
+            ? [["worktree", "list", "--porcelain"]]
+            : [
+                ["worktree", "list", "--porcelain"],
+                ["for-each-ref", "--format=%(refname)", "--", "refs/heads/old-branch"]
+              ]
         );
+        expect(runGit.mock.calls.every(([, path]) => path === indexed.value.path)).toBe(true);
         expect(result).toEqual(ok(
           expect.objectContaining({
             kind: "worktree",
@@ -118,7 +139,7 @@ describe("repo handlers", () => {
         expect(await bus.dispatch("search:branchWorktree", {
           repoId: indexed.value.id, branch: "fix/still-free"
         })).toEqual(ok(null));
-        expect(runGit).toHaveBeenCalledTimes(1);
+        expect(runGit).toHaveBeenCalledTimes(scenario === "new worktree" ? 1 : 2);
         expect(
           await bus.dispatch("repo:search", { query: "fix/still-free" })
         ).toEqual(ok([
