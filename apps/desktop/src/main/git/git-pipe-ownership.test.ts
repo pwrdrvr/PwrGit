@@ -18,12 +18,34 @@ describe("pipe ownership evidence", () => {
       root("new-pipe"), peer("new-pipe")];
     try {
       writeFileSync(join(directory, "windows-processes.jsonl"), [
-        { event: "pipe-handle-sample", callId: "controlled", phase: "baseline", sampleJson: JSON.stringify({ handles: baseline }) },
+        { event: "pipe-handle-sample", callId: "controlled", phase: "baseline", sampleJson: JSON.stringify({ status: "sampled", handles: baseline }) },
         { event: "pipe-handle-sample", callId: "controlled", phase: "post-exit", sampleJson: JSON.stringify({ handles: after }) }
       ].map(row => JSON.stringify(row)).join("\n"));
       expect(ownershipMatches(directory, "controlled", 987)).toEqual([
         expect.objectContaining({ pipeId: "new-pipe", writerPid: 987, writerBinary: "node.exe", readerPid: process.pid })
       ]);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("never treats a missing or partial baseline as evidence that later pipes are new", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pwrgit-pipe-partial-"));
+    const handles = [{ pid: process.pid, pipeId: "pipe", endpoint: "server" },
+      { pid: 987, pipeId: "pipe", endpoint: "client", writeDataAccess: true }];
+    const postExit = { callId: "controlled", phase: "post-exit", sampleJsonl: JSON.stringify({ status: "sampled", handles }) };
+    try {
+      for (const baseline of [null, { event: "pipe-name-query-start" },
+        { status: "sampled", handles: [], limited: true }, { status: "sampled", handles: [], nameFailures: 1 }]) {
+        writeFileSync(join(directory, "windows-processes.jsonl"), [
+          { callId: "controlled", phase: "baseline", sampleJsonl: JSON.stringify(baseline) }, postExit
+        ].map(row => JSON.stringify(row)).join("\n"));
+        expect(ownershipMatches(directory, "controlled", 987)).toEqual([]);
+      }
+      writeFileSync(join(directory, "windows-processes.jsonl"), [
+        { callId: "controlled", phase: "baseline", sampleJsonl: [
+          { event: "inspector-start" }, { status: "sampled", handles: [] }
+        ].map(row => JSON.stringify(row)).join("\n") }, postExit
+      ].map(row => JSON.stringify(row)).join("\n"));
+      expect(ownershipMatches(directory, "controlled", 987)).toHaveLength(1);
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 

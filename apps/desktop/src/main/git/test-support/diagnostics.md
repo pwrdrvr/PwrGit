@@ -265,3 +265,46 @@ test rejects same-endpoint duplex handles, pre-existing pipes, wrong owners and
 handles without write access. The observer source also
 compiled as C# 5 against .NET 9/System.Management references; that is syntax/API
 reference validation, not a test of Windows PowerShell or native API behavior.
+
+### Results from the first ownership-instrumented Windows run
+
+Head `029ded6e` passed [CI run 34932156444](https://github.com/pwrdrvr/PwrGit/actions/runs/34932156444).
+The [Windows artifact](https://github.com/pwrdrvr/PwrGit/actions/runs/34932156444/artifacts/10381943373)
+contains 35 real remote-suite branch traces and 64 separate branch probes. None
+of those branch traces recorded a Git `child_start`, despite system-scope LFS
+filter configuration being present. There were no real helper grace expiries
+or five-second individual-Git reports. Ten real Windows tests emitted finish
+reports; Linux had no real slow reports.
+
+The exact previously implicated test now used launcher PID 9364 and Trace2 Git
+PID 9888; WMI records the parent relation 9364 → 9888. Git exited at about 85ms
+and the helper settled at about 88ms. This is a successful sample, not a
+reproduction of the earlier missing-EOF condition. The standalone Windows
+branch probes had maximum exit-to-close time 3.959ms (Linux: 2.414ms).
+
+The first standalone Windows branch recorded `Git/bin/git.exe` PID 5044,
+`Git/mingw64/bin/git.exe` PID 5888, and a console host PID 1792. The console
+host's name was hashed by the initial allowlist; its hash matches `conhost.exe`.
+That name is now explicitly allowed. The command closed normally, so this
+identifies an additional process but does not implicate it as a retained writer.
+The controlled detached-holder cases identify Node PIDs 7724 and 9292, and
+closed naturally about 1.835s and 1.822s after Git exit, following release.
+
+Windows PowerShell compilation and process subscriptions succeeded. All three
+handle inspections (the real spawn sample and the control's baseline/post-exit
+samples) hit the 900ms inspector deadline. No handle ownership match was
+established. That version discarded partial inspector output on timeout, so
+it cannot establish whether startup, table enumeration or a particular native
+query consumed the deadline. The follow-up preserves bounded JSONL progress
+through those stages and completed handle records even on timeout, without
+extending any deadline. Matching also requires a complete successful baseline:
+a missing/partial baseline cannot make later handles count as new pipes.
+
+WMI timestamps have a material observed limitation: the first standalone Git
+wrapper's stop notification is timestamped around `05:23:21.876Z`, although
+Node had already observed exit and natural close about 0.8s earlier. WMI
+`TIME_CREATED` is therefore labeled as a provider-event clock, **not a kernel
+process-exit clock**. Registration before Git starts preserves available
+parent/binary events, but delayed provider notifications do not prove a process
+was still alive until that timestamp. PID reuse also requires temporal context;
+joining every occurrence of a PID across the entire suite fabricates lineage.

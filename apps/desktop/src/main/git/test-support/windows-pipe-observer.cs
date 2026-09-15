@@ -44,7 +44,7 @@ public class PipeObserver {
   static void Emit(Dictionary<string, object> row) { lock (Gate) { try { Log.WriteLine(Json(row)); Log.Flush(); } catch (ObjectDisposedException) { } } }
   static string SafeName(string name) {
     string lower = name.ToLowerInvariant();
-    string allowed = "|git.exe|git-lfs.exe|node.exe|cmd.exe|sh.exe|bash.exe|ssh.exe|gpg.exe|git-remote-http.exe|git-remote-https.exe|git-credential-manager.exe|powershell.exe|";
+    string allowed = "|git.exe|git-lfs.exe|node.exe|cmd.exe|sh.exe|bash.exe|ssh.exe|gpg.exe|git-remote-http.exe|git-remote-https.exe|git-credential-manager.exe|powershell.exe|conhost.exe|openconsole.exe|werfault.exe|";
     return allowed.Contains("|" + lower + "|") ? lower : "other:" + Hash(name);
   }
   [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
@@ -108,6 +108,7 @@ public class PipeObserver {
       var row = Row(start ? "process-start" : "process-stop");
       row["pid"] = pid;
       row["eventUtc"] = DateTime.FromFileTimeUtc(Convert.ToInt64(e["TIME_CREATED"])).ToString("O");
+      row["eventClock"] = "wmi-provider-not-kernel-lifecycle-time";
       row["binary"] = SafeName(Convert.ToString(e["ProcessName"]));
       if (start) { row["ppid"] = Convert.ToInt32(e["ParentProcessID"]); Image(pid, row); }
       else row["exitStatus"] = Convert.ToUInt32(e["ExitStatus"]);
@@ -138,7 +139,9 @@ public class PipeObserver {
     try {
       while (true) {
         table = Marshal.AllocHGlobal(size);
+        Console.WriteLine(Json(new Dictionary<string, object> { { "event", "handle-table-query-start" }, { "bufferBytes", size } }));
         status = NtQuerySystemInformation(64, table, size, out needed);
+        Console.WriteLine(Json(new Dictionary<string, object> { { "event", "handle-table-query-end" }, { "ntstatus", status }, { "neededBytes", needed } }));
         if (status == 0) break;
         Marshal.FreeHGlobal(table); table = IntPtr.Zero;
         if (status != unchecked((int)0xc0000004) || size >= 32 * 1024 * 1024) { Console.WriteLine(Json(new Dictionary<string, object> { { "status", "handle-table-unavailable" }, { "ntstatus", status } })); return; }
@@ -158,8 +161,10 @@ public class PipeObserver {
         IntPtr handle = IntPtr.Zero;
         try {
           if (!DuplicateHandle(source, new IntPtr(unchecked((long)entry.Handle.ToUInt64())), GetCurrentProcess(), out handle, 0, false, 2)) { denied++; continue; }
+          Console.WriteLine(Json(new Dictionary<string, object> { { "event", "handle-type-query-start" }, { "pid", pid }, { "handle", entry.Handle.ToUInt64() } }));
           if (GetFileType(handle) != 3) continue; // FILE_TYPE_PIPE only; never query arbitrary filenames.
           var row = new Dictionary<string, object> { { "pid", pid }, { "handle", entry.Handle.ToUInt64() }, { "accessMask", entry.Access }, { "writeDataAccess", (entry.Access & 2) != 0 }, { "objectId", Hash(entry.Object.ToString()) } };
+          Console.WriteLine(Json(new Dictionary<string, object> { { "event", "pipe-image-query-start" }, { "handleState", row } }));
           Image(pid, row);
           IntPtr name = Marshal.AllocHGlobal(4096);
           try {
@@ -167,6 +172,7 @@ public class PipeObserver {
             // object's name only after FILE_TYPE_PIPE, in this disposable
             // process: a name query can block on a pending synchronous read.
             int nameNeeded;
+            Console.WriteLine(Json(new Dictionary<string, object> { { "event", "pipe-name-query-start" }, { "handleState", row } }));
             int nameStatus = NtQueryObject(handle, 1, name, 4096, out nameNeeded);
             if (nameStatus == 0) {
               var value = (UnicodeString)Marshal.PtrToStructure(name, typeof(UnicodeString));
@@ -175,10 +181,12 @@ public class PipeObserver {
             } else { failedNames++; row["nameNtStatus"] = nameStatus; }
           } finally { Marshal.FreeHGlobal(name); }
           uint flags, output, input, instances, peer;
+          Console.WriteLine(Json(new Dictionary<string, object> { { "event", "pipe-endpoint-query-start" }, { "handleState", row } }));
           if (GetNamedPipeInfo(handle, out flags, out output, out input, out instances)) row["endpoint"] = (flags & 1) != 0 ? "server" : "client";
           if (GetNamedPipeClientProcessId(handle, out peer)) row["clientPid"] = peer;
           if (GetNamedPipeServerProcessId(handle, out peer)) row["serverPid"] = peer;
           rows.Add(row);
+          Console.WriteLine(Json(new Dictionary<string, object> { { "event", "pipe-handle" }, { "handleState", row } }));
         } finally { if (handle != IntPtr.Zero) CloseHandle(handle); CloseHandle(source); }
       }
       Console.WriteLine(Json(new Dictionary<string, object> { { "status", "sampled" }, { "handles", rows }, { "accessFailures", denied }, { "nameFailures", failedNames }, { "scanMs", budget.ElapsedMilliseconds }, { "limited", rows.Count >= 256 || budget.ElapsedMilliseconds >= 500 } }));
@@ -197,17 +205,23 @@ public class PipeObserver {
     info.UseShellExecute = false; info.RedirectStandardOutput = true; info.RedirectStandardError = true; info.CreateNoWindow = true;
     using (var process = new Process()) {
       process.StartInfo = info; var output = new StringBuilder();
-      process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs data) { if (data.Data != null && output.Length < 128 * 1024) output.Append(data.Data); };
+      process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs data) {
+        if (data.Data != null) lock (output) { if (output.Length + data.Data.Length + 1 <= 128 * 1024) output.Append(data.Data).Append('\n'); }
+      };
       process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs data) { };
       process.Start(); process.BeginOutputReadLine(); process.BeginErrorReadLine();
       if (!process.WaitForExit(900)) { process.Kill(); process.WaitForExit(500); result["status"] = "inspector-timeout"; }
-      else { process.WaitForExit(); result["status"] = "inspector-finished"; result["inspectorExitCode"] = process.ExitCode; result["sampleJson"] = output.ToString(); }
+      else { process.WaitForExit(); result["status"] = "inspector-finished"; result["inspectorExitCode"] = process.ExitCode; }
+      // A blocked native query must not erase the earlier bounded evidence.
+      lock (output) { result["sampleJsonl"] = output.ToString(); }
+      result["completedUtc"] = DateTime.UtcNow.ToString("O");
       result["inspectorPid"] = process.Id;
     }
     Emit(result);
   }
   public static int Main(string[] args) {
     if (args.Length > 0 && args[0] == "handles") {
+      Console.WriteLine(Json(Row("inspector-start")));
       // Also bound this process if its observer disappears during a native
       // filename query. Exiting releases every duplicated handle.
       using (var deadline = new Timer(delegate(object state) { Environment.Exit(124); }, null, 1500, Timeout.Infinite)) {
