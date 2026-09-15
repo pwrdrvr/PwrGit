@@ -123,6 +123,41 @@ async function ownThePointer(h: AppHandle): Promise<void> {
 }
 
 
+/**
+ * A viewport point the pinned card does not cover, asked of the document
+ * rather than assumed from a selector.
+ *
+ * Preference order is "the graph's empty space below the card", then beside
+ * it, then above — the first that is both on the page and off the card wins.
+ * `elementFromPoint` is what decides, so this cannot quietly return a point
+ * inside the card the way a named element quietly stopped being clear of it.
+ */
+async function pointClearOfCard(
+  window: AppHandle["window"]
+): Promise<{ x: number; y: number }> {
+  const box = await window.locator(".remote-activity-popover").boundingBox();
+  expect(box, "the card must be on screen to measure around it").not.toBeNull();
+  const rect = box!;
+  const candidates = [
+    { x: rect.x + rect.width / 2, y: rect.y + rect.height + 48 },
+    { x: rect.x / 2, y: rect.y + rect.height / 2 },
+    { x: rect.x + rect.width / 2, y: rect.y - 24 }
+  ];
+  const clear = await window.evaluate(
+    (points: { x: number; y: number }[]) =>
+      points.find((at) => {
+        const el = document.elementFromPoint(at.x, at.y);
+        return el !== null && el.closest(".remote-activity-popover") === null;
+      }) ?? null,
+    candidates
+  );
+  expect(
+    clear,
+    "no point around the card was both on the page and off the card"
+  ).not.toBeNull();
+  return clear!;
+}
+
 test("a pull that gets no answer says so, shows Git's command, and cancels", async () => {
   const { window } = await wedgedRepo("svc");
 
@@ -290,16 +325,31 @@ test("a fetch clicked and walked away from keeps its card until a click elsewher
   await expect(fetch).toBeVisible({ timeout: 20_000 });
   await ownThePointer(handle!);
   await fetch.click();
-  // Out into the graph. A named row rather than coordinates: a fixed point
-  // silently stops meaning "away from the toolbar" the moment the window size
-  // or the layout changes.
-  const row = window.locator(".graph-row").first();
-  await row.hover();
 
   const busy = window.locator('.wt-btn[aria-busy="true"]');
   await expect(busy).toHaveAttribute("aria-label", "Fetching updates…", {
     timeout: 20_000
   });
+
+  const card = window.locator(".remote-activity-popover");
+  await expect(card).toBeVisible({ timeout: 10_000 });
+
+  // Somewhere the pointer can go that is provably not the card, derived from
+  // the card's own geometry and then confirmed against the document.
+  //
+  // Naming an element instead is what broke this test: a pinned card sits over
+  // the top of the graph, and WHICH element it covers depends on the window
+  // size. `.graph-row` first is clear on macOS and behind the card on CI's
+  // shorter Linux and Windows windows, where Playwright quite correctly
+  // refused to hover through a dialog — and the failure read as a 30s timeout
+  // on the row rather than as "the card is in the way".
+  //
+  // Below the card is preferred because that is the graph's own empty space,
+  // where a click selects nothing and so cannot be what dismissed the card.
+  // The fallbacks exist so a window too short for that fails the assertion
+  // rather than the geometry.
+  const away = await pointClearOfCard(window);
+  await window.mouse.move(away.x, away.y);
 
   // The click left focus on the button — and left it NOT focus-visible.
   expect(
@@ -310,14 +360,16 @@ test("a fetch clicked and walked away from keeps its card until a click elsewher
   ).toEqual({ focused: true, focusVisible: false });
 
   // Several times the old age gate, with the pointer nowhere near the button.
-  const card = window.locator(".remote-activity-popover");
   await window.waitForTimeout(4_000);
   await expect(card).toBeVisible();
   await expect(card).toContainText("Fetch · svc · main");
 
-  // A click elsewhere is the dismissal — and the row it lands on is selected,
-  // because nothing about this swallows the click.
-  await row.click();
+  // A click there is the dismissal. That the click still lands where it was
+  // aimed is asserted in `WorktreeHeader.test.tsx`, where the event's own
+  // `defaultPrevented` can be read — proving it here would need a target that
+  // does something observable AND is clear of the card at every window size,
+  // and the second half of that is exactly what this test got wrong.
+  await window.mouse.click(away.x, away.y);
   await expect(card).toHaveCount(0, { timeout: 10_000 });
 });
 
