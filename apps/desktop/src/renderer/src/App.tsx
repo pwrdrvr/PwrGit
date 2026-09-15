@@ -270,7 +270,7 @@ export function App() {
       if ((e.metaKey || e.ctrlKey) && (key === "k" || key === "f")) {
         e.preventDefault();
         setOverlayOpen(true);
-      } else if (e.key === "Escape") {
+      } else if (e.key === "Escape" && !e.defaultPrevented) {
         setOverlayOpen(false);
       }
     };
