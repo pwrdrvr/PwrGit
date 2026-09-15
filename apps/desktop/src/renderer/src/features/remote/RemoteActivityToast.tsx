@@ -4,6 +4,7 @@ import {
   useSecondsClock
 } from "../../state/useRemoteActivity";
 import { RemoteActivityCard } from "./RemoteActivityCard";
+import { liveActivityView } from "./remote-activity";
 
 /**
  * How long an operation elsewhere must run before it earns a card.
@@ -75,7 +76,11 @@ export function RemoteActivityToast({
           aria-label="Git operation running elsewhere"
           aria-live="off"
         >
-          <RemoteActivityCard activity={activity} now={now} compact />
+          {/* Always a live view: the toast stands for exactly as long as the
+              operation it reports. A receipt belongs beside the button that
+              was pressed, and this card is by definition for a repository the
+              user is not looking at. */}
+          <RemoteActivityCard view={liveActivityView(activity, now)} compact />
         </aside>
       ))}
     </>

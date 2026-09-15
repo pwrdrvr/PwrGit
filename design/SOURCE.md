@@ -80,6 +80,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
 | `Focused Lens Stability - UX Review.dc.html` | The Focused lens re-sorting under the pointer &mdash; the ladder rule that fires on click, the options weighed, and a live prototype of the hold. |
+| `Fetch Status Popover - UX Review.dc.html` | Why the fetch/pull status card was never seen &mdash; the four gates it stood behind &mdash; and the click-pinned lifecycle that replaces them, with the settled receipt, the countdown rail, and a live prototype of the dismissal rules. |
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
@@ -146,6 +147,15 @@ of the sidebar looks identical either way. Card **2d** is a live `DCLogic`
 prototype instead: toggle the hold off and the clicked row leaves from under the
 cursor, toggle it on and it stays. Its repository names are invented, not a real
 profile.
+
+`Fetch Status Popover - UX Review.dc.html` was written here and pushed up the
+same way. It carries no screenshots for the same reason as the Focused Lens
+review: the defect is that a card *never appears*, and the fix is a lifecycle
+&mdash; both are timing, and a still frame of the toolbar looks identical either
+way. Card **1b** draws the timing as a strip instead, and card **2d** is a live
+`DCLogic` prototype of the whole lifecycle: press Fetch at 0.9&thinsp;s (the
+duration the old age gate could never admit), then try to keep the card. Its
+repository names are invented.
 
 The Tag Chips captures are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a
