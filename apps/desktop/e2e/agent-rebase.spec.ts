@@ -29,7 +29,9 @@ test("an unavailable agent leaves the deterministic isolated rebase workflow usa
   for (const subject of ["second focused change", "first focused change"]) {
     const row = window.locator(".graph-row", { hasText: subject });
     await expect(row).toBeVisible({ timeout: 20_000 });
-    await row.getByRole("checkbox", { name: "Select for rebase" }).click();
+    const selection = row.getByRole("checkbox");
+    await selection.click();
+    await expect(selection).toBeChecked();
   }
   await window.getByRole("button", { name: "Squash", exact: true }).click();
 
