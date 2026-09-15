@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { beginGitDiagnostic } from "../git-diagnostics";
+import { beginOwnership } from "./pipe-ownership.cjs";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import {
   gitExecutionEnvironment,
@@ -49,6 +50,7 @@ function runGit(
 ): Promise<Result<Collected, PwrGitError>> {
   return new Promise((resolve) => {
     const diagnostic = beginGitDiagnostic("system-git", args, cwd);
+    const ownership = beginOwnership(args, cwd, env, diagnostic?.id);
     const invocation = gitProcessInvocation(args, cwd);
     const spawnFailed = (cause: Error): Result<Collected, PwrGitError> =>
       err({ kind: "git", code: "spawn_failed", message: cause.message });
@@ -57,7 +59,7 @@ function runGit(
     try {
       proc = spawn("git", invocation.args, {
         cwd: invocation.processCwd,
-        env,
+        env: ownership?.env ?? env,
         // Nothing here answers a prompt, and an inherited stdin lets a git
         // that decides to read one block until the suite's timeout.
         stdio: ["ignore", "pipe", "pipe"],
@@ -74,12 +76,14 @@ function runGit(
       // spawn throws synchronously on bad options; dugite.ts guards its own
       // spawn the same way rather than rejecting out of a Result-returning API.
       diagnostic?.event("spawn-throw");
+      ownership?.event("spawn-throw");
       diagnostic?.settle("resolved");
       resolve(spawnFailed(cause instanceof Error ? cause : new Error(String(cause))));
       return;
     }
     const child = proc;
     diagnostic?.attach(child);
+    ownership?.event("spawn-requested", child.pid);
 
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -94,6 +98,7 @@ function runGit(
     const settle = (result: Result<Collected, PwrGitError>): void => {
       if (settled) return;
       settled = true;
+      ownership?.event("settled", child.pid);
       if (grace) clearTimeout(grace);
       // A grandchild can hold these pipes open long after we have answered.
       // Left attached, they keep appending to buffers nobody will read and
@@ -132,11 +137,13 @@ function runGit(
 
     child.on("error", (cause) => settle(spawnFailed(cause)));
     child.on("exit", (code) => {
+      ownership?.event("exit", child.pid, { code, signal: child.signalCode });
       exited = true;
       if (code !== null) exitCode = code;
       grace = setTimeout(() => {
         diagnostic?.event("helper-flush-grace-expired");
         diagnostic?.flag("helper-flush-grace-expired");
+        ownership?.event("helper-flush-grace-expired", child.pid);
         finish();
       }, FLUSH_GRACE_MS);
       grace.unref?.();

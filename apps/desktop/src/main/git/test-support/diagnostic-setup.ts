@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import { configureGitDiagnostics, gitDiagnosticContext, type GitDiagnosticReport } from "../git-diagnostics";
 import { GitDiagnosticJournal } from "./diagnostic-journal";
+import { startOwnership, type OwnershipSession } from "./pipe-ownership.cjs";
 
 const thresholdMs = 5000;
 let testId: string | undefined;
@@ -11,6 +12,7 @@ let suite: string | undefined;
 let file: string | undefined;
 let artifactFailed = false;
 let journal: GitDiagnosticJournal | undefined;
+let ownership: OwnershipSession | undefined;
 
 const settings = () => ({ thresholdMs, emit, ...(journal ? { record: journal.record } : {}) });
 
@@ -45,6 +47,10 @@ beforeAll(async () => {
       await journal.startWatchdog(thresholdMs);
     }
     journal.begin("suite-setup");
+    if (suite === "remote.test.ts" && process.env.PWRGIT_GIT_PIPE_OWNERSHIP === "1") {
+      ownership = await startOwnership(directory);
+      ownership.context = { suite, testId: "suite-setup" };
+    }
   } catch { process.stderr.write("[git-diagnostic] artifact directory unavailable\n"); }
   configureGitDiagnostics(settings());
 });
@@ -53,6 +59,8 @@ beforeEach((context) => {
   if (!suite) return;
   journal?.end(gitDiagnosticContext());
   testId = context.task.id;
+  if (ownership) ownership.context = { suite, testId,
+    targetBranchTest: context.task.name === "keeps a local merge commit that range-diff omits" };
   journal?.begin(testId);
   configureGitDiagnostics(settings());
   const started = performance.now();
@@ -82,5 +90,6 @@ afterAll(async () => {
     journal?.end(gitDiagnosticContext());
     configureGitDiagnostics(undefined);
     await journal?.close();
+    await ownership?.close();
   }
 });

@@ -197,7 +197,14 @@ jobs:
       - name: Test
         env:
           PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+          PWRGIT_GIT_PIPE_OWNERSHIP: "1"
         run: pnpm run test
+
+      - name: Observe natural Git EOF in a separate finite probe
+        if: ${{ always() }}
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+        run: node apps/desktop/src/main/git/test-support/pipe-ownership-probe.cjs
 
       - name: Upload Git lifecycle diagnostics
         if: ${{ always() }}
@@ -439,10 +446,20 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Prepare bounded Windows process and pipe observer
+        run: node apps/desktop/src/main/git/test-support/pipe-ownership-probe.cjs --prepare
+
       - name: Test
         env:
           PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+          PWRGIT_GIT_PIPE_OWNERSHIP: "1"
         run: pnpm run test
+
+      - name: Observe natural Git EOF in a separate finite probe
+        if: ${{ always() }}
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+        run: node apps/desktop/src/main/git/test-support/pipe-ownership-probe.cjs
 
       - name: Upload Git lifecycle diagnostics
         if: ${{ always() }}

@@ -158,3 +158,110 @@ scope time. The marked remote recovery tests recorded 37 and 27 calls. These
 are local accounting observations, not explanations of historical Windows
 failures. They demonstrate how a modest per-command slowdown can accumulate
 without any single call crossing five seconds.
+
+## PR #270 follow-up: which process owns an open pipe?
+
+The rebased head `79cbef9c` passed [CI run 34919930475](https://github.com/pwrdrvr/PwrGit/actions/runs/34919930475).
+Its [Windows artifact](https://github.com/pwrdrvr/PwrGit/actions/runs/34919930475/artifacts/10378025823)
+contains these **real test** observations (controlled fixtures excluded):
+
+| Observation | Measured evidence |
+| --- | --- |
+| Partial-merge recovery | 37 calls; 11,608ms test scope; 11,575ms summed command time; slowest synchronous setup clone 5,904ms |
+| Arbitrary-line staging | 101 calls; 5,124ms scope; 4,942ms summed command time; slowest call 137ms |
+| Branch call `6924-646`, PID 6004 | Exit 0 at 43.342ms; helper grace expired at 306.266ms; stdout 5 bytes, stderr 0; neither stream had emitted end; both buffers empty |
+
+The branch record is task `1683180523_0_30` in `remote.test.ts`, mapped with
+Vitest's collected test list to **“keeps a local merge commit that range-diff
+omits.”** Counting textual `it(` declarations is insufficient because some
+declarations span multiple lines. The exact helper invocation is
+`git -C <fixture> branch --show-current`, through `resolveCheckedOutRef` in
+`git-service.ts`, with the native cwd set to the OS temporary directory.
+The test creates a bare origin and two ordinary clones, commits text files,
+fetches and makes a local `--no-ff` merge, advances the remote, then calls
+`pullFastForward` and `inspectRemoteDivergence`. It configures fixture user
+name/email, but no LFS attributes, hooks, filters or fsmonitor. Inherited runner
+configuration was not captured in that run.
+
+The record establishes **exit before Node stream-end events**, not a live writer,
+its identity, or natural EOF timing: the existing helper destroyed its streams
+at grace expiry. A queued/unprocessed EOF under load remains possible. Neither
+the launcher, LFS, nor another helper can be identified from that old artifact.
+
+The opt-in `PWRGIT_GIT_PIPE_OWNERSHIP=1` follow-up adds:
+
+- Sanitized [Git Trace2](https://git-scm.com/docs/api-trace2) for the exact branch
+  operation in `remote.test.ts`: session PID chains, executable identity,
+  `child_start`/`child_exit`/`child_ready`, exec, exit, config scope and presence.
+  Child IDs correlate start/exit; a child exit PID of -1 denotes a failed spawn,
+  not a process that ran. Only a fixed set of hooks/fsmonitor/LFS/pager/cache/auto
+  maintenance keys is requested. Non-boolean config values and arbitrary command
+  identities are hashed. A short Git-specific environment allowlist records
+  only which keys exist, never their values. Presence of LFS configuration is not evidence of LFS
+  execution; missing Trace2 events do not rule out an uninstrumented launcher.
+- On Windows, a small observer compiled with the installed PowerShell framework
+  compiler subscribes to process start/stop events **before** the suite starts
+  spawning Git. It preserves PID/parent/binary events, event UTC, observer
+  monotonic time, and queried executable identity when still accessible. This
+  preserves ancestry across parent exit, subject to explicit subscription,
+  access, cache and PID-reuse limitations. Known Git installation suffixes
+  distinguish `Git/cmd/git.exe` from `Git/mingw64/bin/git.exe`; arbitrary paths
+  and process command lines are never uploaded.
+- Bounded handle samples at spawn in the implicated test and at helper grace
+  expiry. These are asynchronous requests: a sample may arrive after the helper
+  has already destroyed its streams. Samples include their observation time;
+  a request's call ID alone does not prove a pipe belongs to that invocation.
+  Matching is strongest in the separate controlled probe, where a before-spawn
+  baseline identifies the new parent endpoints.
+
+Handle inspection is an experiment, not a supported Windows ownership oracle.
+It enumerates the native extended handle table (bounded to 32MiB), duplicates
+only handles from the root and up to 64 observed descendants/explicit target,
+and queries names only for `FILE_TYPE_PIPE`. Pipe names and kernel object
+identities are hashed. It uses `NtQueryObject(ObjectNameInformation)` because
+[GetFileInformationByHandleEx explicitly excludes pipe handles](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getfileinformationbyhandleex).
+Native interfaces can change, require access the runner lacks, or block. Each
+inspection has a 500ms scan budget, a 900ms parent deadline and a separate 1.5s
+self-exit timer; all duplicated handles close on inspector exit. The observer
+has a ten-minute maximum lifetime. Capability failures are artifact records,
+not proof that no writer exists. Process start/stop caches are bounded and
+pruning is explicitly reported.
+
+The meaningful positive match is a **new parent pipe ID** also held by the known
+living holder, with an **opposite client/server endpoint and write access**.
+Write access alone is insufficient because Node's own endpoint can be duplex.
+Client/server PID APIs describe pipe endpoints, not every inheriting owner;
+the owner PID here comes from the enumerated handle table. An empty result
+cannot exclude inaccessible processes, missed ancestry, or a pipe that closed
+before sampling. Duplicating a writer handle can itself extend pipe lifetime;
+inspected timing is explicitly labeled and kept separate from uninspected runs.
+Handle-table enumeration and subsequent queries are not an atomic snapshot.
+
+### Separate natural-EOF experiment
+
+`test-support/pipe-ownership-probe.cjs` reconstructs the plain merge history and
+runs 64 branch invocations through a dedicated close-based collector, followed
+by two readiness/release-controlled Git alias cases with a detached Node holder.
+The first holder run requests no handles; the second requests before/after
+samples and reports whether ownership was actually established. Both wait for
+natural EOF after releasing the holder. Only this separate experiment has a
+ten-second cleanup deadline; deadline closures are labeled forced and fail its
+natural-completion assertion. This does not change test-runner deadlines,
+`system-git.ts`'s 250ms grace, or production Dugite completion.
+
+Both existing CI test jobs run the probe and upload sanitized `ownership-*`
+directories with the other Git diagnostics, including on failure. Raw Trace2
+is written outside the upload tree, read with a 1MiB per-call limit, sanitized
+at exit/settlement and removed on normal session close. If a worker is forcibly
+terminated, its private temporary files are still outside the uploaded tree.
+
+Local macOS/Node 24 validation: 64 branch calls all completed naturally, with
+maximum exit-to-close time 4.919ms and none pending at 250ms. The two known
+holder controls had about 1,808ms and 1,814ms exit-to-close delay and returned
+all 32 expected stdout bytes. Windows handle inspection is unavailable on that
+host; these numbers establish lifecycle behavior, not Windows ownership.
+The 119 focused tests and repository lint passed; an additional ownership-match
+test rejects same-endpoint duplex handles, pre-existing pipes, wrong owners and
+handles without write access. The observer source also
+compiled as C# 5 against .NET 9/System.Management references; that is syntax/API
+reference validation, not a test of Windows PowerShell or native API behavior.

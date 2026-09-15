@@ -137,7 +137,7 @@ function sampleProcesses(pid: number | undefined, emit: (report: GitDiagnosticRe
 
 export class GitDiagnostic {
   private readonly started = performance.now();
-  private readonly id = `${process.pid}-${++sequence}`;
+  readonly id = `${process.pid}-${++sequence}`;
   private readonly events: Event[] = [];
   private readonly bytes = { stdout: 0, stderr: 0 };
   private readonly lastActivityMs: Record<StreamName, number | null> = { stdout: null, stderr: null };
