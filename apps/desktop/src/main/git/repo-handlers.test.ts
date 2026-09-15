@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { err, ok, type Repo, type RepoSearchHit } from "@pwrgit/shared";
+import { err, ok, type Repo } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { RepoIndexer } from "./repo-indexer";
@@ -71,7 +71,8 @@ describe("repo handlers", () => {
         const profile = profiles.create({
           name: "Test", email: "test@example.com", roots: []
         });
-        const indexer = new RepoIndexer(db, createSystemGit());
+        const runGit = vi.fn(createSystemGit());
+        const indexer = new RepoIndexer(db, runGit);
         const indexed = await indexer.indexRepoAt(profile.id, root);
         if (!indexed.ok) throw new Error("index failed");
         expect(indexer.searchAll("fix/search-target")[0]?.kind).toBe("local_branch");
@@ -82,10 +83,18 @@ describe("repo handlers", () => {
         }
         const bus = new CommandBus();
         registerRepoHandlers(bus, indexer, profiles, refresher);
-        const result = await bus.dispatch("repo:search", {
+        runGit.mockClear();
+        expect((await bus.dispatch("repo:search", {
           query: "fix/search-target"
+        }))).toEqual(ok([expect.objectContaining({ kind: "local_branch" })]));
+        expect(runGit).not.toHaveBeenCalled();
+        const result = await bus.dispatch("search:branchWorktree", {
+          repoId: indexed.value.id, branch: "fix/search-target"
         });
-        expect(result).toEqual(ok([
+        expect(runGit).toHaveBeenCalledExactlyOnceWith(
+          ["worktree", "list", "--porcelain"], root
+        );
+        expect(result).toEqual(ok(
           expect.objectContaining({
             kind: "worktree",
             name: "fix/search-target",
@@ -93,13 +102,17 @@ describe("repo handlers", () => {
             worktreeId: expect.any(String),
             repoId: indexed.value.id
           })
-        ]));
+        ));
         expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
           profileId: profile.id
         });
         expect(indexer.getRepo(indexed.value.id)?.worktrees).toContainEqual(
           expect.objectContaining({ branch: "fix/search-target", path: checkout })
         );
+        expect(await bus.dispatch("search:branchWorktree", {
+          repoId: indexed.value.id, branch: "fix/still-free"
+        })).toEqual(ok(null));
+        expect(runGit).toHaveBeenCalledTimes(1);
         expect(
           await bus.dispatch("repo:search", { query: "fix/still-free" })
         ).toEqual(ok([
@@ -114,37 +127,39 @@ describe("repo handlers", () => {
     }
   );
 
-  it("checks each candidate repo once and does not probe ordinary worktree hits", async () => {
-    const hit = (name: string, kind: RepoSearchHit["kind"]): RepoSearchHit => ({
-      kind,
-      name,
-      repoId: canonicalRepo.id,
-      path: canonicalRepo.path,
-      profileId: canonicalRepo.profileId,
-      profileName: "Test",
-      pinned: false,
-      worktreeCount: 0
-    });
-    const hits = [hit("fix/one", "local_branch"), hit("fix/two", "local_branch")];
-    const searchAll = vi.fn(() => hits);
+  it("shares in-flight and completed listings, then expires after 30 seconds", async () => {
+    let now = 1_000;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
     const refreshRepoWorktrees = vi.fn(async () => ok({
-      outcome: "reconciled" as const,
-      repo: canonicalRepo,
-      added: 0,
-      removed: 0,
-      updated: 0
+      outcome: "reconciled" as const, repo: canonicalRepo,
+      added: 0, removed: 0, updated: 0
     }));
-    const indexer = { searchAll, refreshRepoWorktrees } as unknown as RepoIndexer;
+    const indexer = {
+      refreshRepoWorktrees, getRepo: () => canonicalRepo
+    } as unknown as RepoIndexer;
     const bus = new CommandBus();
     registerRepoHandlers(bus, indexer, {} as ProfileService, refresher);
-    expect(await bus.dispatch("repo:search", { query: "fix" })).toEqual(ok(hits));
-    expect(refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(canonicalRepo.id);
-    expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
-    expect(emitEvent).not.toHaveBeenCalled();
-    refreshRepoWorktrees.mockClear();
-    searchAll.mockReturnValue([hit("fix/one", "worktree")]);
-    await bus.dispatch("repo:search", { query: "fix/one" });
-    expect(refreshRepoWorktrees).not.toHaveBeenCalled();
+    const resolve = (branch: string) => bus.dispatch("search:branchWorktree", {
+      repoId: canonicalRepo.id, branch
+    });
+    try {
+      expect(await Promise.all([resolve("one"), resolve("two")])).toEqual([
+        ok(null), ok(null)
+      ]);
+      expect(refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(
+        canonicalRepo.id, { refreshBranches: false }
+      );
+      now += 29_999;
+      await resolve("three");
+      expect(refreshRepoWorktrees).toHaveBeenCalledTimes(1);
+      now += 1;
+      await resolve("three");
+      expect(refreshRepoWorktrees).toHaveBeenCalledTimes(2);
+      expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
+      expect(emitEvent).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("returns a reconciliation error instead of an unverified no-worktree claim", async () => {
@@ -159,7 +174,9 @@ describe("repo handlers", () => {
     } as unknown as RepoIndexer;
     const bus = new CommandBus();
     registerRepoHandlers(bus, indexer, {} as ProfileService, refresher);
-    expect(await bus.dispatch("repo:search", { query: "fix" })).toEqual(failure);
+    expect(await bus.dispatch("search:branchWorktree", {
+      repoId: canonicalRepo.id, branch: "fix"
+    })).toEqual(failure);
   });
 
   it("passes a deindexed fossil repo back as a success and refreshes the tree", async () => {

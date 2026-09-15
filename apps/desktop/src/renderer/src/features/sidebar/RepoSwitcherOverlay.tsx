@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
   Commit,
   FileSearchHit,
@@ -20,6 +20,19 @@ import { PinIcon } from "./WorktreeRow";
 // branches in one repo would otherwise share a React key.
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.repoId}:${hit.worktreeId ?? hit.remoteRef ?? hit.name}`;
+
+function resolvePaletteHits(
+  hits: RepoSearchHit[],
+  resolved: ReadonlyMap<string, RepoSearchHit | null>
+): RepoSearchHit[] {
+  const seen = new Set<string>();
+  return hits.map((hit) => resolved.get(hitKey(hit)) ?? hit).filter((hit) => {
+    const key = hitKey(hit);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 /** A branch hit with no worktree behind it: nothing to pin, no status to fill,
  *  and picking it opens the New worktree modal instead of selecting a row. */
@@ -196,6 +209,33 @@ export function RepoSwitcherOverlay({
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const resolvedBranches = useRef(new Map<string, RepoSearchHit | null>());
+  const [branchError, setBranchError] = useState<string | null>(null);
+  const resolveBranch = useCallback(async (hit: RepoSearchHit) => {
+    const r = await dispatch("search:branchWorktree", {
+      repoId: hit.repoId,
+      branch: hit.name
+    });
+    if (r.ok && mounted.current) {
+      const key = hitKey(hit);
+      resolvedBranches.current.set(key, r.value);
+      setResults((prev) => resolvePaletteHits(prev, resolvedBranches.current));
+      if (r.value !== null) {
+        const replacement = `repo:${hitKey(r.value)}`;
+        setSelectedItemKey((prev) =>
+          prev === `repo:${key}` ? replacement : prev
+        );
+      }
+    }
+    return r;
+  }, []);
   const idPrefix = useId();
   const resultsId = `${idPrefix}-results`;
   const rowId = (index: number): string => `${idPrefix}-result-${index}`;
@@ -247,7 +287,7 @@ export function RepoSwitcherOverlay({
     let active = true;
     void dispatch("repo:search", { query }).then((r) => {
       if (active && r.ok) {
-        setResults(r.value);
+        setResults(resolvePaletteHits(r.value, resolvedBranches.current));
       }
     });
     return () => {
@@ -319,7 +359,20 @@ export function RepoSwitcherOverlay({
   const pickItem = (item: PaletteItem | undefined): void => {
     if (item?.kind === "commit") onPickCommit(item.commit);
     else if (item?.kind === "file") onPickFile(item.hit.path);
-    else if (item?.kind === "repo") onPick(item.hit);
+    else if (item?.kind === "repo") {
+      if (item.hit.kind !== "local_branch") {
+        onPick(item.hit);
+        return;
+      }
+      // Enter/click can beat the visibility debounce. Resolve through the same
+      // backend cache before offering to create a checkout.
+      setBranchError(null);
+      void resolveBranch(item.hit).then((result) => {
+        if (!mounted.current) return;
+        if (result.ok) onPick(result.value ?? item.hit);
+        else setBranchError(result.error.message);
+      });
+    }
   };
 
   const selectItem = (index: number): void => {
@@ -394,6 +447,14 @@ export function RepoSwitcherOverlay({
           if (statusesRef.current.has(key)) continue;
           const hit = byKey.get(key);
           if (hit === undefined) continue;
+          if (hit.kind === "local_branch") {
+            if (!resolvedBranches.current.has(key)) {
+              fill.request(key, async () => {
+                await resolveBranch(hit);
+              });
+            }
+            continue;
+          }
           if (isWorktreelessBranch(hit)) continue;
           fill.request(key, async () => {
             const r = await dispatch("search:status", {
@@ -413,8 +474,11 @@ export function RepoSwitcherOverlay({
     for (const el of root.querySelectorAll("[data-hit-key]")) {
       observer.observe(el);
     }
-    return () => observer.disconnect();
-  }, [results, fill]);
+    return () => {
+      observer.disconnect();
+      for (const key of byKey.keys()) fill.cancel(key);
+    };
+  }, [results, fill, resolveBranch]);
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
@@ -439,6 +503,7 @@ export function RepoSwitcherOverlay({
             onChange={(e) => {
               setQuery(e.target.value);
               setSelectedItemKey(null);
+              setBranchError(null);
             }}
             aria-label="Jump to repo, branch, commit, or file"
             aria-controls={items.length > 0 ? resultsId : undefined}
@@ -452,6 +517,9 @@ export function RepoSwitcherOverlay({
           <span className="kbd">esc</span>
         </div>
 
+        {branchError !== null && (
+          <div className="modal__error" role="alert">{branchError}</div>
+        )}
         <div
           className="overlay-results"
           id={resultsId}
@@ -532,7 +600,7 @@ export function RepoSwitcherOverlay({
                 tabIndex={-1}
                 className={`overlay-result${i === sel ? " is-selected" : ""}`}
                 onMouseEnter={() => selectItem(i)}
-                onClick={() => onPick(r)}
+                onClick={() => pickItem(item)}
               >
               {isWorktreelessBranch(r) ? (
                 <BranchIcon />

@@ -593,7 +593,8 @@ export class RepoIndexer {
   /** Re-list an existing repo's worktrees (after create/remove), preserving
    *  its source, pins, and custom order (syncWorktrees only touches identity). */
   async refreshRepoWorktrees(
-    repoId: string
+    repoId: string,
+    options: { refreshBranches?: boolean } = {}
   ): Promise<Result<RepoWorktreeRefresh>> {
     const repo = this.getRepo(repoId);
     if (repo === null) {
@@ -605,7 +606,9 @@ export class RepoIndexer {
     }
     const [listed, listedBranches] = await Promise.all([
       listWorktrees(this.git, repo.path),
-      listIndexedBranches(this.git, repo.path)
+      options.refreshBranches === false
+        ? Promise.resolve(null)
+        : listIndexedBranches(this.git, repo.path)
     ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
@@ -630,8 +633,16 @@ export class RepoIndexer {
     const worktrees = listed.value
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w, i === 0));
-    this.db.transaction(() => this.syncWorktrees(repoId, worktrees))();
-    if (listedBranches.ok) {
+    this.db.transaction(() => {
+      this.syncWorktrees(repoId, worktrees);
+      // A lightweight visible-hit refresh need not enumerate refs, but must
+      // remove obsolete "no checkout" rows for the branches it just discovered.
+      this.db.prepare(`DELETE FROM local_branches
+        WHERE repo_id = ? AND name IN (
+          SELECT branch FROM worktrees WHERE repo_id = ?
+        )`).run(repoId, repoId);
+    })();
+    if (listedBranches?.ok) {
       await this.syncBranchIndexChunked(
         repoId,
         listedBranches.value.branches,
