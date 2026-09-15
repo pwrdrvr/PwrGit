@@ -3,7 +3,14 @@ import { ok, type Repo } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { ProfileService } from "../profiles/profile-service";
-import type { RepoIndexer } from "./repo-indexer";
+import { RepoIndexer } from "./repo-indexer";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { openDatabase } from "../persistence/db";
+import { ProfileService as RealProfileService } from "../profiles/profile-service";
+import { createSystemGit } from "./test-support/system-git";
 import { registerRepoHandlers } from "./repo-handlers";
 import type { WorktreeRefresher } from "./worktree-handlers";
 
@@ -39,6 +46,55 @@ describe("repo handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+
+  it.each(["new worktree", "existing worktree switches"])(
+    "search discovers an externally assigned branch: %s",
+    async (scenario) => {
+      const root = mkdtempSync(join(tmpdir(), "pwrgit-search-live-"));
+      const db = openDatabase(":memory:");
+      const git = (args: string[]) =>
+        execFileSync("git", ["-C", root, ...args], { stdio: "ignore" });
+      try {
+        git(["init", "-b", "main"]);
+        git(["-c", "user.name=Tester", "-c", "user.email=test@example.com",
+          "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "init"]);
+        git(["branch", "fix/search-target"]);
+        git(["branch", "fix/still-free"]);
+        const checkout = join(root, "linked");
+        if (scenario === "existing worktree switches") {
+          git(["worktree", "add", "-b", "old-branch", checkout]);
+        }
+        const profiles = new RealProfileService(db);
+        const profile = profiles.create({ name: "Test", email: "test@example.com", roots: [] });
+        const indexer = new RepoIndexer(db, createSystemGit());
+        const indexed = await indexer.indexRepoAt(profile.id, root);
+        if (!indexed.ok) throw new Error("index failed");
+        expect(indexer.searchAll("fix/search-target")[0]?.kind).toBe("local_branch");
+        if (scenario === "new worktree") {
+          git(["worktree", "add", checkout, "fix/search-target"]);
+        } else {
+          git(["-C", checkout, "switch", "fix/search-target"]);
+        }
+        const bus = new CommandBus();
+        registerRepoHandlers(bus, indexer, profiles, refresher);
+        const result = await bus.dispatch("repo:search", { query: "fix/search-target" });
+        expect(result).toEqual(ok([expect.objectContaining({
+          kind: "worktree", name: "fix/search-target", path: checkout,
+          worktreeId: expect.any(String), repoId: indexed.value.id
+        })]));
+        expect(emitEvent).toHaveBeenCalledWith("repo:changed", { profileId: profile.id });
+        expect(indexer.getRepo(indexed.value.id)?.worktrees).toContainEqual(
+          expect.objectContaining({ branch: "fix/search-target", path: checkout })
+        );
+        expect(await bus.dispatch("repo:search", { query: "fix/still-free" })).toEqual(
+          ok([expect.objectContaining({ kind: "local_branch", name: "fix/still-free" })])
+        );
+      } finally {
+        db.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
 
   it("passes a deindexed fossil repo back as a success and refreshes the tree", async () => {
     const getRepo = vi.fn(() => fossilRepo);
