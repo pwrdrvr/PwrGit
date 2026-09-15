@@ -1,6 +1,7 @@
 import { err, ok, type Profile } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { mapLimit } from "../util/map-limit";
 import type { ProfileService } from "../profiles/profile-service";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
@@ -71,5 +72,39 @@ export function registerRepoHandlers(
     return ok(null);
   });
 
-  bus.register("repo:search", (req) => ok(indexer.searchAll(req.query)));
+  bus.register("repo:search", async (req) => {
+    const hits = indexer.searchAll(req.query);
+    // Another process can create a checkout or switch its branch after the
+    // last scan. Verify cached "no worktree" claims against Git before the
+    // palette offers to create one. Only probe repositories behind those hits,
+    // once per repository, and never compute status for their whole family.
+    const repoIds = [
+      ...new Set(
+        hits.filter((hit) => hit.kind === "local_branch").map((hit) => hit.repoId)
+      )
+    ];
+    if (repoIds.length === 0) return ok(hits);
+    const refreshed: Awaited<ReturnType<RepoIndexer["refreshRepoWorktrees"]>>[] = [];
+    await mapLimit(repoIds, 4, async (repoId) => {
+      refreshed.push(await indexer.refreshRepoWorktrees(repoId));
+    });
+    const profilesChanged = new Set<string>();
+    for (const result of refreshed) {
+      if (!result.ok) continue;
+      const value = result.value;
+      if (value.outcome === "deindexed") {
+        profilesChanged.add(value.profileId);
+      } else if (value.added > 0 || value.removed > 0 || value.updated > 0) {
+        profilesChanged.add(value.repo.profileId);
+      }
+    }
+    // Publish newly discovered rows so selecting the search hit can reveal it
+    // in the sidebar, including when the checkout lives outside scan roots.
+    for (const profileId of profilesChanged) {
+      emitEvent("repo:changed", { profileId });
+    }
+    const failed = refreshed.find((result) => !result.ok);
+    if (failed !== undefined && !failed.ok) return failed;
+    return ok(indexer.searchAll(req.query));
+  });
 }
