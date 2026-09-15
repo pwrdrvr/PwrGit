@@ -37,24 +37,46 @@ protected job verifies a SHA-256 archive prepared by the unprivileged job and
 does not check out source or install dependencies after credentials become
 available.
 
+## Branch lifecycle
+
+`main` owns the active `N.N` train through alpha, beta, first stable, and
+follow-up `N.N.P` releases. Promoting a beta to stable is a metadata commit and
+tag on `main`, not a reason to create `releases/N.N`.
+
+Cut `releases/N.N` only after the product owner explicitly decides to begin the
+next major or minor train on `main`. Choose the current appropriate `main`
+commit as the maintenance branch point; it may intentionally contain
+post-release fixes or enhancements rather than match the first stable tag. Then
+bump `main` to the next alpha train. After the cut, prepare `N.N` maintenance
+candidates and patches from `releases/N.N`, while `main` carries the next train.
+
+Use `N.N.P-prerelease.M` for Stable maintenance candidates after the cut. A
+Stable `-prerelease.M` candidate is also valid on `main` while its `N.N` train
+is still active there. Once that train moves to `releases/N.N`, only that branch
+may publish its `N.N.P-prerelease.M` candidates; the next `main` train uses
+`-alpha` and `-beta`. Those suffixes share one Beta feed, where a higher-SemVer
+next-train candidate would otherwise hide the maintenance candidate.
+
 ## Prepare and tag
 
-Release from the remote default branch with a clean tracked worktree. The
-desktop version in `apps/desktop/package.json`, the `vX.Y.Z` tag, and a
-matching `CHANGELOG.md` heading must agree.
+Choose `<release-branch>` from the lifecycle above: `main` while its `N.N`
+train is active, or `releases/N.N` for that train after an owner-directed cut.
+Release from that branch with a clean tracked worktree. The desktop version in
+`apps/desktop/package.json`, the `vX.Y.Z` tag, and a matching `CHANGELOG.md`
+heading must agree.
 
 ```bash
-git fetch origin main --tags
+git fetch origin <release-branch> --tags
 RELEASE_TAG=vX.Y.Z pnpm release:check
 pnpm lint
 pnpm test
 pnpm build
 ```
 
-Commit the version and changelog together, land that commit on `main`, rerun
-the metadata check on the landed commit, and create a signed annotated tag.
-Pushing the tag starts the workflow. A manual dispatch is allowed only for a
-tag that already exists in the repository.
+Commit the version and changelog together, land that commit on
+`<release-branch>`, rerun the metadata check on the landed commit, and create a
+signed annotated tag. Pushing the tag starts the workflow. A manual dispatch is
+allowed only for a tag that already exists in the repository.
 
 Every workflow-created release starts as a GitHub Pre-release. Promotion to
 Latest is a separate maintainer action after verification; only suffix-free
