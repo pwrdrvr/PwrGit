@@ -758,10 +758,10 @@ export type SelectedUpdateReleases = {
 // Resolve slots by semver identifier and GitHub Latest, not publish order:
 //   - stable latest      → highest GitHub non-prerelease (the 1.0 / normie feed)
 //   - stable prerelease  → max(stable latest, 1.0 `-prerelease` / legacy `-beta`)
-//   - beta latest        → highest `-beta` whose core is ahead of Stable Latest
-//   - beta prerelease    → max(beta latest, highest `-alpha` on a newer core)
-// Empty Beta slots stay empty. The Settings Beta control remains selectable
-// so an operator can follow the next `main` tag after a Stable promotion.
+//   - beta latest        → highest newer-core `-beta`, falling back to Stable Latest
+//   - beta prerelease    → highest newer-core alpha/beta, falling back to Stable Latest
+// The fallback lets installed alphas/betas upgrade to their stable final without
+// changing the saved selection, so the next eligible main-train tag still wins.
 export function selectChannelReleases(
   releases: GitHubRelease[]
 ): SelectedUpdateReleases {
@@ -772,18 +772,20 @@ export function selectChannelReleases(
   const stableLatest = byPrecedenceDesc.find(
     (release) => release.prerelease !== true
   );
-  const betaLatest = byPrecedenceDesc.find((release) =>
-    isBetaLatestRelease(release, stableLatest, publicReleases)
-  );
+  const betaLatest =
+    byPrecedenceDesc.find((release) =>
+      isBetaLatestRelease(release, stableLatest, publicReleases)
+    ) ?? stableLatest;
   const stablePrerelease = byPrecedenceDesc.find((release) => {
     if (release === stableLatest) return true;
     if (release.prerelease !== true) return false;
     if (firstPrereleaseId(release.tag_name) === "alpha") return false;
     return !isBetaLatestRelease(release, stableLatest, publicReleases);
   });
-  const betaPrerelease = byPrecedenceDesc.find((release) =>
-    isBetaTrainRelease(release, stableLatest, publicReleases)
-  );
+  const betaPrerelease =
+    byPrecedenceDesc.find((release) =>
+      isBetaTrainRelease(release, stableLatest, publicReleases)
+    ) ?? stableLatest;
   return {
     latest: stableLatest,
     prerelease: stablePrerelease,
