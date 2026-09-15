@@ -105,6 +105,15 @@ push the `vX.Y.Z` tag. No release is created until Linux, macOS, and Windows
 jobs succeed. Releases are born as GitHub Pre-releases; promote to Latest
 manually after validation.
 
+`main` owns the active `N.N` train through alpha, beta, first stable, and
+follow-up `N.N.P` releases. Do not create `releases/N.N` merely to promote a
+beta to stable. Cut that maintenance branch only after the product owner
+explicitly decides to begin the next major or minor train on `main`; choose the
+current appropriate `main` commit as the branch point, even when it includes
+post-release fixes or enhancements, then bump `main` to the next alpha train.
+After the cut, release `N.N` maintenance candidates and patches from
+`releases/N.N` and keep the next train on `main`.
+
 Settings → Updates maps tag suffixes onto two axes (Stable|Beta ×
 Latest|Prerelease):
 
@@ -115,10 +124,11 @@ Latest|Prerelease):
 | Beta · Latest | `v1.1.0-beta.3` | Pre-release |
 | Beta · Prerelease | `v1.1.0-alpha.7` | Pre-release |
 
-Use `-prerelease.N` for Stable RCs. Use `-alpha.N` / `-beta.N` on `main`.
-Every `main` tag with a prerelease suffix must stay a GitHub Pre-release so it
-cannot steal `/releases/latest` from the Stable train. The updater pins
-electron-updater to the selected tag via the generic GitHub download feed.
+Use `-prerelease.N` for Stable RCs. Use `-alpha.N` / `-beta.N` on `main` while
+it owns the active train, and on `releases/N.N` for post-cut maintenance
+candidates. Every prerelease tag must stay a GitHub Pre-release so it cannot
+steal `/releases/latest` from the Stable train. The updater pins electron-updater
+to the selected tag via the generic GitHub download feed.
 
 ## macOS architectures
 
