@@ -118,15 +118,17 @@ export function RemoteActivityCard({
         <p className="remote-activity__command">{view.command}</p>
       )}
 
-      {!compact && (
+      {!compact && showOutput(view) && (
         // Git's own words, verbatim. Everything above is PwrGit's reading of
         // the operation; this is the evidence behind it, and the only thing
         // that explains an unfamiliar failure. It outlives the command that
         // wrote it now, which is the whole point of a settled card.
         <pre className="remote-activity__output" aria-label="Recent Git output">
-          {view.output.length === 0
-            ? "Git has produced no output yet."
-            : view.output.join("\n")}
+          {view.output.length > 0
+            ? view.output.join("\n")
+            : view.settled === null
+              ? "Git has produced no output yet."
+              : "Git produced no output."}
         </pre>
       )}
 
@@ -190,6 +192,19 @@ export function RemoteActivityCard({
       {tip.tooltipNode}
     </div>
   );
+}
+
+/**
+ * Whether the Git-output block earns its place.
+ *
+ * Silence is evidence while an operation runs — a fetch that has written
+ * nothing is the wedged case the card exists for — and it is still evidence
+ * once one has failed or been stopped, where "Git produced no output" IS the
+ * finding. On a *successful* operation it is neither: an empty block under
+ * "Fetched" reports nothing and takes up the room that says so.
+ */
+function showOutput(view: RemoteActivityView): boolean {
+  return view.output.length > 0 || view.settled !== "ok";
 }
 
 /** Everything Git wrote, or the empty log of an operation already gone. */

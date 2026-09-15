@@ -883,9 +883,12 @@ describe("WorktreeHeader settled status card", () => {
     freezeClock();
     await press("Fetch", ok(null));
 
+    // The status line, not the Git-output block: a successful card has no
+    // output block at all, because an empty one under "Fetched" reports
+    // nothing.
     await act(async () => {
       card()
-        ?.querySelector(".remote-activity__output")
+        ?.querySelector(".remote-activity__status")
         ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(
@@ -922,6 +925,23 @@ describe("WorktreeHeader settled status card", () => {
     });
     expect(document.activeElement?.textContent).toBe("Cancel");
     expect(tab.defaultPrevented).toBe(true);
+  });
+
+  // Silence is evidence while an operation runs, and still evidence once one
+  // has failed. Under "Fetched" it is neither, and an empty block there takes
+  // up the room that would have said so.
+  it("drops the Git-output block from a successful receipt only", async () => {
+    await press("Fetch", ok(null));
+    expect(card()?.textContent).toContain("Fetched");
+    expect(card()?.querySelector(".remote-activity__output")).toBeNull();
+
+    await press(
+      "Fetch",
+      err({ kind: "remote", code: "network", message: "boom" })
+    );
+    expect(card()?.querySelector(".remote-activity__output")?.textContent).toBe(
+      "boom"
+    );
   });
 
   it("replaces one receipt with the next operation's card", async () => {
