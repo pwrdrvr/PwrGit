@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,8 @@ import {
   execGitRecords,
   gitExecutionEnvironment,
   gitProcessInvocation,
-  sanitizeGitLogDetail
+  sanitizeGitLogDetail,
+  settleOnGitExit
 } from "./dugite";
 
 describe("gitExecutionEnvironment", () => {
@@ -108,6 +109,62 @@ describe("execGitRecords", () => {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+});
+
+describe("settleOnGitExit", () => {
+  /**
+   * A process that exits immediately after leaving behind a descendant which
+   * inherited its stdio — the shape Git-for-Windows' launcher produces, and
+   * the one that made `close` the wrong event to await. Node stands in for
+   * `git` so the test says the same thing on every platform.
+   */
+  function exitsLeavingAPipeHolder(holdMs: number): ReturnType<typeof spawn> {
+    const script = [
+      "const { spawn } = require('node:child_process');",
+      `spawn(process.execPath, ['-e', 'setTimeout(() => {}, ${holdMs})'], {`,
+      "  stdio: 'inherit',",
+      "  detached: true",
+      "}).unref();",
+      "process.stdout.write('from git itself');"
+    ].join("\n");
+    return spawn(process.execPath, ["-e", script], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+  }
+
+  it("answers when git exits, not when the last pipe holder lets go", async () => {
+    const child = exitsLeavingAPipeHolder(4_000);
+    const stdout: Buffer[] = [];
+    child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
+
+    const startedAt = Date.now();
+    const exitCode = await new Promise<number | null>((resolve) =>
+      settleOnGitExit(child, resolve)
+    );
+    const elapsed = Date.now() - startedAt;
+
+    expect(exitCode).toBe(0);
+    // Awaiting `close` here would have taken the grandchild's full 4s.
+    expect(elapsed).toBeLessThan(3_000);
+    // And the grace window is what makes that safe: git's own bytes are in.
+    expect(Buffer.concat(stdout).toString()).toBe("from git itself");
+  }, 30_000);
+
+  it("stops accumulating once it has answered", async () => {
+    const child = exitsLeavingAPipeHolder(2_000);
+    const stdout: Buffer[] = [];
+    child.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
+
+    await new Promise<number | null>((resolve) =>
+      settleOnGitExit(child, resolve)
+    );
+    const atSettle = Buffer.concat(stdout).toString();
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+
+    // The pipes are dropped at settle, so a grandchild that outlives the
+    // answer cannot keep appending to a buffer nobody will read again.
+    expect(Buffer.concat(stdout).toString()).toBe(atSettle);
+  }, 30_000);
 });
 
 describe("sanitizeGitLogDetail", () => {

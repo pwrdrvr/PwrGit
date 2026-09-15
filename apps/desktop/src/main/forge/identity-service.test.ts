@@ -1,19 +1,17 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  err,
   ok,
   type ForgeHostMap,
-  type RepoIdentity,
-  type Result
+  type RepoIdentity
 } from "@pwrgit/shared";
 import { openDatabase } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "../git/repo-indexer";
-import type { GitExec, GitOutput } from "../git/dugite";
+import type { GitExec } from "../git/dugite";
 import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
 import { ForgeHosts } from "./hosts";
@@ -24,19 +22,9 @@ import {
   sameIdentity,
   type ForgeHostGate
 } from "./identity-service";
+import { createSystemGit } from "../git/test-support/system-git";
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise<Result<GitOutput>>((resolve) => {
-    const proc = spawn("git", args, { cwd, env: { ...process.env, ...options?.env } });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
-    proc.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
-    proc.on("close", (code) => resolve(ok({ stdout, stderr, exitCode: code ?? 0 })));
-    proc.on("error", (e) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: e.message }))
-    );
-  });
+const systemGit: GitExec = createSystemGit();
 
 const created: string[] = [];
 function temporaryRoot(): string {

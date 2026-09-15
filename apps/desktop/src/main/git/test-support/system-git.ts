@@ -3,6 +3,7 @@ import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import {
   gitExecutionEnvironment,
   gitProcessInvocation,
+  settleOnGitExit,
   type GitBinaryOutput,
   type GitExec,
   type GitExecBinary,
@@ -14,30 +15,19 @@ import {
  * The `GitExec` the main-process suites run against real `git`.
  *
  * It exists as one module because twenty-four hand-rolled copies of it each
- * carried the same defect, and a defect with twenty-four homes gets fixed once
- * or not at all. A twenty-fifth copy (`bulk-sync.test.ts`) was built on
- * `execFile` and never had the bug; it routes through here anyway, because a
- * surviving hand-rolled helper is the template the next one gets copied from.
+ * carried the same defect — awaiting `close` rather than `exit` — and a defect
+ * with twenty-four homes gets fixed once or not at all. A twenty-fifth copy
+ * (`bulk-sync.test.ts`) was built on `execFile` and never had the bug; it
+ * routes through here anyway, because a surviving hand-rolled helper is the
+ * template the next one gets copied from.
  *
- * **Settle on `exit`, never on `close`.** `close` fires only after every
- * process holding the child's inherited stdio pipes has let go of them, which
- * is not the same question as "did git finish". Git-for-Windows' `cmd\git.exe`
- * hands execution to another process — ../dugite.ts documents the same
- * behavior biting `git worktree remove` — and a handed-off grandchild keeps
- * those pipes open after git itself has exited. A helper awaiting `close`
- * therefore waits out the stranger, not the command: a millisecond-scale git
- * call becomes a multi-second hang, and the test dies on the Vitest timeout
- * having never learned what git did. That is bimodal by nature — the handoff
- * either lingers or it doesn't — which is why it read as a flake, and why
- * raising the timeout only bought the hang more room.
- *
- * So we resolve once git has exited *and* its own streams have ended, and
- * never wait more than FLUSH_GRACE_MS past exit for a stream some grandchild
- * is holding open. The child's own output has already been delivered by then;
- * a 300KB stdout survives the grace path intact.
+ * `settleOnGitExit` in ../dugite.ts carries that rule, and the reasoning, for
+ * this double and for production's `execGitRecords` alike. What this module
+ * adds on top is fidelity to the `GitExec` contract: the same environment
+ * handling, cancellation, and stderr/activity callbacks production's `execGit`
+ * gives its callers, so a suite exercising those paths is testing the real
+ * shape rather than a double that quietly ignores half of them.
  */
-const FLUSH_GRACE_MS = 250;
-
 export type SystemGitOptions = {
   /** Base environment for the child. Defaults to this process's own. */
   env?: NodeJS.ProcessEnv;
@@ -100,30 +90,21 @@ function runGit(
 
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
-    let openStreams = 2;
-    let exited = false;
-    // A null code means a signal killed the child. That is a failure, not a
-    // silent success — and it is reachable now that `signal` is honoured.
-    let exitCode = 1;
     let settled = false;
-    let grace: ReturnType<typeof setTimeout> | undefined;
 
     const settle = (result: Result<Collected, PwrGitError>): void => {
       if (settled) return;
       settled = true;
-      if (grace) clearTimeout(grace);
-      // A grandchild can hold these pipes open long after we have answered.
-      // Left attached, they keep appending to buffers nobody will read and
-      // keep the child and its streams alive for the stranger's lifetime.
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-      child.unref();
       resolve(result);
     };
-    const finish = (): void => settle(ok({ stdout, stderr, exitCode }));
-    const finishWhenDrained = (): void => {
-      if (exited && openStreams === 0) finish();
-    };
+
+    // `settleOnGitExit` owns the exit-not-close rule and the pipe teardown;
+    // see its comment in ../dugite.ts for why `close` is the wrong event.
+    const release = settleOnGitExit(child, (code) => {
+      // A null code means a signal killed the child — a failure, not a silent
+      // success, and reachable because `signal` is honoured above.
+      settle(ok({ stdout, stderr, exitCode: code ?? 1 }));
+    });
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout.push(chunk);
@@ -134,22 +115,10 @@ function runGit(
       options?.onActivity?.();
       if (options?.onStderr) options.onStderr(chunk.toString());
     });
-    child.stdout.once("end", () => {
-      openStreams -= 1;
-      finishWhenDrained();
-    });
-    child.stderr.once("end", () => {
-      openStreams -= 1;
-      finishWhenDrained();
-    });
 
-    child.on("error", (cause) => settle(spawnFailed(cause)));
-    child.on("exit", (code) => {
-      exited = true;
-      if (code !== null) exitCode = code;
-      grace = setTimeout(finish, FLUSH_GRACE_MS);
-      grace.unref?.();
-      finishWhenDrained();
+    child.on("error", (cause) => {
+      release();
+      settle(spawnFailed(cause));
     });
   });
 }

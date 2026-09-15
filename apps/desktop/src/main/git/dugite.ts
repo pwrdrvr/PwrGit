@@ -1,6 +1,6 @@
 // dugite is CommonJS; default-import + destructure so the strict-ESM main
 // bundle loads it (a named `import { exec }` throws at runtime).
-import type { ExecFileOptions } from "node:child_process";
+import type { ChildProcess, ExecFileOptions } from "node:child_process";
 import { tmpdir } from "node:os";
 import dugite from "dugite";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
@@ -229,6 +229,79 @@ export const execGit: GitExec = async (args, cwd, options) => {
 
 const MAX_STREAM_STDERR_CHARS = 32_768;
 
+/** How long past `exit` a stream is given to deliver what Git already wrote. */
+const EXIT_FLUSH_GRACE_MS = 250;
+
+/**
+ * Call `onExited` once Git has exited **and** its own streams have ended —
+ * never waiting on `close`.
+ *
+ * `close` fires only after every process holding the child's inherited stdio
+ * pipes has released them, which is a different question from "did Git
+ * finish". Git-for-Windows' launcher hands execution to another process (the
+ * same behaviour `gitProcessInvocation` above exists to contain), and that
+ * grandchild keeps the pipes open after Git itself has exited. Awaiting
+ * `close` therefore waits out the stranger rather than the command: a
+ * millisecond-scale call becomes a multi-second stall, intermittently, and
+ * only on Windows. Measured on a child that exits immediately while a
+ * grandchild holds the pipes: `exit` at 4ms, `close` at 5008ms.
+ *
+ * So a stream still open `EXIT_FLUSH_GRACE_MS` after exit is treated as one
+ * somebody else is holding; Git's own output has already been delivered by
+ * then. Settling also drops the pipes, because a grandchild would otherwise
+ * keep appending to buffers nobody will read for as long as it lives.
+ *
+ * Returns a `release` for any other settle path (an `error` event) to call, so
+ * the child is detached exactly once whichever way the command ends.
+ */
+export function settleOnGitExit(
+  child: ChildProcess,
+  onExited: (exitCode: number | null) => void
+): () => void {
+  let openStreams = 0;
+  let exited = false;
+  let exitCode: number | null = null;
+  let settled = false;
+  let grace: ReturnType<typeof setTimeout> | undefined;
+
+  const release = (): void => {
+    if (grace !== undefined) clearTimeout(grace);
+    grace = undefined;
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    child.unref();
+  };
+
+  const fire = (): void => {
+    if (settled) return;
+    settled = true;
+    release();
+    onExited(exitCode);
+  };
+
+  for (const stream of [child.stdout, child.stderr]) {
+    if (stream === null) continue;
+    openStreams += 1;
+    stream.once("end", () => {
+      openStreams -= 1;
+      if (exited && openStreams === 0) fire();
+    });
+  }
+
+  child.on("exit", (code) => {
+    exited = true;
+    exitCode = code;
+    grace = setTimeout(fire, EXIT_FLUSH_GRACE_MS);
+    grace.unref?.();
+    if (openStreams === 0) fire();
+  });
+
+  return () => {
+    settled = true;
+    release();
+  };
+}
+
 /**
  * Run a NUL-delimited Git query without allowing its complete stdout to be
  * buffered by Dugite. This is for metadata commands such as ls-tree and
@@ -306,17 +379,7 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
     child.stderr.on("data", (chunk: string) => {
       stderr = `${stderr}${chunk}`.slice(-MAX_STREAM_STDERR_CHARS);
     });
-    child.on("error", (cause) => {
-      finish(
-        err({
-          kind: "git",
-          code: "spawn_failed",
-          message: cause.message,
-          cause
-        })
-      );
-    });
-    child.on("close", (exitCode) => {
+    const release = settleOnGitExit(child, (exitCode) => {
       finish(
         ok({
           records,
@@ -325,6 +388,17 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
           // terminated process can report a platform-specific signal code.
           exitCode: truncated ? 0 : (exitCode ?? 1),
           truncated
+        })
+      );
+    });
+    child.on("error", (cause) => {
+      release();
+      finish(
+        err({
+          kind: "git",
+          code: "spawn_failed",
+          message: cause.message,
+          cause
         })
       );
     });
