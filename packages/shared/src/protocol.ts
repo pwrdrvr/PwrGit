@@ -960,6 +960,12 @@ export interface Commands {
     res: { changed: number; outcomes: RepoIdentityRefreshOutcome[] };
   };
   "repo:search": { req: { query: string }; res: RepoSearchHit[] };
+  /** Verify a visible local-branch hit using a short-lived, shared worktree
+   *  listing. Null means the branch still has no checkout. */
+  "search:branchWorktree": {
+    req: { repoId: string; branch: string };
+    res: RepoSearchHit | null;
+  };
   /** Lazy per-hit status for ⌘F results (cached worktree_state when present;
    *  else one cheap `git log -1` for tip age). Called one hit at a time — the
    *  renderer's cancelable fill queue owns batching/concurrency. */

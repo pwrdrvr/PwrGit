@@ -72,4 +72,62 @@ export function registerRepoHandlers(
   });
 
   bus.register("repo:search", (req) => ok(indexer.searchAll(req.query)));
+
+  // Shared across visible hits, searches and windows. Keep in-flight work in
+  // the cache too: three rows from one repository cost one worktree listing.
+  // Cache failures briefly as well so an unavailable disk cannot cause a storm.
+  const listings = new Map<string, {
+    expiresAt: number;
+    pending: ReturnType<RepoIndexer["refreshRepoWorktrees"]>;
+  }>();
+  bus.register("search:branchWorktree", async (req) => {
+    const now = Date.now();
+    for (const [repoId, entry] of listings) {
+      if (entry.expiresAt <= now) listings.delete(repoId);
+    }
+    let entry = listings.get(req.repoId);
+    if (entry === undefined) {
+      const pending = indexer.refreshRepoWorktrees(req.repoId, {
+        refreshBranches: false
+      }).then((result) => {
+        if (result.ok) {
+          const value = result.value;
+          if (value.outcome === "deindexed") {
+            emitEvent("repo:changed", { profileId: value.profileId });
+          } else if (value.added || value.removed || value.updated) {
+            emitEvent("repo:changed", { profileId: value.repo.profileId });
+          }
+        }
+        return result;
+      });
+      entry = { expiresAt: Infinity, pending };
+      listings.set(req.repoId, entry);
+      const created = entry;
+      void pending.then(
+        () => { created.expiresAt = Date.now() + 30_000; },
+        () => { listings.delete(req.repoId); }
+      );
+    }
+    const result = await entry.pending;
+    if (!result.ok) return result;
+    const repo = indexer.getRepo(req.repoId);
+    if (repo === null) {
+      return err({ kind: "repo", code: "not_found", message: "repo not found" });
+    }
+    const worktree = repo.worktrees.find((wt) => wt.branch === req.branch);
+    if (worktree === undefined) return ok(null);
+    return ok({
+      kind: "worktree" as const,
+      repoId: repo.id,
+      repoName: repo.name,
+      name: worktree.branch,
+      path: worktree.path,
+      worktreeId: worktree.id,
+      profileId: repo.profileId,
+      profileName: profiles.get(repo.profileId)?.name ?? "",
+      pinned: worktree.pinned,
+      worktreeCount: 0,
+      ...(worktree.pr !== undefined ? { pr: worktree.pr } : {})
+    });
+  });
 }

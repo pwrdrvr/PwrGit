@@ -23,7 +23,7 @@ import {
 import type { DB } from "../persistence/db";
 import { parseJsonStringList } from "../persistence/json-string-list";
 import { mapLimit } from "../util/map-limit";
-import type { GitExec } from "./dugite";
+import { requireExit0, type GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
 import { pathLeafLikePatterns, rankSearchHits } from "./search-rank";
 import {
@@ -593,7 +593,8 @@ export class RepoIndexer {
   /** Re-list an existing repo's worktrees (after create/remove), preserving
    *  its source, pins, and custom order (syncWorktrees only touches identity). */
   async refreshRepoWorktrees(
-    repoId: string
+    repoId: string,
+    options: { refreshBranches?: boolean } = {}
   ): Promise<Result<RepoWorktreeRefresh>> {
     const repo = this.getRepo(repoId);
     if (repo === null) {
@@ -605,7 +606,9 @@ export class RepoIndexer {
     }
     const [listed, listedBranches] = await Promise.all([
       listWorktrees(this.git, repo.path),
-      listIndexedBranches(this.git, repo.path)
+      options.refreshBranches === false
+        ? Promise.resolve(null)
+        : listIndexedBranches(this.git, repo.path)
     ]);
     if (!listed.ok) return listed;
     const primary = listed.value[0];
@@ -630,8 +633,47 @@ export class RepoIndexer {
     const worktrees = listed.value
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w, i === 0));
-    this.db.transaction(() => this.syncWorktrees(repoId, worktrees))();
-    if (listedBranches.ok) {
+    const releasedBranches: string[] = [];
+    if (options.refreshBranches === false) {
+      const checkedOut = new Set(worktrees.map((wt) => wt.branch));
+      const released = [...new Set(repo.worktrees.map((wt) => wt.branch))]
+        .filter((branch) => branch !== "" && !checkedOut.has(branch));
+      // The old worktree row was the only search entry for these branches.
+      // Verify just the released refs: an external rename/delete must not
+      // become a phantom local branch. Bound argv size without scanning refs.
+      for (let offset = 0; offset < released.length; offset += BRANCH_WRITE_CHUNK_SIZE) {
+        const batch = released.slice(offset, offset + BRANCH_WRITE_CHUNK_SIZE);
+        const args = [
+          "for-each-ref", "--format=%(refname)", "--",
+          ...batch.map((branch) => `refs/heads/${branch}`)
+        ];
+        const raw = await this.git(args, repo.path);
+        if (!raw.ok) return raw;
+        const checked = requireExit0(raw.value, args);
+        if (!checked.ok) return checked;
+        const existing = new Set(checked.value.stdout.trim().split(/\r?\n/));
+        // for-each-ref patterns also match descendants; accept exact refs only.
+        releasedBranches.push(...batch.filter((branch) => existing.has(`refs/heads/${branch}`)));
+      }
+    }
+    this.db.transaction(() => {
+      this.syncWorktrees(repoId, worktrees);
+      const insertReleased = this.db.prepare(`
+        INSERT INTO local_branches (id, repo_id, name, full_name)
+        VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING
+      `);
+      for (const branch of releasedBranches) {
+        const fullName = `refs/heads/${branch}`;
+        insertReleased.run(`${repoId}:${fullName}`, repoId, branch, fullName);
+      }
+      // A lightweight visible-hit refresh need not enumerate refs, but must
+      // remove obsolete "no checkout" rows for the branches it just discovered.
+      this.db.prepare(`DELETE FROM local_branches
+        WHERE repo_id = ? AND name IN (
+          SELECT branch FROM worktrees WHERE repo_id = ?
+        )`).run(repoId, repoId);
+    })();
+    if (listedBranches?.ok) {
       await this.syncBranchIndexChunked(
         repoId,
         listedBranches.value.branches,
