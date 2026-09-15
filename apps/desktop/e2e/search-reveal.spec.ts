@@ -275,7 +275,7 @@ test("narrowing a ⌘F query leaves no stale ghost rows behind", async () => {
   await expect(window.locator(".overlay-foot")).toContainText("1 result");
 });
 
-test("⌘K keeps focus in the query while arrows select and reveal rows", async () => {
+test("⌘K navigates results and opens the selected row copy menu", async () => {
   sandbox = createGitSandbox();
   for (let index = 0; index < 14; index += 1) {
     sandbox.makeRepo(`palette-${String(index).padStart(2, "0")}`);
@@ -308,7 +308,17 @@ test("⌘K keeps focus in the query while arrows select and reveal rows", async 
   );
 
   await window.keyboard.press("Tab");
+  await expect(selected.locator(".overlay-result__actions")).toBeFocused();
+  await window.keyboard.press("Enter");
+  const menu = window.getByRole("menu", { name: "Copy actions for palette-11" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Copy repo name", exact: true })).toBeFocused();
+  await window.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: "Copy repo path", exact: true })).toBeFocused();
+  await window.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
   await expect(input).toBeFocused();
+  await expect(selected).toHaveAttribute("aria-selected", "true");
   await window.keyboard.press("Enter");
   await expect(window.locator(".titlebar__repo")).toHaveText("palette-11", {
     timeout: 20_000

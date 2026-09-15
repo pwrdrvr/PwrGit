@@ -6,7 +6,11 @@ import type {
   SearchHitStatus
 } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
-import { currentPlatform, shortcutLabel } from "../../lib/platform";
+import { copyText } from "../../lib/copyText";
+import {
+  currentPlatform,
+  shortcutLabel
+} from "../../lib/platform";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
@@ -15,6 +19,7 @@ import {
 } from "../../lib/useViewportTooltip";
 import { shortWhen } from "../graph/graph-view";
 import { commitHashQuery, searchCommits } from "./commit-search";
+import { ContextMenu } from "../shell/ContextMenu";
 import { PrChip } from "./PrChip";
 import { worktreeFolderLabel } from "./repo-view";
 import { PinIcon } from "./WorktreeRow";
@@ -57,6 +62,35 @@ export type PaletteItem =
   | { kind: "commit"; commit: Commit }
   | { kind: "file"; hit: FileSearchHit }
   | { kind: "repo"; hit: RepoSearchHit };
+
+type CopyAction = { label: string; value: string };
+
+function paletteCopyActions(item: PaletteItem | undefined): CopyAction[] {
+  if (item === undefined) return [];
+  if (item.kind === "commit") {
+    return [{ label: "Copy commit hash", value: item.commit.hash }];
+  }
+  if (item.kind === "file") {
+    return [{ label: "Copy file path", value: item.hit.path }];
+  }
+  const hit = item.hit;
+  if (hit.kind === "repo") {
+    return [
+      { label: "Copy repo name", value: hit.name },
+      { label: "Copy repo path", value: hit.path }
+    ];
+  }
+  const actions: CopyAction[] = [];
+  if (hit.kind !== "worktree" || !hit.name.startsWith("detached@")) {
+    actions.push({ label: "Copy branch name", value: hit.name });
+  }
+  // Branch-only hits carry the repository path, not a checked-out worktree.
+  if (hit.kind === "worktree") {
+    actions.push({ label: "Copy worktree path", value: hit.path });
+  }
+  if (hit.pr?.url) actions.push({ label: "Copy PR URL", value: hit.pr.url });
+  return actions;
+}
 
 export const paletteItemKey = (item: PaletteItem): string =>
   item.kind === "commit"
@@ -200,6 +234,9 @@ export function RepoSwitcherOverlay({
   platform?: string;
 }) {
   const now = useRelativeClock();
+  const [copyStatus, setCopyStatus] = useState<{ key: string; message: string } | null>(null);
+  const [menu, setMenu] = useState<{ item: PaletteItem; x: number; y: number } | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoSearchHit[]>([]);
   const [files, setFiles] = useState<FileSearchHit[]>([]);
@@ -266,6 +303,66 @@ export function RepoSwitcherOverlay({
     [allCommitResults, results, query, files]
   );
   const sel = selectedPaletteItemIndex(items, selectedItemKey);
+  useEffect(() => {
+    setCopyStatus(null);
+    setMenu(null);
+  }, [query]);
+  useEffect(() => {
+    if (copyStatus === null) return;
+    const timer = window.setTimeout(() => setCopyStatus(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
+
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const copy = async (item: PaletteItem, action: CopyAction): Promise<void> => {
+    const key = paletteItemKey(item);
+    try {
+      await copyText(action.value);
+      setCopyStatus({ key, message: "Copied" });
+    } catch {
+      setCopyStatus({ key, message: "Could not copy. Try again." });
+    }
+  };
+
+  const rowActions = (item: PaletteItem) => {
+    const key = paletteItemKey(item);
+    const name = item.kind === "commit" ? item.commit.shortHash : item.hit.name;
+    return (
+      <>
+        {copyStatus?.key === key && <span role="status" className="overlay-result__meta">{copyStatus.message}</span>}
+        <button
+          type="button"
+          className="kebab__btn overlay-result__actions"
+          tabIndex={-1}
+          aria-label={`Copy actions for ${name}`}
+          title={`Copy actions for ${name}`}
+          aria-haspopup="menu"
+          aria-expanded={menu !== null && paletteItemKey(menu.item) === key}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (menu !== null && paletteItemKey(menu.item) === key) {
+              closeMenu();
+              return;
+            }
+            menuTriggerRef.current = event.currentTarget;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            setSelectedItemKey(key);
+            setMenu({ item, x: bounds.left, y: bounds.bottom + 4 });
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="12" cy="5" r="2.3" />
+            <circle cx="12" cy="12" r="2.3" />
+            <circle cx="12" cy="19" r="2.3" />
+          </svg>
+        </button>
+      </>
+    );
+  };
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -386,24 +483,33 @@ export function RepoSwitcherOverlay({
   const tip = useViewportTooltip();
 
   const selectItem = (index: number): void => {
+    if (menu !== null) return;
     const item = items[index];
     setSelectedItemKey(item === undefined ? null : paletteItemKey(item));
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    // A nested menu may already have consumed Escape in the capture phase.
+    if (event.defaultPrevented) return;
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
       return;
     }
-    // The field is the palette's only tab stop. Rows are selected through
-    // aria-activedescendant, so Tab must not hand focus to Chromium's
-    // keyboard-focusable scroll container.
+    // Tab reaches the selected row's visible action, then returns to search.
     if (event.key === "Tab") {
       event.preventDefault();
-      inputRef.current?.focus();
+      if (event.target === inputRef.current) {
+        const button = resultsRef.current?.querySelector<HTMLButtonElement>(
+          ".overlay-result.is-selected .overlay-result__actions"
+        );
+        (button ?? inputRef.current)?.focus();
+      } else {
+        inputRef.current?.focus();
+      }
       return;
     }
+    if ((event.target as HTMLElement).closest("button") !== null) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       selectItem(Math.min(sel + 1, Math.max(0, items.length - 1)));
@@ -491,7 +597,12 @@ export function RepoSwitcherOverlay({
   }, [results, fill, resolveBranch]);
 
   return (
-    <div className="overlay-backdrop" onClick={onClose}>
+    <div className="overlay-backdrop" onClick={onClose} onKeyDown={(event) => {
+      // ContextMenu's window listener closes on Tab; retain focus in the palette.
+      if (event.key === "Tab" && (event.target as HTMLElement).closest('[role="menu"]')) {
+        event.preventDefault();
+      }
+    }}>
       <div
         className="overlay-panel"
         role="dialog"
@@ -572,6 +683,7 @@ export function RepoSwitcherOverlay({
                   <span className="overlay-result__profile">
                     {commit.shortHash}
                   </span>
+                  {rowActions(item)}
                 </div>
               );
             }
@@ -605,6 +717,7 @@ export function RepoSwitcherOverlay({
                   </span>
                   <span style={{ flex: 1 }} />
                   <span className="overlay-result__meta">file history</span>
+                  {rowActions(item)}
                 </div>
               );
             }
@@ -763,6 +876,7 @@ export function RepoSwitcherOverlay({
                   : `${r.worktreeCount} ${r.worktreeCount === 1 ? "wt" : "wts"}`}
               </span>
               <span className="overlay-result__profile">{r.profileName}</span>
+              {rowActions(item)}
               </div>
             );
           })}
@@ -778,6 +892,7 @@ export function RepoSwitcherOverlay({
         <div className="overlay-foot">
           <span>↑↓ navigate</span>
           <span>↵ open</span>
+          {items.length > 0 && <span>tab actions</span>}
           {items[sel]?.kind === "repo" &&
             !isWorktreelessBranch(items[sel].hit) && (
               <span>{shortcutLabel({ key: "P" }, platform)} pin</span>
@@ -789,6 +904,20 @@ export function RepoSwitcherOverlay({
         </div>
       </div>
       {tip.tooltipNode}
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={`Copy actions for ${menu.item.kind === "commit" ? menu.item.commit.shortHash : menu.item.hit.name}`}
+          triggerRef={menuTriggerRef}
+          onClose={closeMenu}
+          items={paletteCopyActions(menu.item).map((action) => ({
+            type: "item",
+            label: action.label,
+            onSelect: () => void copy(menu.item, action)
+          }))}
+        />
+      )}
     </div>
   );
 }
