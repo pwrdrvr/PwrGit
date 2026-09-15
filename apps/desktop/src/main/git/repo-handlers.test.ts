@@ -81,6 +81,12 @@ describe("repo handlers", () => {
         } else {
           git(["-C", checkout, "switch", "fix/search-target"]);
         }
+        // Git canonicalizes separators and expands Windows short paths; the
+        // filesystem spelling used to create the checkout is not its Git path.
+        const checkoutGitPath = execFileSync(
+          "git", ["-C", checkout, "rev-parse", "--show-toplevel"],
+          { encoding: "utf8" }
+        ).trim();
         const bus = new CommandBus();
         registerRepoHandlers(bus, indexer, profiles, refresher);
         runGit.mockClear();
@@ -92,13 +98,13 @@ describe("repo handlers", () => {
           repoId: indexed.value.id, branch: "fix/search-target"
         });
         expect(runGit).toHaveBeenCalledExactlyOnceWith(
-          ["worktree", "list", "--porcelain"], root
+          ["worktree", "list", "--porcelain"], indexed.value.path
         );
         expect(result).toEqual(ok(
           expect.objectContaining({
             kind: "worktree",
             name: "fix/search-target",
-            path: checkout,
+            path: checkoutGitPath,
             worktreeId: expect.any(String),
             repoId: indexed.value.id
           })
@@ -107,7 +113,7 @@ describe("repo handlers", () => {
           profileId: profile.id
         });
         expect(indexer.getRepo(indexed.value.id)?.worktrees).toContainEqual(
-          expect.objectContaining({ branch: "fix/search-target", path: checkout })
+          expect.objectContaining({ branch: "fix/search-target", path: checkoutGitPath })
         );
         expect(await bus.dispatch("search:branchWorktree", {
           repoId: indexed.value.id, branch: "fix/still-free"
