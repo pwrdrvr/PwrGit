@@ -33,14 +33,16 @@ import {
   updateRemote
 } from "./git-service";
 import { createSystemGit } from "./test-support/system-git";
+import { diagnoseSyncGit } from "./test-support/diagnostic-sync";
+import { markGitDiagnosticStage } from "./git-diagnostics";
 
 const systemGit: GitExec = createSystemGit();
 
 function git(dir: string, args: string[]): void {
-  execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  diagnoseSyncGit(args, dir, (env) => execFileSync("git", args, { cwd: dir, stdio: "ignore", env }));
 }
 function gitOut(dir: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  return diagnoseSyncGit(args, dir, (env) => execFileSync("git", args, { cwd: dir, encoding: "utf8", env })).trim();
 }
 function fileText(dir: string, file: string): string {
   return readFileSync(join(dir, file), "utf8").replaceAll("\r\n", "\n");
@@ -63,7 +65,7 @@ function commitAt(dir: string, file: string, msg: string, date: string): void {
   writeFileSync(join(dir, file), `${file}\n`);
   git(dir, ["add", "."]);
   const stamp = `${date}T12:00:00Z`;
-  execFileSync("git", ["commit", "-m", msg], {
+  diagnoseSyncGit(["commit", "-m", msg], dir, () => execFileSync("git", ["commit", "-m", msg], {
     cwd: dir,
     stdio: "ignore",
     env: {
@@ -71,7 +73,7 @@ function commitAt(dir: string, file: string, msg: string, date: string): void {
       GIT_AUTHOR_DATE: stamp,
       GIT_COMMITTER_DATE: stamp
     }
-  });
+  }));
 }
 
 function recoverySnapshot(
@@ -361,10 +363,8 @@ describe("remote ops (bare-remote fixture)", () => {
   it("pulls a tracked unborn branch", async () => {
     const { local, upstreamHead } = makeUnbornTrackedFixture();
     expect(() =>
-      execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
-        cwd: local,
-        stdio: "ignore"
-      })
+      diagnoseSyncGit(["rev-parse", "--verify", "HEAD"], local, () =>
+        execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: local, stdio: "ignore" }))
     ).toThrow();
 
     const phases: string[] = [];
@@ -407,16 +407,15 @@ describe("remote ops (bare-remote fixture)", () => {
     if (!result.ok) expect(result.error.code).toBe("merge_failed");
     expect(sawPartialMutation).toBe(true);
     expect(() =>
-      execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
-        cwd: local,
-        stdio: "ignore"
-      })
+      diagnoseSyncGit(["rev-parse", "--verify", "HEAD"], local, () =>
+        execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: local, stdio: "ignore" }))
     ).toThrow();
     expect(gitOut(local, ["status", "--porcelain"])).toBe("");
     expect(existsSync(join(local, "base.txt"))).toBe(false);
   });
 
   it("restores the original checkout before reapplying work after a partial merge failure", async () => {
+    markGitDiagnosticStage("setup");
     const { local, remote } = makeDivergedFixture();
     writeFileSync(join(remote, "base.txt"), "upstream version\n");
     writeFileSync(join(remote, "upstream.txt"), "added upstream\n");
@@ -460,7 +459,9 @@ describe("remote ops (bare-remote fixture)", () => {
       return systemGit(args, cwd, options);
     };
 
+    markGitDiagnosticStage("operation");
     const result = await pullFastForward(failAfterPartialCheckout, local);
+    markGitDiagnosticStage("verification");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe("merge_failed");
     expect(sawPartialMutation).toBe(true);
@@ -651,6 +652,7 @@ describe("remote ops (bare-remote fixture)", () => {
   });
 
   it("keeps a conflicting indexed stash recoverable after a successful pull", async () => {
+    markGitDiagnosticStage("setup");
     const { local, remote } = makeDivergedFixture();
     writeFileSync(join(remote, "base.txt"), "upstream work\n");
     git(remote, ["add", "base.txt"]);
@@ -660,7 +662,9 @@ describe("remote ops (bare-remote fixture)", () => {
     writeFileSync(join(local, "base.txt"), "local staged work\n");
     git(local, ["add", "base.txt"]);
 
+    markGitDiagnosticStage("operation");
     const result = await pullFastForward(systemGit, local);
+    markGitDiagnosticStage("verification");
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value).toEqual({

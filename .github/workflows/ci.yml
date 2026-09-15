@@ -195,7 +195,25 @@ jobs:
         run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
       - name: Test
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+          PWRGIT_GIT_PIPE_OWNERSHIP: "1"
         run: pnpm run test
+
+      - name: Observe natural Git EOF in a separate finite probe
+        if: ${{ always() }}
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+        run: node apps/desktop/src/main/git/test-support/pipe-ownership-probe.cjs
+
+      - name: Upload Git lifecycle diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: git-diagnostics-${{ runner.os }}
+          path: ${{ runner.temp }}/git-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 14
 
   desktop-e2e:
     name: Linux Desktop E2E (${{ matrix.shard }}/2)
@@ -428,8 +446,29 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      - name: Prepare bounded Windows process and pipe observer
+        run: node apps/desktop/src/main/git/test-support/pipe-ownership-probe.cjs --prepare
+
       - name: Test
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+          PWRGIT_GIT_PIPE_OWNERSHIP: "1"
         run: pnpm run test
+
+      - name: Observe natural Git EOF in a separate finite probe
+        if: ${{ always() }}
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-diagnostics
+        run: node apps/desktop/src/main/git/test-support/pipe-ownership-probe.cjs
+
+      - name: Upload Git lifecycle diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: git-diagnostics-${{ runner.os }}
+          path: ${{ runner.temp }}/git-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 14
 
   windows-e2e:
     name: Windows Desktop E2E (${{ matrix.shard }}/4)
