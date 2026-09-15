@@ -10,6 +10,10 @@ export type GitDiagnosticReport = Record<string, unknown>;
 export type GitDiagnosticScope = {
   /** Only install for small, local test fixtures with an expected duration. */
   thresholdMs: number;
+  /** Selected known-fast commands can report earlier within a fixture scope. */
+  commandThresholdsMs?: Readonly<Record<string, number>>;
+  /** Persist completion/close timelines even when these calls stay below threshold. */
+  retainCommands?: readonly string[];
   emit: (report: GitDiagnosticReport) => void;
   processSample?: boolean;
   /** Compact call boundaries. Test sinks persist these before blocking work. */
@@ -182,7 +186,9 @@ export class GitDiagnostic {
     try {
       this.settings.record?.({ event, id: this.id, ...this.identity, stage: this.callStage,
         execution: this.sync ? "sync" : "async", monotonicMs: monotonicMs(),
-        elapsedMs: this.elapsed(), thresholdMs: this.settings.thresholdMs, outcome, aggregate: { ...accounting } });
+        elapsedMs: this.elapsed(), thresholdMs: this.settings.thresholdMs, outcome, aggregate: { ...accounting },
+        ...(event === "call-end" && this.settings.retainCommands?.includes(String(this.identity.command))
+          ? { lifecycle: this.snapshot() } : {}) });
     } catch { /* Best effort, including a failing filesystem sink. */ }
   }
   private emit(report: GitDiagnosticReport): void {
@@ -279,6 +285,11 @@ export class GitDiagnostic {
   dispose(reason?: string): void {
     if (this.disposed) return;
     if (reason && (!this.settled || this.slow)) this.report(reason);
+    if (this.settings.retainCommands?.includes(String(this.identity.command))) {
+      try { this.settings.record?.({ event: "call-lifecycle-final", ...this.snapshot(),
+        monotonicMs: monotonicMs(), aggregate: { ...accounting },
+        observationEnd: reason ?? "completed" }); } catch { /* Best effort. */ }
+    }
     this.disposed = true;
     clearTimeout(this.timer);
     clearTimeout(this.cleanupTimer);
@@ -291,6 +302,9 @@ export class GitDiagnostic {
 }
 
 export function beginGitDiagnostic(source: string, args: string[], cwd: string): GitDiagnostic | undefined {
-  return scope ? new GitDiagnostic(scope, { source, ...safeGitIdentity(args, cwd),
-    nativeCwd: source === "system-git-sync" ? "repository" : "os.tmpdir" }) : undefined;
+  if (!scope) return undefined;
+  const identity: GitDiagnosticReport = { source, ...safeGitIdentity(args, cwd),
+    nativeCwd: source === "system-git-sync" ? "repository" : "os.tmpdir" };
+  const thresholdMs = scope.commandThresholdsMs?.[String(identity.command)] ?? scope.thresholdMs;
+  return new GitDiagnostic({ ...scope, thresholdMs }, identity);
 }

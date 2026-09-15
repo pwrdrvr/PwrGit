@@ -20,14 +20,15 @@ import {
   validateSelection
 } from "./rebase-assistant";
 import { createSystemGit } from "./test-support/system-git";
+import { diagnoseSyncGit } from "./test-support/diagnostic-sync";
 
 const systemGit = createSystemGit();
 
 function git(dir: string, args: string[]): void {
-  execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  diagnoseSyncGit(args, dir, (env) => execFileSync("git", args, { cwd: dir, stdio: "ignore", env }));
 }
 function gitOut(dir: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  return diagnoseSyncGit(args, dir, (env) => execFileSync("git", args, { cwd: dir, encoding: "utf8", env })).trim();
 }
 
 /** Repo with four commits c0..c3, each touching a distinct file. */

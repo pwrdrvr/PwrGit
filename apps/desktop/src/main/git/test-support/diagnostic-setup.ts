@@ -14,7 +14,9 @@ let artifactFailed = false;
 let journal: GitDiagnosticJournal | undefined;
 let ownership: OwnershipSession | undefined;
 
-const settings = () => ({ thresholdMs, emit, ...(journal ? { record: journal.record } : {}) });
+const targetedSuite = () => suite === "remote.test.ts" || suite === "rebase-assistant.test.ts";
+const settings = () => ({ thresholdMs, emit, ...(journal ? { record: journal.record } : {}),
+  ...(targetedSuite() ? { commandThresholdsMs: { fetch: 2000, clone: 2000 }, retainCommands: ["fetch", "clone"] } : {}) });
 
 function emit(report: GitDiagnosticReport): void {
   const line = JSON.stringify({ schema: 2, workerPid: process.pid, suite, testId, ...report });
@@ -43,11 +45,11 @@ beforeAll(async () => {
     journal = new GitDiagnosticJournal(directory, suite, emit);
     // The historically implicated suites use synchronous fixture Git. Await
     // readiness here so their first blocking call is independently observable.
-    if (suite === "remote.test.ts" || suite === "partial-staging.test.ts") {
+    if (targetedSuite() || suite === "partial-staging.test.ts") {
       await journal.startWatchdog(thresholdMs);
     }
     journal.begin("suite-setup");
-    if (suite === "remote.test.ts" && process.env.PWRGIT_GIT_PIPE_OWNERSHIP === "1") {
+    if (targetedSuite() && process.env.PWRGIT_GIT_PIPE_OWNERSHIP === "1") {
       ownership = await startOwnership(directory);
       ownership.context = { suite, testId: "suite-setup" };
     }
@@ -79,9 +81,14 @@ beforeEach((context) => {
       emit({ event: "test-finished", elapsedMs, timerFired: fired,
         state: context.task.result?.state, ...gitDiagnosticContext() });
     }
-    journal?.end({ ...gitDiagnosticContext(), elapsedMs, state: context.task.result?.state });
+    const finalContext = { ...gitDiagnosticContext(), elapsedMs, state: context.task.result?.state };
+    // Keep the test ID attached while disposal persists any final timelines.
     configureGitDiagnostics(undefined);
+    journal?.end(finalContext);
     testId = undefined;
+    // A nested describe's beforeAll can run between test scopes. Its Trace2
+    // calls must not inherit the ID of the preceding completed test.
+    if (ownership) ownership.context = { suite, testId: "between-tests" };
   });
 });
 

@@ -39,10 +39,10 @@ import { markGitDiagnosticStage } from "./git-diagnostics";
 const systemGit: GitExec = createSystemGit();
 
 function git(dir: string, args: string[]): void {
-  diagnoseSyncGit(args, dir, () => execFileSync("git", args, { cwd: dir, stdio: "ignore" }));
+  diagnoseSyncGit(args, dir, (env) => execFileSync("git", args, { cwd: dir, stdio: "ignore", env }));
 }
 function gitOut(dir: string, args: string[]): string {
-  return diagnoseSyncGit(args, dir, () => execFileSync("git", args, { cwd: dir, encoding: "utf8" })).trim();
+  return diagnoseSyncGit(args, dir, (env) => execFileSync("git", args, { cwd: dir, encoding: "utf8", env })).trim();
 }
 function fileText(dir: string, file: string): string {
   return readFileSync(join(dir, file), "utf8").replaceAll("\r\n", "\n");

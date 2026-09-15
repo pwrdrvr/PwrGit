@@ -11,7 +11,8 @@ const keys = ["core.fsmonitor", "core.hookspath", "core.attributesfile", "core.p
   "filter.lfs.process", "filter.lfs.clean", "filter.lfs.smudge", "filter.lfs.required", "maintenance.auto", "gc.auto"];
 const knownNames = new Set(["git", "git.exe", "git-lfs", "git-lfs.exe", "node", "node.exe", "sh", "sh.exe",
   "bash", "bash.exe", "cmd.exe", "ssh", "ssh.exe", "branch", "hook", "pager", "?", "_run_shell_alias_",
-  "post-checkout", "pre-commit", "post-commit", "reference-transaction", "post-merge", "core", "git-remote-https.exe"]);
+  "post-checkout", "pre-commit", "post-commit", "reference-transaction", "post-merge", "core", "git-remote-https.exe",
+  "fetch", "clone", "upload-pack", "index-pack", "pack-objects", "unpack-objects", "rev-list", "maintenance", "git-upload-pack"]);
 function safeName(value) {
   const base = String(value).replaceAll("\\", "/").split("/").at(-1).toLowerCase();
   return knownNames.has(base) ? base : `other:${hash(value)}`;
@@ -90,7 +91,9 @@ class OwnershipSession {
     } catch { this.emit({ event: "native-observer-unavailable", reason: "startup-error" }); }
   }
   begin(args, cwd, env, id, controlled = false) {
-    if (this.closed || (!controlled && !(args.length === 2 && args[0] === "branch" && args[1] === "--show-current"))) return;
+    const branch = args.length === 2 && args[0] === "branch" && args[1] === "--show-current";
+    const transfer = args[0] === "fetch" || args[0] === "clone";
+    if (this.closed || (!controlled && !branch && !transfer)) return;
     if (this.calls.length >= 256) {
       if (!this.limited) this.emit({ event: "ownership-call-limit", limit: 256 });
       this.limited = true;
@@ -106,15 +109,16 @@ class OwnershipSession {
     const environmentKeysPresent = ["GIT_EXEC_PATH", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
       "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_PAGER", "GIT_ATTR_NOSYSTEM", "GIT_LFS_SKIP_SMUDGE"]
       .filter(key => env[key] !== undefined);
-    emit({ event: "ownership-call-begin", cwdId: hash(cwd), environmentKeysPresent,
-      exactCommand: controlled ? "controlled-holder-alias" : ["git", "-C", "<fixture>", "branch", "--show-current"] });
+    emit({ event: "ownership-call-begin", cwdId: hash(cwd), environmentKeysPresent, argumentCount: args.length,
+      exactCommand: controlled ? "controlled-holder-alias" : branch ? ["git", "-C", "<fixture>", "branch", "--show-current"] : undefined,
+      command: controlled ? "controlled-alias" : branch ? "branch" : args[0] });
     return {
       callId,
       env: { ...env, GIT_TRACE2_EVENT: trace, GIT_TRACE2_CONFIG_PARAMS: keys.join(",") },
       event: (event, pid, detail = {}) => {
         emit({ event, pid, ...detail });
-        if (event === "spawn-requested" && context.targetBranchTest) this.request(callId, "spawn", pid);
-        if (["exit", "settled", "helper-flush-grace-expired", "natural-close"].includes(event)) this.flush(call);
+        if (event === "spawn-requested" && context.targetBranchTest && branch) this.request(callId, "spawn", pid);
+        if (["exit", "settled", "sync-return", "sync-throw", "helper-flush-grace-expired", "natural-close"].includes(event)) this.flush(call);
         if (event === "helper-flush-grace-expired") this.request(callId, "cutoff", pid);
       }
     };

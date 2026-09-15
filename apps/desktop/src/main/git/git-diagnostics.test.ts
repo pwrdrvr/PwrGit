@@ -13,9 +13,9 @@ import { diagnoseSyncGit } from "./test-support/diagnostic-sync";
 
 let reports: GitDiagnosticReport[] = [];
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-function enable(thresholdMs = 150, processSample = false): void {
+function enable(thresholdMs = 150, processSample = false, commandThresholdsMs?: Record<string, number>): void {
   reports = [];
-  configureGitDiagnostics({ thresholdMs, processSample, emit: (report) => {
+  configureGitDiagnostics({ thresholdMs, processSample, ...(commandThresholdsMs ? { commandThresholdsMs } : {}), emit: (report) => {
     reports.push(report);
     const directory = process.env.PWRGIT_GIT_DIAGNOSTICS_DIR;
     if (directory) {
@@ -53,13 +53,16 @@ function pipeFixture() {
 
 describe("Git lifecycle diagnostics", () => {
   it("distinguishes a live Git waiting on stdin and captures bounded OS evidence", async () => {
-    enable(100, true);
+    enable(5000, true, { other: 100 });
+    const ordinary = beginGitDiagnostic("controlled-git", ["status"], tmpdir())!;
+    expect(ordinary.snapshot().thresholdMs).toBe(5000);
+    ordinary.dispose();
     const child = spawn("git", ["hash-object", "--stdin"], { cwd: tmpdir() });
     const run = observe(child);
     try {
       await expect.poll(() => reports.some((r) => r.event === "os-process-sample"), { timeout: 4000 }).toBe(true);
       expect(reports.find((r) => r.event === "slow-trigger")).toMatchObject({
-        pid: child.pid, terminationObserved: false, exitCode: null, settled: false,
+        pid: child.pid, thresholdMs: 100, terminationObserved: false, exitCode: null, settled: false,
         streams: { stdout: { readableEnded: false }, stdin: { writableEnded: false } }
       });
       expect(run.settled()).toBe(false);

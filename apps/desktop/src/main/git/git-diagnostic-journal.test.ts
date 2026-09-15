@@ -35,9 +35,12 @@ afterEach(async () => {
 describe("synchronous Git diagnostic journal", () => {
   it("persists begin, watchdog and OS evidence while execFileSync blocks the test thread", async () => {
     const { journal, reports } = journalFixture();
-    await journal.startWatchdog(100);
+    await journal.startWatchdog(1000);
     journal.begin("blocking-call");
-    configureGitDiagnostics({ thresholdMs: 100, emit: (report) => reports.push(report), record: journal.record });
+    // The alias is classified as "other". Its shorter command threshold must
+    // reach the independent observer even while the main thread is blocked.
+    configureGitDiagnostics({ thresholdMs: 1000, commandThresholdsMs: { other: 100 },
+      emit: (report) => reports.push(report), record: journal.record });
     markGitDiagnosticStage("operation");
     const quote = (value: string): string => `'${value.replaceAll("\\", "/").replaceAll("'", "'\\''")}'`;
     const fixture = fileURLToPath(new URL("./test-support/diagnostic-block.cjs", import.meta.url));
@@ -61,7 +64,7 @@ describe("synchronous Git diagnostic journal", () => {
     expect(child.childPid).toBeGreaterThan(0);
     expect(begin).toMatchObject({ execution: "sync", stage: "operation" });
     expect(end).toMatchObject({ id: begin.id, outcome: "resolved" });
-    expect(slow).toMatchObject({ observer: "independent-js-thread", call: { id: begin.id, execution: "sync" } });
+    expect(slow).toMatchObject({ observer: "independent-js-thread", call: { id: begin.id, execution: "sync", thresholdMs: 100 } });
     expect(Number(slow.observedMonotonicMs)).toBeLessThan(Number(end.monotonicMs));
     expect(Number(sample.observedMonotonicMs)).toBeLessThan(Number(end.monotonicMs));
     if (sample.status === "sampled") {

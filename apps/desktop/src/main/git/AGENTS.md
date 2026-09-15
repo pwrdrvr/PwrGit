@@ -25,12 +25,17 @@ fail on the Windows runner, so a green local run proves nothing about them:
   Arguments, output, environment and raw cwd are deliberately excluded; cwd is
   represented by a correlation hash. A `killed` flag means a signal was sent,
   not confirmed termination. Timer lateness cannot by itself establish why the
-  event loop stalled. The two implicated suites journal every synchronous Git
+  event loop stalled. Remote and rebase-assistant fixture fetch/clone calls
+  report at 2s and retain completion timelines even below threshold. With
+  `PWRGIT_GIT_PIPE_OWNERSHIP=1`, their sanitized Trace2 records include Git's own
+  timing and child starts/exits. The two historically implicated suites journal
+  every synchronous Git
   begin/end before/after the blocking call; an independent worker writes its
   own slow-test/call snapshots and bounded OS samples while the test thread is
   blocked. Sync calls expose no ChildProcess lifecycle; missing end records are
   not exit/pipe observations. Test reports include aggregate counts/durations
-  and explicit stages, so many moderately slow calls remain visible. Local
+  and explicit stages, so many moderately slow calls remain visible. The rebase
+  suite's synchronous helpers also journal calls and use the watchdog. Local
   journals default to `test-results/git-diagnostics/`; no watchdog runs in the app.
 
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of

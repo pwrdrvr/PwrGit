@@ -6,8 +6,59 @@ import { describe, expect, it } from "vitest";
 import { startOwnership, sanitizeTrace } from "./test-support/pipe-ownership.cjs";
 import { createSystemGit } from "./test-support/system-git";
 import { ownershipMatches } from "./test-support/pipe-ownership-probe.cjs";
+import { configureGitDiagnostics, gitDiagnosticContext, type GitDiagnosticReport } from "./git-diagnostics";
+import { diagnoseSyncGit } from "./test-support/diagnostic-sync";
 
 describe("pipe ownership evidence", () => {
+  it("retains fast clone/fetch lifecycles and correlated Git child traces beyond the recent-call buffer", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pwrgit-transfer-trace-"));
+    const source = join(directory, "private-source");
+    const destination = join(directory, "private-destination");
+    const session = await startOwnership(directory);
+    const records: GitDiagnosticReport[] = [];
+    configureGitDiagnostics({ thresholdMs: 5000, retainCommands: ["fetch", "clone"],
+      emit: () => {}, record: row => records.push(row) });
+    try {
+      execFileSync("git", ["init", "--bare", "-b", "main", source], { cwd: tmpdir(), stdio: "ignore" });
+      const args = ["clone", source, destination];
+      const cloneOutput = diagnoseSyncGit(args, tmpdir(), env =>
+        execFileSync("git", args, { cwd: tmpdir(), env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+      expect(cloneOutput).toBe("");
+      const git = createSystemGit();
+      expect(await git(["fetch", "origin"], destination)).toMatchObject({ ok: true, value: { exitCode: 0 } });
+      await expect.poll(() => records.filter(row => row.event === "call-lifecycle-final").length).toBe(2);
+      for (let index = 0; index < 13; index++) expect((await git(["--version"], tmpdir())).ok).toBe(true);
+      expect((gitDiagnosticContext().recent as GitDiagnosticReport[]).some(row => row.command === "fetch")).toBe(false);
+      const clone = records.find(row => row.event === "call-lifecycle-final" && row.command === "clone")!;
+      const fetch = records.find(row => row.event === "call-lifecycle-final" && row.command === "fetch")!;
+      expect(clone).toMatchObject({ execution: "sync", settled: true, terminationObserved: null, streams: null });
+      expect(fetch).toMatchObject({ settled: true, terminationObserved: true, childCloseObserved: true, exitCode: 0 });
+      expect((fetch.timeline as { event: string }[]).map(row => row.event)).toEqual(expect.arrayContaining([
+        "spawn", "exit", "stdout-end", "stderr-end", "promise-resolved", "child-close"
+      ]));
+      await session.close();
+      const text = readFileSync(join(session.directory, "ownership.jsonl"), "utf8");
+      const rows = text.trim().split("\n").map(line => JSON.parse(line));
+      for (const call of [clone, fetch]) {
+        const traces = rows.filter(row => row.diagnosticId === call.id).map(row => row.trace).filter(Boolean);
+        expect(traces).toEqual(expect.arrayContaining([
+          expect.objectContaining({ event: "cmd_name", name: call.command }),
+          expect.objectContaining({ event: "exit", code: 0, t_abs: expect.any(Number), utc: expect.any(String) }),
+          expect.objectContaining({ event: "child_start" }),
+          expect.objectContaining({ event: "child_exit", code: 0 })
+        ]));
+      }
+      expect(rows.some(row => row.event === "sync-return" && row.diagnosticId === clone.id)).toBe(true);
+      expect(rows.filter(row => row.event === "ownership-call-begin")).toHaveLength(2);
+      expect(text).not.toMatch(/private-source|private-destination/);
+      expect(existsSync(session.privateDirectory)).toBe(false);
+    } finally {
+      configureGitDiagnostics(undefined);
+      await session.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 15000);
+
   it("requires a new pipe, opposite endpoint, known owner and write access together", () => {
     const directory = mkdtempSync(join(tmpdir(), "pwrgit-pipe-match-"));
     const root = (pipeId: string) => ({ pid: process.pid, pipeId, endpoint: "server", writeDataAccess: true });

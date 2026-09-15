@@ -6,6 +6,12 @@ The app does not enable the diagnostic scope. The Vitest setup enables it for
 `src/main/git` suites, including their shared system-Git helper and calls through
 the text, binary, and streamed-record Dugite adapters.
 
+In `remote.test.ts` and `rebase-assistant.test.ts`, local-fixture `fetch` and
+`clone` use a two-second reporting threshold. These commands retain their
+settlement and final observed lifecycle in the journal even below that
+threshold, independently of the rolling 12-call buffer. Test-level and other
+command thresholds remain five seconds. No production thresholds change.
+
 ## Reading the reports
 
 `[git-diagnostic]` lines contain JSON. Reports and call journals are appended
@@ -15,13 +21,17 @@ Linux and Windows unit-test CI jobs upload that directory even on failure.
 The controlled fixtures also write their reports there on successful runs.
 
 `calls-*.jsonl` contains compact `scope-begin`, `stage`, `call-begin`, `call-end`,
-and `scope-end` records, including fast calls. `call-begin` is appended before
+and `scope-end` records, including fast calls. Selected fetch/clone calls also
+have `call-end.lifecycle` and `call-lifecycle-final`; `observationEnd` says
+whether close completed or observation ended at scope cleanup/the existing
+observation deadline. `call-begin` is appended before
 the actual invocation. `call-end` follows return/throw; `scope-end` contains the
 whole test's accounting, not only the last 12 calls. Boundaries are not printed
 to stderr during normal fast execution. Each journal has one writer.
 
 `watchdog-*.jsonl` is written by an independent JavaScript worker, started and
-awaited before fixtures in `remote.test.ts` and `partial-staging.test.ts`. It
+awaited before fixtures in `remote.test.ts`, `partial-staging.test.ts` and
+`rebase-assistant.test.ts`. It
 can record elapsed test time, the last known stage, cumulative command totals,
 outstanding synchronous calls, and bounded OS process samples while the test's
 thread is blocked in `execFileSync`. It uses a separate file because worker
@@ -78,6 +88,7 @@ they cannot reliably attribute a detached pipe holder after its parent exits.
 All synchronous Git call sites in `remote.test.ts` and `partial-staging.test.ts`
 are instrumented, including expected-error and binary fixture reads. The three
 historically implicated tests also mark setup/operation/verification stages.
+The `git`/`gitOut` fixture helpers in `rebase-assistant.test.ts` are instrumented.
 Synchronous calls elsewhere remain outside this accounting unless wrapped.
 The test's own thread cannot report during a blocking call; the independent
 watchdog can. A starved watchdog, filesystem failure, or abruptly killed process
@@ -191,7 +202,8 @@ the launcher, LFS, nor another helper can be identified from that old artifact.
 The opt-in `PWRGIT_GIT_PIPE_OWNERSHIP=1` follow-up adds:
 
 - Sanitized [Git Trace2](https://git-scm.com/docs/api-trace2) for the exact branch
-  operation in `remote.test.ts`: session PID chains, executable identity,
+  operation and local fetch/clone calls in `remote.test.ts` and
+`rebase-assistant.test.ts`: session PID chains, executable identity,
   `child_start`/`child_exit`/`child_ready`, exec, exit, config scope and presence.
   Child IDs correlate start/exit; a child exit PID of -1 denotes a failed spawn,
   not a process that ran. Only a fixed set of hooks/fsmonitor/LFS/pager/cache/auto
@@ -340,3 +352,54 @@ names, opposite endpoints and a write-capable holder. Missing/incomplete
 baseline inventories cannot establish ownership. Kernel-object address reuse
 can conservatively exclude a new endpoint. The positive-control result on
 Windows remains the validation gate for this revision.
+
+
+### Completed handle scans and slower transfer calls
+
+Head `d0f07823` passed [CI run 34936372061](https://github.com/pwrdrvr/PwrGit/actions/runs/34936372061).
+The [Windows artifact](https://github.com/pwrdrvr/PwrGit/actions/runs/34936372061/artifacts/10383636821)
+contains completed native scans (22ms baseline, 28ms controlled post-exit, 42ms
+real spawn sample). The controlled holder, `node.exe` PID 5484, held write-capable
+client handles for the same two pipe names as Node PID 5180's server handles,
+after Git PID 5532 exited. Natural EOF followed the holder's release. This is
+positive ownership evidence in the intentional control. Baseline access failures
+still prevent the automatic matcher from proving new-pipe origin, and delayed
+WMI discovery means the control's independently supplied holder PID matters.
+No real grace expiry recurred; the 64 branch probes had a 6.795ms maximum
+exit-to-close interval. The historical real writer, if any, remains unidentified.
+
+The earlier `2ed6fc94` Windows artifact also retains a real rebase-assistant
+`fetch`, diagnostic ID `8484-77`, in a whole-test report. Its timeline is:
+
+| Event | Milliseconds after invocation |
+| --- | ---: |
+| Node spawn notification | 2.636 |
+| stderr end | 4,788.014 |
+| stdout end | 4,788.545 |
+| Node exit notification, code 0 | 4,789.653 |
+| Promise resolved | 4,790.006 |
+| Child close | 4,790.062 |
+
+This call did not spend seconds draining after Node's exit notification. The
+records do not establish whether Git itself was slow or Node received its
+notifications late. The earlier 5,904ms synchronous clone similarly lacked Git's
+internal timing. Selected local fetch/clone calls now record sanitized Trace2
+start/exit and child-start/child-exit timing, correlated by diagnostic ID with
+Node lifecycle or synchronous begin/return records. Git's `t_abs` measures its
+own runtime; UTC timestamps help compare processes but are subject to wall-clock
+adjustments. Trace2 cannot measure time before its Git executable starts, and a
+Git-for-Windows launcher's lifetime can differ from the traced Git process.
+
+The two-second command trigger prompts earlier observation; completed timelines
+are retained even when no trigger fires. A nested suite's setup can run outside
+a per-test scope: its ownership records are labeled `between-tests`, without
+claiming a diagnostic ID or attributing it to the previous test. Raw Trace2 is
+sanitized on return/exit and suite close, so abrupt termination during a blocking
+call may leave only the already-persisted boundary and independent watchdog data.
+
+Local validation with tracing enabled passed all 123 focused tests and repository
+lint. The remote suite captured 63 clone, 51 fetch and 36 branch traces; the rebase
+suite captured six fetch traces. No session reached the 256-call cap. All 119
+in-scope transfer calls retained final observations; the extra remote fetch ran
+in nested suite setup. Local transfer durations stayed below 100ms in that run.
+These are harness checks, not a reproduction of the Windows multi-second delay.
