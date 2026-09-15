@@ -107,7 +107,6 @@ function formatLogLine(message: LogMessage): string {
 // with a file hook supplying the app's Logs window exactly once per message.
 // Keep PwrGit's debug collection and separate ring quota intact.
 electronLog.transports.console.level = false;
-electronLog.transports.console.format = ({ message }) => [formatLogLine(message)];
 electronLog.transports.file.level = "debug";
 electronLog.transports.file.maxSize = MAX_LOG_FILE_BYTES;
 electronLog.transports.file.format = ({ message }) => [formatLogLine(message)];

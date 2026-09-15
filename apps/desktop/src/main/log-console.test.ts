@@ -7,6 +7,7 @@ let stop: (() => void) | undefined;
 afterEach(() => {
   stop?.();
   stop = undefined;
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   _resetLogsForTests();
@@ -24,12 +25,42 @@ describe("app console logging", () => {
     const entries = readLogSnapshot().entries;
     expect(write.mock.calls.map(([options]) => options.message.level)).toEqual(["info", "warn", "error"]);
     expect(write.mock.calls.map(([options]) => options.message.data)).toEqual(
-      entries.slice(1).map((entry) => [entry.line])
+      entries.slice(1).map((entry) => [expect.stringMatching(
+        new RegExp(`^\\d{2}:\\d{2}:\\d{2}\\.\\d{3} \\(fixture\\) [›>] message at ${entry.level}$`)
+      )])
     );
     expect(readLogSnapshot().entries).toEqual(entries);
     expect(electronLog.transports.file.level).toBe("debug");
     if (electronLog.transports.ipc) expect(electronLog.transports.ipc.level).toBe(false);
     expect(electronLog.transports.remote.level).toBe(false);
+  });
+
+  it("uses the default colored prefix in a terminal and keeps the Logs window plain", () => {
+    vi.stubEnv("VITEST", "false");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 14, 16, 32, 25, 627));
+    const transport = electronLog.transports.console;
+    const previousStyles = transport.useStyles;
+    const write = vi.spyOn(transport, "writeFn").mockImplementation(() => {});
+    stop = initLogConsole();
+    try {
+      transport.useStyles = true;
+      logMain("info", "app", "PwrGit starting");
+      logMain("warn", "app", "fixture warning");
+      const lines = write.mock.calls.map(([options]) => options.message.data.join(" "));
+      expect(lines[0]).toContain("\u001b[36m16:32:25.627 (app)\u001b[0m");
+      expect(lines[1]).toContain("\u001b[33m16:32:25.627 (app)\u001b[0m");
+      expect(readLogSnapshot().entries[0].line).toBe(
+        "[2026-09-14 16:32:25.627] [info ] (app) PwrGit starting"
+      );
+      transport.useStyles = false;
+      logMain("info", "app", "redirected output");
+      expect(write.mock.calls[2][0].message.data.join(" ")).toMatch(
+        /^16:32:25\.627 \(app\) [›>] redirected output$/
+      );
+    } finally {
+      transport.useStyles = previousStyles;
+    }
   });
 
   it("keeps unit tests quiet", () => {
