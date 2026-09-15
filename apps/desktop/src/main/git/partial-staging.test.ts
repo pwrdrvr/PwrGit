@@ -24,6 +24,7 @@ import {
 } from "./partial-staging";
 import { createSystemGit, createSystemGitBinary } from "./test-support/system-git";
 import { diagnoseSyncGit } from "./test-support/diagnostic-sync";
+import { markGitDiagnosticStage } from "./git-diagnostics";
 
 const systemGit: GitExec = createSystemGit();
 
@@ -134,6 +135,7 @@ describe("partial staging with a real Git index", () => {
   let repo: string;
 
   beforeEach(() => {
+    markGitDiagnosticStage("setup");
     root = mkdtempSync(join(tmpdir(), "pwrgit-partial-stage-test-"));
     repo = join(root, "repo");
     mkdirSync(repo);
@@ -141,9 +143,13 @@ describe("partial staging with a real Git index", () => {
     git(repo, "config", "user.name", "PwrGit Test");
     git(repo, "config", "user.email", "pwrgit@example.com");
     git(repo, "config", "core.autocrlf", "false");
+    markGitDiagnosticStage("test");
   });
 
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => {
+    markGitDiagnosticStage("cleanup");
+    rmSync(root, { recursive: true, force: true });
+  });
 
   const commitFile = (contents: string): void => {
     writeFileSync(join(repo, "file.txt"), contents);
@@ -247,6 +253,7 @@ describe("partial staging with a real Git index", () => {
 
   it("stages arbitrary added lines while leaving the rest in the worktree", async () => {
     for (let seed = 0; seed < 8; seed += 1) {
+      markGitDiagnosticStage("setup");
       if (seed === 0) {
         commitFile(Array.from({ length: 12 }, (_, i) => `base-${i}`).join("\n") + "\n");
       } else {
@@ -262,6 +269,7 @@ describe("partial staging with a real Git index", () => {
         if ((i + seed) % 3 === 0) expected.push(inserted);
       }
       writeFileSync(join(repo, "file.txt"), `${working.join("\n")}\n`);
+      markGitDiagnosticStage("operation");
       const diff = await partialFileDiff(systemGit, systemGitBinary, repo, "file.txt", false);
       expect(diff.ok).toBe(true);
       if (!diff.ok) continue;
@@ -284,6 +292,7 @@ describe("partial staging with a real Git index", () => {
           chosen
         )
       ).toEqual(ok(undefined));
+      markGitDiagnosticStage("verification");
       expect(git(repo, "show", ":file.txt")).toBe(expected.join("\n"));
     }
   });
@@ -373,9 +382,8 @@ describe("partial staging with a real Git index", () => {
     );
     git(repo, "add", "file.txt");
     git(repo, "commit", "-m", "legacy encoding");
-    const indexedBefore = execFileSync("git", ["show", ":file.txt"], {
-      cwd: repo
-    });
+    const indexedBefore = diagnoseSyncGit(["show", ":file.txt"], repo, () =>
+      execFileSync("git", ["show", ":file.txt"], { cwd: repo }));
     writeFileSync(
       join(repo, "file.txt"),
       Buffer.from([0x6e, 0x65, 0x77, 0xfe, 0x0a])
@@ -407,7 +415,7 @@ describe("partial staging with a real Git index", () => {
       error: { code: "partial_unavailable" }
     });
     expect(
-      execFileSync("git", ["show", ":file.txt"], { cwd: repo })
+      diagnoseSyncGit(["show", ":file.txt"], repo, () => execFileSync("git", ["show", ":file.txt"], { cwd: repo }))
     ).toEqual(indexedBefore);
   });
 

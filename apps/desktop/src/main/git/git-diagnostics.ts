@@ -12,7 +12,37 @@ export type GitDiagnosticScope = {
   thresholdMs: number;
   emit: (report: GitDiagnosticReport) => void;
   processSample?: boolean;
+  /** Compact call boundaries. Test sinks persist these before blocking work. */
+  record?: (report: GitDiagnosticReport) => void;
 };
+
+export type GitDiagnosticStage = "test" | "setup" | "operation" | "verification" | "cleanup";
+type Accounting = { started: number; completed: number; rejected: number; sumMs: number; maxMs: number };
+const emptyAccounting = (): Accounting => ({ started: 0, completed: 0, rejected: 0, sumMs: 0, maxMs: 0 });
+let accounting = emptyAccounting();
+let bySource: Record<string, Accounting> = {};
+let byCommand: Record<string, Accounting> = {};
+let stage: GitDiagnosticStage = "test";
+let stageStarted = performance.now();
+let stages: Partial<Record<GitDiagnosticStage, Accounting & { wallMs: number }>> = {};
+
+function stageAccounting(name: GitDiagnosticStage) {
+  return stages[name] ??= { ...emptyAccounting(), wallMs: 0 };
+}
+
+export function markGitDiagnosticStage(next: GitDiagnosticStage): void {
+  if (!scope) return;
+  stageAccounting(stage).wallMs += performance.now() - stageStarted;
+  stage = next;
+  stageStarted = performance.now();
+  stageAccounting(stage);
+  record({ event: "stage", stage, monotonicMs: monotonicMs(), aggregate: { ...accounting } });
+}
+
+function monotonicMs(): number { return Number(process.hrtime.bigint()) / 1e6; }
+function record(report: GitDiagnosticReport): void {
+  try { scope?.record?.(report); } catch { /* Diagnostics never replace a result. */ }
+}
 
 let scope: GitDiagnosticScope | undefined;
 const active = new Set<GitDiagnostic>();
@@ -25,10 +55,21 @@ export function configureGitDiagnostics(value: GitDiagnosticScope | undefined): 
   active.clear();
   recent.length = 0;
   scope = value;
+  accounting = emptyAccounting();
+  bySource = {};
+  byCommand = {};
+  stages = {};
+  stage = "test";
+  stageStarted = performance.now();
 }
 
 export function gitDiagnosticContext(): GitDiagnosticReport {
-  return { active: [...active].map((item) => item.snapshot()), recent: [...recent] };
+  const stageTotals = Object.fromEntries(Object.entries(stages).map(([name, totals]) =>
+    [name, { ...totals, wallMs: totals.wallMs + (name === stage ? performance.now() - stageStarted : 0) }]));
+  return { active: [...active].map((item) => item.snapshot()), recent: [...recent],
+    aggregate: { ...accounting }, bySource: structuredClone(bySource),
+    byCommand: structuredClone(byCommand), stage, stages: stageTotals,
+    accountingScope: "instrumented calls only; sumMs adds durations and can overlap for concurrent calls" };
 }
 
 // Never retain arguments, URLs, config values, ref/file names, output, or env.
@@ -110,10 +151,21 @@ export class GitDiagnostic {
   private closed = false;
   private disposed = false;
   private timerLatenessMs: number | null = null;
+  private readonly callStage = stage;
+  private readonly callAccounting: Accounting[];
+  private readonly sync: boolean;
 
   constructor(private readonly settings: GitDiagnosticScope, private readonly identity: GitDiagnosticReport) {
+    this.sync = identity.source === "system-git-sync";
+    const source = String(identity.source);
+    const command = String(identity.command);
+    this.callAccounting = [accounting, bySource[source] ??= emptyAccounting(),
+      byCommand[command] ??= emptyAccounting(), stageAccounting(this.callStage)];
+    for (const totals of this.callAccounting) totals.started++;
     active.add(this);
     this.event("invocation");
+    this.recordBoundary("call-begin");
+    if (this.sync) return; // A same-thread timer cannot inspect execFileSync.
     this.timer = setTimeout(() => {
       this.timerLatenessMs = Math.max(0, this.elapsed() - settings.thresholdMs);
       this.slow = true;
@@ -126,6 +178,13 @@ export class GitDiagnostic {
   }
 
   private elapsed(): number { return performance.now() - this.started; }
+  private recordBoundary(event: string, outcome?: string): void {
+    try {
+      this.settings.record?.({ event, id: this.id, ...this.identity, stage: this.callStage,
+        execution: this.sync ? "sync" : "async", monotonicMs: monotonicMs(),
+        elapsedMs: this.elapsed(), thresholdMs: this.settings.thresholdMs, outcome, aggregate: { ...accounting } });
+    } catch { /* Best effort, including a failing filesystem sink. */ }
+  }
   private emit(report: GitDiagnosticReport): void {
     // Diagnostic failures must never replace a Git result or throw in a timer.
     try { this.settings.emit(report); } catch { /* Best effort. */ }
@@ -136,10 +195,12 @@ export class GitDiagnostic {
       timerLatenessMs: this.timerLatenessMs, settled: this.settled,
       pid: child?.pid, exitCode: child?.exitCode, signalCode: child?.signalCode,
       killed: child?.killed, connected: child?.connected,
-      terminationObserved: this.events.some((item) => item.event === "exit"),
-      childCloseObserved: this.closed, bytes: { ...this.bytes }, lastActivityMs: { ...this.lastActivityMs },
-      byteCountBasis: "delivered chunks; UTF-8 byte length for decoded strings",
-      streams: { stdin: streamState(child?.stdin), stdout: streamState(child?.stdout), stderr: streamState(child?.stderr) },
+      execution: this.sync ? "sync" : "async", stage: this.callStage,
+      terminationObserved: this.sync ? null : this.events.some((item) => item.event === "exit"),
+      childCloseObserved: this.sync ? null : this.closed,
+      bytes: this.sync ? null : { ...this.bytes }, lastActivityMs: this.sync ? null : { ...this.lastActivityMs },
+      byteCountBasis: this.sync ? "not observed for synchronous calls" : "delivered chunks; UTF-8 byte length for decoded strings",
+      streams: this.sync ? null : { stdin: streamState(child?.stdin), stdout: streamState(child?.stdout), stderr: streamState(child?.stderr) },
       timeline: [...this.events] };
   }
   private report(event: string): void { this.emit({ event, ...this.snapshot() }); }
@@ -191,12 +252,20 @@ export class GitDiagnostic {
     if (this.settled || this.disposed) return;
     this.settled = true;
     clearTimeout(this.timer);
+    const duration = this.elapsed();
+    for (const totals of this.callAccounting) {
+      totals.completed++;
+      totals.rejected += outcome === "rejected" ? 1 : 0;
+      totals.sumMs += duration;
+      totals.maxMs = Math.max(totals.maxMs, duration);
+    }
+    this.recordBoundary("call-end", outcome);
     // A synchronous call or starved loop may settle before its overdue timer.
     if (!this.slow && this.elapsed() >= this.settings.thresholdMs) {
       this.slow = true;
       this.report("slow-settlement-before-timer");
     }
-    this.event(`promise-${outcome}`);
+    this.event(`${this.sync ? "call" : "promise"}-${outcome}`);
     recent.push(this.snapshot());
     if (recent.length > 12) recent.shift();
     if (!this.child || this.closed) this.dispose();

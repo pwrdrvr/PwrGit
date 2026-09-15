@@ -3,15 +3,19 @@ import { basename, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterAll, beforeAll, beforeEach, expect } from "vitest";
 import { configureGitDiagnostics, gitDiagnosticContext, type GitDiagnosticReport } from "../git-diagnostics";
+import { GitDiagnosticJournal } from "./diagnostic-journal";
 
 const thresholdMs = 5000;
 let testId: string | undefined;
 let suite: string | undefined;
 let file: string | undefined;
 let artifactFailed = false;
+let journal: GitDiagnosticJournal | undefined;
+
+const settings = () => ({ thresholdMs, emit, ...(journal ? { record: journal.record } : {}) });
 
 function emit(report: GitDiagnosticReport): void {
-  const line = JSON.stringify({ schema: 1, workerPid: process.pid, suite, testId, ...report });
+  const line = JSON.stringify({ schema: 2, workerPid: process.pid, suite, testId, ...report });
   // Each report is written immediately, not deferred to afterEach (which may
   // never run). A worker has its own file; no cross-worker append contention.
   if (file) {
@@ -24,26 +28,33 @@ function emit(report: GitDiagnosticReport): void {
   process.stderr.write(`[git-diagnostic] ${line}\n`);
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   const path = expect.getState().testPath?.replaceAll("\\", "/") ?? "";
   // Local temp repositories and controlled subprocess fixtures, not network
   // clones or all of production. No configuration is installed in the app.
   if (!path.includes("/src/main/git/")) return;
   suite = basename(path);
-  const directory = process.env.PWRGIT_GIT_DIAGNOSTICS_DIR;
-  if (directory) {
-    try {
-      mkdirSync(directory, { recursive: true });
-      file = join(directory, `git-${process.pid}-${process.env.VITEST_WORKER_ID ?? "0"}.jsonl`);
-    } catch { process.stderr.write("[git-diagnostic] artifact directory unavailable\n"); }
-  }
-  configureGitDiagnostics({ thresholdMs, emit });
+  const directory = process.env.PWRGIT_GIT_DIAGNOSTICS_DIR ?? join(process.cwd(), "test-results", "git-diagnostics");
+  try {
+    mkdirSync(directory, { recursive: true });
+    file = join(directory, `git-${process.pid}-${process.env.VITEST_WORKER_ID ?? "0"}.jsonl`);
+    journal = new GitDiagnosticJournal(directory, suite, emit);
+    // The historically implicated suites use synchronous fixture Git. Await
+    // readiness here so their first blocking call is independently observable.
+    if (suite === "remote.test.ts" || suite === "partial-staging.test.ts") {
+      await journal.startWatchdog(thresholdMs);
+    }
+    journal.begin("suite-setup");
+  } catch { process.stderr.write("[git-diagnostic] artifact directory unavailable\n"); }
+  configureGitDiagnostics(settings());
 });
 
 beforeEach((context) => {
   if (!suite) return;
+  journal?.end(gitDiagnosticContext());
   testId = context.task.id;
-  configureGitDiagnostics({ thresholdMs, emit });
+  journal?.begin(testId);
+  configureGitDiagnostics(settings());
   const started = performance.now();
   let fired = false;
   const timer = setTimeout(() => {
@@ -60,9 +71,16 @@ beforeEach((context) => {
       emit({ event: "test-finished", elapsedMs, timerFired: fired,
         state: context.task.result?.state, ...gitDiagnosticContext() });
     }
+    journal?.end({ ...gitDiagnosticContext(), elapsedMs, state: context.task.result?.state });
     configureGitDiagnostics(undefined);
     testId = undefined;
   });
 });
 
-afterAll(() => { if (suite) configureGitDiagnostics(undefined); });
+afterAll(async () => {
+  if (suite) {
+    journal?.end(gitDiagnosticContext());
+    configureGitDiagnostics(undefined);
+    await journal?.close();
+  }
+});
