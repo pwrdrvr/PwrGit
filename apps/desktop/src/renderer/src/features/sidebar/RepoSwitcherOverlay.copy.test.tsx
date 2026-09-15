@@ -44,52 +44,95 @@ async function key(key: string, modifiers: KeyboardEventInit = {}) {
   await act(async () => container.querySelector("input")!.dispatchEvent(event));
   return event;
 }
+async function openRow(index: number) {
+  const trigger = container.querySelectorAll<HTMLButtonElement>(".overlay-result__actions")[index]!;
+  await act(async () => trigger.click());
+}
+async function choose(label: string) {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    .find((button) => button.textContent === label)!;
+  expect(button).toBeDefined();
+  await act(async () => button.click());
+}
+const menuText = () => document.querySelector('[role="menu"]')?.textContent;
+
 it.each([
   ["repo", "Copy repo name", "demo"],
   ["local_branch", "Copy branch name", "feature/search"],
   ["remote_branch", "Copy branch name", "feature/search"],
   ["worktree", "Copy branch name", "feature/search"]
-] as const)("copies the %s name without opening or closing the palette", async (kind, label, name) => {
-  await render([{ ...hit, kind, name, remoteRef: "origin/feature/search" }]);
-  const button = [...container.querySelectorAll("button")].find((button) => button.textContent?.startsWith(label))!;
-  await act(async () => button.click());
+] as const)("copies the %s row without opening or closing the palette", async (kind, label, name) => {
+  await render([hit, { ...hit, kind, name, repoId: "other", remoteRef: "origin/feature/search" }]);
+  await openRow(1);
+  await choose(label);
   expect(mocks.copyText).toHaveBeenCalledWith(name);
   expect(onPick).not.toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();
-  expect(container.querySelector('[role="status"]')?.textContent).toBe("Copied");
+  const rows = container.querySelectorAll('[role="option"]');
+  expect(rows[0]?.querySelector('[role="status"]')).toBeNull();
+  expect(rows[1]?.querySelector('[role="status"]')?.textContent).toBe("Copied");
   expect(document.activeElement).toBe(container.querySelector("input"));
+  expect(document.querySelector('[role="menu"]')).toBeNull();
 });
-it.each(["darwin", "win32", "linux"])("copies the selected result and its exact path on %s", async (platform) => {
+it("copies the clicked worktree's exact path and PR URL, independent of prior selection", async () => {
   const path = "C:\\Repos\\demo space\\worktree";
-  await render([hit, { ...hit, kind: "worktree", worktreeId: "linked", name: "feature/search", path }], platform);
-  await key("ArrowDown");
-  const modifier = platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
-  await key("c", { ...modifier, shiftKey: true });
-  expect(mocks.copyText).toHaveBeenLastCalledWith("feature/search");
-  await key(platform === "darwin" ? "ç" : "c", { ...modifier, altKey: true, code: "KeyC" });
+  const url = "https://example.com/atlas/pull/42";
+  await render([hit, {
+    ...hit, kind: "worktree", worktreeId: "linked", name: "feature/search", path,
+    pr: { number: 42, url, title: "Search", state: "open", isDraft: false }
+  }]);
+  await openRow(1);
+  expect(menuText()).toContain("Copy branch name");
+  expect(menuText()).toContain("Copy worktree path");
+  expect(menuText()).toContain("Copy PR URL");
+  await choose("Copy worktree path");
   expect(mocks.copyText).toHaveBeenLastCalledWith(path);
-  expect((await key("c", modifier)).defaultPrevented).toBe(false);
-  expect(mocks.copyText).toHaveBeenCalledTimes(2);
-  await key("Enter");
-  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ worktreeId: "linked" }));
+  await openRow(1);
+  await choose("Copy PR URL");
+  expect(mocks.copyText).toHaveBeenLastCalledWith(url);
 });
-it("copies the repository path and reports clipboard failure", async () => {
+it("copies the repository path and reports clipboard failure on that row", async () => {
   await render([hit]);
   mocks.copyText.mockRejectedValueOnce(new Error("denied"));
-  await key("c", { metaKey: true, altKey: true });
+  await openRow(0);
+  await choose("Copy repo path");
   expect(mocks.copyText).toHaveBeenCalledWith(hit.path);
-  expect(container.querySelector('[role="status"]')?.textContent).toBe("Could not copy. Try again.");
+  expect(container.querySelector('[role="option"] [role="status"]')?.textContent).toBe("Could not copy. Try again.");
 });
-it("offers only a worktree path for detached HEAD and no worktree path for branch-only hits", async () => {
+it("offers only a path for detached worktrees and only a branch name for branch-only hits", async () => {
   await render([{ ...hit, kind: "worktree", name: "detached@abcdef0" }, { ...hit, kind: "remote_branch", name: "feature/search" }]);
-  expect(container.querySelector(".overlay-copy-actions")?.textContent).toContain("Copy worktree path");
-  expect(container.querySelector(".overlay-copy-actions")?.textContent).not.toContain("Copy branch name");
-  await key("ArrowDown");
-  expect(container.querySelector(".overlay-copy-actions")?.textContent).not.toContain("path");
+  await openRow(0);
+  expect(menuText()).toBe("Copy worktree path");
+  await choose("Copy worktree path");
+  await openRow(1);
+  expect(menuText()).toBe("Copy branch name");
 });
-it("has no copy action when there are no results", async () => {
+it("reaches row actions with Tab and lets menu arrows and Escape act without navigating", async () => {
+  await render([hit, { ...hit, repoId: "second", name: "second" }]);
+  await key("ArrowDown");
+  await key("Tab");
+  const trigger = container.querySelectorAll<HTMLButtonElement>(".overlay-result__actions")[1]!;
+  expect(document.activeElement).toBe(trigger);
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  await act(async () => trigger.dispatchEvent(enter));
+  expect(enter.defaultPrevented).toBe(false);
+  expect(onPick).not.toHaveBeenCalled();
+  // jsdom does not synthesize a button's native keyboard click.
+  await act(async () => trigger.click());
+  expect(document.activeElement?.textContent).toBe("Copy repo name");
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+  expect(document.activeElement?.textContent).toBe("Copy repo path");
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(container.querySelector("input"));
+  await key("Enter");
+  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ name: "second" }));
+});
+it("leaves normal copy alone and has no actions without results", async () => {
   await render([]);
-  await key("c", { metaKey: true, shiftKey: true });
+  expect((await key("c", { metaKey: true })).defaultPrevented).toBe(false);
   expect(mocks.copyText).not.toHaveBeenCalled();
+  expect(container.querySelector(".overlay-result__actions")).toBeNull();
   expect(container.querySelector(".overlay-copy-actions")).toBeNull();
 });

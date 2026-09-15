@@ -13287,29 +13287,7 @@ button.agent-auth-node {
   outline-offset: 2px;
 }
 
-.overlay-copy-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-top: 1px solid var(--border-subtle);
-  color: var(--text-subtle);
-  font: 500 11px/1.4 var(--font-sans);
-}
-.overlay-copy-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  cursor: pointer;
-}
-.overlay-copy-actions button:hover {
-  background: var(--accent-tint);
-  color: var(--text-primary);
+.overlay-result__actions {
+  flex-shrink: 0;
+  padding: 0;
 }
