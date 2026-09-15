@@ -555,6 +555,54 @@ describe("auto updater", () => {
     expect(addAuthHeaderMock).toHaveBeenCalledWith("token test-token");
   });
 
+  describe.each(["darwin", "win32"] as const)("stable promotion on %s", (platform) => {
+    describe.each(["1.1.0-alpha.7", "1.1.0-beta.5"])("installed %s", (installed) => {
+      describe.each(["stable", "beta"] as const)("%s train", (train) => {
+        it.each(["latest", "prerelease"] as const)("promotes on %s without changing selection", async (channel) => {
+          setPlatform(platform);
+          resolveTrain = train;
+          resolveChannel = channel;
+          autoUpdaterMock.currentVersion = { version: installed };
+          const final = githubRelease("v1.1.0", {
+            assets: platform === "darwin" ? macUpdateAssets("1.1.0") : [
+              { name: "latest.yml", state: "uploaded" },
+              { name: "PwrGit-1.1.0-setup.exe", state: "uploaded" }
+            ]
+          });
+          mockGitHubReleases([
+            githubRelease("v1.1.0-beta.5", { prerelease: true }),
+            final,
+            githubRelease("v1.1.0-alpha.7", { prerelease: true })
+          ]);
+          checkForUpdatesMock.mockResolvedValue({
+            isUpdateAvailable: true,
+            updateInfo: { version: "1.1.0" }
+          });
+          const updater = await startUpdater();
+          await vi.waitFor(() => expect(checkForUpdatesMock).toHaveBeenCalledTimes(1));
+          await vi.advanceTimersByTimeAsync(updater.APP_UPDATE_CHECK_INTERVAL_MS);
+          expect(checkForUpdatesMock).toHaveBeenCalledTimes(2);
+          for (const trigger of ["manual", "menu"] as const) {
+            await expect(updater.checkForAppUpdatesNow(trigger)).resolves.toEqual({
+              status: "available", version: "1.1.0"
+            });
+          }
+          expect(checkForUpdatesMock).toHaveBeenCalledTimes(4);
+          expect(setFeedURLMock).toHaveBeenLastCalledWith({
+            provider: "generic",
+            url: "https://github.com/pwrdrvr/PwrGit/releases/download/v1.1.0/"
+          });
+          const versions = await updater.readAppUpdateReleaseVersions();
+          expect(versions.beta.latest.version).toBe("v1.1.0");
+          expect(versions.beta.prerelease.version).toBe("v1.1.0");
+          expect(autoUpdaterMock.allowPrerelease).toBe(train === "beta" || channel === "prerelease");
+          updateEventHandlers.get("update-downloaded")?.({ version: "1.1.0" });
+          expect(updater.readAppUpdateStatus()).toEqual({ status: "downloaded", version: "1.1.0" });
+        });
+      });
+    });
+  });
+
   it("pins the beta train to the smoke-checked main-train tag", async () => {
     resolveTrain = "beta";
     resolveChannel = "latest";
@@ -1132,8 +1180,8 @@ describe("selectChannelReleases", () => {
     const selected = selectChannelReleases(releases);
     expect(selected.stableLatest?.tag_name).toBe("v1.0.0-beta.8");
     expect(selected.stablePrerelease?.tag_name).toBe("v1.0.0-beta.41");
-    expect(selected.betaLatest).toBeUndefined();
-    expect(selected.betaPrerelease).toBeUndefined();
+    expect(selected.betaLatest?.tag_name).toBe("v1.0.0-beta.8");
+    expect(selected.betaPrerelease?.tag_name).toBe("v1.0.0-beta.8");
   });
 
   it("promotes a same-core alpha to beta latest once the beta tag exists", async () => {
@@ -1160,8 +1208,8 @@ describe("selectChannelReleases", () => {
     const selected = selectChannelReleases(releases);
     expect(selected.stableLatest?.tag_name).toBe("v1.0.1");
     expect(selected.stablePrerelease?.tag_name).toBe("v1.0.1");
-    expect(selected.betaLatest).toBeUndefined();
-    expect(selected.betaPrerelease).toBeUndefined();
+    expect(selected.betaLatest?.tag_name).toBe("v1.0.1");
+    expect(selected.betaPrerelease?.tag_name).toBe("v1.0.1");
   });
 
   it("does not advertise leftover same-core betas after that train becomes Latest", async () => {
@@ -1174,8 +1222,8 @@ describe("selectChannelReleases", () => {
     ];
     const selected = selectChannelReleases(releases);
     expect(selected.stableLatest?.tag_name).toBe("v1.1.0");
-    expect(selected.betaLatest).toBeUndefined();
-    expect(selected.betaPrerelease).toBeUndefined();
+    expect(selected.betaLatest?.tag_name).toBe("v1.1.0");
+    expect(selected.betaPrerelease?.tag_name).toBe("v1.1.0");
   });
 
   it("keeps a newer main-train alpha on Beta after Stable is promoted", async () => {
@@ -1187,7 +1235,7 @@ describe("selectChannelReleases", () => {
     ];
     const selected = selectChannelReleases(releases);
     expect(selected.stableLatest?.tag_name).toBe("v1.1.0");
-    expect(selected.betaLatest).toBeUndefined();
+    expect(selected.betaLatest?.tag_name).toBe("v1.1.0");
     expect(selected.betaPrerelease?.tag_name).toBe("v1.2.0-alpha.1");
   });
 
@@ -1198,8 +1246,30 @@ describe("selectChannelReleases", () => {
       { tag_name: "v1.0.0", prerelease: false, draft: false }
     ];
     const selected = selectChannelReleases(releases);
-    expect(selected.betaLatest).toBeUndefined();
+    expect(selected.betaLatest?.tag_name).toBe("v1.0.0");
     expect(selected.betaPrerelease?.tag_name).toBe("v1.1.0-alpha.7");
+  });
+
+  it("prefers newer beta and alpha releases over the stable fallback", async () => {
+    const { selectChannelReleases } = await import("./auto-updater");
+    const selected = selectChannelReleases([
+      githubRelease("v1.1.0"),
+      githubRelease("v1.3.0-alpha.1", { prerelease: true }),
+      githubRelease("v1.2.0-beta.1", { prerelease: true })
+    ]);
+    expect(selected.betaLatest?.tag_name).toBe("v1.2.0-beta.1");
+    expect(selected.betaPrerelease?.tag_name).toBe("v1.3.0-alpha.1");
+    expect(selected.stableLatest?.tag_name).toBe("v1.1.0");
+  });
+
+  it("leaves unavailable slots empty when there is no stable fallback", async () => {
+    const { selectChannelReleases } = await import("./auto-updater");
+    expect(selectChannelReleases([]).betaPrerelease).toBeUndefined();
+    const selected = selectChannelReleases([
+      githubRelease("v1.2.0-alpha.1", { prerelease: true })
+    ]);
+    expect(selected.betaLatest).toBeUndefined();
+    expect(selected.betaPrerelease?.tag_name).toBe("v1.2.0-alpha.1");
   });
 
   it("ignores drafts in both channels", async () => {
@@ -1224,6 +1294,34 @@ describe("selectAppUpdateReleases", () => {
       configurable: true,
       value: originalPlatform
     });
+  });
+
+  it.each(["darwin", "win32"] as const)("uses only eligible promotion assets on %s", async (platform) => {
+    Object.defineProperty(process, "platform", { configurable: true, value: platform });
+    const { selectAppUpdateReleases } = await import("./auto-updater");
+    const assets = platform === "darwin" ? macUpdateAssets("1.1.0") : [
+      { name: "latest.yml", state: "uploaded" },
+      { name: "PwrGit-1.1.0-setup.exe", state: "uploaded" }
+    ];
+    const otherPlatformAssets = platform === "win32" ? macUpdateAssets("1.1.0") : [
+      { name: "latest.yml", state: "uploaded" },
+      { name: "PwrGit-1.1.0-setup.exe", state: "uploaded" }
+    ];
+    for (const incomplete of [[], [assets[0]], [assets[1]], otherPlatformAssets,
+      [assets[0], { ...assets[1], state: "deleted" }]]) {
+      const selected = selectAppUpdateReleases([githubRelease("v1.1.0", { assets: incomplete })]);
+      expect(selected.betaLatest).toBeUndefined();
+      expect(selected.betaPrerelease).toBeUndefined();
+    }
+    const final = githubRelease("v1.1.0", { assets });
+    const selected = selectAppUpdateReleases([
+      githubRelease("v1.2.0-beta.1", { prerelease: true, assets: [] }),
+      githubRelease("v1.3.0-alpha.1", { prerelease: true, assets: [] }),
+      githubRelease("v2.0.0", { draft: true, assets }),
+      final
+    ]);
+    expect(selected.betaLatest).toBe(final);
+    expect(selected.betaPrerelease).toBe(final);
   });
 
   it("requires macOS updater metadata and zip assets", async () => {
