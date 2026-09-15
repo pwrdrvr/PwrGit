@@ -189,8 +189,12 @@ export function ForkRepoDialog({
     // GitHub repository.
     setSelectedSource(null);
     setPreflight(null);
-    setSourceQuery("");
-  }, [usableHosts.join(","), host]);
+    // Catalog loading can finish after the user starts typing. Only discard
+    // the old selection's label; preserve a new search for the usable forge.
+    setSourceQuery((query) =>
+      query === selectedSource?.nameWithOwner ? "" : query
+    );
+  }, [usableHosts.join(","), host, selectedSource]);
 
   // Fork targets follow the forge actually in play, not the catalog: they are
   // the signed-in user's own accounts, which the clone catalog has no reason

@@ -280,6 +280,9 @@ jobs:
         timeout-minutes: 5
         run: bash ./scripts/ci/macos-e2e-pre-run-cleanup.sh
 
+      - name: Record VideoToolbox clients before E2E
+        run: /usr/sbin/ioclasscount AppleVideoToolboxParavirtualizationUserClient
+
       - name: Run desktop Electron E2E specs (macOS)
         # Tart provides the desktop. Software rendering avoids the virtual
         # AppleParavirtGPU resets observed in PwrAgnt's macOS E2E runs.
@@ -287,6 +290,13 @@ jobs:
         env:
           PWRGIT_E2E_DISABLE_GPU: "1"
         run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4
+
+      # Codec flags prevent new leaks; they cannot clear a guest already
+      # degraded by earlier jobs. Keep before/after counts to distinguish that
+      # state from a regression. A degraded guest needs an operator reboot.
+      - name: Record VideoToolbox clients after E2E
+        if: ${{ !cancelled() }}
+        run: /usr/sbin/ioclasscount AppleVideoToolboxParavirtualizationUserClient
 
       - name: Upload desktop Playwright artifacts
         uses: actions/upload-artifact@v7
