@@ -132,8 +132,12 @@ public class PipeObserver {
       }
     } catch { Emit(Row("process-event-unavailable")); }
   }
-  static void Handles(string[] ids) {
+  static void Handles(string phase, string baselineFile, string[] ids) {
     var wanted = new HashSet<ulong>(); foreach (string id in ids) wanted.Add(UInt64.Parse(id));
+    int root = Int32.Parse(ids[0]);
+    var baseline = new HashSet<string>();
+    if (phase != "baseline" && File.Exists(baselineFile)) foreach (string id in File.ReadAllLines(baselineFile)) baseline.Add(id);
+    var rootObjects = new List<string>();
     int size = 1024 * 1024, needed, status;
     IntPtr table = IntPtr.Zero;
     try {
@@ -164,8 +168,18 @@ public class PipeObserver {
           Console.WriteLine(Json(new Dictionary<string, object> { { "event", "handle-type-query-start" }, { "pid", pid }, { "handle", entry.Handle.ToUInt64() } }));
           if (GetFileType(handle) != 3) continue; // FILE_TYPE_PIPE only; never query arbitrary filenames.
           var row = new Dictionary<string, object> { { "pid", pid }, { "handle", entry.Handle.ToUInt64() }, { "accessMask", entry.Access }, { "writeDataAccess", (entry.Access & 2) != 0 }, { "objectId", Hash(entry.Object.ToString()) } };
+          string objectId = (string)row["objectId"];
+          if (pid == root) rootObjects.Add(objectId);
           Console.WriteLine(Json(new Dictionary<string, object> { { "event", "pipe-image-query-start" }, { "handleState", row } }));
           Image(pid, row);
+          // A pre-spawn inventory only needs root pipe-object identity, not
+          // names. Querying an existing synchronous read pipe's name blocked
+          // every first CI sample. Never query that unrelated pipe again.
+          bool queryName = phase != "baseline" && !(pid == root && baseline.Contains(objectId));
+          if (pid == root && baseline.Count == 0 && (entry.Access & 2) == 0) queryName = false;
+          if (pid != root && (entry.Access & 2) == 0) queryName = false;
+          if (!queryName) row["nameStatus"] = "skipped-baseline-existing-or-nonwriter-pipe";
+          else {
           IntPtr name = Marshal.AllocHGlobal(4096);
           try {
             // FileNameInfo's public API excludes pipes. Query the native
@@ -185,11 +199,14 @@ public class PipeObserver {
           if (GetNamedPipeInfo(handle, out flags, out output, out input, out instances)) row["endpoint"] = (flags & 1) != 0 ? "server" : "client";
           if (GetNamedPipeClientProcessId(handle, out peer)) row["clientPid"] = peer;
           if (GetNamedPipeServerProcessId(handle, out peer)) row["serverPid"] = peer;
+          }
           rows.Add(row);
           Console.WriteLine(Json(new Dictionary<string, object> { { "event", "pipe-handle" }, { "handleState", row } }));
         } finally { if (handle != IntPtr.Zero) CloseHandle(handle); CloseHandle(source); }
       }
-      Console.WriteLine(Json(new Dictionary<string, object> { { "status", "sampled" }, { "handles", rows }, { "accessFailures", denied }, { "nameFailures", failedNames }, { "scanMs", budget.ElapsedMilliseconds }, { "limited", rows.Count >= 256 || budget.ElapsedMilliseconds >= 500 } }));
+      bool limited = rows.Count >= 256 || budget.ElapsedMilliseconds >= 500;
+      if (phase == "baseline" && !limited && denied == 0) File.WriteAllLines(baselineFile, rootObjects.ToArray());
+      Console.WriteLine(Json(new Dictionary<string, object> { { "status", "sampled" }, { "identityMode", "kernel-object-id" }, { "handles", rows }, { "accessFailures", denied }, { "nameFailures", failedNames }, { "scanMs", budget.ElapsedMilliseconds }, { "limited", limited } }));
     } finally { if (table != IntPtr.Zero) Marshal.FreeHGlobal(table); }
   }
   static void Inspect(string call, string phase, int pid) {
@@ -201,7 +218,8 @@ public class PipeObserver {
     var result = Row("pipe-handle-sample"); result["callId"] = call; result["phase"] = phase;
     result["writerDuplicationPossible"] = true;
     result["scope"] = "root-and-observed-descendants-max64";
-    var info = new ProcessStartInfo(Exe, "handles " + String.Join(" ", ids.ToArray()));
+    string baselineFile = Path.Combine(DirectoryPath, "baseline-" + call + ".ids");
+    var info = new ProcessStartInfo(Exe, "handles " + phase + " \"" + baselineFile + "\" " + String.Join(" ", ids.ToArray()));
     info.UseShellExecute = false; info.RedirectStandardOutput = true; info.RedirectStandardError = true; info.CreateNoWindow = true;
     using (var process = new Process()) {
       process.StartInfo = info; var output = new StringBuilder();
@@ -225,7 +243,7 @@ public class PipeObserver {
       // Also bound this process if its observer disappears during a native
       // filename query. Exiting releases every duplicated handle.
       using (var deadline = new Timer(delegate(object state) { Environment.Exit(124); }, null, 1500, Timeout.Infinite)) {
-        Handles(new List<string>(args).GetRange(1, args.Length - 1).ToArray()); return 0;
+        Handles(args[1], args[2], new List<string>(args).GetRange(3, args.Length - 3).ToArray()); return 0;
       }
     }
     Root = Int32.Parse(args[0]); DirectoryPath = args[1]; Exe = args[2]; Self = Process.GetCurrentProcess().Id;

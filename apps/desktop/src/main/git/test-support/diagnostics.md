@@ -308,3 +308,35 @@ process-exit clock**. Registration before Git starts preserves available
 parent/binary events, but delayed provider notifications do not prove a process
 was still alive until that timestamp. PID reuse also requires temporal context;
 joining every occurrence of a PID across the entire suite fabricates lineage.
+
+### Inspector failure localized in the next passing CI run
+
+Head `2ed6fc94` passed [CI run 34933692471](https://github.com/pwrdrvr/PwrGit/actions/runs/34933692471).
+Its [Windows artifact](https://github.com/pwrdrvr/PwrGit/actions/runs/34933692471/artifacts/10382433097)
+again contains 35 real branch traces and 64 natural-EOF branch probes, with no
+real helper grace expiry or individual five-second Git report. The maximum
+probe exit-to-close interval was 2.988ms. Twelve real test scopes crossed five
+seconds; no Git lifecycle failure was reproduced.
+
+All three inspectors reached `pipe-name-query-start` for handle 1888, a read-only
+pipe already in the Node worker before the controlled command started, and then
+hit the 900ms deadline. This localizes the blocking operation to the inspector's
+`NtQueryObject` call. It does not identify the pipe's purpose, a retained writer,
+or a Git hang. Other handle queries completed first, including names for two new
+parent-side pipes in the controlled post-exit sample. The scan stopped before it
+reached the detached holder, so the control still established no writer match.
+
+The next revision makes the baseline an inventory of hashed root pipe-object
+identities, requiring no pipe names or endpoint queries. Post-exit inspection
+skips those existing root objects and examines new parent pipes and candidate
+writer handles. Non-writer descendant handles are not name-query candidates;
+without a baseline, root read-only handles are also skipped. Every skipped
+query is labeled. This avoids the specific unrelated blocking query observed
+in CI without extending the inspector deadline or changing Git's behavior.
+
+Object identity is used only to exclude pre-existing root endpoints. It does
+not join the two ends of a pipe; a positive match still requires matching pipe
+names, opposite endpoints and a write-capable holder. Missing/incomplete
+baseline inventories cannot establish ownership. Kernel-object address reuse
+can conservatively exclude a new endpoint. The positive-control result on
+Windows remains the validation gate for this revision.

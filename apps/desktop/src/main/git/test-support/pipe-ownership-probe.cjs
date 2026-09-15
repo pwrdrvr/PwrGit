@@ -27,13 +27,14 @@ function ownershipMatches(directory, callId, holderPid) {
     } catch { return null; }
   };
   const baseline = parse("baseline"), postExit = parse("post-exit");
+  const baselineKey = baseline?.identityMode === "kernel-object-id" ? "objectId" : "pipeId";
   // Without a complete, successful baseline, "not seen before" means unknown.
   // A timeout must never make all later handles appear to be newly created.
   if (baseline?.status !== "sampled" || baseline.limited || baseline.accessFailures || baseline.nameFailures ||
-    !Array.isArray(baseline.handles) || baseline.handles.some(row => !row.pipeId)) return [];
-  const before = new Set(baseline.handles.filter(row => row.pid === process.pid).map(row => row.pipeId));
+    !Array.isArray(baseline.handles) || baseline.handles.some(row => !row[baselineKey])) return [];
+  const before = new Set(baseline.handles.filter(row => row.pid === process.pid).map(row => row[baselineKey]));
   const after = postExit?.handles ?? [];
-  const readers = after.filter(row => row.pid === process.pid && row.pipeId && row.endpoint && !before.has(row.pipeId));
+  const readers = after.filter(row => row.pid === process.pid && row.pipeId && row.endpoint && row[baselineKey] && !before.has(row[baselineKey]));
   return readers.flatMap(reader => after.filter(writer => writer.pid === holderPid && writer.pipeId === reader.pipeId &&
     writer.writeDataAccess && writer.endpoint && writer.endpoint !== reader.endpoint).map(writer => ({ pipeId: reader.pipeId,
     readerPid: reader.pid, readerHandle: reader.handle, writerPid: writer.pid, writerHandle: writer.handle,

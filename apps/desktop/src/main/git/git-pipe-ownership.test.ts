@@ -49,6 +49,28 @@ describe("pipe ownership evidence", () => {
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
+  it("excludes existing root pipe objects without needing their potentially blocking names", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pwrgit-pipe-objects-"));
+    const baseline = { status: "sampled", identityMode: "kernel-object-id", handles: [
+      { pid: process.pid, objectId: "existing", nameStatus: "skipped-baseline-existing-or-nonwriter-pipe" }
+    ] };
+    const postExit = { status: "sampled", handles: [
+      { pid: process.pid, objectId: "existing", pipeId: "old-pipe", endpoint: "server" },
+      { pid: 987, objectId: "other-old-end", pipeId: "old-pipe", endpoint: "client", writeDataAccess: true },
+      { pid: process.pid, objectId: "new-reader", pipeId: "new-pipe", endpoint: "server" },
+      { pid: 987, objectId: "new-writer", pipeId: "new-pipe", endpoint: "client", writeDataAccess: true }
+    ] };
+    try {
+      writeFileSync(join(directory, "windows-processes.jsonl"), [
+        { callId: "controlled", phase: "baseline", sampleJsonl: JSON.stringify(baseline) },
+        { callId: "controlled", phase: "post-exit", sampleJsonl: JSON.stringify(postExit) }
+      ].map(row => JSON.stringify(row)).join("\n"));
+      expect(ownershipMatches(directory, "controlled", 987)).toEqual([
+        expect.objectContaining({ pipeId: "new-pipe", writerPid: 987, readerPid: process.pid })
+      ]);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
   it("retains child correlation while excluding raw arguments, paths, config and unknown fields", () => {
     const rows = [
       { event: "child_start", sid: "20260915T010203-P00001234/20260915T010203-P00005678", child_id: 7,
