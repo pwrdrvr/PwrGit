@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.16.0 - 2026-09-15
+
+- Worktrees - Added a profile-wide safe worktree sweep that explains why candidates are removable, supports bulk cleanup, and can reclaim ignored build/cache space while protecting common local secrets and databases by default.
+- Branches - Added **Switch here** across branch lists, ranks the branches most relevant to your checkout, and makes uncommitted changes explicit: bring them to the destination with reversible rollback, commit first, or cancel.
+- Forks - PwrGit now marks read-only checkouts before a failed push and lets you fork the existing checkout in place, preserving its files and branches while redirecting `origin` to your fork.
+- Accessibility - Replaced native pointer-only tooltips with PwrGit hover cards that open on keyboard focus, dismiss with Escape, and provide meaningful names for icons and disabled controls.
+- Logs - Desktop logging now reaches the development console as well as the Logs window and rotating file, keeping those views consistent.
+
 ## v0.15.0 - 2026-09-13
 
 - Getting Started - Added a guided first-run setup that helps you confirm your Git identity, review forge connections, choose safe folders to scan, and understand the repository lenses before you begin.
