@@ -61,20 +61,23 @@ still allowed when the user explicitly asks for one.
 Choose `<release-branch>` from the release train, not merely from the
 repository's default branch:
 
-- `main` owns the active `N.N` train through its alphas, betas, first stable
-  `N.N.0`, and follow-up `N.N.P` releases. Promote a beta to stable by preparing
-  and tagging the stable metadata on `main`; never create `releases/N.N` only
-  for that promotion.
+- `main` owns the active `N.N` train through its alphas, betas, stable
+  `-prerelease.M` candidates, first stable `N.N.0`, and follow-up `N.N.P`
+  releases. Promote a beta to stable by preparing and tagging the stable
+  metadata on `main`; never create `releases/N.N` only for that promotion.
 - Cut `releases/N.N` only after the product owner explicitly decides that
   `main` will begin the next major or minor train. Select the current appropriate
   `main` commit as the branch point; it may intentionally include post-release
   fixes or enhancements rather than being the first stable tag. Then bump
   `main` to the next alpha train.
-- After that cut, prepare and tag `N.N` maintenance candidates and patches from
-  `releases/N.N`; `main` carries the next train. A short-lived
-  `release/v<version>` pull-request source branch is only a metadata-review
-  vehicle and never substitutes for, or triggers, a maintenance branch; do not
-  create `releases/N.N` merely because that source PR promotes a beta to stable.
+- After that cut, prepare and tag `N.N.P-prerelease.M` maintenance candidates
+  and patches from `releases/N.N`; `main` carries the next train with its
+  `-alpha` and `-beta` tags. Do not publish `-alpha` or `-beta` from the
+  maintenance branch: the Beta feed is shared and selects the next train's
+  higher SemVer candidate. A short-lived `release/v<version>` pull-request
+  source branch is only a metadata-review vehicle and never substitutes for, or
+  triggers, a maintenance branch; do not create `releases/N.N` merely because
+  that source PR promotes a beta to stable.
 
 ## Guardrails
 
@@ -102,8 +105,10 @@ repository's default branch:
   - Stable Prerelease: `v1.0.6-prerelease.1` (GitHub Pre-release)
   - Beta Latest: `v1.1.0-beta.3` (GitHub Pre-release; smoke-checked `main`)
   - Beta Prerelease: `v1.1.0-alpha.7` (GitHub Pre-release; may not install)
-- Keep `-prerelease.N` for Stable RCs. Do not reuse `-rc` or `-beta` for 1.0
-  RCs; `-beta` is the Beta Latest identifier.
+- Keep `-prerelease.N` for Stable candidates. It may be used on `main` while
+  the `N.N` train remains there; after the cut, use it for that `N.N` train
+  only from `releases/N.N`. Do not reuse `-rc` or `-beta` for 1.0 RCs; `-beta`
+  is the Beta Latest identifier.
 - `main` tags with a prerelease suffix must stay GitHub Pre-release so they
   never steal `/releases/latest` from the Stable train.
 - To promote a smoked alpha to beta, bump `apps/desktop/package.json` and add

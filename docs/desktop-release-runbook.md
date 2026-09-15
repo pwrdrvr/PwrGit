@@ -50,6 +50,13 @@ post-release fixes or enhancements rather than match the first stable tag. Then
 bump `main` to the next alpha train. After the cut, prepare `N.N` maintenance
 candidates and patches from `releases/N.N`, while `main` carries the next train.
 
+Use `N.N.P-prerelease.M` for Stable maintenance candidates after the cut. A
+Stable `-prerelease.M` candidate is also valid on `main` while its `N.N` train
+is still active there. Once that train moves to `releases/N.N`, only that branch
+may publish its `N.N.P-prerelease.M` candidates; the next `main` train uses
+`-alpha` and `-beta`. Those suffixes share one Beta feed, where a higher-SemVer
+next-train candidate would otherwise hide the maintenance candidate.
+
 ## Prepare and tag
 
 Choose `<release-branch>` from the lifecycle above: `main` while its `N.N`
