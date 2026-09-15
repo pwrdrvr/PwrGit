@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { RemoteActivity } from "@pwrgit/shared";
 import {
   formatElapsed,
+  liveActivityView,
   remoteActivityMeter,
   remoteActivityReport,
   remoteActivityStatus,
   remoteActivityTitle,
-  REMOTE_ACTIVITY_QUIET_MS
+  settledActivityView,
+  REMOTE_ACTIVITY_QUIET_MS,
+  type RemoteActivityOutcome
 } from "./remote-activity";
 import {
   elsewhereActivities,
@@ -140,9 +143,11 @@ describe("remoteActivityReport", () => {
   it("carries the diagnosis and the evidence to the clipboard", () => {
     expect(
       remoteActivityReport(
-        at({ silent: true, command: "git fetch --prune --progress" }),
-        [],
-        300_000
+        liveActivityView(
+          at({ silent: true, command: "git fetch --prune --progress" }),
+          300_000
+        ),
+        []
       )
     ).toBe(
       [
@@ -153,6 +158,82 @@ describe("remoteActivityReport", () => {
         "(Git has produced no output)"
       ].join("\n")
     );
+  });
+});
+
+describe("liveActivityView", () => {
+  it("carries the live operation, and the cancel that addresses it", () => {
+    expect(
+      liveActivityView(
+        at({
+          command: "git fetch --prune --progress",
+          tail: ["remote: Counting objects: 100% (12/12), done."],
+          // Recent enough that the quiet warning is not what is under test.
+          lastOutputAt: 40_000,
+          progress: {
+            label: "Receiving objects",
+            percent: 43,
+            completed: 860,
+            total: 2000
+          }
+        }),
+        41_000
+      )
+    ).toEqual({
+      operationId: "op-1",
+      title: "Pull · PwrAgnt · main",
+      elapsed: "41s",
+      statusLabel: "Fetching updates",
+      statusTone: "muted",
+      meter: "Receiving objects 43%",
+      percent: 43,
+      command: "git fetch --prune --progress",
+      output: ["remote: Counting objects: 100% (12/12), done."],
+      canceling: false,
+      settled: null
+    });
+  });
+});
+
+describe("settledActivityView", () => {
+  const ended: RemoteActivityOutcome = {
+    kind: "pull",
+    status: "ok",
+    repoName: "PwrAgnt",
+    branch: "main",
+    startedAt: 1_000,
+    endedAt: 3_400,
+    summary: "Fast-forwarded",
+    command: "git merge --ff-only origin/main",
+    output: ["Fast-forward"]
+  };
+
+  it("reads the elapsed off the operation, not off a clock that moved on", () => {
+    expect(settledActivityView(ended).elapsed).toBe("2s");
+  });
+
+  it("drops the meter and the cancel — there is nothing left to do to it", () => {
+    const view = settledActivityView(ended);
+    expect(view.meter).toBeNull();
+    expect(view.percent).toBeNull();
+    expect(view.canceling).toBeNull();
+    expect(view.operationId).toBeNull();
+  });
+
+  it("gives success and failure tones the card can tell apart", () => {
+    expect(settledActivityView(ended).statusTone).toBe("ok");
+    expect(settledActivityView({ ...ended, status: "error" }).statusTone).toBe(
+      "bad"
+    );
+  });
+
+  // The user stopped it themselves a second ago and is looking at the button
+  // they pressed. Dressing their own decision in the failure color is the same
+  // mistake `flashError` already avoids for the toast.
+  it("keeps a cancel muted rather than dressing it as a failure", () => {
+    expect(
+      settledActivityView({ ...ended, status: "canceled" }).statusTone
+    ).toBe("muted");
   });
 });
 

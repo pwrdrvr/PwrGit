@@ -4,17 +4,79 @@ Live status for a running fetch / pull / push. The main-process half is
 `src/main/git/remote-activity.ts` — read its `AGENTS.md` section for what the
 record means and why `queued` / `silent` are separate facts.
 
-## One card, two placements
+## The click opens it; the outcome closes it
 
-`RemoteActivityCard` is rendered by the toolbar popover
-(`useRemoteActivityPopover`) and by the elsewhere-toast
-(`RemoteActivityToast`). They answer the same question from different places,
-so they share the card rather than growing two dialects of it; `compact` drops
-the Git-output block for the toast and changes nothing else.
+Pressing Fetch, Pull or Push calls `status.pin(button, scope)` **before the
+dispatch**, and the card is up from that moment — no age gate, no hover, and no
+wait for main to register the operation. It then outlives the operation: when
+the dispatch resolves, `status.settle({status, summary})` turns the same card
+into the receipt. A success drains a countdown rail and takes itself away; a
+failure stands until dismissed.
 
-The split between them is scope, and it is load-bearing: the toast shows only
-operations the toolbar on screen is *not* already reporting. Show both and a
-status card covers the graph for the length of every pull you started yourself.
+That last part is the load-bearing half, and it is why the card takes a
+`RemoteActivityView` rather than a `RemoteActivity`. `finish()` deletes the
+record and publishes in the same breath, so by the time an outcome exists there
+is nothing left to read: `Pin` carries the scope taken at the click, and
+`lastSeen` carries the final record so the receipt can still quote Git. A
+snapshot, never a reference.
+
+**Every path out of an operation ends in exactly one of three things** —
+`settle`, `dismiss` (a modal is taking over: the divergence dialog, the SSH
+recovery prompt, the fork prompt), or, for a failure the card could not carry,
+a toast. A fourth early return without one of them leaves a card pinned on
+"Starting…" until the user clicks it away.
+
+`settle` returns whether a pinned card took the outcome, and `flashError` uses
+that: a durable card anchored to the button that was pressed, carrying Git's
+own output plus Logs and Copy, is a better report than a corner toast — and
+both at once is the same failure said twice. The toast is now the fallback for
+a failure with nowhere anchored to go, which is what happens when the user
+clicked the card away mid-operation.
+
+## Dismissal belongs to the user, not to the pointer
+
+A hover card is the pointer's: leaving it, or scrolling the surface it
+described, is the dismissal. A clicked card is not, so `useViewportTooltip`
+grew `setSticky`, which makes `scheduleHide` and the scroll dismissal no-ops.
+What ends a pinned card is Escape, the always-present ✕, the Close button on a
+failure, a `mousedown` anywhere outside it and outside its own trigger, or the
+rail running out.
+
+Two things about that outside-click listener. It is **capture phase**, so a
+surface that stops propagation cannot strand the card on screen; and it calls
+no `preventDefault`, so the click still lands where it was aimed — dismissing
+costs the user nothing but the card. Pressing the trigger again is not
+"elsewhere": that button either starts the next operation (and re-pins) or is
+inert because one is running, and neither should take the status away.
+
+The rail pauses while the pointer is inside the card and stops outright on a
+click or a focus into it — a pointer resting is "still reading", a click is
+"leave this alone". `paused` drives both the CSS `animation-play-state` and the
+JavaScript timer, which banks its remainder in its effect cleanup, so the bar
+and the dismissal always resume from the same place. Under
+`prefers-reduced-motion` the blanket `animation: none !important` in app.css
+would leave a full rail on a card that then vanished unannounced, so the
+popover sets `transform: scaleX()` inline from the seconds clock instead: the
+same drain, in four discrete steps.
+
+`REMOTE_ACTIVITY_SETTLED_MS` may be as short as it is *because* of those
+pauses, not despite them — that, plus the ✕, is WCAG SC 2.2.1 met three ways.
+
+## One card, three placements
+
+`RemoteActivityCard` is rendered by the pinned popover, by a hover-opened card
+from the same hook, and by the elsewhere-toast (`RemoteActivityToast`). They
+answer the same question from different places, so they share the card rather
+than growing dialects of it; `compact` drops the Git-output block for the
+toast, and `onClose` is what draws the ✕ and the Close button — given only
+where dismissal is the user's to make.
+
+The split between popover and toast is scope, and it is load-bearing: the toast
+shows only operations the toolbar on screen is *not* already reporting. Show
+both and a status card covers the graph for the length of every pull you
+started yourself. The toast always builds a **live** view for the same reason:
+a receipt belongs beside the button that was pressed, and that card is by
+definition for a repository the user is not looking at.
 
 ## Seconds belong in the card, never in the live region
 
@@ -34,7 +96,21 @@ where `--progress` obliges Git to emit. Checkout, stash and merge routinely
 print nothing for a long time; warning there would fire on every healthy pull
 and the warning would stop meaning anything.
 
-## The popover opens on hover with no dwell gate
+## The hover path survives, for the operations a click cannot cover
+
+Everything below this line is about the *other* way in, and it still earns its
+keep: an operation against this checkout that something else started — the
+sidebar's refresh, a bulk sync, a second window. There was no click to pin
+from, so the pointer is the only signal there is. That card is transient
+(it leaves with the pointer) and never grows a rail, because there is no
+settle to report.
+
+A pinned card stands the whole of it down: `open`, `close` and the arming
+effect all return early while `pinRef.current !== null`, and the deferred open
+checks again when its timer fires. The click has already answered the question
+this machinery exists to answer, and re-arming underneath it would leave a
+hover primed to reopen a finished operation's card the moment the pinned one
+was dismissed.
 
 `lib/AGENTS.md` reserves `useHoverIntent` for triggers that repeat down a
 column the pointer crosses on its way elsewhere. These triggers are a single
@@ -48,12 +124,20 @@ the pointer has to be able to travel into it, and Escape has to return focus to
 the trigger.
 
 What it DOES gate on is the operation's own age
-(`REMOTE_ACTIVITY_POPOVER_AFTER_MS`), and that is not a dwell timer. Clicking
-Pull leaves the pointer resting on the button, and swapping the glyph for the
-spinner fires `mouseenter` under that stationary pointer — so without the gate
-every ordinary one-second pull threw a card over the graph and took it away
-again. Measuring from `startedAt` means a hover onto something that has already
-been running opens instantly, which is the case the card is for.
+(`REMOTE_ACTIVITY_POPOVER_AFTER_MS`), and that is not a dwell timer.
+Measuring from `startedAt` means a hover onto something that has already been
+running opens instantly, which is the case the card is for.
+
+**That gate no longer applies to the click**, and the reason it once did is
+worth keeping straight. It existed because clicking Pull leaves the pointer
+resting on the button, and swapping the glyph for the spinner fires
+`mouseenter` under that stationary pointer — so without it every ordinary
+one-second pull threw a card over the graph and took it away again. Pinning
+answers that case directly: the card is already open when the enter arrives,
+and the enter finds it and does nothing. What the gate still suppresses is a
+card **nobody asked for** — a bulk sync turning this button busy under a
+pointer that came to rest there for its own reasons, once per repository. A
+click is an ask; that is not.
 
 ## A hover is a place, not a moment — and so is focus
 
@@ -146,12 +230,20 @@ therefore answers `WHERE_THE_USER_IS` directly for one element: enough for the
 wiring (which controls carry the ref), the age gate and the Tab handoff, and
 deliberately blind to which half of that query a real browser would have set.
 
+The jsdom half has one more constraint worth stating plainly, because it is
+easy to undo by accident: **a hover-path test may not press the button first.**
+Every one of them used to, purely to make a control busy, and a click now pins
+a card and stands the hover machinery down. Emitting a record alone is the way
+— `running` answers to the record as well as to this header's own dispatch, so
+a bare record *is* an operation something else started, which is the case the
+hover path is for.
+
 The browser facts live in `e2e/remote-activity.spec.ts`: the pull test, the
-same test for Fetch *without* its `hover()`, the Enter-then-Tab-to-Cancel walk,
-and the walked-away guard. Playwright's `hover()` cannot stand in for any of
-it: after `pull.click()` the pointer is already inside the button, so the hover
-dispatches a bare `mousemove` and no boundary event at all. One caveat on the
-walked-away guard — the record lands inside the click (~30ms, faster than a
-pointer can leave), so the card is armed while the pointer is still there and
-`onMouseLeave` is what cancels it. Its explicit `:focus-visible` assertion is
-what holds the selector honest.
+same test for Fetch, the Enter-then-Tab-to-Cancel walk, the walked-away test,
+and the settled receipt. Playwright's `hover()` cannot re-enter a control the
+pointer is already inside — after `pull.click()` it dispatches a bare
+`mousemove` and no boundary event at all — which is why none of them lean on
+one. The walked-away test carries the explicit `:focus-visible` assertion that
+holds the hover path's selector honest, and now asserts the inverse of what it
+used to: a clicked card is *not* the pointer's to take away, and only the click
+out in the graph ends it.

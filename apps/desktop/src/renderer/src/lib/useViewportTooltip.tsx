@@ -55,6 +55,17 @@ export type ViewportTooltip = {
   }) => void;
   /** Delay dismissal long enough to cross from a hover target into a card. */
   scheduleHide: () => void;
+  /**
+   * Hold this card open regardless of the pointer.
+   *
+   * A hover card belongs to the pointer: leaving it, or scrolling the surface
+   * it described, is the dismissal. A card the user *clicked* open belongs to
+   * them until they say otherwise, so while sticky both of those become
+   * no-ops and only an explicit exit — Escape, a control inside it, the
+   * caller's own dismissal — takes it away. `hide()` always wins, and clears
+   * the flag with it.
+   */
+  setSticky: (sticky: boolean) => void;
   /** Move keyboard focus into the first control in an open tooltip. */
   focusFirst: () => boolean;
   visible: boolean;
@@ -132,6 +143,16 @@ type ViewportTooltipOptions = {
    * so a hard-coded name would mis-announce one of them.
    */
   label?: string;
+  /**
+   * The pointer entered or left an interactive card.
+   *
+   * Reported by the hook rather than by handlers on the caller's own content
+   * because the card's padding belongs to the surface, not to the content
+   * inside it: a pointer resting in that ring is on the card by every reading
+   * a user would give it, and handlers on the content alone would say it had
+   * left. The remote-activity popover pauses its countdown on this.
+   */
+  onPointerWithin?: (within: boolean) => void;
 };
 
 type TooltipPlacement = {
@@ -229,7 +250,11 @@ const rectOf = (rect: DOMRect): TooltipRect => ({
  */
 export function useViewportTooltip(
   className = "viewport-tooltip",
-  { interactive = false, label = "Commit context" }: ViewportTooltipOptions = {}
+  {
+    interactive = false,
+    label = "Commit context",
+    onPointerWithin
+  }: ViewportTooltipOptions = {}
 ): ViewportTooltip {
   const tooltipRef = useRef<HTMLDivElement>(null);
   /** The element this tooltip was opened from, for returning focus. */
@@ -242,6 +267,12 @@ export function useViewportTooltip(
   const contentByTargetRef = useRef(new WeakMap<HTMLElement, ReactNode>());
   const dismissTimerRef = useRef<number | undefined>(undefined);
   const pointerInInteractiveTooltipRef = useRef(false);
+  /** Set by `setSticky`; read by the two dismissals the pointer owns. */
+  const stickyRef = useRef(false);
+  // Latched: the caller passes a fresh closure every render, and the only
+  // things that read it are event handlers registered once.
+  const onPointerWithinRef = useRef(onPointerWithin);
+  onPointerWithinRef.current = onPointerWithin;
   const [state, setState] = useState<TooltipState | undefined>(undefined);
 
   // Measure after paint and clamp the tooltip into the viewport. Generic
@@ -276,10 +307,19 @@ export function useViewportTooltip(
   const hide = useCallback((): void => {
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
+    stickyRef.current = false;
     setState(undefined);
   }, [cancelScheduledHide]);
 
+  const setSticky = useCallback((sticky: boolean): void => {
+    stickyRef.current = sticky;
+    // Pinning while a dismissal is already counting down has to call it off,
+    // or the card the user just clicked open would leave 400ms later.
+    if (sticky) cancelScheduledHide();
+  }, [cancelScheduledHide]);
+
   const scheduleHide = useCallback((): void => {
+    if (stickyRef.current) return;
     if (!interactive) {
       hide();
       return;
@@ -353,6 +393,9 @@ export function useViewportTooltip(
       // `WorktreeHeader`) and never sets the pointer flag, so without this
       // any scroll anywhere — the graph adjusting scrollTop as commits stream
       // in — would take the card away with their focus still inside it.
+      // A pinned card is anchored to a control that does not scroll, and the
+      // user asked for it — scrolling the graph underneath is not a dismissal.
+      if (stickyRef.current) return;
       if (interactive && pointerInInteractiveTooltipRef.current) return;
       if (
         interactive &&
@@ -425,11 +468,13 @@ export function useViewportTooltip(
   const enterInteractiveTooltip = useCallback((): void => {
     pointerInInteractiveTooltipRef.current = true;
     cancelScheduledHide();
+    onPointerWithinRef.current?.(true);
   }, [cancelScheduledHide]);
 
   const leaveInteractiveTooltip = useCallback((): void => {
     pointerInInteractiveTooltipRef.current = false;
     scheduleHide();
+    onPointerWithinRef.current?.(false);
   }, [scheduleHide]);
 
   const focusFirst = useCallback((): boolean => {
@@ -476,6 +521,7 @@ export function useViewportTooltip(
     hide,
     hideFrom,
     scheduleHide,
+    setSticky,
     focusFirst,
     visible,
     tooltipNode
