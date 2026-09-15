@@ -899,6 +899,31 @@ describe("WorktreeHeader settled status card", () => {
     expect(card()).not.toBeNull();
   });
 
+  // The ✕ precedes Cancel in the header, so "first focusable in the DOM" and
+  // "the control this card is being tabbed into for" stopped agreeing the
+  // moment the card grew one. `data-focus-first` is what settles it.
+  it("hands Tab to Cancel on a pinned card, not to the dismiss ✕", async () => {
+    const fetchButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetchButton?.click());
+    await emitActivities([{ kind: "fetch", phase: "fetch" }]);
+    expect(card()?.querySelector(".remote-activity__close")).not.toBeNull();
+
+    const tab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
+        ?.dispatchEvent(tab);
+    });
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    expect(tab.defaultPrevented).toBe(true);
+  });
+
   it("replaces one receipt with the next operation's card", async () => {
     await press("Fetch", ok(null));
     expect(card()?.textContent).toContain("Fetched");

@@ -146,6 +146,13 @@ export function RemoteActivityCard({
               void dispatch("remote:cancelActivity", { operationId });
             }}
             aria-disabled={canceling}
+            // Where Tab from the trigger lands, ahead of the ✕ that precedes
+            // it in the header. Someone tabbing into a card about a fetch that
+            // has said nothing for five minutes came for the way to stop it,
+            // not the way to stop looking at it. A settled card marks nothing,
+            // so the ✕ is first there — which is right, because by then
+            // dismissing is the only thing left to do.
+            data-focus-first=""
           >
             {canceling ? "Stopping…" : "Cancel"}
           </button>

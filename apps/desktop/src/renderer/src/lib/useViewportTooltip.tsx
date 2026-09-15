@@ -66,7 +66,17 @@ export type ViewportTooltip = {
    * the flag with it.
    */
   setSticky: (sticky: boolean) => void;
-  /** Move keyboard focus into the first control in an open tooltip. */
+  /**
+   * Move keyboard focus into an open tooltip's first control — or, where the
+   * content marks one `data-focus-first`, into that one instead.
+   *
+   * The marker exists because "first in the DOM" and "what the user came for"
+   * diverged the moment a card grew a dismiss ✕ in its header: Tab landed on
+   * "get rid of this" rather than on Cancel, which is the control a wedged
+   * fetch is being tabbed into for. Reordering the DOM to fix it would put the
+   * focus order out of step with the visual one (SC 2.4.3); saying which
+   * control matters does not.
+   */
   focusFirst: () => boolean;
   visible: boolean;
   tooltipNode: ReactNode;
@@ -478,11 +488,14 @@ export function useViewportTooltip(
   }, [scheduleHide]);
 
   const focusFirst = useCallback((): boolean => {
-    const firstControl = tooltipRef.current?.querySelector<HTMLElement>(
-      "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
-    );
-    if (firstControl === undefined || firstControl === null) return false;
-    firstControl.focus();
+    const card = tooltipRef.current;
+    const target =
+      card?.querySelector<HTMLElement>("[data-focus-first]") ??
+      card?.querySelector<HTMLElement>(
+        "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
+      );
+    if (target === undefined || target === null) return false;
+    target.focus();
     return true;
   }, []);
 
