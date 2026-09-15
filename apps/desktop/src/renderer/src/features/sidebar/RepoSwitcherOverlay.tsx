@@ -6,7 +6,12 @@ import type {
   SearchHitStatus
 } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
-import { currentPlatform, shortcutLabel } from "../../lib/platform";
+import { copyText } from "../../lib/copyText";
+import {
+  currentPlatform,
+  hasPrimaryModifier,
+  shortcutLabel
+} from "../../lib/platform";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
@@ -44,6 +49,34 @@ export type PaletteItem =
   | { kind: "commit"; commit: Commit }
   | { kind: "file"; hit: FileSearchHit }
   | { kind: "repo"; hit: RepoSearchHit };
+
+type CopyAction = { label: string; value: string; path?: boolean };
+
+function paletteCopyActions(item: PaletteItem | undefined): CopyAction[] {
+  if (item === undefined) return [];
+  if (item.kind === "commit") {
+    return [{ label: "Copy commit hash", value: item.commit.hash }];
+  }
+  if (item.kind === "file") {
+    return [{ label: "Copy file path", value: item.hit.path, path: true }];
+  }
+  const hit = item.hit;
+  if (hit.kind === "repo") {
+    return [
+      { label: "Copy repo name", value: hit.name },
+      { label: "Copy repo path", value: hit.path, path: true }
+    ];
+  }
+  const actions: CopyAction[] = [];
+  if (hit.kind !== "worktree" || !hit.name.startsWith("detached@")) {
+    actions.push({ label: "Copy branch name", value: hit.name });
+  }
+  // Branch-only hits carry the repository path, not a checked-out worktree.
+  if (hit.kind === "worktree") {
+    actions.push({ label: "Copy worktree path", value: hit.path, path: true });
+  }
+  return actions;
+}
 
 export const paletteItemKey = (item: PaletteItem): string =>
   item.kind === "commit"
@@ -187,6 +220,7 @@ export function RepoSwitcherOverlay({
   platform?: string;
 }) {
   const now = useRelativeClock();
+  const [copyStatus, setCopyStatus] = useState("");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoSearchHit[]>([]);
   const [files, setFiles] = useState<FileSearchHit[]>([]);
@@ -226,6 +260,27 @@ export function RepoSwitcherOverlay({
     [allCommitResults, results, query, files]
   );
   const sel = selectedPaletteItemIndex(items, selectedItemKey);
+  const copyActions = paletteCopyActions(items[sel]);
+  const selectedCopyKey =
+    items[sel] === undefined ? null : paletteItemKey(items[sel]);
+
+  useEffect(() => setCopyStatus(""), [selectedCopyKey, query]);
+  useEffect(() => {
+    if (copyStatus === "") return;
+    const timer = window.setTimeout(() => setCopyStatus(""), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copyStatus]);
+
+  const copy = async (action: CopyAction): Promise<void> => {
+    try {
+      await copyText(action.value);
+      setCopyStatus("Copied");
+    } catch {
+      setCopyStatus("Could not copy. Try again.");
+    } finally {
+      inputRef.current?.focus();
+    }
+  };
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -338,6 +393,21 @@ export function RepoSwitcherOverlay({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (
+      hasPrimaryModifier(event, platform) &&
+      (event.code === "KeyC" || event.key.toLowerCase() === "c") &&
+      ((event.shiftKey && !event.altKey) || (event.altKey && !event.shiftKey))
+    ) {
+      const action = copyActions.find(
+        (action) => Boolean(action.path) === event.altKey
+      );
+      if (action !== undefined) {
+        event.preventDefault();
+        event.stopPropagation();
+        void copy(action);
+      }
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -707,6 +777,27 @@ export function RepoSwitcherOverlay({
           )}
         </div>
 
+        {copyActions.length > 0 && (
+          <div className="overlay-copy-actions" aria-label="Copy selected result">
+            {copyActions.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                tabIndex={-1}
+                title={`${action.label}\n${action.value}`}
+                onClick={() => void copy(action)}
+              >
+                {action.label}
+                <span className="kbd">
+                  {shortcutLabel({
+                    key: "C", shift: !action.path, alt: Boolean(action.path)
+                  }, platform)}
+                </span>
+              </button>
+            ))}
+            <span role="status">{copyStatus}</span>
+          </div>
+        )}
         <div className="overlay-foot">
           <span>↑↓ navigate</span>
           <span>↵ open</span>
