@@ -14,6 +14,10 @@ import { planDiff } from "./pixel-diff";
 import { computePixelDiff } from "./pixel-diff-client";
 import type { DiffFile } from "./parse-diff";
 import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import {
   sourceOf,
   useImageRevisions,
   type ImageDiffRevisions,
@@ -228,6 +232,7 @@ function ImageSide({
   onSize: (size: Measured) => void;
   onOpen?: () => void;
 }) {
+  const tip = useViewportTooltip();
   return (
     <figure className="diff-image__side">
       <figcaption className="diff-image__label">{label}</figcaption>
@@ -236,7 +241,7 @@ function ImageSide({
           type="button"
           className="diff-image__frame"
           onClick={onOpen}
-          title="Open (zoom, pan, compare) · right-click to copy"
+          {...hoverTooltip(tip, "Open (zoom, pan, compare) · right-click to copy")}
         >
           <img
             className="diff-image__img"
@@ -283,6 +288,7 @@ function ImageSide({
           ""
         )}
       </div>
+      {tip.tooltipNode}
     </figure>
   );
 }

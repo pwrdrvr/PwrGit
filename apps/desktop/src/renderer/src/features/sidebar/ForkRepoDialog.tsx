@@ -16,6 +16,10 @@ import {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { useCloneSearch } from "./useCloneSearch";
 import {
   cloneDestinationLabel,
@@ -72,6 +76,11 @@ export function ForkRepoDialog({
   onReveal: (path: string) => void;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
+  /** The card for one destination row. Named so the row's own `onMouseEnter`
+   *  can call it rather than overwrite it — see the call site. */
+  const destinationTip = (destination: CloneDestination) =>
+    hoverTooltip(tip, destination.path);
   const [catalog, setCatalog] = useState<CloneCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [destinations, setDestinations] = useState<CloneDestination[]>([]);
@@ -845,11 +854,20 @@ export function ForkRepoDialog({
                       className={`clone-protocol${
                         protocol === candidate ? " is-active" : ""
                       }`}
-                      title={
+                      /* See CloneRepoDialog: the unavailable reason goes in
+                         the name as well as the card, and `detail` stays a
+                         card because it ellipsises. */
+                      aria-label={
+                        disabled
+                          ? `${cliLabel.label} — unavailable, ${cliLabel.label} must be installed and signed in`
+                          : undefined
+                      }
+                      {...hoverTooltip(
+                        tip,
                         disabled
                           ? `${cliLabel.label} must be installed and signed in`
                           : detail
-                      }
+                      )}
                       onClick={() => setProtocol(candidate)}
                     >
                       <strong>
@@ -949,10 +967,19 @@ export function ForkRepoDialog({
                         : ""
                     }`}
                     disabled={busy || selectedSource === null}
-                    title={destination.path}
-                    onMouseEnter={() =>
-                      setDestinationSelectionPath(destination.path)
-                    }
+                    /* The full path as the option's NAME, where the row's own
+                       text is a `root/relative/` label whose basename repeats
+                       across registered roots. That ambiguity was why the path
+                       was sitting in a `title` — an attribute no screen reader
+                       reads off a named button, and no keyboard user can open. */
+                    aria-label={`${destination.path} — ${destinationMeta(destination)}`}
+                    {...destinationTip(destination)}
+                    // See CloneRepoDialog: merged, not spread over, because a
+                    // later `onMouseEnter` would silently win.
+                    onMouseEnter={(event) => {
+                      setDestinationSelectionPath(destination.path);
+                      tip.show(event.currentTarget, destination.path);
+                    }}
                     onClick={() => {
                       setSelectedDestination(destination);
                       setDestinationQuery(cloneDestinationLabel(destination));
@@ -1046,6 +1073,7 @@ export function ForkRepoDialog({
           </button>
         </div>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

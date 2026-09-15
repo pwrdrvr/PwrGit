@@ -21,6 +21,10 @@ import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
 import { pushAccessTitle } from "../sidebar/RepoIdentityMarks";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
@@ -119,6 +123,7 @@ export function WorktreeHeader({
   /** The fork prompt, and why it opened. `{}` is the user asking for it from
    *  the read-only chip; a `reason` is a push the forge just refused. */
   const [forkPrompt, setForkPrompt] = useState<{ reason?: string } | null>(null);
+  const tip = useViewportTooltip();
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
   const pullOperation = useRef(0);
@@ -454,7 +459,7 @@ export function WorktreeHeader({
           <button
             type="button"
             className="sync-chip sync-chip--readonly"
-            title={noPushTitle}
+            {...hoverTooltip(tip, noPushTitle)}
             onClick={() => setForkPrompt({})}
           >
             read-only
@@ -468,7 +473,10 @@ export function WorktreeHeader({
             container queries — ↓behind has the Pull accent, drift has nothing
             else). */}
         {drift !== null && running === null && (
-          <span className="sync-chip sync-chip--drift" title={drift.title}>
+          <span
+            className="sync-chip sync-chip--drift"
+            {...hoverTooltip(tip, drift.title)}
+          >
             {drift.text}
           </span>
         )}
@@ -648,6 +656,7 @@ export function WorktreeHeader({
           }}
         />
       )}
+      {tip.tooltipNode}
     </div>
   );
 }

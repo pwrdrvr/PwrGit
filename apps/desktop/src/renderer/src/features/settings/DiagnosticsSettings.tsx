@@ -13,6 +13,10 @@ import {
   SettingsSegmented
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 const START_DELAY_OPTIONS: Array<{
   value: HotCpuStartDelayMs;
@@ -61,6 +65,7 @@ export function DiagnosticsSettings(props: {
   onHotCpuHeapSnapshotLimitChange: (limit: number) => void;
   onStartupCpuEnabledChange: (enabled: boolean) => void;
 }) {
+  const tip = useViewportTooltip();
   const diag = props.snapshot.diagnostics;
   const env = props.snapshot.diagnosticsEnv;
   // Env vars (PWRGIT_*) can force a monitor on regardless of the switch —
@@ -88,7 +93,7 @@ export function DiagnosticsSettings(props: {
             <button
               className="settings-pathlink"
               type="button"
-              title="Reveal in file manager"
+              {...hoverTooltip(tip, "Reveal in file manager")}
               onClick={() => {
                 void dispatch("shell:revealPath", {
                   path: props.snapshot.diagnosticsOutputRoot
@@ -265,6 +270,7 @@ export function DiagnosticsSettings(props: {
           />
         </div>
       </SettingsSection>
+      {tip.tooltipNode}
     </SettingsSectionStack>
   );
 }

@@ -293,8 +293,12 @@ export function RepoRefsSections({
    * Rendered even with nothing to move, rather than hidden: the column these
    * mini actions share stays a column, and a control whose absence is the only
    * explanation teaches nothing. A disabled button still announces its name, so
-   * the reason lives in the name — `title` is hover-only and AT reads the label
-   * over it.
+   * the reason lives in the name — a hover card is pointer-and-focus only, and
+   * AT reads the label over it.
+   *
+   * The card says it too. Chromium does still fire hover events on a disabled
+   * form control (only the click-shaped ones are suppressed), so a pointer
+   * resting on the greyed-out control gets the same sentence.
    */
   const switchAction = (
     branchName: string,
@@ -307,11 +311,12 @@ export function RepoRefsSections({
           ? `Switch to ${branchName} — unavailable, nothing in this repository is the working target`
           : `Switch ${lastSegment(focusedWorktree.path)} to ${branchName}`
       }
-      title={
+      {...hoverTooltip(
+        tip,
         focusedWorktree === null
           ? "Select a worktree in this repository first"
           : `Switch ${lastSegment(focusedWorktree.path)} to ${branchName}`
-      }
+      )}
       disabled={focusedWorktree === null}
       onClick={(event) => {
         event.stopPropagation();
@@ -479,7 +484,7 @@ export function RepoRefsSections({
                     </CopyTarget>
                     <span
                       className={`ref-branch-row__status is-${branch.tracking}`}
-                      title={trackingLabel(branch)}
+                      {...hoverTooltip(tip, trackingLabel(branch))}
                     >
                       {compactTrackingLabel(branch)}
                     </span>
@@ -513,7 +518,7 @@ export function RepoRefsSections({
                             ? `${branch.name} is checked out here, in ${lastSegment(holder.path)}`
                             : `Go to ${lastSegment(holder.path)}, which has ${branch.name} checked out`
                         }
-                        title={holder.path}
+                        {...hoverTooltip(tip, holder.path)}
                         onClick={(event) => {
                           event.stopPropagation();
                           onRevealWorktree(holder.id);
@@ -540,7 +545,7 @@ export function RepoRefsSections({
                       <button
                         className="ref-mini-action"
                         aria-label={`Create worktree for ${branch.name}`}
-                        title="Create worktree"
+                        {...hoverTooltip(tip, "Create worktree")}
                         onClick={(event) => {
                           event.stopPropagation();
                           onCreateWorktree(branch.name, false);
@@ -603,11 +608,12 @@ export function RepoRefsSections({
                   <span className="refs-copyable-name__text">{tag.name}</span>
                 </CopyTarget>
                 <small
-                  title={
+                  {...hoverTooltip(
+                    tip,
                     tag.kind === "annotated"
                       ? `Annotated tag ${tag.objectId.slice(0, 12)} → ${tag.targetType} ${tag.targetId.slice(0, 12)}`
                       : `Lightweight tag → ${tag.targetType} ${tag.targetId.slice(0, 12)}`
-                  }
+                  )}
                 >
                   {tag.targetId.slice(0, 7)}
                 </small>
@@ -620,19 +626,21 @@ export function RepoRefsSections({
                 {onLocateTag !== undefined && (
                   <button
                     className="ref-mini-action"
-                    /* A disabled control still announces its name, so the name
-                       has to carry the reason — `title` is hover-only, and AT
-                       reads the label over it. */
+                    /* A disabled control still announces its name, so the
+                       name has to carry the reason — a card is pointer-only
+                       and AT reads the label over it. The card repeats it for
+                       the pointer, which a disabled control still receives. */
                     aria-label={
                       tag.targetType === "commit"
                         ? `Locate tag ${tag.name} in lineage`
                         : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
                     }
-                    title={
+                    {...hoverTooltip(
+                      tip,
                       tag.targetType === "commit"
                         ? "Locate tag in lineage"
                         : `This tag points at a ${tag.targetType}, not a commit`
-                    }
+                    )}
                     disabled={tag.targetType !== "commit"}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -924,13 +932,14 @@ export function RepoRefsSections({
                                     ? `Create worktree from local branch ${local.name}`
                                     : `Create a local branch and worktree from ${branch.qualifiedName}`
                               }
-                              title={
+                              {...hoverTooltip(
+                                tip,
                                 checkedOutId !== undefined
                                   ? "Show checked-out worktree"
                                   : local !== undefined
                                     ? "Create worktree from local branch"
                                     : "Create a local branch in a new worktree"
-                              }
+                              )}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 if (checkedOutId !== undefined) {
@@ -1008,6 +1017,7 @@ export function RepoRefsSections({
           onClose={() => setBrowser(null)}
         />
       )}
+      {tip.tooltipNode}
     </>
   );
 }

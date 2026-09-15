@@ -5,6 +5,10 @@ import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
 import { WindowControls } from "./WindowControls";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 /**
  * The window's top strip: wordmark, then the selected worktree's identity as a
@@ -39,6 +43,7 @@ export function TitleBar({
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
+  const tip = useViewportTooltip();
   const [switching, setSwitching] = useState(false);
 
   return (
@@ -58,7 +63,7 @@ export function TitleBar({
 
         {repo !== null && worktree !== null && (
           <div className="titlebar__id">
-            <span className="titlebar__repo" title={repo.name}>
+            <span className="titlebar__repo" {...hoverTooltip(tip, repo.name)}>
               {repo.name}
             </span>
             <span aria-hidden="true" className="titlebar__sep">
@@ -66,7 +71,7 @@ export function TitleBar({
             </span>
             <button
               className="titlebar__branch"
-              title="Switch branch"
+              {...hoverTooltip(tip, "Switch branch")}
               onClick={() => setSwitching(true)}
             >
               <span className="titlebar__dot" />
@@ -120,6 +125,7 @@ export function TitleBar({
           onClose={() => setSwitching(false)}
         />
       )}
+      {tip.tooltipNode}
     </>
   );
 }

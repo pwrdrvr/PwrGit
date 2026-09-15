@@ -30,6 +30,10 @@ import {
   type SideState
 } from "./use-image-revisions";
 import { useZoomPan } from "./use-zoom-pan";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 const ITEM_LABEL: Record<ItemKind, string> = {
   before: "Before",
@@ -94,6 +98,7 @@ export function ImageLightbox({
   onMove: (at: number) => void;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
   const sequence = useMemo(() => buildSequence(files), [files]);
   const position = Math.min(Math.max(0, at), Math.max(0, sequence.length - 1));
   const stop = sequence[position];
@@ -327,7 +332,10 @@ export function ImageLightbox({
               ))}
             </div>
           )}
-          <span className="image-lightbox__path" title={file.path}>
+          <span
+            className="image-lightbox__path"
+            {...hoverTooltip(tip, file.path)}
+          >
             {file.path}
           </span>
           <button
@@ -335,7 +343,7 @@ export function ImageLightbox({
             className="image-lightbox__close"
             onClick={onClose}
             aria-label="Close"
-            title="Close (Esc)"
+            {...hoverTooltip(tip, "Close (Esc)")}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6 6 18" />
@@ -440,7 +448,7 @@ export function ImageLightbox({
                 onPointerDown={stopPan}
                 disabled={position === 0}
                 aria-label="Previous"
-                title="Previous (Left Arrow)"
+                {...hoverTooltip(tip, "Previous (Left Arrow)")}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="m15 18-6-6 6-6" />
@@ -453,7 +461,7 @@ export function ImageLightbox({
                 onPointerDown={stopPan}
                 disabled={position >= sequence.length - 1}
                 aria-label="Next"
-                title="Next (Right Arrow)"
+                {...hoverTooltip(tip, "Next (Right Arrow)")}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="m9 18 6-6-6-6" />
@@ -485,18 +493,22 @@ export function ImageLightbox({
               type="button"
               className={atFit ? "is-on" : ""}
               onClick={fit}
-              title="Fit (0)"
+              {...hoverTooltip(tip, "Fit (0)")}
             >
               Fit
             </button>
-            <button type="button" onClick={actual} title="Actual size (1)">
+            <button
+              type="button"
+              onClick={actual}
+              {...hoverTooltip(tip, "Actual size (1)")}
+            >
               100%
             </button>
             <button
               type="button"
               onClick={() => zoomBy(1 / 1.35)}
               aria-label="Zoom out"
-              title="Zoom out (−)"
+              {...hoverTooltip(tip, "Zoom out (−)")}
             >
               −
             </button>
@@ -504,7 +516,7 @@ export function ImageLightbox({
               type="button"
               onClick={() => zoomBy(1.35)}
               aria-label="Zoom in"
-              title="Zoom in (+)"
+              {...hoverTooltip(tip, "Zoom in (+)")}
             >
               +
             </button>
@@ -529,6 +541,7 @@ export function ImageLightbox({
           onClose={() => setMenu(null)}
         />
       )}
+      {tip.tooltipNode}
     </div>,
     document.body
   );

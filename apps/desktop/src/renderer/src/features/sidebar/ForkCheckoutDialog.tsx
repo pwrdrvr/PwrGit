@@ -8,6 +8,10 @@ import type {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import {
   defaultForkTarget,
   defaultUpstream,
   forkNameProblem,
@@ -51,6 +55,7 @@ export function ForkCheckoutDialog({
   onForked: (repo: Repo) => void;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
   const [preflight, setPreflight] = useState<ForkCheckoutPreflight | null>(null);
   const [checking, setChecking] = useState(true);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -475,7 +480,10 @@ export function ForkCheckoutDialog({
                       <strong>{change.nameWithOwner}</strong>
                       <small>{change.note}</small>
                     </span>
-                    <code className="fork-remote-plan__url" title={change.url}>
+                    <code
+                      className="fork-remote-plan__url"
+                      {...hoverTooltip(tip, change.url)}
+                    >
                       {change.url}
                     </code>
                   </li>
@@ -545,6 +553,7 @@ export function ForkCheckoutDialog({
           </button>
         </div>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

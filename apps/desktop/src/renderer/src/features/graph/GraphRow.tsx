@@ -7,6 +7,10 @@ import type { LaneRow } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
 import type { BranchChipTarget } from "./BranchChipMenu";
 import { shortWhen } from "./graph-view";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 export const LANE_W = 16;
 const ROW_H = 64;
@@ -147,6 +151,10 @@ export function GraphRow({
     isMine,
     pullRequest
   } = vm;
+  /** The row's plain tooltips — the rebase checkbox, the tag chip, the
+   *  overflow pill, the worktree button. Not the gated SHA/PR cards below,
+   *  which repeat down a column the pointer crosses (see lib/AGENTS.md). */
+  const tip = useViewportTooltip();
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
@@ -352,7 +360,7 @@ export function GraphRow({
         className={`commit-check${selected ? " is-checked" : ""}`}
         role="checkbox"
         aria-checked={selected}
-        title={selected ? "Deselect for rebase" : "Select for rebase"}
+        {...hoverTooltip(tip, selected ? "Deselect for rebase" : "Select for rebase")}
         onClick={(e) => {
           e.stopPropagation();
           onToggle();
@@ -404,7 +412,10 @@ export function GraphRow({
           {vm.tag !== undefined && (
             <span
               className="commit-tag commit-tag--tag"
-              title={`${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}`}
+              {...hoverTooltip(
+                tip,
+                `${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}`
+              )}
             >
               <TagGlyph />
               {/* The mark is decorative, so without this the chip announces as
@@ -420,7 +431,10 @@ export function GraphRow({
               must not flood the row. Overflow collapses into a +N pill whose
               tooltip lists everything. */}
           {chipCount > 0 && (
-            <span className="ref-chips" title={[...refs, ...remoteRefs].join("\n")}>
+            <span
+              className="ref-chips"
+              {...hoverTooltip(tip, [...refs, ...remoteRefs].join("\n"))}
+            >
               {refs.slice(0, MAX_REF_CHIPS).map((name) => {
                 const info = branchInfo?.[name];
                 const wtId = info?.worktreeId;
@@ -447,7 +461,7 @@ export function GraphRow({
                     {wtId !== undefined && (
                       <button
                         className="ref-wt"
-                        title="Checked out in a worktree — click to open it"
+                        {...hoverTooltip(tip, "Checked out in a worktree — click to open it")}
                         aria-label={`Open the ${name} worktree`}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -511,6 +525,7 @@ export function GraphRow({
           {commit.isMerge && <span className="commit-tag">merge</span>}
         </div>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

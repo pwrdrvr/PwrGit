@@ -12,6 +12,10 @@ import {
   shortcutLabel
 } from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { openResetToRemote } from "../graph/reset-to-remote";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { PrChip } from "./PrChip";
@@ -106,6 +110,10 @@ export function WorktreeRow({
     }, PR_HOVER_PREFETCH_DELAY_MS);
   };
   useEffect(() => clearPrHoverTimer, []);
+  /** One card for the grip, the branch name, the four state tags, the age and
+   *  the folder line. The PR chip keeps its own gated card — see the sidebar's
+   *  `PrChip`, which is a different surface with a different dwell rule. */
+  const tip = useViewportTooltip();
   // `role="treeitem"`, not `option`: these rows live inside the sidebar's
   // `role="tree"`, and `option` is only meaningful inside a listbox. Level 2
   // puts them under their repo, which the flat DOM can't otherwise convey.
@@ -137,7 +145,8 @@ export function WorktreeRow({
       <span
         className="wt-row__handle"
         aria-hidden="true"
-        title={
+        {...hoverTooltip(
+          tip,
           dragProps.draggable
             ? `Drag to reorder — or ${shortcutLabel(
                 { key: "ArrowUp", shift: true },
@@ -147,7 +156,7 @@ export function WorktreeRow({
                 platform
               )} from the keyboard`
             : undefined
-        }
+        )}
       >
         {dragProps.draggable && (
           <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">
@@ -198,13 +207,13 @@ export function WorktreeRow({
           <path d="M18 9c0 6-6 6-6 12" />
         </svg>
       )}
-      <span className="wt-row__branch" title={worktree.branch}>
+      <span className="wt-row__branch" {...hoverTooltip(tip, worktree.branch)}>
         {worktree.branch}
       </span>
       {worktree.isPrimary && (
         <span
           className="wt-tag wt-tag--local"
-          title="The repository's primary working tree"
+          {...hoverTooltip(tip, "The repository's primary working tree")}
         >
           primary
         </span>
@@ -212,11 +221,12 @@ export function WorktreeRow({
       {missing && (
         <span
           className="wt-tag wt-tag--missing"
-          title={
+          {...hoverTooltip(
+            tip,
             `${worktree.path} no longer exists, but git still registers the ` +
-            "worktree. Remove it to drop this row, or put the folder back " +
-            "(remount the volume) and refresh the repo."
-          }
+              "worktree. Remove it to drop this row, or put the folder back " +
+              "(remount the volume) and refresh the repo."
+          )}
         >
           directory missing
         </span>
@@ -224,7 +234,10 @@ export function WorktreeRow({
       {worktree.locked === true && (
         <span
           className="wt-tag wt-tag--locked"
-          title="Locked with `git worktree lock` (usually on removable media); removing it needs --force"
+          {...hoverTooltip(
+            tip,
+            "Locked with `git worktree lock` (usually on removable media); removing it needs --force"
+          )}
         >
           locked
         </span>
@@ -278,12 +291,13 @@ export function WorktreeRow({
           {!worktree.isDefaultBranch && worktree.mergedIntoDefault && (
             <span
               className="wt-tag wt-tag--merged"
-              title={
+              {...hoverTooltip(
+                tip,
                 "Its commits are already in the default branch, so this " +
-                "worktree is usually safe to remove.\n\n" +
-                "Detected by ancestry, not by a merged PR — a squash or " +
-                "rebase merge rewrites the commits and won't show here."
-              }
+                  "worktree is usually safe to remove.\n\n" +
+                  "Detected by ancestry, not by a merged PR — a squash or " +
+                  "rebase merge rewrites the commits and won't show here."
+              )}
             >
               in default
             </span>
@@ -291,7 +305,10 @@ export function WorktreeRow({
           {!worktree.isDefaultBranch && worktree.divergedFromDefault && (
             <span
               className="wt-tag wt-tag--diverged"
-              title="No shared history with the default branch (rewritten or orphaned)"
+              {...hoverTooltip(
+                tip,
+                "No shared history with the default branch (rewritten or orphaned)"
+              )}
             >
               diverged
             </span>
@@ -305,7 +322,7 @@ export function WorktreeRow({
         </>
       )}
       {worktree.lastActivityAt !== undefined && (
-        <span className="wt-age" title={worktree.lastActivityAt}>
+        <span className="wt-age" {...hoverTooltip(tip, worktree.lastActivityAt)}>
           {relativeAge(worktree.lastActivityAt, now)}
         </span>
       )}
@@ -325,17 +342,21 @@ export function WorktreeRow({
           {/* The branch again, in full. The name above is the row's only
               shrinkable element, so at 320px it is usually the truncated one —
               and this second line is what the pointer is over when someone
-              wants to know which checkout they are looking at. The path is
-              middle-elided: a native tooltip is one unwrapped line, so the
-              whole thing reached across the pane beside the sidebar to say
-              two things the row above already showed. "Copy path" in the ⋯
-              menu still yields it exactly, and the switcher's tooltip keeps
-              it whole, where a path match is why the row is on screen. */}
+              wants to know which checkout they are looking at. The path stays
+              middle-elided even now the card wraps at 440px rather than
+              running out in one native line: two wrapped lines of a path the
+              row above already showed is still the wrong thing to put under
+              the pointer. "Copy path" in the ⋯ menu yields it exactly, and the
+              switcher's card keeps it whole, where a path match is why the row
+              is on screen. */}
           <span
             className="wt-row__folder"
-            title={`${worktree.branch}\nWorktree folder — ${elidePathMiddle(
-              worktree.path
-            )}`}
+            {...hoverTooltip(
+              tip,
+              `${worktree.branch}\nWorktree folder — ${elidePathMiddle(
+                worktree.path
+              )}`
+            )}
           >
             <svg
               width="10"
@@ -361,7 +382,10 @@ export function WorktreeRow({
         <button
           type="button"
           className={`pin${worktree.pinned ? " is-pinned" : ""}`}
-          title={worktree.pinned ? "Unpin worktree" : "Pin worktree"}
+          {...hoverTooltip(
+            tip,
+            worktree.pinned ? "Unpin worktree" : "Pin worktree"
+          )}
           aria-label={worktree.pinned ? "Unpin worktree" : "Pin worktree"}
           onClick={(e) => {
             e.stopPropagation();
@@ -380,6 +404,7 @@ export function WorktreeRow({
           : { onResetToRemote: () => openResetToRemote({ worktree }) })}
         {...(worktree.isPrimary ? {} : { onRemove })}
       />
+      {tip.tooltipNode}
     </div>
   );
 }

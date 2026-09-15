@@ -9,6 +9,10 @@ import {
   SettingsSectionStack
 } from "./SettingsLayout";
 import { useModal } from "../../lib/useModal";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 /**
  * Profiles pane (PwrAgnt's ProfilesSettings pattern, on PwrGit's profile
@@ -115,6 +119,7 @@ function ProfileRow(props: {
   onDelete: () => void;
   canDelete: boolean;
 }) {
+  const tip = useViewportTooltip();
   const profile = props.profile;
   const identity =
     profile.email !== "" ? profile.email : "no commit email set";
@@ -149,7 +154,7 @@ function ProfileRow(props: {
         <span className="settings-profile-row__meta">{identity}</span>
         <span
           className="settings-profile-row__meta"
-          title={profile.roots.join("\n")}
+          {...hoverTooltip(tip, profile.roots.join("\n"))}
         >
           {rootsSummary}
         </span>
@@ -173,16 +178,25 @@ function ProfileRow(props: {
           className="settings-button settings-button--danger"
           type="button"
           disabled={!props.canDelete}
-          title={
+          /* The refusal is the NAME as well as the card: a disabled button
+             still announces its name, and AT reads that over a card. */
+          aria-label={
+            props.canDelete
+              ? undefined
+              : `Delete… ${profile.name} — unavailable, PwrGit must keep at least one profile`
+          }
+          {...hoverTooltip(
+            tip,
             props.canDelete
               ? `Delete ${profile.name}`
               : "PwrGit must keep at least one profile"
-          }
+          )}
           onClick={props.onDelete}
         >
           Delete…
         </button>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

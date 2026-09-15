@@ -586,9 +586,11 @@ test("the sidebar reflows at its narrowest width and largest text notch", async 
   ).toBeLessThanOrEqual(overflow.clientWidth + 1);
 
   // Truncation is fine; losing the text is not. The name ellipsises here, so
-  // the full string has to remain available (SC 1.4.4's intent).
-  await expect(window.locator(".repo-row__name")).toHaveAttribute(
-    "title",
+  // the full string has to remain available (SC 1.4.4's intent) — through a
+  // hover card now, which unlike the old `title` also opens on FOCUS, so a
+  // keyboard user can reach it too.
+  await window.locator(".repo-row__name").hover();
+  await expect(window.getByRole("tooltip")).toHaveText(
     "a-repo-with-a-genuinely-long-name"
   );
 });

@@ -8,6 +8,10 @@ import type {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 type RepoProgress =
   | { phase: "waiting" | "running" }
@@ -154,6 +158,7 @@ export function BulkSyncDialog({
   mode: BulkSyncMode;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
   const repoSnapshot = useRef(repos).current;
   const operationIdRef = useRef("");
   const [completed, setCompleted] = useState(0);
@@ -352,7 +357,10 @@ export function BulkSyncDialog({
                 <div className="bulk-sync__repo-head">
                   <div>
                     <strong>{repo.name}</strong>
-                    <small className="selectable" title={repo.path}>
+                    <small
+                      className="selectable"
+                      {...hoverTooltip(tip, repo.path)}
+                    >
                       {repo.path}
                     </small>
                   </div>
@@ -390,6 +398,7 @@ export function BulkSyncDialog({
           )}
         </div>
       </section>
+      {tip.tooltipNode}
     </div>
   );
 }

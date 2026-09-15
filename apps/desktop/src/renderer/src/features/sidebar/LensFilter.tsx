@@ -1,6 +1,9 @@
 import { useRef, type ReactNode } from "react";
 import type { Lens } from "@pwrgit/shared";
-import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import {
   formatLensCount,
   LENS_EMPTY_COPY,
@@ -151,10 +154,7 @@ export function LensFilter({
             className={`lens-chip${l === lens ? " is-active" : ""}${
               available ? "" : " is-empty"
             }`}
-            onMouseEnter={(e) => tip.show(e.currentTarget, tooltip)}
-            onMouseLeave={tip.hide}
-            onFocus={(e) => tip.show(e.currentTarget, tooltip)}
-            onBlur={tip.hide}
+            {...hoverTooltip(tip, tooltip)}
             onClick={() => {
               if (!available) return;
               tip.hide();
@@ -195,11 +195,12 @@ export function LensFilter({
         <span
           className="lens-filter__count"
           aria-hidden="true"
-          title={
+          {...hoverTooltip(
+            tip,
             formatLensCount(activeCount) === String(activeCount)
               ? undefined
               : `${activeCount}`
-          }
+          )}
         >
           {formatLensCount(activeCount)}
         </span>

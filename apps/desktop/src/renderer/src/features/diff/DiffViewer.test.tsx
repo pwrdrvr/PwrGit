@@ -749,7 +749,11 @@ describe("DiffViewer hunk and line selection", () => {
     // affordance while its neighbours keep theirs reads as a rendering fault.
     const marks = container.querySelectorAll(".diff-line-take--atomic");
     expect(marks).toHaveLength(2);
-    expect(marks[0]?.getAttribute("title")).toContain("no trailing newline");
+    // By accessible name: the caption is a `useViewportTooltip` card now,
+    // and `role="img"` + aria-label is what makes the mark readable at all.
+    expect(marks[0]?.getAttribute("aria-label")).toContain(
+      "no trailing newline"
+    );
     // Nothing here is a control: no + to press, and no chip either.
     expect(container.querySelector("button.diff-line-take")).toBeNull();
     expect(container.querySelector(".diff-hunk-chip")).toBeNull();

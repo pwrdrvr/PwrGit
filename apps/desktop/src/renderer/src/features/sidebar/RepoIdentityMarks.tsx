@@ -419,9 +419,10 @@ export function RepoIdentityGlyphs({
         /* Busy is `aria-disabled`, never `disabled`: Chromium blurs an element
            the moment it becomes disabled, so a refresh started from the
            keyboard threw focus to <body> until it returned (SC 2.4.3) — the
-           same fix `.ref-fetch-all` and `.wt-refresh` already carry. It also
-           kept the busy card below from ever showing, because a disabled
-           control fires no pointer events at all. */
+           same fix `.ref-fetch-all` and `.wt-refresh` already carry. (Not
+           because a disabled control swallows hover — it does not; Chromium
+           still fires mouseover/enter on a disabled button, and only the
+           click-shaped events are suppressed. See lib/AGENTS.md.) */
         aria-disabled={busy}
         {...hoverTooltip(tip, visibilityTip)}
         onClick={(event) => {
@@ -453,23 +454,34 @@ export function RepoIdentityChips({
   repository: CloneRepository;
 }) {
   const noPush = pushAccessTitle(repository);
+  // One card for the row of pills, the same way the glyph variant above does
+  // it. These pills are wider than a 12px mark and a `title` did render on
+  // them — but it rendered for the pointer only, and this dialog is one a
+  // keyboard user tabs through.
+  const tip = useViewportTooltip();
   return (
     <>
       <span
         className="clone-chip clone-chip--muted"
-        title={`Hosted on ${repository.hostname}`}
+        {...hoverTooltip(tip, `Hosted on ${repository.hostname}`)}
       >
         {hostLabel(repository.host, repository.hostname)}
       </span>
       <span
         className={`clone-chip clone-chip--vis clone-chip--${repository.visibility}`}
-        title={visibilityTitle(repository.visibility, repository.hostname)}
+        {...hoverTooltip(
+          tip,
+          visibilityTitle(repository.visibility, repository.hostname)
+        )}
       >
         <VisibilityIcon visibility={repository.visibility} size={10} />
         {VISIBILITY_LABEL[repository.visibility]}
       </span>
       {noPush !== null && (
-        <span className="clone-chip clone-chip--nopush" title={noPush}>
+        <span
+          className="clone-chip clone-chip--nopush"
+          {...hoverTooltip(tip, noPush)}
+        >
           <NoPushIcon size={10} />
           read-only
         </span>
@@ -477,16 +489,20 @@ export function RepoIdentityChips({
       {repository.parent !== undefined && (
         <span
           className="clone-chip clone-chip--muted clone-chip--fork"
-          title={`Fork of ${repository.parent.nameWithOwner}${
-            repository.root === undefined
-              ? ""
-              : ` (originally ${repository.root.nameWithOwner})`
-          }`}
+          {...hoverTooltip(
+            tip,
+            `Fork of ${repository.parent.nameWithOwner}${
+              repository.root === undefined
+                ? ""
+                : ` (originally ${repository.root.nameWithOwner})`
+            }`
+          )}
         >
           <GitForkIcon size={10} />
           {repository.parent.nameWithOwner}
         </span>
       )}
+      {tip.tooltipNode}
     </>
   );
 }

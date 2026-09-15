@@ -5,6 +5,10 @@ import {
 } from "react";
 import type { WindowControlAction } from "@pwrgit/shared";
 import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import {
   isWindowMaximized,
   subscribeWindowFrame
 } from "../../lib/window-frame";
@@ -44,6 +48,7 @@ export function WindowControls(): ReactElement {
     isWindowMaximized
   );
 
+  const tip = useViewportTooltip();
   const run = useCallback((action: WindowControlAction): void => {
     void window.pwrgit.runWindowControl(action);
   }, []);
@@ -54,7 +59,7 @@ export function WindowControls(): ReactElement {
         type="button"
         className="titlebar__control"
         aria-label="Minimize"
-        title="Minimize"
+        {...hoverTooltip(tip, "Minimize")}
         onClick={() => run("minimize")}
       >
         <svg {...glyph}>
@@ -65,7 +70,7 @@ export function WindowControls(): ReactElement {
         type="button"
         className="titlebar__control"
         aria-label={maximized ? "Restore" : "Maximize"}
-        title={maximized ? "Restore" : "Maximize"}
+        {...hoverTooltip(tip, maximized ? "Restore" : "Maximize")}
         onClick={() => run("toggle-maximize")}
       >
         <svg {...glyph}>
@@ -83,13 +88,14 @@ export function WindowControls(): ReactElement {
         type="button"
         className="titlebar__control titlebar__control--close"
         aria-label="Close"
-        title="Close"
+        {...hoverTooltip(tip, "Close")}
         onClick={() => run("close")}
       >
         <svg {...glyph}>
           <path d="m4.6 4.6 6.8 6.8M11.4 4.6l-6.8 6.8" />
         </svg>
       </button>
+      {tip.tooltipNode}
     </div>
   );
 }

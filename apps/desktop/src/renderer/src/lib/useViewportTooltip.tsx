@@ -42,6 +42,17 @@ export type ViewportTooltip = {
   /** Replace an open tooltip's content without making it blink. */
   update: (content: ReactNode) => void;
   hide: () => void;
+  /**
+   * Leave a trigger, restoring the enclosing trigger's card when the pointer
+   * has only moved out to it. Hover targets nest — a file row carries one card
+   * and the path inside it carries another — and React fires no `mouseenter`
+   * on an ancestor you never left, so a plain `hide()` there leaves the
+   * pointer sitting on a trigger with nothing shown. A native `title` put the
+   * ancestor's back.
+   */
+  hideFrom: (event: {
+    relatedTarget: EventTarget | null;
+  }) => void;
   /** Delay dismissal long enough to cross from a hover target into a card. */
   scheduleHide: () => void;
   /** Move keyboard focus into the first control in an open tooltip. */
@@ -55,22 +66,59 @@ export type ViewportTooltip = {
  *
  * One spelling, in one place, because the two halves are not optional
  * separately: a mark that opens on hover but not on focus is a mark a keyboard
- * user never sees, and every copy of this that drifts loses one of them.
+ * user never sees, and every copy of this that drifts loses one of them. This
+ * is also the whole replacement for a native `title`, which was pointer-only —
+ * so the focus half is the entire point of routing through a helper rather
+ * than writing four props at each call site.
+ *
+ * ```tsx
+ * const tip = useViewportTooltip();
+ * <button {...hoverTooltip(tip, "Fetch all remotes")}>…</button>
+ * {tip.tooltipNode}
+ * ```
+ *
  * Pass the tooltip a component already owns; this adds no state of its own.
+ * One hook and one `tooltipNode` per component, however many triggers it has —
+ * a list shares one card the way `LineageGraph` shares one `HoverIntent`.
+ *
+ * `content` may be `undefined`, which is what call sites pass when there is
+ * conditionally nothing to say (`title={x ? y : undefined}` was the shape).
+ * The handlers then do nothing rather than opening an empty card.
+ *
+ * Not for a trigger that should be gated on dwell — see `hoverIntentHandlers`
+ * and "Which hover popups are gated" in this directory's AGENTS.md.
  */
 export function hoverTooltip(
-  tip: Pick<ViewportTooltip, "show" | "hide">,
+  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
   content: ReactNode
 ): {
   onMouseEnter: (event: ReactMouseEvent<HTMLElement>) => void;
-  onMouseLeave: () => void;
+  onMouseLeave: (event: ReactMouseEvent<HTMLElement>) => void;
   onFocus: (event: ReactFocusEvent<HTMLElement>) => void;
   onBlur: () => void;
 } {
+  // `null` and `false` are legitimate ReactNodes that render nothing, so they
+  // count as empty alongside `undefined` and "". A node that renders nothing
+  // would otherwise open a bordered, padded, empty box.
+  const empty =
+    content === undefined ||
+    content === null ||
+    content === false ||
+    content === "";
+  // Read `currentTarget` synchronously into the call: React nulls it once the
+  // handler returns, and `show` stores that element to return focus to.
+  const open = (
+    event: ReactMouseEvent<HTMLElement> | ReactFocusEvent<HTMLElement>
+  ): void => {
+    if (empty) return;
+    tip.show(event.currentTarget, content);
+  };
   return {
-    onMouseEnter: (event) => tip.show(event.currentTarget, content),
-    onMouseLeave: tip.hide,
-    onFocus: (event) => tip.show(event.currentTarget, content),
+    onMouseEnter: open,
+    // Not `tip.hide`: leaving an inner trigger for the row around it has to
+    // put the row's own card back. See `hideFrom`.
+    onMouseLeave: tip.hideFrom,
+    onFocus: open,
     onBlur: tip.hide
   };
 }
@@ -189,6 +237,9 @@ export function useViewportTooltip(
   /** A trigger whose tooltip Escape dismissed, until the pointer or focus
    * leaves it. Without this the card reopens the instant focus returns. */
   const dismissedTargetRef = useRef<HTMLElement | null>(null);
+  /** What each trigger last showed, so leaving a nested trigger can restore
+   *  the enclosing one. Weak so a removed row is not held alive by it. */
+  const contentByTargetRef = useRef(new WeakMap<HTMLElement, ReactNode>());
   const dismissTimerRef = useRef<number | undefined>(undefined);
   const pointerInInteractiveTooltipRef = useRef(false);
   const [state, setState] = useState<TooltipState | undefined>(undefined);
@@ -256,12 +307,33 @@ export function useViewportTooltip(
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
     targetRef.current = target;
+    contentByTargetRef.current.set(target, content);
     setState({
       content,
       targetRect: rectOf(target.getBoundingClientRect()),
       ...(anchor === undefined ? {} : { anchor })
     });
   }, [cancelScheduledHide]);
+
+  const hideFrom = useCallback((event: {
+    relatedTarget: EventTarget | null;
+  }): void => {
+    // Where the pointer went. If it is still inside a trigger that has shown
+    // a card before — the row this tag or path sits in — that card is what
+    // should be on screen now, because its own `mouseenter` will not fire
+    // again for a descendant it never lost the pointer to.
+    const to = event.relatedTarget;
+    if (to instanceof HTMLElement) {
+      for (let el: HTMLElement | null = to; el !== null; el = el.parentElement) {
+        const remembered = contentByTargetRef.current.get(el);
+        if (remembered !== undefined) {
+          show(el, remembered);
+          return;
+        }
+      }
+    }
+    hide();
+  }, [hide, show]);
 
   const update = useCallback((content: ReactNode): void => {
     setState((current) => (current ? { ...current, content } : current));
@@ -302,10 +374,6 @@ export function useViewportTooltip(
       // (useDismissable) can be up at the same time as a hover card, and one
       // keystroke must not dismiss both.
       if (event.defaultPrevented) return;
-      // This listener only exists while a card is showing, so the Escape is
-      // spent on the card. Say so: surfaces underneath (the diff pane) defer
-      // to a claimed Escape rather than closing on the same keystroke.
-      event.preventDefault();
       // A keyboard user may have tabbed into the card. Dismissing it must not
       // drop them at the top of the document — send them back to the trigger
       // they opened it from.
@@ -313,13 +381,26 @@ export function useViewportTooltip(
       const leavingFocusBehind =
         card !== null && card.contains(document.activeElement);
       const trigger = targetRef.current;
+      // Dismiss always; claim only a card the keyboard summoned, so an Escape
+      // meant for the surface underneath still reaches it. Why, and why
+      // `:focus-visible` rather than `:focus`: "A hover card claims Escape
+      // only if the keyboard summoned it" in this directory's AGENTS.md.
+      const summonedByKeyboard =
+        leavingFocusBehind || trigger?.matches(":focus-visible") === true;
+      if (summonedByKeyboard) event.preventDefault();
       hide();
       // The dismissal is released by the trigger's own exit, listened for
       // here rather than folded into hide()/scheduleHide(): restoring focus
       // below blurs a control inside the card, and the card's blur handler
       // schedules a hide — which would drop the flag a moment before the
       // trigger's focus handler reads it, reopening what was just dismissed.
-      if (trigger !== null) {
+      //
+      // Only on the claiming path. The flag exists for that focus restore, and
+      // nothing re-fires on a trigger the pointer is merely resting on — while
+      // the keystroke we did NOT claim is, by now, closing the surface that
+      // trigger lives in. Latching it there pins a removed element, and
+      // `parentNode` keeps its whole detached subtree alive with it.
+      if (summonedByKeyboard && trigger !== null) {
         dismissedTargetRef.current = trigger;
         const release = (): void => {
           dismissedTargetRef.current = null;
@@ -393,6 +474,7 @@ export function useViewportTooltip(
     show,
     update,
     hide,
+    hideFrom,
     scheduleHide,
     focusFirst,
     visible,

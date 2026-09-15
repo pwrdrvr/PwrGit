@@ -299,7 +299,7 @@ describe("ChangesTab partially staged files", () => {
     container.remove();
   });
 
-  it("marks both rows of a path git lists on either side of the index", () => {
+  it("marks both rows of a path git lists on either side of the index", async () => {
     // `both.txt` is partly staged, so it is listed twice; the other two files
     // sit on one side each and must stay unmarked.
     const marked = [...container.querySelectorAll(".file-row.is-split")];
@@ -308,14 +308,31 @@ describe("ChangesTab partially staged files", () => {
       true
     );
     expect(container.querySelectorAll(".file-split")).toHaveLength(2);
-    // The tag names where the rest of the file went, per side.
-    const titles = [...container.querySelectorAll(".file-split")].map((tag) =>
-      tag.getAttribute("title")
-    );
-    expect(titles).toContain(
+    // The tag names where the rest of the file went, per side — on a
+    // `useViewportTooltip` card now rather than a `title`, so each tag has to
+    // be hovered for its sentence to exist at all.
+    const cards: string[] = [];
+    for (const tag of container.querySelectorAll(".file-split")) {
+      await act(async () => {
+        tag.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      });
+      cards.push(document.querySelector('[role="tooltip"]')?.textContent ?? "");
+      // Each row owns its own card, so the pointer has to be seen LEAVING one
+      // before the next opens — otherwise the first card is still mounted and
+      // the query keeps finding it. A real pointer always emits this.
+      await act(async () => {
+        tag.dispatchEvent(
+          new MouseEvent("mouseout", {
+            bubbles: true,
+            relatedTarget: document.body
+          })
+        );
+      });
+    }
+    expect(cards).toContain(
       "Partly staged — this file also has unstaged changes"
     );
-    expect(titles).toContain(
+    expect(cards).toContain(
       "Partly staged — this file also has staged changes"
     );
   });

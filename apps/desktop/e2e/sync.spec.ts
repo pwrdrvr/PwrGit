@@ -93,8 +93,10 @@ test("a synced release branch distinguishes default-branch drift from commits to
   // green.
   await expect(drift).toBeVisible({ timeout: 20_000 });
   await expect(drift).toHaveText("main +4");
-  await expect(drift).toHaveAttribute(
-    "title",
+  // The sentence behind the compact chip is a hover card rather than a
+  // `title`, so it has to be hovered to exist at all.
+  await drift.hover();
+  await expect(window.getByRole("tooltip")).toHaveText(
     "main has 4 commits not in releases/1.0; this is not commits available to pull"
   );
 });

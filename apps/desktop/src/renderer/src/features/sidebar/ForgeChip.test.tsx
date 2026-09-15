@@ -9,8 +9,24 @@ async function draw(chip: Parameters<typeof ForgeChip>[0]["chip"]) {
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(<ForgeChip chip={chip} />));
+  const el = container.querySelector<HTMLElement>(".forge-chip")!;
   return {
-    el: container.querySelector<HTMLElement>(".forge-chip")!,
+    el,
+    /**
+     * Park the pointer on the chip and read the card it opens.
+     *
+     * The words the mark abbreviates used to be a native `title`, readable
+     * straight off the element. They are a `useViewportTooltip` card now — see
+     * `lib/AGENTS.md` — so the only way to assert them is to hover and look at
+     * what rendered. React turns a bubbling `mouseover` into `onMouseEnter`,
+     * which is the same route `WorktreeHeader.test.tsx` takes.
+     */
+    hover: async (): Promise<string> => {
+      await act(async () => {
+        el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      });
+      return document.querySelector('[role="tooltip"]')?.textContent ?? "";
+    },
     cleanup: async () => {
       await act(async () => root.unmount());
       container.remove();
@@ -19,25 +35,23 @@ async function draw(chip: Parameters<typeof ForgeChip>[0]["chip"]) {
 }
 
 it("draws the product's mark and no words when the mark answers alone", async () => {
-  const { el, cleanup } = await draw({
+  const { el, hover, cleanup } = await draw({
     kind: "github",
     name: null,
     others: 0,
     title: "origin is on github.com"
   });
   expect(el.querySelector("img")).not.toBeNull();
+  // The chip's own box stays wordless; `textContent` would otherwise pick the
+  // card up once it is open, since both are read after the hover below.
   expect(el.textContent).toBe("");
+  expect(el.className).toContain("forge-chip--mark");
   // The words it dropped are still reachable — the chip is an abbreviation,
   // not a loss. Through `useViewportTooltip` rather than a native `title`: the
   // marks one glyph away draw the house card, and a chip answering with the OS
   // tooltip made one row speak in two voices.
   expect(el.getAttribute("title")).toBeNull();
-  await act(async () => {
-    el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-    el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-  });
-  expect(document.body.textContent).toContain("origin is on github.com");
-  expect(el.className).toContain("forge-chip--mark");
+  expect(await hover()).toBe("origin is on github.com");
   await cleanup();
 });
 

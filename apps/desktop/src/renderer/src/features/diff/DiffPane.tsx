@@ -13,6 +13,10 @@ import { showErrorToast } from "../../lib/toast";
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
 import type { FileInsightTab } from "./FileInsightsPane";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 export type DiffTarget =
   | { kind: "file"; path: string; staged: boolean }
@@ -72,6 +76,7 @@ export function DiffPane({
   ) => void;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
   const [patch, setPatch] = useState<string | null>(null);
   const [selectionDiff, setSelectionDiff] = useState<PartialFileDiff | null>(
     null
@@ -219,9 +224,12 @@ export function DiffPane({
   // it). Escape is scoped to that focus: it closes the pane only while focus
   // is inside it, so a modal that has taken focus, or a rail control the user
   // is working in, keeps its own Escape. Overlays that leave focus where it
-  // was (a hover tooltip) claim the key with preventDefault instead — and
-  // since their window listeners are registered after this one, the check
-  // is deferred a tick so the claim has been made by the time it is read.
+  // was claim the key with preventDefault instead — and since their window
+  // listeners are registered after this one, the check is deferred a tick so
+  // the claim has been made by the time it is read. A hover card is the one
+  // that does NOT claim unless the keyboard summoned it: its trigger is under
+  // the pointer, not under focus, so an Escape meant for this pane has to
+  // reach it (see `useViewportTooltip`).
   // `hidden` is in the dependencies, not just `key`: file details render OVER
   // this pane rather than replacing it, so coming back changes neither the
   // target nor the key. Without it the pane stayed unfocused on return — the
@@ -473,7 +481,10 @@ export function DiffPane({
         <div className="diff-pane__row">
           <span
             className="diff-pane__scope"
-            title={target.kind === "file" ? undefined : target.hash}
+            {...hoverTooltip(
+              tip,
+              target.kind === "file" ? undefined : target.hash
+            )}
           >
             {scope}
           </span>
@@ -490,11 +501,12 @@ export function DiffPane({
                   className={`diff-side__tab${target.staged === staged ? " is-active" : ""}`}
                   aria-pressed={target.staged === staged}
                   onClick={() => onOpenFile(target.path, staged)}
-                  title={
+                  {...hoverTooltip(
+                    tip,
                     staged
                       ? "Staged for the next commit (HEAD → index)"
                       : "Not yet staged (index → working tree)"
-                  }
+                  )}
                 >
                   {staged ? "Staged" : "Unstaged"}
                   {target.staged !== staged && counterpart && (
@@ -522,7 +534,7 @@ export function DiffPane({
             className="diff-pane__close"
             onClick={onClose}
             aria-label="Close"
-            title="Close (Esc)"
+            {...hoverTooltip(tip, "Close (Esc)")}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6 6 18" />
@@ -533,7 +545,7 @@ export function DiffPane({
         {subject !== null &&
           (body === "" ? (
             // Nothing more to read, so nothing to press.
-            <div className="diff-pane__message" title={subject}>
+            <div className="diff-pane__message" {...hoverTooltip(tip, subject)}>
               {subject}
             </div>
           ) : (
@@ -547,7 +559,7 @@ export function DiffPane({
                 // Only while the body exists in the DOM: a dangling
                 // aria-controls id is an axe violation and AT noise.
                 {...(messageOpen ? { "aria-controls": messageBodyId } : {})}
-                title={subject ?? undefined}
+                {...hoverTooltip(tip, subject ?? undefined)}
               >
                 <svg
                   className="diff-pane__message-caret"
@@ -606,7 +618,7 @@ export function DiffPane({
                 className="diff-selection-bar__file"
                 disabled={applying}
                 onClick={applyFile}
-                title={`${selectionVerb} every change to this file`}
+                {...hoverTooltip(tip, `${selectionVerb} every change to this file`)}
               >
                 {selectionVerb} file
               </button>
@@ -627,7 +639,7 @@ export function DiffPane({
                     className="diff-selection-bar__help"
                     aria-expanded={helpOpen}
                     aria-label="Gestures and keyboard shortcuts"
-                    title="Gestures and keyboard shortcuts (?)"
+                    {...hoverTooltip(tip, "Gestures and keyboard shortcuts (?)")}
                     onClick={() => setHelpOpen((open) => !open)}
                   >
                     ?
@@ -746,6 +758,7 @@ export function DiffPane({
           />
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

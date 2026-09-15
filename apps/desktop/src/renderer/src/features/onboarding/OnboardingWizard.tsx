@@ -15,6 +15,10 @@ import {
 } from "../settings/ForgeProductSection";
 import { useForgeStatuses } from "../settings/useForgeStatuses";
 import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import {
   RAIL_LABELS,
   nextStep,
   previousStep,
@@ -503,6 +507,7 @@ function FolderPickStep(props: {
   onAdd: () => void;
   onRemove: (root: string) => void;
 }) {
+  const tip = useViewportTooltip();
   const homeish = props.roots.some((r) => /^([A-Za-z]:)?[/\\]?Users?[/\\][^/\\]+[/\\]?$/.test(r));
   return (
     <div>
@@ -519,7 +524,10 @@ function FolderPickStep(props: {
       <ul className="onboarding-wizard__roots">
         {props.roots.map((root) => (
           <li key={root} className="onboarding-wizard__root">
-            <span className="onboarding-wizard__root-path" title={root}>
+            <span
+              className="onboarding-wizard__root-path"
+              {...hoverTooltip(tip, root)}
+            >
               {root}
             </span>
             <button
@@ -563,6 +571,7 @@ function FolderPickStep(props: {
           </div>
         </div>
       )}
+      {tip.tooltipNode}
     </div>
   );
 }

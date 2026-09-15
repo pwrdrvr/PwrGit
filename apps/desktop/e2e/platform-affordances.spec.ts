@@ -48,8 +48,10 @@ test("renderer affordances follow the real OS platform", async () => {
 
   const searchHint = window.locator(".sidebar__search .kbd");
   await expect(searchHint).toHaveText(shortcut("F"));
-  await expect(searchHint).toHaveAttribute(
-    "title",
+  // The alternative chord is a `useViewportTooltip` card now, not a `title`:
+  // hover it and read what rendered. (See `lib/AGENTS.md`.)
+  await searchHint.hover();
+  await expect(window.getByRole("tooltip")).toHaveText(
     `${shortcut("F")} or ${shortcut("K")}`
   );
 
@@ -70,8 +72,8 @@ test("renderer affordances follow the real OS platform", async () => {
   await expect(window.locator(".titlebar__pathchip")).toContainText(expectedTail);
 
   const linked = branchRow(window, "feature/one");
-  await expect(linked.locator(".wt-row__handle")).toHaveAttribute(
-    "title",
+  await linked.locator(".wt-row__handle").hover();
+  await expect(window.getByRole("tooltip")).toHaveText(
     `Drag to reorder — or ${reorder} from the keyboard`
   );
 
@@ -92,11 +94,10 @@ test("renderer affordances follow the real OS platform", async () => {
     .getByRole("button", { name: "Pin repo" })
     .click();
   await lensChip(window, "Pinned").click();
-  await expect(repoGroup(window, "alpha").locator(".repo-row__handle"))
-    .toHaveAttribute(
-      "title",
-      `Drag to reorder — or ${reorder} from the keyboard`
-    );
+  await repoGroup(window, "alpha").locator(".repo-row__handle").hover();
+  await expect(window.getByRole("tooltip")).toHaveText(
+    `Drag to reorder — or ${reorder} from the keyboard`
+  );
 
   await window.keyboard.press(primaryShortcut("F"));
   const search = window.getByRole("dialog", {

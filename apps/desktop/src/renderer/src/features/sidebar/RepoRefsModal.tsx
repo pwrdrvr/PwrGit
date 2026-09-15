@@ -19,6 +19,10 @@ import {
   useRemoteBranchSearch,
   type RemoteBranchSearch
 } from "../../lib/useRemoteBranchSearch";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { CopyTarget } from "../shell/CopyTarget";
 import { lastSegment } from "./repo-view";
 import { BranchRenameDialog } from "./BranchRenameDialog";
@@ -93,6 +97,7 @@ function SwitchHereButton({
   inFlight: string | null;
   onSwitch: () => void;
 }) {
+  const tip = useViewportTooltip();
   const busy = inFlight === rowKey;
   // Only one switch runs at a time — `switchHere` refuses a second outright.
   // Without saying so, every other row stayed enabled and swallowed its click
@@ -108,11 +113,12 @@ function SwitchHereButton({
     <button
       className="refs-row-action"
       aria-label={label}
-      title={
+      {...hoverTooltip(
+        tip,
         worktree === null
           ? "Select a worktree in this repository first"
           : label
-      }
+      )}
       disabled={worktree === null}
       aria-disabled={busy || blocked}
       onClick={() => {
@@ -121,6 +127,7 @@ function SwitchHereButton({
       }}
     >
       {busy ? "Switching…" : "Switch here"}
+      {tip.tooltipNode}
     </button>
   );
 }
@@ -286,6 +293,7 @@ export function RepoRefsModal({
   ) => void;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
   const [tab, setTab] = useState(initialTab);
   const [query, setQuery] = useState("");
   const [pushOpen, setPushOpen] = useState(false);
@@ -544,7 +552,10 @@ export function RepoRefsModal({
             <div className="refs-browser__eyebrow">Repository refs</div>
             <div className="refs-browser__title">{repo.name}</div>
           </div>
-          <span className="refs-browser__path" title={repo.path}>
+          <span
+            className="refs-browser__path"
+            {...hoverTooltip(tip, repo.path)}
+          >
             {repo.path}
           </span>
           <button className="refs-icon-btn" aria-label="Close" onClick={onClose}>
@@ -738,12 +749,17 @@ export function RepoRefsModal({
                       )}
                       <button
                         className="refs-row-action refs-row-action--quiet"
-                        aria-label={`Rename local branch ${branch.name}`}
-                        title={
+                        aria-label={
+                          branch.checkedOutWorktreeIds.length > 0
+                            ? `Rename local branch ${branch.name} — unavailable, switch every worktree away from this branch first`
+                            : `Rename local branch ${branch.name}`
+                        }
+                        {...hoverTooltip(
+                          tip,
                           branch.checkedOutWorktreeIds.length > 0
                             ? "Switch every worktree away from this branch before renaming it"
                             : "Rename local branch"
-                        }
+                        )}
                         disabled={branch.checkedOutWorktreeIds.length > 0}
                         onClick={() => setRenaming(branch)}
                       >
@@ -751,12 +767,17 @@ export function RepoRefsModal({
                       </button>
                       <button
                         className="refs-row-action refs-row-action--quiet is-danger"
-                        aria-label={`Delete local branch ${branch.name}`}
-                        title={
+                        aria-label={
+                          branch.checkedOutWorktreeIds.length > 0
+                            ? `Delete local branch ${branch.name} — unavailable, switch every worktree away from this branch first`
+                            : `Delete local branch ${branch.name}`
+                        }
+                        {...hoverTooltip(
+                          tip,
                           branch.checkedOutWorktreeIds.length > 0
                             ? "Switch every worktree away from this branch before deleting it"
                             : "Delete local branch"
-                        }
+                        )}
                         disabled={
                           branch.checkedOutWorktreeIds.length > 0 ||
                           deleting !== null
@@ -862,7 +883,7 @@ export function RepoRefsModal({
                             : ` · ${shortWhen(tag.annotation.taggedAt, now)}`}
                         </small>
                         {tag.annotation.body !== undefined && (
-                          <small title={tag.annotation.body}>
+                          <small {...hoverTooltip(tip, tag.annotation.body)}>
                             {tag.annotation.body}
                           </small>
                         )}
@@ -884,11 +905,12 @@ export function RepoRefsModal({
                             : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
                         }
                         disabled={tag.targetType !== "commit"}
-                        title={
+                        {...hoverTooltip(
+                          tip,
                           tag.targetType === "commit"
                             ? "Locate tag in lineage"
                             : `This tag points at a ${tag.targetType}, not a commit`
-                        }
+                        )}
                         onClick={() => {
                           onLocateTag(repo.id, tag);
                           onClose();
@@ -1041,6 +1063,7 @@ export function RepoRefsModal({
           />
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

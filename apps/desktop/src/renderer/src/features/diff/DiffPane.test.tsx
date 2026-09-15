@@ -679,7 +679,7 @@ describe("DiffPane", () => {
 
     // PATCH's one added line is new-side line 1.
     const gutter = container.querySelector<HTMLButtonElement>(
-      '[title="Blame from line 1"]'
+      '[aria-label="Blame from line 1"]'
     );
     expect(gutter).not.toBeNull();
     await act(async () => gutter?.click());
@@ -779,7 +779,9 @@ describe("DiffPane", () => {
     // A staged diff numbers its new side in INDEX coordinates while blame
     // reads the working tree — an aim would confidently mark the wrong line,
     // so the gutter offers none. The header's un-aimed Blame remains.
-    expect(container.querySelector('[title^="Blame from line"]')).toBeNull();
+    expect(
+      container.querySelector('[aria-label^="Blame from line"]')
+    ).toBeNull();
     expect(
       [...container.querySelectorAll(".diff-pane__tools button")].map(
         (button) => button.textContent

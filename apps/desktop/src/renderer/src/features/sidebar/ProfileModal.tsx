@@ -7,6 +7,10 @@ import type {
 } from "@pwrgit/shared";
 import { SettingsSegmented } from "../settings/SettingsLayout";
 import { useModal } from "../../lib/useModal";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 type ProfileThemeChoice = "inherit" | ProfileThemeOverride;
 
@@ -39,6 +43,7 @@ export function ProfileModal({
   pickDirectories: () => Promise<string[]>;
   onClose: () => void;
 }) {
+  const tip = useViewportTooltip();
   const [name, setName] = useState(profile?.name ?? "");
   const [email, setEmail] = useState(profile?.email ?? "");
   const [authorName, setAuthorName] = useState(profile?.authorName ?? "");
@@ -206,14 +211,14 @@ export function ProfileModal({
             )}
             {roots.map((r) => (
               <div className="rootlist__item" key={r}>
-                <span className="rootlist__path" title={r}>
+                <span className="rootlist__path" {...hoverTooltip(tip, r)}>
                   {r}
                 </span>
                 <button
                   className="rootlist__x"
                   onClick={() => removeRoot(r)}
                   aria-label={`Remove ${r}`}
-                  title="Remove folder"
+                  {...hoverTooltip(tip, "Remove folder")}
                 >
                   ×
                 </button>
@@ -240,6 +245,7 @@ export function ProfileModal({
           </button>
         </div>
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }

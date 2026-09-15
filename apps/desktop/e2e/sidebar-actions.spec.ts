@@ -30,9 +30,17 @@ test("clone action stays visible above a long scrolling repo list", async () => 
   // made explicit rather than hiding the action entirely.
   await expect(clone).toBeVisible();
   await expect(clone).toBeDisabled();
-  await expect(clone).toHaveAttribute(
-    "title",
-    "Add a repo folder before cloning"
+  // By accessible name, not `title`: a disabled button still announces its
+  // name, and AT reads that over the hover card the pointer gets. The old
+  // `title` reached neither a screen reader nor the keyboard.
+  //
+  // The ellipsis is load-bearing. `aria-label` REPLACES the button's contents,
+  // so the name has to open with the visible label character for character
+  // ("Clone…") or the button has been renamed out from under everything that
+  // looks it up by name — SC 2.5.3, voice control, and every `getByRole({
+  // name })` in this suite.
+  await expect(clone).toHaveAccessibleName(
+    "Clone… — unavailable, add a repo folder before cloning"
   );
   await expect(
     window.getByText("Add a repo folder to enable clone and fork.")

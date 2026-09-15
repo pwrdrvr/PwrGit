@@ -8,6 +8,10 @@ import {
   type ReclaimWorktreeResult
 } from "@pwrgit/shared";
 import { currentPlatform } from "../../lib/platform";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
@@ -69,6 +73,7 @@ export function ReclaimDiskPanel({
    */
   onRunningChange?: (running: boolean) => void;
 }) {
+  const tip = useViewportTooltip();
   const worktrees = useRef(candidates).current;
   const [excludeText, setExcludeText] = useState(() =>
     formatExcludeLines(RECLAIM_DEFAULT_EXCLUDES)
@@ -335,7 +340,10 @@ export function ReclaimDiskPanel({
                     {plan.repoName} <span aria-hidden="true">·</span>{" "}
                     {plan.branch}
                   </strong>
-                  <small className="selectable" title={plan.path}>
+                  <small
+                    className="selectable"
+                    {...hoverTooltip(tip, plan.path)}
+                  >
                     {plan.path}
                   </small>
                 </div>
@@ -405,11 +413,20 @@ export function ReclaimDiskPanel({
                 totals.paths === 0 ||
                 excludesDiffer
               }
-              title={
+              /* The reason lives in the NAME as well as the card: a disabled
+                 button still announces its name, and AT reads that over a
+                 card. Chromium does still fire hover on a disabled control. */
+              aria-label={
+                excludesDiffer
+                  ? "Delete ignored files… — unavailable, update the preview first because the spare list has unapplied edits"
+                  : undefined
+              }
+              {...hoverTooltip(
+                tip,
                 excludesDiffer
                   ? "Update the preview first — the spare list has unapplied edits."
                   : undefined
-              }
+              )}
               onClick={() => void reclaim()}
             >
               Delete ignored files…
@@ -417,6 +434,7 @@ export function ReclaimDiskPanel({
           </>
         )}
       </div>
+      {tip.tooltipNode}
     </>
   );
 }

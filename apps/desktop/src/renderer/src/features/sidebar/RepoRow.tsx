@@ -14,7 +14,10 @@ import {
   shortcutLabel
 } from "../../lib/platform";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
-import { useViewportTooltip } from "../../lib/useViewportTooltip";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { useForgeNaming } from "../../state/useForgeNaming";
 import {
   type FocusContext,
@@ -186,7 +189,10 @@ export function RepoRow({
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
-  const refreshTooltip = useViewportTooltip();
+  /** One card for every hover surface in the row: the grip, the truncated
+   *  name, the two lens markers, the pin, the refresh button and the sort
+   *  cycle. They are never open at once. */
+  const tip = useViewportTooltip();
   const navigation = groupWorktreesForNavigation(
     repo.worktrees,
     sort,
@@ -514,13 +520,16 @@ export function RepoRow({
           <span
             className="repo-row__handle"
             aria-hidden="true"
-            title={`Drag to reorder — or ${shortcutLabel(
-              { key: "ArrowUp", shift: true },
-              platform
-            )} / ${shortcutLabel(
-              { key: "ArrowDown", shift: true },
-              platform
-            )} from the keyboard`}
+            {...hoverTooltip(
+              tip,
+              `Drag to reorder — or ${shortcutLabel(
+                { key: "ArrowUp", shift: true },
+                platform
+              )} / ${shortcutLabel(
+                { key: "ArrowDown", shift: true },
+                platform
+              )} from the keyboard`
+            )}
           >
             <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor">
               <circle cx="2" cy="2" r="1.3" />
@@ -544,7 +553,7 @@ export function RepoRow({
             (SC 1.4.4's intent — no loss of content when text is enlarged). */}
         <span
           className={`repo-row__name${containsSelection ? " is-active" : ""}`}
-          title={repo.name}
+          {...hoverTooltip(tip, repo.name)}
         >
           {repo.name}
         </span>
@@ -587,7 +596,10 @@ export function RepoRow({
         {arrangeable && pinSource === "worktree" && (
           <span
             className="repo-row__pin-via"
-            title="In Pinned because one of its worktrees is pinned"
+            {...hoverTooltip(
+              tip,
+              "In Pinned because one of its worktrees is pinned"
+            )}
           >
             via wt
           </span>
@@ -595,7 +607,7 @@ export function RepoRow({
         {focusReason !== undefined && (
           <span
             className="repo-row__focus-reason"
-            title={FOCUS_REASON_COPY[focusReason].description}
+            {...hoverTooltip(tip, FOCUS_REASON_COPY[focusReason].description)}
           >
             {FOCUS_REASON_COPY[focusReason].short}
           </span>
@@ -603,7 +615,7 @@ export function RepoRow({
         <button
           type="button"
           className={`pin${repo.pinned ? " is-pinned" : ""}`}
-          title={pinLabel}
+          {...hoverTooltip(tip, pinLabel)}
           aria-label={pinLabel}
           aria-pressed={repo.pinned}
           onClick={(e) => {
@@ -714,30 +726,16 @@ export function RepoRow({
                  conveys the same state without removing the element from the
                  focus order; the click handler below is what makes it inert. */
               aria-disabled={refreshing}
-              onMouseEnter={(e) =>
-                refreshTooltip.show(
-                  e.currentTarget,
-                  REFRESH_WORKTREES_TOOLTIP
-                )
-              }
-              onMouseLeave={refreshTooltip.hide}
-              onFocus={(e) =>
-                refreshTooltip.show(
-                  e.currentTarget,
-                  REFRESH_WORKTREES_TOOLTIP
-                )
-              }
-              onBlur={refreshTooltip.hide}
+              {...hoverTooltip(tip, REFRESH_WORKTREES_TOOLTIP)}
               onClick={(e) => {
                 e.stopPropagation();
                 if (refreshing) return;
-                refreshTooltip.hide();
+                tip.hide();
                 onRefreshWorktrees();
               }}
             >
               <RefreshGlyph />
             </button>
-            {refreshTooltip.tooltipNode}
             {/* The visible text is the current VALUE ("Recent"), which on its
                 own named this button "Recent" — a name that says nothing about
                 what activating it does (SC 4.1.2). The label states the action
@@ -752,7 +750,7 @@ export function RepoRow({
               aria-label={`${
                 SORT_LABEL[customOrder !== undefined ? "custom" : sort]
               } — cycle worktree sort order`}
-              title="Cycle worktree sort"
+              {...hoverTooltip(tip, "Cycle worktree sort")}
             >
               {SORT_LABEL[customOrder !== undefined ? "custom" : sort]}
             </button>
@@ -793,6 +791,7 @@ export function RepoRow({
           />
         </div>
       )}
+      {tip.tooltipNode}
     </div>
   );
 }

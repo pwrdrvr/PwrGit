@@ -13,6 +13,10 @@ import type {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 
 const shortSha = (sha: string | undefined): string => sha?.slice(0, 8) ?? "—";
 
@@ -57,6 +61,7 @@ function snapshotHasConcern(snapshot: SubmoduleSnapshot): boolean {
 }
 
 function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
+  const tip = useViewportTooltip();
   const expected = submodule.indexCommit ?? submodule.pinnedCommit;
   const stagedPinMoved =
     submodule.indexCommit !== undefined &&
@@ -73,7 +78,10 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
       open={hasConcern || undefined}
     >
       <summary className="submodule-row__summary">
-        <span className="submodule-row__path" title={submodule.path}>
+        <span
+          className="submodule-row__path"
+          {...hoverTooltip(tip, submodule.path)}
+        >
           {submodule.path}
         </span>
         {submodule.dirty === true && (
@@ -96,12 +104,16 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
           <span className="submodule-fact__label">Parent pin</span>
           <span
             className="submodule-fact__value"
-            title={submodule.pinnedCommit}
+            {...hoverTooltip(tip, submodule.pinnedCommit)}
           >
             {shortSha(submodule.pinnedCommit)}
           </span>
           {submodule.pinnedTags.map((tag) => (
-            <span className="submodule-tag" key={tag} title={`Tag ${tag}`}>
+            <span
+              className="submodule-tag"
+              key={tag}
+              {...hoverTooltip(tip, `Tag ${tag}`)}
+            >
               {tag}
             </span>
           ))}
@@ -111,7 +123,7 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
             <span className="submodule-fact__label">Next pin</span>
             <span
               className="submodule-fact__value"
-              title={submodule.indexCommit}
+              {...hoverTooltip(tip, submodule.indexCommit)}
             >
               {shortSha(submodule.indexCommit)}
             </span>
@@ -122,7 +134,7 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
           <span className="submodule-fact__label">Checkout</span>
           <span
             className="submodule-fact__value"
-            title={submodule.checkedOutCommit}
+            {...hoverTooltip(tip, submodule.checkedOutCommit)}
           >
             {shortSha(submodule.checkedOutCommit)}
           </span>
@@ -144,7 +156,7 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
           <span className="submodule-fact__label">.gitmodules URL</span>
           <span
             className="submodule-fact__value"
-            title={submodule.configuredUrl}
+            {...hoverTooltip(tip, submodule.configuredUrl)}
           >
             {submodule.configuredUrl ?? "—"}
           </span>
@@ -155,7 +167,7 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
               <span className="submodule-fact__label">Initialized URL</span>
               <span
                 className="submodule-fact__value"
-                title={submodule.initializedUrl}
+                {...hoverTooltip(tip, submodule.initializedUrl)}
               >
                 {submodule.initializedUrl}
               </span>
@@ -185,6 +197,7 @@ function SubmoduleRow({ submodule }: { submodule: SubmoduleStatus }) {
           </ul>
         )}
       </div>
+      {tip.tooltipNode}
     </details>
   );
 }

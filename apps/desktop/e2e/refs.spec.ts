@@ -271,7 +271,7 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   await expect(
     compactOrigin
       .locator(".ref-remote-branch-row", { hasText: "main" })
-      .getByTitle("Show checked-out worktree")
+      .getByRole("button", { name: "Show worktree checked out at main" })
   ).toHaveText("●");
 
   await window
@@ -365,7 +365,9 @@ test("browses local branches and nested remotes, then pushes to a test target", 
   const localOnly = window.locator(".ref-branch-row", {
     hasText: "feat/local-only"
   });
-  await localOnly.getByTitle("Create worktree").click();
+  await localOnly
+    .getByRole("button", { name: "Create worktree for feat/local-only" })
+    .click();
   const newWorktree = window.locator(".modal", { hasText: "New worktree" });
   await newWorktree.getByRole("button", { name: "Create" }).click();
   // A local branch that now has a worktree swaps its "+" for a checkout chip

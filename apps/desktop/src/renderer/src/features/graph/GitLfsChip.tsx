@@ -7,6 +7,10 @@ import {
 import { currentPlatform, isMacPlatform } from "../../lib/platform";
 import { dispatch } from "../../lib/pwrgit";
 import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import {
   dismissToastKey,
   showErrorToast,
   showInfoToast
@@ -155,6 +159,7 @@ export function GitLfsChip({
    *  touches the preload bridge. */
   platform?: string;
 }) {
+  const tip = useViewportTooltip();
   const [status, setStatus] = useState<GitLfsStatus | null>(null);
   const [checking, setChecking] = useState(false);
   const requestId = useRef(0);
@@ -201,14 +206,16 @@ export function GitLfsChip({
     return (
       <span
         className="lfs-chip lfs-chip--ok"
-        title={storyLine("This repository", status)}
+        {...hoverTooltip(tip, storyLine("This repository", status))}
       >
         LFS
-        {/* The title is pointer-only; hand the accessibility tree the same
-            sentence the old banner used to keep in the DOM. */}
+        {/* The card is pointer- and focus-only, and this chip is neither
+            focusable nor named; hand the accessibility tree the same sentence
+            the old banner used to keep in the DOM. */}
         <span className="a11y-sr-only">
           {` — ${storyLine("This repository", status)}`}
         </span>
+        {tip.tooltipNode}
       </span>
     );
   }
@@ -220,15 +227,17 @@ export function GitLfsChip({
       // user's focus to <body> on every re-check.
       aria-busy={checking}
       aria-label="Git LFS setup needed — check again"
-      title={
+      {...hoverTooltip(
+        tip,
         `${storyLine("This repository", status)} ${POINTER_WARNING} ` +
-        `Click to check again.`
-      }
+          `Click to check again.`
+      )}
       onClick={() => {
         if (!checking) void check();
       }}
     >
       LFS
+      {tip.tooltipNode}
     </button>
   );
 }
