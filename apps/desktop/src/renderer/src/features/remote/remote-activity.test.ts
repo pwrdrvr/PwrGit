@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RemoteActivity } from "@pwrgit/shared";
 import {
+  activitySteps,
   formatElapsed,
   liveActivityView,
   remoteActivityMeter,
@@ -184,6 +185,9 @@ describe("liveActivityView", () => {
       title: "Pull · PwrAgnt · main",
       elapsed: "41s",
       statusLabel: "Fetching updates",
+      // No history handed in, so nothing to list — the toast's case, and the
+      // card falls back to the status line above.
+      steps: [],
       statusTone: "muted",
       meter: "Receiving objects 43%",
       percent: 43,
@@ -192,6 +196,54 @@ describe("liveActivityView", () => {
       canceling: false,
       settled: null
     });
+  });
+});
+
+describe("activitySteps", () => {
+  // `queued` is waiting on another operation's lock, `prepare` is a
+  // `git status` main emits whether or not there is anything to stash, and
+  // `refresh` is PwrGit's own bookkeeping. None is an outcome, and a receipt
+  // reading "Checked for local changes" between two real steps is noise in
+  // the one place a user reads carefully.
+  it("gives a row to work and nothing to bookkeeping", () => {
+    const steps = activitySteps(
+      ["queued", "fetch", "prepare", "fast_forward", "reapply", "refresh"],
+      null
+    );
+    expect(steps.map((step) => step.label)).toEqual([
+      "Fetched",
+      "Fast-forwarded",
+      "Reapplied your changes"
+    ]);
+  });
+
+  // The row under the eye is the one that must not move: only the marker
+  // turns, and the transfer readout it carried goes with it.
+  it("names only the current step in the present tense", () => {
+    const steps = activitySteps(["fetch", "fast_forward"], "fast_forward", {
+      detail: "Resolving deltas 62%",
+      percent: 62
+    });
+    expect(steps).toEqual([
+      {
+        phase: "fetch",
+        label: "Fetched",
+        detail: null,
+        percent: null,
+        state: "done"
+      },
+      {
+        phase: "fast_forward",
+        label: "Fast-forwarding",
+        detail: "Resolving deltas 62%",
+        percent: 62,
+        state: "running"
+      }
+    ]);
+  });
+
+  it("has nothing to say about an operation with no phases yet", () => {
+    expect(activitySteps([], null)).toEqual([]);
   });
 });
 
@@ -205,11 +257,23 @@ describe("settledActivityView", () => {
     endedAt: 3_400,
     summary: "Fast-forwarded",
     command: "git merge --ff-only origin/main",
-    output: ["Fast-forward"]
+    output: ["Fast-forward"],
+    steps: activitySteps(["fetch", "prepare", "fast_forward"], "fast_forward")
   };
 
   it("reads the elapsed off the operation, not off a clock that moved on", () => {
     expect(settledActivityView(ended).elapsed).toBe("2s");
+  });
+
+  // The receipt IS the running card, with every marker turned — which is what
+  // makes it readable without re-reading: the rows have not moved.
+  it("turns the step that was still running when it ended", () => {
+    expect(
+      settledActivityView(ended).steps.map((step) => [step.label, step.state])
+    ).toEqual([
+      ["Fetched", "done"],
+      ["Fast-forwarded", "done"]
+    ]);
   });
 
   it("drops the meter and the cancel — there is nothing left to do to it", () => {

@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import { addRootAndExpand } from "./fixtures/steps";
@@ -158,6 +158,24 @@ async function pointClearOfCard(
   return clear!;
 }
 
+/**
+ * Open the card's Git-output disclosure and return the block inside it.
+ *
+ * Collapsed while an operation looks healthy, because Git's progress output is
+ * `\r`-rewritten and reproducing it live was the card's largest source of
+ * churn. It opens itself once that output IS the finding — a quiet warning, a
+ * failure, a cancel — and these tests reach it before the 20s quiet threshold,
+ * so they ask for it explicitly.
+ */
+async function gitOutput(card: Locator): Promise<Locator> {
+  const evidence = card.locator(".remote-activity__evidence");
+  await expect(evidence).toBeVisible({ timeout: 10_000 });
+  if ((await evidence.evaluate((el: HTMLDetailsElement) => el.open)) === false) {
+    await evidence.locator("summary").click();
+  }
+  return evidence.locator(".remote-activity__output");
+}
+
 test("a pull that gets no answer says so, shows Git's command, and cancels", async () => {
   const { window } = await wedgedRepo("svc");
 
@@ -179,9 +197,17 @@ test("a pull that gets no answer says so, shows Git's command, and cancels", asy
     timeout: 20_000
   });
 
-  // The two facts that turn "it's spinning" into something actionable.
+  // The three facts that turn "it's spinning" into something actionable: what
+  // step it is on, what it ran, and what Git has said — which is nothing, and
+  // that is the finding.
+  await expect(card.locator(".remote-activity__step")).toHaveText(
+    /Fetching updates/,
+    { timeout: 20_000 }
+  );
   await expect(card).toContainText("git fetch --prune --progress");
-  await expect(card).toContainText("Git has produced no output yet.");
+  await expect(await gitOutput(card)).toContainText(
+    "Git has produced no output yet."
+  );
 
   // Walking away does NOT take it away. A hover card belongs to the pointer; a
   // card the user clicked open belongs to them. Aimed at an element rather
@@ -255,7 +281,9 @@ test("a wedged fetch opens its card from the click that started it", async () =>
   await expect(card).toBeVisible({ timeout: 10_000 });
   await expect(card).toContainText("Fetch · svc · main");
   await expect(card).toContainText("git fetch --prune --progress");
-  await expect(card).toContainText("Git has produced no output yet.");
+  await expect(await gitOutput(card)).toContainText(
+    "Git has produced no output yet."
+  );
 
   // Reachable means reachable all the way to the way out.
   await card.getByRole("button", { name: "Cancel" }).click();
@@ -395,6 +423,9 @@ test("a fetch that succeeds leaves a receipt that counts itself out", async () =
 
   const card = window.locator(".remote-activity-popover");
   await expect(card).toContainText("Fetched", { timeout: 20_000 });
+  // And it is a *row*, not a sentence that replaced one: the receipt is what
+  // the running card became, which is the whole of why it needs no re-reading.
+  await expect(card.locator(".remote-activity__step")).toHaveText(/Fetched/);
   // Nothing left to stop, and a way out that does not depend on seeing the
   // rail drain — which is what a reader with prefers-reduced-motion gets.
   await expect(card.getByRole("button", { name: "Cancel" })).toHaveCount(0);

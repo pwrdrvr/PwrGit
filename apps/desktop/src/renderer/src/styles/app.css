@@ -12100,6 +12100,144 @@ button.agent-auth-node {
   color: var(--danger-text);
 }
 
+/* The step list — what the operation has done, one row per phase.
+   A row's text is written once and never rewritten: only its marker moves
+   from ● to ✓. That is the whole of what makes it readable while an operation
+   runs, and it is why the settled card needs no separate layout — the receipt
+   is the same list with every marker turned. */
+.remote-activity__steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  overflow: hidden;
+}
+
+.remote-activity__step {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: 500 11px/1.45 var(--font-sans);
+}
+
+.remote-activity__step:last-child {
+  border-bottom: 0;
+}
+
+.remote-activity__step--running {
+  background: var(--bg-panel-hover);
+}
+
+.remote-activity__step-mark {
+  color: var(--status-ok);
+  font: 700 10px/1.45 var(--font-mono);
+}
+
+.remote-activity__step--running .remote-activity__step-mark {
+  color: var(--accent);
+}
+
+/* Where the operation stopped. The label stays in the present tense, because
+   what this row adds to the summary above it is "this is the step it was on"
+   — and "Fetched" with a cross beside it would say the opposite. */
+.remote-activity__step--failed .remote-activity__step-mark,
+.remote-activity__step--failed .remote-activity__step-label {
+  color: var(--danger-text);
+}
+
+.remote-activity__step--running .remote-activity__step-label {
+  color: var(--text-primary);
+}
+
+.remote-activity__step-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-activity__step-detail {
+  color: var(--text-muted);
+  font: 500 10.5px/1.45 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-activity__step--running .remote-activity__step-detail {
+  color: var(--accent);
+}
+
+/* Spans the label and detail columns, under both — a step's own progress,
+   where the shared meter used to mount and unmount above the whole card. */
+.remote-activity__step-bar {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-muted) 25%, transparent);
+}
+
+.remote-activity__step-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* Git's own words, collapsed while the operation is healthy. Open, this is a
+   `\r`-rewritten progress stream that grows to its cap while its last line
+   flickers — the card's largest single source of churn, and on a healthy
+   operation it says nothing the step list has not. */
+.remote-activity__evidence-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: 600 10.5px/1.4 var(--font-mono);
+  cursor: pointer;
+  list-style: none;
+}
+
+.remote-activity__evidence-summary::-webkit-details-marker {
+  display: none;
+}
+
+.remote-activity__evidence-summary::before {
+  content: "\203a";
+  display: inline-block;
+  font: 700 11px/1 var(--font-mono);
+  transition: transform 120ms ease;
+}
+
+.remote-activity__evidence[open] .remote-activity__evidence-summary::before {
+  transform: rotate(90deg);
+}
+
+.remote-activity__evidence-summary:hover {
+  color: var(--text-secondary);
+}
+
+.remote-activity__evidence-summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.remote-activity__evidence[open] .remote-activity__output {
+  margin-top: 6px;
+}
+
 .remote-activity__meter {
   display: flex;
   flex-direction: column;

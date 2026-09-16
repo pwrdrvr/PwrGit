@@ -12,11 +12,15 @@ import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useSecondsClock } from "../../state/useRemoteActivity";
 import { RemoteActivityCard } from "./RemoteActivityCard";
+import type { RemoteActivityPhase } from "@pwrgit/shared";
 import {
+  activitySteps,
   formatElapsed,
   liveActivityView,
+  remoteActivityMeter,
   remoteActivityTitle,
   settledActivityView,
+  REMOTE_ACTIVITY_NARRATE_AFTER_MS,
   REMOTE_ACTIVITY_SETTLED_MS,
   type RemoteActivityOutcome,
   type RemoteActivityOutcomeStatus,
@@ -175,6 +179,9 @@ function startingView(pin: Pin, now: number): RemoteActivityView {
     percent: null,
     command: null,
     output: [],
+    // Nothing observed yet, so nothing to list: the card falls back to its
+    // status line, which is the whole of what "Starting…" has to say.
+    steps: [],
     // No operation id yet, so nothing to cancel. The button is drawn from the
     // moment there is something for it to stop, and not before.
     canceling: null,
@@ -244,6 +251,18 @@ export function useRemoteActivityPopover(
     setPinState(next);
   }, []);
   const pinCount = useRef(0);
+  // Every phase this pin's operation has been observed in, in order and
+  // deduplicated — the card's step list, and the receipt's substance.
+  //
+  // In state so a new phase re-renders (a row appearing IS the update worth
+  // rendering), and in a ref because `settle` reads it from an async
+  // continuation, exactly as `pin` is. `setSeen` is the only writer of either.
+  const [seen, setSeenState] = useState<readonly RemoteActivityPhase[]>([]);
+  const seenRef = useRef<readonly RemoteActivityPhase[]>([]);
+  const setSeen = useCallback((next: readonly RemoteActivityPhase[]): void => {
+    seenRef.current = next;
+    setSeenState(next);
+  }, []);
   /** An explicit hold: the user clicked the card, or tabbed into it. Named
    *  apart from the `held` locals below, which are the rested-on trigger. */
   const [railHeld, setRailHeld] = useState(false);
@@ -327,6 +346,7 @@ export function useRemoteActivityPopover(
       // the moment this session ended.
       forgetTrigger();
       lastSeen.current = null;
+      setSeen([]);
       rail.current = { remaining: REMOTE_ACTIVITY_SETTLED_MS, since: null };
       wasVisible.current = false;
       shownFor.current = null;
@@ -342,7 +362,7 @@ export function useRemoteActivityPopover(
       });
       setSticky(true);
     },
-    [forgetTrigger, setPin, setSticky]
+    [forgetTrigger, setPin, setSeen, setSticky]
   );
 
   const settle = useCallback(
@@ -362,6 +382,16 @@ export function useRemoteActivityPopover(
           endedAt: Date.now(),
           summary: settlement.summary,
           command: record?.command ?? null,
+          // What it did, whether or not the live card ever narrated it. Below
+          // the narration threshold nothing was drawn — and this is still the
+          // full list, which is how a sub-second pull ends up answering
+          // "what happened" without ever having churned.
+          // The last phase is passed as the *current* one so a failure can
+          // resolve it: `settledActivityView` turns it into "✓ Fetched" on a
+          // success and leaves it marked as where the operation stopped
+          // otherwise. Marking every step done unconditionally made a failed
+          // fetch report "✓ Fetched", which is the opposite of the truth.
+          steps: activitySteps(seenRef.current, record?.phase ?? null),
           // Git's own words first; the error body only when Git wrote nothing
           // at all, which is exactly the wedged case the card exists for.
           output:
@@ -497,7 +527,14 @@ export function useRemoteActivityPopover(
     if (activity === null) return;
     if (activity.kind !== pinRef.current?.scope.kind) return;
     lastSeen.current = activity;
-  }, [activity]);
+    const phase = activity.phase;
+    // Append-only and deduplicated: a phase Git re-enters (a pull pops its
+    // stash in two places) is one step, not two rows, and a row once written
+    // is never moved.
+    if (!seenRef.current.includes(phase)) {
+      setSeen([...seenRef.current, phase]);
+    }
+  }, [activity, setSeen]);
 
   // The hover card's own refresh, and its ending.
   //
@@ -525,13 +562,28 @@ export function useRemoteActivityPopover(
   // What the pinned session is currently showing: its receipt if it has one,
   // the live record while the operation runs, and a placeholder for the gap
   // between the click and main's first word.
+  // Below the threshold the card shows one stable line and then its receipt —
+  // two states rather than a five-redraw play-by-play of something that was
+  // over before the first frame could be read. The steps go on being recorded
+  // throughout, so the receipt is the same either way.
+  const narrating =
+    pin !== null && now - pin.startedAt >= REMOTE_ACTIVITY_NARRATE_AFTER_MS;
   const pinView: RemoteActivityView | null =
     pin === null
       ? null
       : pin.outcome !== null
         ? settledActivityView(pin.outcome)
         : activity !== null && activity.kind === pin.scope.kind
-          ? liveActivityView(activity, now)
+          ? liveActivityView(
+              activity,
+              now,
+              narrating
+                ? activitySteps(seen, activity.phase, {
+                    detail: remoteActivityMeter(activity),
+                    percent: activity.progress?.percent ?? null
+                  })
+                : []
+            )
           : startingView(pin, now);
 
   // A failure has no rail at all: a bar that is not draining cannot be
@@ -613,7 +665,18 @@ export function useRemoteActivityPopover(
     // re-run this for every render and buy nothing.
     // `railHeld` is deliberately absent: `paused` is `within || railHeld`, so
     // anything it could change here has already changed `paused`.
-  }, [activity, dismiss, draining, now, paused, pin, reduced, show, update]);
+  }, [
+    activity,
+    dismiss,
+    draining,
+    now,
+    paused,
+    pin,
+    reduced,
+    seen,
+    show,
+    update
+  ]);
 
   // A click anywhere else dismisses the card, and the click still lands where
   // it was aimed — nothing here calls `preventDefault`. Capture phase so a

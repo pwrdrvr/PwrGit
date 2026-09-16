@@ -43,6 +43,73 @@ both at once is the same failure said twice. The toast is now the fallback for
 a failure with nowhere anchored to go, which is what happens when the user
 clicked the card away mid-operation.
 
+## The card accumulates; it does not narrate
+
+Everything the card drew used to be **replaced**. One status line rewritten at
+every phase boundary, a progress block that mounted and unmounted with
+`progress !== null`, a command line that changed with the phase, and a
+Git-output tail rewriting its own last line at Git's rate. Phase transitions
+call `publish(true)` and bypass the 400&nbsp;ms throttle, so a 620&nbsp;ms pull
+walked `prepare → fetch → fast_forward → reapply → refresh` and landed five
+full redraws inside six tenths of a second &mdash; then `settle` threw all of it
+away for one sentence. Correct for a five-minute fetch, where each phase lasts
+long enough to read. Unreadable below a second, which is nearly all of them.
+
+So the card keeps a **step list** instead. `activitySteps` turns the ordered,
+deduplicated phases an operation has been observed in into one row each, and a
+row changes exactly once &mdash; when its own work ends, the label moves from
+the present tense to the past and the marker turns. It never moves position and
+is never removed. One change per row, at the moment that row's work finishes,
+is an event a reader can follow; a line that is a different sentence every time
+you look at it is not.
+
+The receipt is that same list with every marker turned, which is the whole
+point: **nothing is wiped, so nothing needs re-reading.** It is also why
+`RemoteActivityOutcome` carries `steps` &mdash; the phases were observed off
+records that `finish()` has since deleted.
+
+Four rules hold it together.
+
+- **Bookkeeping earns no row.** `queued` is waiting on another operation's
+  lock, `prepare` is a `git status` main emits whether or not there is anything
+  to stash, and `refresh` is PwrGit's own work after Git is done. None is an
+  outcome. They are dropped rather than shown-and-then-removed: a row that
+  disappears is a layout shift, which is the thing this list exists to avoid.
+  While the operation is *in* one of them every real step reads `done`, which
+  is honest &mdash; during `prepare`, the fetch above it has finished.
+- **A phase Git re-enters is still one row.** A pull pops its stash in two
+  places; that is one piece of work, not two.
+- **Below `REMOTE_ACTIVITY_NARRATE_AFTER_MS` there is no narration at all.**
+  The card shows one stable line and then its receipt &mdash; two states, no
+  churn. The steps are still recorded throughout, so a sub-second pull answers
+  "what happened" without ever having flickered. Note what this does *not*
+  gate: the card still opens on the click. That was the original ask and it is
+  what makes the button feel answered; this governs what the card says, not
+  whether it is there.
+- **Git's own output is collapsed while the operation looks healthy.** It is
+  `\r`-rewritten progress &mdash; built to be transient in a terminal &mdash;
+  and live it grew from nothing to its 108&nbsp;px cap while its last line
+  flickered. That was the single largest source of churn, and on a healthy
+  operation it says nothing the rows have not. It opens *itself* the moment it
+  is the finding: a quiet warning, a failure, or a cancel. Making a user hunt
+  for a disclosure to read the thing they came for would be the same mistake as
+  the age gate was. The open state is React-controlled because the popover
+  re-renders every second &mdash; an uncontrolled `<details>` would shut itself
+  under a user who had just opened it.
+
+Rows carry bare labels today. Counts &mdash; *"Fast-forwarded · 12 commits"*
+&mdash; need the command results widened in main: `remote:fetch` and
+`remote:push` return `null` and `remote:pull` returns three booleans, while
+`pullBranch` holds the commit range either side of the merge and discards it.
+That is design card 3a's deferred protocol change, in a much smaller form, and
+the list is honest without it.
+
+`liveActivityView` takes the steps as an argument rather than reading them off
+the record, because a record says which phase the operation is in *now* and
+nothing about the ones before it: the history belongs to whoever has been
+watching. The toast passes none and gets the status line and the shared meter,
+which is right for a card about a repository the user is not looking at.
+
 ## Dismissal belongs to the user, not to the pointer
 
 A hover card is the pointer's: leaving it, or scrolling the surface it

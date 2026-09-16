@@ -26,10 +26,128 @@ export const REMOTE_ACTIVITY_QUIET_MS = 20_000;
  */
 export const REMOTE_ACTIVITY_SETTLED_MS = 4_000;
 
+/**
+ * How long an operation must run before the card narrates it step by step.
+ *
+ * Below this it shows one stable line and then its receipt — two states, no
+ * churn. A pull walks five phases and every transition publishes immediately,
+ * so a 620ms pull otherwise lands five redraws in six tenths of a second: a
+ * play-by-play of something that finished before the first frame could be
+ * read. The steps are still *recorded* through the quiet period, so the
+ * receipt says what happened either way; only the live narration waits.
+ *
+ * The card itself is NOT withheld. It opens on the click, which is what was
+ * asked for and what makes the button feel answered — this gates what the card
+ * says, not whether it is there.
+ */
+export const REMOTE_ACTIVITY_NARRATE_AFTER_MS = 600;
+
 const NETWORK_PHASES: ReadonlySet<RemoteActivityPhase> = new Set([
   "fetch",
   "push"
 ]);
+
+/**
+ * A phase that represents *work*, and so earns a row of its own.
+ *
+ * `queued` is waiting on another operation's lock, `prepare` is a
+ * `git status` (main emits it whether or not there is anything to stash), and
+ * `refresh` is PwrGit's own bookkeeping after Git is done. None of the three
+ * is an outcome, and a receipt listing "Checked for local changes ✓" between
+ * two real steps is noise in the one place a user is reading carefully.
+ *
+ * They are dropped rather than shown-then-removed: a row that disappears is a
+ * layout shift, which is the whole thing this list exists to avoid.
+ */
+export type RemoteActivityStepPhase = Exclude<
+  RemoteActivityPhase,
+  "queued" | "prepare" | "refresh"
+>;
+
+const STEP_LABELS: Record<
+  RemoteActivityStepPhase,
+  { running: string; done: string }
+> = {
+  fetch: { running: "Fetching updates", done: "Fetched" },
+  push: { running: "Pushing commits", done: "Pushed" },
+  fast_forward: { running: "Fast-forwarding", done: "Fast-forwarded" },
+  reapply: {
+    running: "Reapplying your changes",
+    done: "Reapplied your changes"
+  },
+  recovery: {
+    running: "Restoring the previous checkout",
+    done: "Restored the previous checkout"
+  }
+};
+
+export function isStepPhase(
+  phase: RemoteActivityPhase
+): phase is RemoteActivityStepPhase {
+  return phase !== "queued" && phase !== "prepare" && phase !== "refresh";
+}
+
+/**
+ * One row of the card's step list.
+ *
+ * A row changes exactly **once**: when its step completes, the label moves from
+ * the present tense to the past, the marker turns, and the transfer readout is
+ * dropped. After that it is fixed. It never moves position and is never
+ * removed.
+ *
+ * That "once" is the whole of what makes the list readable, and the contrast
+ * is with what it replaces: a single status line rewritten at every phase
+ * boundary, over a Git-output tail rewriting its own last line at Git's
+ * progress rate. One change per row, at the moment the row's own work ends, is
+ * an event a reader can follow; a line that is a different sentence every time
+ * you look at it is not.
+ *
+ * A step also reads `done` while the operation is in a phase that earns no row
+ * of its own — during `prepare`, the fetch above it genuinely has finished.
+ */
+export type RemoteActivityStep = {
+  phase: RemoteActivityStepPhase;
+  label: string;
+  /** The transfer readout, while this step is the one being worked. */
+  detail: string | null;
+  /** 0-100 while running and Git is reporting a meter; null otherwise. */
+  percent: number | null;
+  /**
+   * `failed` is where an operation stopped, and it keeps the present-tense
+   * label on purpose: "✕ Fetching updates" says *this is the step it was on*,
+   * which is the one thing the row can add to the summary above it. Turning it
+   * into "✓ Fetched" — which is what marking every step done on settle
+   * produced — says the opposite of what happened.
+   */
+  state: "running" | "done" | "failed";
+};
+
+/**
+ * The step list, from the phases an operation has been observed in.
+ *
+ * `seen` is ordered and deduplicated by the caller, which is the only thing
+ * that knows the operation's history — a record carries the phase it is in
+ * now, and nothing about the ones before it.
+ */
+export function activitySteps(
+  seen: readonly RemoteActivityPhase[],
+  current: RemoteActivityPhase | null,
+  live: { detail: string | null; percent: number | null } = {
+    detail: null,
+    percent: null
+  }
+): RemoteActivityStep[] {
+  return seen.filter(isStepPhase).map((phase) => {
+    const running = phase === current;
+    return {
+      phase,
+      label: STEP_LABELS[phase][running ? "running" : "done"],
+      detail: running ? live.detail : null,
+      percent: running ? live.percent : null,
+      state: running ? ("running" as const) : ("done" as const)
+    };
+  });
+}
 
 export function remoteActivityAction(kind: RemoteActivityKind): string {
   switch (kind) {
@@ -175,6 +293,14 @@ export type RemoteActivityOutcome = {
   command: string | null;
   /** Git's own last lines, copied off the record before it went away. */
   output: string[];
+  /**
+   * What the operation did, step by step — the receipt's substance.
+   *
+   * Accumulated while it ran, so it survives an operation whose narration was
+   * never drawn: below `REMOTE_ACTIVITY_NARRATE_AFTER_MS` the live card shows
+   * one line, and this is still the full list when it settles.
+   */
+  steps: RemoteActivityStep[];
 };
 
 /**
@@ -198,19 +324,35 @@ export type RemoteActivityView = {
   percent: number | null;
   command: string | null;
   output: string[];
+  /**
+   * The step list. Empty means "nothing to narrate yet" — the card falls back
+   * to the single status line, which is what a queued or just-started
+   * operation has to say for itself.
+   */
+  steps: RemoteActivityStep[];
   /** Live only: Cancel is drawn, and inert once Git has been signalled. */
   canceling: boolean | null;
   /** How it ended, once it has. `null` while it is still running. */
   settled: RemoteActivityOutcomeStatus | null;
 };
 
-/** The card for an operation that is still running. */
+/**
+ * The card for an operation that is still running.
+ *
+ * `steps` is passed in rather than read off the record: a record says which
+ * phase the operation is in *now* and nothing about the ones before it, so the
+ * history belongs to whoever has been watching. The toast passes none and gets
+ * the status line, which is right for a card about a repository the user is
+ * not looking at.
+ */
 export function liveActivityView(
   activity: RemoteActivity,
-  now: number
+  now: number,
+  steps: RemoteActivityStep[] = []
 ): RemoteActivityView {
   const status = remoteActivityStatus(activity, now);
   return {
+    steps,
     operationId: activity.id,
     title: remoteActivityTitle(activity),
     elapsed: formatElapsed(now - activity.startedAt),
@@ -250,6 +392,19 @@ export function settledActivityView(
     percent: null,
     command: outcome.command,
     output: outcome.output,
+    // The receipt is what the running card became, so the rows that were on
+    // screen a moment ago are still the rows on screen — with the step that
+    // was in progress resolved one way or the other.
+    steps: outcome.steps.map((step) => {
+      const stopped = step.state === "running" && outcome.status !== "ok";
+      return {
+        ...step,
+        label: stopped ? step.label : STEP_LABELS[step.phase].done,
+        detail: null,
+        percent: null,
+        state: stopped ? ("failed" as const) : ("done" as const)
+      };
+    }),
     canceling: null,
     settled: outcome.status
   };

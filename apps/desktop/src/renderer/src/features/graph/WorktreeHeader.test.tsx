@@ -904,6 +904,194 @@ describe("WorktreeHeader settled status card", () => {
     expect(card()).toBeNull();
   });
 
+  const steps = (): string[] =>
+    [...(card()?.querySelectorAll(".remote-activity__step-label") ?? [])].map(
+      (row) => row.textContent ?? ""
+    );
+
+  /**
+   * Hold a dispatch open so the operation can be observed while it runs.
+   *
+   * The returned resolver takes the outcome, defaulting to a plain success —
+   * an earlier version always resolved with `ok`, which quietly turned a test
+   * of a *failed* operation into a test of a successful one.
+   */
+  const inFlight = async (
+    label: string
+  ): Promise<(value?: unknown) => void> => {
+    let finish!: (value: unknown) => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+        ?.click();
+    });
+    return (value: unknown = ok({ fastForwarded: true, stashed: true })) =>
+      finish(value);
+  };
+
+  // The complaint this answers: five phases, every transition publishing past
+  // the 400ms throttle, so a sub-second pull lands five full redraws before
+  // one frame can be read. Below the threshold the card says one stable thing
+  // and then what it did.
+  it("does not narrate an operation that is over before it can be read", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await emitActivities([{ kind: "pull", phase: "fetch" }]);
+    await emitActivities([{ kind: "pull", phase: "fast_forward" }]);
+    expect(
+      steps(),
+      "nothing has run long enough to be worth narrating"
+    ).toEqual([]);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // But it was recorded throughout, so the receipt still answers the
+    // question the churn was failing to.
+    expect(steps()).toEqual(["Fetched", "Fast-forwarded"]);
+  });
+
+  // A row is appended, changes once when its own work ends, and then holds.
+  // The DOM node is the honest way to assert "the row did not move".
+  it("appends a row per phase, and each changes once when it completes", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([{ kind: "pull", phase: "fetch" }]);
+    expect(steps()).toEqual(["Fetching updates"]);
+    const firstRow = card()?.querySelector(".remote-activity__step");
+
+    // `prepare` is a `git status` main emits whether or not there is anything
+    // to stash. It earns no row — and, just as importantly, takes none away.
+    // The fetch above it reads done because by then it genuinely is.
+    await emitActivities([{ kind: "pull", phase: "prepare" }]);
+    expect(steps()).toEqual(["Fetched"]);
+
+    await emitActivities([{ kind: "pull", phase: "fast_forward" }]);
+    expect(steps()).toEqual(["Fetched", "Fast-forwarding"]);
+    expect(
+      card()?.querySelector(".remote-activity__step"),
+      "the first row is the same element, in the same place"
+    ).toBe(firstRow);
+
+    // A phase Git re-enters is still one row: a pull pops its stash in two
+    // places, and that must not read as two separate pieces of work.
+    await emitActivities([{ kind: "pull", phase: "reapply" }]);
+    await emitActivities([{ kind: "pull", phase: "reapply" }]);
+    expect(steps()).toEqual([
+      "Fetched",
+      "Fast-forwarded",
+      "Reapplying your changes"
+    ]);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(steps()).toEqual([
+      "Fetched",
+      "Fast-forwarded",
+      "Reapplied your changes"
+    ]);
+  });
+
+  // Git's progress output is `\r`-rewritten and grows to its cap while its
+  // last line flickers — the card's largest single source of churn, and on a
+  // healthy operation it says nothing the rows have not.
+  it("keeps Git's output collapsed while the operation is healthy", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      {
+        kind: "pull",
+        phase: "fetch",
+        // Git wrote a moment ago: a healthy transfer, not the quiet that
+        // would rightly throw the evidence open.
+        lastOutputAt: Date.now(),
+        tail: ["Receiving objects:  71%"]
+      }
+    ]);
+    const evidence = (): HTMLDetailsElement | null =>
+      card()?.querySelector<HTMLDetailsElement>(".remote-activity__evidence") ??
+      null;
+    expect(evidence()?.open).toBe(false);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // Still there on the receipt, still shut. Git's words are kept — Copy and
+    // the Logs window both reach them — they are just not the thing a
+    // successful pull is trying to say.
+    expect(evidence()?.open).toBe(false);
+    expect(evidence()?.textContent).toContain("Receiving objects");
+  });
+
+  // Caught by a real-app capture, not by this suite: marking every step done
+  // on settle made a FAILED fetch report "✓ Fetched", and the step list
+  // replaced the status line that carried the reason — so the card said the
+  // operation had succeeded and said nothing about why it had not.
+  it("does not report a step as done when the operation failed on it", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(steps()).toEqual(["Fetching updates"]);
+
+    await act(async () => {
+      finish(
+        err({ kind: "remote", code: "network", message: "fatal: unreachable" })
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await emitActivities([]);
+
+    // The step it stopped on, still in the present tense and marked as such.
+    expect(steps()).toEqual(["Fetching updates"]);
+    expect(
+      card()?.querySelector(".remote-activity__step--failed"),
+      "the step the operation failed on must not read as done"
+    ).not.toBeNull();
+    expect(card()?.querySelector(".remote-activity__step--done")).toBeNull();
+    // And the reason is on screen, which the step list had displaced.
+    expect(card()?.textContent).toContain("Pull failed");
+    expect(card()?.textContent).toContain("fatal: unreachable");
+  });
+
+  // The three cases the card exists for. Making a user hunt for a disclosure
+  // to read the finding would be the same mistake as the old age gate.
+  it("opens Git's output by itself when that output IS the finding", async () => {
+    freezeClock();
+    await press(
+      "Pull",
+      err({ kind: "remote", code: "network", message: "fatal: unreachable" })
+    );
+    const evidence = card()?.querySelector<HTMLDetailsElement>(
+      ".remote-activity__evidence"
+    );
+    expect(evidence?.open).toBe(true);
+    expect(evidence?.textContent).toContain("fatal: unreachable");
+  });
+
   it("keeps the card as the receipt, and counts it down", async () => {
     freezeClock();
     await press("Fetch", ok(null));

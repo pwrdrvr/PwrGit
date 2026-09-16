@@ -43,6 +43,25 @@ export function RemoteActivityCard({
   // Destructured so the two null checks below narrow inside the handlers —
   // TypeScript cannot carry a narrowing on `view.x` into a closure.
   const { canceling, operationId } = view;
+  // Whether Git's own output is showing. Owned here rather than left to the
+  // `<details>` element: the popover re-renders this card every second, and an
+  // uncontrolled `open` would be reasserted from props each time — so a user
+  // who opened it would watch it shut itself a second later.
+  const wantsEvidence = evidenceEarnsAttention(view);
+  const [evidenceOpen, setEvidenceOpen] = useState(wantsEvidence);
+  const wasWanted = useRef(wantsEvidence);
+  useEffect(() => {
+    // Opened *for* the user when the operation turns bad, and never closed for
+    // them: a card that hid its evidence again as a fetch recovered would take
+    // away the thing they were reading.
+    if (wantsEvidence && !wasWanted.current) setEvidenceOpen(true);
+    wasWanted.current = wantsEvidence;
+  }, [wantsEvidence]);
+  // Nothing observed yet — every card before its first phase arrives, and
+  // every operation that fails before one does.
+  const fallback = view.steps.length === 0;
+  // A settled card whose rows cannot carry the outcome on their own.
+  const headline = view.settled !== null && view.settled !== "ok";
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<number | undefined>(undefined);
   useEffect(
@@ -92,26 +111,88 @@ export function RemoteActivityCard({
         </span>
       </div>
 
-      <p
-        className={`remote-activity__status remote-activity__status--${view.statusTone}`}
-      >
-        {view.statusLabel}
-      </p>
+      {/* The headline, above the detail. Drawn when the card has something to
+          say that its rows cannot: an outcome that was not a plain success —
+          a failure's reason, a cancel, "your stashed changes came back with
+          conflicts" — or when there are no rows at all, which is every card
+          before the first phase is observed and every fast failure.
 
-      {view.meter !== null && view.percent !== null && (
-        <div className="remote-activity__meter">
-          <div
-            className="remote-activity__bar"
-            role="progressbar"
-            aria-label={view.meter}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={view.percent}
-          >
-            <span style={{ width: `${view.percent}%` }} />
-          </div>
-          <span className="remote-activity__meter-label">{view.meter}</span>
-        </div>
+          A *successful* receipt deliberately has none: its rows already say
+          what happened, and a sentence restating them is the kind of padding
+          that made the old card feel like it was hiding something. */}
+      {(headline || fallback) && (
+        <p
+          className={`remote-activity__status remote-activity__status--${view.statusTone}`}
+        >
+          {view.statusLabel}
+        </p>
+      )}
+
+      {fallback ? (
+        <>
+          {/* The meter belongs to whichever presentation is on screen: to the
+              step being worked when there is a list, and to the status line
+              when there is not. The toast is the standing case for the
+              second — it passes no steps, because a receipt belongs beside the
+              button that was pressed and the toast is for a repository the
+              user is not looking at. */}
+          {view.meter !== null && view.percent !== null && (
+            <div className="remote-activity__meter">
+              <div
+                className="remote-activity__bar"
+                role="progressbar"
+                aria-label={view.meter}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={view.percent}
+              >
+                <span style={{ width: `${view.percent}%` }} />
+              </div>
+              <span className="remote-activity__meter-label">{view.meter}</span>
+            </div>
+          )}
+        </>
+      ) : (
+        <ol className="remote-activity__steps">
+          {view.steps.map((step) => (
+            <li
+              key={step.phase}
+              className={`remote-activity__step remote-activity__step--${step.state}`}
+            >
+              <span className="remote-activity__step-mark" aria-hidden="true">
+                {step.state === "done" ? "✓" : step.state === "failed" ? "✕" : "●"}
+              </span>
+              <span className="remote-activity__step-label">{step.label}</span>
+              {step.detail !== null && (
+                <span className="remote-activity__step-detail">
+                  {step.detail}
+                </span>
+              )}
+              {step.percent !== null && (
+                <span
+                  className="remote-activity__step-bar"
+                  role="progressbar"
+                  aria-label={step.detail ?? step.label}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={step.percent}
+                >
+                  <span style={{ width: `${step.percent}%` }} />
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {/* The health line rides *under* the list, because "no Git output for
+          2m 04s" is about the operation rather than about any one step — and
+          reading it above "● Fetching updates" would just restate the row it
+          sits on. It is the whole reason a wedged fetch is worth looking at. */}
+      {!fallback && view.statusTone === "warn" && (
+        <p className="remote-activity__status remote-activity__status--warn">
+          {view.statusLabel}
+        </p>
       )}
 
       {view.command !== null && (
@@ -121,15 +202,43 @@ export function RemoteActivityCard({
       {!compact && showOutput(view) && (
         // Git's own words, verbatim. Everything above is PwrGit's reading of
         // the operation; this is the evidence behind it, and the only thing
-        // that explains an unfamiliar failure. It outlives the command that
-        // wrote it now, which is the whole point of a settled card.
-        <pre className="remote-activity__output" aria-label="Recent Git output">
-          {view.output.length > 0
-            ? view.output.join("\n")
-            : view.settled === null
-              ? "Git has produced no output yet."
-              : "Git produced no output."}
-        </pre>
+        // that explains an unfamiliar failure.
+        //
+        // Collapsed while the operation is healthy, because Git's progress
+        // output is `\r`-rewritten — built to be transient in a terminal — and
+        // reproducing it here meant a block that grew from nothing to its
+        // 108px cap while its last line flickered at Git's own rate. That was
+        // the single largest source of the card's churn, and on a healthy
+        // operation it explains nothing the step list has not already said.
+        //
+        // It opens itself the moment it IS the finding: a quiet warning, a
+        // failure, or a cancel. Those are exactly the cases a user came to the
+        // card to read, and making them hunt for a disclosure would be the
+        // same mistake as hiding the card behind an age gate.
+        <details className="remote-activity__evidence" open={evidenceOpen}>
+          <summary
+            className="remote-activity__evidence-summary"
+            onClick={(event) => {
+              // The browser toggles `open` on a summary click by itself, and
+              // React owns that attribute — so let exactly one of them drive
+              // it rather than having both arrive at the same answer by luck.
+              event.preventDefault();
+              setEvidenceOpen(!evidenceOpen);
+            }}
+          >
+            Git output
+          </summary>
+          <pre
+            className="remote-activity__output"
+            aria-label="Recent Git output"
+          >
+            {view.output.length > 0
+              ? view.output.join("\n")
+              : view.settled === null
+                ? "Git has produced no output yet."
+                : "Git produced no output."}
+          </pre>
+        </details>
       )}
 
       <div className="remote-activity__actions">
@@ -191,6 +300,21 @@ export function RemoteActivityCard({
       </div>
       {tip.tooltipNode}
     </div>
+  );
+}
+
+/**
+ * Whether Git's own output is the thing to read, rather than a detail.
+ *
+ * Three cases, and they are the three the card exists for: a network phase
+ * that has gone quiet (`warn`), an operation that failed, and one the user
+ * stopped. A healthy fetch is explained by its step list.
+ */
+function evidenceEarnsAttention(view: RemoteActivityView): boolean {
+  return (
+    view.statusTone === "warn" ||
+    view.settled === "error" ||
+    view.settled === "canceled"
   );
 }
 
