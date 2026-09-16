@@ -16,12 +16,13 @@ Read the current versions of these files before changing release metadata:
 
 1. [../../../AGENTS.md](../../../AGENTS.md)
 2. [../../../.github/workflows/README.md](../../../.github/workflows/README.md)
-3. [../../../.github/workflows/release.yml](../../../.github/workflows/release.yml)
-4. [../../../scripts/check-desktop-release-metadata.mjs](../../../scripts/check-desktop-release-metadata.mjs)
-5. [../../../apps/desktop/scripts/release.mjs](../../../apps/desktop/scripts/release.mjs)
-6. [../../../apps/desktop/package.json](../../../apps/desktop/package.json)
-7. [../../../apps/desktop/electron-builder.yml](../../../apps/desktop/electron-builder.yml)
-8. [../../../apps/desktop/src/main/auto-updater.ts](../../../apps/desktop/src/main/auto-updater.ts)
+3. [../../../docs/desktop-release-runbook.md](../../../docs/desktop-release-runbook.md)
+4. [../../../.github/workflows/release.yml](../../../.github/workflows/release.yml)
+5. [../../../scripts/check-desktop-release-metadata.mjs](../../../scripts/check-desktop-release-metadata.mjs)
+6. [../../../apps/desktop/scripts/release.mjs](../../../apps/desktop/scripts/release.mjs)
+7. [../../../apps/desktop/package.json](../../../apps/desktop/package.json)
+8. [../../../apps/desktop/electron-builder.yml](../../../apps/desktop/electron-builder.yml)
+9. [../../../apps/desktop/src/main/auto-updater.ts](../../../apps/desktop/src/main/auto-updater.ts)
 
 If any file does not exist, handle that through the readiness gate below instead
 of assuming the sibling repositories' configuration applies.
@@ -55,10 +56,36 @@ ask whether to build the release infrastructure. Do not create a provisional
 tag or GitHub Release as a workaround. A local unsigned packaging smoke test is
 still allowed when the user explicitly asks for one.
 
+## Branch Lifecycle
+
+Choose `<release-branch>` from the release train, not merely from the
+repository's default branch:
+
+- `main` owns the active `N.N` train through its alphas, betas, stable
+  `-prerelease.M` candidates, first stable `N.N.0`, and follow-up `N.N.P`
+  releases. Promote a beta to stable by preparing and tagging the stable
+  metadata on `main`; never create `releases/N.N` only for that promotion.
+- Cut `releases/N.N` only after the product owner explicitly decides that
+  `main` will begin the next major or minor train. Select the current appropriate
+  `main` commit as the branch point; it may intentionally include post-release
+  fixes or enhancements rather than being the first stable tag. Then bump
+  `main` to the next alpha train.
+- After that cut, prepare and tag `N.N.P-prerelease.M` maintenance candidates
+  and patches from `releases/N.N`; `main` carries the next train with its
+  `-alpha` and `-beta` tags before its own suffix-free stable release. Both
+  branches may publish suffix-free stable releases: for example, `v1.0.1` from
+  `releases/1.0` and `v2.0.0` from `main`. Do not publish `-alpha` or `-beta`
+  from the maintenance branch: the Beta feed is shared and selects the next
+  train's higher SemVer candidate. A short-lived `release/v<version>`
+  pull-request source branch is only a metadata-review vehicle and never
+  substitutes for, or triggers, a maintenance branch; do not create
+  `releases/N.N` merely because that source PR promotes a beta to stable.
+
 ## Guardrails
 
-- Determine the repository default branch from the remote. Release from it
-  unless the user explicitly approves another ref.
+- Determine the repository default branch from the remote. Choose the actual
+  `<release-branch>` using the lifecycle above: it is `main` while that train is
+  active, then `releases/N.N` for maintenance after an owner-directed cut.
 - Start from a clean tracked working tree. Preserve untracked or unrelated user
   work. If tracked files are dirty, stop and ask before changing release
   metadata.
@@ -80,8 +107,15 @@ still allowed when the user explicitly asks for one.
   - Stable Prerelease: `v1.0.6-prerelease.1` (GitHub Pre-release)
   - Beta Latest: `v1.1.0-beta.3` (GitHub Pre-release; smoke-checked `main`)
   - Beta Prerelease: `v1.1.0-alpha.7` (GitHub Pre-release; may not install)
-- Keep `-prerelease.N` for Stable RCs. Do not reuse `-rc` or `-beta` for 1.0
-  RCs; `-beta` is the Beta Latest identifier.
+- A suffix-free stable tag may come from either the active `main` train or a
+  maintenance branch. GitHub's `Latest` flag and `/releases/latest` URL name
+  one repository-wide release, not one per train. The current updater likewise
+  selects a single highest stable release globally; until train pinning exists,
+  users who need a maintenance-line update install it manually.
+- Keep `-prerelease.N` for Stable candidates. It may be used on `main` while
+  the `N.N` train remains there; after the cut, use it for that `N.N` train
+  only from `releases/N.N`. Do not reuse `-rc` or `-beta` for 1.0 RCs; `-beta`
+  is the Beta Latest identifier.
 - `main` tags with a prerelease suffix must stay GitHub Pre-release so they
   never steal `/releases/latest` from the Stable train.
 - To promote a smoked alpha to beta, bump `apps/desktop/package.json` and add
@@ -188,11 +222,13 @@ git fetch origin <release-branch> --tags
 git pull --ff-only
 ```
 
-If direct push is rejected, use a short-lived `release/v<version>` branch and a
-pull request based on the repository's PR template. Wait for every required
-check and merge using the method documented by the repository. After landing,
-fetch the release branch and identify the actual landed commit; do not tag the
-pre-merge branch commit by assumption.
+If direct push is rejected, use a short-lived `release/v<version>` metadata
+source branch and a pull request based on the repository's PR template. Merge
+it into the lifecycle-selected `<release-branch>`; it remains a metadata source
+branch, not a `releases/N.N` maintenance branch, even when a beta becomes
+stable. Wait for every required check and merge using the method documented by
+the repository. After landing, fetch the release branch and identify the actual
+landed commit; do not tag the pre-merge branch commit by assumption.
 
 Rerun the metadata gate on the landed release-branch commit:
 
