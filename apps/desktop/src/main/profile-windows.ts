@@ -27,10 +27,21 @@ export function createProfileWindows(options: {
   appearance: (profileId: string) => AppAppearance;
 }): ProfileWindows {
   const byProfile = new Map<string, BrowserWindow>();
+  /** Windows that have begun closing — see `alive`. */
+  const closing = new WeakSet<BrowserWindow>();
 
+  // `isDestroyed()` alone is too late. A window reports itself undestroyed
+  // from the moment `close()` is called until the teardown completes, and in
+  // that gap it is still a live entry here: a reveal arriving mid-close would
+  // be emitted into a renderer that is going away, and `open` would "focus"
+  // the corpse instead of building the window the caller asked for. The
+  // reveal is then lost twice over — never delivered, never queued. `close`
+  // is the earliest truthful signal, and nothing in this app prevents it, so
+  // a window that has fired it is gone as far as callers are concerned.
   const alive = (profileId: string): BrowserWindow | null => {
     const win = byProfile.get(profileId);
-    return win !== undefined && !win.isDestroyed() ? win : null;
+    if (win === undefined || win.isDestroyed() || closing.has(win)) return null;
+    return win;
   };
 
   const open = (
@@ -44,6 +55,9 @@ export function createProfileWindows(options: {
     }
     const win = createMainWindow(profileId, options.appearance(profileId));
     byProfile.set(profileId, win);
+    win.on("close", () => closing.add(win));
+    // Identity-checked: a reveal that raced this window's close has already
+    // put its replacement in the map, and the loser must not evict it.
     win.on("closed", () => {
       if (byProfile.get(profileId) === win) byProfile.delete(profileId);
     });

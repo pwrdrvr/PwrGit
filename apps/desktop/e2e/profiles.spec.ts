@@ -438,7 +438,15 @@ test("a queued cross-profile reveal wins over a stale restored worktree", async 
   });
   await expect(hit).toBeVisible({ timeout: 20_000 });
   const reopenedPromise = handle.app.waitForEvent("window");
-  await hit.click();
+  // Click the NAME, not the row. `click()` aims at the target's geometric
+  // centre, and this row's centre is not a stable place to put a pointer: the
+  // per-hit status chip is filled in lazily (asyncFill), the flexible name
+  // gives up the ~56px it needs, and every control to the name's right slides
+  // left by that much. The pin star lands within a few pixels of the centre —
+  // and it stops propagation, so the click toggles a pin instead of picking
+  // the hit and no window is ever asked for. The name is what a user aims at
+  // and the one child that cannot become a button.
+  await hit.locator(".overlay-result__name").click();
   const reopened = await reopenedPromise;
   await reopened.waitForSelector("#root");
 
