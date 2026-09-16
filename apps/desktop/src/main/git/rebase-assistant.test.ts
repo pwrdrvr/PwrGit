@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { timedGitSync } from "./test-support/git-tripwire";
 import {
   chmodSync,
   existsSync,
@@ -24,10 +25,10 @@ import { createSystemGit } from "./test-support/system-git";
 const systemGit = createSystemGit();
 
 function git(dir: string, args: string[]): void {
-  execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, stdio: "ignore" }));
 }
 function gitOut(dir: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  return timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, encoding: "utf8" })).trim();
 }
 
 /** Repo with four commits c0..c3, each touching a distinct file. */

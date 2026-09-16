@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { timedGitSync } from "./test-support/git-tripwire";
 import {
   chmodSync,
   mkdirSync,
@@ -29,11 +30,11 @@ const systemGit: GitExec = createSystemGit();
 const systemGitBinary: GitExecBinary = createSystemGitBinary();
 
 function git(repo: string, ...args: string[]): string {
-  return execFileSync("git", args, {
+  return timedGitSync(args, repo, () => execFileSync("git", args, {
     cwd: repo,
     encoding: "utf8",
     env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" }
-  }).trimEnd();
+  })).trimEnd();
 }
 
 const allLineIds = (

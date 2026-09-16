@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { timedGitSync } from "./test-support/git-tripwire";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,10 +38,10 @@ import { createSystemGit } from "./test-support/system-git";
 const systemGit: GitExec = createSystemGit();
 
 function git(dir: string, args: string[]): void {
-  execFileSync("git", args, { cwd: dir, stdio: "ignore" });
+  timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, stdio: "ignore" }));
 }
 function gitOut(dir: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  return timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, encoding: "utf8" })).trim();
 }
 function fileText(dir: string, file: string): string {
   return readFileSync(join(dir, file), "utf8").replaceAll("\r\n", "\n");
@@ -63,7 +64,7 @@ function commitAt(dir: string, file: string, msg: string, date: string): void {
   writeFileSync(join(dir, file), `${file}\n`);
   git(dir, ["add", "."]);
   const stamp = `${date}T12:00:00Z`;
-  execFileSync("git", ["commit", "-m", msg], {
+  timedGitSync(["commit", "-m", msg], dir, () => execFileSync("git", ["commit", "-m", msg], {
     cwd: dir,
     stdio: "ignore",
     env: {
@@ -71,7 +72,7 @@ function commitAt(dir: string, file: string, msg: string, date: string): void {
       GIT_AUTHOR_DATE: stamp,
       GIT_COMMITTER_DATE: stamp
     }
-  });
+  }));
 }
 
 function recoverySnapshot(
