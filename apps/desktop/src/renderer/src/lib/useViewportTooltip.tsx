@@ -318,14 +318,27 @@ export function useViewportTooltip(
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
     stickyRef.current = false;
+    // The card is going, so the pointer is not in it by any reading a user
+    // would give — and `leaveInteractiveTooltip` cannot say so once the node
+    // is gone. Whichever channel reports pointer state has to be the one that
+    // resets it, or a caller pausing on it stays paused with the pointer
+    // nowhere near.
+    onPointerWithinRef.current?.(false);
     setState(undefined);
   }, [cancelScheduledHide]);
 
   const setSticky = useCallback((sticky: boolean): void => {
     stickyRef.current = sticky;
+    if (!sticky) return;
     // Pinning while a dismissal is already counting down has to call it off,
     // or the card the user just clicked open would leave 400ms later.
-    if (sticky) cancelScheduledHide();
+    cancelScheduledHide();
+    // And it clears the Escape latch. That flag exists to stop a *focus
+    // restore* reopening a hover card the user just dismissed; a click or
+    // Enter on the trigger is neither, and it is the same trigger, so left
+    // set it would make `show` refuse the card the user just asked for while
+    // the caller went on believing it had one.
+    dismissedTargetRef.current = null;
   }, [cancelScheduledHide]);
 
   const scheduleHide = useCallback((): void => {

@@ -159,6 +159,19 @@ export function WorktreeHeader({
   // Button first: it is the thing the user aimed at.
   const status = useRemoteActivityPopover(activity, [cardButton, cardChip]);
 
+  // The selection changed under a pinned card. That card reports an operation
+  // belonging to a checkout that is no longer on screen, and its dispatch will
+  // come back to one of the staleness guards below rather than to a `settle` —
+  // so this is the only thing that can ever take it away. Without it the card
+  // stands on "Starting…" over the new worktree's toolbar, titled with the old
+  // one's repository, until the user clicks it off.
+  //
+  // Its own effect rather than a line in the reset above, because that one is
+  // declared before the hook that owns `dismiss`.
+  useEffect(() => {
+    status.dismiss();
+  }, [status.dismiss, worktree.id]);
+
   const showFlash = (chip: Chip, ms: number): void => {
     setFlash(chip);
     setTimeout(() => setFlash(null), ms);
@@ -232,8 +245,15 @@ export function WorktreeHeader({
     okSummary: string,
     label: string
   ): Promise<void> => {
+    const worktreeId = worktree.id;
     setBusy(kind);
     const result = await fn();
+    // The same guard `onPull` and `onPush` carry, and now load-bearing for a
+    // third reason: an outcome that settles the card of a checkout it does not
+    // belong to puts one worktree's error under another's title — and reports
+    // it as carried, so the toast that should have caught it never fires.
+    // The reset effect above clears `busy` on the switch.
+    if (activeWorktreeId.current !== worktreeId) return;
     setBusy(null);
     if (result.ok) {
       showFlash(okChip, 1600);
@@ -459,33 +479,53 @@ export function WorktreeHeader({
   // the gap before this operation has a record to carry.
   const couldCarryCard = (kind: Exclude<Busy, null>): boolean =>
     carriesCard(kind) || (running === kind && activity === null);
-  const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps => ({
-    ...(!couldCarryCard(kind)
-      ? {}
-      : {
-          ref: cardButton,
-          onMouseEnter: (event: { currentTarget: HTMLElement }) =>
-            status.open(event.currentTarget),
-          onMouseLeave: status.close,
-          onFocus: (event: { currentTarget: HTMLElement }) =>
-            status.open(event.currentTarget),
-          onBlur: status.close
-        }),
+  const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps => {
+    const carries = couldCarryCard(kind);
     // The pointer reaches Cancel by moving into the card; Tab is the
     // keyboard's equivalent, the same handoff `GraphRow` makes into the
     // commit context card. Without it Tab lands on Pull, blurs the trigger,
     // and takes the card away — leaving the one control that stops a wedged
     // fetch reachable by mouse only.
     //
-    // Unconditional, because a *pinned* card is anchored to whichever button
-    // was clicked rather than to a trigger this factory knows about, and
-    // `focusFirst` answers false when there is no card to hand off to.
-    onKeyDown: (event) => {
-      if (event.key === "Tab" && !event.shiftKey && status.focusFirst()) {
-        event.preventDefault();
-      }
-    }
-  });
+    // It reaches past `carries` because a *pinned* card is anchored to
+    // whichever button was clicked rather than to a trigger this factory
+    // knows about — but only as far as that button. The three are adjacent
+    // and carry `aria-disabled` rather than `disabled`, so they stay
+    // tabbable while one of them works: claiming Tab on all of them would
+    // send a keyboard user on Push backwards, past Push, into a card hanging
+    // off Pull (SC 2.4.3).
+    const handsOff = carries || status.pinnedKind === kind;
+    return {
+      ...(!carries
+        ? {}
+        : {
+            ref: cardButton,
+            onMouseEnter: (event: { currentTarget: HTMLElement }) =>
+              status.open(event.currentTarget),
+            onMouseLeave: status.close,
+            onFocus: (event: { currentTarget: HTMLElement }) =>
+              status.open(event.currentTarget),
+            onBlur: status.close
+          }),
+      ...(!handsOff
+        ? {}
+        : {
+            onKeyDown: (event: {
+              key: string;
+              shiftKey: boolean;
+              preventDefault: () => void;
+            }) => {
+              if (
+                event.key === "Tab" &&
+                !event.shiftKey &&
+                status.focusFirst()
+              ) {
+                event.preventDefault();
+              }
+            }
+          })
+    };
+  };
   /**
    * A native tooltip everywhere the status card is NOT coming — the two must
    * never both appear, but a button with neither is worse than either.

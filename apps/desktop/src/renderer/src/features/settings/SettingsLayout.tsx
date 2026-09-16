@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode
 } from "react";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
 
 /**
  * Layout primitives for the Settings window, ported from PwrAgnt's
@@ -120,15 +121,6 @@ function slugForSectionId(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   return slug === "" ? "" : `${slug}-${hash(value)}`;
-}
-
-/** Whether the reader has asked for less motion. Defensive about `matchMedia`
- *  itself: jsdom and other non-browser hosts may not carry one. */
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return false;
-  }
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 /** djb2, base36. Not security — just enough to separate two titles that share

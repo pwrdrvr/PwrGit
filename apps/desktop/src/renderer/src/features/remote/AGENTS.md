@@ -26,6 +26,16 @@ recovery prompt, the fork prompt), or, for a failure the card could not carry,
 a toast. A fourth early return without one of them leaves a card pinned on
 "Starting…" until the user clicks it away.
 
+The staleness guards **are** that fourth return, and they deliberately cannot
+settle: an operation whose checkout is no longer selected has an outcome that
+belongs to a toolbar nobody is looking at. `WorktreeHeader` answers them by
+dismissing on `worktree.id`, in an effect of its own because the reset effect
+beside it is declared before the hook that owns `dismiss`. And `run` carries
+the same `activeWorktreeId` guard `onPull` and `onPush` already had — without
+it a fetch started on the checkout you left settles the card of the one you
+are on, under the wrong title, and reports itself carried so the toast that
+should have caught the failure never fires.
+
 `settle` returns whether a pinned card took the outcome, and `flashError` uses
 that: a durable card anchored to the button that was pressed, carrying Git's
 own output plus Logs and Copy, is a better report than a corner toast — and
@@ -58,6 +68,13 @@ and the dismissal always resume from the same place. Under
 would leave a full rail on a card that then vanished unannounced, so the
 popover sets `transform: scaleX()` inline from the seconds clock instead: the
 same drain, in four discrete steps.
+
+`settle` starts the receipt **un-held**. A click that landed while the
+operation was still running — Copy, or Cancel itself — was not a click on a
+countdown, because there was no countdown yet; carried forward it hands the
+user a card that never leaves and no timer they could have seen to stop. The
+pointer is the other half and is deliberately *not* reset: `within` is where
+it is right now, and a card under the pointer still waits.
 
 `REMOTE_ACTIVITY_SETTLED_MS` may be as short as it is *because* of those
 pauses, not despite them — that, plus the ✕, is WCAG SC 2.2.1 met three ways.
@@ -105,8 +122,17 @@ from, so the pointer is the only signal there is. That card is transient
 (it leaves with the pointer) and never grows a rail, because there is no
 settle to report.
 
-A pinned card stands the whole of it down: `open`, `close` and the arming
-effect all return early while `pinRef.current !== null`, and the deferred open
+**A hover card refreshes itself, and ends with the record.** Its own effect,
+and it is the whole reason the card is worth opening: elapsed, the transfer
+meter and "no Git output for 2m 04s" exist only in *later* records, so a card
+frozen at the instant it opened draws a wedged fetch as a healthy one. The
+record going is also its ending, and that is not belt-and-braces — the
+pointer's exit rides on `close()`, a prop on a control that stops being a
+trigger the moment its operation ends, so an operation that finishes under a
+resting pointer takes its own dismissal away with it.
+
+A pinned card stands the whole of it down: `open`, `close`, the arming effect
+and that refresh all return early while there is a pin, and the deferred open
 checks again when its timer fires. The click has already answered the question
 this machinery exists to answer, and re-arming underneath it would leave a
 hover primed to reopen a finished operation's card the moment the pinned one
@@ -183,6 +209,13 @@ card; the keyboard needs the handoff `GraphRow` already makes into its commit
 context card (`focusFirst`, swallowing the key). Without it Tab lands on Pull,
 blurs the trigger and takes the card with it — so opening the card for the
 keyboard without this would show a Cancel button only a mouse could press.
+
+It reaches past the trigger the record names, because a pinned card hangs off
+whichever button was *clicked* — but only as far as that button
+(`status.pinnedKind`). The three are adjacent and carry `aria-disabled` rather
+than `disabled`, so they stay tabbable while one of them works: claiming Tab
+on all three would send a keyboard user on Push backwards, past Push, into a
+card hanging off Pull (SC 2.4.3).
 
 Three things keep that from becoming a card nobody asked for.
 

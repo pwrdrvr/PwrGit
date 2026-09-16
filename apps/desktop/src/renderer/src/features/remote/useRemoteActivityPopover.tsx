@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { RemoteActivity } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useSecondsClock } from "../../state/useRemoteActivity";
 import { RemoteActivityCard } from "./RemoteActivityCard";
@@ -144,6 +145,13 @@ export type RemoteActivityPopover = {
   focusFirst: () => boolean;
   /** A card is on screen, pinned or hovered. */
   showing: boolean;
+  /**
+   * Which operation the *pinned* card belongs to, or null when nothing is
+   * pinned. The caller needs it because a pinned card hangs off whichever
+   * control was clicked, which is not something the trigger wiring otherwise
+   * knows — and a control that is not the anchor must not claim Tab.
+   */
+  pinnedKind: RemoteActivityScope["kind"] | null;
   node: ReactNode;
 };
 
@@ -154,15 +162,6 @@ export type RemoteActivityPopover = {
  * arming effect below.
  */
 export type RemoteActivityTriggers = readonly RefObject<HTMLElement | null>[];
-
-/**
- * Asked once. A preference that changes mid-session is rare enough not to be
- * worth a listener, and `LineageGraph` reads it the same way.
- */
-const prefersReducedMotion = (): boolean =>
-  typeof window !== "undefined" &&
-  typeof window.matchMedia === "function" &&
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** The card between the click and main's first word about the operation. */
 function startingView(pin: Pin, now: number): RemoteActivityView {
@@ -316,9 +315,10 @@ export function useRemoteActivityPopover(
   const dismiss = useCallback((): void => {
     wasVisible.current = false;
     setPin(null);
-    setSticky(false);
+    // No `setSticky(false)` — `hide()` clears the flag itself, and that is
+    // part of what it promises rather than an accident of how it is written.
     hide();
-  }, [hide, setPin, setSticky]);
+  }, [hide, setPin]);
 
   const pinCard = useCallback(
     (target: HTMLElement, scope: RemoteActivityScope): void => {
@@ -375,6 +375,15 @@ export function useRemoteActivityPopover(
       // chip beside it is the live region for "what is happening"; this is the
       // single sentence for "what happened".
       announce(`${remoteActivityTitle(open.scope)} — ${settlement.summary}`);
+      // The receipt's countdown begins now, so it begins un-held. A click
+      // that landed while the operation was still running — Copy, or Cancel
+      // itself — was not a click on a timer, because there was no timer yet;
+      // carrying it forward would hand the user a receipt that never goes
+      // away and no countdown they could have seen to stop. The pointer is
+      // the other half and is deliberately not reset: `within` is where it
+      // is right now, and a card under the pointer still waits.
+      setRailHeld(false);
+      rail.current = { remaining: REMOTE_ACTIVITY_SETTLED_MS, since: null };
       return true;
     },
     [setPin]
@@ -490,6 +499,29 @@ export function useRemoteActivityPopover(
     lastSeen.current = activity;
   }, [activity]);
 
+  // The hover card's own refresh, and its ending.
+  //
+  // The pinned half is redrawn by the effect further down, which bails when
+  // there is no pin — so without this one a hover-opened card is a snapshot
+  // of the instant it opened. That is the whole of what it is for: the
+  // elapsed readout, the transfer meter and "no Git output for 2m 41s" are
+  // the difference between a fetch that is working and one that is wedged,
+  // and a frozen card draws the wedged one as healthy.
+  //
+  // `activity === null` is the other half. A hover card leaves with the
+  // pointer, but the pointer's exit is reported by `close()`, a React prop on
+  // a control that STOPS being a trigger the moment its operation ends — so
+  // an operation that finishes under a resting pointer takes its own
+  // dismissal away with it. The record going is the dismissal here.
+  useEffect(() => {
+    if (!visible || pin !== null) return;
+    if (activity === null) {
+      hide();
+      return;
+    }
+    update(<RemoteActivityCard view={liveActivityView(activity, now)} />);
+  }, [activity, hide, now, pin, update, visible]);
+
   // What the pinned session is currently showing: its receipt if it has one,
   // the live record while the operation runs, and a placeholder for the gap
   // between the click and main's first word.
@@ -579,18 +611,9 @@ export function useRemoteActivityPopover(
     // `pinView` and `railLeft()` are rebuilt every render and derive from
     // exactly `pin`, `activity` and `now`, all listed — naming them here would
     // re-run this for every render and buy nothing.
-  }, [
-    activity,
-    dismiss,
-    draining,
-    now,
-    paused,
-    pin,
-    railHeld,
-    reduced,
-    show,
-    update
-  ]);
+    // `railHeld` is deliberately absent: `paused` is `within || railHeld`, so
+    // anything it could change here has already changed `paused`.
+  }, [activity, dismiss, draining, now, paused, pin, reduced, show, update]);
 
   // A click anywhere else dismisses the card, and the click still lands where
   // it was aimed — nothing here calls `preventDefault`. Capture phase so a
@@ -649,6 +672,7 @@ export function useRemoteActivityPopover(
     dismiss,
     focusFirst,
     showing: visible,
+    pinnedKind: pin?.scope.kind ?? null,
     node: tooltip.tooltipNode
   };
 }

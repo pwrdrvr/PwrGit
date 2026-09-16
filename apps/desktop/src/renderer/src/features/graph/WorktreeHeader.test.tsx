@@ -587,6 +587,41 @@ describe("WorktreeHeader pull progress", () => {
     expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
   });
 
+  // Opening it is half the job. What makes a hover card worth opening at all
+  // is that it keeps counting — the elapsed readout, the transfer meter and
+  // "no Git output for 2m 04s" are the whole difference between a fetch that
+  // is working and one that is stuck, and they only exist in later records.
+  // A card frozen at the instant it opened draws the stuck one as healthy.
+  it("keeps the hover card up to date as the record moves", async () => {
+    userIsOn('button[aria-busy="true"]');
+    const startedAt = Date.now() - WEDGED_SINCE;
+    const card = (): Element | null =>
+      document.querySelector(".remote-activity-popover");
+    await emitActivities([{ kind: "fetch", startedAt, tail: [] }]);
+    expect(card()?.textContent).toContain("Git has produced no output yet.");
+
+    await emitActivities([
+      { kind: "fetch", startedAt, tail: ["remote: Enumerating objects: 214"] }
+    ]);
+    expect(card()?.textContent).toContain("remote: Enumerating objects: 214");
+  });
+
+  // A hover card leaves with the pointer — but the pointer's exit rides on
+  // `onMouseLeave`, a prop on a control that stops being a trigger the moment
+  // its operation ends. An operation that finishes under a resting pointer
+  // takes its own dismissal away with it, so the record going has to be what
+  // ends the card.
+  it("takes the hover card away when the operation ends", async () => {
+    userIsOn('button[aria-busy="true"]');
+    await emitActivities([
+      { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
+    ]);
+    expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
+
+    await emitActivities([]);
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+  });
+
   // The card carries Cancel, and the pointer's route into it — just move — has
   // no keyboard equivalent. Without this handoff Tab lands on Pull, blurs the
   // trigger and takes the card with it, so the one control that stops a wedged
@@ -755,6 +790,119 @@ describe("WorktreeHeader settled status card", () => {
       await Promise.resolve();
     });
   };
+
+  // Escape latches the trigger inside `useViewportTooltip` so that restoring
+  // focus to it cannot reopen what was just dismissed. Pressing that same
+  // button is a fresh ask, not a focus restore — and the failure mode is
+  // silent twice over: `show` refuses the card, and `settle` still reports the
+  // outcome as carried, so the toast that should have caught it never fires.
+  it("reopens for the next press after Escape took the last one away", async () => {
+    await press("Fetch", ok(null));
+    expect(card()).not.toBeNull();
+
+    // Tab in first, because that is the Escape the latch exists for: leaving
+    // focus behind is what makes `useViewportTooltip` restore it to the
+    // trigger, and what makes it hold the trigger against reopening.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Tab",
+            bubbles: true,
+            cancelable: true
+          })
+        );
+    });
+    expect(card()?.contains(document.activeElement)).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(card()).toBeNull();
+
+    await press(
+      "Fetch",
+      err({ kind: "remote", code: "network", message: "boom" })
+    );
+    expect(card()?.textContent).toContain("Fetch failed");
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  // The selection changing is a fourth way out of an operation, and it had
+  // none of the three. The card reports a checkout that is no longer on
+  // screen, and the dispatch comes back to a staleness guard rather than to a
+  // settle — so without this nothing would ever take it away.
+  it("lets go of the card when the selection moves to another worktree", async () => {
+    let finish!: () => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve(ok(null));
+      })
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.click();
+    });
+    expect(card()).not.toBeNull();
+
+    await act(async () => {
+      root.render(
+        <WorktreeHeader
+          repo={repo}
+          worktree={{ ...worktree, id: "worktree-2" }}
+          state={null}
+        />
+      );
+    });
+    expect(card()).toBeNull();
+
+    // And the outcome belongs to the checkout that left, so it must not write
+    // a receipt over the one now on screen either.
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(card()).toBeNull();
+  });
+
+  // A click that lands while the operation is still running is not a click on
+  // a countdown, because there is no countdown yet. Carried forward it hands
+  // the user a receipt that never goes away and no timer they could have seen
+  // to stop.
+  it("still counts the receipt out after a click during the operation", async () => {
+    freezeClock();
+    let finish!: () => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve(ok(null));
+      })
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.click();
+    });
+    await act(async () => {
+      card()
+        ?.querySelector(".remote-activity__status")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(card()?.textContent).toContain("Fetched");
+
+    await act(async () => {
+      vi.advanceTimersByTime(REMOTE_ACTIVITY_SETTLED_MS);
+    });
+    expect(card()).toBeNull();
+  });
 
   it("keeps the card as the receipt, and counts it down", async () => {
     freezeClock();
