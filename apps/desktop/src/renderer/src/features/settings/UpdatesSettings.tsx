@@ -89,7 +89,10 @@ function readReleases() {
  *  member of the union either carries a `version` or has nothing to link to
  *  (`checking`, `skipped`, `error`), so a status added later is covered the
  *  day it lands. */
-function resultVersion(result: AppUpdateCheckResult): string | undefined {
+function resultVersion(
+  result: AppUpdateCheckResult | undefined
+): string | undefined {
+  if (result === undefined) return undefined;
   return "version" in result ? result.version : undefined;
 }
 
@@ -278,13 +281,16 @@ export function UpdatesSettings(props: {
   // many, so the Restart row wins the tie. It has to: a window opened after a
   // background download shows that button with no status line beside it, which
   // is exactly the case where the version is otherwise unexplained.
+  //
+  // The tie is asked of the VERSIONS, through the same `sameVersion` the
+  // Installed chip uses. Comparing the composed URLs instead would answer the
+  // same question only for as long as `releaseNotesUrl` keeps normalizing a
+  // leading `v` the way this file does.
+  const statusVersion = resultVersion(updateResult);
   const restartNotesUrl = releaseNotesUrl(downloadedVersion);
-  const resultNotesUrl =
-    updateResult === undefined
-      ? undefined
-      : releaseNotesUrl(resultVersion(updateResult));
-  const statusNotesUrl =
-    resultNotesUrl === restartNotesUrl ? undefined : resultNotesUrl;
+  const statusNotesUrl = sameVersion(statusVersion, downloadedVersion)
+    ? undefined
+    : releaseNotesUrl(statusVersion);
 
   // Roving tabindex + arrow keys, the radiogroup contract. Focus moves and
   // selection does NOT follow it: picking a slot rewrites which build the app
@@ -413,11 +419,19 @@ export function UpdatesSettings(props: {
                               slotRefs.current[index] = element;
                             }}
                           />
-                          <ReleaseNotesLink
-                            url={releaseNotesUrl(release?.version)}
-                            className="settings-slot-notes"
-                            ariaLabel={`Release notes for ${TRAIN_LABEL[rowTrain]} ${CHANNEL_LABEL[slotChannel]} ${release?.version ?? ""}`}
-                          />
+                          {/* Gated on the version rather than left to the
+                              control's own `url === undefined` check, so the
+                              accessible name is written from a string TS has
+                              proved is there — the matrix renders four of
+                              these at once, and an unnamed one is not a
+                              usable list entry. */}
+                          {release?.version === undefined ? null : (
+                            <ReleaseNotesLink
+                              url={releaseNotesUrl(release.version)}
+                              className="settings-slot-notes"
+                              ariaLabel={`Release notes for ${TRAIN_LABEL[rowTrain]} ${CHANNEL_LABEL[slotChannel]} ${release.version}`}
+                            />
+                          )}
                         </div>
                       );
                     })}
@@ -466,14 +480,6 @@ export function UpdatesSettings(props: {
                     >
                       Restart to Update ({downloadedVersion})
                     </button>
-                    {/* Under the button that commits to it. This is the one
-                        version the pane names without any check having run in
-                        this window — a background download put it there. */}
-                    <ReleaseNotesLink
-                      url={restartNotesUrl}
-                      className="settings-notes-link"
-                      ariaLabel={`Release notes for v${downloadedVersion}`}
-                    />
                     {updateRestartError ? (
                       <span
                         className="settings-update-channel__result settings-update-channel__result--error"
@@ -482,6 +488,16 @@ export function UpdatesSettings(props: {
                         {updateRestartError}
                       </span>
                     ) : null}
+                    {/* Under the button that commits to it — but BELOW the
+                        failure, which belongs against the button that raised
+                        it. This is the one version the pane names without any
+                        check having run in this window: a background download
+                        put it there. */}
+                    <ReleaseNotesLink
+                      url={restartNotesUrl}
+                      className="settings-notes-link"
+                      ariaLabel={`Release notes for v${downloadedVersion}`}
+                    />
                   </div>
                 ) : null}
                 <button

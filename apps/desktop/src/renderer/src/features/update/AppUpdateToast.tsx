@@ -233,9 +233,10 @@ export function AppUpdateToast() {
           </div>
           {/* Rendered only when there is an action: `.app-toast` is a two
               column grid, and an empty second column still spends its gap.
-              `checking` has neither — no version to read about, and nothing
-              downloading to stop — so that card keeps its single column. */}
-          {(progress.cancelable || progress.notesUrl !== undefined) && (
+              `cancelable` is the whole test — every phase that names a version
+              is also one there is a download to stop, and `checking`, the one
+              phase with neither, is the card that keeps its single column. */}
+          {progress.cancelable && (
             <div className="app-toast__actions">
               {/* Reading what is being downloaded is the one thing worth doing
                   WHILE it downloads — this card stands for minutes. */}
@@ -247,19 +248,17 @@ export function AppUpdateToast() {
                   blurs an element the moment it becomes disabled, which would
                   throw focus to <body> at the instant the user asked to
                   stop. The handler guards instead. */}
-              {progress.cancelable && (
-                <button
-                  className="app-toast__button"
-                  type="button"
-                  aria-disabled={canceling}
-                  onClick={() => {
-                    if (canceling) return;
-                    cancel();
-                  }}
-                >
-                  {canceling ? "Canceling…" : "Cancel"}
-                </button>
-              )}
+              <button
+                className="app-toast__button"
+                type="button"
+                aria-disabled={canceling}
+                onClick={() => {
+                  if (canceling) return;
+                  cancel();
+                }}
+              >
+                {canceling ? "Canceling…" : "Cancel"}
+              </button>
             </div>
           )}
         </aside>

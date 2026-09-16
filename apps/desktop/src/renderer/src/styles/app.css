@@ -11045,12 +11045,7 @@ body.is-col-resizing {
 .settings-slots {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr) minmax(0, 1fr);
-  column-gap: 6px;
-  /* Wider than the column gap on purpose. Each cell now ends in a "Release
-     notes" link, and at an even 6px both ways that link sat as close to the
-     NEXT row's tile as to its own — it has to read as a caption on the tile
-     above it. */
-  row-gap: 13px;
+  gap: 6px;
   align-items: stretch;
   width: 100%;
 }
@@ -11149,18 +11144,25 @@ body.is-col-resizing {
   color: var(--success-text);
 }
 /* The grid cell, not the tile. The tile is a radio and cannot contain an
-   interactive element, so its "Release notes" link is a sibling below it — the
-   cell is what makes the two read as one unit, and `flex: 1` on the tile keeps
-   every tile in a row the same height whether or not its slot resolved to a
-   version. */
+   interactive element, so its "Release notes" link is a sibling below it, and
+   the cell is what makes the two read as one unit.
+
+   The caption row is a FIXED track, not `auto`. An empty slot renders no link
+   (`releaseNotesUrl` answers undefined), and an `auto` track would collapse
+   there — stretching that tile taller than the row-mate whose cell spends a
+   line on a link, which puts the most visual weight on the one slot with
+   nothing in it. 12px is the link's own line box (`10px/1.2` below); keep the
+   two in step.
+
+   `padding-bottom` rather than a wider grid `row-gap`: the separation belongs
+   under the caption, and row-gap is uniform, so widening it would also push
+   the column headers away from the tiles they label. */
 .settings-slot-cell {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: 1fr 12px;
   gap: 4px;
+  padding-bottom: 7px;
   min-width: 0;
-}
-.settings-slot-cell > .settings-slot {
-  flex: 1 1 auto;
 }
 /* "Release notes" — quiet by default, accent on hover. It sits under a tile
    the reader is deciding about, so it must not compete with the tile itself
@@ -11193,9 +11195,12 @@ body.is-col-resizing {
   color: var(--accent);
 }
 /* Indented to the tile's own text column (11px padding + 1px border) so it
-   hangs under the version rather than off the tile's outer edge. */
+   hangs under the version rather than off the tile's outer edge.
+   `justify-self`, not `align-self`: the cell is a grid, so the inline axis is
+   the one to pin — stretched, the button's click target would be the cell's
+   whole width. */
 .settings-slot-notes {
-  align-self: flex-start;
+  justify-self: start;
   padding-left: 12px;
 }
 /* Inline with the sentence — or beside the button — it qualifies. It is scoped
@@ -11203,7 +11208,6 @@ body.is-col-resizing {
    it. */
 .settings-notes-link {
   margin-left: 6px;
-  vertical-align: baseline;
 }
 /* …except under the Restart button, where the two stack in a column and a
    left margin would push it out of line with the button above it. */

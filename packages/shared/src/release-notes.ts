@@ -41,7 +41,8 @@ import { PWRGIT_LINKS } from "./product";
 /** Tag shape the release lane publishes: `0.16.0`, `0.16.0-beta.1`, with an
  *  optional `+build` suffix. Anchored, so a version carrying a path
  *  separator, a scheme or a query cannot reach the template below. */
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
+const SEMVER =
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /**
  * The GitHub release page for one version, or `undefined` when the version is
