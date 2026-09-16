@@ -41,10 +41,12 @@ vi.mock("../../lib/toast", () => ({
 }));
 vi.mock("../shell/WorktreeMenu", () => ({ WorktreeMenu: () => null }));
 
+import { REMOTE_ACTIVITY_SETTLED_MS } from "../remote/remote-activity";
 import {
   REMOTE_ACTIVITY_POPOVER_AFTER_MS,
   WHERE_THE_USER_IS
 } from "../remote/useRemoteActivityPopover";
+import { showErrorToast } from "../../lib/toast";
 import { WorktreeHeader } from "./WorktreeHeader";
 
 const repo = {
@@ -152,7 +154,17 @@ const ALMOST_DUE = REMOTE_ACTIVITY_POPOVER_AFTER_MS - 50;
 let container: HTMLDivElement;
 let root: Root;
 
-/** Publish the live remote operations this window can see. */
+/**
+ * Publish the live remote operations this window can see.
+ *
+ * Emitting one is also how every hover-path test below makes a button busy —
+ * `running` answers to the record as well as to this header's own dispatch, so
+ * a record alone is an operation something ELSE started: the sidebar, a bulk
+ * sync, a second window. Those tests used to press the button first, which is
+ * no longer a route to the hover path at all: a click pins the card outright
+ * and a pinned card stands the hover machinery down. This is both the only way
+ * left and a closer likeness of the case the hover path still exists for.
+ */
 async function emitActivities(activities: Partial<RemoteActivity>[]) {
   await act(async () => {
     bridge.handlers.get("remote:activity")?.({
@@ -291,11 +303,19 @@ describe("WorktreeHeader pull progress", () => {
     expect(container.textContent).not.toContain("Fetching updates…");
   });
 
-  it("opens the status card from the working button, and cancels from it", async () => {
+  it("pins the card from the click and cancels from it", async () => {
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
     await act(async () => pull?.click());
+
+    // Before main has said a word. This is the whole change: no age gate, no
+    // hover, and the card is already answering "what is it doing?" during the
+    // stretch where nothing else could.
+    expect(
+      document.querySelector(".remote-activity-popover")?.textContent
+    ).toContain("Pull · project · main");
+
     await emitActivities([
       {
         phase: "fetch",
@@ -305,11 +325,6 @@ describe("WorktreeHeader pull progress", () => {
       }
     ]);
 
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
-        ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-    });
     const card = document.querySelector(".remote-activity-popover");
     expect(card).not.toBeNull();
     // Git's own words, and the command that produced them — the two facts a
@@ -344,42 +359,39 @@ describe("WorktreeHeader pull progress", () => {
     );
   });
 
-  it("answers a hover that landed before the operation was reported", async () => {
+  // What used to be a race is now a non-event. Clicking Pull turns the button
+  // busy from this component's own state and swaps its glyph for the spinner,
+  // firing mouseenter under the pointer the click left resting there — before
+  // main reports the operation. That enter used to be the only one the button
+  // would ever see, and losing it meant no card however long the user waited.
+  // The click has already opened one, so the enter arrives at a card that is
+  // up and changes nothing.
+  it("is unmoved by the stationary-pointer mouseenter the click fires", async () => {
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
     await act(async () => pull?.click());
+    const before = document.querySelector(".remote-activity-popover");
+    expect(before).not.toBeNull();
 
-    // The whole of the race, in order. Clicking Pull turns the button busy
-    // from this component's own state and swaps its glyph for the spinner,
-    // which fires mouseenter under the pointer the click left resting there —
-    // all of it BEFORE main reports the operation. That enter used to be the
-    // only one the button would ever see, and it was dropped for having
-    // nothing to report; the pointer was already inside, so no further enter
-    // was coming and the card never opened however long the user waited.
     await act(async () => {
       container
         .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
         ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
-    expect(document.querySelector(".remote-activity-popover")).toBeNull();
-
-    // Old enough to be past the age gate the moment it is reported, which is
-    // the case the card exists for.
     await emitActivities([
       { startedAt: Date.now() - 30_000, phase: "fetch", silent: true }
     ]);
-    expect(
-      document.querySelector(".remote-activity-popover")?.textContent,
-      "a hover is a place the pointer is, not a moment an event fired"
-    ).toContain("Pull · project · main");
+
+    const after = document.querySelector(".remote-activity-popover");
+    expect(after, "the same card, not a second one").toBe(before);
+    expect(after?.textContent).toContain("Pull · project · main");
   });
 
   it("does not open a later operation's card beside a pointer that left", async () => {
-    const pull = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Pull"]'
-    );
-    await act(async () => pull?.click());
+    // Young enough that its own card is still behind the age gate, so nothing
+    // is on screen when the pointer leaves.
+    await emitActivities([{ startedAt: Date.now(), phase: "fetch" }]);
     const busy = container.querySelector<HTMLButtonElement>(
       'button[aria-busy="true"]'
     );
@@ -407,10 +419,7 @@ describe("WorktreeHeader pull progress", () => {
   });
 
   it("forgets a trigger the pointer left after the operation ended", async () => {
-    const pull = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Pull"]'
-    );
-    await act(async () => pull?.click());
+    await emitActivities([{ startedAt: Date.now(), phase: "fetch" }]);
     const busy = container.querySelector<HTMLButtonElement>(
       'button[aria-busy="true"]'
     );
@@ -444,18 +453,13 @@ describe("WorktreeHeader pull progress", () => {
 
   it("arms the operation that replaced one still inside the age gate", async () => {
     freezeClock();
-    const pull = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Pull"]'
-    );
-    await act(async () => pull?.click());
+    // Young enough that its card is still waiting on the age gate.
+    await emitActivities([{ startedAt: Date.now(), phase: "fetch" }]);
     await act(async () => {
       container
         .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
         ?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
-
-    // Young enough that its card is still waiting on the age gate.
-    await emitActivities([{ startedAt: Date.now(), phase: "fetch" }]);
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
 
     // It finishes and another takes its place before that wait elapses. The
@@ -474,14 +478,21 @@ describe("WorktreeHeader pull progress", () => {
     // `running` answers to this header's own `busy` as well as to the live
     // record, so a locally dispatched fetch can be what makes a button busy
     // while the record for this checkout is a pull someone started elsewhere.
-    // The trigger widened in time, not in scope: a card naming a Pull must not
-    // hang off the Fetch button.
+    // The card is scoped, not merely anchored: one opened by pressing Fetch
+    // names that Fetch and must never adopt the Pull's phase, command or
+    // output just because both are true of this checkout at once.
     const fetchButton = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Fetch"]'
     );
     await act(async () => fetchButton?.click());
     await emitActivities([
-      { kind: "pull", startedAt: Date.now() - 30_000, phase: "fetch" }
+      {
+        kind: "pull",
+        startedAt: Date.now() - 30_000,
+        phase: "fetch",
+        command: "git fetch --prune --progress",
+        tail: ["remote: Enumerating objects: 12"]
+      }
     ]);
 
     const busy = container.querySelector<HTMLButtonElement>(
@@ -491,27 +502,26 @@ describe("WorktreeHeader pull progress", () => {
     await act(async () => {
       busy?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
-    expect(document.querySelector(".remote-activity-popover")).toBeNull();
+
+    const card = document.querySelector(".remote-activity-popover");
+    expect(card?.textContent).toContain("Fetch · project · main");
+    expect(card?.textContent).not.toContain("Pull · project · main");
+    expect(card?.textContent).not.toContain("remote: Enumerating objects: 12");
   });
 
   it("takes the waiting card away with the trigger the pointer left", async () => {
     freezeClock();
-    const pull = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Pull"]'
-    );
-    await act(async () => pull?.click());
+    // Old enough that the wait is nearly up, so the card is genuinely armed
+    // rather than merely not due yet.
+    await emitActivities([
+      { startedAt: Date.now() - ALMOST_DUE, phase: "fetch", silent: true }
+    ]);
     const busy = container.querySelector<HTMLButtonElement>(
       'button[aria-busy="true"]'
     );
     await act(async () => {
       busy?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
-
-    // Old enough that the wait is nearly up, so the card is genuinely armed
-    // rather than merely not due yet.
-    await emitActivities([
-      { startedAt: Date.now() - ALMOST_DUE, phase: "fetch", silent: true }
-    ]);
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
 
     // Letting the trigger go has to take the wait with it. The element-level
@@ -529,15 +539,12 @@ describe("WorktreeHeader pull progress", () => {
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
-  it("keeps the card off a pull short enough that nobody asked", async () => {
+  // What the age gate is still for. A bulk sync turns this button busy under a
+  // pointer that came to rest there for its own reasons, once per repository —
+  // and a card that appears and vanishes inside a second is a flicker, not a
+  // status. Nobody asked for this one, so the gate withholds it.
+  it("keeps the card off an elsewhere-started pull nobody asked about", async () => {
     freezeClock();
-    const pull = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Pull"]'
-    );
-    await act(async () => pull?.click());
-    // Clicking Pull leaves the pointer on the button, and swapping in the
-    // spinner fires mouseenter under it. A card for every one-second pull is
-    // the "front and centre" this deliberately is not.
     await emitActivities([{ startedAt: Date.now(), phase: "fetch" }]);
     await act(async () => {
       container
@@ -548,18 +555,14 @@ describe("WorktreeHeader pull progress", () => {
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
-  // The gap this closes: Pull swaps its glyph for the spinner, so Chromium
-  // re-resolves hover and React reports a `mouseenter` under a pointer that
-  // never moved. Fetch keeps drawing the same <RefreshGlyph/>, so that
-  // accident never happens and the click is followed by no boundary event at
-  // all — the card waited to be told about a pointer already resting on its
-  // trigger.
+  // The gap this closes, and the one the pin does not: an operation that turns
+  // this button busy with the pointer already resting on it dispatches no
+  // boundary event at all, because nothing under the pointer changed. There is
+  // no click here to pin from — this is work something else started — so the
+  // only way to a card is for the popover to ask the DOM where the user is
+  // rather than wait to be told.
   it("opens the card for an operation that starts under a pointer that never moved", async () => {
     userIsOn('button[aria-busy="true"]');
-    const fetch = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fetch"]'
-    );
-    await act(async () => fetch?.click());
     await emitActivities([
       {
         kind: "fetch",
@@ -577,15 +580,46 @@ describe("WorktreeHeader pull progress", () => {
 
   it("opens it from the progress chip the same way", async () => {
     userIsOn(".sync-chip--progress");
-    const fetch = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fetch"]'
-    );
-    await act(async () => fetch?.click());
     await emitActivities([
       { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
     ]);
 
     expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
+  });
+
+  // Opening it is half the job. What makes a hover card worth opening at all
+  // is that it keeps counting — the elapsed readout, the transfer meter and
+  // "no Git output for 2m 04s" are the whole difference between a fetch that
+  // is working and one that is stuck, and they only exist in later records.
+  // A card frozen at the instant it opened draws the stuck one as healthy.
+  it("keeps the hover card up to date as the record moves", async () => {
+    userIsOn('button[aria-busy="true"]');
+    const startedAt = Date.now() - WEDGED_SINCE;
+    const card = (): Element | null =>
+      document.querySelector(".remote-activity-popover");
+    await emitActivities([{ kind: "fetch", startedAt, tail: [] }]);
+    expect(card()?.textContent).toContain("Git has produced no output yet.");
+
+    await emitActivities([
+      { kind: "fetch", startedAt, tail: ["remote: Enumerating objects: 214"] }
+    ]);
+    expect(card()?.textContent).toContain("remote: Enumerating objects: 214");
+  });
+
+  // A hover card leaves with the pointer — but the pointer's exit rides on
+  // `onMouseLeave`, a prop on a control that stops being a trigger the moment
+  // its operation ends. An operation that finishes under a resting pointer
+  // takes its own dismissal away with it, so the record going has to be what
+  // ends the card.
+  it("takes the hover card away when the operation ends", async () => {
+    userIsOn('button[aria-busy="true"]');
+    await emitActivities([
+      { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
+    ]);
+    expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
+
+    await emitActivities([]);
+    expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
   // The card carries Cancel, and the pointer's route into it — just move — has
@@ -595,10 +629,6 @@ describe("WorktreeHeader pull progress", () => {
   // context card.
   it("hands Tab from the working button into the card, not past it", async () => {
     userIsOn('button[aria-busy="true"]');
-    const fetch = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fetch"]'
-    );
-    await act(async () => fetch?.click());
     await emitActivities([
       { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
     ]);
@@ -624,10 +654,6 @@ describe("WorktreeHeader pull progress", () => {
   // Shift+Tab is the way back out, and the card is not where it leads.
   it("leaves Shift+Tab on the working button alone", async () => {
     userIsOn('button[aria-busy="true"]');
-    const fetch = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fetch"]'
-    );
-    await act(async () => fetch?.click());
     await emitActivities([
       { kind: "fetch", startedAt: Date.now() - WEDGED_SINCE }
     ]);
@@ -654,27 +680,34 @@ describe("WorktreeHeader pull progress", () => {
   it("still keeps the card off a fetch too young to have been asked about", async () => {
     freezeClock();
     userIsOn('button[aria-busy="true"]');
-    const fetch = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Fetch"]'
-    );
-    await act(async () => fetch?.click());
     await emitActivities([{ kind: "fetch", startedAt: Date.now() }]);
 
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
-  it("keeps a tooltip on a working button until the card can take over", async () => {
+  // The native title and the card must never be on screen together, and the
+  // pin removes the gap the title used to cover: a click puts a card up before
+  // main has registered anything, so the button that was pressed drops its
+  // title in the same breath — as do the idle buttons beside it, whose tooltip
+  // would otherwise open over a card they have nothing to do with.
+  it("drops every native tooltip while a card is on screen", async () => {
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
+    expect(pull?.getAttribute("title")).toBe("Pull · fetch + fast-forward");
+
     await act(async () => pull?.click());
-    // Before main registers the operation there is no card to summon, and in
-    // the narrow header the label span is display:none — so the title is the
-    // only text a spinning button has.
-    expect(pull?.getAttribute("title")).toBe("Pulling…");
+    expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
+    for (const label of ["Fetch", "Pull", "Push"]) {
+      expect(
+        container
+          .querySelector(`button[aria-label^="${label}"], button[aria-label="Pulling…"]`)
+          ?.hasAttribute("title"),
+        `${label} must not open a native tooltip over the card`
+      ).toBe(false);
+    }
 
     await emitActivities([{ phase: "fetch" }]);
-    // Now the card carries it, and a native tooltip would cover the card.
     expect(
       container
         .querySelector('button[aria-busy="true"]')
@@ -728,6 +761,550 @@ describe("WorktreeHeader pull progress", () => {
       "remote:applySshRecovery",
       expect.anything()
     );
+  });
+});
+
+/**
+ * The card outliving its operation.
+ *
+ * Everything here is about the stretch AFTER Git exits, which is the half the
+ * card never used to have: it was torn down the instant the record went away,
+ * so the only thing it could ever describe was work in flight.
+ */
+describe("WorktreeHeader settled status card", () => {
+  const card = (): Element | null =>
+    document.querySelector(".remote-activity-popover");
+  const buttonIn = (root: Element | null, label: string) =>
+    [...(root?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      (button) => button.textContent === label
+    );
+
+  /** Press a toolbar button and let its dispatch resolve. */
+  const press = async (label: string, result: unknown): Promise<void> => {
+    bridge.dispatch.mockReturnValueOnce(Promise.resolve(result));
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  // Escape latches the trigger inside `useViewportTooltip` so that restoring
+  // focus to it cannot reopen what was just dismissed. Pressing that same
+  // button is a fresh ask, not a focus restore — and the failure mode is
+  // silent twice over: `show` refuses the card, and `settle` still reports the
+  // outcome as carried, so the toast that should have caught it never fires.
+  it("reopens for the next press after Escape took the last one away", async () => {
+    await press("Fetch", ok(null));
+    expect(card()).not.toBeNull();
+
+    // Tab in first, because that is the Escape the latch exists for: leaving
+    // focus behind is what makes `useViewportTooltip` restore it to the
+    // trigger, and what makes it hold the trigger against reopening.
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Tab",
+            bubbles: true,
+            cancelable: true
+          })
+        );
+    });
+    expect(card()?.contains(document.activeElement)).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(card()).toBeNull();
+
+    await press(
+      "Fetch",
+      err({ kind: "remote", code: "network", message: "boom" })
+    );
+    expect(card()?.textContent).toContain("Fetch failed");
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  // The selection changing is a fourth way out of an operation, and it had
+  // none of the three. The card reports a checkout that is no longer on
+  // screen, and the dispatch comes back to a staleness guard rather than to a
+  // settle — so without this nothing would ever take it away.
+  it("lets go of the card when the selection moves to another worktree", async () => {
+    let finish!: () => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve(ok(null));
+      })
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.click();
+    });
+    expect(card()).not.toBeNull();
+
+    await act(async () => {
+      root.render(
+        <WorktreeHeader
+          repo={repo}
+          worktree={{ ...worktree, id: "worktree-2" }}
+          state={null}
+        />
+      );
+    });
+    expect(card()).toBeNull();
+
+    // And the outcome belongs to the checkout that left, so it must not write
+    // a receipt over the one now on screen either.
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(card()).toBeNull();
+  });
+
+  // A click that lands while the operation is still running is not a click on
+  // a countdown, because there is no countdown yet. Carried forward it hands
+  // the user a receipt that never goes away and no timer they could have seen
+  // to stop.
+  it("still counts the receipt out after a click during the operation", async () => {
+    freezeClock();
+    let finish!: () => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = () => resolve(ok(null));
+      })
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.click();
+    });
+    await act(async () => {
+      card()
+        ?.querySelector(".remote-activity__status")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(card()?.textContent).toContain("Fetched");
+
+    await act(async () => {
+      vi.advanceTimersByTime(REMOTE_ACTIVITY_SETTLED_MS);
+    });
+    expect(card()).toBeNull();
+  });
+
+  const steps = (): string[] =>
+    [...(card()?.querySelectorAll(".remote-activity__step-label") ?? [])].map(
+      (row) => row.textContent ?? ""
+    );
+
+  /**
+   * Hold a dispatch open so the operation can be observed while it runs.
+   *
+   * The returned resolver takes the outcome, defaulting to a plain success —
+   * an earlier version always resolved with `ok`, which quietly turned a test
+   * of a *failed* operation into a test of a successful one.
+   */
+  const inFlight = async (
+    label: string
+  ): Promise<(value?: unknown) => void> => {
+    let finish!: (value: unknown) => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+        ?.click();
+    });
+    return (value: unknown = ok({ fastForwarded: true, stashed: true })) =>
+      finish(value);
+  };
+
+  // The complaint this answers: five phases, every transition publishing past
+  // the 400ms throttle, so a sub-second pull lands five full redraws before
+  // one frame can be read. Below the threshold the card says one stable thing
+  // and then what it did.
+  it("does not narrate an operation that is over before it can be read", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await emitActivities([{ kind: "pull", phase: "fetch" }]);
+    await emitActivities([{ kind: "pull", phase: "fast_forward" }]);
+    expect(
+      steps(),
+      "nothing has run long enough to be worth narrating"
+    ).toEqual([]);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // But it was recorded throughout, so the receipt still answers the
+    // question the churn was failing to.
+    expect(steps()).toEqual(["Fetched", "Fast-forwarded"]);
+  });
+
+  // A row is appended, changes once when its own work ends, and then holds.
+  // The DOM node is the honest way to assert "the row did not move".
+  it("appends a row per phase, and each changes once when it completes", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([{ kind: "pull", phase: "fetch" }]);
+    expect(steps()).toEqual(["Fetching updates"]);
+    const firstRow = card()?.querySelector(".remote-activity__step");
+
+    // `prepare` is a `git status` main emits whether or not there is anything
+    // to stash. It earns no row — and, just as importantly, takes none away.
+    // The fetch above it reads done because by then it genuinely is.
+    await emitActivities([{ kind: "pull", phase: "prepare" }]);
+    expect(steps()).toEqual(["Fetched"]);
+
+    await emitActivities([{ kind: "pull", phase: "fast_forward" }]);
+    expect(steps()).toEqual(["Fetched", "Fast-forwarding"]);
+    expect(
+      card()?.querySelector(".remote-activity__step"),
+      "the first row is the same element, in the same place"
+    ).toBe(firstRow);
+
+    // A phase Git re-enters is still one row: a pull pops its stash in two
+    // places, and that must not read as two separate pieces of work.
+    await emitActivities([{ kind: "pull", phase: "reapply" }]);
+    await emitActivities([{ kind: "pull", phase: "reapply" }]);
+    expect(steps()).toEqual([
+      "Fetched",
+      "Fast-forwarded",
+      "Reapplying your changes"
+    ]);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(steps()).toEqual([
+      "Fetched",
+      "Fast-forwarded",
+      "Reapplied your changes"
+    ]);
+  });
+
+  // Git's progress output is `\r`-rewritten and grows to its cap while its
+  // last line flickers — the card's largest single source of churn, and on a
+  // healthy operation it says nothing the rows have not.
+  it("keeps Git's output collapsed while the operation is healthy", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      {
+        kind: "pull",
+        phase: "fetch",
+        // Git wrote a moment ago: a healthy transfer, not the quiet that
+        // would rightly throw the evidence open.
+        lastOutputAt: Date.now(),
+        tail: ["Receiving objects:  71%"]
+      }
+    ]);
+    const evidence = (): HTMLDetailsElement | null =>
+      card()?.querySelector<HTMLDetailsElement>(".remote-activity__evidence") ??
+      null;
+    expect(evidence()?.open).toBe(false);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // Still there on the receipt, still shut. Git's words are kept — Copy and
+    // the Logs window both reach them — they are just not the thing a
+    // successful pull is trying to say.
+    expect(evidence()?.open).toBe(false);
+    expect(evidence()?.textContent).toContain("Receiving objects");
+  });
+
+  // Caught by a real-app capture, not by this suite: marking every step done
+  // on settle made a FAILED fetch report "✓ Fetched", and the step list
+  // replaced the status line that carried the reason — so the card said the
+  // operation had succeeded and said nothing about why it had not.
+  it("does not report a step as done when the operation failed on it", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(steps()).toEqual(["Fetching updates"]);
+
+    await act(async () => {
+      finish(
+        err({ kind: "remote", code: "network", message: "fatal: unreachable" })
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await emitActivities([]);
+
+    // The step it stopped on, still in the present tense and marked as such.
+    expect(steps()).toEqual(["Fetching updates"]);
+    expect(
+      card()?.querySelector(".remote-activity__step--failed"),
+      "the step the operation failed on must not read as done"
+    ).not.toBeNull();
+    expect(card()?.querySelector(".remote-activity__step--done")).toBeNull();
+    // And the reason is on screen, which the step list had displaced.
+    expect(card()?.textContent).toContain("Pull failed");
+    expect(card()?.textContent).toContain("fatal: unreachable");
+  });
+
+  // The three cases the card exists for. Making a user hunt for a disclosure
+  // to read the finding would be the same mistake as the old age gate.
+  it("opens Git's output by itself when that output IS the finding", async () => {
+    freezeClock();
+    await press(
+      "Pull",
+      err({ kind: "remote", code: "network", message: "fatal: unreachable" })
+    );
+    const evidence = card()?.querySelector<HTMLDetailsElement>(
+      ".remote-activity__evidence"
+    );
+    expect(evidence?.open).toBe(true);
+    expect(evidence?.textContent).toContain("fatal: unreachable");
+  });
+
+  it("keeps the card as the receipt, and counts it down", async () => {
+    freezeClock();
+    await press("Fetch", ok(null));
+
+    expect(card()?.textContent).toContain("Fetched");
+    // Cancel goes with the operation it addressed; the way out does not.
+    expect(buttonIn(card(), "Cancel")).toBeUndefined();
+    expect(card()?.querySelector(".remote-activity__close")).not.toBeNull();
+    expect(card()?.querySelector(".remote-activity__rail")).not.toBeNull();
+
+    // Not a moment before the rail is out.
+    await act(async () => {
+      vi.advanceTimersByTime(REMOTE_ACTIVITY_SETTLED_MS - 1);
+    });
+    expect(card()).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(card()).toBeNull();
+  });
+
+  it("stands until dismissed when the operation fails, with no rail", async () => {
+    freezeClock();
+    await press(
+      "Fetch",
+      err({
+        kind: "remote",
+        code: "network",
+        message: "fatal: Could not read from remote repository."
+      })
+    );
+
+    expect(card()?.textContent).toContain("Fetch failed");
+    // A bar that is not draining must not be mistaken for one that is.
+    expect(card()?.querySelector(".remote-activity__rail")).toBeNull();
+
+    // Several times the rail, with nothing to take it away.
+    await act(async () => {
+      vi.advanceTimersByTime(REMOTE_ACTIVITY_SETTLED_MS * 4);
+    });
+    expect(card()).not.toBeNull();
+    expect(card()?.textContent).toContain(
+      "fatal: Could not read from remote repository."
+    );
+
+    await act(async () => buttonIn(card(), "Close")?.click());
+    expect(card()).toBeNull();
+  });
+
+  // A durable card anchored to the button that was pressed, carrying Git's own
+  // output plus Logs and Copy, is a better report than a corner toast — and
+  // both at once is the same failure said twice.
+  it("raises no toast for a failure the card carried", async () => {
+    await press(
+      "Fetch",
+      err({ kind: "remote", code: "network", message: "boom" })
+    );
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  it("still raises one for a failure with no card to land on", async () => {
+    // The user clicked away while the fetch was still running, so when it does
+    // fail the outcome has nowhere anchored to go. That is the whole remaining
+    // job of the corner toast.
+    let fail!: () => void;
+    bridge.dispatch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        fail = () =>
+          resolve(err({ kind: "remote", code: "network", message: "boom" }));
+      })
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.click();
+    });
+    expect(card()).not.toBeNull();
+
+    await act(async () => {
+      document.body.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true })
+      );
+    });
+    expect(card()).toBeNull();
+
+    await act(async () => {
+      fail();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(showErrorToast).toHaveBeenCalled();
+  });
+
+  it("closes on a click elsewhere, and the click is not swallowed", async () => {
+    await press("Fetch", ok(null));
+    expect(card()).not.toBeNull();
+
+    const down = new MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true
+    });
+    await act(async () => {
+      document.body.dispatchEvent(down);
+    });
+    expect(card()).toBeNull();
+    // The click still lands where it was aimed — this dismissal costs the user
+    // nothing but the card.
+    expect(down.defaultPrevented).toBe(false);
+  });
+
+  // Pressing the button again is not "elsewhere": it either starts the next
+  // operation or is inert because one is running, and neither should take the
+  // status away.
+  it("survives a mousedown on its own trigger", async () => {
+    await press("Fetch", ok(null));
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(card()).not.toBeNull();
+  });
+
+  it("stops the countdown when the user clicks the card, and keeps it stopped", async () => {
+    freezeClock();
+    await press("Fetch", ok(null));
+
+    // The status line, not the Git-output block: a successful card has no
+    // output block at all, because an empty one under "Fetched" reports
+    // nothing.
+    await act(async () => {
+      card()
+        ?.querySelector(".remote-activity__status")
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(
+      card()?.querySelector(".remote-activity__rail")?.getAttribute("data-paused"),
+      "a click is deliberate, so the rail stops for good rather than while hovered"
+    ).toBe("true");
+
+    await act(async () => {
+      vi.advanceTimersByTime(REMOTE_ACTIVITY_SETTLED_MS * 4);
+    });
+    expect(card()).not.toBeNull();
+  });
+
+  // The ✕ precedes Cancel in the header, so "first focusable in the DOM" and
+  // "the control this card is being tabbed into for" stopped agreeing the
+  // moment the card grew one. `data-focus-first` is what settles it.
+  it("hands Tab to Cancel on a pinned card, not to the dismiss ✕", async () => {
+    const fetchButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Fetch"]'
+    );
+    await act(async () => fetchButton?.click());
+    await emitActivities([{ kind: "fetch", phase: "fetch" }]);
+    expect(card()?.querySelector(".remote-activity__close")).not.toBeNull();
+
+    const tab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-busy="true"]')
+        ?.dispatchEvent(tab);
+    });
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    expect(tab.defaultPrevented).toBe(true);
+  });
+
+  // Silence is evidence while an operation runs, and still evidence once one
+  // has failed. Under "Fetched" it is neither, and an empty block there takes
+  // up the room that would have said so.
+  it("drops the Git-output block from a successful receipt only", async () => {
+    await press("Fetch", ok(null));
+    expect(card()?.textContent).toContain("Fetched");
+    expect(card()?.querySelector(".remote-activity__output")).toBeNull();
+
+    await press(
+      "Fetch",
+      err({ kind: "remote", code: "network", message: "boom" })
+    );
+    expect(card()?.querySelector(".remote-activity__output")?.textContent).toBe(
+      "boom"
+    );
+  });
+
+  it("replaces one receipt with the next operation's card", async () => {
+    await press("Fetch", ok(null));
+    expect(card()?.textContent).toContain("Fetched");
+
+    await press("Pull", ok({ fastForwarded: true, stashed: false, reappliedWithConflicts: false }));
+    expect(card()?.textContent).toContain("Fast-forwarded");
+    expect(card()?.textContent).not.toContain("Fetched");
+  });
+
+  // There is work left in the checkout. A receipt that takes itself away in
+  // four seconds is the wrong shape for something the user has to act on.
+  it("keeps a pull whose stash came back with conflicts up until dismissed", async () => {
+    freezeClock();
+    await press("Pull", ok({
+      fastForwarded: true,
+      stashed: true,
+      reappliedWithConflicts: true
+    }));
+
+    expect(card()?.textContent).toContain("conflicts");
+    expect(card()?.querySelector(".remote-activity__rail")).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(REMOTE_ACTIVITY_SETTLED_MS * 4);
+    });
+    expect(card()).not.toBeNull();
   });
 });
 

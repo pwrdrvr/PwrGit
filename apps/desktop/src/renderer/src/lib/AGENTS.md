@@ -251,6 +251,20 @@ pass as a keyboard one. The same browser fact `WHERE_THE_USER_IS` leans on in
 so a unit test reaches the claiming branch by putting focus inside the card, not
 by focusing the trigger.
 
+**The dismissal latches the trigger, and a pin clears it.** After a claimed
+Escape the trigger sits in `dismissedTargetRef` until the pointer or focus
+leaves it, so restoring focus there cannot reopen what was just dismissed. The
+latch is about that focus restore, not about the button — so `setSticky(true)`
+drops it, a click or Enter being a fresh ask rather than a restore. Left set it
+fails silently in both directions: `show` refuses, and the caller has no way to
+see that it did. `features/remote` is where that bites, because a pin with no
+card on screen still reports its outcome as *carried*, so the failure that
+would have raised a toast is reported nowhere at all.
+
+`onPointerWithin` is reported from the card's own root, so the padding ring
+counts as inside it — and `hide()` reports `false` on the way out, because the
+`mouseleave` that would otherwise say so never comes once the node is gone.
+
 Deferring alone is not enough, because it settles ties by **listener order**,
 and `useDismissable`'s listener is removed and re-added each time the overlay
 stack empties and refills — so the same gesture would close the menu sometimes

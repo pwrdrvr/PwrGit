@@ -12013,6 +12013,48 @@ button.agent-auth-node {
   gap: 10px;
 }
 
+.remote-activity__header-end {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Always drawn on a dismissible card, in every state. A card that can take
+   itself away must never be one the user has to race — and under
+   prefers-reduced-motion the rail that says it is going steps rather than
+   sweeps, which makes this the only unambiguous way out. */
+.remote-activity__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.remote-activity__close:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+/* The house focus indicator, not the accent recolor its siblings on this card
+   use: a new control follows the convention (styles/AGENTS.md) rather than the
+   nearest precedent, and an 18px glyph button needs a ring to be findable at
+   all. `outline-offset: -2px` because the card clips to its own corners. */
+.remote-activity__close:focus-visible {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .remote-activity__title {
   min-width: 0;
   overflow: hidden;
@@ -12045,6 +12087,155 @@ button.agent-auth-node {
    been silent for four minutes must not look alike. */
 .remote-activity__status--warn {
   color: var(--status-warning);
+}
+
+/* The two settled tones. A cancel takes --muted with the running phases: the
+   user stopped it themselves a second ago, and dressing their own decision as
+   a failure is the mistake `flashError` already avoids. */
+.remote-activity__status--ok {
+  color: var(--status-ok);
+}
+
+.remote-activity__status--bad {
+  color: var(--danger-text);
+}
+
+/* The step list — what the operation has done, one row per phase.
+   A row's text is written once and never rewritten: only its marker moves
+   from ● to ✓. That is the whole of what makes it readable while an operation
+   runs, and it is why the settled card needs no separate layout — the receipt
+   is the same list with every marker turned. */
+.remote-activity__steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  overflow: hidden;
+}
+
+.remote-activity__step {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: 500 11px/1.45 var(--font-sans);
+}
+
+.remote-activity__step:last-child {
+  border-bottom: 0;
+}
+
+.remote-activity__step--running {
+  background: var(--bg-panel-hover);
+}
+
+.remote-activity__step-mark {
+  color: var(--status-ok);
+  font: 700 10px/1.45 var(--font-mono);
+}
+
+.remote-activity__step--running .remote-activity__step-mark {
+  color: var(--accent);
+}
+
+/* Where the operation stopped. The label stays in the present tense, because
+   what this row adds to the summary above it is "this is the step it was on"
+   — and "Fetched" with a cross beside it would say the opposite. */
+.remote-activity__step--failed .remote-activity__step-mark,
+.remote-activity__step--failed .remote-activity__step-label {
+  color: var(--danger-text);
+}
+
+.remote-activity__step--running .remote-activity__step-label {
+  color: var(--text-primary);
+}
+
+.remote-activity__step-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-activity__step-detail {
+  color: var(--text-muted);
+  font: 500 10.5px/1.45 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.remote-activity__step--running .remote-activity__step-detail {
+  color: var(--accent);
+}
+
+/* Spans the label and detail columns, under both — a step's own progress,
+   where the shared meter used to mount and unmount above the whole card. */
+.remote-activity__step-bar {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-muted) 25%, transparent);
+}
+
+.remote-activity__step-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* Git's own words, collapsed while the operation is healthy. Open, this is a
+   `\r`-rewritten progress stream that grows to its cap while its last line
+   flickers — the card's largest single source of churn, and on a healthy
+   operation it says nothing the step list has not. */
+.remote-activity__evidence-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font: 600 10.5px/1.4 var(--font-mono);
+  cursor: pointer;
+  list-style: none;
+}
+
+.remote-activity__evidence-summary::-webkit-details-marker {
+  display: none;
+}
+
+.remote-activity__evidence-summary::before {
+  content: "\203a";
+  display: inline-block;
+  font: 700 11px/1 var(--font-mono);
+  transition: transform 120ms ease;
+}
+
+.remote-activity__evidence[open] .remote-activity__evidence-summary::before {
+  transform: rotate(90deg);
+}
+
+.remote-activity__evidence-summary:hover {
+  color: var(--text-secondary);
+}
+
+.remote-activity__evidence-summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.remote-activity__evidence[open] .remote-activity__output {
+  margin-top: 6px;
 }
 
 .remote-activity__meter {
@@ -12150,9 +12341,14 @@ button.agent-auth-node {
 }
 
 /* The popover shell. `.viewport-tooltip` is pointer-events: none because it
-   is a label; this card is a dialog you move into, so it sets its own. */
+   is a label; this card is a dialog you move into, so it sets its own.
+
+   `overflow: hidden` clips the countdown rail to the rounded corners; it is
+   safe because the card's own scrollports (the Git output block) and the
+   tooltips its buttons open are either inside it or portalled to <body>. */
 .remote-activity-popover {
   position: fixed;
+  overflow: hidden;
   z-index: 140;
   width: max-content;
   max-width: calc(100vw - 32px);
@@ -12169,6 +12365,44 @@ button.agent-auth-node {
 .app-toast--activity {
   display: block;
   padding: 11px 12px;
+}
+
+/* The countdown rail on a settled status card — the toast's `__timer` idiom,
+   in --status-ok rather than muted grey, because here the bar means both "this
+   is going" and "this went well". A failure is drawn without one at all: a bar
+   that is not draining cannot be mistaken for one that is.
+
+   The duration is set inline from REMOTE_ACTIVITY_SETTLED_MS so the timer that
+   dismisses the card and the bar that describes it cannot drift apart. Under
+   prefers-reduced-motion the blanket `animation: none !important` at the top of
+   this file kills the sweep, and the popover sets `transform` inline instead —
+   the same drain in one-second steps. */
+.remote-activity__rail {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--status-ok);
+  transform-origin: left center;
+  animation: remote-activity-countdown linear forwards;
+}
+
+/* Pointer resting on the card, or a click that held it outright. The CSS stops
+   where it is and the JS timer banks the same remainder, so the two resume
+   together. */
+.remote-activity__rail[data-paused="true"] {
+  animation-play-state: paused;
+  background: var(--text-muted);
+}
+
+@keyframes remote-activity-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 .app-toast__timer {

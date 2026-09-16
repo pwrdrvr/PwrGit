@@ -10,6 +10,7 @@ import type {
   PrSummary
 } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { useDismissable } from "../../lib/useDismissable";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
 import { useHoverIntent } from "../../lib/hoverIntent";
@@ -215,9 +216,7 @@ function defaultLineageScope(): Promise<Scope> {
 }
 
 const scrollBehavior = (): ScrollBehavior =>
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ? "auto"
-    : "smooth";
+  prefersReducedMotion() ? "auto" : "smooth";
 
 export function LineageGraph({
   repoId,

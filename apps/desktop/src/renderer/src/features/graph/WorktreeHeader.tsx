@@ -11,7 +11,10 @@ import type {
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast } from "../../lib/toast";
-import { remoteActivityPhaseLabel } from "../remote/remote-activity";
+import {
+  remoteActivityPhaseLabel,
+  type RemoteActivityScope
+} from "../remote/remote-activity";
 import { useRemoteActivityPopover } from "../remote/useRemoteActivityPopover";
 import { useRemoteActivityFor } from "../../state/useRemoteActivity";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
@@ -156,9 +159,51 @@ export function WorktreeHeader({
   // Button first: it is the thing the user aimed at.
   const status = useRemoteActivityPopover(activity, [cardButton, cardChip]);
 
+  // The selection changed under a pinned card. That card reports an operation
+  // belonging to a checkout that is no longer on screen, and its dispatch will
+  // come back to one of the staleness guards below rather than to a `settle` —
+  // so this is the only thing that can ever take it away. Without it the card
+  // stands on "Starting…" over the new worktree's toolbar, titled with the old
+  // one's repository, until the user clicks it off.
+  //
+  // Its own effect rather than a line in the reset above, because that one is
+  // declared before the hook that owns `dismiss`.
+  useEffect(() => {
+    status.dismiss();
+  }, [status.dismiss, worktree.id]);
+
   const showFlash = (chip: Chip, ms: number): void => {
     setFlash(chip);
     setTimeout(() => setFlash(null), ms);
+  };
+
+  /**
+   * Every path out of an operation ends in exactly one of three things: the
+   * card settles into a receipt, the card is dismissed because a modal is
+   * taking over, or — for a failure the card could not carry — a toast. Adding
+   * a fourth early return without one of them leaves a card pinned on
+   * "Starting…" until the user clicks it away.
+   */
+
+  /** Who an operation belongs to, for the card that outlives its record. */
+  const scopeOf = (kind: Exclude<Busy, null>): RemoteActivityScope => ({
+    kind,
+    repoName: repo.name,
+    branch: worktree.branch
+  });
+
+  /**
+   * Open the status card for the operation this click is about to start.
+   *
+   * Before the dispatch, not after: the card is the answer to "what is it
+   * doing?", and the gap between pressing the button and main registering the
+   * operation is exactly the stretch where that question has had no answer.
+   */
+  const pinStatus = (
+    kind: Exclude<Busy, null>,
+    target: HTMLElement
+  ): void => {
+    status.pin(target, scopeOf(kind));
   };
 
   // Failures surface twice on purpose: the inline chip flash (collapsed away
@@ -171,10 +216,21 @@ export function WorktreeHeader({
   const flashError = (kind: string, error: PwrGitError): void => {
     if (error.code === "canceled") {
       showFlash({ text: `${kind.toLowerCase()} canceled`, tone: "muted" }, 2000);
+      status.settle({ status: "canceled", summary: `${kind} canceled` });
       return;
     }
     const firstLine = error.message.split("\n")[0];
     showFlash({ text: firstLine.slice(0, 64), tone: "warn" }, 3200);
+    // The status card is durable on a failure, anchored to the button that was
+    // pressed, and carries Git's own output plus Logs and Copy. A corner toast
+    // saying the same thing at the same time is noise — so it is the fallback
+    // for a failure with no card to land on, which is what `settle` reports.
+    const carried = status.settle({
+      status: "error",
+      summary: `${kind} failed — ${firstLine}`,
+      detail: error.message
+    });
+    if (carried) return;
     showErrorToast({
       title: `${kind} failed`,
       message: firstLine,
@@ -186,13 +242,25 @@ export function WorktreeHeader({
     kind: Exclude<Busy, null>,
     fn: () => Promise<Result<unknown, PwrGitError>>,
     okChip: Chip,
+    okSummary: string,
     label: string
   ): Promise<void> => {
+    const worktreeId = worktree.id;
     setBusy(kind);
     const result = await fn();
+    // The same guard `onPull` and `onPush` carry, and now load-bearing for a
+    // third reason: an outcome that settles the card of a checkout it does not
+    // belong to puts one worktree's error under another's title — and reports
+    // it as carried, so the toast that should have caught it never fires.
+    // The reset effect above clears `busy` on the switch.
+    if (activeWorktreeId.current !== worktreeId) return;
     setBusy(null);
-    if (result.ok) showFlash(okChip, 1600);
-    else flashError(label, result.error);
+    if (result.ok) {
+      showFlash(okChip, 1600);
+      status.settle({ status: "ok", summary: okSummary });
+      return;
+    }
+    flashError(label, result.error);
   };
 
   const id = worktree.id;
@@ -201,6 +269,7 @@ export function WorktreeHeader({
       "fetch",
       () => dispatch("remote:fetch", { worktreeId: id }),
       { text: "fetched", tone: "muted" },
+      "Fetched — refs and tags are up to date",
       "Fetch"
     );
   };
@@ -225,6 +294,11 @@ export function WorktreeHeader({
           }
           setBusy(null);
           if (inspected.ok) {
+            // The dialog IS the outcome, and it is modal: a status card left
+            // pinned behind it would be a second thing to dismiss for one
+            // pull, and would sit over the histories the dialog exists to
+            // compare. Same rule as the fork prompt below.
+            status.dismiss();
             setDivergence(inspected.value);
             return;
           }
@@ -250,6 +324,7 @@ export function WorktreeHeader({
             return;
           }
           if (inspected.ok && inspected.value !== null) {
+            status.dismiss();
             setSshRecovery(inspected.value);
             return;
           }
@@ -270,10 +345,22 @@ export function WorktreeHeader({
           { text: "pulled · resolve stash conflicts", tone: "warn" },
           4000
         );
+        // Reported as a failure so the card stands until dismissed: there is
+        // work left to do in the checkout, and a receipt that takes itself
+        // away in four seconds is the wrong shape for that.
+        status.settle({
+          status: "error",
+          summary: "Pulled — your stashed changes came back with conflicts"
+        });
       } else if (stashed) {
         showFlash({ text: "pulled · changes reapplied", tone: "ok" }, 2400);
+        status.settle({
+          status: "ok",
+          summary: "Fast-forwarded · local changes stashed and reapplied"
+        });
       } else {
         showFlash({ text: "fast-forwarded", tone: "ok" }, 1600);
+        status.settle({ status: "ok", summary: "Fast-forwarded" });
       }
     });
   };
@@ -323,6 +410,7 @@ export function WorktreeHeader({
       setBusy(null);
       if (result.ok) {
         showFlash({ text: "pushed", tone: "ok" }, 1600);
+        status.settle({ status: "ok", summary: "Pushed" });
         return;
       }
       // The one push failure with a remedy inside PwrGit. Git has just said
@@ -331,6 +419,9 @@ export function WorktreeHeader({
       // works on a checkout nothing has ever asked the forge about.
       if (result.error.code === "push_denied") {
         showFlash({ text: "push denied", tone: "warn" }, 2400);
+        // The fork prompt is a modal over the whole window; leaving a status
+        // card behind it would be a second thing to dismiss for one refusal.
+        status.dismiss();
         setForkPrompt({ reason: result.error.message.split("\n")[0] });
         return;
       }
@@ -388,26 +479,53 @@ export function WorktreeHeader({
   // the gap before this operation has a record to carry.
   const couldCarryCard = (kind: Exclude<Busy, null>): boolean =>
     carriesCard(kind) || (running === kind && activity === null);
-  const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps =>
-    !couldCarryCard(kind)
-      ? {}
-      : {
-          ref: cardButton,
-          onMouseEnter: (event) => status.open(event.currentTarget),
-          onMouseLeave: status.close,
-          onFocus: (event) => status.open(event.currentTarget),
-          onBlur: status.close,
-          // The pointer reaches Cancel by moving into the card; Tab is the
-          // keyboard's equivalent, the same handoff `GraphRow` makes into the
-          // commit context card. Without it Tab lands on Pull, blurs the
-          // trigger, and takes the card away — leaving the one control that
-          // stops a wedged fetch reachable by mouse only.
-          onKeyDown: (event) => {
-            if (event.key === "Tab" && !event.shiftKey && status.focusFirst()) {
-              event.preventDefault();
+  const statusTrigger = (kind: Exclude<Busy, null>): StatusTriggerProps => {
+    const carries = couldCarryCard(kind);
+    // The pointer reaches Cancel by moving into the card; Tab is the
+    // keyboard's equivalent, the same handoff `GraphRow` makes into the
+    // commit context card. Without it Tab lands on Pull, blurs the trigger,
+    // and takes the card away — leaving the one control that stops a wedged
+    // fetch reachable by mouse only.
+    //
+    // It reaches past `carries` because a *pinned* card is anchored to
+    // whichever button was clicked rather than to a trigger this factory
+    // knows about — but only as far as that button. The three are adjacent
+    // and carry `aria-disabled` rather than `disabled`, so they stay
+    // tabbable while one of them works: claiming Tab on all of them would
+    // send a keyboard user on Push backwards, past Push, into a card hanging
+    // off Pull (SC 2.4.3).
+    const handsOff = carries || status.pinnedKind === kind;
+    return {
+      ...(!carries
+        ? {}
+        : {
+            ref: cardButton,
+            onMouseEnter: (event: { currentTarget: HTMLElement }) =>
+              status.open(event.currentTarget),
+            onMouseLeave: status.close,
+            onFocus: (event: { currentTarget: HTMLElement }) =>
+              status.open(event.currentTarget),
+            onBlur: status.close
+          }),
+      ...(!handsOff
+        ? {}
+        : {
+            onKeyDown: (event: {
+              key: string;
+              shiftKey: boolean;
+              preventDefault: () => void;
+            }) => {
+              if (
+                event.key === "Tab" &&
+                !event.shiftKey &&
+                status.focusFirst()
+              ) {
+                event.preventDefault();
+              }
             }
-          }
-        };
+          })
+    };
+  };
   /**
    * A native tooltip everywhere the status card is NOT coming — the two must
    * never both appear, but a button with neither is worse than either.
@@ -418,6 +536,11 @@ export function WorktreeHeader({
    * overlap on screen because the record that lets the card open is the same
    * record that drops this attribute, in one render.
    *
+   * `status.showing` covers the pinned card, which has no such gap — it is on
+   * screen from the click, before any record exists — and covers the idle
+   * buttons beside it too, whose native tooltip would otherwise open over a
+   * card they have nothing to do with.
+   *
    * `.wt-btn__label` is `display:none` in the narrow header, so this is the
    * only text left there; dropping it for the whole of a sub-second fetch, or
    * for the gap before main registers the operation, left a spinning button
@@ -427,7 +550,7 @@ export function WorktreeHeader({
     kind: Exclude<Busy, null>,
     idle: string
   ): { title?: string } =>
-    carriesCard(kind)
+    status.showing || carriesCard(kind)
       ? {}
       : { title: running === kind ? busyLabel(kind) : idle };
   const dirty = state?.dirty ?? worktree.dirty;
@@ -522,8 +645,9 @@ export function WorktreeHeader({
               inert. */}
           <button
             className="wt-btn"
-            onClick={() => {
+            onClick={(event) => {
               if (running !== null) return;
+              pinStatus("fetch", event.currentTarget);
               onFetch();
             }}
             aria-disabled={running !== null}
@@ -543,8 +667,9 @@ export function WorktreeHeader({
 
           <button
             className={`wt-btn wt-btn--pull${behind > 0 ? " is-behind" : ""}`}
-            onClick={() => {
+            onClick={(event) => {
               if (running !== null) return;
+              pinStatus("pull", event.currentTarget);
               onPull();
             }}
             aria-disabled={running !== null}
@@ -569,8 +694,9 @@ export function WorktreeHeader({
 
           <button
             className="wt-btn"
-            onClick={() => {
+            onClick={(event) => {
               if (running !== null) return;
+              pinStatus("push", event.currentTarget);
               onPush();
             }}
             aria-disabled={running !== null}

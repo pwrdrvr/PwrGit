@@ -2,26 +2,50 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type ReactNode,
   type RefObject
 } from "react";
 import type { RemoteActivity } from "@pwrgit/shared";
+import { announce } from "../../lib/announce";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useSecondsClock } from "../../state/useRemoteActivity";
 import { RemoteActivityCard } from "./RemoteActivityCard";
+import type { RemoteActivityPhase } from "@pwrgit/shared";
+import {
+  activitySteps,
+  formatElapsed,
+  liveActivityView,
+  remoteActivityMeter,
+  remoteActivityTitle,
+  settledActivityView,
+  REMOTE_ACTIVITY_NARRATE_AFTER_MS,
+  REMOTE_ACTIVITY_SETTLED_MS,
+  type RemoteActivityOutcome,
+  type RemoteActivityOutcomeStatus,
+  type RemoteActivityScope,
+  type RemoteActivityView
+} from "./remote-activity";
 
 /**
- * How old an operation must be before its card will open.
+ * How old an operation must be before a *hover* will open its card.
  *
- * Not a hover dwell — the wait is measured from when the *operation* started,
- * so it is already satisfied for anything that has been running a while and
- * such a hover opens instantly.
+ * Not a hover dwell — the wait is measured from when the operation started, so
+ * it is already satisfied for anything that has been running a while and such
+ * a hover opens instantly.
  *
- * It exists because clicking Pull leaves the pointer resting on the button,
- * and re-rendering that button with its spinner fires `mouseenter` under the
- * stationary pointer. Without this, every ordinary one-second pull threw a
- * card over the graph and took it away again. The user asked for a status that
- * is reachable, not one that is front and centre.
+ * It only governs the hover path now, and that is the whole of its remaining
+ * job: suppressing a card nobody asked for. A pointer can come to rest on a
+ * toolbar button that then turns busy because a bulk sync or another window
+ * started something — one sub-second operation per repository, each throwing a
+ * card over the graph and taking it away again.
+ *
+ * It deliberately does NOT gate `pin`. A click is an ask, and the original
+ * reason this number existed — that clicking Pull leaves the pointer inside
+ * the button, so the spinner swap fires `mouseenter` under it — is answered by
+ * pinning instead: the card is already open when that enter arrives, and the
+ * enter finds it and does nothing.
  */
 export const REMOTE_ACTIVITY_POPOVER_AFTER_MS = 1_200;
 
@@ -55,7 +79,64 @@ type Resting = {
   wait: { operationId: string; timer: number } | undefined;
 };
 
+/**
+ * One click-opened session: what it hangs from, whose operation it is, and how
+ * far that operation has got.
+ *
+ * `scope` is taken at the click rather than read off the live record, because
+ * for the first tens of milliseconds — and for an operation short enough that
+ * the renderer never sees a record at all — there is no record to read. It is
+ * also what titles the receipt after `finish()` has deleted the record.
+ */
+type Pin = {
+  /** Distinguishes one session from the next on the same button. */
+  id: number;
+  target: HTMLElement;
+  scope: RemoteActivityScope;
+  /** When the click happened — the elapsed fallback before a record exists. */
+  startedAt: number;
+  /** Set once the operation ends; the card becomes its receipt. */
+  outcome: RemoteActivityOutcome | null;
+};
+
+/**
+ * The countdown rail, as "how much is left" and "since when it has been
+ * draining" — one record, because they are halves of one fact.
+ *
+ * Banking the elapsed time on pause and restarting from the banked value is
+ * what keeps the JavaScript timer in step with the CSS animation that draws
+ * it: both stop where they are and both resume from there.
+ */
+type Rail = { remaining: number; since: number | null };
+
+/** What the caller reports when an operation ends. */
+export type RemoteActivitySettlement = {
+  status: RemoteActivityOutcomeStatus;
+  /** The one sentence: "Fast-forwarded · local changes reapplied". */
+  summary: string;
+  /** Shown only when the live record left no Git output — an error body. */
+  detail?: string;
+};
+
 export type RemoteActivityPopover = {
+  /**
+   * Wire to the action button's `onClick`. Opens the card for the operation
+   * that click is about to start, and holds it until the user dismisses it or
+   * a successful outcome's rail runs out.
+   */
+  pin: (target: HTMLElement, scope: RemoteActivityScope) => void;
+  /**
+   * The operation ended. Returns whether a pinned card took the outcome — the
+   * caller uses that to decide whether a failure still needs a toast of its
+   * own, so the same error is never reported twice.
+   */
+  settle: (settlement: RemoteActivitySettlement) => boolean;
+  /**
+   * Take the card off screen now. For the one case the dismissal rules do not
+   * cover: something else — a modal — is about to own the window, and a status
+   * card behind it would be a second thing to dismiss.
+   */
+  dismiss: () => void;
   /** Wire to the busy control's mouseenter/focus, passing `currentTarget`. */
   open: (target: HTMLElement) => void;
   /** Wire to mouseleave/blur; the pointer keeps a grace period to cross in. */
@@ -66,6 +147,15 @@ export type RemoteActivityPopover = {
    * pointer's route into it (just move) has no keyboard equivalent.
    */
   focusFirst: () => boolean;
+  /** A card is on screen, pinned or hovered. */
+  showing: boolean;
+  /**
+   * Which operation the *pinned* card belongs to, or null when nothing is
+   * pinned. The caller needs it because a pinned card hangs off whichever
+   * control was clicked, which is not something the trigger wiring otherwise
+   * knows — and a control that is not the anchor must not claim Tab.
+   */
+  pinnedKind: RemoteActivityScope["kind"] | null;
   node: ReactNode;
 };
 
@@ -77,32 +167,67 @@ export type RemoteActivityPopover = {
  */
 export type RemoteActivityTriggers = readonly RefObject<HTMLElement | null>[];
 
+/** The card between the click and main's first word about the operation. */
+function startingView(pin: Pin, now: number): RemoteActivityView {
+  return {
+    operationId: null,
+    title: remoteActivityTitle(pin.scope),
+    elapsed: formatElapsed(now - pin.startedAt),
+    statusLabel: "Starting…",
+    statusTone: "muted",
+    meter: null,
+    percent: null,
+    command: null,
+    output: [],
+    // Nothing observed yet, so nothing to list: the card falls back to its
+    // status line, which is the whole of what "Starting…" has to say.
+    steps: [],
+    // No operation id yet, so nothing to cancel. The button is drawn from the
+    // moment there is something for it to stop, and not before.
+    canceling: null,
+    settled: null
+  };
+}
+
 /**
- * The status card, hung off whichever toolbar control is currently working.
+ * The status card, hung off whichever toolbar control the operation belongs to.
  *
- * Hover-opened without a dwell gate on purpose: `lib/AGENTS.md` reserves
- * `useHoverIntent` for triggers that repeat down a column the pointer crosses
- * on its way elsewhere. These are one button and the chip beside it, both of
- * which the user had to aim at, and they are only triggers at all while an
- * operation is running — so there is no sweep to suppress.
+ * Two ways in, one card. **A click pins it**: no gate, no hover requirement,
+ * and it stays through the operation and past it — a success drains a rail and
+ * leaves, a failure stands until dismissed. **A hover opens it un-pinned**, for
+ * an operation against this checkout that something else started, where there
+ * was no click to pin from; that one still answers to the pointer and to the
+ * age gate above.
  *
- * Interactive, because the card carries the Cancel button: the pointer has to
- * be able to travel from the trigger into it.
+ * Interactive, because the card carries Cancel, Logs and Copy: the pointer has
+ * to be able to travel from the trigger into it.
  */
 export function useRemoteActivityPopover(
   activity: RemoteActivity | null,
   triggers: RemoteActivityTriggers = []
 ): RemoteActivityPopover {
+  // Where the pointer is inside the card. Owned by the hook rather than by
+  // handlers on the content, because the card's padding ring belongs to the
+  // surface: a pointer resting there is on the card by any reading a user
+  // would give it.
+  const [within, setWithin] = useState(false);
   const tooltip = useViewportTooltip("remote-activity-popover", {
     interactive: true,
-    label: "Git operation status"
+    label: "Git operation status",
+    onPointerWithin: setWithin
   });
-  const { show, update, hide, scheduleHide, focusFirst, visible } = tooltip;
+  const { show, update, hide, scheduleHide, setSticky, focusFirst, visible } =
+    tooltip;
   // The deferred open fires from a timer, long after the render that armed it.
   // Read the live record through a ref so the timer can tell "still running"
   // from "finished while I waited".
   const latest = useRef<RemoteActivity | null>(activity);
   latest.current = activity;
+  // The last record this pin's operation published. `settle` runs from an IPC
+  // response that races main's own `finish()` broadcast, so by then `activity`
+  // is usually already null — and Git's last words, which are the whole point
+  // of a failed card, only exist here.
+  const lastSeen = useRef<RemoteActivity | null>(null);
   // Where the pointer (or focus) is resting, whether or not there is yet a
   // record to report, and the wait it has earned — as ONE record, because
   // "the pointer is here" and "an open is counting down for this operation"
@@ -115,8 +240,47 @@ export function useRemoteActivityPopover(
   // that reads it is an effect keyed on the operation.
   const triggersRef = useRef<RemoteActivityTriggers>(triggers);
   triggersRef.current = triggers;
+
+  // The pinned session, in state because it is rendered and in a ref because
+  // `settle` reads it from an async continuation. `setPin` is the only writer
+  // of either, so the two cannot disagree.
+  const [pin, setPinState] = useState<Pin | null>(null);
+  const pinRef = useRef<Pin | null>(null);
+  const setPin = useCallback((next: Pin | null): void => {
+    pinRef.current = next;
+    setPinState(next);
+  }, []);
+  const pinCount = useRef(0);
+  // Every phase this pin's operation has been observed in, in order and
+  // deduplicated — the card's step list, and the receipt's substance.
+  //
+  // In state so a new phase re-renders (a row appearing IS the update worth
+  // rendering), and in a ref because `settle` reads it from an async
+  // continuation, exactly as `pin` is. `setSeen` is the only writer of either.
+  const [seen, setSeenState] = useState<readonly RemoteActivityPhase[]>([]);
+  const seenRef = useRef<readonly RemoteActivityPhase[]>([]);
+  const setSeen = useCallback((next: readonly RemoteActivityPhase[]): void => {
+    seenRef.current = next;
+    setSeenState(next);
+  }, []);
+  /** An explicit hold: the user clicked the card, or tabbed into it. Named
+   *  apart from the `held` locals below, which are the rested-on trigger. */
+  const [railHeld, setRailHeld] = useState(false);
+  const rail = useRef<Rail>({ remaining: REMOTE_ACTIVITY_SETTLED_MS, since: null });
+  const [reduced] = useState(prefersReducedMotion);
+  // Which pin session the tooltip is currently showing, so a re-render updates
+  // the card in place and only a new session re-anchors it.
+  const shownFor = useRef<number | null>(null);
+  // Whether the card has actually been on screen during this session. Escape,
+  // a window blur and a scroll all take it away through `useViewportTooltip`
+  // without telling us, and a session whose card is gone must not go on
+  // holding the pointer hostage — but the render right after `pin()` is also
+  // not visible yet, and that one is not a dismissal.
+  const wasVisible = useRef(false);
+
   // One tick per second, and only while the card is on screen — the readouts
-  // it exists for ("no response for 2m 41s") are counted in seconds.
+  // it exists for ("no response for 2m 41s", and the rail's remaining steps
+  // under reduced motion) are counted in seconds.
   const now = useSecondsClock(visible);
 
   /** Drop any wait counting down, leaving the trigger itself remembered. */
@@ -166,6 +330,95 @@ export function useRemoteActivityPopover(
 
   useEffect(() => forgetTrigger, [forgetTrigger]);
 
+  /** End the pinned session and take the card off screen. */
+  const dismiss = useCallback((): void => {
+    wasVisible.current = false;
+    setPin(null);
+    // No `setSticky(false)` — `hide()` clears the flag itself, and that is
+    // part of what it promises rather than an accident of how it is written.
+    hide();
+  }, [hide, setPin]);
+
+  const pinCard = useCallback(
+    (target: HTMLElement, scope: RemoteActivityScope): void => {
+      // A pin supersedes anything the pointer had earned: the two paths render
+      // into one tooltip, and a hover left armed would re-show a stale card
+      // the moment this session ended.
+      forgetTrigger();
+      lastSeen.current = null;
+      setSeen([]);
+      rail.current = { remaining: REMOTE_ACTIVITY_SETTLED_MS, since: null };
+      wasVisible.current = false;
+      shownFor.current = null;
+      setRailHeld(false);
+      setWithin(false);
+      pinCount.current += 1;
+      setPin({
+        id: pinCount.current,
+        target,
+        scope,
+        startedAt: Date.now(),
+        outcome: null
+      });
+      setSticky(true);
+    },
+    [forgetTrigger, setPin, setSeen, setSticky]
+  );
+
+  const settle = useCallback(
+    (settlement: RemoteActivitySettlement): boolean => {
+      const open = pinRef.current;
+      if (open === null) return false;
+      const record = lastSeen.current;
+      const detail = (settlement.detail ?? "")
+        .split("\n")
+        .filter((line) => line.trim() !== "");
+      setPin({
+        ...open,
+        outcome: {
+          ...open.scope,
+          status: settlement.status,
+          startedAt: record?.startedAt ?? open.startedAt,
+          endedAt: Date.now(),
+          summary: settlement.summary,
+          command: record?.command ?? null,
+          // What it did, whether or not the live card ever narrated it. Below
+          // the narration threshold nothing was drawn — and this is still the
+          // full list, which is how a sub-second pull ends up answering
+          // "what happened" without ever having churned.
+          // The last phase is passed as the *current* one so a failure can
+          // resolve it: `settledActivityView` turns it into "✓ Fetched" on a
+          // success and leaves it marked as where the operation stopped
+          // otherwise. Marking every step done unconditionally made a failed
+          // fetch report "✓ Fetched", which is the opposite of the truth.
+          steps: activitySteps(seenRef.current, record?.phase ?? null),
+          // Git's own words first; the error body only when Git wrote nothing
+          // at all, which is exactly the wedged case the card exists for.
+          output:
+            record !== null && record.tail.length > 0
+              ? [...record.tail]
+              : detail
+        }
+      });
+      // One utterance, not a counter — which is why the settled card may be
+      // announced at all where the running one deliberately is not. The sync
+      // chip beside it is the live region for "what is happening"; this is the
+      // single sentence for "what happened".
+      announce(`${remoteActivityTitle(open.scope)} — ${settlement.summary}`);
+      // The receipt's countdown begins now, so it begins un-held. A click
+      // that landed while the operation was still running — Copy, or Cancel
+      // itself — was not a click on a timer, because there was no timer yet;
+      // carrying it forward would hand the user a receipt that never goes
+      // away and no countdown they could have seen to stop. The pointer is
+      // the other half and is deliberately not reset: `within` is where it
+      // is right now, and a card under the pointer still waits.
+      setRailHeld(false);
+      rail.current = { remaining: REMOTE_ACTIVITY_SETTLED_MS, since: null };
+      return true;
+    },
+    [setPin]
+  );
+
   /** Open the card for the live record, once it is old enough to earn one. */
   const arm = useCallback(
     (target: HTMLElement): void => {
@@ -176,8 +429,14 @@ export function useRemoteActivityPopover(
       disarm();
       const remaining =
         REMOTE_ACTIVITY_POPOVER_AFTER_MS - (Date.now() - live.startedAt);
+      const showHover = (record: RemoteActivity): void => {
+        show(
+          target,
+          <RemoteActivityCard view={liveActivityView(record, Date.now())} />
+        );
+      };
       if (remaining <= 0) {
-        show(target, <RemoteActivityCard activity={live} now={Date.now()} />);
+        showHover(live);
         return;
       }
       const held = resting.current;
@@ -189,7 +448,9 @@ export function useRemoteActivityPopover(
         if (resting.current?.target === target) resting.current.wait = undefined;
         const atFire = latest.current;
         if (atFire === null || atFire.id !== operationId) return;
-        show(target, <RemoteActivityCard activity={atFire} now={Date.now()} />);
+        // A pin that arrived while this was counting down owns the card now.
+        if (pinRef.current !== null) return;
+        showHover(atFire);
       }, remaining);
       held.wait = { operationId, timer };
     },
@@ -230,9 +491,14 @@ export function useRemoteActivityPopover(
   // the answer hold: `restOn` puts real `mouseleave`/`blur` listeners on the
   // element, so a user who does move away calls the whole thing off exactly
   // as if they had arrived by event.
+  //
+  // None of it runs while a card is pinned. The click already answered the
+  // question this machinery exists to answer, and re-arming underneath it
+  // would leave a hover primed to reopen a finished operation's card the
+  // moment the pinned one was dismissed.
   const operationId = activity?.id ?? null;
   useEffect(() => {
-    if (operationId === null || visible) return;
+    if (operationId === null || visible || pin !== null) return;
     if (resting.current === null) {
       const found = triggersRef.current
         .map((trigger) => trigger.current)
@@ -251,28 +517,225 @@ export function useRemoteActivityPopover(
     }
     if (held.wait?.operationId === operationId) return;
     arm(held.target);
-  }, [arm, forgetTrigger, operationId, restOn, visible]);
+  }, [arm, forgetTrigger, operationId, pin, restOn, visible]);
 
+  // Keep the pinned card's own record of the operation, so the receipt can
+  // still quote Git after `finish()` has taken the record away. In an effect
+  // rather than during render: a render React discards must not be what
+  // decides which Git output a failure gets to show.
   useEffect(() => {
-    if (!visible) return;
-    // The operation finished while its card was open. Nothing left to report.
+    if (activity === null) return;
+    if (activity.kind !== pinRef.current?.scope.kind) return;
+    lastSeen.current = activity;
+    const phase = activity.phase;
+    // Append-only and deduplicated: a phase Git re-enters (a pull pops its
+    // stash in two places) is one step, not two rows, and a row once written
+    // is never moved.
+    if (!seenRef.current.includes(phase)) {
+      setSeen([...seenRef.current, phase]);
+    }
+  }, [activity, setSeen]);
+
+  // The hover card's own refresh, and its ending.
+  //
+  // The pinned half is redrawn by the effect further down, which bails when
+  // there is no pin — so without this one a hover-opened card is a snapshot
+  // of the instant it opened. That is the whole of what it is for: the
+  // elapsed readout, the transfer meter and "no Git output for 2m 41s" are
+  // the difference between a fetch that is working and one that is wedged,
+  // and a frozen card draws the wedged one as healthy.
+  //
+  // `activity === null` is the other half. A hover card leaves with the
+  // pointer, but the pointer's exit is reported by `close()`, a React prop on
+  // a control that STOPS being a trigger the moment its operation ends — so
+  // an operation that finishes under a resting pointer takes its own
+  // dismissal away with it. The record going is the dismissal here.
+  useEffect(() => {
+    if (!visible || pin !== null) return;
     if (activity === null) {
       hide();
       return;
     }
-    update(<RemoteActivityCard activity={activity} now={now} />);
-  }, [activity, hide, now, update, visible]);
+    update(<RemoteActivityCard view={liveActivityView(activity, now)} />);
+  }, [activity, hide, now, pin, update, visible]);
 
+  // What the pinned session is currently showing: its receipt if it has one,
+  // the live record while the operation runs, and a placeholder for the gap
+  // between the click and main's first word.
+  // Below the threshold the card shows one stable line and then its receipt —
+  // two states rather than a five-redraw play-by-play of something that was
+  // over before the first frame could be read. The steps go on being recorded
+  // throughout, so the receipt is the same either way.
+  const narrating =
+    pin !== null && now - pin.startedAt >= REMOTE_ACTIVITY_NARRATE_AFTER_MS;
+  const pinView: RemoteActivityView | null =
+    pin === null
+      ? null
+      : pin.outcome !== null
+        ? settledActivityView(pin.outcome)
+        : activity !== null && activity.kind === pin.scope.kind
+          ? liveActivityView(
+              activity,
+              now,
+              narrating
+                ? activitySteps(seen, activity.phase, {
+                    detail: remoteActivityMeter(activity),
+                    percent: activity.progress?.percent ?? null
+                  })
+                : []
+            )
+          : startingView(pin, now);
+
+  // A failure has no rail at all: a bar that is not draining cannot be
+  // mistaken for one that is, and nothing but the user ends it.
+  const draining =
+    pin !== null && pin.outcome !== null && pin.outcome.status !== "error";
+  const paused = within || railHeld;
+  const railLeft = (): number => {
+    const { remaining, since } = rail.current;
+    return Math.max(0, since === null ? remaining : remaining - (now - since));
+  };
+
+  useEffect(() => {
+    if (!draining || paused) return;
+    const from = Date.now();
+    rail.current = { remaining: rail.current.remaining, since: from };
+    const timer = window.setTimeout(dismiss, rail.current.remaining);
+    return () => {
+      window.clearTimeout(timer);
+      rail.current = {
+        remaining: Math.max(0, rail.current.remaining - (Date.now() - from)),
+        since: null
+      };
+    };
+  }, [dismiss, draining, paused]);
+
+  // Draw (or redraw) the pinned card. `show` anchors a new session; every
+  // later render of the same one is an `update`, which keeps the card where it
+  // was placed rather than letting it walk as its content changes height.
+  useEffect(() => {
+    if (pin === null || pinView === null) {
+      shownFor.current = null;
+      return;
+    }
+    const content = (
+      <>
+        {/* Capture rather than bubble so a click on a control inside the card
+            still counts as "the user is using this" — and so does the focus a
+            Tab handoff lands, which is the keyboard's version of the same
+            gesture. */}
+        <div
+          className="remote-activity__pinned"
+          onClickCapture={() => setRailHeld(true)}
+          onFocusCapture={() => setRailHeld(true)}
+        >
+          <RemoteActivityCard view={pinView} onClose={dismiss} />
+        </div>
+        {draining && (
+          <span
+            className="remote-activity__rail"
+            aria-hidden="true"
+            data-paused={paused ? "true" : undefined}
+            // The blanket `prefers-reduced-motion` rule in app.css is
+            // `animation: none !important`, which would leave a full rail on a
+            // card that then vanished unannounced. Stepping `scaleX` off the
+            // seconds clock the card already runs keeps the information and
+            // drops the motion — four discrete steps, not a sweep.
+            style={
+              reduced
+                ? {
+                    transform: `scaleX(${(
+                      railLeft() / REMOTE_ACTIVITY_SETTLED_MS
+                    ).toFixed(3)})`
+                  }
+                : { animationDuration: `${REMOTE_ACTIVITY_SETTLED_MS}ms` }
+            }
+          />
+        )}
+      </>
+    );
+    if (shownFor.current === pin.id) {
+      update(content);
+      return;
+    }
+    shownFor.current = pin.id;
+    show(pin.target, content);
+    // `pinView` and `railLeft()` are rebuilt every render and derive from
+    // exactly `pin`, `activity` and `now`, all listed — naming them here would
+    // re-run this for every render and buy nothing.
+    // `railHeld` is deliberately absent: `paused` is `within || railHeld`, so
+    // anything it could change here has already changed `paused`.
+  }, [
+    activity,
+    dismiss,
+    draining,
+    now,
+    paused,
+    pin,
+    reduced,
+    seen,
+    show,
+    update
+  ]);
+
+  // A click anywhere else dismisses the card, and the click still lands where
+  // it was aimed — nothing here calls `preventDefault`. Capture phase so a
+  // surface that stops propagation cannot strand the card on screen; mousedown
+  // rather than click so it goes at the start of the gesture, the way every
+  // other dismissable overlay in the app behaves.
+  //
+  // Pressing the trigger again is not "elsewhere": the button's own handler
+  // either starts a new operation (and re-pins) or is inert because one is
+  // already running, and neither should take the status away.
+  useEffect(() => {
+    if (pin === null) return;
+    const onPointerDown = (event: MouseEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (
+        target instanceof Element &&
+        target.closest(".remote-activity-popover") !== null
+      ) {
+        return;
+      }
+      if (pin.target.contains(target)) return;
+      dismiss();
+    };
+    window.addEventListener("mousedown", onPointerDown, true);
+    return () => window.removeEventListener("mousedown", onPointerDown, true);
+  }, [dismiss, pin]);
+
+  // Escape, a window blur and a scroll all hide the card from inside
+  // `useViewportTooltip` without routing through `dismiss`. Left alone, the
+  // session would go on believing it owned a card that is no longer there.
+  useEffect(() => {
+    if (visible) {
+      wasVisible.current = true;
+      return;
+    }
+    if (!wasVisible.current) return;
+    if (pinRef.current !== null) dismiss();
+  }, [dismiss, visible]);
+
+  // The hover half of the card, unchanged — except that it stands down
+  // entirely while a click owns the surface.
   return {
+    pin: pinCard,
     open: (target) => {
+      if (pinRef.current !== null) return;
       restOn(target);
       arm(target);
     },
     close: () => {
+      if (pinRef.current !== null) return;
       forgetTrigger();
       scheduleHide();
     },
+    settle,
+    dismiss,
     focusFirst,
+    showing: visible,
+    pinnedKind: pin?.scope.kind ?? null,
     node: tooltip.tooltipNode
   };
 }

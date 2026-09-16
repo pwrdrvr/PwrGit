@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-elev: #101010;
+            --bg-menu: #101010; --bg-hover: #14110d;
+            --line0: rgba(247, 243, 235, 0.06);
+            --line: rgba(247, 243, 235, 0.1);
+            --line2: rgba(247, 243, 235, 0.14);
+            --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(95, 169, 105, 0.16);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --badbord: rgba(185, 66, 50, 0.28);
+            --shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Focused Lens Stability - UX Review") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 700px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- stages, notes, findings ---- */
+          .stage { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .pair { display: flex; gap: 22px; align-items: flex-start; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 330px; }
+          .note b { color: var(--t2); font-weight: 600; }
+          .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 392px; display: flex; flex-direction: column; gap: 11px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- tables ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr.gates { grid-template-columns: 22px 132px minmax(0, 1fr) 62px; }
+          .tr.life { grid-template-columns: 104px 96px minmax(0, 1fr); }
+          .tr.dis { grid-template-columns: 148px 78px minmax(0, 1fr); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { font: 600 10.5px/1.45 var(--mono); color: var(--t1); }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: var(--oksoft); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.no { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          .verd { display: flex; align-items: center; gap: 7px; font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verd.out { color: var(--badt); }
+          .verd.in { color: var(--okt); }
+
+          /* ---- timeline strip ---- */
+          .tl { width: 420px; display: flex; flex-direction: column; gap: 5px; }
+          .tl-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 9px; align-items: center; }
+          .tl-lab { font: 500 9.5px/1.2 var(--mono); color: var(--t3); text-align: right; }
+          .tl-track { position: relative; height: 15px; border-radius: 4px; background: rgba(247, 243, 235, 0.04); overflow: hidden; }
+          .tl-span { position: absolute; top: 0; bottom: 0; border-radius: 4px; display: flex; align-items: center; padding: 0 5px; font: 600 8.5px/1 var(--mono); white-space: nowrap; }
+          .tl-span.run { background: var(--asoft); border: 1px solid var(--abord); color: var(--accb); }
+          .tl-span.gate { background: rgba(185, 66, 50, 0.16); border: 1px solid var(--badbord); color: var(--badt); }
+          .tl-span.none { background: rgba(247, 243, 235, 0.05); color: var(--t3); }
+          .tl-span.okspan { background: var(--oksoft); border: 1px solid rgba(95, 169, 105, 0.34); color: var(--okt); }
+          .tl-axis { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 9px; }
+          .tl-ticks { display: flex; justify-content: space-between; font: 500 8.5px/1 var(--mono); color: var(--tsub); padding-top: 2px; }
+
+          /* ---- toolbar specimen, true size from apps/desktop/src/renderer/src/styles ----
+             .wt-btn: height 32px, padding 0 12px, radius --radius-md 7px,
+             1px --border-default, --bg-panel-elevated, font 600 12px/1 sans,
+             gap 6px. .sync-chip: height 24px, padding 0 10px, radius 999px,
+             font 600 11px/1 mono. .wt-actions gap 8px, margin-left 12px. */
+          .bar { position: relative; display: flex; align-items: center; gap: 8px; width: 520px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--warnsoft); color: var(--warn); font: 600 10px/1 var(--mono); }
+          .spacer { flex: 1; }
+          .chip { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font: 600 11px/1 var(--mono); flex: none; color: var(--t3); }
+          .chip.warnc { color: var(--warn); }
+          .chip.okc { color: var(--ok); }
+          .chip.prog { background: var(--asoft); color: var(--accb); }
+          .acts { display: flex; gap: 8px; flex: none; margin-left: 12px; }
+          .wtb { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--line2); background: var(--bg-elev); color: var(--t1); font: 600 12px/1 var(--sans); cursor: pointer; }
+          .wtb.busy { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .wtb svg { flex: none; }
+          .wtb .ring { width: 13px; height: 13px; border-radius: 999px; border: 2px solid rgba(255, 138, 31, 0.3); border-top-color: var(--acc); }
+
+          /* ---- the status card, true size from app.css ----
+             .remote-activity-popover: padding 11px 12px, radius --radius-lg
+             10px, 1px --border-strong, --bg-menu, --shadow-popover.
+             .remote-activity: width 320px, column gap 8px. */
+          .card { position: relative; overflow: hidden; width: 344px; padding: 11px 12px; border: 1px solid var(--line3); border-radius: 10px; background: var(--bg-menu); box-shadow: var(--shadow); }
+          .card.err { border-color: var(--badbord); }
+          .ra { display: flex; flex-direction: column; gap: 8px; }
+          .ra-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+          .ra-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 600 11.5px/1.3 var(--sans); }
+          .ra-right { flex: none; display: flex; align-items: center; gap: 7px; }
+          .ra-el { color: var(--t3); font: 500 11px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+          .ra-x { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border: 0; border-radius: 4px; background: transparent; color: var(--t3); font: 600 11px/1 var(--sans); cursor: pointer; }
+          .ra-x:hover { background: rgba(247, 243, 235, 0.08); color: var(--t1); }
+          .ra-st { margin: 0; font: 500 12px/1.35 var(--sans); overflow-wrap: anywhere; }
+          .ra-st.muted { color: var(--t2); }
+          .ra-st.warn { color: var(--warn); }
+          .ra-st.okst { color: var(--ok); }
+          .ra-st.badst { color: var(--badt); }
+          .ra-meter { display: flex; flex-direction: column; gap: 4px; }
+          .ra-bar { overflow: hidden; height: 4px; border-radius: 2px; background: rgba(140, 133, 122, 0.25); }
+          .ra-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--acc); }
+          .ra-ml { color: var(--t3); font: 500 10.5px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+          .ra-cmd { margin: 0; color: var(--t3); font: 500 10.5px/1.35 var(--mono); overflow-wrap: anywhere; }
+          .ra-out { margin: 0; max-height: 108px; overflow: auto; padding: 6px 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-app); color: var(--t2); font: 400 10.5px/1.45 var(--mono); white-space: pre-wrap; }
+          .ra-acts { display: flex; gap: 6px; }
+          .rab { display: inline-flex; align-items: center; justify-content: center; height: 24px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--t2); font: 600 11px/1 var(--sans); cursor: pointer; }
+          .rab:hover { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .rab.stop { border-color: var(--badbord); color: var(--badt); }
+          .rab.stop:hover { background: rgba(185, 66, 50, 0.14); color: var(--badt); }
+          /* the countdown rail, same idiom as .app-toast__timer */
+          .rail { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--ok); transform-origin: left center; }
+          .rail.held { background: var(--t3); }
+
+          /* callout arrow from a trigger down to its card */
+          .drop { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+          .tether { width: 2px; height: 14px; margin-left: 96px; background: var(--line2); }
+
+          .ptr { width: 15px; height: 20px; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
+          .cap { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 9px; border-radius: 6px; font: 500 10px/1.4 var(--mono); }
+          .cap b { font-weight: 700; }
+          .cap.bad { background: var(--badsoft); color: var(--badt); }
+          .cap.ok { background: var(--oksoft); color: var(--okt); }
+          .cap.neu { background: rgba(247, 243, 235, 0.05); color: var(--t3); }
+
+          /* ---- live prototype chrome ---- */
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--abord); border-radius: 9px; background: var(--bg-panel); width: 560px; }
+          .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+          .ctl-lab { font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); margin-right: 2px; }
+          .seg { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: #050505; }
+          .seg button { appearance: none; border: 0; padding: 4px 9px; border-radius: 5px; background: transparent; color: var(--t3); font: 600 9.5px/1 var(--mono); cursor: pointer; }
+          .seg button.on { background: var(--acc); color: var(--accon); }
+          .btn { appearance: none; padding: 5px 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-elev); color: var(--t2); font: 600 9.5px/1 var(--mono); cursor: pointer; }
+          .btn:hover { border-color: var(--abord); color: var(--t1); }
+          /* The prototype's "somewhere else on screen" — clicking it must close
+             a pinned card, which is the whole outside-click rule. */
+          .elsewhere { display: flex; align-items: center; justify-content: center; height: 62px; border: 1px dashed var(--line2); border-radius: 8px; color: var(--t3); font: 500 10px/1 var(--mono); cursor: pointer; }
+          .elsewhere:hover { border-color: var(--abord); color: var(--t2); }
+          .readout { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; font: 500 10px/1.4 var(--mono); }
+          .readout.live { background: rgba(247, 243, 235, 0.05); color: var(--t3); }
+          .readout.holdr { background: var(--oksoft); color: var(--okt); }
+          .readout.badr { background: var(--badsoft); color: var(--badt); }
+          .hint { margin: 0; font: 400 10px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- turn 4: the accumulating phase list ----
+             A row is written once and never rewritten; only its marker moves
+             from running to done. That is the whole difference from .ra-out,
+             which rewrites its last line at Git's own progress rate. */
+          .ph { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-app); overflow: hidden; }
+          .ph-r { display: grid; grid-template-columns: 13px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 5px 8px; border-bottom: 1px solid var(--line0); font: 500 11px/1.45 var(--sans); color: var(--t2); }
+          .ph-r:last-child { border-bottom: 0; }
+          .ph-m { font: 700 10px/1.45 var(--mono); color: var(--ok); }
+          .ph-r.now { background: rgba(255, 138, 31, 0.06); }
+          .ph-r.now .ph-m { color: var(--acc); }
+          .ph-r.now .ph-n { color: var(--t1); }
+          .ph-r.bad .ph-m, .ph-r.bad .ph-n { color: var(--badt); }
+          .ph-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .ph-v { font: 500 10.5px/1.45 var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
+          .ph-r.now .ph-v { color: var(--accb); }
+          .ph-bar { grid-column: 2 / -1; height: 3px; margin-top: 4px; border-radius: 2px; background: rgba(140, 133, 122, 0.25); overflow: hidden; }
+          .ph-bar > span { display: block; height: 100%; background: var(--acc); }
+          /* Git's own words, behind a disclosure: evidence for a failure, not
+             a play-by-play of a success. */
+          .disc { display: inline-flex; align-items: center; gap: 5px; font: 600 10px/1 var(--mono); color: var(--t3); cursor: pointer; }
+          .disc:hover { color: var(--t2); }
+          .frames { display: flex; flex-direction: column; gap: 10px; }
+          .fr-t { font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .col { display: flex; flex-direction: column; gap: 10px; }
+          .col-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .col-h.bad2 { color: var(--badt); }
+          .col-h.ok2 { color: var(--okt); }
+          .col-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--t3); text-transform: none; letter-spacing: 0; }
+          .tr.rules { grid-template-columns: 150px 74px minmax(0, 1fr); }
+          .is-off { display: none !important; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; four gates stand between the card and the screen</span>
+        </div>
+        <p class="dv-sub">The remote&#8209;activity card is good, complete, and almost never seen. It is summoned by <em>hover</em>, withheld for the operation's first 1.2&#8239;s, and torn down the instant the operation ends &#8212; so the only fetch it can describe is one slow enough to outlast the gate <em>and</em> under a pointer that happens to be resting on the right control. Specimens below are drawn at shipped size from <code>styles/app.css</code> and <code>tokens.css</code>, on contrived repository names.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Gates">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Everything that must be true at once</div>
+            <div class="tbl" style="width:520px;">
+              <div class="tr gates head"><span></span><span>Gate</span><span>Where it lives</span><span>Verdict</span></div>
+              <div class="tr gates"><span><b>1</b></span><span><b>age &#8805; 1.2&#8239;s</b></span><span><code>REMOTE_ACTIVITY_POPOVER_AFTER_MS</code> &#8212; a warm fetch finishes first</span><span><span class="st bug">cut</span></span></div>
+              <div class="tr gates"><span><b>2</b></span><span><b>pointer parked</b></span><span>hover or <code>:focus-visible</code> on the busy button or the chip</span><span><span class="st chg">demote</span></span></div>
+              <div class="tr gates"><span><b>3</b></span><span><b>record exists</b></span><span>main must have registered the operation before the hover lands</span><span><span class="st chg">demote</span></span></div>
+              <div class="tr gates last"><span><b>4</b></span><span><b>still running</b></span><span><code>activity === null &#8594; hide()</code> &#8212; the card dies at the finish line</span><span><span class="st bug">cut</span></span></div>
+            </div>
+            <p class="note" style="max-width:520px;">Gates&nbsp;2 and&nbsp;3 have already been fought hard &#8212; the hook remembers a trigger with nothing to report, re&#8209;arms when the record lands, and asks the DOM where the user is when no event ever fires. That work is <b>correct and stays</b>. It was solving the wrong problem: not &#8220;did we catch the hover&#8221; but &#8220;why is a hover the price of admission at all&#8221;.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Timeline">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>A 0.9&#8239;s fetch, drawn against its own gate</div>
+            <div class="stage" style="width:452px;">
+              <div class="stage-h">Today <em>press Fetch, warm repo, nothing shown</em></div>
+              <div class="tl">
+                <div class="tl-row"><span class="tl-lab">git</span><span class="tl-track"><span class="tl-span run" style="left:0; width:45%;">fetch &#183; 0.9s</span></span></div>
+                <div class="tl-row"><span class="tl-lab">age gate</span><span class="tl-track"><span class="tl-span gate" style="left:0; width:60%;">withheld until 1.2s</span></span></div>
+                <div class="tl-row"><span class="tl-lab">card</span><span class="tl-track"><span class="tl-span none" style="left:0; width:100%;">never opens</span></span></div>
+                <div class="tl-row"><span class="tl-lab">what you get</span><span class="tl-track"><span class="tl-span okspan" style="left:45%; width:55%;">chip flash &#8220;fetched&#8221; &#183; 1.6s</span></span></div>
+                <div class="tl-axis"><span></span><span class="tl-ticks"><span>0</span><span>0.5s</span><span>1.0s</span><span>1.5s</span><span>2.0s</span></span></div>
+              </div>
+              <p class="note" style="max-width:424px;">The gate outlives the operation. Nothing about this is a race or a missed event &#8212; the card is working exactly as specified, and the specification excludes the common case.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Outcome">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>And the outcome has nowhere to land</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div>
+                <h4>Success is a 1.6&#8239;s word in a 24&#8239;px chip</h4>
+                <p><code>showFlash({text:"fetched"}, 1600)</code>. It collapses away entirely in a narrow header, it cannot say <em>what</em> was fetched, and it is gone before a user who looked away can read it.</p>
+              </div></div>
+              <div class="fitem"><span class="pin">2</span><div>
+                <h4>Failure splits across two surfaces</h4>
+                <p>A 3.2&#8239;s chip flash <em>and</em> a corner error toast, neither of them anchored to the button that was pressed. The Git output that explains the failure is on the card &#8212; which has just closed.</p>
+              </div></div>
+              <div class="fitem"><span class="pin q">3</span><div>
+                <h4>The one card that survives is the one for somewhere else</h4>
+                <p><code>RemoteActivityToast</code> shows operations in <em>other</em> repositories after 4&#8239;s. So the status you reliably see is for work you are not looking at, and the status you cannot see is for the button under your hand.</p>
+              </div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div>
+                <h4>The card itself is not the problem</h4>
+                <p>Scope line, health sentence, transfer meter, the running command, Git's own last eight lines, Cancel / Logs / Copy. Nothing here needs redesigning &#8212; it needs a lifecycle.</p>
+              </div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw 1b for a 6&#8239;s pull&#8221; &#183; &#8220;what does the chip flash look like at the narrow&#8209;header notch?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The proposal &#8212; the click opens it, the outcome closes it</span>
+        </div>
+        <p class="dv-sub">Pressing Fetch, Pull or Push pins the card open immediately, with no age gate and no hover requirement. It stays for the whole operation, then <em>keeps going</em>: it becomes the receipt. A success drains a countdown rail and leaves; a failure stands until dismissed. One surface answers &#8220;what is it doing?&#8221; and &#8220;what did it do?&#8221;, in the one place the user is already looking.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Running">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Running &#8212; opened by the click, no gate</div>
+            <div class="drop">
+              <div class="bar" style="width:470px;">
+                <span class="badge">&#9679;2</span>
+                <span class="spacer"></span>
+                <span class="chip prog">Fetching updates&#8230;</span>
+                <span class="acts">
+                  <button class="wtb busy"><span class="ring"></span>Fetching&#8230;</button>
+                  <button class="wtb"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>Pull</button>
+                </span>
+              </div>
+              <div class="tether" style="margin-left:330px;"></div>
+              <div class="card" style="margin-left:180px;">
+                <div class="ra">
+                  <div class="ra-h"><span class="ra-title">Fetch &#183; atlas&#8209;api &#183; main</span><span class="ra-right"><span class="ra-el">0:04</span><button class="ra-x">&#10005;</button></span></div>
+                  <p class="ra-st muted">Fetching updates</p>
+                  <div class="ra-meter">
+                    <div class="ra-bar"><span style="width:43%"></span></div>
+                    <span class="ra-ml">Receiving objects 43% &#183; 12.4 MiB &#183; 3.1 MiB/s</span>
+                  </div>
+                  <p class="ra-cmd">git fetch --prune --progress origin</p>
+                  <pre class="ra-out">remote: Enumerating objects: 2000, done.
+remote: Counting objects: 100% (2000/2000), done.
+Receiving objects:  43% (860/2000), 12.4 MiB | 3.1 MiB/s</pre>
+                  <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:344px;">Unchanged from what ships today, minus the wait. The &#10005; is new and permanent: a card that can auto&#8209;close must never be a card you have to race.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Settled OK">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Settled &#8212; the receipt, and the rail that takes it away</div>
+            <div class="pair">
+              <div class="stage" style="width:376px;">
+                <div class="stage-h">Success <em>auto&#8209;closes at the end of the rail</em></div>
+                <div class="card">
+                  <div class="ra">
+                    <div class="ra-h"><span class="ra-title">Pull &#183; atlas&#8209;api &#183; main</span><span class="ra-right"><span class="ra-el">2.4s</span><button class="ra-x">&#10005;</button></span></div>
+                    <p class="ra-st okst">Fast&#8209;forwarded &#183; 4 commits &#183; local changes reapplied</p>
+                    <p class="ra-cmd">git merge --ff-only origin/main</p>
+                    <pre class="ra-out">Updating 9f21c0a..3ae87b1
+Fast-forward
+ 12 files changed, 214 insertions(+), 39 deletions(-)</pre>
+                    <div class="ra-acts"><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                  </div>
+                  <span class="rail" style="transform:scaleX(0.62)"></span>
+                </div>
+                <p class="note" style="max-width:348px;">Cancel is gone &#8212; there is nothing left to cancel. The rail is the same idiom as <code>.app&#8209;toast__timer</code>, in <code>--status&#8209;ok</code> rather than the muted grey, so &#8220;this went well&#8221; is readable without reading.</p>
+              </div>
+              <div class="stage" style="width:376px;">
+                <div class="stage-h">Failure <em>stands until dismissed</em></div>
+                <div class="card err">
+                  <div class="ra">
+                    <div class="ra-h"><span class="ra-title">Push &#183; atlas&#8209;api &#183; feat/lanes</span><span class="ra-right"><span class="ra-el">6.1s</span><button class="ra-x">&#10005;</button></span></div>
+                    <p class="ra-st badst">Push rejected &#8212; the remote has commits you do not have</p>
+                    <p class="ra-cmd">git push --progress origin feat/lanes</p>
+                    <pre class="ra-out">To github.com:contrived/atlas-api.git
+ ! [rejected]  feat/lanes -> feat/lanes (fetch first)
+error: failed to push some refs</pre>
+                    <div class="ra-acts"><button class="rab">Logs</button><button class="rab">Copy</button><button class="rab">Close</button></div>
+                  </div>
+                </div>
+                <p class="note" style="max-width:348px;">No rail at all &#8212; a bar that is not draining cannot be mistaken for one that is. Git's own words are the whole point of the card here, and they now outlive the command that wrote them.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Lifecycle">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>What opens it, what holds it, what closes it</div>
+            <div class="tbl" style="width:474px;">
+              <div class="tr life head"><span>State</span><span>Rail</span><span>Leaves when</span></div>
+              <div class="tr life"><span><b>running</b></span><span><span class="st no">none</span></span><span>the operation settles &#8212; never on its own</span></div>
+              <div class="tr life"><span><b>success</b></span><span><span class="st keep">drains</span></span><span>the rail empties, or &#10005;, or a click elsewhere</span></div>
+              <div class="tr life"><span><b>failure</b></span><span><span class="st bug">none</span></span><span>&#10005; / Close / Escape / a click elsewhere</span></div>
+              <div class="tr life"><span><b>canceled</b></span><span><span class="st keep">drains</span></span><span>same as success &#8212; the user already knows</span></div>
+              <div class="tr life last"><span><b>held</b></span><span><span class="st no">frozen</span></span><span>only an explicit dismissal</span></div>
+            </div>
+            <div class="tbl" style="width:474px;">
+              <div class="tr dis head"><span>Gesture</span><span>Effect</span><span>Why</span></div>
+              <div class="tr dis"><span><b>pointer over card</b></span><span><span class="st chg">pause</span></span><span>reading it is evidence you want it; resumes on leave</span></div>
+              <div class="tr dis"><span><b>click the card</b></span><span><span class="st chg">hold</span></span><span>deliberate, so the rail stops for good &#8212; not just while hovered</span></div>
+              <div class="tr dis"><span><b>focus inside</b></span><span><span class="st chg">hold</span></span><span>the keyboard&#8217;s version of the same gesture</span></div>
+              <div class="tr dis"><span><b>click elsewhere</b></span><span><span class="st bug">close</span></span><span>the click still lands where it was aimed &#8212; nothing is swallowed</span></div>
+              <div class="tr dis"><span><b>Escape</b></span><span><span class="st bug">close</span></span><span>focus returns to the button that opened it</span></div>
+              <div class="tr dis last"><span><b>press it again</b></span><span><span class="st chg">replace</span></span><span>a new operation retires the previous receipt</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Live &#8212; press a button, then try to keep the card</div>
+            <div class="proto">
+              <div class="ctl">
+                <span class="ctl-lab">Outcome</span>
+                <span class="seg"><button class="{{okCls}}" onClick="{{setOk}}">success</button><button class="{{failCls}}" onClick="{{setFail}}">failure</button></span>
+                <span class="ctl-lab" style="margin-left:6px;">Duration</span>
+                <span class="seg"><button class="{{fastCls}}" onClick="{{setFast}}">0.9s</button><button class="{{slowCls}}" onClick="{{setSlow}}">6s</button></span>
+                <span class="ctl-lab" style="margin-left:6px;">Rail</span>
+                <span class="seg"><button class="{{d3Cls}}" onClick="{{setD3}}">3s</button><button class="{{d4Cls}}" onClick="{{setD4}}">4s</button><button class="{{d5Cls}}" onClick="{{setD5}}">5s</button></span>
+              </div>
+              <div class="bar">
+                <span class="badge">&#9679;2</span>
+                <span class="spacer"></span>
+                <span class="chip {{chipCls}}">{{chipText}}</span>
+                <span class="acts">
+                  <button class="wtb {{fetchCls}}" onClick="{{runFetch}}"><span class="ring {{fetchRingCls}}"></span>{{fetchLabel}}</button>
+                  <button class="wtb {{pullCls}}" onClick="{{runPull}}">{{pullLabel}}</button>
+                </span>
+              </div>
+              <div class="card {{cardCls}} {{cardErrCls}}" onMouseEnter="{{cardEnter}}" onMouseLeave="{{cardLeave}}" onClick="{{cardHold}}">
+                <div class="ra">
+                  <div class="ra-h"><span class="ra-title">{{title}}</span><span class="ra-right"><span class="ra-el">{{elapsed}}</span><button class="ra-x" onClick="{{close}}">&#10005;</button></span></div>
+                  <p class="ra-st {{statusCls}}">{{statusText}}</p>
+                  <div class="ra-meter {{meterCls}}">
+                    <div class="ra-bar"><span style="{{meterStyle}}"></span></div>
+                    <span class="ra-ml">{{meterLabel}}</span>
+                  </div>
+                  <p class="ra-cmd">{{command}}</p>
+                  <pre class="ra-out">{{output}}</pre>
+                  <div class="ra-acts">
+                    <button class="rab stop {{stopCls}}" onClick="{{cancel}}">Cancel</button>
+                    <button class="rab">Logs</button>
+                    <button class="rab">Copy</button>
+                    <button class="rab {{closeBtnCls}}" onClick="{{close}}">Close</button>
+                  </div>
+                </div>
+                <span class="rail {{railCls}} {{railHeldCls}}" style="{{railStyle}}"></span>
+              </div>
+              <div class="elsewhere" onClick="{{clickAway}}">somewhere else on screen &#8212; click here</div>
+              <div class="readout {{readoutCls}}">{{readout}}</div>
+              <p class="hint">{{hint}}</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;show 2b with a cancel outcome&#8221; &#183; &#8220;draw the card at the narrow&#8209;header notch where the chip is gone&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">The four calls inside it</span>
+        </div>
+        <p class="dv-sub">The lifecycle above is settled. These are the decisions it forces, each with a recommendation and the reason &#8212; three of them are cheap to change later, one of them decides how much of the app this touches.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Outcome source">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Where does the outcome come from?</div>
+            <div class="pair">
+              <div class="stage" style="width:352px;">
+                <div class="stage-h">Chosen <em>A &#8212; the header already has it</em></div>
+                <p class="note" style="max-width:324px;"><code>WorktreeHeader</code> awaits the <code>Result</code> for every fetch, pull and push it dispatches, and already turns it into the chip flash: <em>fast&#8209;forwarded</em>, <em>pulled &#183; changes reapplied</em>, <em>pulled &#183; resolve stash conflicts</em>, <em>push denied</em>. That richness exists nowhere else. Hand it to the popover as an explicit <b>settled</b> input instead of deriving the card&#8217;s life from <code>activity !== null</code>.</p>
+                <p class="note" style="max-width:324px;">No IPC change, no new main&#8209;process state, no change to what <code>remote:activity</code> means. The blast radius is the popover hook and the header that owns it.</p>
+                <div class="verd in"><span class="pin ok">&#10003;</span>Recommended &#8212; smallest change that delivers the whole ask</div>
+              </div>
+              <div class="stage" style="width:352px;">
+                <div class="stage-h">Deferred <em>B &#8212; main emits a terminal record</em></div>
+                <p class="note" style="max-width:324px;">Give <code>RemoteActivity</code> an <code>outcome</code> and let finished records linger a few seconds. Every surface gets receipts for free, including operations started from the sidebar, a second window, or bulk sync &#8212; the cases A leaves showing nothing, exactly as today.</p>
+                <p class="note" style="max-width:324px;">It also changes what &#8220;live activities&#8221; means for every consumer, and the elsewhere&#8209;toast would start showing receipts for repositories you are not looking at, which is a separate design question with its own answer.</p>
+                <div class="verd out"><span class="pin q">&#183;</span>Not now &#8212; right shape, wrong scope for this change</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Hover">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Does hover&#8209;to&#8209;open survive?</div>
+            <div class="stage" style="width:400px;">
+              <div class="stage-h">Yes, un&#8209;pinned, and the age gate goes</div>
+              <p class="note" style="max-width:372px;">The click path is the one the user asked for, and it makes the whole stationary&#8209;pointer problem moot: the card is already open before any <code>mouseenter</code> can fire, so the enter finds it open and does nothing. <b>The 1.2&#8239;s gate exists only to suppress a card nobody asked for</b> &#8212; and a click is an ask. It goes.</p>
+              <p class="note" style="max-width:372px;">Hover still earns a card in the one case a click cannot cover: an operation against this checkout that <em>someone else</em> started &#8212; the sidebar&#8217;s refresh, bulk sync, a second window. That card is transient (leaves with the pointer) and never grows a rail, because there is no settle to report. All of <code>WHERE_THE_USER_IS</code>, the re&#8209;arm on record arrival and the Tab handoff stay exactly as they are.</p>
+              <div class="verd in"><span class="pin ok">&#10003;</span>Keep &#8212; two openings, one card, one dismissal rule</div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Rail length">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>How long is the rail?</div>
+            <div class="stage" style="width:400px;">
+              <div class="stage-h">4&#8239;s <em>you asked for 3 or 5</em></div>
+              <p class="note" style="max-width:372px;">3&#8239;s is short for a two&#8209;line outcome with a diffstat under it; 5&#8239;s is long enough that a card sitting over the graph starts to feel like something you have to wait out. 4&#8239;s reads one sentence plus a glance at the output with room to spare, and it is comfortably under the 9&#8239;s the error toasts use &#8212; those appear unasked and have to survive being ignored; this one you just summoned and are looking straight at.</p>
+              <p class="note" style="max-width:372px;">Cheap to move: one constant. Try 2d on both and say which.</p>
+              <div class="verd in"><span class="pin ok">&#10003;</span><code>REMOTE_ACTIVITY_SETTLED_MS = 4_000</code></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Motion + a11y">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>The rail under reduced motion, and the WCAG line</div>
+            <div class="find" style="width:400px;">
+              <div class="fitem"><span class="pin">1</span><div>
+                <h4>A drained rail is an animation, and app.css kills all of them</h4>
+                <p>The blanket <code>prefers-reduced-motion</code> rule at the top of the file is <code>animation: none !important</code>. The toast&#8217;s countdown already loses to it &#8212; the bar sits full while the toast leaves anyway. Copying that here would leave a success card with a full green rail that vanishes without warning.</p>
+              </div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div>
+                <h4>Step it from the clock the card already runs</h4>
+                <p>The card ticks once a second while visible (<code>useSecondsClock</code>). Under reduced motion, set the rail&#8217;s <code>scaleX</code> from that tick instead of from a keyframe: four discrete steps, no smooth motion, and the information survives. Same timer either way &#8212; only the drawing changes.</p>
+              </div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div>
+                <h4>SC 2.2.1 is satisfied by pause, not by length</h4>
+                <p>Pointer pauses it, a click or focus holds it outright, and &#10005; is always there. That is the &#8220;Timing Adjustable&#8221; escape hatch met three ways &#8212; which is also why the rail may be short.</p>
+              </div></div>
+              <div class="fitem"><span class="pin q">?</span><div>
+                <h4>The settled card announces once</h4>
+                <p>Running stays silent (the sync chip is the live region and already says &#8220;Fetching updates&#8230;&#8221;). The settle is a single <code>announce()</code> of the outcome line &#8212; one utterance, not a counter, so it can be a live region without the problem the card was kept out of one for.</p>
+              </div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;build it &#8212; A, hover kept, 4&#8239;s&#8221; &#183; &#8220;write 3a option B as a follow&#8209;up issue&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">&#8220;What was all that flashing text telling me?&#8221;</span>
+        </div>
+        <p class="dv-sub">
+          Shipped, used, and the verdict from use: the card shows now instead of flashing, but what
+          it shows during an operation is unreadable &#8212; text that replaces itself faster than it
+          can be read, a box that resizes while you read it, and then one word at the end. The card
+          was designed to narrate a <em>slow</em> operation. This turn is about the fast one, which
+          is nearly all of them.
+        </p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a What churns">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Every element is replaced, and a fast pull replaces all of them five times</div>
+            <div class="pair">
+              <div class="find">
+                <div class="fitem">
+                  <span class="pin">1</span>
+                  <div>
+                    <h4>Phase changes bypass the throttle</h4>
+                    <p>Output is debounced to 400&#8239;ms, but every phase transition calls
+                      <code>publish(true)</code> &#8212; immediate. A pull walks
+                      <code>prepare &#8594; fetch &#8594; fast_forward &#8594; reapply &#8594; refresh</code>,
+                      so a 620&#8239;ms pull lands five full redraws in six tenths of a second.</p>
+                  </div>
+                </div>
+                <div class="fitem">
+                  <span class="pin">2</span>
+                  <div>
+                    <h4>The meter mounts and unmounts</h4>
+                    <p>The progress block is drawn only while <code>progress !== null</code>, so it
+                      appears for the transfer phase and vanishes for the others. The card changes
+                      height under the pointer &#8212; twice per pull, minimum.</p>
+                  </div>
+                </div>
+                <div class="fitem">
+                  <span class="pin">3</span>
+                  <div>
+                    <h4>The tail rewrites its own last line</h4>
+                    <p>Git&#8217;s progress output is <code>\r</code>-rewritten &#8212; designed to be
+                      transient in a terminal. The record reproduces that faithfully, so the bottom
+                      line of the block flickers at Git&#8217;s rate while the block itself grows
+                      from nothing to its 108&#8239;px cap.</p>
+                  </div>
+                </div>
+                <div class="fitem">
+                  <span class="pin ok">4</span>
+                  <div>
+                    <h4>And then it is all thrown away</h4>
+                    <p><code>settle</code> replaces every one of those elements with a single
+                      sentence. Whatever you managed to read had no bearing on what you are left
+                      looking at, which is what makes the churn feel like it was hiding something.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="tl">
+                <div class="tl-row">
+                  <span class="tl-lab">one pull, 620ms</span>
+                  <span class="tl-track">
+                    <span class="tl-span gate" style="left:0%;width:17%">prepare</span>
+                    <span class="tl-span gate" style="left:18%;width:38%">fetch</span>
+                    <span class="tl-span gate" style="left:57%;width:23%">ff</span>
+                    <span class="tl-span gate" style="left:81%;width:11%">reapply</span>
+                    <span class="tl-span gate" style="left:93%;width:7%"></span>
+                  </span>
+                </div>
+                <div class="tl-row">
+                  <span class="tl-lab">card redraws</span>
+                  <span class="tl-track">
+                    <span class="tl-span none" style="left:0%;width:100%">5 immediate &#183; 1 settle &#8212; &#8776;100ms apart</span>
+                  </span>
+                </div>
+                <div class="tl-row">
+                  <span class="tl-lab">readable?</span>
+                  <span class="tl-track">
+                    <span class="tl-span gate" style="left:0%;width:100%">nothing survives long enough</span>
+                  </span>
+                </div>
+                <div class="tl-axis">
+                  <span></span>
+                  <span class="tl-ticks"><span>0</span><span>200ms</span><span>400ms</span><span>620ms</span></span>
+                </div>
+                <p class="note" style="margin-top:8px;max-width:420px;">
+                  <b>The diagnosis is not &#8220;too fast&#8221;.</b> It is that everything the card
+                  draws is <b>replaced</b> rather than <b>accumulated</b> &#8212; correct for a
+                  five-minute fetch where each phase lasts long enough to read, and exactly wrong
+                  below a second, where the narration plays out before the first frame is read.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Replace vs accumulate">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>The same 6&#8239;s pull, three moments each &#8212; replace on the left, accumulate on the right</div>
+            <div class="pair">
+
+              <div class="col">
+                <div class="col-h bad2">Today &#8212; replace <em>nothing survives frame to frame</em></div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 1.2s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">1s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st muted">Preparing local changes</p>
+                      <p class="ra-cmd">git stash push --include-untracked</p>
+                      <pre class="ra-out">Git has produced no output yet.</pre>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 3.4s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">3s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st muted">Fetching updates</p>
+                      <div class="ra-meter">
+                        <div class="ra-bar"><span style="width:71%"></span></div>
+                        <span class="ra-ml">Receiving objects 71% &#183; 4.2 MiB &#183; 9.1 MiB/s</span>
+                      </div>
+                      <p class="ra-cmd">git fetch --prune --progress</p>
+                      <pre class="ra-out">remote: Enumerating objects: 214, done.
+remote: Counting objects: 100% (214/214), done.
+remote: Compressing objects: 100% (118/118), done.
+Receiving objects:  71% (152/214), 4.20 MiB</pre>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 5.8s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">5s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st muted">Reapplying local changes</p>
+                      <p class="ra-cmd">git stash pop --index</p>
+                      <pre class="ra-out">Updating 9f2c1a4..b71e803
+Fast-forward</pre>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">settled</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">6s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st okst">Fast-forwarded &#183; local changes stashed and reapplied</p>
+                      <div class="ra-acts"><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                    <span class="rail" style="transform:scaleX(0.62)"></span>
+                  </div>
+                  <span class="cap bad"><b>4 heights, 4 texts.</b> None of the first three is on screen at the end.</span>
+                </div>
+              </div>
+
+              <div class="col">
+                <div class="col-h ok2">Proposed &#8212; accumulate <em>a row is written once and never rewritten</em></div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 1.2s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">1s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r now">
+                          <span class="ph-m">&#9679;</span>
+                          <span class="ph-n">Fetching updates</span>
+                          <span class="ph-v">4.2 MiB &#183; 9.1 MiB/s</span>
+                          <span class="ph-bar"><span style="width:38%"></span></span>
+                        </div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 3.4s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">3s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fetched</span><span class="ph-v">3 refs &#183; 5.9 MiB</span></div>
+                        <div class="ph-r now">
+                          <span class="ph-m">&#9679;</span>
+                          <span class="ph-n">Fast-forwarding</span>
+                          <span class="ph-v">12 commits</span>
+                          <span class="ph-bar"><span style="width:62%"></span></span>
+                        </div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 5.8s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">5s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fetched</span><span class="ph-v">3 refs &#183; 5.9 MiB</span></div>
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fast-forwarded</span><span class="ph-v">12 commits</span></div>
+                        <div class="ph-r now">
+                          <span class="ph-m">&#9679;</span>
+                          <span class="ph-n">Reapplying your changes</span>
+                          <span class="ph-v">4 files</span>
+                          <span class="ph-bar"><span style="width:55%"></span></span>
+                        </div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">settled</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">6s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fetched</span><span class="ph-v">3 refs &#183; 5.9 MiB</span></div>
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fast-forwarded</span><span class="ph-v">12 commits</span></div>
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Reapplied your changes</span><span class="ph-v">4 files</span></div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                    <span class="rail" style="transform:scaleX(0.62)"></span>
+                  </div>
+                  <span class="cap ok"><b>The receipt is what the running card became.</b> Nothing is wiped, so nothing needs re-reading.</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Five rules, and what each one costs</div>
+            <div class="tbl" style="width:660px;">
+              <div class="tr rules head"><span>Rule</span><span>Needs</span><span>Why</span></div>
+              <div class="tr rules">
+                <b>Append, never rewrite</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>A row&#8217;s text is written once; only its marker moves &#9679;&#8594;&#10003;. Text under the eye never moves, which is the whole of &#8220;readable&#8221;.</span>
+              </div>
+              <div class="tr rules">
+                <b>Output behind a disclosure</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>Git&#8217;s <code>\r</code> progress is evidence for a failure, not narration for a success. Collapsing it removes the flicker <em>and</em> the 0&#8594;108&#8239;px growth in one move.</span>
+              </div>
+              <div class="tr rules">
+                <b>No row for a phase that did nothing</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>A pull with nothing to stash must not draw &#8220;Preparing local changes&#8221;. Most fetches then settle to a single line, which is the honest amount.</span>
+              </div>
+              <div class="tr rules">
+                <b>Under &#8776;1&#8239;s, no running card at all</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>Click straight to the receipt. Most of the churn is a play-by-play of something that finished before the first frame landed. The pin still happens at the click &#8212; only the narration waits.</span>
+              </div>
+              <div class="tr rules last">
+                <b>Rows carry numbers</b>
+                <span><span class="st bug">main</span></span>
+                <span><code>remote:fetch</code> and <code>remote:push</code> return <code>null</code>; <code>remote:pull</code> returns three booleans. <code>pullBranch</code> holds the commit range either side of the merge and discards it. Without this the rows are honest but wordless &#8212; checkmarks, no counts.</span>
+              </div>
+            </div>
+            <p class="note" style="max-width:660px;">
+              <b>The first four ship without touching main</b>, and they are what kills the churn.
+              The fifth is what turns &#8220;Fast-forwarded &#10003;&#8221; into &#8220;Fast-forwarded &#183; 12 commits&#8221;,
+              and it is the same protocol widening card <a href="#3a">3a</a> deferred &#8212; a much smaller
+              version of it, since the commands need only <em>return</em> what they did rather than
+              emit terminal records.
+            </p>
+          </div>
+
+          <div class="dv-opt" id="4d" data-screen-label="4d Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Live &#8212; run the same pull both ways, at both speeds</div>
+            <div class="proto">
+              <div class="ctl">
+                <span class="ctl-lab">Card</span>
+                <span class="seg"><button class="{{p4TodayCls}}" onClick="{{p4SetToday}}">today</button><button class="{{p4PropCls}}" onClick="{{p4SetProp}}">proposed</button></span>
+                <span class="ctl-lab" style="margin-left:6px;">Pull takes</span>
+                <span class="seg"><button class="{{p4FastCls}}" onClick="{{p4SetFast}}">0.62s</button><button class="{{p4SlowCls}}" onClick="{{p4SetSlow}}">6s</button></span>
+                <button class="btn" style="margin-left:6px;" onClick="{{p4Run}}">{{p4RunLabel}}</button>
+              </div>
+
+              <div class="card {{p4TodayOff}}">
+                <div class="ra">
+                  <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">{{p4El}}</span><button class="ra-x" onClick="{{p4Close}}">&#10005;</button></span></div>
+                  <p class="ra-st {{p4tStCls}}">{{p4tSt}}</p>
+                  <div class="ra-meter {{p4tMeterOff}}">
+                    <div class="ra-bar"><span style="{{p4tMeterStyle}}"></span></div>
+                    <span class="ra-ml">{{p4tMeterLabel}}</span>
+                  </div>
+                  <p class="ra-cmd {{p4tCmdOff}}">{{p4tCmd}}</p>
+                  <pre class="ra-out {{p4tOutOff}}">{{p4tOut}}</pre>
+                  <div class="ra-acts"><button class="rab stop {{p4StopOff}}">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                </div>
+                <span class="rail {{p4RailOff}}" style="{{p4RailStyle}}"></span>
+              </div>
+
+              <div class="card {{p4PropOff}}">
+                <div class="ra">
+                  <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">{{p4El}}</span><button class="ra-x" onClick="{{p4Close}}">&#10005;</button></span></div>
+                  <div class="ph {{p4PhOff}}">
+                    <div class="ph-r {{p4r1Cls}}"><span class="ph-m">{{p4r1M}}</span><span class="ph-n">{{p4r1N}}</span><span class="ph-v">{{p4r1V}}</span><span class="ph-bar {{p4r1BarOff}}"><span style="{{p4r1BarStyle}}"></span></span></div>
+                    <div class="ph-r {{p4r2Cls}} {{p4r2Off}}"><span class="ph-m">{{p4r2M}}</span><span class="ph-n">{{p4r2N}}</span><span class="ph-v">{{p4r2V}}</span><span class="ph-bar {{p4r2BarOff}}"><span style="{{p4r2BarStyle}}"></span></span></div>
+                    <div class="ph-r {{p4r3Cls}} {{p4r3Off}}"><span class="ph-m">{{p4r3M}}</span><span class="ph-n">{{p4r3N}}</span><span class="ph-v">{{p4r3V}}</span><span class="ph-bar {{p4r3BarOff}}"><span style="{{p4r3BarStyle}}"></span></span></div>
+                  </div>
+                  <span class="disc">&#8250; Git output</span>
+                  <div class="ra-acts"><button class="rab stop {{p4StopOff}}">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                </div>
+                <span class="rail {{p4RailOff}}" style="{{p4RailStyle}}"></span>
+              </div>
+
+              <div class="readout {{p4ReadCls}}">{{p4Read}}</div>
+              <p class="hint">{{p4Hint}}</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;build 4b &#8212; rules 1&#8211;4, leave the numbers for a second PR&#8221; &#183; &#8220;show 4b with a failure partway through&#8221; &#183; &#8220;what does Push look like with one phase?&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.TICK = 100;
+          this.state = {
+            mode: "ok",        // what the next run will do
+            dur: 900,          // simulated git duration
+            rail: 4000,        // settled dwell
+            kind: null,        // "fetch" | "pull" while a card exists
+            stage: "idle",     // "running" | "ok" | "fail" | "canceled"
+            t: 0,              // ms inside the current stage
+            hover: false,
+            held: false,
+            // turn 4's prototype, on its own clock
+            p4mode: "today",
+            p4dur: 620,
+            p4stage: "idle",
+            p4t: 0
+          };
+          this.timer = null;
+          this.p4timer = null;
+          this.P4_RAIL = 4000;
+        }
+        componentWillUnmount() { this.stop(); this.p4Stop(); }
+        stop() {
+          if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
+        }
+        start(kind) {
+          this.stop();
+          this.setState({ kind: kind, stage: "running", t: 0, hover: false, held: false });
+          this.timer = setInterval(() => { this.tick(); }, this.TICK);
+        }
+        tick() {
+          const s = this.state;
+          if (s.stage === "running") {
+            const t = s.t + this.TICK;
+            if (t < s.dur) { this.setState({ t: t }); return; }
+            this.setState({ stage: s.mode === "ok" ? "ok" : "fail", t: 0 });
+            return;
+          }
+          // A failure is durable: no rail, no clock, nothing to advance.
+          if (s.stage === "fail") { this.stop(); return; }
+          // Reading it is evidence you want it; a click is evidence you want
+          // it to stay. Either one stops the rail.
+          if (s.hover || s.held) { return; }
+          const t = s.t + this.TICK;
+          if (t < s.rail) { this.setState({ t: t }); return; }
+          this.stop();
+          this.setState({ kind: null, stage: "idle", t: 0 });
+        }
+        close() {
+          this.stop();
+          this.setState({ kind: null, stage: "idle", t: 0, hover: false, held: false });
+        }
+        settled() {
+          const st = this.state.stage;
+          return st === "ok" || st === "fail" || st === "canceled";
+        }
+        secs(ms) {
+          return (ms / 1000).toFixed(1) + "s";
+        }
+        renderVals() {
+          return Object.assign(this.t2Vals(), this.p4Vals());
+        }
+        t2Vals() {
+          const s = this.state;
+          const open = s.kind !== null;
+          const running = s.stage === "running";
+          const failed = s.stage === "fail";
+          const canceled = s.stage === "canceled";
+          const draining = this.settled() && !failed;
+          const frozen = draining && (s.hover || s.held);
+          const name = s.kind === "pull" ? "Pull" : "Fetch";
+          const pct = running ? Math.min(99, Math.round((s.t / s.dur) * 100)) : 0;
+
+          let statusText = "";
+          let statusCls = "muted";
+          let output = "";
+          let command = "";
+          if (running) {
+            statusText = s.kind === "pull" ? "Fetching updates" : "Fetching updates";
+            command = s.kind === "pull"
+              ? "git fetch --prune --progress origin"
+              : "git fetch --prune --progress origin";
+            output = "remote: Enumerating objects: 2000, done.\n"
+              + "remote: Counting objects: 100% (2000/2000), done.\n"
+              + "Receiving objects:  " + pct + "% (" + Math.round(pct * 20) + "/2000)";
+          } else if (canceled) {
+            statusCls = "muted";
+            statusText = name + " canceled";
+            command = "git fetch --prune --progress origin";
+            output = "fatal: the remote end hung up unexpectedly";
+          } else if (failed) {
+            statusCls = "badst";
+            statusText = s.kind === "pull"
+              ? "Pull failed — the remote has commits you do not have"
+              : "Fetch failed — could not read from remote repository";
+            command = "git fetch --prune --progress origin";
+            output = "ssh: connect to host github.com port 22: Operation timed out\n"
+              + "fatal: Could not read from remote repository.";
+          } else {
+            statusCls = "okst";
+            statusText = s.kind === "pull"
+              ? "Fast-forwarded · 4 commits · local changes reapplied"
+              : "Fetched · 4 new commits on origin/main";
+            command = s.kind === "pull"
+              ? "git merge --ff-only origin/main"
+              : "git fetch --prune --progress origin";
+            output = s.kind === "pull"
+              ? "Updating 9f21c0a..3ae87b1\nFast-forward\n 12 files changed, 214 insertions(+), 39 deletions(-)"
+              : "From github.com:contrived/atlas-api\n   9f21c0a..3ae87b1  main -> origin/main";
+          }
+
+          const remaining = draining ? Math.max(0, s.rail - s.t) : 0;
+          let readout = "No card. Press Fetch or Pull.";
+          let readoutCls = "live";
+          if (running) {
+            readout = "running · " + this.secs(s.t) + " of " + this.secs(s.dur)
+              + " — the card opened on the click, with no gate";
+          } else if (failed) {
+            readout = "failed · durable — nothing will close this but you";
+            readoutCls = "badr";
+          } else if (s.held) {
+            readout = "held · you clicked the card, so the rail stopped for good";
+            readoutCls = "holdr";
+          } else if (s.hover) {
+            readout = "paused · " + this.secs(remaining) + " left — resumes when the pointer leaves";
+            readoutCls = "holdr";
+          } else if (draining) {
+            readout = "closing in " + this.secs(remaining);
+          }
+
+          return {
+            okCls: s.mode === "ok" ? "on" : "",
+            failCls: s.mode === "fail" ? "on" : "",
+            setOk: () => { this.setState({ mode: "ok" }); },
+            setFail: () => { this.setState({ mode: "fail" }); },
+            fastCls: s.dur === 900 ? "on" : "",
+            slowCls: s.dur === 6000 ? "on" : "",
+            setFast: () => { this.setState({ dur: 900 }); },
+            setSlow: () => { this.setState({ dur: 6000 }); },
+            d3Cls: s.rail === 3000 ? "on" : "",
+            d4Cls: s.rail === 4000 ? "on" : "",
+            d5Cls: s.rail === 5000 ? "on" : "",
+            setD3: () => { this.setState({ rail: 3000 }); },
+            setD4: () => { this.setState({ rail: 4000 }); },
+            setD5: () => { this.setState({ rail: 5000 }); },
+
+            runFetch: () => { this.start("fetch"); },
+            runPull: () => { this.start("pull"); },
+            fetchCls: running && s.kind === "fetch" ? "busy" : "",
+            pullCls: running && s.kind === "pull" ? "busy" : "",
+            fetchRingCls: running && s.kind === "fetch" ? "" : "is-off",
+            fetchLabel: running && s.kind === "fetch" ? "Fetching…" : "Fetch",
+            pullLabel: running && s.kind === "pull" ? "Pulling…" : "Pull",
+            chipCls: running ? "prog" : failed ? "warnc" : this.settled() ? "okc" : "",
+            chipText: running
+              ? (s.kind === "pull" ? "Pulling…" : "Fetching updates…")
+              : failed ? "↓" + "4 behind" : this.settled() ? "up to date" : "↓4 behind",
+
+            cardCls: open ? "" : "is-off",
+            cardErrCls: failed ? "err" : "",
+            title: name + " · atlas-api · main",
+            elapsed: running ? this.secs(s.t) : this.secs(s.dur),
+            statusText: statusText,
+            statusCls: statusCls,
+            meterCls: running ? "" : "is-off",
+            meterStyle: "width:" + pct + "%",
+            meterLabel: "Receiving objects " + pct + "% · 12.4 MiB · 3.1 MiB/s",
+            command: command,
+            output: output,
+            stopCls: running ? "" : "is-off",
+            closeBtnCls: failed || s.held ? "" : "is-off",
+            cancel: () => {
+              if (!running) { return; }
+              this.setState({ stage: "canceled", t: 0 });
+            },
+            close: () => { this.close(); },
+            // Pointer and click are different promises: one lasts while you
+            // are reading, the other lasts until you say otherwise.
+            cardEnter: () => { this.setState({ hover: true }); },
+            cardLeave: () => { this.setState({ hover: false }); },
+            cardHold: () => { if (draining) { this.setState({ held: true }); } },
+            clickAway: () => { if (open) { this.close(); } },
+
+            railCls: draining ? "" : "is-off",
+            railHeldCls: frozen ? "held" : "",
+            railStyle: "transform:scaleX(" + (draining ? (1 - s.t / s.rail).toFixed(3) : 0) + ")",
+
+            readout: readout,
+            readoutCls: readoutCls,
+            hint: "Press Fetch at 0.9 s — today that operation can never open a card at all. "
+              + "Then try: let the rail run out; hover the card to pause it; click the card to hold it; "
+              + "click “somewhere else” to dismiss; switch Outcome to failure and watch the rail not appear."
+          };
+        }
+
+        /* ======================= turn 4: replace vs accumulate =======================
+           One pull, two cards, driven off one clock. The phase boundaries are
+           the real ones — fetch, fast-forward, reapply — at the proportions a
+           local pull actually spends in them. */
+        P4_PHASES() {
+          return [
+            { to: 0.45, run: "Fetching updates", done: "Fetched", val: "3 refs · 5.9 MiB",
+              live: "4.2 MiB · 9.1 MiB/s", cmd: "git fetch --prune --progress",
+              out: "remote: Enumerating objects: 214, done.\nremote: Counting objects: 100% (214/214), done.\nremote: Compressing objects: 100% (118/118), done.\nReceiving objects:  71% (152/214), 4.20 MiB" },
+            { to: 0.80, run: "Fast-forwarding", done: "Fast-forwarded", val: "12 commits",
+              live: "12 commits", cmd: "git merge --ff-only origin/main",
+              out: "Updating 9f2c1a4..b71e803\nFast-forward" },
+            { to: 1.00, run: "Reapplying your changes", done: "Reapplied your changes", val: "4 files",
+              live: "4 files", cmd: "git stash pop --index",
+              out: "Updating 9f2c1a4..b71e803\nFast-forward" }
+          ];
+        }
+        p4Stop() {
+          if (this.p4timer) { clearInterval(this.p4timer); this.p4timer = null; }
+        }
+        p4Start() {
+          this.p4Stop();
+          this.setState({ p4stage: "running", p4t: 0 });
+          this.p4timer = setInterval(() => { this.p4Tick(); }, this.TICK);
+        }
+        p4Tick() {
+          const s = this.state;
+          if (s.p4stage === "running") {
+            const t = s.p4t + this.TICK;
+            if (t < s.p4dur) { this.setState({ p4t: t }); return; }
+            this.setState({ p4stage: "done", p4t: 0 });
+            return;
+          }
+          const t = s.p4t + this.TICK;
+          if (t < this.P4_RAIL) { this.setState({ p4t: t }); return; }
+          this.p4Stop();
+          this.setState({ p4stage: "idle", p4t: 0 });
+        }
+        p4Close() {
+          this.p4Stop();
+          this.setState({ p4stage: "idle", p4t: 0 });
+        }
+        /** Which phase index the clock is in, and how far through it. */
+        p4At() {
+          const s = this.state;
+          const frac = s.p4dur === 0 ? 1 : Math.min(1, s.p4t / s.p4dur);
+          const phases = this.P4_PHASES();
+          let i = 0;
+          while (i < phases.length - 1 && frac >= phases[i].to) { i += 1; }
+          const from = i === 0 ? 0 : phases[i - 1].to;
+          const within = (frac - from) / (phases[i].to - from);
+          return { frac: frac, i: i, within: Math.max(0, Math.min(1, within)) };
+        }
+        /** One row of the proposed card, as flat bindings. */
+        p4Row(n, index, at, done) {
+          const phase = this.P4_PHASES()[index];
+          const reached = done || at.i > index;
+          const current = !done && at.i === index;
+          const out = {};
+          out["p4r" + n + "Off"] = (reached || current) ? "" : "is-off";
+          out["p4r" + n + "Cls"] = current ? "now" : "";
+          out["p4r" + n + "M"] = current ? "●" : "✓";
+          out["p4r" + n + "N"] = current ? phase.run : phase.done;
+          out["p4r" + n + "V"] = current ? phase.live : phase.val;
+          out["p4r" + n + "BarOff"] = current ? "" : "is-off";
+          out["p4r" + n + "BarStyle"] = "width:" + Math.round(at.within * 100) + "%";
+          return out;
+        }
+        p4Vals() {
+          const s = this.state;
+          const proposed = s.p4mode === "proposed";
+          const running = s.p4stage === "running";
+          const done = s.p4stage === "done";
+          const idle = s.p4stage === "idle";
+          const at = this.p4At();
+          const phase = this.P4_PHASES()[at.i];
+          // Rule 4: below the threshold the narration is skipped outright —
+          // the pin still happens at the click, only the play-by-play waits.
+          const quick = s.p4dur < 1000;
+          const narrating = running && !(proposed && quick);
+          const onScreen = narrating || done;
+
+          let readout = "nothing on screen";
+          let readoutCls = "live";
+          if (running && proposed && quick) {
+            readout = "below the threshold — no running card drawn";
+          } else if (running && proposed) {
+            readout = "row " + (at.i + 1) + " of 3 — the rows above it have not changed";
+            readoutCls = "holdr";
+          } else if (running) {
+            readout = "redraw " + (at.i + 1) + " of 5 — every element replaced";
+            readoutCls = "badr";
+          } else if (done) {
+            readout = proposed
+              ? "receipt — the same three rows, nothing wiped"
+              : "receipt — one sentence, none of the above survived";
+            readoutCls = proposed ? "holdr" : "badr";
+          }
+
+          const vals = {
+            p4TodayCls: proposed ? "" : "on",
+            p4PropCls: proposed ? "on" : "",
+            p4SetToday: () => { this.setState({ p4mode: "today" }); },
+            p4SetProp: () => { this.setState({ p4mode: "proposed" }); },
+            p4FastCls: s.p4dur < 1000 ? "on" : "",
+            p4SlowCls: s.p4dur < 1000 ? "" : "on",
+            p4SetFast: () => { this.setState({ p4dur: 620 }); },
+            p4SetSlow: () => { this.setState({ p4dur: 6000 }); },
+            p4Run: () => { this.p4Start(); },
+            p4RunLabel: idle ? "run pull" : "restart",
+            p4Close: () => { this.p4Close(); },
+
+            p4TodayOff: (!proposed && onScreen) ? "" : "is-off",
+            p4PropOff: (proposed && onScreen) ? "" : "is-off",
+            p4El: (running ? Math.round(s.p4t / 1000) : Math.round(s.p4dur / 1000)) + "s",
+            p4StopOff: running ? "" : "is-off",
+            p4RailOff: done ? "" : "is-off",
+            p4RailStyle: "transform:scaleX(" + (done ? (1 - s.p4t / this.P4_RAIL).toFixed(3) : 0) + ")",
+
+            // Today: one status line, one command, one rolling block — all of
+            // it swapped wholesale at each boundary, and dropped at the end.
+            p4tSt: done ? "Fast-forwarded · local changes stashed and reapplied" : phase.run,
+            p4tStCls: done ? "okst" : "muted",
+            p4tMeterOff: (running && at.i === 0) ? "" : "is-off",
+            p4tMeterStyle: "width:" + Math.round(at.within * 100) + "%",
+            p4tMeterLabel: "Receiving objects " + Math.round(at.within * 100) + "% · 4.2 MiB · 9.1 MiB/s",
+            p4tCmdOff: done ? "is-off" : "",
+            p4tCmd: phase.cmd,
+            p4tOutOff: done ? "is-off" : "",
+            p4tOut: running && at.i === 0 && at.within < 0.25
+              ? "Git has produced no output yet."
+              : phase.out,
+
+            p4PhOff: "",
+            p4Read: readout,
+            p4ReadCls: readoutCls,
+            p4Hint: "Run it on “today” at 0.62 s and try to read a single frame. Then the same on "
+              + "“proposed”: nothing is drawn at all, because it was over before it could be read. "
+              + "Switch to 6 s and compare — on the left every element is replaced three times, on the "
+              + "right each row is written once and is still there in the receipt."
+          };
+          Object.assign(vals, this.p4Row(1, 0, at, done));
+          Object.assign(vals, this.p4Row(2, 1, at, done));
+          Object.assign(vals, this.p4Row(3, 2, at, done));
+          return vals;
+        }
+      }
+    </script>
+  </body>
+</html>
