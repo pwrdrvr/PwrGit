@@ -113,7 +113,9 @@ current appropriate `main` commit as the branch point, even when it includes
 post-release fixes or enhancements, then bump `main` to the next alpha train.
 After the cut, release `N.N.P-prerelease.M` maintenance candidates and patches
 from `releases/N.N` and keep the next train on `main` with its `-alpha` and
-`-beta` tags.
+`-beta` tags before its own suffix-free stable release. Both branches may
+publish suffix-free stable releases: for example, `v1.0.1` from `releases/1.0`
+and `v2.0.0` from `main`.
 
 Settings → Updates maps tag suffixes onto two axes (Stable|Beta ×
 Latest|Prerelease):
@@ -124,6 +126,12 @@ Latest|Prerelease):
 | Stable · Prerelease | `v1.0.6-prerelease.1` | Pre-release |
 | Beta · Latest | `v1.1.0-beta.3` | Pre-release |
 | Beta · Prerelease | `v1.1.0-alpha.7` | Pre-release |
+
+A suffix-free stable tag may come from either the active `main` train or a
+maintenance branch. GitHub's `Latest` flag and `/releases/latest` URL name one
+repository-wide release, not one per train. The current updater likewise
+selects a single highest stable release globally; until train pinning exists,
+users who need a maintenance-line update install it manually.
 
 Use `-prerelease.N` for Stable candidates. It may be tagged on `main` while the
 current `N.N` train is active there; after the cut, use it for that train only

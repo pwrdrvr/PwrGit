@@ -72,12 +72,14 @@ repository's default branch:
   `main` to the next alpha train.
 - After that cut, prepare and tag `N.N.P-prerelease.M` maintenance candidates
   and patches from `releases/N.N`; `main` carries the next train with its
-  `-alpha` and `-beta` tags. Do not publish `-alpha` or `-beta` from the
-  maintenance branch: the Beta feed is shared and selects the next train's
-  higher SemVer candidate. A short-lived `release/v<version>` pull-request
-  source branch is only a metadata-review vehicle and never substitutes for, or
-  triggers, a maintenance branch; do not create `releases/N.N` merely because
-  that source PR promotes a beta to stable.
+  `-alpha` and `-beta` tags before its own suffix-free stable release. Both
+  branches may publish suffix-free stable releases: for example, `v1.0.1` from
+  `releases/1.0` and `v2.0.0` from `main`. Do not publish `-alpha` or `-beta`
+  from the maintenance branch: the Beta feed is shared and selects the next
+  train's higher SemVer candidate. A short-lived `release/v<version>`
+  pull-request source branch is only a metadata-review vehicle and never
+  substitutes for, or triggers, a maintenance branch; do not create
+  `releases/N.N` merely because that source PR promotes a beta to stable.
 
 ## Guardrails
 
@@ -105,6 +107,11 @@ repository's default branch:
   - Stable Prerelease: `v1.0.6-prerelease.1` (GitHub Pre-release)
   - Beta Latest: `v1.1.0-beta.3` (GitHub Pre-release; smoke-checked `main`)
   - Beta Prerelease: `v1.1.0-alpha.7` (GitHub Pre-release; may not install)
+- A suffix-free stable tag may come from either the active `main` train or a
+  maintenance branch. GitHub's `Latest` flag and `/releases/latest` URL name
+  one repository-wide release, not one per train. The current updater likewise
+  selects a single highest stable release globally; until train pinning exists,
+  users who need a maintenance-line update install it manually.
 - Keep `-prerelease.N` for Stable candidates. It may be used on `main` while
   the `N.N` train remains there; after the cut, use it for that `N.N` train
   only from `releases/N.N`. Do not reuse `-rc` or `-beta` for 1.0 RCs; `-beta`

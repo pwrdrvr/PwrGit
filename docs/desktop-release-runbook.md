@@ -57,6 +57,14 @@ may publish its `N.N.P-prerelease.M` candidates; the next `main` train uses
 `-alpha` and `-beta`. Those suffixes share one Beta feed, where a higher-SemVer
 next-train candidate would otherwise hide the maintenance candidate.
 
+Both branches may later publish suffix-free stable releases: for example,
+`v1.0.1` from `releases/1.0` and `v2.0.0` from `main`. That does not make
+GitHub's `Latest` flag branch-specific: its `/releases/latest` URL names one
+repository-wide release. The current updater also selects one highest stable
+release globally and cannot yet keep a user on a major/minor train; a user
+needing a maintenance-line update installs it manually until train pinning is
+implemented.
+
 ## Prepare and tag
 
 Choose `<release-branch>` from the lifecycle above: `main` while its `N.N`
