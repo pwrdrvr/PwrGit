@@ -24,6 +24,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import {
+  releaseNotesUrl,
   UPDATE_CHANNELS,
   UPDATE_TRAINS,
   type AppSettingsSnapshot,
@@ -34,6 +35,7 @@ import {
   type UpdateTrain
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import { useAppUpdateStatus } from "../update/useAppUpdateStatus";
 import {
   SettingsField,
@@ -78,6 +80,17 @@ function sameVersion(a: string | undefined, b: string | undefined): boolean {
 
 function readReleases() {
   return dispatch("app:readUpdateReleases", undefined);
+}
+
+/** The version the visible status line is talking about — so the link beside
+ *  it points at THAT release and not at whatever is installed.
+ *
+ *  Written as a property test rather than a status list on purpose: every
+ *  member of the union either carries a `version` or has nothing to link to
+ *  (`checking`, `skipped`, `error`), so a status added later is covered the
+ *  day it lands. */
+function resultVersion(result: AppUpdateCheckResult): string | undefined {
+  return "version" in result ? result.version : undefined;
 }
 
 function updateResultText(result: AppUpdateCheckResult): string {
@@ -259,6 +272,20 @@ export function UpdatesSettings(props: {
     }
   };
 
+  // The two places this pane names a version — the status line and the Restart
+  // button — often name the SAME one: a check that lands on `downloaded`
+  // writes both. Two identical "Release notes" links a row apart is one too
+  // many, so the Restart row wins the tie. It has to: a window opened after a
+  // background download shows that button with no status line beside it, which
+  // is exactly the case where the version is otherwise unexplained.
+  const restartNotesUrl = releaseNotesUrl(downloadedVersion);
+  const resultNotesUrl =
+    updateResult === undefined
+      ? undefined
+      : releaseNotesUrl(resultVersion(updateResult));
+  const statusNotesUrl =
+    resultNotesUrl === restartNotesUrl ? undefined : resultNotesUrl;
+
   // Roving tabindex + arrow keys, the radiogroup contract. Focus moves and
   // selection does NOT follow it: picking a slot rewrites which build the app
   // installs, so a stray arrow press should not change the feed. The user
@@ -357,27 +384,41 @@ export function UpdatesSettings(props: {
                       const index = rowIndex * COLUMNS + columnIndex;
                       const release = releaseVersions?.[rowTrain]?.[slotChannel];
                       return (
-                        <SlotTile
-                          key={slotChannel}
-                          train={rowTrain}
-                          channel={slotChannel}
-                          release={release}
-                          loading={!releasesSettled}
-                          unread={releasesError !== undefined}
-                          selected={index === selectedIndex}
-                          installed={sameVersion(release?.version, appVersion)}
-                          tabbable={index === selectedIndex}
-                          onSelect={() => {
-                            props.onSelectionChange({
-                              train: rowTrain,
-                              channel: slotChannel
-                            });
-                          }}
-                          onKeyDown={handleSlotKeyDown(index)}
-                          registerRef={(element) => {
-                            slotRefs.current[index] = element;
-                          }}
-                        />
+                        // The link is a SIBLING of the tile, not a child: the
+                        // tile is the radio, and an interactive element nested
+                        // inside one is neither valid HTML nor reachable by
+                        // keyboard. Picking a slot rewrites which build the app
+                        // installs, so reading the notes first has to be
+                        // possible WITHOUT picking — that is the whole reason
+                        // all four are here rather than one link under the
+                        // selected slot.
+                        <div key={slotChannel} className="settings-slot-cell">
+                          <SlotTile
+                            train={rowTrain}
+                            channel={slotChannel}
+                            release={release}
+                            loading={!releasesSettled}
+                            unread={releasesError !== undefined}
+                            selected={index === selectedIndex}
+                            installed={sameVersion(release?.version, appVersion)}
+                            tabbable={index === selectedIndex}
+                            onSelect={() => {
+                              props.onSelectionChange({
+                                train: rowTrain,
+                                channel: slotChannel
+                              });
+                            }}
+                            onKeyDown={handleSlotKeyDown(index)}
+                            registerRef={(element) => {
+                              slotRefs.current[index] = element;
+                            }}
+                          />
+                          <ReleaseNotesLink
+                            url={releaseNotesUrl(release?.version)}
+                            className="settings-slot-notes"
+                            ariaLabel={`Release notes for ${TRAIN_LABEL[rowTrain]} ${CHANNEL_LABEL[slotChannel]} ${release?.version ?? ""}`}
+                          />
+                        </div>
                       );
                     })}
                   </Fragment>
@@ -399,6 +440,14 @@ export function UpdatesSettings(props: {
                   role={updateResult.status === "error" ? "alert" : undefined}
                 >
                   {updateResultText(updateResult)}
+                  {/* Inline, inside the same line, because it is scoped to the
+                      version that line just named — an "Update ready: v0.16.1"
+                      with no way to find out what v0.16.1 holds was the gap
+                      this whole change closes. */}
+                  <ReleaseNotesLink
+                    url={statusNotesUrl}
+                    className="settings-notes-link"
+                  />
                 </span>
               ) : undefined
             }
@@ -417,6 +466,14 @@ export function UpdatesSettings(props: {
                     >
                       Restart to Update ({downloadedVersion})
                     </button>
+                    {/* Under the button that commits to it. This is the one
+                        version the pane names without any check having run in
+                        this window — a background download put it there. */}
+                    <ReleaseNotesLink
+                      url={restartNotesUrl}
+                      className="settings-notes-link"
+                      ariaLabel={`Release notes for v${downloadedVersion}`}
+                    />
                     {updateRestartError ? (
                       <span
                         className="settings-update-channel__result settings-update-channel__result--error"

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AppUpdateToast } from "../update/AppUpdateToast";
+import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import { RemoteActivityToast } from "../remote/RemoteActivityToast";
 import { dispatch } from "../../lib/pwrgit";
 import { dismissToast, subscribeToasts, type Toast } from "../../lib/toast";
@@ -88,6 +89,15 @@ function ToastCard({ toast }: { toast: Toast }) {
         )}
       </div>
       <div className="app-toast__actions">
+        {/* Before the generic actions: a card that says "You're running
+            v0.16.1" is the only place that version appears, and the way to
+            read what is in it belongs beside the claim, not after Dismiss.
+            `undefined` on every toast that names no version, and the control
+            renders nothing for it. */}
+        <ReleaseNotesLink
+          url={toast.notesUrl}
+          className="app-toast__notes"
+        />
         {toast.showLogsAction !== false && (
           <button
             className="app-toast__button"

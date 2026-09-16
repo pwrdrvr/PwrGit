@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import {
   PWRGIT_LINKS,
+  releaseNotesUrl,
   type AppDocumentKind,
   type AppIdentity,
   type PwrGitLinkName
 } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
+import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import {
   SettingsField,
   SettingsPanelHead,
@@ -290,7 +292,23 @@ export function AboutSettings() {
             <SettingsField
               label="Version"
               control={
-                <code className="about-identity-value">v{identity.version}</code>
+                <span className="about-identity-version">
+                  <code className="about-identity-value">
+                    v{identity.version}
+                  </code>
+                  {/* The documents this pane opens below describe the build
+                      that is RUNNING — the license and the third-party
+                      notices — and neither says what changed in it. The
+                      release page does, and this is the only place the running
+                      version is named. A development build is not a published
+                      release, so the control disappears; the Releases row
+                      below is the index for that case. */}
+                  <ReleaseNotesLink
+                    url={releaseNotesUrl(identity.version)}
+                    className="settings-notes-link"
+                    ariaLabel={`Release notes for v${identity.version}`}
+                  />
+                </span>
               }
             />
             <SettingsField

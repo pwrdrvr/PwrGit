@@ -204,4 +204,29 @@ describe("ToastHost", () => {
 
     expect(eyebrows()).toEqual(["error:Push failed"]);
   });
+
+  it("offers release notes only for a toast that names a version", async () => {
+    // "You're up to date (v1.0.0)" is the only place that version appears, so
+    // the card that says it carries the way to read what is in it. Every other
+    // notice in this stack names none, and must not grow a control for it.
+    await act(async () => {
+      showInfoToast({
+        key: "check",
+        title: "PwrGit is up to date",
+        message: "You're running v1.0.0.",
+        notesUrl: "https://github.com/pwrdrvr/PwrGit/releases/tag/v1.0.0"
+      });
+      showInfoToast({ title: "Tag created", message: "v1.2.3" });
+    });
+
+    const links = container.querySelectorAll<HTMLButtonElement>(
+      "button.app-toast__notes"
+    );
+    expect(links).toHaveLength(1);
+
+    await act(async () => links[0]?.click());
+    expect(dispatchMock).toHaveBeenLastCalledWith("shell:openExternal", {
+      url: "https://github.com/pwrdrvr/PwrGit/releases/tag/v1.0.0"
+    });
+  });
 });

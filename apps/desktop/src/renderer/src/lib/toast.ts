@@ -14,6 +14,12 @@ export type Toast = {
   /** Optional action payload, separate from the explanatory card text. */
   copyText?: string;
   copyLabel?: string;
+  /** The published release page for the version this toast NAMES, from
+   *  `releaseNotesUrl`. A card that says "You're running v0.16.1" is the only
+   *  place that version appears, so it carries the way to read what is in it;
+   *  `undefined` both for a toast about no particular version and for a
+   *  version this repo never tagged. */
+  notesUrl?: string;
   /** Errors head the card in the danger color; anything else is not a
    *  failure and must not be dressed as one. */
   tone: "error" | "info";
@@ -70,6 +76,7 @@ export function showInfoToast(input: {
   key?: string;
   title: string;
   message: string;
+  notesUrl?: string;
 }): void {
   pushToast({
     ...input,

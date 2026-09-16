@@ -37,6 +37,19 @@ describe("updateProgressCopy", () => {
     expect(copy.title).toBe("Checking for updates");
     expect(copy.percent).toBeUndefined();
     expect(copy.cancelable).toBe(false);
+    // Nothing to read about either: `checking` has no version yet, and that is
+    // the one card that deliberately renders no release-notes link.
+    expect(copy.notesUrl).toBeUndefined();
+  });
+
+  it("carries the release page for every phase that names a version", () => {
+    expect(
+      updateProgressCopy({ status: "available", version: "1.0.0" }).notesUrl
+    ).toBe("https://github.com/pwrdrvr/PwrGit/releases/tag/v1.0.0");
+    expect(
+      updateProgressCopy({ status: "downloading", version: "1.0.0", percent: 42 })
+        .notesUrl
+    ).toBe("https://github.com/pwrdrvr/PwrGit/releases/tag/v1.0.0");
   });
 
   it("offers Cancel as soon as a download is the thing being waited on", () => {
