@@ -111,7 +111,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
           lookup-only: "true"
@@ -126,7 +126,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
           lookup-only: "true"
@@ -145,7 +145,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
 
@@ -166,7 +166,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
 
@@ -183,7 +183,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
 
@@ -212,7 +212,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
 
@@ -251,7 +251,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
           lookup-only: "true"
@@ -277,7 +277,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         timeout-minutes: 10
         with:
           node-version: 24.x
@@ -403,7 +403,7 @@ jobs:
       # `packageManager` field via Corepack, so there's no second pnpm pin to
       # drift on upgrade.
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
 
@@ -446,7 +446,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@f5895f6b363a7510618f66e667a7c3964671a880 # PR #12 validation
         with:
           node-version: 24.x
 
