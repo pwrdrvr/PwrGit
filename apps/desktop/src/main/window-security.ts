@@ -29,18 +29,26 @@ export function applyWindowSecurityHardening(
   } = {}
 ): void {
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (windowOpen === "open-in-browser") {
-      void openExternalUrl(url).then((result) => {
-        if (result.ok) return;
-        logMain(
-          "warn",
-          "window-guards",
-          "refused a window-open link:",
-          result.error.message,
-          url
-        );
-      });
+    if (windowOpen === "deny") {
+      logMain(
+        "warn",
+        "window-guards",
+        "refused a window-open link: this window opens nothing",
+        describeUrlForLog(url)
+      );
+      return { action: "deny" };
     }
+
+    void openExternalUrl(url).then((result) => {
+      if (result.ok) return;
+      logMain(
+        "warn",
+        "window-guards",
+        "refused a window-open link:",
+        result.error.message,
+        describeUrlForLog(url)
+      );
+    });
 
     return { action: "deny" };
   });
@@ -50,7 +58,12 @@ export function applyWindowSecurityHardening(
       return;
     }
     event.preventDefault();
-    logMain("warn", "window-guards", "blocked renderer navigation:", targetUrl);
+    logMain(
+      "warn",
+      "window-guards",
+      "blocked renderer navigation:",
+      describeUrlForLog(targetUrl)
+    );
   });
 }
 
@@ -62,7 +75,7 @@ export function applyWindowSecurityHardening(
  * — Electron does not even raise `will-navigate` for an in-page hash change,
  * but the predicate must not depend on that.
  */
-export function isSafeRendererNavigation(targetUrl: string): boolean {
+function isSafeRendererNavigation(targetUrl: string): boolean {
   let parsed: URL;
   try {
     parsed = new URL(targetUrl);
@@ -81,4 +94,25 @@ export function isSafeRendererNavigation(targetUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Scheme and host only, for the two refusal logs above. Both are handed a
+ * renderer-supplied URL, and `main.log` is a file on disk that Help → Logs
+ * also shows for copying into bug reports — so the whole string must not go
+ * in. The credential case is the pointed one: a URL refused *because* it
+ * embeds `user:token@` would otherwise have that token persisted by the very
+ * guard that rejected it. Query strings carry OAuth codes and session tokens
+ * for the same reason, so they are dropped as well; scheme and host are what
+ * a reader needs to tell a blocked `file://` from a blocked remote host.
+ */
+function describeUrlForLog(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "<unparseable URL>";
+  }
+
+  return parsed.host === "" ? parsed.protocol : `${parsed.protocol}//${parsed.host}`;
 }
