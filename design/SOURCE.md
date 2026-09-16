@@ -80,7 +80,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
 | `Focused Lens Stability - UX Review.dc.html` | The Focused lens re-sorting under the pointer &mdash; the ladder rule that fires on click, the options weighed, and a live prototype of the hold. |
-| `Fetch Status Popover - UX Review.dc.html` | Why the fetch/pull status card was never seen &mdash; the four gates it stood behind &mdash; and the click-pinned lifecycle that replaces them, with the settled receipt, the countdown rail, and a live prototype of the dismissal rules. |
+| `Fetch Status Popover - UX Review.dc.html` | Why the fetch/pull status card was never seen &mdash; the four gates it stood behind &mdash; and the click-pinned lifecycle that replaces them, with the settled receipt, the countdown rail, and a live prototype of the dismissal rules. Turn&nbsp;4 is the review after use: why the running card is unreadable, and the accumulating phase list that makes the receipt out of it. |
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
@@ -156,6 +156,21 @@ way. Card **1b** draws the timing as a strip instead, and card **2d** is a live
 `DCLogic` prototype of the whole lifecycle: press Fetch at 0.9&thinsp;s (the
 duration the old age gate could never admit), then try to keep the card. Its
 repository names are invented.
+
+**Turn 4 was added after the lifecycle shipped and was used.** It is the second
+half of the same defect: the card is now reachable, and what it shows while an
+operation runs is unreadable &mdash; five immediate redraws inside a 620&thinsp;ms
+pull, a progress block that mounts and unmounts, and a Git-output tail that
+rewrites its own last line. Card **4b** is the argument in one picture: the same
+six-second pull at three moments, *replacing* on the left and *accumulating* on
+the right, where every row readable in the first frame is still there in the
+receipt. Card **4d** runs both at both speeds. Turn 4 is a proposal, not a
+record of what is built &mdash; the shipped card is turns 1&ndash;3.
+
+That turn shares one `DCLogic` component with turn 2, because an artboard has a
+single `data-dc-script` block. `renderVals()` merges two value sets
+(`t2Vals()` and `p4Vals()`) rather than one class growing two personalities;
+the `p4` prefix is what keeps the bindings from colliding.
 
 The Tag Chips captures are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a

@@ -177,6 +177,36 @@
           .readout.holdr { background: var(--oksoft); color: var(--okt); }
           .readout.badr { background: var(--badsoft); color: var(--badt); }
           .hint { margin: 0; font: 400 10px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- turn 4: the accumulating phase list ----
+             A row is written once and never rewritten; only its marker moves
+             from running to done. That is the whole difference from .ra-out,
+             which rewrites its last line at Git's own progress rate. */
+          .ph { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-app); overflow: hidden; }
+          .ph-r { display: grid; grid-template-columns: 13px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 5px 8px; border-bottom: 1px solid var(--line0); font: 500 11px/1.45 var(--sans); color: var(--t2); }
+          .ph-r:last-child { border-bottom: 0; }
+          .ph-m { font: 700 10px/1.45 var(--mono); color: var(--ok); }
+          .ph-r.now { background: rgba(255, 138, 31, 0.06); }
+          .ph-r.now .ph-m { color: var(--acc); }
+          .ph-r.now .ph-n { color: var(--t1); }
+          .ph-r.bad .ph-m, .ph-r.bad .ph-n { color: var(--badt); }
+          .ph-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .ph-v { font: 500 10.5px/1.45 var(--mono); color: var(--t3); font-variant-numeric: tabular-nums; }
+          .ph-r.now .ph-v { color: var(--accb); }
+          .ph-bar { grid-column: 2 / -1; height: 3px; margin-top: 4px; border-radius: 2px; background: rgba(140, 133, 122, 0.25); overflow: hidden; }
+          .ph-bar > span { display: block; height: 100%; background: var(--acc); }
+          /* Git's own words, behind a disclosure: evidence for a failure, not
+             a play-by-play of a success. */
+          .disc { display: inline-flex; align-items: center; gap: 5px; font: 600 10px/1 var(--mono); color: var(--t3); cursor: pointer; }
+          .disc:hover { color: var(--t2); }
+          .frames { display: flex; flex-direction: column; gap: 10px; }
+          .fr-t { font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .col { display: flex; flex-direction: column; gap: 10px; }
+          .col-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .col-h.bad2 { color: var(--badt); }
+          .col-h.ok2 { color: var(--okt); }
+          .col-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--t3); text-transform: none; letter-spacing: 0; }
+          .tr.rules { grid-template-columns: 150px 74px minmax(0, 1fr); }
           .is-off { display: none !important; }
         </style>
       </helmet>
@@ -466,6 +496,342 @@ error: failed to push some refs</pre>
         </div>
         <p class="dv-next">Try next: &#8220;build it &#8212; A, hover kept, 4&#8239;s&#8221; &#183; &#8220;write 3a option B as a follow&#8209;up issue&#8221;</p>
       </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">&#8220;What was all that flashing text telling me?&#8221;</span>
+        </div>
+        <p class="dv-sub">
+          Shipped, used, and the verdict from use: the card shows now instead of flashing, but what
+          it shows during an operation is unreadable &#8212; text that replaces itself faster than it
+          can be read, a box that resizes while you read it, and then one word at the end. The card
+          was designed to narrate a <em>slow</em> operation. This turn is about the fast one, which
+          is nearly all of them.
+        </p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a What churns">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Every element is replaced, and a fast pull replaces all of them five times</div>
+            <div class="pair">
+              <div class="find">
+                <div class="fitem">
+                  <span class="pin">1</span>
+                  <div>
+                    <h4>Phase changes bypass the throttle</h4>
+                    <p>Output is debounced to 400&#8239;ms, but every phase transition calls
+                      <code>publish(true)</code> &#8212; immediate. A pull walks
+                      <code>prepare &#8594; fetch &#8594; fast_forward &#8594; reapply &#8594; refresh</code>,
+                      so a 620&#8239;ms pull lands five full redraws in six tenths of a second.</p>
+                  </div>
+                </div>
+                <div class="fitem">
+                  <span class="pin">2</span>
+                  <div>
+                    <h4>The meter mounts and unmounts</h4>
+                    <p>The progress block is drawn only while <code>progress !== null</code>, so it
+                      appears for the transfer phase and vanishes for the others. The card changes
+                      height under the pointer &#8212; twice per pull, minimum.</p>
+                  </div>
+                </div>
+                <div class="fitem">
+                  <span class="pin">3</span>
+                  <div>
+                    <h4>The tail rewrites its own last line</h4>
+                    <p>Git&#8217;s progress output is <code>\r</code>-rewritten &#8212; designed to be
+                      transient in a terminal. The record reproduces that faithfully, so the bottom
+                      line of the block flickers at Git&#8217;s rate while the block itself grows
+                      from nothing to its 108&#8239;px cap.</p>
+                  </div>
+                </div>
+                <div class="fitem">
+                  <span class="pin ok">4</span>
+                  <div>
+                    <h4>And then it is all thrown away</h4>
+                    <p><code>settle</code> replaces every one of those elements with a single
+                      sentence. Whatever you managed to read had no bearing on what you are left
+                      looking at, which is what makes the churn feel like it was hiding something.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="tl">
+                <div class="tl-row">
+                  <span class="tl-lab">one pull, 620ms</span>
+                  <span class="tl-track">
+                    <span class="tl-span gate" style="left:0%;width:17%">prepare</span>
+                    <span class="tl-span gate" style="left:18%;width:38%">fetch</span>
+                    <span class="tl-span gate" style="left:57%;width:23%">ff</span>
+                    <span class="tl-span gate" style="left:81%;width:11%">reapply</span>
+                    <span class="tl-span gate" style="left:93%;width:7%"></span>
+                  </span>
+                </div>
+                <div class="tl-row">
+                  <span class="tl-lab">card redraws</span>
+                  <span class="tl-track">
+                    <span class="tl-span none" style="left:0%;width:100%">5 immediate &#183; 1 settle &#8212; &#8776;100ms apart</span>
+                  </span>
+                </div>
+                <div class="tl-row">
+                  <span class="tl-lab">readable?</span>
+                  <span class="tl-track">
+                    <span class="tl-span gate" style="left:0%;width:100%">nothing survives long enough</span>
+                  </span>
+                </div>
+                <div class="tl-axis">
+                  <span></span>
+                  <span class="tl-ticks"><span>0</span><span>200ms</span><span>400ms</span><span>620ms</span></span>
+                </div>
+                <p class="note" style="margin-top:8px;max-width:420px;">
+                  <b>The diagnosis is not &#8220;too fast&#8221;.</b> It is that everything the card
+                  draws is <b>replaced</b> rather than <b>accumulated</b> &#8212; correct for a
+                  five-minute fetch where each phase lasts long enough to read, and exactly wrong
+                  below a second, where the narration plays out before the first frame is read.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Replace vs accumulate">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>The same 6&#8239;s pull, three moments each &#8212; replace on the left, accumulate on the right</div>
+            <div class="pair">
+
+              <div class="col">
+                <div class="col-h bad2">Today &#8212; replace <em>nothing survives frame to frame</em></div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 1.2s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">1s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st muted">Preparing local changes</p>
+                      <p class="ra-cmd">git stash push --include-untracked</p>
+                      <pre class="ra-out">Git has produced no output yet.</pre>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 3.4s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">3s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st muted">Fetching updates</p>
+                      <div class="ra-meter">
+                        <div class="ra-bar"><span style="width:71%"></span></div>
+                        <span class="ra-ml">Receiving objects 71% &#183; 4.2 MiB &#183; 9.1 MiB/s</span>
+                      </div>
+                      <p class="ra-cmd">git fetch --prune --progress</p>
+                      <pre class="ra-out">remote: Enumerating objects: 214, done.
+remote: Counting objects: 100% (214/214), done.
+remote: Compressing objects: 100% (118/118), done.
+Receiving objects:  71% (152/214), 4.20 MiB</pre>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 5.8s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">5s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st muted">Reapplying local changes</p>
+                      <p class="ra-cmd">git stash pop --index</p>
+                      <pre class="ra-out">Updating 9f2c1a4..b71e803
+Fast-forward</pre>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">settled</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">6s</span><button class="ra-x">&#10005;</button></span></div>
+                      <p class="ra-st okst">Fast-forwarded &#183; local changes stashed and reapplied</p>
+                      <div class="ra-acts"><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                    <span class="rail" style="transform:scaleX(0.62)"></span>
+                  </div>
+                  <span class="cap bad"><b>4 heights, 4 texts.</b> None of the first three is on screen at the end.</span>
+                </div>
+              </div>
+
+              <div class="col">
+                <div class="col-h ok2">Proposed &#8212; accumulate <em>a row is written once and never rewritten</em></div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 1.2s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">1s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r now">
+                          <span class="ph-m">&#9679;</span>
+                          <span class="ph-n">Fetching updates</span>
+                          <span class="ph-v">4.2 MiB &#183; 9.1 MiB/s</span>
+                          <span class="ph-bar"><span style="width:38%"></span></span>
+                        </div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 3.4s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">3s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fetched</span><span class="ph-v">3 refs &#183; 5.9 MiB</span></div>
+                        <div class="ph-r now">
+                          <span class="ph-m">&#9679;</span>
+                          <span class="ph-n">Fast-forwarding</span>
+                          <span class="ph-v">12 commits</span>
+                          <span class="ph-bar"><span style="width:62%"></span></span>
+                        </div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">t = 5.8s</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">5s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fetched</span><span class="ph-v">3 refs &#183; 5.9 MiB</span></div>
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fast-forwarded</span><span class="ph-v">12 commits</span></div>
+                        <div class="ph-r now">
+                          <span class="ph-m">&#9679;</span>
+                          <span class="ph-n">Reapplying your changes</span>
+                          <span class="ph-v">4 files</span>
+                          <span class="ph-bar"><span style="width:55%"></span></span>
+                        </div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab stop">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="frames">
+                  <span class="fr-t">settled</span>
+                  <div class="card">
+                    <div class="ra">
+                      <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">6s</span><button class="ra-x">&#10005;</button></span></div>
+                      <div class="ph">
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fetched</span><span class="ph-v">3 refs &#183; 5.9 MiB</span></div>
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Fast-forwarded</span><span class="ph-v">12 commits</span></div>
+                        <div class="ph-r"><span class="ph-m">&#10003;</span><span class="ph-n">Reapplied your changes</span><span class="ph-v">4 files</span></div>
+                      </div>
+                      <span class="disc">&#8250; Git output</span>
+                      <div class="ra-acts"><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                    </div>
+                    <span class="rail" style="transform:scaleX(0.62)"></span>
+                  </div>
+                  <span class="cap ok"><b>The receipt is what the running card became.</b> Nothing is wiped, so nothing needs re-reading.</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Five rules, and what each one costs</div>
+            <div class="tbl" style="width:660px;">
+              <div class="tr rules head"><span>Rule</span><span>Needs</span><span>Why</span></div>
+              <div class="tr rules">
+                <b>Append, never rewrite</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>A row&#8217;s text is written once; only its marker moves &#9679;&#8594;&#10003;. Text under the eye never moves, which is the whole of &#8220;readable&#8221;.</span>
+              </div>
+              <div class="tr rules">
+                <b>Output behind a disclosure</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>Git&#8217;s <code>\r</code> progress is evidence for a failure, not narration for a success. Collapsing it removes the flicker <em>and</em> the 0&#8594;108&#8239;px growth in one move.</span>
+              </div>
+              <div class="tr rules">
+                <b>No row for a phase that did nothing</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>A pull with nothing to stash must not draw &#8220;Preparing local changes&#8221;. Most fetches then settle to a single line, which is the honest amount.</span>
+              </div>
+              <div class="tr rules">
+                <b>Under &#8776;1&#8239;s, no running card at all</b>
+                <span><span class="st chg">renderer</span></span>
+                <span>Click straight to the receipt. Most of the churn is a play-by-play of something that finished before the first frame landed. The pin still happens at the click &#8212; only the narration waits.</span>
+              </div>
+              <div class="tr rules last">
+                <b>Rows carry numbers</b>
+                <span><span class="st bug">main</span></span>
+                <span><code>remote:fetch</code> and <code>remote:push</code> return <code>null</code>; <code>remote:pull</code> returns three booleans. <code>pullBranch</code> holds the commit range either side of the merge and discards it. Without this the rows are honest but wordless &#8212; checkmarks, no counts.</span>
+              </div>
+            </div>
+            <p class="note" style="max-width:660px;">
+              <b>The first four ship without touching main</b>, and they are what kills the churn.
+              The fifth is what turns &#8220;Fast-forwarded &#10003;&#8221; into &#8220;Fast-forwarded &#183; 12 commits&#8221;,
+              and it is the same protocol widening card <a href="#3a">3a</a> deferred &#8212; a much smaller
+              version of it, since the commands need only <em>return</em> what they did rather than
+              emit terminal records.
+            </p>
+          </div>
+
+          <div class="dv-opt" id="4d" data-screen-label="4d Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Live &#8212; run the same pull both ways, at both speeds</div>
+            <div class="proto">
+              <div class="ctl">
+                <span class="ctl-lab">Card</span>
+                <span class="seg"><button class="{{p4TodayCls}}" onClick="{{p4SetToday}}">today</button><button class="{{p4PropCls}}" onClick="{{p4SetProp}}">proposed</button></span>
+                <span class="ctl-lab" style="margin-left:6px;">Pull takes</span>
+                <span class="seg"><button class="{{p4FastCls}}" onClick="{{p4SetFast}}">0.62s</button><button class="{{p4SlowCls}}" onClick="{{p4SetSlow}}">6s</button></span>
+                <button class="btn" style="margin-left:6px;" onClick="{{p4Run}}">{{p4RunLabel}}</button>
+              </div>
+
+              <div class="card {{p4TodayOff}}">
+                <div class="ra">
+                  <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">{{p4El}}</span><button class="ra-x" onClick="{{p4Close}}">&#10005;</button></span></div>
+                  <p class="ra-st {{p4tStCls}}">{{p4tSt}}</p>
+                  <div class="ra-meter {{p4tMeterOff}}">
+                    <div class="ra-bar"><span style="{{p4tMeterStyle}}"></span></div>
+                    <span class="ra-ml">{{p4tMeterLabel}}</span>
+                  </div>
+                  <p class="ra-cmd {{p4tCmdOff}}">{{p4tCmd}}</p>
+                  <pre class="ra-out {{p4tOutOff}}">{{p4tOut}}</pre>
+                  <div class="ra-acts"><button class="rab stop {{p4StopOff}}">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                </div>
+                <span class="rail {{p4RailOff}}" style="{{p4RailStyle}}"></span>
+              </div>
+
+              <div class="card {{p4PropOff}}">
+                <div class="ra">
+                  <div class="ra-h"><span class="ra-title">Pull &#183; svc &#183; main</span><span class="ra-right"><span class="ra-el">{{p4El}}</span><button class="ra-x" onClick="{{p4Close}}">&#10005;</button></span></div>
+                  <div class="ph {{p4PhOff}}">
+                    <div class="ph-r {{p4r1Cls}}"><span class="ph-m">{{p4r1M}}</span><span class="ph-n">{{p4r1N}}</span><span class="ph-v">{{p4r1V}}</span><span class="ph-bar {{p4r1BarOff}}"><span style="{{p4r1BarStyle}}"></span></span></div>
+                    <div class="ph-r {{p4r2Cls}} {{p4r2Off}}"><span class="ph-m">{{p4r2M}}</span><span class="ph-n">{{p4r2N}}</span><span class="ph-v">{{p4r2V}}</span><span class="ph-bar {{p4r2BarOff}}"><span style="{{p4r2BarStyle}}"></span></span></div>
+                    <div class="ph-r {{p4r3Cls}} {{p4r3Off}}"><span class="ph-m">{{p4r3M}}</span><span class="ph-n">{{p4r3N}}</span><span class="ph-v">{{p4r3V}}</span><span class="ph-bar {{p4r3BarOff}}"><span style="{{p4r3BarStyle}}"></span></span></div>
+                  </div>
+                  <span class="disc">&#8250; Git output</span>
+                  <div class="ra-acts"><button class="rab stop {{p4StopOff}}">Cancel</button><button class="rab">Logs</button><button class="rab">Copy</button></div>
+                </div>
+                <span class="rail {{p4RailOff}}" style="{{p4RailStyle}}"></span>
+              </div>
+
+              <div class="readout {{p4ReadCls}}">{{p4Read}}</div>
+              <p class="hint">{{p4Hint}}</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;build 4b &#8212; rules 1&#8211;4, leave the numbers for a second PR&#8221; &#183; &#8220;show 4b with a failure partway through&#8221; &#183; &#8220;what does Push look like with one phase?&#8221;</p>
+      </section>
     </x-dc>
     <script
       type="text/x-dc"
@@ -484,11 +850,18 @@ error: failed to push some refs</pre>
             stage: "idle",     // "running" | "ok" | "fail" | "canceled"
             t: 0,              // ms inside the current stage
             hover: false,
-            held: false
+            held: false,
+            // turn 4's prototype, on its own clock
+            p4mode: "today",
+            p4dur: 620,
+            p4stage: "idle",
+            p4t: 0
           };
           this.timer = null;
+          this.p4timer = null;
+          this.P4_RAIL = 4000;
         }
-        componentWillUnmount() { this.stop(); }
+        componentWillUnmount() { this.stop(); this.p4Stop(); }
         stop() {
           if (this.timer !== null) { clearInterval(this.timer); this.timer = null; }
         }
@@ -527,6 +900,9 @@ error: failed to push some refs</pre>
           return (ms / 1000).toFixed(1) + "s";
         }
         renderVals() {
+          return Object.assign(this.t2Vals(), this.p4Vals());
+        }
+        t2Vals() {
           const s = this.state;
           const open = s.kind !== null;
           const running = s.stage === "running";
@@ -657,6 +1033,153 @@ error: failed to push some refs</pre>
               + "Then try: let the rail run out; hover the card to pause it; click the card to hold it; "
               + "click “somewhere else” to dismiss; switch Outcome to failure and watch the rail not appear."
           };
+        }
+
+        /* ======================= turn 4: replace vs accumulate =======================
+           One pull, two cards, driven off one clock. The phase boundaries are
+           the real ones — fetch, fast-forward, reapply — at the proportions a
+           local pull actually spends in them. */
+        P4_PHASES() {
+          return [
+            { to: 0.45, run: "Fetching updates", done: "Fetched", val: "3 refs · 5.9 MiB",
+              live: "4.2 MiB · 9.1 MiB/s", cmd: "git fetch --prune --progress",
+              out: "remote: Enumerating objects: 214, done.\nremote: Counting objects: 100% (214/214), done.\nremote: Compressing objects: 100% (118/118), done.\nReceiving objects:  71% (152/214), 4.20 MiB" },
+            { to: 0.80, run: "Fast-forwarding", done: "Fast-forwarded", val: "12 commits",
+              live: "12 commits", cmd: "git merge --ff-only origin/main",
+              out: "Updating 9f2c1a4..b71e803\nFast-forward" },
+            { to: 1.00, run: "Reapplying your changes", done: "Reapplied your changes", val: "4 files",
+              live: "4 files", cmd: "git stash pop --index",
+              out: "Updating 9f2c1a4..b71e803\nFast-forward" }
+          ];
+        }
+        p4Stop() {
+          if (this.p4timer) { clearInterval(this.p4timer); this.p4timer = null; }
+        }
+        p4Start() {
+          this.p4Stop();
+          this.setState({ p4stage: "running", p4t: 0 });
+          this.p4timer = setInterval(() => { this.p4Tick(); }, this.TICK);
+        }
+        p4Tick() {
+          const s = this.state;
+          if (s.p4stage === "running") {
+            const t = s.p4t + this.TICK;
+            if (t < s.p4dur) { this.setState({ p4t: t }); return; }
+            this.setState({ p4stage: "done", p4t: 0 });
+            return;
+          }
+          const t = s.p4t + this.TICK;
+          if (t < this.P4_RAIL) { this.setState({ p4t: t }); return; }
+          this.p4Stop();
+          this.setState({ p4stage: "idle", p4t: 0 });
+        }
+        p4Close() {
+          this.p4Stop();
+          this.setState({ p4stage: "idle", p4t: 0 });
+        }
+        /** Which phase index the clock is in, and how far through it. */
+        p4At() {
+          const s = this.state;
+          const frac = s.p4dur === 0 ? 1 : Math.min(1, s.p4t / s.p4dur);
+          const phases = this.P4_PHASES();
+          let i = 0;
+          while (i < phases.length - 1 && frac >= phases[i].to) { i += 1; }
+          const from = i === 0 ? 0 : phases[i - 1].to;
+          const within = (frac - from) / (phases[i].to - from);
+          return { frac: frac, i: i, within: Math.max(0, Math.min(1, within)) };
+        }
+        /** One row of the proposed card, as flat bindings. */
+        p4Row(n, index, at, done) {
+          const phase = this.P4_PHASES()[index];
+          const reached = done || at.i > index;
+          const current = !done && at.i === index;
+          const out = {};
+          out["p4r" + n + "Off"] = (reached || current) ? "" : "is-off";
+          out["p4r" + n + "Cls"] = current ? "now" : "";
+          out["p4r" + n + "M"] = current ? "●" : "✓";
+          out["p4r" + n + "N"] = current ? phase.run : phase.done;
+          out["p4r" + n + "V"] = current ? phase.live : phase.val;
+          out["p4r" + n + "BarOff"] = current ? "" : "is-off";
+          out["p4r" + n + "BarStyle"] = "width:" + Math.round(at.within * 100) + "%";
+          return out;
+        }
+        p4Vals() {
+          const s = this.state;
+          const proposed = s.p4mode === "proposed";
+          const running = s.p4stage === "running";
+          const done = s.p4stage === "done";
+          const idle = s.p4stage === "idle";
+          const at = this.p4At();
+          const phase = this.P4_PHASES()[at.i];
+          // Rule 4: below the threshold the narration is skipped outright —
+          // the pin still happens at the click, only the play-by-play waits.
+          const quick = s.p4dur < 1000;
+          const narrating = running && !(proposed && quick);
+          const onScreen = narrating || done;
+
+          let readout = "nothing on screen";
+          let readoutCls = "live";
+          if (running && proposed && quick) {
+            readout = "below the threshold — no running card drawn";
+          } else if (running && proposed) {
+            readout = "row " + (at.i + 1) + " of 3 — the rows above it have not changed";
+            readoutCls = "holdr";
+          } else if (running) {
+            readout = "redraw " + (at.i + 1) + " of 5 — every element replaced";
+            readoutCls = "badr";
+          } else if (done) {
+            readout = proposed
+              ? "receipt — the same three rows, nothing wiped"
+              : "receipt — one sentence, none of the above survived";
+            readoutCls = proposed ? "holdr" : "badr";
+          }
+
+          const vals = {
+            p4TodayCls: proposed ? "" : "on",
+            p4PropCls: proposed ? "on" : "",
+            p4SetToday: () => { this.setState({ p4mode: "today" }); },
+            p4SetProp: () => { this.setState({ p4mode: "proposed" }); },
+            p4FastCls: s.p4dur < 1000 ? "on" : "",
+            p4SlowCls: s.p4dur < 1000 ? "" : "on",
+            p4SetFast: () => { this.setState({ p4dur: 620 }); },
+            p4SetSlow: () => { this.setState({ p4dur: 6000 }); },
+            p4Run: () => { this.p4Start(); },
+            p4RunLabel: idle ? "run pull" : "restart",
+            p4Close: () => { this.p4Close(); },
+
+            p4TodayOff: (!proposed && onScreen) ? "" : "is-off",
+            p4PropOff: (proposed && onScreen) ? "" : "is-off",
+            p4El: (running ? Math.round(s.p4t / 1000) : Math.round(s.p4dur / 1000)) + "s",
+            p4StopOff: running ? "" : "is-off",
+            p4RailOff: done ? "" : "is-off",
+            p4RailStyle: "transform:scaleX(" + (done ? (1 - s.p4t / this.P4_RAIL).toFixed(3) : 0) + ")",
+
+            // Today: one status line, one command, one rolling block — all of
+            // it swapped wholesale at each boundary, and dropped at the end.
+            p4tSt: done ? "Fast-forwarded · local changes stashed and reapplied" : phase.run,
+            p4tStCls: done ? "okst" : "muted",
+            p4tMeterOff: (running && at.i === 0) ? "" : "is-off",
+            p4tMeterStyle: "width:" + Math.round(at.within * 100) + "%",
+            p4tMeterLabel: "Receiving objects " + Math.round(at.within * 100) + "% · 4.2 MiB · 9.1 MiB/s",
+            p4tCmdOff: done ? "is-off" : "",
+            p4tCmd: phase.cmd,
+            p4tOutOff: done ? "is-off" : "",
+            p4tOut: running && at.i === 0 && at.within < 0.25
+              ? "Git has produced no output yet."
+              : phase.out,
+
+            p4PhOff: "",
+            p4Read: readout,
+            p4ReadCls: readoutCls,
+            p4Hint: "Run it on “today” at 0.62 s and try to read a single frame. Then the same on "
+              + "“proposed”: nothing is drawn at all, because it was over before it could be read. "
+              + "Switch to 6 s and compare — on the left every element is replaced three times, on the "
+              + "right each row is written once and is still there in the receipt."
+          };
+          Object.assign(vals, this.p4Row(1, 0, at, done));
+          Object.assign(vals, this.p4Row(2, 1, at, done));
+          Object.assign(vals, this.p4Row(3, 2, at, done));
+          return vals;
         }
       }
     </script>
