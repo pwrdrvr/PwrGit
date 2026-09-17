@@ -4,7 +4,7 @@
 // interesting part of a progress card is the wording and the arithmetic, and
 // neither needs a DOM to be checked.
 
-import type { AppUpdateStatus } from "@pwrgit/shared";
+import { releaseNotesUrl, type AppUpdateStatus } from "@pwrgit/shared";
 
 /** The statuses a user-initiated check passes through before it has an answer.
  *  While the status is one of these the toast shows a live card instead of a
@@ -34,6 +34,9 @@ export type UpdateProgressCopy = {
   meter: string | undefined;
   /** A download is running, so there is something for Cancel to stop. */
   cancelable: boolean;
+  /** The release page for the version being fetched, when it names one.
+   *  `undefined` while `checking`, which has no version yet. */
+  notesUrl: string | undefined;
 };
 
 export function updateProgressCopy(
@@ -45,7 +48,8 @@ export function updateProgressCopy(
       message: "Asking GitHub for the latest release…",
       percent: undefined,
       meter: undefined,
-      cancelable: false
+      cancelable: false,
+      notesUrl: undefined
     };
   }
   if (status.status === "available") {
@@ -54,7 +58,8 @@ export function updateProgressCopy(
       message: `Starting download of v${status.version}…`,
       percent: undefined,
       meter: undefined,
-      cancelable: true
+      cancelable: true,
+      notesUrl: releaseNotesUrl(status.version)
     };
   }
   return {
@@ -67,7 +72,8 @@ export function updateProgressCopy(
     // the bar at 0% for the length of the download.
     percent: clampPercent(status.percent),
     meter: downloadMeter(status),
-    cancelable: true
+    cancelable: true,
+    notesUrl: releaseNotesUrl(status.version)
   };
 }
 

@@ -70,3 +70,53 @@ emitting one sample because a meter cannot be judged against a single frozen
 percent, and it honours Cancel for the same reason. `PWRGIT_E2E_UPDATE_STEP_MS`
 paces it so `e2e/update-check.spec.ts` can click a button that only exists
 mid-download.
+
+## A version the app names, it must also be able to describe
+
+Every update surface prints a version number the user has never seen and cannot
+look up from inside the app. Settings → About opens the license and third-party
+notices that shipped INSIDE the running build — neither says what changed in it,
+and by construction neither can say anything about the build being *offered*: a
+v0.16.0 install cannot carry v0.16.1's notes. Before this, the four-slot matrix,
+the `Update ready: v0.16.1` line, the toast's Restart card and the settled
+outcome toasts all named a version with no way out to what is in it.
+
+So: **any surface that renders a version renders a
+[`ReleaseNotesLink`](./ReleaseNotesLink.tsx) beside it**, and the URL comes from
+`releaseNotesUrl` in
+[packages/shared/src/release-notes.ts](../../../../../../packages/shared/src/release-notes.ts)
+— never composed at the call site.
+
+Four things about that are load-bearing:
+
+- **The URL is DERIVED from the version, not read from the feed.**
+  `AppUpdateReleaseInfo.url` carries GitHub's `html_url` for the four published
+  slots, but the STATUS surfaces have no feed record at all — `AppUpdateStatus`
+  carries a bare version through every transition, including the ones
+  electron-updater raises, which never saw our GitHub read. One composer that
+  takes a version is the only thing all the surfaces can share. Deriving is
+  exact because the release tag is `v` + the version, which
+  `configureAutoUpdaterFeedForRelease` already assumes.
+- **No URL means no control.** `releaseNotesUrl` answers `undefined` for a
+  version that is not *shaped* like a tag this repo publishes, and
+  `ReleaseNotesLink` renders `null` for it. It screens on shape, not existence —
+  nothing can know a tag exists without asking GitHub, so the dev fake's
+  `420.0.0` keeps a link and lands on GitHub's 404. That is the accepted edge;
+  for every version a real update names, the tag exists by construction.
+- **It is a `<button>`, never an `<a href>`.** PwrGit's windows install
+  `setWindowOpenHandler`, so a middle-click on a real anchor is already handed
+  to the OS — but nothing guards SAME-FRAME navigation outside the agent-consent
+  window, so an ordinary left click on an `<a href>` would load github.com into
+  the app frame. Pinned by `ReleaseNotesLink.test.tsx`.
+- **Settings → Updates hangs it OUTSIDE the tile.** The slot tile is a
+  `role="radio"`, and an interactive element nested in one is neither valid HTML
+  nor keyboard-reachable — hence `.settings-slot-cell` wrapping the two. Every
+  slot that resolved gets a link, not just the selected one: picking a slot
+  rewrites which build the app installs, so reading the notes has to be possible
+  without picking.
+
+Two surfaces deliberately render nothing. The `checking` card has no version
+yet, and the `skipped` / `error` toasts name none. On Settings → Updates the
+status line yields to the Restart row when both would name the same version —
+the Restart row has to win, because a window opened after a background download
+shows that button with no status line beside it.

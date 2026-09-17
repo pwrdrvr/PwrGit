@@ -24,9 +24,10 @@
 // Dismissal is per version: a newer update raises the toast again.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppUpdateCheckResult } from "@pwrgit/shared";
+import { releaseNotesUrl, type AppUpdateCheckResult } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { dismissToastKey, showErrorToast, showInfoToast } from "../../lib/toast";
+import { ReleaseNotesLink } from "./ReleaseNotesLink";
 import { useAppUpdateStatus } from "./useAppUpdateStatus";
 import { isUpdateCheckInProgress, updateProgressCopy } from "./update-progress";
 
@@ -39,26 +40,36 @@ export const UPDATE_CHECK_TOAST_KEY = "app:updateCheckResult";
  *  `updateProgressCopy` words those. */
 export function updateCheckToastCopy(
   result: Exclude<AppUpdateCheckResult, { status: "downloaded" | "checking" }>
-): { title: string; message: string; isError: boolean } {
+): {
+  title: string;
+  message: string;
+  isError: boolean;
+  /** The release page for whichever version the card names. `undefined` for
+   *  `skipped` and `error`, which name none. */
+  notesUrl: string | undefined;
+} {
   if (result.status === "skipped") {
     return {
       title: "Updates unavailable",
       message: result.reason,
-      isError: false
+      isError: false,
+      notesUrl: undefined
     };
   }
   if (result.status === "error") {
     return {
       title: "Update check failed",
       message: result.message,
-      isError: true
+      isError: true,
+      notesUrl: undefined
     };
   }
   if (result.status === "canceled") {
     return {
       title: "Download canceled",
       message: `PwrGit v${result.version} is still available — check again to download it.`,
-      isError: false
+      isError: false,
+      notesUrl: releaseNotesUrl(result.version)
     };
   }
   if (result.status === "available") {
@@ -68,13 +79,17 @@ export function updateCheckToastCopy(
     return {
       title: "Update available",
       message: `PwrGit v${result.version} is downloading in the background.`,
-      isError: false
+      isError: false,
+      notesUrl: releaseNotesUrl(result.version)
     };
   }
   return {
     title: "PwrGit is up to date",
     message: `You’re running v${result.version}.`,
-    isError: false
+    isError: false,
+    // Up to date is exactly when "what did I get?" is the live question, and
+    // this card is the only place the answer's version number appears.
+    notesUrl: releaseNotesUrl(result.version)
   };
 }
 
@@ -150,7 +165,8 @@ export function AppUpdateToast() {
         showInfoToast({
           key: UPDATE_CHECK_TOAST_KEY,
           title: copy.title,
-          message: copy.message
+          message: copy.message,
+          ...(copy.notesUrl === undefined ? {} : { notesUrl: copy.notesUrl })
         });
       }),
     [resetRestart, setStatus]
@@ -216,9 +232,18 @@ export function AppUpdateToast() {
             )}
           </div>
           {/* Rendered only when there is an action: `.app-toast` is a two
-              column grid, and an empty second column still spends its gap. */}
+              column grid, and an empty second column still spends its gap.
+              `cancelable` is the whole test — every phase that names a version
+              is also one there is a download to stop, and `checking`, the one
+              phase with neither, is the card that keeps its single column. */}
           {progress.cancelable && (
             <div className="app-toast__actions">
+              {/* Reading what is being downloaded is the one thing worth doing
+                  WHILE it downloads — this card stands for minutes. */}
+              <ReleaseNotesLink
+                url={progress.notesUrl}
+                className="app-toast__notes"
+              />
               {/* aria-disabled, never `disabled` (styles/AGENTS.md): Chromium
                   blurs an element the moment it becomes disabled, which would
                   throw focus to <body> at the instant the user asked to
@@ -264,6 +289,14 @@ export function AppUpdateToast() {
             >
               {restarting ? "Restarting…" : "Restart"}
             </button>
+            {/* Between Restart and Dismiss on purpose: the question this card
+                raises is "what is in it?", and the answer belongs next to the
+                button that commits to it. */}
+            <ReleaseNotesLink
+              url={releaseNotesUrl(version)}
+              className="app-toast__notes"
+              ariaLabel={`Release notes for v${version}`}
+            />
             <button
               className="app-toast__button"
               type="button"

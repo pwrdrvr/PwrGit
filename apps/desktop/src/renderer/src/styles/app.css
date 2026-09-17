@@ -11143,6 +11143,86 @@ body.is-col-resizing {
   background: var(--success-soft);
   color: var(--success-text);
 }
+/* The grid cell, not the tile. The tile is a radio and cannot contain an
+   interactive element, so its "Release notes" link is a sibling below it, and
+   the cell is what makes the two read as one unit.
+
+   The caption row is a FIXED track, not `auto`. An empty slot renders no link
+   (`releaseNotesUrl` answers undefined), and an `auto` track would collapse
+   there — stretching that tile taller than the row-mate whose cell spends a
+   line on a link, which puts the most visual weight on the one slot with
+   nothing in it. 12px is the link's own line box (`10px/1.2` below); keep the
+   two in step.
+
+   `padding-bottom` rather than a wider grid `row-gap`: the separation belongs
+   under the caption, and row-gap is uniform, so widening it would also push
+   the column headers away from the tiles they label. */
+.settings-slot-cell {
+  display: grid;
+  grid-template-rows: 1fr 12px;
+  gap: 4px;
+  padding-bottom: 7px;
+  min-width: 0;
+}
+/* "Release notes" — quiet by default, accent on hover. It sits under a tile
+   the reader is deciding about, so it must not compete with the tile itself
+   for the click; the underline only appears on hover/focus for the same
+   reason. Text-sized rather than button-sized: four of these at button weight
+   would out-shout the four versions above them. */
+.settings-slot-notes,
+.settings-notes-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--text-muted);
+  font: 500 10px/1.2 var(--font-sans);
+  cursor: pointer;
+}
+.settings-slot-notes:hover,
+.settings-notes-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.settings-slot-notes:focus-visible,
+.settings-notes-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+}
+/* Indented to the tile's own text column (11px padding + 1px border) so it
+   hangs under the version rather than off the tile's outer edge.
+   `justify-self`, not `align-self`: the cell is a grid, so the inline axis is
+   the one to pin — stretched, the button's click target would be the cell's
+   whole width. */
+.settings-slot-notes {
+  justify-self: start;
+  padding-left: 12px;
+}
+/* Inline with the sentence — or beside the button — it qualifies. It is scoped
+   to the version that neighbour just named, so it must not float away from
+   it. */
+.settings-notes-link {
+  margin-left: 6px;
+}
+/* …except under the Restart button, where the two stack in a column and a
+   left margin would push it out of line with the button above it. */
+.settings-update-channel__restart > .settings-notes-link {
+  margin-left: 0;
+}
+
+/* About → Version: the running version and the way to read what is in it. */
+.about-identity-version {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  min-width: 0;
+}
 
 .settings-update-channel {
   display: flex;
@@ -11920,6 +12000,39 @@ button.agent-auth-node {
 .app-toast__button:disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+/* "Release notes" — a text link among the card's real buttons, on purpose.
+   The card already carries the one action it exists for (Restart / Cancel) and
+   the one way out of it (Dismiss); a third pill would make the reader choose
+   between three things that look equally like the point. Sized to the same
+   26px so the row still reads as one strip. */
+.app-toast__notes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 2px;
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+/* --accent, not --accent-bright: the toast body is a flat panel surface, the
+   same reason `.app-toast__eyebrow--info` gives. --accent-bright is
+   contrast-floored against an --accent-soft tint, which this control has
+   none of. */
+.app-toast__notes:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.app-toast__notes:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
 }
 
 .app-toast__error {

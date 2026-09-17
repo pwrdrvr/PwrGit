@@ -109,6 +109,28 @@ function slot(train: string, channel: string): HTMLButtonElement {
   return tile;
 }
 
+/** The "Release notes" control for one slot, addressed the same way — by the
+ *  accessible name, since four of them render at once. */
+function slotNotes(train: string, channel: string): HTMLButtonElement {
+  const link = [
+    ...container.querySelectorAll<HTMLButtonElement>("button.settings-slot-notes")
+  ].find((candidate) =>
+    candidate
+      .getAttribute("aria-label")
+      ?.startsWith(`Release notes for ${train} ${channel}`)
+  );
+  if (!link) throw new Error(`no ${train} ${channel} release-notes link`);
+  return link;
+}
+
+function notesLinks(): HTMLButtonElement[] {
+  return [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      "button.settings-slot-notes, button.settings-notes-link"
+    )
+  ];
+}
+
 async function render(
   snapshot: AppSettingsSnapshot = snapshotWith()
 ): Promise<void> {
@@ -421,5 +443,92 @@ describe("UpdatesSettings — check and install", () => {
     expect(container.textContent).not.toContain(
       "Could not read published releases"
     );
+  });
+
+  it("hangs a release-notes link outside every published tile", async () => {
+    await render();
+
+    // Outside, because the tile is a role="radio" and an interactive element
+    // nested in one is neither valid HTML nor keyboard-reachable.
+    expect(slot("Stable", "Latest").querySelector("button")).toBeNull();
+
+    await act(async () => slotNotes("Beta", "Prerelease").click());
+
+    expect(mocks.dispatch).toHaveBeenLastCalledWith("shell:openExternal", {
+      url: "https://github.com/pwrdrvr/PwrGit/releases/tag/v1.1.0-alpha.6"
+    });
+    // Every slot that resolved gets one, not just the selected slot: picking a
+    // slot rewrites which build the app installs, so reading the notes has to
+    // be possible WITHOUT picking. The empty Beta Latest gets none.
+    expect(notesLinks()).toHaveLength(3);
+    expect(() => slotNotes("Beta", "Latest")).toThrow();
+  });
+
+  it("links the version its status line names, not the one installed", async () => {
+    bootWith({ status: "idle" }, { appVersion: "0.9.0" });
+    await render();
+    mocks.dispatch.mockImplementation((name: string) => {
+      if (name === "app:checkForUpdate") {
+        return Promise.resolve(ok({ status: "available", version: "1.0.3" }));
+      }
+      return Promise.resolve(ok(releases));
+    });
+
+    await act(async () => button("Check for Update")?.click());
+    expect(container.textContent).toContain("Update available: v1.0.3");
+
+    const inline = container.querySelector<HTMLButtonElement>(
+      "button.settings-notes-link"
+    );
+    await act(async () => inline?.click());
+
+    expect(mocks.dispatch).toHaveBeenLastCalledWith("shell:openExternal", {
+      url: "https://github.com/pwrdrvr/PwrGit/releases/tag/v1.0.3"
+    });
+  });
+
+  it("links the downloaded version once, from the Restart row", async () => {
+    // A window opened after a background download shows that button with no
+    // status line beside it, so the Restart row is the one that must carry the
+    // link — and when a check DOES land on `downloaded`, both would name the
+    // same version, which is one link too many.
+    bootWith({ status: "downloaded", version: "1.0.3" });
+    await render();
+
+    const inline = [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        "button.settings-notes-link"
+      )
+    ];
+    expect(inline).toHaveLength(1);
+    expect(inline[0]?.getAttribute("aria-label")).toBe(
+      "Release notes for v1.0.3"
+    );
+
+    await act(async () => inline[0]?.click());
+    expect(mocks.dispatch).toHaveBeenLastCalledWith("shell:openExternal", {
+      url: "https://github.com/pwrdrvr/PwrGit/releases/tag/v1.0.3"
+    });
+  });
+
+  it("does not repeat the link when a check lands on the same version", async () => {
+    // The tie the rule above exists to break: a check that reaches
+    // `downloaded` writes the status line AND raises the Restart button, and
+    // the two would otherwise name v1.0.3 twice a row apart.
+    await render();
+    mocks.dispatch.mockImplementation((name: string) => {
+      if (name === "app:checkForUpdate") {
+        return Promise.resolve(ok({ status: "downloaded", version: "1.0.3" }));
+      }
+      return Promise.resolve(ok(releases));
+    });
+
+    await act(async () => button("Check for Update")?.click());
+
+    expect(container.textContent).toContain("Update ready: v1.0.3");
+    expect(button("Restart to Update")).toBeDefined();
+    expect(
+      container.querySelectorAll("button.settings-notes-link")
+    ).toHaveLength(1);
   });
 });

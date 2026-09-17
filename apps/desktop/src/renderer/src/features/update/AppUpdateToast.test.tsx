@@ -311,4 +311,73 @@ describe("AppUpdateToast", () => {
     expect(toasts[0]?.title).toBe("Update check failed");
     expect(toasts[0]?.showLogsAction).toBe(true);
   });
+
+  it("links the version it asks you to restart into", async () => {
+    // "Restart to update to v0.9.0" was a dead end: the CHANGELOG bundled in
+    // the running build cannot describe the build being offered.
+    await mount({ status: "downloaded", version: "0.9.0" });
+
+    await act(async () => button("Release notes")?.click());
+
+    expect(dispatchMock).toHaveBeenLastCalledWith("shell:openExternal", {
+      url: "https://github.com/pwrdrvr/PwrGit/releases/tag/v0.9.0"
+    });
+  });
+
+  it("links the version while it is still downloading", async () => {
+    // This card stands for minutes, which is exactly when reading what is
+    // coming is worth doing.
+    await mount({ status: "idle" });
+    await emit("app:updateCheckResult", { status: "checking" });
+    // `checking` names no version, so there is nothing to link to yet — and a
+    // control that only sometimes exists has to be pinned in both states.
+    expect(button("Release notes")).toBeUndefined();
+
+    await emit("app:updateStatus", {
+      status: "downloading",
+      version: "1.0.0",
+      percent: 42
+    });
+    await act(async () => button("Release notes")?.click());
+
+    expect(dispatchMock).toHaveBeenLastCalledWith("shell:openExternal", {
+      url: "https://github.com/pwrdrvr/PwrGit/releases/tag/v1.0.0"
+    });
+  });
+
+  it("hands the settled outcome's version to the toast stack", async () => {
+    // "You're running v0.8.0" is the only place that version appears, so the
+    // card that says it carries the way to read what is in it.
+    await mount({ status: "idle" });
+    await emit("app:updateCheckResult", { status: "checking" });
+    await emit("app:updateCheckResult", {
+      status: "no-update",
+      version: "0.8.0"
+    });
+
+    expect(toasts[0]?.notesUrl).toBe(
+      "https://github.com/pwrdrvr/PwrGit/releases/tag/v0.8.0"
+    );
+  });
+
+  it("leaves an outcome that names no version without a link", async () => {
+    await mount({ status: "idle" });
+    await emit("app:updateCheckResult", { status: "checking" });
+    await emit("app:updateCheckResult", {
+      status: "skipped",
+      reason: "Linux builds are updated by installing a newer package."
+    });
+
+    expect(toasts[0]?.notesUrl).toBeUndefined();
+  });
+
+  it("offers no link for a version that is not shaped like a tag", async () => {
+    // The composer screens on shape, so this is where the control disappears.
+    // It cannot screen out a well-formed version that was never tagged — the
+    // dev fake's `420.0.0` keeps its link and lands on GitHub's 404.
+    await mount({ status: "downloaded", version: "main-dirty" });
+
+    expect(container.textContent).toContain("Restart to update to vmain-dirty.");
+    expect(button("Release notes")).toBeUndefined();
+  });
 });

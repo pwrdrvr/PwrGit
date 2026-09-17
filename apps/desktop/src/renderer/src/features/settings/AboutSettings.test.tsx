@@ -164,4 +164,32 @@ describe("AboutSettings", () => {
     expect(container.textContent).toContain("v1.2.0-alpha.7");
     expect(mocks.dispatch).toHaveBeenCalledTimes(2);
   });
+
+  it("takes the running version out to its release notes", async () => {
+    // The documents this pane opens describe the running build but not what
+    // changed in it, and this is the only place the running version is named.
+    await render();
+
+    await act(async () => button("Release notes for v1.2.0-alpha.7").click());
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("shell:openExternal", {
+      url: "https://github.com/pwrdrvr/PwrGit/releases/tag/v1.2.0-alpha.7"
+    });
+  });
+
+  it("drops the version link for a build that is not shaped like a release", async () => {
+    // The Releases row below is the index, so the pane still has a way out.
+    mocks.dispatch.mockImplementation((name: string) =>
+      name === "app:readIdentity"
+        ? Promise.resolve(ok({ ...IDENTITY, version: "main-dirty" }))
+        : Promise.resolve(ok(null))
+    );
+    await render();
+
+    expect(container.textContent).toContain("vmain-dirty");
+    expect(
+      container.querySelector("button.settings-notes-link")
+    ).toBeNull();
+    expect(button("Open releases")).toBeDefined();
+  });
 });
