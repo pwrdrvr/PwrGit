@@ -2441,6 +2441,16 @@ textarea,
 .overlay-result.is-selected {
   background: var(--bg-row-active);
 }
+/* The kind icon is not the row's slack.
+
+   It declared no `flex`, so it inherited `0 1 auto` and gave up space on a
+   crowded row — drawn as small as 9px against its declared 15. Shrink belongs
+   to `__name` and `__folder`, which say so (`1`/`4`) and are built to
+   ellipsize, the point `__name`'s own rule makes about a worktree truncating
+   its NAME first. `__meta` is handled at its own rule below. */
+.overlay-result > svg {
+  flex: 0 0 auto;
+}
 .overlay-result__name {
   /* Auto basis for the same reason as .wt-row__branch: with a zero basis the
      hit's name is whatever space its own qualifiers left behind, and a worktree
@@ -2454,7 +2464,23 @@ textarea,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The trailing label shrinks LAST and truncates, it does not wrap.
+
+   It used to inherit `0 1 auto` with no `overflow` handling, so a crowded row
+   compressed it below its text and — having no ellipsis — it wrapped under the
+   profile pill. Pinning it at `0 0 auto` fixes that but overcorrects: this
+   text is `repoName · remoteName`, user data of any length, and `.overlay-panel`
+   is `min(620px, 92vw)`, so on a narrow window an unshrinkable label pushes the
+   profile pill and the kebab past the row's edge — where the panel's
+   `overflow: hidden` clips them out of reach entirely. So it stays shrinkable
+   and ellipsizes instead, which costs a few px of movement on the two crowded
+   row kinds and can never strand a control. */
 .overlay-result__meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font: 500 10px/1 var(--font-mono);
   color: var(--text-muted);
 }
@@ -2479,8 +2505,14 @@ textarea,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The pin star keeps its slot (no layout shift) but only shows on rows that
-   are pinned, hovered, or keyboard-selected. */
+/* The pin star keeps its slot but only shows on rows that are pinned, hovered,
+   or keyboard-selected.
+
+   "Keeps its slot" is about this rule — `opacity`, not `display`, so the star
+   appearing costs no reflow. It says nothing about where the slot IS: the star
+   sits ahead of `.hit-status`, which asyncFill inserts once `search:status`
+   answers, so the slot itself slides left when a status lands — by 56px for an
+   age alone, 109px once the dirty/ahead/behind badges come with it. */
 .overlay-result .pin {
   /* `margin: 0` is load-bearing: `.pin` carries a -4px margin to collapse its
      24px sidebar target to a 16px footprint, and inheriting that here would
@@ -2497,7 +2529,14 @@ textarea,
 .overlay-result .pin.is-pinned {
   opacity: 1;
 }
-/* Lazily-filled per-hit status: fades in as rows are seen (asyncFill). */
+/* Lazily-filled per-hit status: fades in as rows are seen (asyncFill).
+
+   This is an INSERT, not a reveal, and `__name` is the row's only grower, so
+   `__name` gives up the chip's width and everything between it and here — the
+   folder label, any PR chip, the pin star — slides that far left. `__meta`
+   rightward is packed against the row's right edge and stays put, give or take
+   the few px `__meta` itself yields on a row already out of room. Worth
+   knowing before putting anything ahead of here that the pointer aims at. */
 .hit-status {
   flex: 0 0 auto;
   display: inline-flex;
