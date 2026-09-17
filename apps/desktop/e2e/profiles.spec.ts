@@ -436,6 +436,9 @@ test("a queued cross-profile reveal wins over a stale restored worktree", async 
   const hit = window.locator(".overlay-result", {
     hasText: "feature/requested"
   });
+  // Wait for the row BEFORE arming the window promise. `pickPaletteHit` waits
+  // too, but that wait would then be spending the event's own 30s budget.
+  await expect(hit).toBeVisible({ timeout: 20_000 });
   const reopenedPromise = handle.app.waitForEvent("window");
   await pickPaletteHit(hit);
   const reopened = await reopenedPromise;
