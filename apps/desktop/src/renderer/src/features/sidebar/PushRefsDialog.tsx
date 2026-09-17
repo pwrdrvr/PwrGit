@@ -298,7 +298,14 @@ export function PushRefsDialog({
         {error !== null && <div className="modal__error">{error}</div>}
         <div className="modal__actions">
           <button className="modal__cancel" onClick={onClose}>
-            {results === null ? "Cancel" : "Close"}
+            {/* "Close" the moment there is anything to close over, because
+                the card above carries a Cancel of its own and that one stops
+                Git. Two buttons reading "Cancel" in one dialog, one aborting a
+                transfer and one dismissing the window, is a choice nobody
+                should have to make under a wedged push — and "Close" is the
+                truer word anyway: the operation is registered in main and goes
+                on running, with the elsewhere-toast to carry it. */}
+            {results === null && activity === null ? "Cancel" : "Close"}
           </button>
           {results === null && plans === null && (
             <button
