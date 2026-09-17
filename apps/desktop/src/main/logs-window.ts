@@ -1,12 +1,13 @@
 import { showWindowWhenReady } from "./show-window-when-ready";
 import { join } from "node:path";
-import { BrowserWindow, shell } from "electron";
+import { BrowserWindow } from "electron";
 import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
 import {
   auxiliaryWindowChromeOptions,
   hideAuxiliaryWindowMenuBar
 } from "./auxiliary-window-chrome";
 import { windowChrome } from "./window-chrome";
+import { applyWindowSecurityHardening } from "./window-security";
 
 /**
  * Singleton Logs window (PwrAgnt's app-log-window pattern): the renderer
@@ -43,10 +44,7 @@ export function openLogsWindow(appearance: AppAppearance): BrowserWindow {
   hideAuxiliaryWindowMenuBar(window);
 
   showWindowWhenReady(window);
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: "deny" };
-  });
+  applyWindowSecurityHardening(window);
 
   const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
   if (rendererUrl !== undefined) {

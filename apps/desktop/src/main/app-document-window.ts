@@ -11,6 +11,7 @@ import {
   hideAuxiliaryWindowMenuBar
 } from "./auxiliary-window-chrome";
 import { windowChrome } from "./window-chrome";
+import { applyWindowSecurityHardening } from "./window-security";
 
 const documentWindows = new Map<AppDocumentKind, BrowserWindow>();
 
@@ -55,7 +56,8 @@ export function openAppDocumentWindow(
   hideAuxiliaryWindowMenuBar(window);
 
   showWindowWhenReady(window);
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  // Bundled documents are read-only text; they have nothing to open outward.
+  applyWindowSecurityHardening(window, { windowOpen: "deny" });
 
   const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
   const hash = `document-${kind}`;
