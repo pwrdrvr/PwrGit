@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.17.0 - 2026-09-17
+
+- Remote operations - Fetch, pull, and push now open their status card as soon as you click, then keep a readable receipt of the work completed. Successful operations close after a short pause; failures stay open until dismissed.
+- Updates - Every installed or offered version now links directly to its GitHub release notes, and Beta installations correctly advance to the matching stable release without losing their selected update track.
+- Command Palette - Added per-result copy menus for branch names, worktree and repository paths, commit hashes, file paths, and pull-request URLs, with keyboard support and feedback that keeps search open.
+- Command Palette - Branch results now recognize worktrees created or switched outside PwrGit, and crowded rows preserve their kind icons and metadata without hiding controls.
+- Security - Hardened external-link and navigation handling across every desktop window so unsafe protocols and credential-bearing URLs are refused.
+
 ## v0.16.0 - 2026-09-15
 
 - Worktrees - Added a profile-wide safe worktree sweep that explains why candidates are removable, supports bulk cleanup, and can reclaim ignored build/cache space while protecting common local secrets and databases by default.
