@@ -196,6 +196,17 @@ jobs:
 
       - name: Test
         run: pnpm run test
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-tripwires
+
+      - name: Upload Git tripwires
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-tripwires-${{ runner.os }}
+          path: ${{ runner.temp }}/git-tripwires
+          if-no-files-found: ignore
+          retention-days: 14
 
   desktop-e2e:
     name: Linux Desktop E2E (${{ matrix.shard }}/2)
@@ -430,6 +441,17 @@ jobs:
 
       - name: Test
         run: pnpm run test
+        env:
+          PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-tripwires
+
+      - name: Upload Git tripwires
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-tripwires-${{ runner.os }}
+          path: ${{ runner.temp }}/git-tripwires
+          if-no-files-found: ignore
+          retention-days: 14
 
   windows-e2e:
     name: Windows Desktop E2E (${{ matrix.shard }}/4)

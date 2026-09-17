@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { beginGitCall } from "./git-tripwire";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import {
   gitExecutionEnvironment,
@@ -10,32 +11,9 @@ import {
   type GitOutput
 } from "../dugite";
 
-/**
- * The `GitExec` the main-process suites run against real `git`.
- *
- * It exists as one module because twenty-four hand-rolled copies of it each
- * carried the same defect, and a defect with twenty-four homes gets fixed once
- * or not at all. A twenty-fifth copy (`bulk-sync.test.ts`) was built on
- * `execFile` and never had the bug; it routes through here anyway, because a
- * surviving hand-rolled helper is the template the next one gets copied from.
- *
- * **Settle on `exit`, never on `close`.** `close` fires only after every
- * process holding the child's inherited stdio pipes has let go of them, which
- * is not the same question as "did git finish". Git-for-Windows' `cmd\git.exe`
- * hands execution to another process — ../dugite.ts documents the same
- * behavior biting `git worktree remove` — and a handed-off grandchild keeps
- * those pipes open after git itself has exited. A helper awaiting `close`
- * therefore waits out the stranger, not the command: a millisecond-scale git
- * call becomes a multi-second hang, and the test dies on the Vitest timeout
- * having never learned what git did. That is bimodal by nature — the handoff
- * either lingers or it doesn't — which is why it read as a flake, and why
- * raising the timeout only bought the hang more room.
- *
- * So we resolve once git has exited *and* its own streams have ended, and
- * never wait more than FLUSH_GRACE_MS past exit for a stream some grandchild
- * is holding open. The child's own output has already been delivered by then;
- * a 300KB stdout survives the grace path intact.
- */
+/** Shared fixture executor. Preserve the existing exit + stream-end policy
+ * and 250ms post-exit grace. Grace expiry does not identify a pipe owner or
+ * establish the cause of a test timeout; diagnostics record it before cleanup. */
 const FLUSH_GRACE_MS = 250;
 
 export type SystemGitOptions = {
@@ -69,6 +47,8 @@ function runGit(
   options?: GitExecOptions
 ): Promise<Result<Collected, PwrGitError>> {
   return new Promise((resolve) => {
+    let snapshot: () => Record<string, unknown> = () => ({});
+    const call = beginGitCall(args, cwd, "async", () => snapshot());
     const invocation = gitProcessInvocation(args, cwd);
     const spawnFailed = (cause: Error): Result<Collected, PwrGitError> =>
       err({ kind: "git", code: "spawn_failed", message: cause.message });
@@ -93,6 +73,8 @@ function runGit(
     } catch (cause) {
       // spawn throws synchronously on bad options; dugite.ts guards its own
       // spawn the same way rather than rejecting out of a Result-returning API.
+      call?.event("spawn-throw");
+      call?.finish("spawn-failed");
       resolve(spawnFailed(cause instanceof Error ? cause : new Error(String(cause))));
       return;
     }
@@ -107,11 +89,23 @@ function runGit(
     let exitCode = 1;
     let settled = false;
     let grace: ReturnType<typeof setTimeout> | undefined;
+    const streamState = (stream: typeof child.stdout) => ({ ended: stream.readableEnded,
+      destroyed: stream.destroyed, closed: stream.closed, bufferedBytes: stream.readableLength });
+    snapshot = () => ({ pid: child.pid, exitObserved: exited, exitCode: child.exitCode,
+      signalCode: child.signalCode, killed: child.killed,
+      stdout: streamState(child.stdout), stderr: streamState(child.stderr),
+      stdoutBytes: stdout.reduce((n, chunk) => n + chunk.length, 0),
+      stderrBytes: stderr.reduce((n, chunk) => n + chunk.length, 0) });
+    const onSpawn = () => call?.event("spawn");
+    if (call) child.once("spawn", onSpawn);
 
     const settle = (result: Result<Collected, PwrGitError>): void => {
       if (settled) return;
       settled = true;
       if (grace) clearTimeout(grace);
+      child.removeListener("spawn", onSpawn);
+      call?.event("settlement");
+      call?.finish(result.ok ? "resolved" : "error-result");
       // A grandchild can hold these pipes open long after we have answered.
       // Left attached, they keep appending to buffers nobody will read and
       // keep the child and its streams alive for the stranger's lifetime.
@@ -135,19 +129,22 @@ function runGit(
       if (options?.onStderr) options.onStderr(chunk.toString());
     });
     child.stdout.once("end", () => {
+      call?.event("stdout-end");
       openStreams -= 1;
       finishWhenDrained();
     });
     child.stderr.once("end", () => {
+      call?.event("stderr-end");
       openStreams -= 1;
       finishWhenDrained();
     });
 
-    child.on("error", (cause) => settle(spawnFailed(cause)));
+    child.on("error", (cause) => { call?.event("child-error"); settle(spawnFailed(cause)); });
     child.on("exit", (code) => {
       exited = true;
+      call?.event("exit");
       if (code !== null) exitCode = code;
-      grace = setTimeout(finish, FLUSH_GRACE_MS);
+      grace = setTimeout(() => { call?.report("drain-grace-expired"); finish(); }, FLUSH_GRACE_MS);
       grace.unref?.();
       finishWhenDrained();
     });
