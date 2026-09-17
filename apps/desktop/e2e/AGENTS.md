@@ -111,6 +111,28 @@ the Electron build.
   Playwright already is. Ordinary click-and-assert specs are unaffected; this
   is for a test that reads hover state across a timer.
 
+- **Never click a palette row at its centre — use `pickPaletteHit`.**
+  `locator(".overlay-result").click()` aims at the row's geometric centre, and
+  a ⌘K/⌘F row's centre is not a stable place to put a pointer. The per-hit
+  status chip is filled in lazily (asyncFill → `search:status`), the flexible
+  `.overlay-result__name` gives up the ~56px it needs, and every control to
+  the name's right slides left by that much. Measured against the real
+  stylesheets at the palette's 620px width, `.pin` moves from x=350..374 to
+  x=294..318 across a row centre of x=301 — so the click lands on the pin
+  star, which calls `stopPropagation` and toggles a pin instead of picking the
+  hit. Nothing opens, and the failure surfaces 30s later at whatever the spec
+  awaited next (`waitForEvent("window")`, a modal), never at the click. This
+  is what made `profiles.spec.ts`'s cross-profile reveal fail every run on
+  macOS after #282, which only moved the timing; the geometry was already
+  within 7px. `pickPaletteHit(hit)` in `fixtures/steps.ts` waits for the row
+  and clicks its **name** — what a user aims at, and the one child of a row
+  that cannot become a button. It works for every row kind (repo, worktree,
+  branch, commit, file), so reach for it rather than adding a `.first()` or a
+  `position` to a bare click. The rows clicked in `refs.spec.ts`,
+  `tags.spec.ts`, `diff.spec.ts` and `lineage.spec.ts` are safe today only
+  because those kinds render no pin star — one row-kind change away from the
+  same failure.
+
 - Specs run as **ESM** — use `import.meta.url` + `fileURLToPath`, not
   `__dirname`.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking
@@ -118,7 +140,7 @@ the Electron build.
   Playwright's `window.on("dialog", …)`.
 - Shared step helpers (`addRootAndExpand`, `expandRepoGroup`,
   `expandWorktrees`, `collapseWorktrees`, `repoGroup`, `branchRow`,
-  `lensChip`) live in `fixtures/steps.ts`; a repo that trails its origin comes
+  `lensChip`, `pickPaletteHit`) live in `fixtures/steps.ts`; a repo that trails its origin comes
   from `sandbox.makeRepoBehindRemote(name, { behindBy })`.
 - **The lens switch is icon-only — reach it with `lensChip(window, "All")`,
   never `locator(".lens-chip", { hasText: … })`.** The chips carry no text, so

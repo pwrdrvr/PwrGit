@@ -6,7 +6,8 @@ import {
   branchRow,
   expandRepoGroup,
   expandWorktrees,
-  lensChip
+  lensChip,
+  pickPaletteHit
 } from "./fixtures/steps";
 
 // One window per profile: creating/picking a profile opens (or focuses) its
@@ -370,8 +371,7 @@ test("a cross-profile remote branch opens its new-worktree flow in the owning wi
   const release = window.locator(".overlay-result", {
     hasText: "releases/1.0"
   });
-  await expect(release).toBeVisible({ timeout: 20_000 });
-  await release.click();
+  await pickPaletteHit(release);
 
   const modal = remoteWindow.locator(".modal", {
     hasText: "New worktree · remote-profile"
@@ -436,17 +436,8 @@ test("a queued cross-profile reveal wins over a stale restored worktree", async 
   const hit = window.locator(".overlay-result", {
     hasText: "feature/requested"
   });
-  await expect(hit).toBeVisible({ timeout: 20_000 });
   const reopenedPromise = handle.app.waitForEvent("window");
-  // Click the NAME, not the row. `click()` aims at the target's geometric
-  // centre, and this row's centre is not a stable place to put a pointer: the
-  // per-hit status chip is filled in lazily (asyncFill), the flexible name
-  // gives up the ~56px it needs, and every control to the name's right slides
-  // left by that much. The pin star lands within a few pixels of the centre —
-  // and it stops propagation, so the click toggles a pin instead of picking
-  // the hit and no window is ever asked for. The name is what a user aims at
-  // and the one child that cannot become a button.
-  await hit.locator(".overlay-result__name").click();
+  await pickPaletteHit(hit);
   const reopened = await reopenedPromise;
   await reopened.waitForSelector("#root");
 

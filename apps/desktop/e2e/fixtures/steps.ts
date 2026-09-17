@@ -251,3 +251,15 @@ export const refBranchRow = (window: Page, branch: string): Locator =>
   window.locator(".ref-branch-row").filter({
     has: window.locator(".refs-copyable-name__text", { hasText: branch })
   });
+
+/** Pick a ⌘K / ⌘F palette row with the pointer, waiting for it first.
+
+    Takes the row locator so it composes with whatever narrowed it
+    (`.first()`, `hasText`, `.filter()`), and clicks the row's NAME rather
+    than the row: `click()` aims at the target's geometric centre, and a
+    palette row's centre is not a stable place to put a pointer. See the
+    "Never click a palette row at its centre" gotcha in `e2e/AGENTS.md`. */
+export async function pickPaletteHit(hit: Locator): Promise<void> {
+  await expect(hit).toBeVisible({ timeout: ROW_VISIBLE_MS });
+  await hit.locator(".overlay-result__name").click();
+}

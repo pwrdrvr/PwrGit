@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createMainWindow: vi.fn(),
-  getFocusedWindow: vi.fn(() => null)
+  getFocusedWindow: vi.fn((): BrowserWindow | null => null)
 }));
 
 vi.mock("electron", () => ({
@@ -35,7 +35,7 @@ function fakeWindow() {
 
 function windows() {
   return createProfileWindows({
-    appearance: () => ({ resolvedTheme: "dark" }) as never
+    appearance: () => ({ theme: "dark", resolvedTheme: "dark" })
   });
 }
 
@@ -99,7 +99,7 @@ describe("profile windows", () => {
     expect(mocks.createMainWindow).toHaveBeenCalledTimes(2);
   });
 
-  it("reports a closing window as closed rather than closing it twice", () => {
+  it("still reports a closing window as one that was open", () => {
     const first = fakeWindow();
     mocks.createMainWindow.mockReturnValueOnce(first);
     const profiles = windows();
@@ -107,8 +107,41 @@ describe("profile windows", () => {
 
     expect(profiles.close("acme")).toBe(true);
     expect(first.close).toHaveBeenCalledOnce();
-    expect(profiles.close("acme")).toBe(false);
+    // The delete path reads this as "did the user just lose a window", and
+    // opens the active profile's in answer. A window already on its way out
+    // is still one lost — but re-closing it buys nothing.
+    expect(profiles.close("acme")).toBe(true);
     expect(first.close).toHaveBeenCalledOnce();
+
+    first.finishClosing();
+    expect(profiles.close("acme")).toBe(false);
+  });
+
+  it("restores a minimized window instead of only focusing it", () => {
+    const first = fakeWindow();
+    first.isMinimized.mockReturnValue(true);
+    mocks.createMainWindow.mockReturnValueOnce(first);
+    const profiles = windows();
+    profiles.open("acme");
+
+    expect(profiles.open("acme").created).toBe(false);
+    expect(first.restore).toHaveBeenCalledOnce();
+    expect(first.focus).toHaveBeenCalledOnce();
+  });
+
+  it("does not name a closing window's profile as the focused one", () => {
+    const first = fakeWindow();
+    mocks.createMainWindow.mockReturnValueOnce(first);
+    const profiles = windows();
+    profiles.open("acme");
+    mocks.getFocusedWindow.mockReturnValue(first as unknown as BrowserWindow);
+    expect(profiles.focusedProfileId()).toBe("acme");
+
+    // `has` has already written this window off; `focusedProfileId` feeding
+    // the menu a profile it disagrees about would skip the caller's own
+    // fallback to the active profile.
+    first.close();
+    expect(profiles.focusedProfileId()).toBe(null);
   });
 
   it("drops a window from the open set once it is destroyed", () => {
