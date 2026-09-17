@@ -203,6 +203,10 @@ function startingView(
     // information.
     meter: null,
     percent: null,
+    // Nor is its space reserved: an empty transfer block here would make this
+    // card TALLER than the one-row step list that replaces it at the
+    // threshold, and turn the card's one honest transition into a shrink.
+    meterSlot: false,
     // No command either. It changes with every Git invocation rather than
     // every phase — a pull runs eight of them — and each is a different
     // number of wrapped lines under the rest of the card.

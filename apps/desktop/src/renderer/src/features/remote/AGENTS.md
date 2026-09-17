@@ -118,6 +118,52 @@ Four rules hold it together.
   belong together, behind a disclosure that opens itself on exactly the
   operations where they are the finding.
 
+## The card grows; it never takes space back
+
+The step list answered "the text keeps being rewritten". This is the other half
+of the same complaint: **a thing that appears and disappears moves everything
+under it, twice.** So the rule for anything the card draws is that its space is
+reserved for as long as the card might want it, and the card's height only ever
+goes up while an operation runs.
+
+Four places used to break it, and each one moved the evidence block and the
+buttons — which is exactly where a reader looks when they want to know what
+happened.
+
+- **A network step's progress track is decided by its PHASE**
+  (`stepHasMeter`), not by whether Git has sent a percentage yet. Git starts
+  reporting a beat after a phase opens and stops before it closes, and
+  `setPhase` clears `progress` outright, so a track that followed the numbers
+  resized its own row twice per step. A `fetch` or `push` row has one from the
+  moment it is written; a `fast_forward` row never does. `Track` renders the
+  reserved-but-empty case as presentational rather than as a `progressbar` with
+  an invented value — an assistive technology should hear "running, progress
+  unknown", not "0%". A finished network step reads 100%, in the success
+  colour, because it transferred.
+- **The fallback meter keeps its slot for the life of the operation**
+  (`meterSlot`). That is the toast's standing presentation, and the block came
+  and went three times in a pull. The label line holds its height empty, in
+  CSS, for the same reason. `meterSlot` is a field on the view rather than
+  something the card derives, because the *other* fallback — the quiet card
+  before the narration threshold — must NOT reserve it: an empty transfer
+  block there would make that card taller than the one-row step list that
+  replaces it, and turn the card's one honest transition into a shrink.
+- **The health line stays once it has had something to say.** A fetch that
+  goes quiet for twenty seconds and then resumes is a real event and the
+  retraction is real information — but the line has to update in place, not
+  vanish.
+- **The Git-output disclosure keeps its place on the receipt.** It stood under
+  the card for the whole operation (a running card always shows it), so
+  dropping it because a successful fetch had nothing to put in it pulled the
+  buttons upward at the moment the user looked down to read the outcome. "Git
+  produced no output." is a sentence; an absent block is a jump.
+
+What deliberately still moves, and why it is allowed: rows are **appended** as
+phases are observed, the disclosure **opens** itself on a finding, and a
+failure's headline appears above the list. All three are growth at the moment
+the card has something new to say, and growth below the reader's eye is how a
+card reports progress. What is not allowed is taking any of it back.
+
 Rows carry bare labels today. Counts &mdash; *"Fast-forwarded · 12 commits"*
 &mdash; need the command results widened in main: `remote:fetch` and
 `remote:push` return `null` and `remote:pull` returns three booleans, while

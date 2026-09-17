@@ -88,6 +88,24 @@ export function isStepPhase(
 }
 
 /**
+ * Whether a step's row carries a progress track.
+ *
+ * Decided by the phase, so a row's height is fixed the moment it is written
+ * and never changes again. That is the whole reason it is a phase question
+ * rather than a "has Git reported a percentage yet" question: `--progress` is
+ * forced on the network phases and they are the only ones that ever report
+ * one, but Git reports it a beat after the phase starts and stops reporting it
+ * before the phase ends. A track that appeared and vanished with the numbers
+ * would move every row under it twice per step.
+ *
+ * The same `NETWORK_PHASES` the quiet warning is scoped to, for the same
+ * reason: those are the transfers.
+ */
+export function stepHasMeter(phase: RemoteActivityStepPhase): boolean {
+  return NETWORK_PHASES.has(phase);
+}
+
+/**
  * One row of the card's step list.
  *
  * A row changes exactly **once**: when its step completes, the label moves from
@@ -322,6 +340,22 @@ export type RemoteActivityView = {
   /** Live only — a finished operation has no meter left to move. */
   meter: string | null;
   percent: number | null;
+  /**
+   * Whether this presentation keeps room for a transfer meter even with no
+   * numbers to put in it.
+   *
+   * True for the live card of an operation being narrated — the toast, and a
+   * hover card. Git reports a meter a beat after a network phase begins and
+   * stops before it ends, and `setPhase` clears `progress` outright, so a
+   * block that mounted with the numbers came and went three times in a pull
+   * and moved everything under it six times.
+   *
+   * False for the quiet card before the narration threshold, which is one
+   * stable line and deliberately nothing else: reserving a meter there would
+   * make that card TALLER than the one-row step list that replaces it, turning
+   * the one honest transition the card has into a shrink.
+   */
+  meterSlot: boolean;
   command: string | null;
   output: string[];
   /**
@@ -360,6 +394,7 @@ export function liveActivityView(
     statusTone: status.tone,
     meter: remoteActivityMeter(activity),
     percent: activity.progress?.percent ?? null,
+    meterSlot: true,
     command: activity.command,
     output: activity.tail,
     canceling: activity.canceling,
@@ -390,6 +425,7 @@ export function settledActivityView(
           : "muted",
     meter: null,
     percent: null,
+    meterSlot: false,
     command: outcome.command,
     output: outcome.output,
     // The receipt is what the running card became, so the rows that were on

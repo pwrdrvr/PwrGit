@@ -1023,6 +1023,95 @@ describe("WorktreeHeader settled status card", () => {
     });
   });
 
+  // The rule the whole card is now held to: it may grow, and it may not take
+  // space back. Anything that disappears under the reader's eye moves the text
+  // below it, and a thing that comes and goes moves that text twice.
+  //
+  // A network step's track is decided by its PHASE, not by whether Git has
+  // sent a percentage yet — Git starts reporting a beat after the phase opens
+  // and stops before it closes, so a track that followed the numbers would
+  // resize its own row twice per step.
+  it("gives a network step its progress track before Git sends a number", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    const bars = (): number =>
+      card()?.querySelectorAll(".remote-activity__step-bar").length ?? 0;
+
+    // No meter in this record at all.
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(bars(), "the fetch row reserves its track from the start").toBe(1);
+
+    await emitActivities([
+      {
+        kind: "pull",
+        phase: "fetch",
+        lastOutputAt: Date.now(),
+        progress: {
+          label: "Receiving objects",
+          percent: 43,
+          completed: 43,
+          total: 100
+        }
+      }
+    ]);
+    expect(bars(), "and keeps exactly that one when the numbers arrive").toBe(1);
+
+    // A local phase never meters anything, so its row never carries a track —
+    // which is what keeps every row's height fixed at the moment it is written.
+    await emitActivities([
+      { kind: "pull", phase: "fast_forward", lastOutputAt: Date.now() }
+    ]);
+    expect(bars(), "the finished fetch keeps its track; the local step has none")
+      .toBe(1);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(bars(), "and the receipt is the same rows it was a moment ago").toBe(
+      1
+    );
+  });
+
+  // "No Git output for 25s" appears under the list and above the buttons. Git
+  // going quiet for twenty seconds and then speaking again is a real event and
+  // a real retraction — but a line that vanishes on the retraction pushes the
+  // evidence and the buttons down and pulls them back up.
+  it("keeps the health line once it has had something to say", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    const health = (): string | null =>
+      [...(card()?.querySelectorAll(".remote-activity__status") ?? [])]
+        .at(-1)
+        ?.textContent ?? null;
+
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(health(), "nothing wrong yet, so nothing to say").toBeNull();
+
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() - 25_000 }
+    ]);
+    expect(health()).toContain("no Git output for");
+
+    // Git speaks again. The reading is honest — and the line stays put.
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(health()).toBe("Fetching updates");
+    finish();
+  });
+
   // The command line is up to 160 monospace characters in a 320px card, so it
   // wraps to a different number of lines per invocation — as a permanent
   // fixture under the step list it moved everything below it several times a
@@ -1356,13 +1445,17 @@ describe("WorktreeHeader settled status card", () => {
     expect(tab.defaultPrevented).toBe(true);
   });
 
-  // Silence is evidence while an operation runs, and still evidence once one
-  // has failed. Under "Fetched" it is neither, and an empty block there takes
-  // up the room that would have said so.
-  it("drops the Git-output block from a successful receipt only", async () => {
+  // The block stood under this card for the whole operation, so it keeps its
+  // place on the receipt. Dropping it because a successful fetch had nothing
+  // to put in it pulled the buttons under it upward at the exact moment the
+  // user looked down to read the outcome — and "Git produced no output" is a
+  // sentence, not an empty block.
+  it("keeps the Git-output block on the receipt it stood under", async () => {
     await press("Fetch", ok(null));
     expect(card()?.textContent).toContain("Fetched");
-    expect(card()?.querySelector(".remote-activity__output")).toBeNull();
+    expect(card()?.querySelector(".remote-activity__output")?.textContent).toBe(
+      "Git produced no output."
+    );
 
     await press(
       "Fetch",

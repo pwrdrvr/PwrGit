@@ -6,6 +6,8 @@ import {
 } from "../../lib/useViewportTooltip";
 import {
   remoteActivityReport,
+  stepHasMeter,
+  type RemoteActivityStep,
   type RemoteActivityView
 } from "./remote-activity";
 
@@ -60,6 +62,17 @@ export function RemoteActivityCard({
   // Nothing observed yet — every card before its first phase arrives, and
   // every operation that fails before one does.
   const fallback = view.steps.length === 0;
+  // Once the health line has had something to say it keeps its place, even
+  // when Git starts talking again and the reading goes back to "muted".
+  //
+  // A retraction is real information, so the line still updates — what it must
+  // not do is vanish. It sits above the evidence and the buttons, and a fetch
+  // that stalls for twenty seconds and then resumes would otherwise push them
+  // down and pull them back up, which is the same whip the step list was
+  // written to end, arriving one line lower.
+  const warned = useRef(false);
+  if (view.statusTone === "warn") warned.current = true;
+  const health = warned.current && !fallback && view.settled === null;
   // A settled card whose rows cannot carry the outcome on their own.
   const headline = view.settled !== null && view.settled !== "ok";
   const [copied, setCopied] = useState(false);
@@ -135,20 +148,24 @@ export function RemoteActivityCard({
               when there is not. The toast is the standing case for the
               second — it passes no steps, because a receipt belongs beside the
               button that was pressed and the toast is for a repository the
-              user is not looking at. */}
-          {view.meter !== null && view.percent !== null && (
+              user is not looking at.
+
+              Its space is reserved for as long as the operation runs, rather
+              than mounted with Git's first progress line and unmounted at
+              every phase boundary (`setPhase` clears `progress`, by design —
+              the next meter belongs to new work). A block that comes and goes
+              three times in a pull moves everything under it six times; an
+              empty track that fills is the same information without that. */}
+          {view.meterSlot && (
             <div className="remote-activity__meter">
-              <div
+              <Track
+                percent={view.percent}
+                label={view.meter}
                 className="remote-activity__bar"
-                role="progressbar"
-                aria-label={view.meter}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={view.percent}
-              >
-                <span style={{ width: `${view.percent}%` }} />
-              </div>
-              <span className="remote-activity__meter-label">{view.meter}</span>
+              />
+              <span className="remote-activity__meter-label">
+                {view.meter ?? ""}
+              </span>
             </div>
           )}
         </>
@@ -168,17 +185,12 @@ export function RemoteActivityCard({
                   {step.detail}
                 </span>
               )}
-              {step.percent !== null && (
-                <span
+              {stepHasMeter(step.phase) && (
+                <Track
+                  percent={stepPercent(step)}
+                  label={step.detail ?? step.label}
                   className="remote-activity__step-bar"
-                  role="progressbar"
-                  aria-label={step.detail ?? step.label}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={step.percent}
-                >
-                  <span style={{ width: `${step.percent}%` }} />
-                </span>
+                />
               )}
             </li>
           ))}
@@ -189,13 +201,15 @@ export function RemoteActivityCard({
           2m 04s" is about the operation rather than about any one step — and
           reading it above "● Fetching updates" would just restate the row it
           sits on. It is the whole reason a wedged fetch is worth looking at. */}
-      {!fallback && view.statusTone === "warn" && (
-        <p className="remote-activity__status remote-activity__status--warn">
+      {health && (
+        <p
+          className={`remote-activity__status remote-activity__status--${view.statusTone}`}
+        >
           {view.statusLabel}
         </p>
       )}
 
-      {!compact && showOutput(view) && (
+      {!compact && (
         // Git's own words, verbatim. Everything above is PwrGit's reading of
         // the operation; this is the evidence behind it, and the only thing
         // that explains an unfamiliar failure.
@@ -327,16 +341,56 @@ function evidenceEarnsAttention(view: RemoteActivityView): boolean {
 }
 
 /**
- * Whether the Git-output block earns its place.
+ * How full a step's track is drawn.
  *
- * Silence is evidence while an operation runs — a fetch that has written
- * nothing is the wedged case the card exists for — and it is still evidence
- * once one has failed or been stopped, where "Git produced no output" IS the
- * finding. On a *successful* operation it is neither: an empty block under
- * "Fetched" reports nothing and takes up the room that says so.
+ * A finished network step reads 100% rather than empty: it transferred, and the
+ * row it is on says so. A step that stopped keeps whatever Git last reported,
+ * which is nothing once the view has settled — an empty track under "✕
+ * Fetching updates" is the honest drawing of a transfer that did not get
+ * anywhere.
  */
-function showOutput(view: RemoteActivityView): boolean {
-  return view.output.length > 0 || view.settled !== "ok";
+function stepPercent(step: RemoteActivityStep): number | null {
+  if (step.state === "done") return 100;
+  return step.percent;
+}
+
+/**
+ * A progress track whose space exists whether or not there is a number for it.
+ *
+ * The reserved-but-empty case is the whole point, so it is deliberately NOT a
+ * `progressbar` with a made-up value: an assistive technology should hear
+ * "running, progress unknown" rather than "0%". The element is presentational
+ * until Git supplies a percentage, and the step's own label carries the state
+ * either way.
+ */
+function Track({
+  percent,
+  label,
+  className
+}: {
+  percent: number | null;
+  label: string | null;
+  className: string;
+}) {
+  if (percent === null) {
+    return (
+      <span className={className} aria-hidden="true">
+        <span style={{ width: "0%" }} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className={className}
+      role="progressbar"
+      aria-label={label ?? undefined}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent}
+    >
+      <span style={{ width: `${percent}%` }} />
+    </span>
+  );
 }
 
 /** Everything Git wrote, or the empty log of an operation already gone. */
