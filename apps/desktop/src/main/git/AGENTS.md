@@ -100,6 +100,19 @@ Two rules that are easy to undo:
 Output lines are sanitized through `sanitizeGitLogDetail` on the way in, so a
 credential in a remote URL never reaches the record, the event, or the clipboard.
 
+**"Long-running remote command" means every command that reaches a remote, not
+just the ones with a toolbar button.** `remote:planPushRefs` and
+`remote:pushRefs` sat outside the registry for exactly that reason — they
+belong to a sidebar dialog rather than the worktree header — and the review
+half fetches EVERY destination remote before it can compare anything. Both are
+tracked now, repo-scoped (`worktreeId: null`, since no checkout owns a push
+aimed at named remotes), and every network command they run forces
+`--progress`: the quiet warning reads silence as evidence, so a command that
+was never obliged to emit would make that reading a lie. `pushFailureMessage`
+is the other half of forcing it — Git writes the meter with CR, and a
+rejection's stderr would otherwise reach the review table with every repaint of
+"Writing objects" in front of it.
+
 The failure that motivated all of this: an SSH agent that is present but cannot
 answer (1Password's agent with 1Password stopped or locked) accepts the
 connection and then blocks forever. Git prints nothing, exits never, and every

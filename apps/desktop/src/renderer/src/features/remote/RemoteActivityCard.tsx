@@ -195,10 +195,6 @@ export function RemoteActivityCard({
         </p>
       )}
 
-      {view.command !== null && (
-        <p className="remote-activity__command">{view.command}</p>
-      )}
-
       {!compact && showOutput(view) && (
         // Git's own words, verbatim. Everything above is PwrGit's reading of
         // the operation; this is the evidence behind it, and the only thing
@@ -228,6 +224,18 @@ export function RemoteActivityCard({
           >
             Git output
           </summary>
+          {/* Inside the disclosure with the output, and for the same reason.
+              `setCommand` fires per Git INVOCATION rather than per phase — a
+              pull runs eight of them — and a 160-character command line wraps
+              to a different number of lines each time, so as a permanent
+              fixture it moved everything under it several times a second. The
+              two facts a wedged transfer is diagnosed from are "which command"
+              and "what did it last print"; they belong together, and the
+              disclosure opens itself on exactly the operations where they are
+              the finding. */}
+          {view.command !== null && (
+            <p className="remote-activity__command">{view.command}</p>
+          )}
           <pre
             className="remote-activity__output"
             aria-label="Recent Git output"

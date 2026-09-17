@@ -86,16 +86,37 @@ Four rules hold it together.
   gate: the card still opens on the click. That was the original ask and it is
   what makes the button feel answered; this governs what the card says, not
   whether it is there.
-- **Git's own output is collapsed while the operation looks healthy.** It is
-  `\r`-rewritten progress &mdash; built to be transient in a terminal &mdash;
-  and live it grew from nothing to its 108&nbsp;px cap while its last line
-  flickered. That was the single largest source of churn, and on a healthy
-  operation it says nothing the rows have not. It opens *itself* the moment it
-  is the finding: a quiet warning, a failure, or a cancel. Making a user hunt
-  for a disclosure to read the thing they came for would be the same mistake as
-  the age gate was. The open state is React-controlled because the popover
-  re-renders every second &mdash; an uncontrolled `<details>` would shut itself
-  under a user who had just opened it.
+
+  **The gate covers the whole card, not the step list.** Gating the list alone
+  left the card falling through to its status line &mdash; and
+  `remoteActivityStatus` *is* the per-phase narration, so the same four
+  sentences went on landing in six tenths of a second by the other door. Below
+  the threshold `startingView` is the view, from the click right through main's
+  first words: one line, no meter, no command. It reads the record only for
+  the operation itself (the id and `canceling`, so Cancel is drawn from the
+  moment there is something to stop rather than appearing when the narration
+  starts) and for the output tail, which rides inside a collapsed disclosure
+  and so cannot move anything.
+- **Git's own output is collapsed while the operation looks healthy, and the
+  command line rides with it.** The output is `\r`-rewritten progress &mdash;
+  built to be transient in a terminal &mdash; and live it grew from nothing to
+  its 108&nbsp;px cap while its last line flickered. That was the single
+  largest source of churn, and on a healthy operation it says nothing the rows
+  have not. It opens *itself* the moment it is the finding: a quiet warning, a
+  failure, or a cancel. Making a user hunt for a disclosure to read the thing
+  they came for would be the same mistake as the age gate was. The open state
+  is React-controlled because the popover re-renders every second &mdash; an
+  uncontrolled `<details>` would shut itself under a user who had just opened
+  it.
+
+  The command line is in there for the same reason and one of its own:
+  `setCommand` fires per Git *invocation*, not per phase &mdash; a pull runs
+  about eight &mdash; and 160 monospace characters wrap to a different number
+  of lines each time, so as a fixture in the card's own column it moved
+  everything under it several times a second. "Which command" and "what did it
+  last print" are the two facts a wedged transfer is diagnosed from; they
+  belong together, behind a disclosure that opens itself on exactly the
+  operations where they are the finding.
 
 Rows carry bare labels today. Counts &mdash; *"Fast-forwarded · 12 commits"*
 &mdash; need the command results widened in main: `remote:fetch` and
@@ -146,14 +167,27 @@ it is right now, and a card under the pointer still waits.
 `REMOTE_ACTIVITY_SETTLED_MS` may be as short as it is *because* of those
 pauses, not despite them — that, plus the ✕, is WCAG SC 2.2.1 met three ways.
 
-## One card, three placements
+## One card, four placements
 
 `RemoteActivityCard` is rendered by the pinned popover, by a hover-opened card
-from the same hook, and by the elsewhere-toast (`RemoteActivityToast`). They
-answer the same question from different places, so they share the card rather
-than growing dialects of it; `compact` drops the Git-output block for the
-toast, and `onClose` is what draws the ✕ and the Close button — given only
-where dismissal is the user's to make.
+from the same hook, by the elsewhere-toast (`RemoteActivityToast`), and by
+`PushRefsDialog`. They answer the same question from different places, so they
+share the card rather than growing dialects of it; `compact` drops the
+Git-output block for the toast, and `onClose` is what draws the ✕ and the
+Close button — given only where dismissal is the user's to make.
+
+The dialog is the exception to "a modal takes the card away", and it has to
+be: it is the surface that *starts* the operation. Both halves of the push
+review are network commands — the plan fetches every destination remote
+before it can compare anything — and until `remote:planPushRefs` and
+`remote:pushRefs` were wrapped in `tracked()` neither registered anything at
+all, so the only thing that said an SSH agent had wedged was a button caption
+reading "Pushing…". It draws the card itself rather than leaning on the
+elsewhere-toast because `.toast-host` is z-index 90 under a backdrop at 110:
+that card would be dimmed and unclickable behind the dialog that started the
+work. It shows the live view only; the dialog's own per-destination results
+table is a better receipt than a one-line summary, so there is no `settle`
+here.
 
 The split between popover and toast is scope, and it is load-bearing: the toast
 shows only operations the toolbar on screen is *not* already reporting. Show

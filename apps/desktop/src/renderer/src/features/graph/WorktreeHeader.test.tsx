@@ -304,6 +304,7 @@ describe("WorktreeHeader pull progress", () => {
   });
 
   it("pins the card from the click and cancels from it", async () => {
+    freezeClock();
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
@@ -316,6 +317,12 @@ describe("WorktreeHeader pull progress", () => {
       document.querySelector(".remote-activity-popover")?.textContent
     ).toContain("Pull · project · main");
 
+    // Past the narration threshold: below it the card deliberately carries no
+    // command line at all, because `setCommand` fires per Git invocation and a
+    // pull runs eight of them.
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
     await emitActivities([
       {
         phase: "fetch",
@@ -956,6 +963,92 @@ describe("WorktreeHeader settled status card", () => {
     // But it was recorded throughout, so the receipt still answers the
     // question the churn was failing to.
     expect(steps()).toEqual(["Fetched", "Fast-forwarded"]);
+  });
+
+  // The same complaint, arriving by the other door. Gating only the step list
+  // left the card falling back to `remoteActivityStatus`, which IS the
+  // per-phase narration — so a sub-second pull still walked four sentences in
+  // six tenths of a second, in the one line the card was showing.
+  it("says one stable thing while it is too short to narrate", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    const line = (): string =>
+      card()?.querySelector(".remote-activity__status")?.textContent ?? "";
+    expect(line()).toBe("Starting…");
+
+    for (const phase of [
+      "fetch",
+      "prepare",
+      "fast_forward",
+      "reapply"
+    ] as const) {
+      await emitActivities([
+        { kind: "pull", phase, lastOutputAt: Date.now(), command: `git ${phase}` }
+      ]);
+      expect(line(), `the card was rewritten during ${phase}`).toBe(
+        "Starting…"
+      );
+    }
+    // And nothing under it moved either: the command line changes with every
+    // Git invocation, not merely every phase.
+    expect(card()?.querySelector(".remote-activity__command")).toBeNull();
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(steps()).toEqual([
+      "Fetched",
+      "Fast-forwarded",
+      "Reapplied your changes"
+    ]);
+  });
+
+  // Cancel is the one thing the quiet period must not withhold: it is drawn
+  // from the moment there is an operation to stop, not from the moment the
+  // card starts narrating one.
+  it("offers Cancel before it narrates", async () => {
+    freezeClock();
+    await inFlight("Pull");
+    await emitActivities([
+      { id: "op-9", kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    const cancel = [
+      ...(card()?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    ].find((button) => button.textContent === "Cancel");
+    await act(async () => cancel?.click());
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:cancelActivity", {
+      operationId: "op-9"
+    });
+  });
+
+  // The command line is up to 160 monospace characters in a 320px card, so it
+  // wraps to a different number of lines per invocation — as a permanent
+  // fixture under the step list it moved everything below it several times a
+  // second. It belongs with the output it produced, behind the disclosure that
+  // opens itself when those two facts ARE the finding.
+  it("keeps the command line inside the evidence disclosure", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      {
+        kind: "pull",
+        phase: "fetch",
+        lastOutputAt: Date.now(),
+        command: "git fetch --prune --progress origin"
+      }
+    ]);
+    const command = card()?.querySelector(".remote-activity__command");
+    expect(command?.textContent).toBe("git fetch --prune --progress origin");
+    expect(
+      command?.closest(".remote-activity__evidence"),
+      "a line that reflows at Git's rate must not sit in the card's own column"
+    ).not.toBeNull();
+    finish();
   });
 
   // A row is appended, changes once when its own work ends, and then holds.

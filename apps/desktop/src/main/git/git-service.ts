@@ -4180,13 +4180,10 @@ async function ensureCommitObject(
   const have = await git(["cat-file", "-e", `${head}^{commit}`], cwd);
   if (!have.ok) return have;
   if (have.value.exitCode === 0) return ok(undefined);
-  const fetched = await git(["fetch", pushUrl, `refs/heads/${branch}`], cwd);
+  const args = ["fetch", "--progress", pushUrl, `refs/heads/${branch}`];
+  const fetched = await git(args, cwd);
   if (!fetched.ok) return fetched;
-  const checked = requireExit0(fetched.value, [
-    "fetch",
-    pushUrl,
-    `refs/heads/${branch}`
-  ]);
+  const checked = requireExit0(fetched.value, args);
   return checked.ok ? ok(undefined) : checked;
 }
 
@@ -4222,6 +4219,17 @@ function sourceRemote(
     .slice()
     .sort((a, b) => b.length - a.length)
     .find((name) => sourceRef.startsWith(`refs/remotes/${name}/`));
+}
+
+/**
+ * A ref as the push review names it — "main", "origin/main".
+ *
+ * Exported because the status card wants the same short name the dialog shows:
+ * an activity titled "Fetch · PwrGit · refs/heads/main" is the one
+ * place a user would see the long form, and it would be the only one.
+ */
+export function pushRefLabel(ref: string): string {
+  return ref.replace(/^refs\/heads\//, "").replace(/^refs\/remotes\//, "");
 }
 
 /**
@@ -4264,15 +4272,16 @@ export async function planPushRefs(
   const sourceRemoteName = sourceRemote(sourceRef, names.value);
   if (sourceRemoteName !== undefined) refreshNames.add(sourceRemoteName);
   for (const remote of refreshNames) {
-    const fetched = await fetchNamedRemote(git, cwd, remote);
+    // `--progress`, like every other tracked network command: the activity
+    // registry reads silence as evidence that a transfer is wedged, and a
+    // fetch that was never obliged to emit would make that reading a lie.
+    const fetched = await fetchNamedRemote(git, cwd, remote, true);
     if (!fetched.ok) return fetched;
   }
 
   const source = await resolveCommit(git, cwd, sourceRef);
   if (!source.ok) return source;
-  const sourceLabel = sourceRef
-    .replace(/^refs\/heads\//, "")
-    .replace(/^refs\/remotes\//, "");
+  const sourceLabel = pushRefLabel(sourceRef);
   const plans: PushRefPlan[] = [];
   const seen = new Set<string>();
   for (const destination of destinations) {
@@ -4318,6 +4327,24 @@ export async function planPushRefs(
     });
   }
   return ok(plans);
+}
+
+/**
+ * A failed push's stderr as a terminal would have shown it.
+ *
+ * `--progress` is forced here for the activity registry's sake — silence
+ * during a push is the only thing that tells a wedged transfer from a slow one
+ * — and Git writes that meter with CR, so the raw string carries every
+ * repaint of "Writing objects" as ordinary text. The last segment of each CR
+ * run is the state that line settled on, and it is the only one worth putting
+ * beside a rejection in the review table.
+ */
+function pushFailureMessage(stderr: string): string {
+  return stderr
+    .split("\n")
+    .map((line) => line.split("\r").filter((part) => part !== "").at(-1) ?? "")
+    .join("\n")
+    .trim();
 }
 
 /** Execute reviewed pushes with a lease and a fresh ancestry check per target. */
@@ -4407,6 +4434,7 @@ export async function pushPlannedRefs(
     const raw = await git(
       [
         "push",
+        "--progress",
         `--force-with-lease=${destinationRef}:${expected}`,
         pushUrl.value,
         `${plan.sourceHead}:${destinationRef}`
@@ -4419,7 +4447,7 @@ export async function pushPlannedRefs(
         outcome: "failed",
         message:
           raw.ok
-            ? raw.value.stderr.trim() || "Push failed."
+            ? pushFailureMessage(raw.value.stderr) || "Push failed."
             : raw.error.message
       });
       continue;
@@ -4427,7 +4455,9 @@ export async function pushPlannedRefs(
     results.push({ ...base, outcome: "pushed" });
     refreshed.add(plan.destinationRemote);
   }
-  for (const remote of refreshed) await fetchNamedRemote(git, cwd, remote);
+  for (const remote of refreshed) {
+    await fetchNamedRemote(git, cwd, remote, true);
+  }
   return ok(results);
 }
 

@@ -167,24 +167,51 @@ export type RemoteActivityPopover = {
  */
 export type RemoteActivityTriggers = readonly RefObject<HTMLElement | null>[];
 
-/** The card between the click and main's first word about the operation. */
-function startingView(pin: Pin, now: number): RemoteActivityView {
+/**
+ * The card before the operation is old enough to narrate — one stable line.
+ *
+ * It covers the whole quiet period, from the click through main's first words
+ * about the operation, and says the same thing throughout. That is the point:
+ * below the threshold the card has exactly two states, this one and its
+ * receipt.
+ *
+ * The record is deliberately NOT read for the line. `remoteActivityStatus` IS
+ * the per-phase narration — "Fetching updates", "Preparing local changes",
+ * "Fast-forwarding and checking out files", "Reapplying local changes" — and
+ * every `setPhase` publishes past the 400ms throttle, so a 620ms pull put four
+ * sentences on screen inside six tenths of a second. Gating the step list alone
+ * left that same churn arriving by the other door.
+ *
+ * What the record IS read for is the operation itself: its id and canceling
+ * flag, so Cancel is drawn from the moment there is something to stop rather
+ * than appearing when the narration starts, and its output tail, which rides
+ * inside a collapsed disclosure and so changes nothing about the card's shape.
+ */
+function startingView(
+  pin: Pin,
+  now: number,
+  activity: RemoteActivity | null = null
+): RemoteActivityView {
   return {
-    operationId: null,
+    operationId: activity?.id ?? null,
     title: remoteActivityTitle(pin.scope),
     elapsed: formatElapsed(now - pin.startedAt),
     statusLabel: "Starting…",
     statusTone: "muted",
+    // No meter: it mounts and unmounts with Git's first and last progress
+    // line, and a block that appears for a third of a second is churn, not
+    // information.
     meter: null,
     percent: null,
+    // No command either. It changes with every Git invocation rather than
+    // every phase — a pull runs eight of them — and each is a different
+    // number of wrapped lines under the rest of the card.
     command: null,
-    output: [],
-    // Nothing observed yet, so nothing to list: the card falls back to its
-    // status line, which is the whole of what "Starting…" has to say.
+    output: activity?.tail ?? [],
+    // Nothing to list yet: the card falls back to its status line, which is
+    // the whole of what "Starting…" has to say.
     steps: [],
-    // No operation id yet, so nothing to cancel. The button is drawn from the
-    // moment there is something for it to stop, and not before.
-    canceling: null,
+    canceling: activity?.canceling ?? null,
     settled: null
   };
 }
@@ -573,18 +600,18 @@ export function useRemoteActivityPopover(
       ? null
       : pin.outcome !== null
         ? settledActivityView(pin.outcome)
-        : activity !== null && activity.kind === pin.scope.kind
-          ? liveActivityView(
-              activity,
-              now,
-              narrating
-                ? activitySteps(seen, activity.phase, {
-                    detail: remoteActivityMeter(activity),
-                    percent: activity.progress?.percent ?? null
-                  })
-                : []
-            )
-          : startingView(pin, now);
+        : activity === null || activity.kind !== pin.scope.kind
+          ? startingView(pin, now)
+          : narrating
+            ? liveActivityView(
+                activity,
+                now,
+                activitySteps(seen, activity.phase, {
+                  detail: remoteActivityMeter(activity),
+                  percent: activity.progress?.percent ?? null
+                })
+              )
+            : startingView(pin, now, activity);
 
   // A failure has no rail at all: a bar that is not draining cannot be
   // mistaken for one that is, and nothing but the user ends it.

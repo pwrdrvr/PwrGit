@@ -22,6 +22,7 @@ import {
   pullFastForward,
   planPushRefs,
   pushPlannedRefs,
+  pushRefLabel,
   pushRemote,
   rebaseOntoUpstream,
   removeRemote,
@@ -480,21 +481,46 @@ export function registerRemoteHandlers(
     return ok(null);
   });
 
+  // Both halves of the push review are tracked, for the reason
+  // `src/main/git/AGENTS.md` gives: they are network commands, and the review
+  // fetches EVERY destination remote before it can compare anything. An SSH
+  // agent that accepts the connection and then never answers wedges them
+  // exactly as it wedges a fetch — and until they were registered here the
+  // only thing that said so was a button in a modal reading "Pushing…", with
+  // no elapsed, no Git output and no way to stop it.
+  //
+  // Repo-scoped: no worktree owns a push the user aimed at named remotes, and
+  // `worktreeId: null` is also what makes the elsewhere-toast keep it visible
+  // once the dialog is closed.
   bus.register("remote:planPushRefs", async (req) => {
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
-    const result = await operations.runRepository(req.repoId, async () => {
-      const planned = await planPushRefs(
-        execGit,
-        repo.path,
-        req.sourceRef,
-        req.destinations
-      );
-      if (planned.ok) {
-        await refreshRemoteBranches(req.repoId, "plan push refs");
+    const result = await tracked(
+      {
+        kind: "fetch",
+        profileId: repo.profileId,
+        repoId: req.repoId,
+        repoName: repo.name,
+        branch: pushRefLabel(req.sourceRef)
+      },
+      "fetch",
+      async (git, activity) => {
+        const planned = await planPushRefs(
+          git,
+          repo.path,
+          req.sourceRef,
+          req.destinations
+        );
+        if (planned.ok) {
+          // PwrGit's own bookkeeping, not Git's: the quiet warning is scoped
+          // to network phases, and leaving this one inside `fetch` would make
+          // a slow index refresh read as a transfer that had gone silent.
+          activity.setPhase("refresh");
+          await refreshRemoteBranches(req.repoId, "plan push refs");
+        }
+        return planned;
       }
-      return planned;
-    });
+    );
     refresher.refreshRepoWorktrees(req.repoId);
     return result;
   });
@@ -503,11 +529,27 @@ export function registerRemoteHandlers(
     const repo = repoOf(req.repoId);
     if (repo === null) return err({ ...notFound, message: "repo not found" });
     const startedAt = Date.now();
-    const result = await operations.runRepository(req.repoId, async () => {
-      const pushed = await pushPlannedRefs(execGit, repo.path, req.plans);
-      if (pushed.ok) await refreshRemoteBranches(req.repoId, "push refs");
-      return pushed;
-    });
+    const result = await tracked(
+      {
+        kind: "push",
+        profileId: repo.profileId,
+        repoId: req.repoId,
+        repoName: repo.name,
+        branch:
+          req.plans[0] === undefined
+            ? null
+            : pushRefLabel(req.plans[0].sourceRef)
+      },
+      "push",
+      async (git, activity) => {
+        const pushed = await pushPlannedRefs(git, repo.path, req.plans);
+        if (pushed.ok) {
+          activity.setPhase("refresh");
+          await refreshRemoteBranches(req.repoId, "push refs");
+        }
+        return pushed;
+      }
+    );
     refresher.refreshRepoWorktrees(req.repoId);
     if (!result.ok) return result;
     const pushed = result.value.filter((item) => item.outcome === "pushed").length;

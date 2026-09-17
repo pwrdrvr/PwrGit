@@ -12,6 +12,12 @@ import {
 } from "../shell/BranchRefPicker";
 import { CopyTarget } from "../shell/CopyTarget";
 import { useModal } from "../../lib/useModal";
+import { RemoteActivityCard } from "../remote/RemoteActivityCard";
+import { liveActivityView } from "../remote/remote-activity";
+import {
+  useRepoRemoteActivity,
+  useSecondsClock
+} from "../../state/useRemoteActivity";
 
 /**
  * The branch name a push should default to for `option` — the name relative to
@@ -81,6 +87,23 @@ export function PushRefsDialog({
   const [results, setResults] = useState<PushRefResult[] | null>(null);
   const [busy, setBusy] = useState<"plan" | "push" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The running half of this dialog, from the same registry the toolbar reads.
+  //
+  // Both commands behind these buttons are network commands — the review
+  // fetches every destination remote before it can compare anything — and
+  // until they were registered the only thing that said so was the button
+  // caption below. An SSH agent that accepts the connection and then never
+  // answers wedges them exactly as it wedges a fetch, and a caption cannot
+  // carry elapsed, Git's own words, Logs, or a way to stop it.
+  //
+  // It is drawn here rather than left to the elsewhere-toast because this is a
+  // modal: `.toast-host` sits under `.overlay-backdrop`, so that card would be
+  // dimmed and unclickable behind the dialog that started the work.
+  const activity = useRepoRemoteActivity(
+    busy === null ? null : repo.id,
+    busy === "push" ? "push" : "fetch"
+  );
+  const now = useSecondsClock(activity !== null);
 
   const resetReview = (): void => {
     setPlans(null);
@@ -263,6 +286,12 @@ export function PushRefsDialog({
             <div className="modal__hint">
               {pushedCount ?? 0} destination{pushedCount === 1 ? "" : "s"} updated.
             </div>
+          </div>
+        )}
+
+        {activity !== null && (
+          <div className="refs-push__activity">
+            <RemoteActivityCard view={liveActivityView(activity, now)} />
           </div>
         )}
 

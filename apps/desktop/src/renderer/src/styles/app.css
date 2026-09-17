@@ -5259,6 +5259,21 @@ textarea,
   max-height: 80vh;
   overflow: auto;
 }
+/* The running operation, in the dialog that started it. The elsewhere-toast
+   cannot serve here: `.toast-host` is z-index 90 and this backdrop is 110, so
+   its card would be dimmed and unclickable behind the modal. */
+.refs-push__activity {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-app);
+}
+/* The card sizes itself for a popover; here it has the dialog's width to fill,
+   and a 320px column floating in a 560px panel reads as a stray tooltip. */
+.refs-push__activity .remote-activity {
+  width: 100%;
+}
 .refs-tag-resolved {
   min-height: 54px;
   margin: 8px 0 2px;
@@ -12384,6 +12399,10 @@ button.agent-auth-node {
 .remote-activity__evidence-summary:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
+}
+
+.remote-activity__evidence[open] .remote-activity__command {
+  margin-top: 6px;
 }
 
 .remote-activity__evidence[open] .remote-activity__output {
