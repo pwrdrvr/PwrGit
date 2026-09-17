@@ -6,7 +6,8 @@ import {
   branchRow,
   expandRepoGroup,
   expandWorktrees,
-  lensChip
+  lensChip,
+  pickPaletteHit
 } from "./fixtures/steps";
 
 // One window per profile: creating/picking a profile opens (or focuses) its
@@ -370,8 +371,7 @@ test("a cross-profile remote branch opens its new-worktree flow in the owning wi
   const release = window.locator(".overlay-result", {
     hasText: "releases/1.0"
   });
-  await expect(release).toBeVisible({ timeout: 20_000 });
-  await release.click();
+  await pickPaletteHit(release);
 
   const modal = remoteWindow.locator(".modal", {
     hasText: "New worktree · remote-profile"
@@ -436,9 +436,11 @@ test("a queued cross-profile reveal wins over a stale restored worktree", async 
   const hit = window.locator(".overlay-result", {
     hasText: "feature/requested"
   });
+  // Wait for the row BEFORE arming the window promise. `pickPaletteHit` waits
+  // too, but that wait would then be spending the event's own 30s budget.
   await expect(hit).toBeVisible({ timeout: 20_000 });
   const reopenedPromise = handle.app.waitForEvent("window");
-  await hit.click();
+  await pickPaletteHit(hit);
   const reopened = await reopenedPromise;
   await reopened.waitForSelector("#root");
 
