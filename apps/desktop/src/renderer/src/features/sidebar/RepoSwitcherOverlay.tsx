@@ -58,6 +58,21 @@ const hitFolderLabel = (hit: RepoSearchHit): string | null =>
     ? worktreeFolderLabel(hit.name, hit.path, [hit.repoName])
     : null;
 
+/** The word the row's leading glyph stands for.
+ *  Both the glyph's tooltip and the first thing the row says to a screen
+ *  reader: `.overlay-result` is a `role="option"`, so its accessible name is
+ *  built from its subtree, and the kind is otherwise unsaid for two of the
+ *  four kinds — `.overlay-result__meta` names the repo for a worktree and the
+ *  worktree count for a repo, never the kind itself. */
+const hitKindLabel = (hit: RepoSearchHit): string =>
+  hit.kind === "worktree"
+    ? "Worktree"
+    : hit.kind === "local_branch"
+    ? "Local branch"
+    : hit.kind === "remote_branch"
+    ? "Remote branch"
+    : "Repo";
+
 export type PaletteItem =
   | { kind: "commit"; commit: Commit }
   | { kind: "file"; hit: FileSearchHit }
@@ -166,6 +181,7 @@ function CommitIcon() {
       stroke="currentColor"
       strokeWidth="1.8"
       strokeLinecap="round"
+      aria-hidden="true"
     >
       <path d="M3 12h6M15 12h6" />
       <circle cx="12" cy="12" r="3" />
@@ -184,6 +200,7 @@ function FileIcon() {
       strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
     >
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
       <path d="M14 3v5h5" />
@@ -202,6 +219,7 @@ function BranchIcon() {
       strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
+      aria-hidden="true"
     >
       <circle cx="6" cy="5" r="2" />
       <circle cx="6" cy="19" r="2" />
@@ -739,38 +757,56 @@ export function RepoSwitcherOverlay({
                 onMouseEnter={() => selectItem(i)}
                 onClick={() => pickItem(item)}
               >
-              {isWorktreelessBranch(r) ? (
-                <BranchIcon />
-              ) : r.kind === "worktree" ? (
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M6 3v12" />
-                  <circle cx="6" cy="18" r="3" />
-                  <circle cx="18" cy="6" r="3" />
-                  <path d="M18 9c0 6-6 6-6 12" />
-                </svg>
-              ) : (
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-                </svg>
-              )}
+              {/* The kind, said twice: once to the pointer and once to the
+                  accessibility tree. The glyph carried neither, and for a
+                  worktree and a repo it is the row's ONLY marker of kind —
+                  `__meta` names their repo and worktree count, never the kind
+                  — so a screen reader was told nothing and a sighted user got
+                  a 15px mark with nothing to ask. The sr-only span is what
+                  lands in the name: the row is a `role="option"`, so the name
+                  comes from its subtree. Wrapped in a span rather than spread
+                  onto the <svg> because `hoverTooltip`'s handlers are typed
+                  for HTMLElement; the folder beside it is wrapped likewise. */}
+              <span className="a11y-sr-only">{hitKindLabel(r)}</span>
+              <span
+                className="overlay-result__kind"
+                {...hoverTooltip(tip, hitKindLabel(r))}
+              >
+                {isWorktreelessBranch(r) ? (
+                  <BranchIcon />
+                ) : r.kind === "worktree" ? (
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 3v12" />
+                    <circle cx="6" cy="18" r="3" />
+                    <circle cx="18" cy="6" r="3" />
+                    <path d="M18 9c0 6-6 6-6 12" />
+                  </svg>
+                ) : (
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                  </svg>
+                )}
+              </span>
               <span className="overlay-result__name">{r.name}</span>
               {(() => {
                 const folder = hitFolderLabel(r);

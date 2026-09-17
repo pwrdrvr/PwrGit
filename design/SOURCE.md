@@ -84,12 +84,14 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Tag Chips and Locate - UX Review.dc.html` | The lineage tag chip and the tag locator — chip vocabulary, the light-theme contrast the accent tint could not hold, and the sidebar action column. |
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
+| `Palette Kind Glyphs - UX Review.dc.html` | The &#8984;K palette's leading kind glyph &mdash; why branch and worktree do not separate at 15&nbsp;px, the channels that survive that size, the labels that shipped, and the redraws offered for worktree and for the remote branch that never had a mark of its own. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
 | `github.md` | Provenance note for the icon asset set (matched to PwrSnap's). |
 | `assets/logo-pwrgit.svg` | The lineage mark. |
 | `assets/tag-locate-{before,after}.png` | Shipped-app captures for the tag chip artboard, from the Playwright tag scenario on contrived fixture repos. |
+| `assets/palette-glyph-raster-before.png` | The three shipped palette glyphs rasterised at their true 15&nbsp;px and magnified with nearest-neighbour sampling &mdash; the evidence for the review's first finding. Generated, not a capture. |
 | `assets/forges-before.png` | Shipped-app capture of Settings › Forges, from a Playwright scenario against contrived `gh`/`glab` stubs. |
 | `assets/branch-switch-{sidebar,browser}-{before,after}.png` | Shipped-app captures of the sidebar ref sections and the refs browser, from one Playwright scenario on a contrived repository, run against the renderer before and after the change. |
 | `assets/dirty-switch-prompt.png` | Shipped-app capture of the uncommitted-changes prompt, from the same contrived scenario. |
@@ -171,6 +173,22 @@ That turn shares one `DCLogic` component with turn 2, because an artboard has a
 single `data-dc-script` block. `renderVals()` merges two value sets
 (`t2Vals()` and `p4Vals()`) rather than one class growing two personalities;
 the `p4` prefix is what keeps the bindings from colliding.
+
+`Palette Kind Glyphs - UX Review.dc.html` and `assets/palette-glyph-raster-before.png`
+were written here the same way, during the &#8984;K palette glyph review. Unlike the
+files above, this one took the route **because Claude Design was unreachable** &mdash;
+both the `claude-design` MCP server and the built-in `DesignSync` tool answer
+HTTP&nbsp;403 `FIRST_PARTY_AUTH_REJECTED` until `/design-login` has been run in an
+interactive session, and a non-interactive one cannot run it. **So this artboard is
+not yet in the project, and a re-export will delete it** &mdash; push it up before
+running one.
+
+Its specimens are invented (`Demo`, `feature/requested`, `spike/no-checkout`,
+`release/1.4`), and its one image is generated rather than captured: the glyphs are
+drawn at 15&nbsp;px by headless Chromium and blown up with nearest-neighbour
+sampling, which is the whole argument &mdash; vector magnification flatters an icon
+and hides the defect. Card **4e** is a live `DCLogic` prototype that swaps the whole
+glyph set and blurs it, because the read being argued about is a peripheral one.
 
 The Tag Chips captures are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a

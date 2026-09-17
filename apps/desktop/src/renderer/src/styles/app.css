@@ -2458,6 +2458,14 @@ textarea,
   font: 500 10px/1 var(--font-mono);
   color: var(--text-muted);
 }
+/* The kind glyph's box. It exists to carry a tooltip, but it also pins the
+   glyph's width: every other item in this row is shrinkable, and the 15px mark
+   is the one that can least afford to give. Same `flex: 0 0 auto` as the
+   folder's own glyph two rules down. */
+.overlay-result__kind {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
 /* Same rule as the sidebar's .wt-row__folder, in this row's proportions: a
    worktree hit can match on its PATH (paths are indexed), and a row that named
    only the branch left the user no way to see why it came back. */
