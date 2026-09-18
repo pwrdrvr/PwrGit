@@ -15,6 +15,7 @@ import {
   err,
   ok,
   type RemoteActivity,
+  type RemoteSummary,
   type Repo,
   type SshRemoteRecovery,
   type Worktree,
@@ -1341,6 +1342,28 @@ describe("WorktreeHeader settled status card", () => {
     expect(evidence?.textContent).toContain("fatal: unreachable");
   });
 
+  it("quotes only what Git wrote under a reason PwrGit wrote", async () => {
+    // A rejected push's message is PwrGit's reading of Git; `detail` is Git.
+    // The headline takes the one and the Git-output block the other, so the
+    // block never presents PwrGit's sentence as something Git printed.
+    freezeClock();
+    await press(
+      "Push",
+      err({
+        kind: "remote",
+        code: "rejected",
+        message: "The remote has newer commits. Pull, then push again.",
+        detail: " ! [rejected]        main -> main (fetch first)"
+      })
+    );
+    expect(card()?.textContent).toContain(
+      "Push failed — The remote has newer commits. Pull, then push again."
+    );
+    const output = card()?.querySelector(".remote-activity__output");
+    expect(output?.textContent).toContain("! [rejected]");
+    expect(output?.textContent).not.toContain("Pull, then push again");
+  });
+
   it("keeps the card as the receipt, and counts it down", async () => {
     freezeClock();
     await press("Fetch", ok(null));
@@ -1784,5 +1807,202 @@ describe("WorktreeHeader offers a fork when this account cannot push", () => {
     )!;
     await act(async () => push.click());
     expect(document.querySelector(".fork-checkout-dialog")).toBeNull();
+  });
+});
+
+describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
+  // Push on a branch with no upstream used to be a dead end: Git refused, and
+  // the card relayed its advice to go and run `git push --set-upstream` in a
+  // terminal. The toolbar asks the one question that command needs instead.
+  const branch = "feature/new-thing";
+  const unpublishedRow: Worktree = {
+    ...worktree,
+    branch,
+    isDefaultBranch: false,
+    behind: 0,
+    tracking: "unpublished"
+  };
+  const remote = (name: string): RemoteSummary => ({
+    name,
+    fetchUrl: `https://example.test/${name}/project.git`,
+    pushUrl: `https://example.test/${name}/project.git`,
+    skipFetchAll: false,
+    previewBranches: [],
+    branchCount: 0
+  });
+  const snapshot = (overrides: Partial<WorktreeState>): WorktreeState => ({
+    worktreeId: worktree.id,
+    branch,
+    head: "0123456789abcdef0123456789abcdef01234567",
+    hasUpstream: false,
+    ahead: 0,
+    behind: 0,
+    dirty: 0,
+    behindDefault: 0,
+    defaultBranch: "main",
+    mergedIntoDefault: false,
+    divergedFromDefault: false,
+    isDefaultBranch: false,
+    updatedAt: "2026-09-17T00:00:00.000Z",
+    ...overrides
+  });
+
+  const dialog = (): Element | null => document.querySelector(".publish-branch");
+  const card = (): Element | null =>
+    document.querySelector(".remote-activity-popover");
+  const pushCalls = () =>
+    bridge.dispatch.mock.calls.filter(([name]) => name === "remote:push");
+
+  /**
+   * Mount a header of its own, answering `repo:refs` with `remotes` and
+   * `remote:push` with `push`. Listed `upstream` first, so a test that sees
+   * `origin` chosen is seeing the preference and not the order.
+   */
+  async function mount({
+    row = unpublishedRow,
+    state = null,
+    remotes = [remote("upstream"), remote("origin")],
+    push = new Promise(() => undefined)
+  }: {
+    row?: Worktree;
+    state?: WorktreeState | null;
+    remotes?: RemoteSummary[];
+    push?: Promise<unknown>;
+  } = {}) {
+    // The shared fixture's header is a second Push button on the page.
+    await act(async () => root.unmount());
+    bridge.dispatch.mockImplementation((name: string) =>
+      name === "repo:refs"
+        ? Promise.resolve(
+            ok({ branches: [], previewTags: [], tagCount: 0, remotes })
+          )
+        : name === "remote:push"
+          ? push
+          : name === "remote:activities"
+            ? Promise.resolve(ok([]))
+            : new Promise(() => undefined)
+    );
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<WorktreeHeader repo={repo} worktree={row} state={state} />);
+    });
+  }
+
+  const clickPush = async (): Promise<void> => {
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Push"]')
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+  const choose = async (name: string): Promise<void> => {
+    const radio = [
+      ...(dialog()?.querySelectorAll<HTMLLabelElement>(".refs-destination") ?? [])
+    ]
+      .find((row) => row.textContent?.startsWith(name))
+      ?.querySelector("input");
+    await act(async () => radio?.click());
+  };
+  const pressIn = async (label: string): Promise<void> => {
+    const button = [
+      ...(dialog()?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    ].find((candidate) => candidate.textContent === label);
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  it("asks where to publish, and pushes nothing until it is answered", async () => {
+    await mount();
+    await clickPush();
+
+    expect(dialog()?.textContent).toContain(`Publish ${branch}`);
+    // origin, though it is listed second.
+    expect(dialog()?.textContent).toContain(
+      `Pushes ${branch} to origin/${branch} and tracks it.`
+    );
+    expect(pushCalls()).toEqual([]);
+    // Nothing is running yet, so there is nothing for a card to report.
+    expect(card()).toBeNull();
+  });
+
+  it("publishes to the remote chosen, and the receipt says where", async () => {
+    await mount({ push: Promise.resolve(ok(null)) });
+    await clickPush();
+    await choose("upstream");
+    await pressIn("Publish");
+
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([
+      ["remote:push", { worktreeId: worktree.id, publish: { remote: "upstream" } }]
+    ]);
+    // Hung off the button that asked, as a plain push's card is.
+    expect(card()?.textContent).toContain("Published to upstream");
+  });
+
+  it("leaves without pushing or pinning anything on Cancel", async () => {
+    await mount();
+    await clickPush();
+    await pressIn("Cancel");
+
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([]);
+    expect(card()).toBeNull();
+  });
+
+  it("reads the live snapshot ahead of the indexed row", async () => {
+    // The row still says unpublished; the snapshot has seen it tracked since.
+    await mount({ state: snapshot({ hasUpstream: true }) });
+    await clickPush();
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([["remote:push", { worktreeId: worktree.id }]]);
+  });
+
+  it("offers nothing to publish when the directory is gone", async () => {
+    // A missing checkout reads `hasUpstream: false` as well; publishing it
+    // would be an answer to the wrong question.
+    await mount({ state: snapshot({ missing: true }) });
+    await clickPush();
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([["remote:push", { worktreeId: worktree.id }]]);
+  });
+
+  it("asks the same question when Git says no upstream after all", async () => {
+    // Both the row and the snapshot said tracked; Git is the authority.
+    await mount({
+      row: { ...unpublishedRow, tracking: "up_to_date" },
+      push: Promise.resolve(
+        err({
+          kind: "remote",
+          code: "no_upstream",
+          message: `fatal: The current branch ${branch} has no upstream branch.`
+        })
+      )
+    });
+    await clickPush();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(dialog()).not.toBeNull();
+    // The card goes rather than relaying Git's terminal advice, and the
+    // question is the report — so no toast either.
+    expect(card()).toBeNull();
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  it("says so, and offers no Publish, when there is no remote at all", async () => {
+    await mount({ remotes: [] });
+    await clickPush();
+
+    expect(dialog()?.textContent).toContain("no remotes to publish to");
+    const publish = [
+      ...(dialog()?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    ].find((button) => button.textContent === "Publish");
+    expect(publish?.disabled).toBe(true);
   });
 });

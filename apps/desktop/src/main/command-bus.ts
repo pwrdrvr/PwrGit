@@ -64,7 +64,8 @@ export class CommandBus {
           "command",
           `${String(name)} failed:`,
           `${result.error.kind}/${result.error.code}`,
-          result.error.message
+          result.error.message,
+          ...(result.error.detail === undefined ? [] : [result.error.detail])
         );
       }
       return result;

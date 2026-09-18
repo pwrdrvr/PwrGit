@@ -779,7 +779,7 @@ export function registerRemoteHandlers(
       },
       "push",
       async (git, activity) => {
-        const pushed = await pushRemote(git, worktree.path, true);
+        const pushed = await pushRemote(git, worktree.path, true, req.publish);
         if (pushed.ok) {
           activity.setPhase("refresh");
           await refreshRemoteBranches(worktree.repoId, "push");

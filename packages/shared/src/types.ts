@@ -220,6 +220,19 @@ export type RemoteResetPreview = {
   dirty: number;
 };
 
+/**
+ * Where a branch with no upstream is published to.
+ *
+ * The remote only, never a different name for the branch there. Git's default
+ * `push.default=simple` refuses a plain push whose upstream is named
+ * differently from the local branch, so publishing under another name would
+ * create a branch the Push button could never push to again — measured, not
+ * assumed, in `remote.test.ts`.
+ */
+export type PushPublishTarget = {
+  remote: string;
+};
+
 export type RemoteSummary = {
   name: string;
   fetchUrl: string;

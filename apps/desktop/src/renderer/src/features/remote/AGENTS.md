@@ -22,9 +22,9 @@ snapshot, never a reference.
 
 **Every path out of an operation ends in exactly one of three things** —
 `settle`, `dismiss` (a modal is taking over: the divergence dialog, the SSH
-recovery prompt, the fork prompt), or, for a failure the card could not carry,
-a toast. A fourth early return without one of them leaves a card pinned on
-"Starting…" until the user clicks it away.
+recovery prompt, the fork prompt, the publish question), or, for a failure the
+card could not carry, a toast. A fourth early return without one of them leaves
+a card pinned on "Starting…" until the user clicks it away.
 
 The staleness guards **are** that fourth return, and they deliberately cannot
 settle: an operation whose checkout is no longer selected has an outcome that
@@ -42,6 +42,14 @@ own output plus Logs and Copy, is a better report than a corner toast — and
 both at once is the same failure said twice. The toast is now the fallback for
 a failure with nowhere anchored to go, which is what happens when the user
 clicked the card away mid-operation.
+
+Push on a branch with no upstream is the one click that pins **nothing**: it
+asks `PublishBranchDialog` which remote first, because a plain push there only
+gets Git's refusal and its `--set-upstream` advice for a terminal. Nothing is
+running until the question is answered, so the card pins on Publish, off the
+Push button that asked. The header reads "no upstream" from the live snapshot
+(the indexed row until one arrives) and answers Git's own `no_upstream` with the
+same question, for when both were stale — that is a `dismiss`, not a failure.
 
 ## The card accumulates; it does not narrate
 

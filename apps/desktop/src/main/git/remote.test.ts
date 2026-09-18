@@ -423,6 +423,84 @@ describe("remote ops (bare-remote fixture)", () => {
     }
   );
 
+  // The toolbar's Push on a branch with no upstream used to be a dead end: Git
+  // refused and printed the `--set-upstream` command for the user to go and run
+  // in a terminal. Publishing is that command, run for them — and the proof it
+  // worked is not that the push exited 0 but that the branch now TRACKS
+  // something, so the next plain Push has somewhere to go.
+  it("publishes a branch with no upstream and tracks it from then on", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-publish-"));
+    git(root, ["init", "--bare", "-b", "main", "origin.git"]);
+    git(root, ["clone", "origin.git", "local"]);
+    const local = join(root, "local");
+    configure(local, "L");
+    commit(local, "base.txt", "base");
+    git(local, ["push", "-u", "origin", "main"]);
+    git(local, ["checkout", "-b", "feature/new-thing"]);
+    commit(local, "feature.txt", "unseen");
+
+    const refused = await pushRemote(systemGit, local, true);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("no_upstream");
+
+    const published = await pushRemote(systemGit, local, true, {
+      remote: "origin"
+    });
+    expect(published.ok).toBe(true);
+    expect(
+      gitOut(local, ["rev-parse", "--abbrev-ref", "feature/new-thing@{upstream}"])
+    ).toBe("origin/feature/new-thing");
+    expect(
+      gitOut(root, ["--git-dir", "origin.git", "rev-parse", "feature/new-thing"])
+    ).toBe(gitOut(local, ["rev-parse", "HEAD"]));
+
+    // And from here a plain Push just works. This is the half that rules out
+    // publishing under a DIFFERENT name: Git's default `push.default=simple`
+    // refuses a plain push whose upstream is named differently, so a renamed
+    // publish creates a branch the Push button can never push to again.
+    commit(local, "more.txt", "more");
+    expect((await pushRemote(systemGit, local, true)).ok).toBe(true);
+  });
+
+  it("refuses to publish to a remote that is gone", async () => {
+    const missing = await pushRemote(systemGit, cloneB, true, {
+      remote: "nowhere"
+    });
+    expect(missing).toMatchObject({ ok: false, error: { code: "remote_missing" } });
+  });
+
+  // Measured in the real app: the card's headline read "Push failed — To
+  // /private/var/…/svc.git", because Git's first stderr line on a rejection
+  // is the destination. The reason sat collapsed in the output below it.
+  it("leads a rejected push with the reason, not the destination", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-rejected-"));
+    git(root, ["init", "--bare", "-b", "main", "origin.git"]);
+    git(root, ["clone", "origin.git", "mine"]);
+    const mine = join(root, "mine");
+    configure(mine, "M");
+    commit(mine, "base.txt", "base");
+    git(mine, ["push", "-u", "origin", "main"]);
+    git(root, ["clone", "origin.git", "theirs"]);
+    const theirs = join(root, "theirs");
+    configure(theirs, "T");
+    commit(theirs, "theirs.txt", "theirs");
+    git(theirs, ["push", "origin", "main"]);
+    commit(mine, "mine.txt", "mine");
+
+    const pushed = await pushRemote(systemGit, mine, true);
+    expect(pushed.ok).toBe(false);
+    if (pushed.ok) return;
+    expect(pushed.error.code).toBe("rejected");
+    expect(pushed.error.message).toBe(
+      "The remote has newer commits. Pull, then push again."
+    );
+    // Git's own words ride beside it, for Copy and the evidence block — and
+    // only Git's: the sentence above is PwrGit's, not something Git printed.
+    expect(pushed.error.detail).toContain("[rejected]");
+    expect(pushed.error.detail).not.toContain("Pull, then push again");
+  });
+
   it("push sends a new commit to the remote", async () => {
     commit(cloneB, "g.txt", "c2 from B");
     const result = await pushRemote(systemGit, cloneB);

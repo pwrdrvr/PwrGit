@@ -11,6 +11,7 @@ import {
   type DivergenceCommitAlignment,
   type DivergenceCommit,
   type LocalBranchSummary,
+  type PushPublishTarget,
   type PushRefPlan,
   type PushRefResult,
   type PullProgressPhase,
@@ -4505,32 +4506,98 @@ export function pushWasDenied(stderr: string): boolean {
   );
 }
 
-/** Push the current branch to its upstream. */
+/**
+ * The first line of a failed push's message: the reason, in a sentence.
+ *
+ * The renderer shows `message.split("\n")[0]` as the headline, and Git's own
+ * first line is almost never the reason. For a rejected push it is
+ * `To github.com:owner/repo.git` — the destination, which the user already
+ * knew, standing in front of the one thing they did not. Measured in the real
+ * app: the card read "Push failed — To /private/var/…/svc.git" while the
+ * sentence that explained it sat collapsed in Git's output below.
+ *
+ * The one case with an unambiguous remedy gets it said plainly. Everything
+ * else gets the most specific line Git wrote, in the order a person would read
+ * for: what the server said, then which ref it refused, then Git's own verdict.
+ */
+function pushFailureHeadline(code: string, stderr: string): string {
+  if (code === "rejected" && /fetch first|non-fast-forward/i.test(stderr)) {
+    return "The remote has newer commits. Pull, then push again.";
+  }
+  const lines = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  return (
+    lines.find((line) => /^remote: (error|fatal)\b/i.test(line)) ??
+    lines.find((line) => line.startsWith("! [")) ??
+    lines.find((line) => /^(fatal|error):/i.test(line)) ??
+    lines.find((line) => !line.startsWith("To ")) ??
+    "Push failed."
+  );
+}
+
+/**
+ * Push the current branch to its upstream — or, with `publish`, create it on a
+ * remote and track it from now on.
+ *
+ * `publish` exists because a bare `git push` on a branch with no upstream is a
+ * dead end: Git refuses and prints the `--set-upstream` command for the user to
+ * go and run in a terminal. It is that command — `-u <remote> HEAD`, the
+ * branch under its own name, which is the only name a later plain push will
+ * accept under Git's default `push.default=simple`.
+ */
 export async function pushRemote(
   git: GitExec,
   cwd: string,
-  forceProgress = false
+  forceProgress = false,
+  publish?: PushPublishTarget
 ): Promise<Result<void>> {
+  if (publish !== undefined) {
+    // Checked here rather than left to Git, whose "does not appear to be a git
+    // repository" for a vanished remote reads as a network failure.
+    const names = await listRemoteNames(git, cwd);
+    if (!names.ok) return names;
+    if (!names.value.includes(publish.remote)) {
+      return err({
+        kind: "remote",
+        code: "remote_missing",
+        message: `Remote "${publish.remote}" no longer exists.`
+      });
+    }
+  }
   const raw = await git(
-    ["push", ...(forceProgress ? ["--progress"] : [])],
+    [
+      "push",
+      ...(forceProgress ? ["--progress"] : []),
+      ...(publish === undefined
+        ? []
+        : ["--set-upstream", publish.remote, "HEAD"])
+    ],
     cwd
   );
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
-    const message = raw.value.stderr.trim();
+    const stderr = collapseProgress(raw.value.stderr);
     // Before `rejected`: a denial carries no "rejected" line today, but the
     // two are asked in the order of how specific they are, not how likely.
-    const code = pushWasDenied(message)
+    const code = pushWasDenied(stderr)
       ? "push_denied"
-      : /non-fast-forward|rejected/i.test(message)
+      : /non-fast-forward|rejected/i.test(stderr)
         ? "rejected"
-        : /no upstream|has no upstream/i.test(message)
+        : /no upstream|has no upstream/i.test(stderr)
           ? "no_upstream"
           : "push_failed";
     return err({
       kind: "remote",
       code,
-      message: message !== "" ? message : "push failed"
+      // The reason as the message, Git's own words as the detail: the card's
+      // headline and the fork prompt read the one, and the evidence block,
+      // Copy and the log read the other — so neither quotes PwrGit's sentence
+      // as something Git said.
+      ...(stderr === ""
+        ? { message: "Push failed." }
+        : { message: pushFailureHeadline(code, stderr), detail: stderr })
     });
   }
   return ok(undefined);

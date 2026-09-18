@@ -32,6 +32,7 @@ import type {
   RepoIdentityRefreshOutcome,
   PushRefPlan,
   PushRefResult,
+  PushPublishTarget,
   RemoteActivity,
   ChangeSet,
   GitOperationKind,
@@ -1457,7 +1458,16 @@ export interface Commands {
       reappliedWithConflicts: boolean;
     };
   };
-  "remote:push": { req: { worktreeId: string }; res: null };
+  /**
+   * Push the checkout's branch to its upstream — or, with `publish`, create it
+   * on a remote and track it from now on. `publish` is how a branch with no
+   * upstream gets one: a bare `git push` there is Git telling the user to go
+   * run `--set-upstream` in a terminal.
+   */
+  "remote:push": {
+    req: { worktreeId: string; publish?: PushPublishTarget };
+    res: null;
+  };
   /** Fresh branch/upstream comparison after a non-fast-forward pull. */
   "remote:inspectDivergence": {
     req: { worktreeId: string };
