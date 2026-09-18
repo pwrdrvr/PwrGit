@@ -1112,6 +1112,73 @@ describe("WorktreeHeader settled status card", () => {
     finish();
   });
 
+  // The card holds per-operation state, and the pinned popover UPDATES one
+  // React tree rather than remounting it — so without a key tied to the
+  // session, one operation's card starts where the last one's ended.
+  it("does not inherit the previous operation's warning", async () => {
+    freezeClock();
+    const health = (): string | null =>
+      [...(card()?.querySelectorAll(".remote-activity__status") ?? [])]
+        .at(-1)
+        ?.textContent ?? null;
+
+    const first = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() - 25_000 }
+    ]);
+    expect(health()).toContain("no Git output for");
+    await act(async () => {
+      first();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await emitActivities([]);
+
+    // A second pull, perfectly healthy from its first breath.
+    const second = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { id: "op-2", kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(
+      health(),
+      "a healthy operation must not wear the last one's warning"
+    ).toBeNull();
+    second();
+  });
+
+  // Dropping the health line at settle was the same defect the evidence block
+  // had, one line lower, and at the worst possible moment: the buttons jump
+  // upward exactly as the user looks down to read the outcome.
+  it("keeps the health line on the receipt it stood on", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() - 25_000 }
+    ]);
+    const lines = (): number =>
+      card()?.querySelectorAll(".remote-activity__status").length ?? 0;
+    expect(lines()).toBe(1);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await emitActivities([]);
+    expect(lines(), "the receipt kept every line the running card had").toBe(1);
+    // And it says the outcome rather than a stale stall reading.
+    expect(card()?.textContent).toContain("Fast-forwarded");
+  });
+
   // The command line is up to 160 monospace characters in a 320px card, so it
   // wraps to a different number of lines per invocation — as a permanent
   // fixture under the step list it moved everything below it several times a

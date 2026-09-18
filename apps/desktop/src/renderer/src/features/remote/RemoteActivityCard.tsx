@@ -62,19 +62,29 @@ export function RemoteActivityCard({
   // Nothing observed yet — every card before its first phase arrives, and
   // every operation that fails before one does.
   const fallback = view.steps.length === 0;
+  // A settled card whose rows cannot carry the outcome on their own.
+  const headline = view.settled !== null && view.settled !== "ok";
   // Once the health line has had something to say it keeps its place, even
-  // when Git starts talking again and the reading goes back to "muted".
+  // when Git starts talking again and the reading goes back to "muted", and
+  // through the receipt.
   //
   // A retraction is real information, so the line still updates — what it must
   // not do is vanish. It sits above the evidence and the buttons, and a fetch
   // that stalls for twenty seconds and then resumes would otherwise push them
-  // down and pull them back up, which is the same whip the step list was
-  // written to end, arriving one line lower.
-  const warned = useRef(false);
-  if (view.statusTone === "warn") warned.current = true;
-  const health = warned.current && !fallback && view.settled === null;
-  // A settled card whose rows cannot carry the outcome on their own.
-  const headline = view.settled !== null && view.settled !== "ok";
+  // down and pull them back up; dropping it at settle did the same thing at
+  // the one moment the user is reading the card most carefully.
+  //
+  // State set in an effect, never a ref written during render: a render React
+  // begins and discards must not be what latches this on. It resets with the
+  // card, which every caller keys to the operation it reports.
+  const [warned, setWarned] = useState(false);
+  useEffect(() => {
+    if (view.statusTone === "warn") setWarned(true);
+  }, [view.statusTone]);
+  // Yielding to the headline is what keeps the settle from saying the same
+  // sentence twice: on a failure `statusLabel` is the reason, and it belongs
+  // above the rows rather than under them.
+  const health = warned && !fallback && !headline;
   const [copied, setCopied] = useState(false);
   const copiedTimer = useRef<number | undefined>(undefined);
   useEffect(

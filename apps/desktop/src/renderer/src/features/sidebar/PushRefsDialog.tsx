@@ -291,7 +291,12 @@ export function PushRefsDialog({
 
         {activity !== null && (
           <div className="refs-push__activity">
-            <RemoteActivityCard view={liveActivityView(activity, now)} />
+            {/* Keyed to the operation: review-then-push is two operations
+                through one dialog, and the card holds per-operation state. */}
+            <RemoteActivityCard
+              key={activity.id}
+              view={liveActivityView(activity, now)}
+            />
           </div>
         )}
 

@@ -4183,7 +4183,7 @@ async function ensureCommitObject(
   const args = ["fetch", "--progress", pushUrl, `refs/heads/${branch}`];
   const fetched = await git(args, cwd);
   if (!fetched.ok) return fetched;
-  const checked = requireExit0(fetched.value, args);
+  const checked = withCollapsedProgress(requireExit0(fetched.value, args));
   return checked.ok ? ok(undefined) : checked;
 }
 
@@ -4276,7 +4276,7 @@ export async function planPushRefs(
     // registry reads silence as evidence that a transfer is wedged, and a
     // fetch that was never obliged to emit would make that reading a lie.
     const fetched = await fetchNamedRemote(git, cwd, remote, true);
-    if (!fetched.ok) return fetched;
+    if (!fetched.ok) return withCollapsedProgress(fetched);
   }
 
   const source = await resolveCommit(git, cwd, sourceRef);
@@ -4330,21 +4330,29 @@ export async function planPushRefs(
 }
 
 /**
- * A failed push's stderr as a terminal would have shown it.
+ * Git's own words as a terminal would have shown them.
  *
- * `--progress` is forced here for the activity registry's sake — silence
- * during a push is the only thing that tells a wedged transfer from a slow one
- * — and Git writes that meter with CR, so the raw string carries every
- * repaint of "Writing objects" as ordinary text. The last segment of each CR
- * run is the state that line settled on, and it is the only one worth putting
- * beside a rejection in the review table.
+ * `--progress` is forced on every network command the push review runs, for
+ * the activity registry's sake — silence during a transfer is the only thing
+ * that tells a wedged one from a slow one. Git writes that meter with CR, so
+ * the raw stderr carries every repaint of "Receiving objects" as ordinary
+ * text, on ONE newline-delimited line. The review dialog shows
+ * `message.split("\n")[0]`, so left alone the reason a fetch died is displaced
+ * by a wall of its own progress. The last segment of each CR run is the state
+ * that line settled on, and it is the only one worth reading.
  */
-function pushFailureMessage(stderr: string): string {
+function collapseProgress(stderr: string): string {
   return stderr
     .split("\n")
     .map((line) => line.split("\r").filter((part) => part !== "").at(-1) ?? "")
     .join("\n")
     .trim();
+}
+
+/** The same error, with Git's CR-rewritten progress collapsed out of it. */
+function withCollapsedProgress<T>(result: Result<T>): Result<T> {
+  if (result.ok) return result;
+  return err({ ...result.error, message: collapseProgress(result.error.message) });
 }
 
 /** Execute reviewed pushes with a lease and a fresh ancestry check per target. */
@@ -4360,8 +4368,18 @@ export async function pushPlannedRefs(
       destinationRemote: plan.destinationRemote,
       destinationBranch: plan.destinationBranch
     };
+    // Failing to READ the ref and finding it MOVED are different answers, and
+    // folding them together sends the wrong one. Cancel is the standing case:
+    // stopping the push kills Git, `resolveCommit` fails for every remaining
+    // destination, and each one used to report that the branch had changed
+    // underneath the user — telling them to re-review something they
+    // themselves stopped.
     const source = await resolveCommit(git, cwd, plan.sourceRef);
-    if (!source.ok || source.value !== plan.sourceHead) {
+    if (!source.ok) {
+      results.push({ ...base, outcome: "failed", message: source.error.message });
+      continue;
+    }
+    if (source.value !== plan.sourceHead) {
       results.push({
         ...base,
         outcome: "failed",
@@ -4384,7 +4402,11 @@ export async function pushPlannedRefs(
       pushUrl.value,
       plan.destinationBranch
     );
-    if (!actual.ok || actual.value !== plan.destinationHead) {
+    if (!actual.ok) {
+      results.push({ ...base, outcome: "failed", message: actual.error.message });
+      continue;
+    }
+    if (actual.value !== plan.destinationHead) {
       results.push({
         ...base,
         outcome: "failed",
@@ -4447,7 +4469,7 @@ export async function pushPlannedRefs(
         outcome: "failed",
         message:
           raw.ok
-            ? pushFailureMessage(raw.value.stderr) || "Push failed."
+            ? collapseProgress(raw.value.stderr) || "Push failed."
             : raw.error.message
       });
       continue;

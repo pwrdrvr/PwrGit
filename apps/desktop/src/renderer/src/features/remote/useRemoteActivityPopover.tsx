@@ -587,7 +587,16 @@ export function useRemoteActivityPopover(
       hide();
       return;
     }
-    update(<RemoteActivityCard view={liveActivityView(activity, now)} />);
+    // Keyed to the operation: the card carries per-operation state of its own
+    // (whether the health line has spoken, whether Git's output was thrown
+    // open by a failure), and this tree is UPDATED rather than remounted, so
+    // without the key one operation's card starts where the last one's ended.
+    update(
+      <RemoteActivityCard
+        key={activity.id}
+        view={liveActivityView(activity, now)}
+      />
+    );
   }, [activity, hide, now, pin, update, visible]);
 
   // What the pinned session is currently showing: its receipt if it has one,
@@ -660,7 +669,11 @@ export function useRemoteActivityPopover(
           onClickCapture={() => setRailHeld(true)}
           onFocusCapture={() => setRailHeld(true)}
         >
-          <RemoteActivityCard view={pinView} onClose={dismiss} />
+          {/* Keyed to the session, for the reason the hover card is keyed to
+              the record: two pulls in a row are the same React element in the
+              same portal, so a stall in the first would otherwise leave the
+              second drawing a health line it never earned. */}
+          <RemoteActivityCard key={pin.id} view={pinView} onClose={dismiss} />
         </div>
         {draining && (
           <span

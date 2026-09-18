@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  err,
   ok,
   REMOTE_BRANCH_PAGE_MAX,
   REMOTE_BRANCH_PREVIEW,
@@ -36,6 +37,86 @@ import {
 import { createSystemGit } from "./test-support/system-git";
 
 const systemGit: GitExec = createSystemGit();
+
+/** A GitExec that answers from a table keyed on the subcommand. */
+function stubGit(
+  answers: Record<string, { stdout?: string; stderr?: string; exitCode?: number }>
+): GitExec {
+  return async (args) => {
+    const answer = answers[args[0] ?? ""];
+    if (answer === undefined) {
+      return ok({ stdout: "", stderr: "", exitCode: 0 });
+    }
+    return ok({
+      stdout: answer.stdout ?? "",
+      stderr: answer.stderr ?? "",
+      exitCode: answer.exitCode ?? 0
+    });
+  };
+}
+
+describe("the push review reports what actually went wrong", () => {
+  // Cancel is the standing case. Stopping the push kills Git, so every
+  // remaining destination fails to READ its refs — which is not the same
+  // answer as a ref that MOVED. Folding the two together told the user their
+  // branch had changed underneath them and sent them back to re-review
+  // something they had stopped themselves.
+  it("does not call a failed ref read a ref that changed", async () => {
+    const canceled: GitExec = async () =>
+      err({
+        kind: "git",
+        code: "canceled",
+        message: "Stopped at your request."
+      });
+    const pushed = await pushPlannedRefs(canceled, "/repo", [
+      {
+        sourceRef: "refs/heads/main",
+        sourceLabel: "main",
+        sourceHead: "a".repeat(40),
+        destinationRemote: "origin",
+        destinationBranch: "main",
+        relation: "fast_forward"
+      }
+    ]);
+    expect(pushed.ok).toBe(true);
+    if (!pushed.ok) return;
+    expect(pushed.value[0]).toMatchObject({
+      outcome: "failed",
+      message: "Stopped at your request."
+    });
+  });
+
+  // `--progress` is forced on every network command here so the activity
+  // registry can read silence as evidence. Git writes that meter with CR, all
+  // on one newline-delimited line, and the dialog shows `split("\n")[0]` — so
+  // left alone the reason a fetch died is displaced by a wall of its own
+  // progress.
+  it("collapses Git's progress repaints out of a failed fetch", async () => {
+    const planned = await planPushRefs(
+      stubGit({
+        remote: { stdout: "origin\n" },
+        fetch: {
+          exitCode: 128,
+          stderr:
+            "Receiving objects:   1%\rReceiving objects:  53%\rReceiving objects:  99%\n" +
+            "fatal: the remote end hung up unexpectedly\n"
+        }
+      }),
+      "/repo",
+      "refs/heads/main",
+      [{ remote: "origin", branch: "main" }]
+    );
+    expect(planned.ok).toBe(false);
+    if (planned.ok) return;
+    // What the dialog puts in front of the user.
+    expect(planned.error.message.split("\n")[0]).toBe(
+      "Receiving objects:  99%"
+    );
+    expect(planned.error.message).toContain(
+      "fatal: the remote end hung up unexpectedly"
+    );
+  });
+});
 
 function git(dir: string, args: string[]): void {
   timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, stdio: "ignore" }));
