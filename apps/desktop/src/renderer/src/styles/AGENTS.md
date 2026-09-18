@@ -152,3 +152,31 @@ before the renderer exists. Change a token, change that file —
 styles in `.tsx` need a manual pass. Pass `var(--token)` strings instead of
 literals — Chromium resolves custom properties in SVG presentation
 attributes, which is how `GraphRow.tsx` renders lane colors.
+
+## A 15px glyph separates by silhouette, not by counting
+
+Row glyphs are drawn at 15px in a 24-unit viewBox, so a 1.7–1.8 stroke lands on
+about 1.1 device pixels and an `r2` circle is a 3px disc whose interior fills
+with antialiasing. Node count, radius and anything inside a closed shape are all
+gone at that size; what survives is the **silhouette class** (open line art vs a
+closed shape), fill vs stroke, and gross aspect.
+
+This is why the ⌘K palette shipped a branch glyph and a worktree glyph that
+nobody could tell apart: both were an open trunk on the left with round nodes
+and a curve to an upper-right node, differing only in how many circles and how
+big. The folder beside them was always legible, and never had more detail — it
+had a different silhouette.
+
+Two consequences when adding or changing one of these marks:
+
+- **Check it as a raster, not as vector.** Blowing the SVG up proves nothing;
+  render at the real 15px and magnify the bitmap with nearest-neighbour. A
+  contact sheet and the two failing marks are in
+  [design/Palette Kind Glyphs - UX Review.dc.html](../../../../../../design/Palette%20Kind%20Glyphs%20-%20UX%20Review.dc.html).
+- **Check it against its neighbours, not alone.** Every glyph here reads fine on
+  its own; the question is only ever whether it reads apart from the row above
+  it. Moving the palette's worktree mark to a closed shape traded one collision
+  for a possible worktree-vs-repo one, and that had to be drawn to settle.
+
+A glyph also needs words. See "The kind glyph is labelled twice" in
+`features/sidebar/AGENTS.md`.

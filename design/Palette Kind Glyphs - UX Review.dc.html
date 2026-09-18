@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit styles/tokens.css, restated short. Dark is the review
+             surface; the light values are carried because the kind glyph is
+             painted in --text-muted, which is the token that moves most
+             between themes (#8c857a -> #736c64 on #ffffff). */
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-menu: #101010;
+            --bg-elev: #101010; --bg-row-active: #120800;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(95, 169, 105, 0.16);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Focused Lens Stability - UX Review") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 700px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- palette specimen, true size from styles/app.css ----
+             .overlay-result: flex, gap 11px, padding 9px 11px, radius 8px.
+             .overlay-result__name 600 13px/1.2 sans --text-primary.
+             .overlay-result__meta 500 10px/1 mono --text-muted.
+             .overlay-result__profile 600 9.5px/1 mono, --accent on --bg-panel.
+             The kind glyph is 15x15, stroke currentColor, inheriting the row's
+             own --text-muted. */
+          .plist { width: 392px; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-menu); }
+          .plist.bare { border: 0; background: transparent; padding: 0; }
+          .orow { display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--t3); }
+          .orow.is-sel { background: var(--bg-row-active); }
+          .okind { display: inline-flex; flex: 0 0 auto; }
+          .oname { flex: 1 1 auto; min-width: 0; font: 600 13px/1.2 var(--sans); color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .ometa { flex: none; font: 500 10px/1 var(--mono); color: var(--t3); }
+          .oprof { flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--bg-panel); border: 1px solid var(--line); color: var(--acc); font: 600 9.5px/1 var(--mono); }
+          /* Light theme, same tokens the app switches to. */
+          .plist.light { background: #ffffff; border-color: rgba(0,0,0,.08); }
+          .plist.light .orow { color: #736c64; }
+          .plist.light .orow.is-sel { background: #fff5e9; }
+          .plist.light .oname { color: #1a1612; }
+          .plist.light .ometa { color: #736c64; }
+          .plist.light .oprof { background: #fdfcfa; border-color: rgba(0,0,0,.08); color: #b74c00; }
+
+          /* ---- panels, notes, findings ---- */
+          .stage { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 360px; }
+          .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .shot { display: block; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-menu); }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 392px; display: flex; flex-direction: column; gap: 11px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- tables ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; width: 560px; }
+          .tr { display: grid; grid-template-columns: 116px 74px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { font: 600 10.5px/1.45 var(--mono); color: var(--t1); }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: var(--oksoft); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.no { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          .verd { display: flex; align-items: center; gap: 7px; font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verd.out { color: var(--badt); }
+          .verd.in { color: var(--okt); }
+          .verd.maybe { color: var(--tsub); }
+
+          /* ---- live prototype chrome ---- */
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--abord); border-radius: 9px; background: var(--bg-panel); width: 424px; }
+          .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+          .seg { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: #050505; }
+          .seg button { appearance: none; border: 0; padding: 4px 9px; border-radius: 5px; background: transparent; color: var(--t3); font: 600 9.5px/1 var(--mono); cursor: pointer; }
+          .seg button.on { background: var(--acc); color: var(--accon); }
+          .readout { font: 500 10px/1.5 var(--mono); color: var(--tsub); }
+          .hint { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          /* The prototype holds every glyph set in the DOM and reveals one, so
+             no mark is pushed through a {{binding}} as markup. */
+          .gset { display: none; }
+          .set-ship .gset.s-ship, .set-prop .gset.s-prop { display: inline-flex; }
+          /* Squint test: the first read of a palette row is peripheral. */
+          .blur .okind { filter: blur(1.1px); }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; four kinds, three marks, and two of them are the same drawing</span>
+        </div>
+        <p class="dv-sub">Every row in the &#8984;K palette leads with a 15&#8239;px glyph that is supposed to say what kind of result it is. Specimens are drawn at shipped size from <code>styles/tokens.css</code> and <code>app.css</code> on contrived names. Source: <code>features/sidebar/RepoSwitcherOverlay.tsx</code>.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Shipped">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>The four kinds as they ship, in the order the palette returns them</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/></svg></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/></svg></span><span class="oname">release/1.4</span><span class="ometa">Demo &#183; origin</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+            </div>
+            <p class="note">Rows&nbsp;2 and&nbsp;3 are not merely similar &#8212; <code>isWorktreelessBranch()</code> routes both <code>local_branch</code> and <code>remote_branch</code> to the same <code>BranchIcon</code>, so they are the identical drawing. Only <code>__meta</code> separates them, and it is at the far end of the row.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Raster">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The same marks rasterised at 15&#8239;px, then magnified 15&times;</div>
+            <img class="shot" src="./assets/palette-glyph-raster-before.png" width="466" alt="The worktree, branch and repo glyphs rendered at 15 pixels and blown up with nearest-neighbour sampling" />
+            <p class="note">Vector magnification flatters an icon; this does not. At 15&#8239;px a stroke of 1.7&#8211;1.8 in a 24-unit viewBox is about 1.1 device pixels, and an <code>r2</code> circle is a 3&#8239;px disc whose interior fills with antialiasing. &#8220;How many circles, and how big&#8221; is precisely the information the rasteriser destroys. The folder survives because what distinguishes it is its <em>silhouette</em>, not its interior.</p>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>What is actually wrong</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div>
+                <h4>Branch and worktree share a silhouette</h4>
+                <p>Both are open line art: a vertical trunk on the left, round nodes, a curve to an upper-right node, at the same stroke weight. The whole distinction is node count and radius &#8212; the two channels that do not survive the raster.</p>
+              </div></div>
+              <div class="fitem"><span class="pin">2</span><div>
+                <h4>Local and remote branches are the same glyph</h4>
+                <p>Not a legibility problem &#8212; a missing drawing. Two of the four kinds have never had a mark of their own.</p>
+              </div></div>
+              <div class="fitem ok-item"><span class="pin ok">3</span><div>
+                <h4>The glyph said nothing to anyone &#8212; fixed</h4>
+                <p>It carried no <code>title</code>, no tooltip, no <code>aria-label</code>, and not even <code>aria-hidden</code>, so it was an unlabelled graphic. The row is a <code>role="option"</code>, so its name is built from its subtree: an <code>.a11y-sr-only</code> span now puts the kind first, a <code>hoverTooltip</code> gives the pointer the same word, and the <code>&lt;svg&gt;</code> is hidden from the tree. Shipped; see&nbsp;2b.</p>
+              </div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;show 1a in the light theme&#8221; &#183; &#8220;what do these look like beside the commit and file rows?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">What a 15&#8239;px box can carry</span>
+        </div>
+        <p class="dv-sub">Before drawing anything, the rule the raster gives us. A palette row is read peripherally &#8212; the eye is going to the name &#8212; so the glyph has one glance, at one eleventh the area of the word beside it.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Channels">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Which differences survive, and which the rasteriser eats</div>
+            <div class="tbl">
+              <div class="tr head"><span>Channel</span><span>At 15&#8239;px</span><span>Evidence</span></div>
+              <div class="tr"><b>Silhouette class</b><span class="st keep">holds</span><span>Closed vs open is the one difference visible in 1b. The folder is legible for this reason alone.</span></div>
+              <div class="tr"><b>Fill vs stroke</b><span class="st keep">holds</span><span>A filled disc reads as a dot; a 1.1&#8239;px ring of the same radius fills in and reads as a dot too &#8212; so fill is legible, but only against a stroke that is <em>not</em> a small circle.</span></div>
+              <div class="tr"><b>Gross aspect</b><span class="st keep">holds</span><span>Tall vs wide, left-weighted vs centred. Survives blur.</span></div>
+              <div class="tr"><b>Node count</b><span class="st bug">lost</span><span>Two circles vs three, at r2&#8211;r3, is the shipped distinction. 1b shows it gone.</span></div>
+              <div class="tr"><b>Radius / weight</b><span class="st bug">lost</span><span>r2 vs r3 is 1&#8239;unit &#8212; 0.6 device px.</span></div>
+              <div class="tr last"><b>Interior detail</b><span class="st bug">lost</span><span>Anything inside a closed shape has roughly 7&#215;7&#8239;px to live in.</span></div>
+            </div>
+            <p class="note">So: <strong>separate the kinds by silhouette class, not by counting nodes.</strong> That is the rule the rest of this review is spent on, and it is also why the repo folder needs no work.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Labels shipped">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The half that is already shipped &#8212; the glyph now has words</div>
+            <div class="stage">
+              <div class="stage-h">Row 2 <em>role="option"</em></div>
+              <div class="plist bare">
+                <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/></svg></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+              </div>
+              <p class="note">Screen reader, arrowing onto this row: <code>&#8220;Local branch, spike/no-checkout, Demo &#183; no worktree, work, 2 of 4&#8221;</code>. Pointer on the glyph: a card reading <code>Local branch</code>.</p>
+              <p class="note">Two patterns were available and the file uses both. The pin button takes <code>hoverTooltip</code> + <code>aria-label</code> because it is a control with its own name. The glyph took the folder's pattern instead &#8212; <code>aria-hidden</code> on the <code>&lt;svg&gt;</code> and an <code>.a11y-sr-only</code> span &#8212; because the row computes its accessible name from its own subtree, so text in the subtree is what actually gets announced. The short word goes to the reader (it is heard on every arrow key); the tooltip carries the same word for the pointer.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Light">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>The same four rows in the light theme</div>
+            <div class="plist light">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+                <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/></svg></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+                <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/></svg></span><span class="oname">release/1.4</span><span class="ometa">Demo &#183; origin</span><span class="oprof">work</span></div>
+                <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+            </div>
+            <p class="note">The glyph paints in <code>--text-muted</code>, which goes <code>#8c857a</code> &#8594; <code>#736c64</code> against <code>#ffffff</code>. Contrast rises; the confusion does not move. This is a shape problem, not a colour one, so no token change can reach it.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;does the sidebar&#8217;s own worktree row have the same collision?&#8221; &#183; &#8220;write 2a as a note in styles/AGENTS.md&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Worktree &#8212; five closed shapes, each against the folder it must not become</span>
+        </div>
+        <p class="dv-sub">The branch glyph is the near-universal git mark and the one users arrive already knowing, so it keeps the open line-art class and the worktree moves out of it. The trap is obvious: a closed shape is what the <em>repo</em> folder already is, and trading a branch/worktree collision for a worktree/repo one is no gain. So every option below is drawn with the repo row directly beneath it &#8212; the adjacency that actually happens in the list.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a wt-box-stem">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>A ref given a home &#8212; stem and node entering a box</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd in">Recommended</div>
+            <p class="note">The biggest silhouette break available: left-weighted, with a stem that no other mark in the row has, and asymmetric where the folder is a solid block. It also keeps the vocabulary &#8212; the stem-and-node is the branch's own language, and a worktree <em>is</em> a branch that has been given somewhere to live. Quiet at 15&#8239;px and survives the squint test in&nbsp;4e.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b wt-window">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>A pane &#8212; box with a header bar</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M3 9.4h18"/></svg></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd maybe">Viable, with a naming risk</div>
+            <p class="note">The most legible of the five in isolation. The risk is semantic, not visual: PwrGit is one&#8209;window&#8209;per&#8209;profile, so a window glyph on a row whose <kbd>&#8629;</kbd> opens or focuses a window will be read as &#8220;open in a window&#8221; rather than &#8220;this is a worktree&#8221;. Against the folder it is also the weakest of the closed shapes &#8212; both are rounded rectangles of the same weight.</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c wt-folder-dot">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>The folder, with a dot in it</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><circle cx="12" cy="14" r="2.1" fill="currentColor" stroke="none"/></svg></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd out">Rejected</div>
+            <p class="note">Moves the collision rather than solving it. At 15&#8239;px the dot has about 7&#215;7&#8239;px of interior to occupy &#8212; interior detail is the channel 2a rules out &#8212; and the silhouette against the repo row is identical.</p>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d wt-folder-fill">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>The folder, filled &#8212; outline is the repo, solid is the checkout</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path fill="currentColor" stroke="currentColor" d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd out">Rejected on weight</div>
+            <p class="note">Separates perfectly: fill is the strongest channel in 2a, and &#8220;the repo is the outline, the worktree is the one that exists on disk&#8221; is a clean idea. But it is by far the heaviest mark in the panel, and worktree rows are the most common row in the list &#8212; a palette of them reads as a column of blobs pulling the eye off the names.</p>
+          </div>
+
+          <div class="dv-opt" id="3e" data-screen-label="3e wt-copies">
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>Two stacked cards &#8212; one copy among several</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><rect x="3" y="7.5" width="12.5" height="12.5" rx="2.6"/><path d="M8 4h8a4 4 0 0 1 4 4v8"/></svg></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd maybe">Viable, second choice</div>
+            <p class="note">Legible and semantically fair. Slightly noisier than 3a &#8212; the offset back card is the sort of thin secondary edge that 1b shows going mushy &#8212; and &#8220;copy&#8221; is a duplicate-file idiom elsewhere in most toolbars.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw 3a at 13&#8239;px and 17&#8239;px&#8221; &#183; &#8220;does 3a still read when the row is selected and tinted?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Local vs remote &#8212; the mark that was never drawn</span>
+        </div>
+        <p class="dv-sub">Finding&nbsp;2 is a different problem from finding&nbsp;1: there is no legibility to recover, because there is only one drawing for two kinds. Every option keeps the branch silhouette for local (4a is settled &#8212; the shipped shape with its nodes filled, which is strictly crisper at 15&#8239;px for no change in what it means) and asks what &#8220;this one is not here yet&#8221; should look like. Local is the top row of each pair.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a local-solid">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Baseline &#8212; both rows are 4a, which is the shipped shape with filled nodes</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span><span class="oname">release/1.4</span><span class="ometa">Demo &#183; origin</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd in">Settled for local</div>
+            <p class="note">This pair is the control: it is what the palette looks like today, once the rings that fill in anyway (1b) are drawn as the dots they already become. Crisper, same meaning, near-zero risk &#8212; and it is <em>still</em> two identical rows, which is finding&nbsp;2.</p>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b rem-hollow-tip">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Hollow tip &#8212; the node that is not here yet is not filled</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.4"/></svg></span><span class="oname">release/1.4</span><span class="ometa">Demo &#183; origin</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd out">Rejected</div>
+            <p class="note">The prettiest idea and the one the raster refuses. A hollow r2.4 ring at 15&#8239;px is the exact case 1b convicts: it fills with antialiasing and reads as a slightly softer dot. Held against 4a in this pair the two rows are, again, nearly the same drawing.</p>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c rem-dashed-trunk">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Dashed trunk &#8212; the branch exists, the working copy does not</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7" stroke-dasharray="2.4 2.4"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span><span class="oname">release/1.4</span><span class="ometa">Demo &#183; origin</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd maybe">Recommended, with a caveat</div>
+            <p class="note">The dash gap survives the raster where the hollow ring does not, and &#8220;not materialised&#8221; is the right idea for a ref that lives on a server. The caveat is honest: this is the weakest of the recommendations in this review. It is a real difference but a quiet one, and it should be looked at on a real list before it is committed to &#8212; hence the follow-up prompt below rather than a change in this PR.</p>
+          </div>
+
+          <div class="dv-opt" id="4d" data-screen-label="4d rem-cloud">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>A cloud on a stem &#8212; leave the branch vocabulary behind</div>
+            <div class="plist">
+              <div class="orow is-sel"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+              <div class="orow"><span class="okind "><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M7.6 13.4a3.4 3.4 0 0 1 .5-6.8 4.9 4.9 0 0 1 9.2 1.6 3.6 3.6 0 0 1-.6 5.2Z"/><path d="M12 13.8v5.6"/><circle cx="12" cy="20.4" r="1.9" fill="currentColor" stroke="none"/></svg></span><span class="oname">release/1.4</span><span class="ometa">Demo &#183; origin</span><span class="oprof">work</span></div>
+            </div>
+            <div class="verd maybe">Viable, and the only decisive one</div>
+            <p class="note">Unmistakable at 15&#8239;px &#8212; a closed shape with a wide aspect, which is every channel 2a says holds. The cost is that a remote branch stops looking like a branch at all, and the palette loses the family resemblance that makes rows 2 and 3 obviously two versions of one thing. Take this if decisiveness matters more than the family.</p>
+          </div>
+
+
+          <div class="dv-opt" id="4e" data-screen-label="4e Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#4e">4e</a>Live &#8212; switch the whole set, then squint at it</div>
+            <div class="proto">
+              <div class="ctl">
+                <span class="seg"><button class="{{shipCls}}" onClick="{{useShip}}">Shipped</button><button class="{{propCls}}" onClick="{{useProp}}">Proposed</button></span>
+                <span class="seg"><button class="{{blurOffCls}}" onClick="{{blurOff}}">Sharp</button><button class="{{blurOnCls}}" onClick="{{blurOn}}">Squint</button></span>
+              </div>
+              <div class="{{listCls}}">
+                <div class="orow is-sel"><span class="okind"><span class="gset s-ship"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="gset s-prop"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span></span><span class="oname">feature/requested</span><span class="ometa">Demo</span><span class="oprof">work</span></div>
+                <div class="orow"><span class="okind"><span class="gset s-ship"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/></svg></span><span class="gset s-prop"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span></span><span class="oname">spike/no-checkout</span><span class="ometa">Demo &#183; no worktree</span><span class="oprof">work</span></div>
+                <div class="orow"><span class="okind"><span class="gset s-ship"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7"/><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/></svg></span><span class="gset s-prop"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 7v10M8 17c5 0 8-2 8-7" stroke-dasharray="2.4 2.4"/><circle cx="6" cy="5" r="2.2" fill="currentColor" stroke="none"/><circle cx="6" cy="19" r="2.2" fill="currentColor" stroke="none"/><circle cx="18" cy="8" r="2.2" fill="currentColor" stroke="none"/></svg></span></span><span class="oname">release/1.4</span><span class="ometa">Demo &#183; origin</span><span class="oprof">work</span></div>
+                <div class="orow"><span class="okind"><span class="gset s-ship"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span><span class="gset s-prop"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span></span><span class="oname">Demo</span><span class="ometa">6 wts</span><span class="oprof">work</span></div>
+              </div>
+              <div class="readout">{{readout}}</div>
+              <p class="hint">{{hint}}</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;settle 4b vs 4c with a two-up at 200&#8239;% zoom&#8221; &#183; &#8220;does the remote mark belong in the sidebar ref sections too?&#8221; &#183; &#8220;draw the tracking case &#8212; a local branch that has a remote&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { set: "prop", blur: false };
+        }
+        renderVals() {
+          const s = this.state;
+          const classes = ["plist", s.set === "ship" ? "set-ship" : "set-prop"];
+          if (s.blur) { classes.push("blur"); }
+          return {
+            listCls: classes.join(" "),
+            shipCls: s.set === "ship" ? "on" : "",
+            propCls: s.set === "prop" ? "on" : "",
+            blurOnCls: s.blur ? "on" : "",
+            blurOffCls: s.blur ? "" : "on",
+            useShip: () => { this.setState({ set: "ship" }); },
+            useProp: () => { this.setState({ set: "prop" }); },
+            blurOn: () => { this.setState({ blur: true }); },
+            blurOff: () => { this.setState({ blur: false }); },
+            readout: s.set === "ship"
+              ? (s.blur
+                ? "shipped, squinting \u2014 four rows, two marks, and they blur into one"
+                : "shipped \u2014 rows 1 and 2 differ by one circle; rows 2 and 3 do not differ at all")
+              : (s.blur
+                ? "proposed, squinting \u2014 closed box, open line art, folder: three silhouettes still apart"
+                : "proposed \u2014 worktree 3a, local 4a, remote 4c, repo unchanged"),
+            hint: s.set === "ship"
+              ? "Switch to Proposed and back. Watch row 1 (worktree) against row 4 (repo), and rows 2 and 3 against each other."
+              : "Turn blur on: this is the read a palette row actually gets before the eye lands on the name. The shipped pair does not survive it."
+          };
+        }
+      }
+    </script>
+  </body>
+</html>
