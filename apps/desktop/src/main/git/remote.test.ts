@@ -20,6 +20,7 @@ import {
   inspectRemoteReset,
   inspectRemoteDivergence,
   listRemoteBranchPage,
+  listRemoteEndpoints,
   listRepoRefs,
   parseRepoRefRows,
   previewRemoteBranches,
@@ -463,6 +464,53 @@ describe("remote ops (bare-remote fixture)", () => {
     expect((await pushRemote(systemGit, local, true)).ok).toBe(true);
   });
 
+  // A remote name is data. `git remote add -- -x` is accepted, and without a
+  // `--` ahead of it Git reads the name as an option: probed, a remote named
+  // `--dry-run` turned `push --set-upstream --dry-run HEAD` into a push to a
+  // repository called HEAD.
+  it("publishes to a remote whose name starts with a dash", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-dash-remote-"));
+    git(root, ["init", "--bare", "-b", "main", "origin.git"]);
+    git(root, ["init", "-b", "main", "local"]);
+    const local = join(root, "local");
+    configure(local, "L");
+    commit(local, "base.txt", "base");
+    git(local, ["remote", "add", "--", "--dry-run", join(root, "origin.git")]);
+
+    const published = await pushRemote(systemGit, local, true, {
+      remote: "--dry-run"
+    });
+    expect(published).toMatchObject({ ok: true });
+    expect(
+      gitOut(root, ["--git-dir", "origin.git", "rev-parse", "main"])
+    ).toBe(gitOut(local, ["rev-parse", "HEAD"]));
+  });
+
+  it("names every remote and where a push to it goes, in one Git call", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-endpoints-"));
+    git(root, ["init", "-b", "main", "local"]);
+    const local = join(root, "local");
+    git(local, ["remote", "add", "origin", "https://example.test/o.git"]);
+    git(local, ["remote", "add", "fork", "https://example.test/f.git"]);
+    git(local, ["remote", "set-url", "--push", "fork", "git@example.test:f.git"]);
+    git(local, ["remote", "set-url", "--add", "--push", "fork", "git@example.test:g.git"]);
+    const calls: string[][] = [];
+    const counted: GitExec = (args, cwd) => {
+      calls.push(args);
+      return systemGit(args, cwd);
+    };
+
+    const endpoints = await listRemoteEndpoints(counted, local);
+    expect(endpoints).toEqual(
+      ok([
+        // Git's own order. A remote with no push URL pushes where it fetches.
+        { name: "fork", pushUrl: "git@example.test:f.git" },
+        { name: "origin", pushUrl: "https://example.test/o.git" }
+      ])
+    );
+    expect(calls).toHaveLength(1);
+  });
+
   it("refuses to publish to a remote that is gone", async () => {
     const missing = await pushRemote(systemGit, cloneB, true, {
       remote: "nowhere"
@@ -499,6 +547,42 @@ describe("remote ops (bare-remote fixture)", () => {
     // only Git's: the sentence above is PwrGit's, not something Git printed.
     expect(pushed.error.detail).toContain("[rejected]");
     expect(pushed.error.detail).not.toContain("Pull, then push again");
+  });
+
+  // Git's `fatal:` is usually a wrapper around the cause it printed just
+  // before it. Ranking it first headlined each of these as the wrapper.
+  it.each([
+    [
+      "an HTTPS denial",
+      "remote: Permission to desktop/dugite.git denied to huntharo.\nfatal: unable to access 'https://github.com/desktop/dugite.git/': The requested URL returned error: 403",
+      "remote: Permission to desktop/dugite.git denied to huntharo."
+    ],
+    [
+      "an SSH key the server refused",
+      "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.",
+      "git@github.com: Permission denied (publickey)."
+    ],
+    [
+      "a host that never answered",
+      "ssh: connect to host github.com port 22: Operation timed out\nfatal: Could not read from remote repository.",
+      "ssh: connect to host github.com port 22: Operation timed out"
+    ],
+    [
+      "a server rule, behind progress and the destination",
+      "Enumerating objects: 3, done.\nWriting objects: 100% (3/3), done.\nremote: \nremote: error: GH013: Repository rule violations found for refs/heads/main.\nremote: \nTo github.com:o/r.git\n ! [remote rejected] main -> main (push declined due to repository rule violations)\nerror: failed to push some refs to 'github.com:o/r.git'",
+      "remote: error: GH013: Repository rule violations found for refs/heads/main."
+    ],
+    [
+      "a transport failure after the upload",
+      "Enumerating objects: 9, done.\nCounting objects: 100% (9/9), done.\nWriting objects: 100% (9/9), 1.2 MiB, done.\nTotal 9 (delta 0), reused 0 (delta 0)\nerror: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413\nfatal: the remote end hung up unexpectedly",
+      "error: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413"
+    ]
+  ])("headlines %s with its cause, not Git's wrapper", async (_case, stderr, headline) => {
+    const pushed = await pushRemote(
+      stubGit({ push: { stderr, exitCode: 128 } }),
+      "/unused"
+    );
+    expect(pushed).toMatchObject({ ok: false, error: { message: headline } });
   });
 
   it("push sends a new commit to the remote", async () => {

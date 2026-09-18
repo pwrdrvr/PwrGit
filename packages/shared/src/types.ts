@@ -233,6 +233,10 @@ export type PushPublishTarget = {
   remote: string;
 };
 
+/** A remote as a question about where to push draws it: its name, and the URL
+ *  a push to it goes to. */
+export type RemoteEndpoint = Pick<RemoteSummary, "name" | "pushUrl">;
+
 export type RemoteSummary = {
   name: string;
   fetchUrl: string;

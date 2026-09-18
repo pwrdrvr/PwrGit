@@ -19,6 +19,7 @@ import {
   type RemoteBranchPage,
   type RemoteBranchSummary,
   type RemoteDivergence,
+  type RemoteEndpoint,
   type RemoteResetMode,
   type RemoteResetPreview,
   type RemoteResetSnapshot,
@@ -3227,6 +3228,43 @@ function trackingStatus(
   return { ahead, behind, tracking };
 }
 
+/**
+ * Every remote's name and push URL, from one `git remote -v`.
+ *
+ * `listRepoRefs` answers this too, but only after walking every local and
+ * remote-tracking ref with ahead/behind, a page of tags and four Git processes
+ * per remote — which is what the toolbar's Push used to wait on, showing
+ * nothing, before it could ask where to publish.
+ *
+ * The push URL falls back to the fetch URL, as `git remote get-url --push`
+ * does; a remote with several push URLs is drawn by its first.
+ */
+export async function listRemoteEndpoints(
+  git: GitExec,
+  cwd: string
+): Promise<Result<RemoteEndpoint[]>> {
+  const raw = await git(["remote", "-v"], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["remote", "-v"]);
+  if (!checked.ok) return checked;
+  const urls = new Map<string, { fetch?: string; push?: string }>();
+  for (const line of checked.value.stdout.split("\n")) {
+    const match = /^([^\t]+)\t(.*) \((fetch|push)\)$/.exec(line.trimEnd());
+    if (match === null) continue;
+    const [, name = "", url = "", role] = match;
+    const entry = urls.get(name) ?? {};
+    if (role === "push") entry.push ??= url;
+    else entry.fetch ??= url;
+    urls.set(name, entry);
+  }
+  return ok(
+    [...urls].map(([name, entry]) => ({
+      name,
+      pushUrl: entry.push ?? entry.fetch ?? ""
+    }))
+  );
+}
+
 export async function listRemoteNames(
   git: GitExec,
   cwd: string
@@ -4517,8 +4555,12 @@ export function pushWasDenied(stderr: string): boolean {
  * sentence that explained it sat collapsed in Git's output below.
  *
  * The one case with an unambiguous remedy gets it said plainly. Everything
- * else gets the most specific line Git wrote, in the order a person would read
- * for: what the server said, then which ref it refused, then Git's own verdict.
+ * else gets Git's first line that says WHY — a server's explicit error first,
+ * wherever it sits, then the first line that is not a destination, a hint or
+ * progress. Not "the first `fatal:` line": Git's `fatal:` is usually a wrapper
+ * around the cause it printed just before it, so ranking it first headlined an
+ * HTTPS denial as "unable to access … 403" instead of "Permission to … denied",
+ * and an SSH key failure as "Could not read from remote repository".
  */
 function pushFailureHeadline(code: string, stderr: string): string {
   if (code === "rejected" && /fetch first|non-fast-forward/i.test(stderr)) {
@@ -4530,12 +4572,14 @@ function pushFailureHeadline(code: string, stderr: string): string {
     .filter((line) => line !== "");
   return (
     lines.find((line) => /^remote: (error|fatal)\b/i.test(line)) ??
-    lines.find((line) => line.startsWith("! [")) ??
-    lines.find((line) => /^(fatal|error):/i.test(line)) ??
-    lines.find((line) => !line.startsWith("To ")) ??
+    lines.find((line) => !PUSH_NOISE.test(line)) ??
     "Push failed."
   );
 }
+
+/** Lines of push stderr that say where or how far, never why. */
+const PUSH_NOISE =
+  /^(To |hint:|remote:$|(remote: )?(Enumerating|Counting|Delta compression|Compressing|Writing|Resolving|Total)\b)/;
 
 /**
  * Push the current branch to its upstream — or, with `publish`, create it on a
@@ -4572,7 +4616,9 @@ export async function pushRemote(
       ...(forceProgress ? ["--progress"] : []),
       ...(publish === undefined
         ? []
-        : ["--set-upstream", publish.remote, "HEAD"])
+        : // `--` because a remote name is data: `git remote add -- -x` is
+          // accepted, and without it Git reads that name as an option.
+          ["--set-upstream", "--", publish.remote, "HEAD"])
     ],
     cwd
   );

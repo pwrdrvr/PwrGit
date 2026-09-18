@@ -3,7 +3,7 @@ import type {
   PushPublishTarget,
   PwrGitError,
   RemoteDivergence,
-  RemoteSummary,
+  RemoteEndpoint,
   Repo,
   Result,
   SshRemoteRecovery,
@@ -132,13 +132,16 @@ export function WorktreeHeader({
   /** The remotes a branch with no upstream can be published to, while the
    *  question is open. Loaded BEFORE the dialog opens, so its list never
    *  arrives under a dialog the user is already reading. */
-  const [publishing, setPublishing] = useState<RemoteSummary[] | null>(null);
+  const [publishing, setPublishing] = useState<RemoteEndpoint[] | null>(null);
   /** The Push button as it was clicked, so a card can hang off it once the
    *  publish question has been answered. A ref rather than the trigger
    *  factory's `cardButton`, which only points at a button while it carries
    *  a card. */
   const pushTarget = useRef<HTMLElement | null>(null);
-  const askingWhere = useRef(false);
+  /** The publish question being loaded, if any. A token rather than a flag:
+   *  switching checkouts clears it, so a load from an earlier visit finds
+   *  itself superseded even when the user has come back to the same one. */
+  const askingWhere = useRef<symbol | null>(null);
   const tip = useViewportTooltip();
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
@@ -161,7 +164,7 @@ export function WorktreeHeader({
     setSshRecovery(null);
     setForkPrompt(null);
     setPublishing(null);
-    askingWhere.current = false;
+    askingWhere.current = null;
   }, [worktree.id]);
 
   // Phase, Git's output and the cancel all ride on one live record, scoped to
@@ -228,10 +231,14 @@ export function WorktreeHeader({
   // A cancel takes neither. The user stopped it themselves a second ago and
   // is watching the button they pressed; dressing their own decision as a
   // failure card is noise, and an error toast would outlive the gesture.
-  const flashError = (kind: string, error: PwrGitError): void => {
+  const flashError = (
+    kind: string,
+    error: PwrGitError,
+    { onCard = true }: { onCard?: boolean } = {}
+  ): void => {
     if (error.code === "canceled") {
       showFlash({ text: `${kind.toLowerCase()} canceled`, tone: "muted" }, 2000);
-      status.settle({ status: "canceled", summary: `${kind} canceled` });
+      if (onCard) status.settle({ status: "canceled", summary: `${kind} canceled` });
       return;
     }
     const firstLine = error.message.split("\n")[0];
@@ -242,11 +249,13 @@ export function WorktreeHeader({
     // pressed, and carries Git's own output plus Logs and Copy. A corner toast
     // saying the same thing at the same time is noise — so it is the fallback
     // for a failure with no card to land on, which is what `settle` reports.
-    const carried = status.settle({
-      status: "error",
-      summary: `${kind} failed — ${firstLine}`,
-      detail
-    });
+    const carried =
+      onCard &&
+      status.settle({
+        status: "error",
+        summary: `${kind} failed — ${firstLine}`,
+        detail
+      });
     if (carried) return;
     showErrorToast({
       title: `${kind} failed`,
@@ -429,17 +438,19 @@ export function WorktreeHeader({
    * underneath a dialog the user has started reading.
    */
   const askWhereToPublish = async (): Promise<void> => {
-    if (askingWhere.current) return;
-    askingWhere.current = true;
-    const worktreeId = id;
-    const refs = await dispatch("repo:refs", { repoId: repo.id });
-    if (activeWorktreeId.current !== worktreeId) return;
-    askingWhere.current = false;
-    if (!refs.ok) {
-      flashError("Push", refs.error);
+    if (askingWhere.current !== null) return;
+    const ask = Symbol("publish question");
+    askingWhere.current = ask;
+    const remotes = await dispatch("repo:remotes", { repoId: repo.id });
+    if (askingWhere.current !== ask) return;
+    askingWhere.current = null;
+    if (!remotes.ok) {
+      // Nothing of this question's is pinned — a card still up belongs to an
+      // earlier operation, and settling would rewrite it as this failure.
+      flashError("Push", remotes.error, { onCard: false });
       return;
     }
-    setPublishing(refs.value.remotes);
+    setPublishing(remotes.value);
   };
 
   const onPush = (publish?: PushPublishTarget): void => {

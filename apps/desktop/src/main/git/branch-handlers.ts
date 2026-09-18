@@ -13,6 +13,7 @@ import {
   listBranches,
   listLocalBranchNames,
   listRemoteBranchPage,
+  listRemoteEndpoints,
   listRepoRefs,
   readCheckoutDirtyCount,
   switchBranch,
@@ -138,6 +139,16 @@ export function registerBranchHandlers(
       checkedOut.set(worktree.branch, ids);
     }
     return listRepoRefs(execGit, repo.path, checkedOut);
+  });
+
+  bus.register("repo:remotes", async (req) => {
+    const repo = db
+      .prepare("SELECT path FROM repos WHERE id = ?")
+      .get(req.repoId) as { path: string } | undefined;
+    if (repo === undefined) {
+      return err({ ...notFound, message: "repo not found" });
+    }
+    return listRemoteEndpoints(execGit, repo.path);
   });
 
   bus.register("repo:remoteBranches", async (req) => {

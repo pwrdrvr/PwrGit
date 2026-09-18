@@ -77,6 +77,7 @@ import type {
   Repo,
   RepoId,
   RepoRefs,
+  RemoteEndpoint,
   ResetTargets,
   ResolvedCommit,
   TagPage,
@@ -1229,6 +1230,12 @@ export interface Commands {
   };
   /** Repository-wide local branches and configured remote-tracking refs. */
   "repo:refs": { req: { repoId: string }; res: RepoRefs };
+  /**
+   * Every remote's name and push URL, from one `git remote -v` — for a
+   * question that only has to NAME the remotes (the toolbar Push's publish
+   * dialog). `repo:refs` carries the same list, after walking every ref.
+   */
+  "repo:remotes": { req: { repoId: string }; res: RemoteEndpoint[] };
   /**
    * One page of a remote's branches, newest commit first. `repo:refs` carries
    * only a preview per remote; every surface that browses or picks from the

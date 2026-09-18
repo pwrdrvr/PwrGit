@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from "react";
-import type { PushPublishTarget, RemoteSummary } from "@pwrgit/shared";
+import type { PushPublishTarget, RemoteEndpoint } from "@pwrgit/shared";
 import { useModal } from "../../lib/useModal";
 
 /**
@@ -7,7 +7,7 @@ import { useModal } from "../../lib/useModal";
  * that is where a clone's branches go unless someone chose otherwise, and
  * otherwise whichever remote is listed first.
  */
-export function defaultPublishRemote(remotes: RemoteSummary[]): string | null {
+export function defaultPublishRemote(remotes: RemoteEndpoint[]): string | null {
   return (
     remotes.find((remote) => remote.name === "origin")?.name ??
     remotes[0]?.name ??
@@ -40,7 +40,7 @@ export function PublishBranchDialog({
   onClose
 }: {
   branch: string;
-  remotes: RemoteSummary[];
+  remotes: RemoteEndpoint[];
   onPublish: (target: PushPublishTarget) => void;
   onClose: () => void;
 }) {

@@ -15,7 +15,7 @@ import {
   err,
   ok,
   type RemoteActivity,
-  type RemoteSummary,
+  type RemoteEndpoint,
   type Repo,
   type SshRemoteRecovery,
   type Worktree,
@@ -1822,13 +1822,9 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     behind: 0,
     tracking: "unpublished"
   };
-  const remote = (name: string): RemoteSummary => ({
+  const remote = (name: string): RemoteEndpoint => ({
     name,
-    fetchUrl: `https://example.test/${name}/project.git`,
-    pushUrl: `https://example.test/${name}/project.git`,
-    skipFetchAll: false,
-    previewBranches: [],
-    branchCount: 0
+    pushUrl: `https://example.test/${name}/project.git`
   });
   const snapshot = (overrides: Partial<WorktreeState>): WorktreeState => ({
     worktreeId: worktree.id,
@@ -1854,33 +1850,35 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     bridge.dispatch.mock.calls.filter(([name]) => name === "remote:push");
 
   /**
-   * Mount a header of its own, answering `repo:refs` with `remotes` and
+   * Mount a header of its own, answering `repo:remotes` with `remotes` and
    * `remote:push` with `push`. Listed `upstream` first, so a test that sees
    * `origin` chosen is seeing the preference and not the order.
    */
   async function mount({
     row = unpublishedRow,
     state = null,
-    remotes = [remote("upstream"), remote("origin")],
-    push = new Promise(() => undefined)
+    remotes = Promise.resolve(ok([remote("upstream"), remote("origin")])),
+    push = new Promise(() => undefined),
+    fetch = new Promise(() => undefined)
   }: {
     row?: Worktree;
     state?: WorktreeState | null;
-    remotes?: RemoteSummary[];
+    remotes?: Promise<unknown>;
     push?: Promise<unknown>;
+    fetch?: Promise<unknown>;
   } = {}) {
     // The shared fixture's header is a second Push button on the page.
     await act(async () => root.unmount());
     bridge.dispatch.mockImplementation((name: string) =>
-      name === "repo:refs"
-        ? Promise.resolve(
-            ok({ branches: [], previewTags: [], tagCount: 0, remotes })
-          )
+      name === "repo:remotes"
+        ? remotes
         : name === "remote:push"
           ? push
-          : name === "remote:activities"
-            ? Promise.resolve(ok([]))
-            : new Promise(() => undefined)
+          : name === "remote:fetch"
+            ? fetch
+            : name === "remote:activities"
+              ? Promise.resolve(ok([]))
+              : new Promise(() => undefined)
     );
     root = createRoot(container);
     await act(async () => {
@@ -1930,7 +1928,7 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     expect(card()).toBeNull();
   });
 
-  it("publishes to the remote chosen, and the receipt says where", async () => {
+  it("publishes to the remote chosen, and the sync chip says where", async () => {
     await mount({ push: Promise.resolve(ok(null)) });
     await clickPush();
     await choose("upstream");
@@ -1940,8 +1938,13 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     expect(pushCalls()).toEqual([
       ["remote:push", { worktreeId: worktree.id, publish: { remote: "upstream" } }]
     ]);
-    // Hung off the button that asked, as a plain push's card is.
-    expect(card()?.textContent).toContain("Published to upstream");
+    // Hung off the button that asked, as a plain push's card is. Its receipt
+    // is the step list — "✓ Pushed" once main has reported a phase, which
+    // jsdom never does — so where it went is the chip's to say.
+    expect(card()?.textContent).toContain("Push · project");
+    expect(container.querySelector(".sync-chip")?.textContent).toBe(
+      "published to upstream"
+    );
   });
 
   it("leaves without pushing or pinning anything on Cancel", async () => {
@@ -1996,7 +1999,7 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
   });
 
   it("says so, and offers no Publish, when there is no remote at all", async () => {
-    await mount({ remotes: [] });
+    await mount({ remotes: Promise.resolve(ok([])) });
     await clickPush();
 
     expect(dialog()?.textContent).toContain("no remotes to publish to");
@@ -2004,5 +2007,59 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
       ...(dialog()?.querySelectorAll<HTMLButtonElement>("button") ?? [])
     ].find((button) => button.textContent === "Publish");
     expect(publish?.disabled).toBe(true);
+  });
+
+  it("leaves another operation's receipt alone when the remotes cannot be read", async () => {
+    // Nothing of the question's is pinned while it loads, so a card still up
+    // is some earlier operation's — settling would rewrite it as this failure.
+    await mount({
+      fetch: Promise.resolve(ok(null)),
+      remotes: Promise.resolve(
+        err({ kind: "git", code: "git_failed", message: "fatal: not a git repository" })
+      )
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(card()?.textContent).toContain("Fetched");
+
+    await clickPush();
+
+    expect(card()?.textContent).toContain("Fetched");
+    expect(card()?.textContent).not.toContain("Push failed");
+    expect(showErrorToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Push failed",
+        message: "fatal: not a git repository"
+      })
+    );
+    expect(dialog()).toBeNull();
+  });
+
+  it("drops a question asked on an earlier visit to the same checkout", async () => {
+    let answer!: (value: unknown) => void;
+    await mount({ remotes: new Promise((resolve) => (answer = resolve)) });
+    await clickPush();
+
+    // Away and back before the remotes arrive: the same id, a new visit.
+    const elsewhere = { ...unpublishedRow, id: "worktree-2" };
+    await act(async () => {
+      root.render(<WorktreeHeader repo={repo} worktree={elsewhere} state={null} />);
+    });
+    await act(async () => {
+      root.render(
+        <WorktreeHeader repo={repo} worktree={unpublishedRow} state={null} />
+      );
+    });
+    await act(async () => {
+      answer(ok([remote("origin")]));
+      await Promise.resolve();
+    });
+
+    expect(dialog()).toBeNull();
   });
 });

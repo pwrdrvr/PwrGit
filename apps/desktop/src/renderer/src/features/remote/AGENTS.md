@@ -47,7 +47,10 @@ Push on a branch with no upstream is the one click that pins **nothing**: it
 asks `PublishBranchDialog` which remote first, because a plain push there only
 gets Git's refusal and its `--set-upstream` advice for a terminal. Nothing is
 running until the question is answered, so the card pins on Publish, off the
-Push button that asked. The header reads "no upstream" from the live snapshot
+Push button that asked — and a failure to load the remotes is a toast, never a
+`settle`, because any card still up then belongs to an earlier operation. The
+remotes come from `repo:remotes` (one `git remote -v`), not `repo:refs`, which
+walks every ref while the button shows nothing. The header reads "no upstream" from the live snapshot
 (the indexed row until one arrives) and answers Git's own `no_upstream` with the
 same question, for when both were stale — that is a `dismiss`, not a failure.
 

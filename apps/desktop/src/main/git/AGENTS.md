@@ -497,7 +497,9 @@ about access.
 
 ## Publishing a branch asks for a remote, never a name
 
-`remote:push` with `publish` runs `git push --set-upstream <remote> HEAD`. The
+`remote:push` with `publish` runs `git push --set-upstream -- <remote> HEAD` —
+the `--` because `git remote add -- -x` is accepted and Git would otherwise read
+that name as an option. The
 branch keeps its own name on the remote because Git's default
 `push.default=simple` refuses a plain push whose upstream is named differently:
 publish under another name and the toolbar's next Push fails, with no way back
@@ -506,7 +508,10 @@ short of a terminal. Verified against real Git in `remote.test.ts`.
 A failed push's `message` is the **reason** (`pushFailureHeadline`) and Git's
 stderr rides as `PwrGitError.detail`. The renderer's headline is the message's
 first line, and Git's first line is `To <url>` — so a rejected push used to
-headline as the one thing the user already knew. Keep the two apart: the card's
+headline as the one thing the user already knew. The headline is Git's first
+line that says *why* — never simply its first `fatal:`, which is usually a
+wrapper around the cause printed just before it ("Could not read from remote
+repository" after "Permission denied (publickey)"). Keep the two apart: the card's
 Git-output block, Copy and the command log read `detail`, and a sentence
 PwrGit wrote must never be quoted there as something Git printed.
 
