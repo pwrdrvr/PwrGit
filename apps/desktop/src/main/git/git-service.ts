@@ -11,6 +11,7 @@ import {
   type DivergenceCommitAlignment,
   type DivergenceCommit,
   type LocalBranchSummary,
+  type PushPublishTarget,
   type PushRefPlan,
   type PushRefResult,
   type PullProgressPhase,
@@ -18,6 +19,7 @@ import {
   type RemoteBranchPage,
   type RemoteBranchSummary,
   type RemoteDivergence,
+  type RemoteEndpoint,
   type RemoteResetMode,
   type RemoteResetPreview,
   type RemoteResetSnapshot,
@@ -3226,6 +3228,43 @@ function trackingStatus(
   return { ahead, behind, tracking };
 }
 
+/**
+ * Every remote's name and push URL, from one `git remote -v`.
+ *
+ * `listRepoRefs` answers this too, but only after walking every local and
+ * remote-tracking ref with ahead/behind, a page of tags and four Git processes
+ * per remote — which is what the toolbar's Push used to wait on, showing
+ * nothing, before it could ask where to publish.
+ *
+ * The push URL falls back to the fetch URL, as `git remote get-url --push`
+ * does; a remote with several push URLs is drawn by its first.
+ */
+export async function listRemoteEndpoints(
+  git: GitExec,
+  cwd: string
+): Promise<Result<RemoteEndpoint[]>> {
+  const raw = await git(["remote", "-v"], cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, ["remote", "-v"]);
+  if (!checked.ok) return checked;
+  const urls = new Map<string, { fetch?: string; push?: string }>();
+  for (const line of checked.value.stdout.split("\n")) {
+    const match = /^([^\t]+)\t(.*) \((fetch|push)\)$/.exec(line.trimEnd());
+    if (match === null) continue;
+    const [, name = "", url = "", role] = match;
+    const entry = urls.get(name) ?? {};
+    if (role === "push") entry.push ??= url;
+    else entry.fetch ??= url;
+    urls.set(name, entry);
+  }
+  return ok(
+    [...urls].map(([name, entry]) => ({
+      name,
+      pushUrl: entry.push ?? entry.fetch ?? ""
+    }))
+  );
+}
+
 export async function listRemoteNames(
   git: GitExec,
   cwd: string
@@ -4180,13 +4219,10 @@ async function ensureCommitObject(
   const have = await git(["cat-file", "-e", `${head}^{commit}`], cwd);
   if (!have.ok) return have;
   if (have.value.exitCode === 0) return ok(undefined);
-  const fetched = await git(["fetch", pushUrl, `refs/heads/${branch}`], cwd);
+  const args = ["fetch", "--progress", pushUrl, `refs/heads/${branch}`];
+  const fetched = await git(args, cwd);
   if (!fetched.ok) return fetched;
-  const checked = requireExit0(fetched.value, [
-    "fetch",
-    pushUrl,
-    `refs/heads/${branch}`
-  ]);
+  const checked = withCollapsedProgress(requireExit0(fetched.value, args));
   return checked.ok ? ok(undefined) : checked;
 }
 
@@ -4222,6 +4258,17 @@ function sourceRemote(
     .slice()
     .sort((a, b) => b.length - a.length)
     .find((name) => sourceRef.startsWith(`refs/remotes/${name}/`));
+}
+
+/**
+ * A ref as the push review names it — "main", "origin/main".
+ *
+ * Exported because the status card wants the same short name the dialog shows:
+ * an activity titled "Fetch · PwrGit · refs/heads/main" is the one
+ * place a user would see the long form, and it would be the only one.
+ */
+export function pushRefLabel(ref: string): string {
+  return ref.replace(/^refs\/heads\//, "").replace(/^refs\/remotes\//, "");
 }
 
 /**
@@ -4264,15 +4311,16 @@ export async function planPushRefs(
   const sourceRemoteName = sourceRemote(sourceRef, names.value);
   if (sourceRemoteName !== undefined) refreshNames.add(sourceRemoteName);
   for (const remote of refreshNames) {
-    const fetched = await fetchNamedRemote(git, cwd, remote);
-    if (!fetched.ok) return fetched;
+    // `--progress`, like every other tracked network command: the activity
+    // registry reads silence as evidence that a transfer is wedged, and a
+    // fetch that was never obliged to emit would make that reading a lie.
+    const fetched = await fetchNamedRemote(git, cwd, remote, true);
+    if (!fetched.ok) return withCollapsedProgress(fetched);
   }
 
   const source = await resolveCommit(git, cwd, sourceRef);
   if (!source.ok) return source;
-  const sourceLabel = sourceRef
-    .replace(/^refs\/heads\//, "")
-    .replace(/^refs\/remotes\//, "");
+  const sourceLabel = pushRefLabel(sourceRef);
   const plans: PushRefPlan[] = [];
   const seen = new Set<string>();
   for (const destination of destinations) {
@@ -4320,6 +4368,32 @@ export async function planPushRefs(
   return ok(plans);
 }
 
+/**
+ * Git's own words as a terminal would have shown them.
+ *
+ * `--progress` is forced on every network command the push review runs, for
+ * the activity registry's sake — silence during a transfer is the only thing
+ * that tells a wedged one from a slow one. Git writes that meter with CR, so
+ * the raw stderr carries every repaint of "Receiving objects" as ordinary
+ * text, on ONE newline-delimited line. The review dialog shows
+ * `message.split("\n")[0]`, so left alone the reason a fetch died is displaced
+ * by a wall of its own progress. The last segment of each CR run is the state
+ * that line settled on, and it is the only one worth reading.
+ */
+function collapseProgress(stderr: string): string {
+  return stderr
+    .split("\n")
+    .map((line) => line.split("\r").filter((part) => part !== "").at(-1) ?? "")
+    .join("\n")
+    .trim();
+}
+
+/** The same error, with Git's CR-rewritten progress collapsed out of it. */
+function withCollapsedProgress<T>(result: Result<T>): Result<T> {
+  if (result.ok) return result;
+  return err({ ...result.error, message: collapseProgress(result.error.message) });
+}
+
 /** Execute reviewed pushes with a lease and a fresh ancestry check per target. */
 export async function pushPlannedRefs(
   git: GitExec,
@@ -4333,8 +4407,18 @@ export async function pushPlannedRefs(
       destinationRemote: plan.destinationRemote,
       destinationBranch: plan.destinationBranch
     };
+    // Failing to READ the ref and finding it MOVED are different answers, and
+    // folding them together sends the wrong one. Cancel is the standing case:
+    // stopping the push kills Git, `resolveCommit` fails for every remaining
+    // destination, and each one used to report that the branch had changed
+    // underneath the user — telling them to re-review something they
+    // themselves stopped.
     const source = await resolveCommit(git, cwd, plan.sourceRef);
-    if (!source.ok || source.value !== plan.sourceHead) {
+    if (!source.ok) {
+      results.push({ ...base, outcome: "failed", message: source.error.message });
+      continue;
+    }
+    if (source.value !== plan.sourceHead) {
       results.push({
         ...base,
         outcome: "failed",
@@ -4357,7 +4441,11 @@ export async function pushPlannedRefs(
       pushUrl.value,
       plan.destinationBranch
     );
-    if (!actual.ok || actual.value !== plan.destinationHead) {
+    if (!actual.ok) {
+      results.push({ ...base, outcome: "failed", message: actual.error.message });
+      continue;
+    }
+    if (actual.value !== plan.destinationHead) {
       results.push({
         ...base,
         outcome: "failed",
@@ -4407,6 +4495,7 @@ export async function pushPlannedRefs(
     const raw = await git(
       [
         "push",
+        "--progress",
         `--force-with-lease=${destinationRef}:${expected}`,
         pushUrl.value,
         `${plan.sourceHead}:${destinationRef}`
@@ -4419,7 +4508,7 @@ export async function pushPlannedRefs(
         outcome: "failed",
         message:
           raw.ok
-            ? raw.value.stderr.trim() || "Push failed."
+            ? collapseProgress(raw.value.stderr) || "Push failed."
             : raw.error.message
       });
       continue;
@@ -4427,7 +4516,9 @@ export async function pushPlannedRefs(
     results.push({ ...base, outcome: "pushed" });
     refreshed.add(plan.destinationRemote);
   }
-  for (const remote of refreshed) await fetchNamedRemote(git, cwd, remote);
+  for (const remote of refreshed) {
+    await fetchNamedRemote(git, cwd, remote, true);
+  }
   return ok(results);
 }
 
@@ -4453,32 +4544,106 @@ export function pushWasDenied(stderr: string): boolean {
   );
 }
 
-/** Push the current branch to its upstream. */
+/**
+ * The first line of a failed push's message: the reason, in a sentence.
+ *
+ * The renderer shows `message.split("\n")[0]` as the headline, and Git's own
+ * first line is almost never the reason. For a rejected push it is
+ * `To github.com:owner/repo.git` — the destination, which the user already
+ * knew, standing in front of the one thing they did not. Measured in the real
+ * app: the card read "Push failed — To /private/var/…/svc.git" while the
+ * sentence that explained it sat collapsed in Git's output below.
+ *
+ * The one case with an unambiguous remedy gets it said plainly. Everything
+ * else gets Git's first line that says WHY — a server's explicit error first,
+ * wherever it sits, then the first line that is not a destination, a hint or
+ * progress. Not "the first `fatal:` line": Git's `fatal:` is usually a wrapper
+ * around the cause it printed just before it, so ranking it first headlined an
+ * HTTPS denial as "unable to access … 403" instead of "Permission to … denied",
+ * and an SSH key failure as "Could not read from remote repository".
+ */
+function pushFailureHeadline(code: string, stderr: string): string {
+  if (code === "rejected" && /fetch first|non-fast-forward/i.test(stderr)) {
+    return "The remote has newer commits. Pull, then push again.";
+  }
+  const lines = stderr
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  return (
+    lines.find((line) => /^remote: (error|fatal)\b/i.test(line)) ??
+    lines.find((line) => !PUSH_NOISE.test(line)) ??
+    "Push failed."
+  );
+}
+
+/** Lines of push stderr that say where or how far, never why. */
+const PUSH_NOISE =
+  /^(To |hint:|remote:$|(remote: )?(Enumerating|Counting|Delta compression|Compressing|Writing|Resolving|Total)\b)/;
+
+/**
+ * Push the current branch to its upstream — or, with `publish`, create it on a
+ * remote and track it from now on.
+ *
+ * `publish` exists because a bare `git push` on a branch with no upstream is a
+ * dead end: Git refuses and prints the `--set-upstream` command for the user to
+ * go and run in a terminal. It is that command — `-u <remote> HEAD`, the
+ * branch under its own name, which is the only name a later plain push will
+ * accept under Git's default `push.default=simple`.
+ */
 export async function pushRemote(
   git: GitExec,
   cwd: string,
-  forceProgress = false
+  forceProgress = false,
+  publish?: PushPublishTarget
 ): Promise<Result<void>> {
+  if (publish !== undefined) {
+    // Checked here rather than left to Git, whose "does not appear to be a git
+    // repository" for a vanished remote reads as a network failure.
+    const names = await listRemoteNames(git, cwd);
+    if (!names.ok) return names;
+    if (!names.value.includes(publish.remote)) {
+      return err({
+        kind: "remote",
+        code: "remote_missing",
+        message: `Remote "${publish.remote}" no longer exists.`
+      });
+    }
+  }
   const raw = await git(
-    ["push", ...(forceProgress ? ["--progress"] : [])],
+    [
+      "push",
+      ...(forceProgress ? ["--progress"] : []),
+      ...(publish === undefined
+        ? []
+        : // `--` because a remote name is data: `git remote add -- -x` is
+          // accepted, and without it Git reads that name as an option.
+          ["--set-upstream", "--", publish.remote, "HEAD"])
+    ],
     cwd
   );
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
-    const message = raw.value.stderr.trim();
+    const stderr = collapseProgress(raw.value.stderr);
     // Before `rejected`: a denial carries no "rejected" line today, but the
     // two are asked in the order of how specific they are, not how likely.
-    const code = pushWasDenied(message)
+    const code = pushWasDenied(stderr)
       ? "push_denied"
-      : /non-fast-forward|rejected/i.test(message)
+      : /non-fast-forward|rejected/i.test(stderr)
         ? "rejected"
-        : /no upstream|has no upstream/i.test(message)
+        : /no upstream|has no upstream/i.test(stderr)
           ? "no_upstream"
           : "push_failed";
     return err({
       kind: "remote",
       code,
-      message: message !== "" ? message : "push failed"
+      // The reason as the message, Git's own words as the detail: the card's
+      // headline and the fork prompt read the one, and the evidence block,
+      // Copy and the log read the other — so neither quotes PwrGit's sentence
+      // as something Git said.
+      ...(stderr === ""
+        ? { message: "Push failed." }
+        : { message: pushFailureHeadline(code, stderr), detail: stderr })
     });
   }
   return ok(undefined);

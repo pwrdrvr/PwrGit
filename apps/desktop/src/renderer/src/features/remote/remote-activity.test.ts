@@ -191,6 +191,10 @@ describe("liveActivityView", () => {
       statusTone: "muted",
       meter: "Receiving objects 43%",
       percent: 43,
+      // The live card keeps room for the meter even between the numbers:
+      // `setPhase` clears `progress`, so a block that mounted with them came
+      // and went at every phase boundary.
+      meterSlot: true,
       command: "git fetch --prune --progress",
       output: ["remote: Counting objects: 100% (12/12), done."],
       canceling: false,

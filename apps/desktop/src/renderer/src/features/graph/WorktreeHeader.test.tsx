@@ -15,6 +15,7 @@ import {
   err,
   ok,
   type RemoteActivity,
+  type RemoteEndpoint,
   type Repo,
   type SshRemoteRecovery,
   type Worktree,
@@ -304,6 +305,7 @@ describe("WorktreeHeader pull progress", () => {
   });
 
   it("pins the card from the click and cancels from it", async () => {
+    freezeClock();
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
@@ -316,6 +318,12 @@ describe("WorktreeHeader pull progress", () => {
       document.querySelector(".remote-activity-popover")?.textContent
     ).toContain("Pull · project · main");
 
+    // Past the narration threshold: below it the card deliberately carries no
+    // command line at all, because `setCommand` fires per Git invocation and a
+    // pull runs eight of them.
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
     await emitActivities([
       {
         phase: "fetch",
@@ -958,6 +966,248 @@ describe("WorktreeHeader settled status card", () => {
     expect(steps()).toEqual(["Fetched", "Fast-forwarded"]);
   });
 
+  // The same complaint, arriving by the other door. Gating only the step list
+  // left the card falling back to `remoteActivityStatus`, which IS the
+  // per-phase narration — so a sub-second pull still walked four sentences in
+  // six tenths of a second, in the one line the card was showing.
+  it("says one stable thing while it is too short to narrate", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    const line = (): string =>
+      card()?.querySelector(".remote-activity__status")?.textContent ?? "";
+    expect(line()).toBe("Starting…");
+
+    for (const phase of [
+      "fetch",
+      "prepare",
+      "fast_forward",
+      "reapply"
+    ] as const) {
+      await emitActivities([
+        { kind: "pull", phase, lastOutputAt: Date.now(), command: `git ${phase}` }
+      ]);
+      expect(line(), `the card was rewritten during ${phase}`).toBe(
+        "Starting…"
+      );
+    }
+    // And nothing under it moved either: the command line changes with every
+    // Git invocation, not merely every phase.
+    expect(card()?.querySelector(".remote-activity__command")).toBeNull();
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(steps()).toEqual([
+      "Fetched",
+      "Fast-forwarded",
+      "Reapplied your changes"
+    ]);
+  });
+
+  // Cancel is the one thing the quiet period must not withhold: it is drawn
+  // from the moment there is an operation to stop, not from the moment the
+  // card starts narrating one.
+  it("offers Cancel before it narrates", async () => {
+    freezeClock();
+    await inFlight("Pull");
+    await emitActivities([
+      { id: "op-9", kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    const cancel = [
+      ...(card()?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    ].find((button) => button.textContent === "Cancel");
+    await act(async () => cancel?.click());
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:cancelActivity", {
+      operationId: "op-9"
+    });
+  });
+
+  // The rule the whole card is now held to: it may grow, and it may not take
+  // space back. Anything that disappears under the reader's eye moves the text
+  // below it, and a thing that comes and goes moves that text twice.
+  //
+  // A network step's track is decided by its PHASE, not by whether Git has
+  // sent a percentage yet — Git starts reporting a beat after the phase opens
+  // and stops before it closes, so a track that followed the numbers would
+  // resize its own row twice per step.
+  it("gives a network step its progress track before Git sends a number", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    const bars = (): number =>
+      card()?.querySelectorAll(".remote-activity__step-bar").length ?? 0;
+
+    // No meter in this record at all.
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(bars(), "the fetch row reserves its track from the start").toBe(1);
+
+    await emitActivities([
+      {
+        kind: "pull",
+        phase: "fetch",
+        lastOutputAt: Date.now(),
+        progress: {
+          label: "Receiving objects",
+          percent: 43,
+          completed: 43,
+          total: 100
+        }
+      }
+    ]);
+    expect(bars(), "and keeps exactly that one when the numbers arrive").toBe(1);
+
+    // A local phase never meters anything, so its row never carries a track —
+    // which is what keeps every row's height fixed at the moment it is written.
+    await emitActivities([
+      { kind: "pull", phase: "fast_forward", lastOutputAt: Date.now() }
+    ]);
+    expect(bars(), "the finished fetch keeps its track; the local step has none")
+      .toBe(1);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(bars(), "and the receipt is the same rows it was a moment ago").toBe(
+      1
+    );
+  });
+
+  // "No Git output for 25s" appears under the list and above the buttons. Git
+  // going quiet for twenty seconds and then speaking again is a real event and
+  // a real retraction — but a line that vanishes on the retraction pushes the
+  // evidence and the buttons down and pulls them back up.
+  it("keeps the health line once it has had something to say", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    const health = (): string | null =>
+      [...(card()?.querySelectorAll(".remote-activity__status") ?? [])]
+        .at(-1)
+        ?.textContent ?? null;
+
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(health(), "nothing wrong yet, so nothing to say").toBeNull();
+
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() - 25_000 }
+    ]);
+    expect(health()).toContain("no Git output for");
+
+    // Git speaks again. The reading is honest — and the line stays put.
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(health()).toBe("Fetching updates");
+    finish();
+  });
+
+  // The card holds per-operation state, and the pinned popover UPDATES one
+  // React tree rather than remounting it — so without a key tied to the
+  // session, one operation's card starts where the last one's ended.
+  it("does not inherit the previous operation's warning", async () => {
+    freezeClock();
+    const health = (): string | null =>
+      [...(card()?.querySelectorAll(".remote-activity__status") ?? [])]
+        .at(-1)
+        ?.textContent ?? null;
+
+    const first = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() - 25_000 }
+    ]);
+    expect(health()).toContain("no Git output for");
+    await act(async () => {
+      first();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await emitActivities([]);
+
+    // A second pull, perfectly healthy from its first breath.
+    const second = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { id: "op-2", kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
+    ]);
+    expect(
+      health(),
+      "a healthy operation must not wear the last one's warning"
+    ).toBeNull();
+    second();
+  });
+
+  // Dropping the health line at settle was the same defect the evidence block
+  // had, one line lower, and at the worst possible moment: the buttons jump
+  // upward exactly as the user looks down to read the outcome.
+  it("keeps the health line on the receipt it stood on", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      { kind: "pull", phase: "fetch", lastOutputAt: Date.now() - 25_000 }
+    ]);
+    const lines = (): number =>
+      card()?.querySelectorAll(".remote-activity__status").length ?? 0;
+    expect(lines()).toBe(1);
+
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await emitActivities([]);
+    expect(lines(), "the receipt kept every line the running card had").toBe(1);
+    // And it says the outcome rather than a stale stall reading.
+    expect(card()?.textContent).toContain("Fast-forwarded");
+  });
+
+  // The command line is up to 160 monospace characters in a 320px card, so it
+  // wraps to a different number of lines per invocation — as a permanent
+  // fixture under the step list it moved everything below it several times a
+  // second. It belongs with the output it produced, behind the disclosure that
+  // opens itself when those two facts ARE the finding.
+  it("keeps the command line inside the evidence disclosure", async () => {
+    freezeClock();
+    const finish = await inFlight("Pull");
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    await emitActivities([
+      {
+        kind: "pull",
+        phase: "fetch",
+        lastOutputAt: Date.now(),
+        command: "git fetch --prune --progress origin"
+      }
+    ]);
+    const command = card()?.querySelector(".remote-activity__command");
+    expect(command?.textContent).toBe("git fetch --prune --progress origin");
+    expect(
+      command?.closest(".remote-activity__evidence"),
+      "a line that reflows at Git's rate must not sit in the card's own column"
+    ).not.toBeNull();
+    finish();
+  });
+
   // A row is appended, changes once when its own work ends, and then holds.
   // The DOM node is the honest way to assert "the row did not move".
   it("appends a row per phase, and each changes once when it completes", async () => {
@@ -1090,6 +1340,28 @@ describe("WorktreeHeader settled status card", () => {
     );
     expect(evidence?.open).toBe(true);
     expect(evidence?.textContent).toContain("fatal: unreachable");
+  });
+
+  it("quotes only what Git wrote under a reason PwrGit wrote", async () => {
+    // A rejected push's message is PwrGit's reading of Git; `detail` is Git.
+    // The headline takes the one and the Git-output block the other, so the
+    // block never presents PwrGit's sentence as something Git printed.
+    freezeClock();
+    await press(
+      "Push",
+      err({
+        kind: "remote",
+        code: "rejected",
+        message: "The remote has newer commits. Pull, then push again.",
+        detail: " ! [rejected]        main -> main (fetch first)"
+      })
+    );
+    expect(card()?.textContent).toContain(
+      "Push failed — The remote has newer commits. Pull, then push again."
+    );
+    const output = card()?.querySelector(".remote-activity__output");
+    expect(output?.textContent).toContain("! [rejected]");
+    expect(output?.textContent).not.toContain("Pull, then push again");
   });
 
   it("keeps the card as the receipt, and counts it down", async () => {
@@ -1263,13 +1535,17 @@ describe("WorktreeHeader settled status card", () => {
     expect(tab.defaultPrevented).toBe(true);
   });
 
-  // Silence is evidence while an operation runs, and still evidence once one
-  // has failed. Under "Fetched" it is neither, and an empty block there takes
-  // up the room that would have said so.
-  it("drops the Git-output block from a successful receipt only", async () => {
+  // The block stood under this card for the whole operation, so it keeps its
+  // place on the receipt. Dropping it because a successful fetch had nothing
+  // to put in it pulled the buttons under it upward at the exact moment the
+  // user looked down to read the outcome — and "Git produced no output" is a
+  // sentence, not an empty block.
+  it("keeps the Git-output block on the receipt it stood under", async () => {
     await press("Fetch", ok(null));
     expect(card()?.textContent).toContain("Fetched");
-    expect(card()?.querySelector(".remote-activity__output")).toBeNull();
+    expect(card()?.querySelector(".remote-activity__output")?.textContent).toBe(
+      "Git produced no output."
+    );
 
     await press(
       "Fetch",
@@ -1531,5 +1807,259 @@ describe("WorktreeHeader offers a fork when this account cannot push", () => {
     )!;
     await act(async () => push.click());
     expect(document.querySelector(".fork-checkout-dialog")).toBeNull();
+  });
+});
+
+describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
+  // Push on a branch with no upstream used to be a dead end: Git refused, and
+  // the card relayed its advice to go and run `git push --set-upstream` in a
+  // terminal. The toolbar asks the one question that command needs instead.
+  const branch = "feature/new-thing";
+  const unpublishedRow: Worktree = {
+    ...worktree,
+    branch,
+    isDefaultBranch: false,
+    behind: 0,
+    tracking: "unpublished"
+  };
+  const remote = (name: string): RemoteEndpoint => ({
+    name,
+    pushUrl: `https://example.test/${name}/project.git`
+  });
+  const snapshot = (overrides: Partial<WorktreeState>): WorktreeState => ({
+    worktreeId: worktree.id,
+    branch,
+    head: "0123456789abcdef0123456789abcdef01234567",
+    hasUpstream: false,
+    ahead: 0,
+    behind: 0,
+    dirty: 0,
+    behindDefault: 0,
+    defaultBranch: "main",
+    mergedIntoDefault: false,
+    divergedFromDefault: false,
+    isDefaultBranch: false,
+    updatedAt: "2026-09-17T00:00:00.000Z",
+    ...overrides
+  });
+
+  const dialog = (): Element | null => document.querySelector(".publish-branch");
+  const card = (): Element | null =>
+    document.querySelector(".remote-activity-popover");
+  const pushCalls = () =>
+    bridge.dispatch.mock.calls.filter(([name]) => name === "remote:push");
+
+  /**
+   * Mount a header of its own, answering `repo:remotes` with `remotes` and
+   * `remote:push` with `push`. Listed `upstream` first, so a test that sees
+   * `origin` chosen is seeing the preference and not the order.
+   */
+  async function mount({
+    row = unpublishedRow,
+    state = null,
+    remotes = Promise.resolve(ok([remote("upstream"), remote("origin")])),
+    push = new Promise(() => undefined),
+    fetch = new Promise(() => undefined)
+  }: {
+    row?: Worktree;
+    state?: WorktreeState | null;
+    remotes?: Promise<unknown>;
+    push?: Promise<unknown>;
+    fetch?: Promise<unknown>;
+  } = {}) {
+    // The shared fixture's header is a second Push button on the page.
+    await act(async () => root.unmount());
+    bridge.dispatch.mockImplementation((name: string) =>
+      name === "repo:remotes"
+        ? remotes
+        : name === "remote:push"
+          ? push
+          : name === "remote:fetch"
+            ? fetch
+            : name === "remote:activities"
+              ? Promise.resolve(ok([]))
+              : new Promise(() => undefined)
+    );
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<WorktreeHeader repo={repo} worktree={row} state={state} />);
+    });
+  }
+
+  const clickPush = async (): Promise<void> => {
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Push"]')
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+  const choose = async (name: string): Promise<void> => {
+    const radio = [
+      ...(dialog()?.querySelectorAll<HTMLLabelElement>(".refs-destination") ?? [])
+    ]
+      .find((row) => row.textContent?.startsWith(name))
+      ?.querySelector("input");
+    await act(async () => radio?.click());
+  };
+  const pressIn = async (label: string): Promise<void> => {
+    const button = [
+      ...(dialog()?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    ].find((candidate) => candidate.textContent === label);
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  it("asks where to publish, and pushes nothing until it is answered", async () => {
+    await mount();
+    await clickPush();
+
+    expect(dialog()?.textContent).toContain(`Publish ${branch}`);
+    // origin, though it is listed second.
+    expect(dialog()?.textContent).toContain(
+      `Pushes ${branch} to origin/${branch} and tracks it.`
+    );
+    expect(pushCalls()).toEqual([]);
+    // Nothing is running yet, so there is nothing for a card to report.
+    expect(card()).toBeNull();
+  });
+
+  it("publishes to the remote chosen, and the sync chip says where", async () => {
+    await mount({ push: Promise.resolve(ok(null)) });
+    await clickPush();
+    await choose("upstream");
+    await pressIn("Publish");
+
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([
+      ["remote:push", { worktreeId: worktree.id, publish: { remote: "upstream" } }]
+    ]);
+    // Hung off the button that asked, as a plain push's card is. Its receipt
+    // is the step list — "✓ Pushed" once main has reported a phase, which
+    // jsdom never does — so where it went is the chip's to say.
+    expect(card()?.textContent).toContain("Push · project");
+    expect(container.querySelector(".sync-chip")?.textContent).toBe(
+      "published to upstream"
+    );
+  });
+
+  it("leaves without pushing or pinning anything on Cancel", async () => {
+    await mount();
+    await clickPush();
+    await pressIn("Cancel");
+
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([]);
+    expect(card()).toBeNull();
+  });
+
+  it("reads the live snapshot ahead of the indexed row", async () => {
+    // The row still says unpublished; the snapshot has seen it tracked since.
+    await mount({ state: snapshot({ hasUpstream: true }) });
+    await clickPush();
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([["remote:push", { worktreeId: worktree.id }]]);
+  });
+
+  it("offers nothing to publish when the directory is gone", async () => {
+    // A missing checkout reads `hasUpstream: false` as well; publishing it
+    // would be an answer to the wrong question.
+    await mount({ state: snapshot({ missing: true }) });
+    await clickPush();
+    expect(dialog()).toBeNull();
+    expect(pushCalls()).toEqual([["remote:push", { worktreeId: worktree.id }]]);
+  });
+
+  it("asks the same question when Git says no upstream after all", async () => {
+    // Both the row and the snapshot said tracked; Git is the authority.
+    await mount({
+      row: { ...unpublishedRow, tracking: "up_to_date" },
+      push: Promise.resolve(
+        err({
+          kind: "remote",
+          code: "no_upstream",
+          message: `fatal: The current branch ${branch} has no upstream branch.`
+        })
+      )
+    });
+    await clickPush();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(dialog()).not.toBeNull();
+    // The card goes rather than relaying Git's terminal advice, and the
+    // question is the report — so no toast either.
+    expect(card()).toBeNull();
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  it("says so, and offers no Publish, when there is no remote at all", async () => {
+    await mount({ remotes: Promise.resolve(ok([])) });
+    await clickPush();
+
+    expect(dialog()?.textContent).toContain("no remotes to publish to");
+    const publish = [
+      ...(dialog()?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+    ].find((button) => button.textContent === "Publish");
+    expect(publish?.disabled).toBe(true);
+  });
+
+  it("leaves another operation's receipt alone when the remotes cannot be read", async () => {
+    // Nothing of the question's is pinned while it loads, so a card still up
+    // is some earlier operation's — settling would rewrite it as this failure.
+    await mount({
+      fetch: Promise.resolve(ok(null)),
+      remotes: Promise.resolve(
+        err({ kind: "git", code: "git_failed", message: "fatal: not a git repository" })
+      )
+    });
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(card()?.textContent).toContain("Fetched");
+
+    await clickPush();
+
+    expect(card()?.textContent).toContain("Fetched");
+    expect(card()?.textContent).not.toContain("Push failed");
+    expect(showErrorToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Push failed",
+        message: "fatal: not a git repository"
+      })
+    );
+    expect(dialog()).toBeNull();
+  });
+
+  it("drops a question asked on an earlier visit to the same checkout", async () => {
+    let answer!: (value: unknown) => void;
+    await mount({ remotes: new Promise((resolve) => (answer = resolve)) });
+    await clickPush();
+
+    // Away and back before the remotes arrive: the same id, a new visit.
+    const elsewhere = { ...unpublishedRow, id: "worktree-2" };
+    await act(async () => {
+      root.render(<WorktreeHeader repo={repo} worktree={elsewhere} state={null} />);
+    });
+    await act(async () => {
+      root.render(
+        <WorktreeHeader repo={repo} worktree={unpublishedRow} state={null} />
+      );
+    });
+    await act(async () => {
+      answer(ok([remote("origin")]));
+      await Promise.resolve();
+    });
+
+    expect(dialog()).toBeNull();
   });
 });

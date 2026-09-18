@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
+  err,
   ok,
   REMOTE_BRANCH_PAGE_MAX,
   REMOTE_BRANCH_PREVIEW,
@@ -19,6 +20,7 @@ import {
   inspectRemoteReset,
   inspectRemoteDivergence,
   listRemoteBranchPage,
+  listRemoteEndpoints,
   listRepoRefs,
   parseRepoRefRows,
   previewRemoteBranches,
@@ -36,6 +38,86 @@ import {
 import { createSystemGit } from "./test-support/system-git";
 
 const systemGit: GitExec = createSystemGit();
+
+/** A GitExec that answers from a table keyed on the subcommand. */
+function stubGit(
+  answers: Record<string, { stdout?: string; stderr?: string; exitCode?: number }>
+): GitExec {
+  return async (args) => {
+    const answer = answers[args[0] ?? ""];
+    if (answer === undefined) {
+      return ok({ stdout: "", stderr: "", exitCode: 0 });
+    }
+    return ok({
+      stdout: answer.stdout ?? "",
+      stderr: answer.stderr ?? "",
+      exitCode: answer.exitCode ?? 0
+    });
+  };
+}
+
+describe("the push review reports what actually went wrong", () => {
+  // Cancel is the standing case. Stopping the push kills Git, so every
+  // remaining destination fails to READ its refs — which is not the same
+  // answer as a ref that MOVED. Folding the two together told the user their
+  // branch had changed underneath them and sent them back to re-review
+  // something they had stopped themselves.
+  it("does not call a failed ref read a ref that changed", async () => {
+    const canceled: GitExec = async () =>
+      err({
+        kind: "git",
+        code: "canceled",
+        message: "Stopped at your request."
+      });
+    const pushed = await pushPlannedRefs(canceled, "/repo", [
+      {
+        sourceRef: "refs/heads/main",
+        sourceLabel: "main",
+        sourceHead: "a".repeat(40),
+        destinationRemote: "origin",
+        destinationBranch: "main",
+        relation: "fast_forward"
+      }
+    ]);
+    expect(pushed.ok).toBe(true);
+    if (!pushed.ok) return;
+    expect(pushed.value[0]).toMatchObject({
+      outcome: "failed",
+      message: "Stopped at your request."
+    });
+  });
+
+  // `--progress` is forced on every network command here so the activity
+  // registry can read silence as evidence. Git writes that meter with CR, all
+  // on one newline-delimited line, and the dialog shows `split("\n")[0]` — so
+  // left alone the reason a fetch died is displaced by a wall of its own
+  // progress.
+  it("collapses Git's progress repaints out of a failed fetch", async () => {
+    const planned = await planPushRefs(
+      stubGit({
+        remote: { stdout: "origin\n" },
+        fetch: {
+          exitCode: 128,
+          stderr:
+            "Receiving objects:   1%\rReceiving objects:  53%\rReceiving objects:  99%\n" +
+            "fatal: the remote end hung up unexpectedly\n"
+        }
+      }),
+      "/repo",
+      "refs/heads/main",
+      [{ remote: "origin", branch: "main" }]
+    );
+    expect(planned.ok).toBe(false);
+    if (planned.ok) return;
+    // What the dialog puts in front of the user.
+    expect(planned.error.message.split("\n")[0]).toBe(
+      "Receiving objects:  99%"
+    );
+    expect(planned.error.message).toContain(
+      "fatal: the remote end hung up unexpectedly"
+    );
+  });
+});
 
 function git(dir: string, args: string[]): void {
   timedGitSync(args, dir, () => execFileSync("git", args, { cwd: dir, stdio: "ignore" }));
@@ -341,6 +423,167 @@ describe("remote ops (bare-remote fixture)", () => {
       ).toBe(reviewedHead);
     }
   );
+
+  // The toolbar's Push on a branch with no upstream used to be a dead end: Git
+  // refused and printed the `--set-upstream` command for the user to go and run
+  // in a terminal. Publishing is that command, run for them — and the proof it
+  // worked is not that the push exited 0 but that the branch now TRACKS
+  // something, so the next plain Push has somewhere to go.
+  it("publishes a branch with no upstream and tracks it from then on", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-publish-"));
+    git(root, ["init", "--bare", "-b", "main", "origin.git"]);
+    git(root, ["clone", "origin.git", "local"]);
+    const local = join(root, "local");
+    configure(local, "L");
+    commit(local, "base.txt", "base");
+    git(local, ["push", "-u", "origin", "main"]);
+    git(local, ["checkout", "-b", "feature/new-thing"]);
+    commit(local, "feature.txt", "unseen");
+
+    const refused = await pushRemote(systemGit, local, true);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("no_upstream");
+
+    const published = await pushRemote(systemGit, local, true, {
+      remote: "origin"
+    });
+    expect(published.ok).toBe(true);
+    expect(
+      gitOut(local, ["rev-parse", "--abbrev-ref", "feature/new-thing@{upstream}"])
+    ).toBe("origin/feature/new-thing");
+    expect(
+      gitOut(root, ["--git-dir", "origin.git", "rev-parse", "feature/new-thing"])
+    ).toBe(gitOut(local, ["rev-parse", "HEAD"]));
+
+    // And from here a plain Push just works. This is the half that rules out
+    // publishing under a DIFFERENT name: Git's default `push.default=simple`
+    // refuses a plain push whose upstream is named differently, so a renamed
+    // publish creates a branch the Push button can never push to again.
+    commit(local, "more.txt", "more");
+    expect((await pushRemote(systemGit, local, true)).ok).toBe(true);
+  });
+
+  // A remote name is data. `git remote add -- -x` is accepted, and without a
+  // `--` ahead of it Git reads the name as an option: probed, a remote named
+  // `--dry-run` turned `push --set-upstream --dry-run HEAD` into a push to a
+  // repository called HEAD.
+  it("publishes to a remote whose name starts with a dash", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-dash-remote-"));
+    git(root, ["init", "--bare", "-b", "main", "origin.git"]);
+    git(root, ["init", "-b", "main", "local"]);
+    const local = join(root, "local");
+    configure(local, "L");
+    commit(local, "base.txt", "base");
+    git(local, ["remote", "add", "--", "--dry-run", join(root, "origin.git")]);
+
+    const published = await pushRemote(systemGit, local, true, {
+      remote: "--dry-run"
+    });
+    expect(published).toMatchObject({ ok: true });
+    expect(
+      gitOut(root, ["--git-dir", "origin.git", "rev-parse", "main"])
+    ).toBe(gitOut(local, ["rev-parse", "HEAD"]));
+  });
+
+  it("names every remote and where a push to it goes, in one Git call", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-endpoints-"));
+    git(root, ["init", "-b", "main", "local"]);
+    const local = join(root, "local");
+    git(local, ["remote", "add", "origin", "https://example.test/o.git"]);
+    git(local, ["remote", "add", "fork", "https://example.test/f.git"]);
+    git(local, ["remote", "set-url", "--push", "fork", "git@example.test:f.git"]);
+    git(local, ["remote", "set-url", "--add", "--push", "fork", "git@example.test:g.git"]);
+    const calls: string[][] = [];
+    const counted: GitExec = (args, cwd) => {
+      calls.push(args);
+      return systemGit(args, cwd);
+    };
+
+    const endpoints = await listRemoteEndpoints(counted, local);
+    expect(endpoints).toEqual(
+      ok([
+        // Git's own order. A remote with no push URL pushes where it fetches.
+        { name: "fork", pushUrl: "git@example.test:f.git" },
+        { name: "origin", pushUrl: "https://example.test/o.git" }
+      ])
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it("refuses to publish to a remote that is gone", async () => {
+    const missing = await pushRemote(systemGit, cloneB, true, {
+      remote: "nowhere"
+    });
+    expect(missing).toMatchObject({ ok: false, error: { code: "remote_missing" } });
+  });
+
+  // Measured in the real app: the card's headline read "Push failed — To
+  // /private/var/…/svc.git", because Git's first stderr line on a rejection
+  // is the destination. The reason sat collapsed in the output below it.
+  it("leads a rejected push with the reason, not the destination", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-rejected-"));
+    git(root, ["init", "--bare", "-b", "main", "origin.git"]);
+    git(root, ["clone", "origin.git", "mine"]);
+    const mine = join(root, "mine");
+    configure(mine, "M");
+    commit(mine, "base.txt", "base");
+    git(mine, ["push", "-u", "origin", "main"]);
+    git(root, ["clone", "origin.git", "theirs"]);
+    const theirs = join(root, "theirs");
+    configure(theirs, "T");
+    commit(theirs, "theirs.txt", "theirs");
+    git(theirs, ["push", "origin", "main"]);
+    commit(mine, "mine.txt", "mine");
+
+    const pushed = await pushRemote(systemGit, mine, true);
+    expect(pushed.ok).toBe(false);
+    if (pushed.ok) return;
+    expect(pushed.error.code).toBe("rejected");
+    expect(pushed.error.message).toBe(
+      "The remote has newer commits. Pull, then push again."
+    );
+    // Git's own words ride beside it, for Copy and the evidence block — and
+    // only Git's: the sentence above is PwrGit's, not something Git printed.
+    expect(pushed.error.detail).toContain("[rejected]");
+    expect(pushed.error.detail).not.toContain("Pull, then push again");
+  });
+
+  // Git's `fatal:` is usually a wrapper around the cause it printed just
+  // before it. Ranking it first headlined each of these as the wrapper.
+  it.each([
+    [
+      "an HTTPS denial",
+      "remote: Permission to desktop/dugite.git denied to huntharo.\nfatal: unable to access 'https://github.com/desktop/dugite.git/': The requested URL returned error: 403",
+      "remote: Permission to desktop/dugite.git denied to huntharo."
+    ],
+    [
+      "an SSH key the server refused",
+      "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.",
+      "git@github.com: Permission denied (publickey)."
+    ],
+    [
+      "a host that never answered",
+      "ssh: connect to host github.com port 22: Operation timed out\nfatal: Could not read from remote repository.",
+      "ssh: connect to host github.com port 22: Operation timed out"
+    ],
+    [
+      "a server rule, behind progress and the destination",
+      "Enumerating objects: 3, done.\nWriting objects: 100% (3/3), done.\nremote: \nremote: error: GH013: Repository rule violations found for refs/heads/main.\nremote: \nTo github.com:o/r.git\n ! [remote rejected] main -> main (push declined due to repository rule violations)\nerror: failed to push some refs to 'github.com:o/r.git'",
+      "remote: error: GH013: Repository rule violations found for refs/heads/main."
+    ],
+    [
+      "a transport failure after the upload",
+      "Enumerating objects: 9, done.\nCounting objects: 100% (9/9), done.\nWriting objects: 100% (9/9), 1.2 MiB, done.\nTotal 9 (delta 0), reused 0 (delta 0)\nerror: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413\nfatal: the remote end hung up unexpectedly",
+      "error: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413"
+    ]
+  ])("headlines %s with its cause, not Git's wrapper", async (_case, stderr, headline) => {
+    const pushed = await pushRemote(
+      stubGit({ push: { stderr, exitCode: 128 } }),
+      "/unused"
+    );
+    expect(pushed).toMatchObject({ ok: false, error: { message: headline } });
+  });
 
   it("push sends a new commit to the remote", async () => {
     commit(cloneB, "g.txt", "c2 from B");

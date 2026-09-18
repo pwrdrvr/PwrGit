@@ -32,6 +32,7 @@ import type {
   RepoIdentityRefreshOutcome,
   PushRefPlan,
   PushRefResult,
+  PushPublishTarget,
   RemoteActivity,
   ChangeSet,
   GitOperationKind,
@@ -76,6 +77,7 @@ import type {
   Repo,
   RepoId,
   RepoRefs,
+  RemoteEndpoint,
   ResetTargets,
   ResolvedCommit,
   TagPage,
@@ -1229,6 +1231,12 @@ export interface Commands {
   /** Repository-wide local branches and configured remote-tracking refs. */
   "repo:refs": { req: { repoId: string }; res: RepoRefs };
   /**
+   * Every remote's name and push URL, from one `git remote -v` — for a
+   * question that only has to NAME the remotes (the toolbar Push's publish
+   * dialog). `repo:refs` carries the same list, after walking every ref.
+   */
+  "repo:remotes": { req: { repoId: string }; res: RemoteEndpoint[] };
+  /**
    * One page of a remote's branches, newest commit first. `repo:refs` carries
    * only a preview per remote; every surface that browses or picks from the
    * full set pages through here so a fork network's thousands of
@@ -1457,7 +1465,16 @@ export interface Commands {
       reappliedWithConflicts: boolean;
     };
   };
-  "remote:push": { req: { worktreeId: string }; res: null };
+  /**
+   * Push the checkout's branch to its upstream — or, with `publish`, create it
+   * on a remote and track it from now on. `publish` is how a branch with no
+   * upstream gets one: a bare `git push` there is Git telling the user to go
+   * run `--set-upstream` in a terminal.
+   */
+  "remote:push": {
+    req: { worktreeId: string; publish?: PushPublishTarget };
+    res: null;
+  };
   /** Fresh branch/upstream comparison after a non-fast-forward pull. */
   "remote:inspectDivergence": {
     req: { worktreeId: string };

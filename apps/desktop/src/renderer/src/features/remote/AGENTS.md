@@ -22,9 +22,9 @@ snapshot, never a reference.
 
 **Every path out of an operation ends in exactly one of three things** —
 `settle`, `dismiss` (a modal is taking over: the divergence dialog, the SSH
-recovery prompt, the fork prompt), or, for a failure the card could not carry,
-a toast. A fourth early return without one of them leaves a card pinned on
-"Starting…" until the user clicks it away.
+recovery prompt, the fork prompt, the publish question), or, for a failure the
+card could not carry, a toast. A fourth early return without one of them leaves
+a card pinned on "Starting…" until the user clicks it away.
 
 The staleness guards **are** that fourth return, and they deliberately cannot
 settle: an operation whose checkout is no longer selected has an outcome that
@@ -42,6 +42,17 @@ own output plus Logs and Copy, is a better report than a corner toast — and
 both at once is the same failure said twice. The toast is now the fallback for
 a failure with nowhere anchored to go, which is what happens when the user
 clicked the card away mid-operation.
+
+Push on a branch with no upstream is the one click that pins **nothing**: it
+asks `PublishBranchDialog` which remote first, because a plain push there only
+gets Git's refusal and its `--set-upstream` advice for a terminal. Nothing is
+running until the question is answered, so the card pins on Publish, off the
+Push button that asked — and a failure to load the remotes is a toast, never a
+`settle`, because any card still up then belongs to an earlier operation. The
+remotes come from `repo:remotes` (one `git remote -v`), not `repo:refs`, which
+walks every ref while the button shows nothing. The header reads "no upstream" from the live snapshot
+(the indexed row until one arrives) and answers Git's own `no_upstream` with the
+same question, for when both were stale — that is a `dismiss`, not a failure.
 
 ## The card accumulates; it does not narrate
 
@@ -86,16 +97,83 @@ Four rules hold it together.
   gate: the card still opens on the click. That was the original ask and it is
   what makes the button feel answered; this governs what the card says, not
   whether it is there.
-- **Git's own output is collapsed while the operation looks healthy.** It is
-  `\r`-rewritten progress &mdash; built to be transient in a terminal &mdash;
-  and live it grew from nothing to its 108&nbsp;px cap while its last line
-  flickered. That was the single largest source of churn, and on a healthy
-  operation it says nothing the rows have not. It opens *itself* the moment it
-  is the finding: a quiet warning, a failure, or a cancel. Making a user hunt
-  for a disclosure to read the thing they came for would be the same mistake as
-  the age gate was. The open state is React-controlled because the popover
-  re-renders every second &mdash; an uncontrolled `<details>` would shut itself
-  under a user who had just opened it.
+
+  **The gate covers the whole card, not the step list.** Gating the list alone
+  left the card falling through to its status line &mdash; and
+  `remoteActivityStatus` *is* the per-phase narration, so the same four
+  sentences went on landing in six tenths of a second by the other door. Below
+  the threshold `startingView` is the view, from the click right through main's
+  first words: one line, no meter, no command. It reads the record only for
+  the operation itself (the id and `canceling`, so Cancel is drawn from the
+  moment there is something to stop rather than appearing when the narration
+  starts) and for the output tail, which rides inside a collapsed disclosure
+  and so cannot move anything.
+- **Git's own output is collapsed while the operation looks healthy, and the
+  command line rides with it.** The output is `\r`-rewritten progress &mdash;
+  built to be transient in a terminal &mdash; and live it grew from nothing to
+  its 108&nbsp;px cap while its last line flickered. That was the single
+  largest source of churn, and on a healthy operation it says nothing the rows
+  have not. It opens *itself* the moment it is the finding: a quiet warning, a
+  failure, or a cancel. Making a user hunt for a disclosure to read the thing
+  they came for would be the same mistake as the age gate was. The open state
+  is React-controlled because the popover re-renders every second &mdash; an
+  uncontrolled `<details>` would shut itself under a user who had just opened
+  it.
+
+  The command line is in there for the same reason and one of its own:
+  `setCommand` fires per Git *invocation*, not per phase &mdash; a pull runs
+  about eight &mdash; and 160 monospace characters wrap to a different number
+  of lines each time, so as a fixture in the card's own column it moved
+  everything under it several times a second. "Which command" and "what did it
+  last print" are the two facts a wedged transfer is diagnosed from; they
+  belong together, behind a disclosure that opens itself on exactly the
+  operations where they are the finding.
+
+## The card grows; it never takes space back
+
+The step list answered "the text keeps being rewritten". This is the other half
+of the same complaint: **a thing that appears and disappears moves everything
+under it, twice.** So the rule for anything the card draws is that its space is
+reserved for as long as the card might want it, and the card's height only ever
+goes up while an operation runs.
+
+Four places used to break it, and each one moved the evidence block and the
+buttons — which is exactly where a reader looks when they want to know what
+happened.
+
+- **A network step's progress track is decided by its PHASE**
+  (`stepHasMeter`), not by whether Git has sent a percentage yet. Git starts
+  reporting a beat after a phase opens and stops before it closes, and
+  `setPhase` clears `progress` outright, so a track that followed the numbers
+  resized its own row twice per step. A `fetch` or `push` row has one from the
+  moment it is written; a `fast_forward` row never does. `Track` renders the
+  reserved-but-empty case as presentational rather than as a `progressbar` with
+  an invented value — an assistive technology should hear "running, progress
+  unknown", not "0%". A finished network step reads 100%, in the success
+  colour, because it transferred.
+- **The fallback meter keeps its slot for the life of the operation**
+  (`meterSlot`). That is the toast's standing presentation, and the block came
+  and went three times in a pull. The label line holds its height empty, in
+  CSS, for the same reason. `meterSlot` is a field on the view rather than
+  something the card derives, because the *other* fallback — the quiet card
+  before the narration threshold — must NOT reserve it: an empty transfer
+  block there would make that card taller than the one-row step list that
+  replaces it, and turn the card's one honest transition into a shrink.
+- **The health line stays once it has had something to say.** A fetch that
+  goes quiet for twenty seconds and then resumes is a real event and the
+  retraction is real information — but the line has to update in place, not
+  vanish.
+- **The Git-output disclosure keeps its place on the receipt.** It stood under
+  the card for the whole operation (a running card always shows it), so
+  dropping it because a successful fetch had nothing to put in it pulled the
+  buttons upward at the moment the user looked down to read the outcome. "Git
+  produced no output." is a sentence; an absent block is a jump.
+
+What deliberately still moves, and why it is allowed: rows are **appended** as
+phases are observed, the disclosure **opens** itself on a finding, and a
+failure's headline appears above the list. All three are growth at the moment
+the card has something new to say, and growth below the reader's eye is how a
+card reports progress. What is not allowed is taking any of it back.
 
 Rows carry bare labels today. Counts &mdash; *"Fast-forwarded · 12 commits"*
 &mdash; need the command results widened in main: `remote:fetch` and
@@ -146,14 +224,27 @@ it is right now, and a card under the pointer still waits.
 `REMOTE_ACTIVITY_SETTLED_MS` may be as short as it is *because* of those
 pauses, not despite them — that, plus the ✕, is WCAG SC 2.2.1 met three ways.
 
-## One card, three placements
+## One card, four placements
 
 `RemoteActivityCard` is rendered by the pinned popover, by a hover-opened card
-from the same hook, and by the elsewhere-toast (`RemoteActivityToast`). They
-answer the same question from different places, so they share the card rather
-than growing dialects of it; `compact` drops the Git-output block for the
-toast, and `onClose` is what draws the ✕ and the Close button — given only
-where dismissal is the user's to make.
+from the same hook, by the elsewhere-toast (`RemoteActivityToast`), and by
+`PushRefsDialog`. They answer the same question from different places, so they
+share the card rather than growing dialects of it; `compact` drops the
+Git-output block for the toast, and `onClose` is what draws the ✕ and the
+Close button — given only where dismissal is the user's to make.
+
+The dialog is the exception to "a modal takes the card away", and it has to
+be: it is the surface that *starts* the operation. Both halves of the push
+review are network commands — the plan fetches every destination remote
+before it can compare anything — and until `remote:planPushRefs` and
+`remote:pushRefs` were wrapped in `tracked()` neither registered anything at
+all, so the only thing that said an SSH agent had wedged was a button caption
+reading "Pushing…". It draws the card itself rather than leaning on the
+elsewhere-toast because `.toast-host` is z-index 90 under a backdrop at 110:
+that card would be dimmed and unclickable behind the dialog that started the
+work. It shows the live view only; the dialog's own per-destination results
+table is a better receipt than a one-line summary, so there is no `settle`
+here.
 
 The split between popover and toast is scope, and it is load-bearing: the toast
 shows only operations the toolbar on screen is *not* already reporting. Show

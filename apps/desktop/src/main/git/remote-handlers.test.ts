@@ -735,6 +735,84 @@ describe("remote handlers", () => {
     expect(refresher.refreshRepoWorktrees).toHaveBeenCalledTimes(3);
   });
 
+  // The sidebar's push review is two network commands — the plan fetches
+  // EVERY destination remote before it can compare anything — and neither was
+  // registered, so the dialog's only signal was a button reading "Pushing…".
+  // An SSH agent that accepts a connection and never answers wedges them the
+  // way it wedges a fetch, and a caption carries no elapsed, no Git output, no
+  // Logs and no way to stop.
+  it.each([
+    {
+      what: "plan",
+      command: "remote:planPushRefs" as const,
+      request: {
+        repoId: "repo-1",
+        sourceRef: "refs/heads/main",
+        destinations: [{ remote: "origin", branch: "main" }]
+      },
+      kind: "fetch",
+      phase: "fetch",
+      hold: planPushRefs
+    },
+    {
+      what: "push",
+      command: "remote:pushRefs" as const,
+      request: { repoId: "repo-1", plans: [] },
+      kind: "push",
+      phase: "push",
+      hold: pushPlannedRefs
+    }
+  ])("registers a cancellable activity for the $what half of a push review", async ({
+    command,
+    request,
+    kind,
+    phase,
+    hold
+  }) => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({
+          path: "/repos/project",
+          name: "project",
+          profileId: "profile-1"
+        }))
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(async () => undefined),
+      refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    let release!: () => void;
+    vi.mocked(hold).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(ok([]) as never);
+        }) as never
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+
+    const running = bus.dispatch(command, request as never);
+    await vi.waitFor(() =>
+      expect(liveActivities(vi.mocked(emitEvent))[0]?.phase).toBe(phase)
+    );
+    const live = liveActivities(vi.mocked(emitEvent))[0]!;
+    expect(live.kind).toBe(kind);
+    // Repo-scoped: no checkout owns a push aimed at named remotes, and it is
+    // `worktreeId: null` that keeps the elsewhere-toast carrying it once the
+    // dialog is closed.
+    expect(live.worktreeId).toBeNull();
+
+    await expect(
+      bus.dispatch("remote:cancelActivity", { operationId: live.id })
+    ).resolves.toEqual(ok({ canceled: true }));
+
+    release();
+    await expect(running).resolves.toMatchObject({ ok: true });
+    // Retired with the operation, so no stale card outlives it.
+    expect(liveActivities(vi.mocked(emitEvent))).toEqual([]);
+  });
+
   it("serializes worktree and repo fetches that update the same repository refs", async () => {
     let finishWorktreeFetch!: () => void;
     const worktreeFetch = new Promise<void>((resolve) => {

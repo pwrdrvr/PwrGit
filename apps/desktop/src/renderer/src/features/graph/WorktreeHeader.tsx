@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type {
+  PushPublishTarget,
   PwrGitError,
   RemoteDivergence,
+  RemoteEndpoint,
   Repo,
   Result,
   SshRemoteRecovery,
@@ -23,6 +25,7 @@ import { PullDivergenceDialog } from "./PullDivergenceDialog";
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
+import { PublishBranchDialog } from "./PublishBranchDialog";
 import { pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 import {
   hoverTooltip,
@@ -126,6 +129,19 @@ export function WorktreeHeader({
   /** The fork prompt, and why it opened. `{}` is the user asking for it from
    *  the read-only chip; a `reason` is a push the forge just refused. */
   const [forkPrompt, setForkPrompt] = useState<{ reason?: string } | null>(null);
+  /** The remotes a branch with no upstream can be published to, while the
+   *  question is open. Loaded BEFORE the dialog opens, so its list never
+   *  arrives under a dialog the user is already reading. */
+  const [publishing, setPublishing] = useState<RemoteEndpoint[] | null>(null);
+  /** The Push button as it was clicked, so a card can hang off it once the
+   *  publish question has been answered. A ref rather than the trigger
+   *  factory's `cardButton`, which only points at a button while it carries
+   *  a card. */
+  const pushTarget = useRef<HTMLElement | null>(null);
+  /** The publish question being loaded, if any. A token rather than a flag:
+   *  switching checkouts clears it, so a load from an earlier visit finds
+   *  itself superseded even when the user has come back to the same one. */
+  const askingWhere = useRef<symbol | null>(null);
   const tip = useViewportTooltip();
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
@@ -147,6 +163,8 @@ export function WorktreeHeader({
     setRecoveryBusy(null);
     setSshRecovery(null);
     setForkPrompt(null);
+    setPublishing(null);
+    askingWhere.current = null;
   }, [worktree.id]);
 
   // Phase, Git's output and the cancel all ride on one live record, scoped to
@@ -213,28 +231,36 @@ export function WorktreeHeader({
   // A cancel takes neither. The user stopped it themselves a second ago and
   // is watching the button they pressed; dressing their own decision as a
   // failure card is noise, and an error toast would outlive the gesture.
-  const flashError = (kind: string, error: PwrGitError): void => {
+  const flashError = (
+    kind: string,
+    error: PwrGitError,
+    { onCard = true }: { onCard?: boolean } = {}
+  ): void => {
     if (error.code === "canceled") {
       showFlash({ text: `${kind.toLowerCase()} canceled`, tone: "muted" }, 2000);
-      status.settle({ status: "canceled", summary: `${kind} canceled` });
+      if (onCard) status.settle({ status: "canceled", summary: `${kind} canceled` });
       return;
     }
     const firstLine = error.message.split("\n")[0];
+    // What the tool wrote, when the message is PwrGit's reading of it.
+    const detail = error.detail ?? error.message;
     showFlash({ text: firstLine.slice(0, 64), tone: "warn" }, 3200);
     // The status card is durable on a failure, anchored to the button that was
     // pressed, and carries Git's own output plus Logs and Copy. A corner toast
     // saying the same thing at the same time is noise — so it is the fallback
     // for a failure with no card to land on, which is what `settle` reports.
-    const carried = status.settle({
-      status: "error",
-      summary: `${kind} failed — ${firstLine}`,
-      detail: error.message
-    });
+    const carried =
+      onCard &&
+      status.settle({
+        status: "error",
+        summary: `${kind} failed — ${firstLine}`,
+        detail
+      });
     if (carried) return;
     showErrorToast({
       title: `${kind} failed`,
       message: firstLine,
-      detail: error.message
+      detail
     });
   };
 
@@ -402,15 +428,67 @@ export function WorktreeHeader({
       2400
     );
   };
-  const onPush = (): void => {
+  /**
+   * Ask where a branch with no upstream should go.
+   *
+   * A plain `git push` there is a dead end — Git refuses and prints the
+   * `--set-upstream` command for the user to go and run in a terminal — and
+   * this toolbar already says "no upstream" in the chip beside the button.
+   * Loads the remotes first and opens the dialog second, so nothing arrives
+   * underneath a dialog the user has started reading.
+   */
+  const askWhereToPublish = async (): Promise<void> => {
+    if (askingWhere.current !== null) return;
+    const ask = Symbol("publish question");
+    askingWhere.current = ask;
+    const remotes = await dispatch("repo:remotes", { repoId: repo.id });
+    if (askingWhere.current !== ask) return;
+    askingWhere.current = null;
+    if (!remotes.ok) {
+      // Nothing of this question's is pinned — a card still up belongs to an
+      // earlier operation, and settling would rewrite it as this failure.
+      flashError("Push", remotes.error, { onCard: false });
+      return;
+    }
+    setPublishing(remotes.value);
+  };
+
+  const onPush = (publish?: PushPublishTarget): void => {
     const worktreeId = id;
     setBusy("push");
-    void dispatch("remote:push", { worktreeId }).then((result) => {
+    void dispatch("remote:push", {
+      worktreeId,
+      ...(publish === undefined ? {} : { publish })
+    }).then((result) => {
       if (activeWorktreeId.current !== worktreeId) return;
       setBusy(null);
       if (result.ok) {
-        showFlash({ text: "pushed", tone: "ok" }, 1600);
-        status.settle({ status: "ok", summary: "Pushed" });
+        showFlash(
+          {
+            text:
+              publish === undefined ? "pushed" : `published to ${publish.remote}`,
+            tone: "ok"
+          },
+          1600
+        );
+        status.settle({
+          status: "ok",
+          summary:
+            publish === undefined ? "Pushed" : `Published to ${publish.remote}`
+        });
+        return;
+      }
+      // No upstream after all: the state the button read was stale, or had not
+      // been computed yet. The remedy is the same as reading it right, and a
+      // card relaying Git's "go run --set-upstream" advice is not a remedy —
+      // so the card goes, like the fork prompt's does, and the question opens.
+      if (
+        result.error.code === "no_upstream" &&
+        publish === undefined &&
+        worktree.branch !== null
+      ) {
+        status.dismiss();
+        void askWhereToPublish();
         return;
       }
       // The one push failure with a remedy inside PwrGit. Git has just said
@@ -554,6 +632,17 @@ export function WorktreeHeader({
       ? {}
       : { title: running === kind ? busyLabel(kind) : idle };
   const dirty = state?.dirty ?? worktree.dirty;
+  // The same fact the chip beside the button reads as "no upstream". The live
+  // snapshot when it is this checkout's; the indexed row until one arrives.
+  // Neither is authoritative — `onPush` also answers Git's own `no_upstream`
+  // with the same question, for the case where both were stale. A checkout
+  // whose directory is gone reads `hasUpstream: false` too, and publishing is
+  // no remedy for that, so it keeps the plain push and Git's own refusal.
+  const live = state?.worktreeId === worktree.id ? state : null;
+  const unpublished =
+    worktree.branch !== null &&
+    (live?.missing ?? worktree.missing) !== true &&
+    (live !== null ? !live.hasUpstream : worktree.tracking === "unpublished");
   const behind = state?.behind ?? worktree.behind;
   const drift = defaultBranchDrift(state, worktree);
 
@@ -696,13 +785,26 @@ export function WorktreeHeader({
             className="wt-btn"
             onClick={(event) => {
               if (running !== null) return;
+              pushTarget.current = event.currentTarget;
+              // Nowhere for a plain push to go: ask, rather than let Git refuse
+              // and hand the user a command to run in a terminal. No card yet
+              // — nothing is running until the question is answered.
+              if (unpublished) {
+                void askWhereToPublish();
+                return;
+              }
               pinStatus("push", event.currentTarget);
               onPush();
             }}
             aria-disabled={running !== null}
             aria-label={running === "push" ? busyLabel("push") : "Push"}
             aria-busy={running === "push"}
-            {...busyTitle("push", "Push")}
+            {...busyTitle(
+              "push",
+              // The label stays "Push" — a button that renamed itself would
+              // shift the toolbar — and the tooltip says what it will ask.
+              unpublished ? "Push · publish this branch to a remote…" : "Push"
+            )}
             {...statusTrigger("push")}
           >
             {running === "push" ? (
@@ -749,6 +851,22 @@ export function WorktreeHeader({
               { text: `${sshRecovery.remote} now uses SSH`, tone: "ok" },
               2400
             );
+          }}
+        />
+      )}
+      {publishing !== null && worktree.branch !== null && (
+        <PublishBranchDialog
+          branch={worktree.branch}
+          remotes={publishing}
+          onClose={() => setPublishing(null)}
+          onPublish={(target) => {
+            setPublishing(null);
+            // The card hangs off the button that asked, exactly as it would
+            // have for a plain push — opened now, because this is the moment
+            // something starts running.
+            const from = pushTarget.current;
+            if (from !== null && from.isConnected) pinStatus("push", from);
+            onPush(target);
           }}
         />
       )}

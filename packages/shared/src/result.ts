@@ -35,6 +35,14 @@ export type PwrGitError = {
   kind: PwrGitErrorKind;
   code: string;
   message: string;
+  /**
+   * The tool's own output behind `message`, when `message` is PwrGit's reading
+   * of it rather than the output itself — a rejected push says "The remote has
+   * newer commits" and carries Git's stderr here. Surfaces that show evidence
+   * (the status card's Git output, Copy, the log) read this, so they quote only
+   * what the tool actually wrote. Absent means `message` IS the output.
+   */
+  detail?: string;
   cause?: unknown;
 };
 

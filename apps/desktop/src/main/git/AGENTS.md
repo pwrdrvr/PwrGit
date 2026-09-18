@@ -100,6 +100,19 @@ Two rules that are easy to undo:
 Output lines are sanitized through `sanitizeGitLogDetail` on the way in, so a
 credential in a remote URL never reaches the record, the event, or the clipboard.
 
+**"Long-running remote command" means every command that reaches a remote, not
+just the ones with a toolbar button.** `remote:planPushRefs` and
+`remote:pushRefs` sat outside the registry for exactly that reason — they
+belong to a sidebar dialog rather than the worktree header — and the review
+half fetches EVERY destination remote before it can compare anything. Both are
+tracked now, repo-scoped (`worktreeId: null`, since no checkout owns a push
+aimed at named remotes), and every network command they run forces
+`--progress`: the quiet warning reads silence as evidence, so a command that
+was never obliged to emit would make that reading a lie. `pushFailureMessage`
+is the other half of forcing it — Git writes the meter with CR, and a
+rejection's stderr would otherwise reach the review table with every repaint of
+"Writing objects" in front of it.
+
 The failure that motivated all of this: an SSH agent that is present but cannot
 answer (1Password's agent with 1Password stopped or locked) accepts the
 connection and then blocks forever. Git prints nothing, exits never, and every
@@ -481,6 +494,26 @@ instead of "Fork & switch origin" once the preflight lands.
 failure with a remedy inside PwrGit, and deliberately excludes a protected
 branch, which reads almost identically on GitLab and means the opposite thing
 about access.
+
+## Publishing a branch asks for a remote, never a name
+
+`remote:push` with `publish` runs `git push --set-upstream -- <remote> HEAD` —
+the `--` because `git remote add -- -x` is accepted and Git would otherwise read
+that name as an option. The
+branch keeps its own name on the remote because Git's default
+`push.default=simple` refuses a plain push whose upstream is named differently:
+publish under another name and the toolbar's next Push fails, with no way back
+short of a terminal. Verified against real Git in `remote.test.ts`.
+
+A failed push's `message` is the **reason** (`pushFailureHeadline`) and Git's
+stderr rides as `PwrGitError.detail`. The renderer's headline is the message's
+first line, and Git's first line is `To <url>` — so a rejected push used to
+headline as the one thing the user already knew. The headline is Git's first
+line that says *why* — never simply its first `fatal:`, which is usually a
+wrapper around the cause printed just before it ("Could not read from remote
+repository" after "Permission denied (publickey)"). Keep the two apart: the card's
+Git-output block, Copy and the command log read `detail`, and a sentence
+PwrGit wrote must never be quoted there as something Git printed.
 
 ## SSH host approval
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { RemoteActivity } from "@pwrgit/shared";
+import type { RemoteActivity, RemoteActivityKind } from "@pwrgit/shared";
 import { dispatch, subscribe, windowProfileId } from "../lib/pwrgit";
 
 /**
@@ -70,6 +70,36 @@ export function useRemoteActivityFor(
         ? null
         : (all.find((activity) => activity.worktreeId === worktreeId) ?? null),
     [all, worktreeId]
+  );
+}
+
+/**
+ * The repo-wide operation of one kind, if any — the half of the registry no
+ * single checkout owns.
+ *
+ * `worktreeId === null` is what makes it repo-wide: a repository fetch and the
+ * two halves of the push review are all aimed at a repository rather than at a
+ * checkout. `kind` separates the review's own fetch from a repository refresh,
+ * which is as far as the record lets a caller go — both take the repository
+ * lock, so only one of them can be running, and a caller that finds the other
+ * one queued is looking at the reason its own work has not started.
+ */
+export function useRepoRemoteActivity(
+  repoId: string | null,
+  kind: RemoteActivityKind | null
+): RemoteActivity | null {
+  const all = useRemoteActivities();
+  return useMemo(
+    () =>
+      repoId === null || kind === null
+        ? null
+        : (all.find(
+            (activity) =>
+              activity.repoId === repoId &&
+              activity.worktreeId === null &&
+              activity.kind === kind
+          ) ?? null),
+    [all, kind, repoId]
   );
 }
 
