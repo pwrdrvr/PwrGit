@@ -69,6 +69,17 @@ function guidanceValue(value: unknown): string | undefined {
   return cleaned.slice(0, AI_GUIDANCE_MAX_LENGTH);
 }
 
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** An ISO-8601 instant with its zone, normalized to UTC; undefined for
+ *  anything else. The shape is checked first because `Date.parse` alone
+ *  accepts `"1"` as a date in 2001. */
+function timestampValue(value: unknown): string | undefined {
+  if (typeof value !== "string" || !ISO_INSTANT.test(value)) return undefined;
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? new Date(at).toISOString() : undefined;
+}
+
 function agentIds(value: unknown): BuiltInAcpAgentId[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return [...new Set(value.filter(isBuiltInAcpAgentId))];
@@ -93,6 +104,10 @@ function preference(value: unknown): AcpAgentPreference | undefined {
 export function sanitizeAiProviderSettingsPatch(value: unknown): AiProviderSettingsPatch {
   const raw = record(value) ?? {};
   const patch: AiProviderSettingsPatch = {};
+
+  if (typeof raw["enabled"] === "boolean") patch.enabled = raw["enabled"];
+  const consentAcceptedAt = timestampValue(raw["consentAcceptedAt"]);
+  if (consentAcceptedAt !== undefined) patch.consentAcceptedAt = consentAcceptedAt;
 
   const codex = record(raw["codex"]);
   if (codex !== null) {
@@ -200,7 +215,14 @@ export function applyAiProviderSettingsPatch(
     jobs[jobId] = merged;
   }
 
+  // The switch cannot be on without the disclosure accepted. The renderer
+  // shows the disclosure first; this is what holds when something skips it.
+  const consentAcceptedAt = patch.consentAcceptedAt ?? current.consentAcceptedAt;
+  const enabled = (patch.enabled ?? current.enabled) && consentAcceptedAt !== null;
+
   return {
+    enabled,
+    consentAcceptedAt,
     codex,
     acp: {
       enabledAgentIds: patch.acp?.enabledAgentIds ?? [...current.acp.enabledAgentIds],

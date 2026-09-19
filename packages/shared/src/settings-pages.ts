@@ -34,8 +34,9 @@ export function isSettingsPage(value: unknown): value is SettingsPage {
   );
 }
 
-/** AI Features' sections, in the order the page reads. */
-export const AI_FEATURE_SECTIONS = ["default-agents", "guidance"] as const;
+/** AI Features' sections, in the order the page reads. Availability — the
+ *  master switch — leads, because nothing below it runs while it is off. */
+export const AI_FEATURE_SECTIONS = ["availability", "default-agents", "guidance"] as const;
 
 /**
  * Places within a page, keyed by the page that owns them.

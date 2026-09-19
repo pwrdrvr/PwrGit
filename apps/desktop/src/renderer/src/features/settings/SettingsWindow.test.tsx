@@ -606,7 +606,7 @@ describe("Settings nav — AI", () => {
     const labels = [
       ...sublist("ai-features").querySelectorAll(".settings-nav__sublabel")
     ].map((node) => node.textContent?.trim());
-    expect(labels).toEqual(["Default agents", "Guidance"]);
+    expect(labels).toEqual(["Availability", "Default agents", "Guidance"]);
     await act(async () => navChild("Guidance").click());
     expect(navChild("Guidance").getAttribute("aria-current")).toBe("page");
   });

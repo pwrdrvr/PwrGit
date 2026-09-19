@@ -16,6 +16,8 @@ import {
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import { AiConsentDialog } from "./AiConsentDialog";
+import { resolveAiToggleAction } from "./ai-enablement";
 import { AiProfilePicker, type AiProfileSelection } from "./AiProfilePicker";
 import { useAiProvidersContext, useInUseAcpModelProbes } from "./AiProvidersContext";
 import { AI_FEATURE_SECTION_LABELS } from "./settings-nav";
@@ -26,6 +28,7 @@ import {
   SettingsSectionStack,
   type SettingsFocusRequest
 } from "./SettingsLayout";
+import { SettingsSwitch } from "./SettingsSwitch";
 
 /** What `aiProviders:codexModels` answered, and for which profile and binary. */
 type CodexModelsRead = {
@@ -145,6 +148,12 @@ export function AiFeaturesSettings(props: {
                 : ai.settingsError}
             </p>
           )}
+          <AvailabilitySection
+            profileName={
+              props.profile.profiles.find((profile) => profile.id === profileId)?.name ??
+              "this profile"
+            }
+          />
           <SettingsSection
             sectionId="default-agents"
             title={AI_FEATURE_SECTION_LABELS["default-agents"]}
@@ -414,6 +423,69 @@ function JobDefaultRow(props: {
           ? { error: `${providerLabel(provider)} models unavailable: ${modelError}` }
           : {})}
     />
+  );
+}
+
+/**
+ * The profile's AI switch — the same one at the bottom of the sidebar, here
+ * so Settings can say what it gates. The disclosure comes first the first
+ * time, exactly as it does there (`resolveAiToggleAction`); readiness is not
+ * checked here, because this pane is the place a reader sets a provider up.
+ */
+function AvailabilitySection(props: { profileName: string }) {
+  const { settings, update, saving } = useAiProvidersContext();
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const on = settings?.enabled === true;
+
+  const write = (patch: { enabled: boolean; consentAcceptedAt?: string }): void => {
+    setError(null);
+    void update(patch).then(setError);
+  };
+
+  return (
+    <SettingsSection
+      sectionId="availability"
+      title={AI_FEATURE_SECTION_LABELS.availability}
+      eyebrow="Features"
+      description="Whether AI features may run for this profile. While this is off, no feature sends anything to an agent — providers and defaults can still be set up first."
+      chip={<span aria-label={`AI features: ${on ? "On" : "Off"}`}>{on ? "On" : "Off"}</span>}
+      chipKind={on ? "ok" : "default"}
+    >
+      <SettingsField
+        label="Use AI features"
+        sub="Off until you turn it on. The switch at the bottom of the sidebar is the same setting."
+        control={
+          <SettingsSwitch
+            checked={on}
+            disabled={settings === null}
+            busy={saving}
+            label={`Use AI features for ${props.profileName}`}
+            onChange={() => {
+              if (saving || settings === null) return;
+              const action = resolveAiToggleAction({
+                enabled: settings.enabled,
+                consentAcceptedAt: settings.consentAcceptedAt,
+                providerReady: undefined
+              });
+              if (action === "consent") setConsentOpen(true);
+              else write({ enabled: action === "enable" });
+            }}
+          />
+        }
+        {...(error === null ? {} : { error })}
+      />
+      {consentOpen && (
+        <AiConsentDialog
+          profileName={props.profileName}
+          onCancel={() => setConsentOpen(false)}
+          onAccept={() => {
+            setConsentOpen(false);
+            write({ enabled: true, consentAcceptedAt: new Date().toISOString() });
+          }}
+        />
+      )}
+    </SettingsSection>
   );
 }
 

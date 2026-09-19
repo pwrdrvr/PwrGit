@@ -70,6 +70,7 @@ describe("aiProviderNavChild", () => {
 describe("aiFeatureNavChildren", () => {
   it("lists one plain jump link per section, in the order the pane reads", () => {
     expect(aiFeatureNavChildren()).toStrictEqual([
+      { label: "Availability", sectionId: "availability" },
       { label: "Default agents", sectionId: "default-agents" },
       { label: "Guidance", sectionId: "guidance" }
     ]);

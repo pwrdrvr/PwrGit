@@ -7,6 +7,7 @@ import {
   DEFAULT_AI_PROVIDER_SETTINGS,
   ok,
   type AiProviderSettings,
+  type AiProviderSettingsPatch,
   type CodexModelOption,
   type Profile
 } from "@pwrgit/shared";
@@ -64,10 +65,19 @@ function model(overrides: Partial<CodexModelOption> & { id: string }): CodexMode
   };
 }
 
-async function answer(name: string): Promise<unknown> {
-  if (name === "aiProviders:read" || name === "aiProviders:update") {
+async function answer(name: string, request?: unknown): Promise<unknown> {
+  if (name === "aiProviders:update") {
+    // The switch fields only, applied as main applies them: on needs consent.
+    const patch = (request as { patch: AiProviderSettingsPatch }).patch;
+    const consentAcceptedAt = patch.consentAcceptedAt ?? settings.consentAcceptedAt;
+    settings = {
+      ...settings,
+      consentAcceptedAt,
+      enabled: (patch.enabled ?? settings.enabled) && consentAcceptedAt !== null
+    };
     return ok({ profileId: PERSONAL.id, settings });
   }
+  if (name === "aiProviders:read") return ok({ profileId: PERSONAL.id, settings });
   if (name === "aiProviders:discoverCodex") {
     return ok({
       candidates: [{ path: "/opt/homebrew/bin/codex", source: "path", version: "0.201.0", available: true }],
@@ -156,6 +166,84 @@ function updates(): unknown[] {
     .filter(([name]) => name === "aiProviders:update")
     .map(([, req]) => (req as { patch: unknown }).patch);
 }
+
+function aiSwitch(): HTMLButtonElement {
+  const found = container.querySelector<HTMLButtonElement>(
+    "button[role='switch'][aria-label='Use AI features for Personal']"
+  );
+  if (found === null) throw new Error("no AI switch");
+  return found;
+}
+
+function consentDialog(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".ai-consent[role='dialog']");
+}
+
+function button(scope: ParentNode, text: string): HTMLButtonElement {
+  const found = [...scope.querySelectorAll<HTMLButtonElement>("button")].find(
+    (candidate) => candidate.textContent?.trim() === text
+  );
+  if (found === undefined) throw new Error(`no button "${text}"`);
+  return found;
+}
+
+async function click(element: HTMLElement): Promise<void> {
+  await act(async () => {
+    element.click();
+  });
+}
+
+describe("AI Features — availability", () => {
+  it("is off for a profile that never turned it on", async () => {
+    await render();
+
+    expect(aiSwitch().getAttribute("aria-checked")).toBe("false");
+    expect(container.querySelector("[aria-label='AI features: Off']")).not.toBeNull();
+    // The first card is the switch: it is what every other card waits on.
+    expect(container.querySelector(".settings-panel__title")?.textContent).toBe("Availability");
+  });
+
+  it("shows the disclosure before the first switch-on, and writes nothing if it is cancelled", async () => {
+    await render();
+
+    await click(aiSwitch());
+    const dialog = consentDialog();
+    expect(dialog?.textContent).toContain("Turn on AI features for Personal?");
+    // Cancel holds focus, so Enter on an unread dialog does not accept it.
+    expect(document.activeElement?.textContent).toBe("Cancel");
+
+    await click(button(dialog as HTMLElement, "Cancel"));
+    expect(consentDialog()).toBeNull();
+    expect(updates()).toEqual([]);
+    expect(aiSwitch().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("records the acceptance with the switch-on", async () => {
+    await render();
+
+    await click(aiSwitch());
+    await click(button(consentDialog() as HTMLElement, "Turn on AI features"));
+
+    expect(consentDialog()).toBeNull();
+    const [patch] = updates() as AiProviderSettingsPatch[];
+    expect(patch?.enabled).toBe(true);
+    expect(Number.isFinite(Date.parse(patch?.consentAcceptedAt ?? ""))).toBe(true);
+    expect(aiSwitch().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("does not ask twice: once accepted, on and off are just writes", async () => {
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, consentAcceptedAt: "2026-09-01T12:00:00.000Z" };
+    await render();
+
+    await click(aiSwitch());
+    expect(consentDialog()).toBeNull();
+    expect(aiSwitch().getAttribute("aria-checked")).toBe("true");
+
+    await click(aiSwitch());
+    expect(updates()).toEqual([{ enabled: true }, { enabled: false }]);
+    expect(aiSwitch().getAttribute("aria-checked")).toBe("false");
+  });
+});
 
 describe("AI Features — default agents", () => {
   it("offers only Codex for rebase review, and says why", async () => {

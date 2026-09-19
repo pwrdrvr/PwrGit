@@ -955,6 +955,33 @@ textarea,
   margin: 8px 4px;
 }
 
+/* The window profile's AI switch (AiFeaturesSwitch) — PwrGit's version of the
+   switch in PwrSnap's Library status bar. A footer rather than a row in the
+   list: it belongs to the profile, not to any repo, and holds still while the
+   list scrolls. `.pane` is a flex column and `.sidebar__list` takes the rest,
+   so this sits on the bottom edge with no positioning of its own. */
+.sidebar__footer {
+  flex: 0 0 auto;
+  padding: 5px 12px 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.ai-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+}
+.ai-switch__label {
+  color: var(--text-muted);
+  font: 600 11px/1.2 var(--font-sans);
+}
+.ai-switch__error {
+  margin: 2px 0 2px;
+  color: var(--danger-text);
+  font: 500 11px/1.4 var(--font-sans);
+}
+
 .read-error {
   display: flex;
   align-items: flex-start;
@@ -7720,6 +7747,22 @@ body.is-col-resizing {
   color: var(--danger-on);
 }
 
+/* The AI disclosure (AiConsentDialog): two paragraphs, so the pair is spaced
+   as prose rather than as the one-message confirm the base rule assumes. */
+.ai-consent {
+  width: min(440px, 92vw);
+}
+.ai-consent__eyebrow {
+  margin: 0 0 6px;
+  font: 650 10px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.ai-consent .dialog__message {
+  margin: 0 0 10px;
+}
+
 /* ---- A question with more than two answers ----
 
    Wider than a confirm because each answer carries its consequence on a second
@@ -11213,6 +11256,11 @@ body.is-col-resizing {
 }
 .settings-switch.is-on .settings-switch__word {
   color: var(--accent);
+}
+.settings-switch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--radius-md);
 }
 
 /* Segmented radio group */

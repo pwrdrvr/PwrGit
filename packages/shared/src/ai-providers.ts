@@ -186,6 +186,16 @@ export type AiJobDefault = {
 export const AI_GUIDANCE_MAX_LENGTH = 4000;
 
 export type AiProviderSettings = {
+  /**
+   * The profile's master switch for AI features, off until the operator turns
+   * it on. Discovery and these settings work either way, so an agent can be
+   * set up before anything is allowed to run; `resolveJob` refuses every job
+   * while this is false.
+   */
+  enabled: boolean;
+  /** ISO-8601, stamped when the operator accepted the disclosure; null until
+   *  then. `enabled` cannot be true without it — main enforces that. */
+  consentAcceptedAt: string | null;
   codex: AiCodexSettings;
   acp: AiAcpSettings;
   jobs: Record<AiJobId, AiJobDefault>;
@@ -195,6 +205,8 @@ export type AiProviderSettings = {
 };
 
 export const DEFAULT_AI_PROVIDER_SETTINGS: AiProviderSettings = {
+  enabled: false,
+  consentAcceptedAt: null,
   codex: { mode: "auto", pinnedPath: "" },
   acp: { enabledAgentIds: [], agents: {} },
   jobs: { rebaseReview: {} },
@@ -208,6 +220,10 @@ export const DEFAULT_AI_PROVIDER_SETTINGS: AiProviderSettings = {
  * would pin the System default instead).
  */
 export type AiProviderSettingsPatch = {
+  enabled?: boolean;
+  /** Sent with the `enabled: true` that accepts the disclosure. There is no
+   *  way to un-accept: the disclosure describes PwrGit, not a session. */
+  consentAcceptedAt?: string;
   codex?: {
     mode?: CodexSelectionMode;
     pinnedPath?: string;

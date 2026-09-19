@@ -540,7 +540,8 @@ export class AiProviderService {
    * `effectiveJobProvider`, so a job whose chosen agent was disabled, or that
    * cannot run on ACP at all, lands on Codex exactly as its row says. Never
    * spawns an agent — discovery only — and answers from cache unless
-   * `refresh`.
+   * `refresh`. Answers `disabled` without probing while the profile's AI
+   * switch is off, which it is until the operator turns it on.
    */
   async resolveJob(input: {
     profileId: ProfileId;
@@ -550,6 +551,16 @@ export class AiProviderService {
   }): Promise<Result<ResolvedAgentJob, PwrGitError>> {
     const { profileId, jobId } = input;
     const settings = this.settings(profileId);
+    // Checked before anything is probed: while the switch is off, a job
+    // resolves to nothing and spawns nothing.
+    if (!settings.enabled) {
+      return err(
+        agentError(
+          "disabled",
+          "AI features are off for this profile. Turn them on from the AI switch at the bottom of the sidebar."
+        )
+      );
+    }
     const job = settings.jobs[jobId];
     const providerId = effectiveJobProvider(settings, jobId);
     const model = isAiModelId(job.model) ? job.model : null;

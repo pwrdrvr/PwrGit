@@ -38,3 +38,15 @@ silhouette, not by counting" in `styles/AGENTS.md`.
 Several specs in `apps/desktop/e2e` locate rows with `.overlay-result` plus a
 `hasText` filter, so **text added to a row lands in those filters**. The
 sr-only kind label is deliberately a word no fixture branch name contains.
+
+## The footer holds the profile's AI switch
+
+`.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.
+It is a footer and not a list row because the switch belongs to the profile,
+not to a repo. The rules it follows are in `settings/AGENTS.md`.
+
+`.pane--sidebar` is a size container, and a size container is the containing
+block for its `position: fixed` descendants. An overlay opened from inside the
+sidebar must be portalled to `<body>`, as `AiConsentDialog` is. Rendered in
+place, its backdrop covers only the sidebar and the dialog is squeezed to the
+sidebar's width.

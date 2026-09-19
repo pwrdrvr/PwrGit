@@ -111,13 +111,21 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+/** Every profile starts switched on here, so each test is about the resolver
+ *  and not the switch; the one test about the switch turns it off. */
+const SWITCHED_ON: AiProviderSettings = {
+  ...structuredClone(DEFAULT_AI_PROVIDER_SETTINGS),
+  enabled: true,
+  consentAcceptedAt: "2026-09-01T12:00:00.000Z"
+};
+
 function harness(options: { discoveryDisabled?: boolean } = {}) {
   const stored = new Map<ProfileId, AiProviderSettings>();
   const clock = { now: Date.parse("2026-09-19T12:00:00.000Z") };
   const deps = {
     settings: {
       read: (profileId: ProfileId) =>
-        structuredClone(stored.get(profileId) ?? DEFAULT_AI_PROVIDER_SETTINGS)
+        structuredClone(stored.get(profileId) ?? SWITCHED_ON)
     },
     discoverCodex: vi.fn<Deps["discoverCodex"]>(async () => codexSnapshot()),
     checkCodexAuth: vi.fn<Deps["checkCodexAuth"]>(async (params) =>
@@ -154,7 +162,7 @@ function harness(options: { discoveryDisabled?: boolean } = {}) {
   } satisfies Deps;
 
   function configure(profileId: ProfileId, mutate: (settings: AiProviderSettings) => void): void {
-    const next = structuredClone(stored.get(profileId) ?? DEFAULT_AI_PROVIDER_SETTINGS);
+    const next = structuredClone(stored.get(profileId) ?? SWITCHED_ON);
     mutate(next);
     stored.set(profileId, next);
   }
@@ -701,6 +709,25 @@ describe("AiProviderService", () => {
   });
 
   describe("resolveJob", () => {
+    it("answers disabled, and starts nothing, while the profile's AI switch is off", async () => {
+      const { service, deps, configure } = harness();
+      configure("work", (s) => {
+        s.enabled = false;
+      });
+
+      const result = await service.resolveJob({ profileId: "work", jobId: "rebaseReview" });
+
+      expect(result).toMatchObject({ ok: false, error: { kind: "agent", code: "disabled" } });
+      if (!result.ok) expect(result.error.message).toContain("sidebar");
+      expect(deps.discoverCodex).not.toHaveBeenCalled();
+      expect(deps.discoverAcp).not.toHaveBeenCalled();
+      expect(deps.checkCodexAuth).not.toHaveBeenCalled();
+      // The other profile's switch is its own.
+      expect(
+        await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+      ).toMatchObject({ ok: true });
+    });
+
     it("resolves a Codex job with the profile's model, effort and guidance", async () => {
       const { service, deps, configure } = harness();
       configure("work", (s) => {

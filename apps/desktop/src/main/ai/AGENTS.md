@@ -19,12 +19,18 @@ runs.
 
 ```ts
 const job = await aiProviders.resolveJob({ profileId, jobId: "rebaseReview", signal });
-if (!job.ok) return job;            // unavailable | signed_out | cancelled | discovery_failed
+if (!job.ok) return job;            // disabled | unavailable | signed_out | cancelled | discovery_failed
 const { backend, model, effort, guidance } = job.value;
 // backend.kind === "codex": spawn backend.command with backend.env
 // backend.kind === "acp":   hand backend.agent + backend.strategy to the kit
 ```
 
+- **`disabled` is the default answer.** Each profile has an AI switch
+  (`settings.enabled`), off until the operator turns it on from the sidebar
+  footer or Settings → AI Features, after accepting a disclosure
+  (`consentAcceptedAt`). `applyAiProviderSettingsPatch` refuses `enabled`
+  without consent. A feature should treat `disabled` as "offer the
+  non-AI path", not as an error to report.
 - `backend.env` is complete: the profile's CODEX_HOME and `PWRGIT_PROFILE_ID`
   are already applied. Pass it through; don't rebuild it with
   `agentEnvForPwrGitProfile`.

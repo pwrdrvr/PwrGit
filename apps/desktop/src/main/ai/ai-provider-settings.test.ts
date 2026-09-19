@@ -199,11 +199,38 @@ describe("sanitizeAiProviderSettingsPatch", () => {
   it("drops guidance that is not text", () => {
     expect(sanitizeAiProviderSettingsPatch({ guidance: ["x"] })).toEqual({});
   });
+
+  it("keeps a boolean switch and nothing that merely looks like one", () => {
+    expect(sanitizeAiProviderSettingsPatch({ enabled: false })).toEqual({ enabled: false });
+    expect(sanitizeAiProviderSettingsPatch({ enabled: true })).toEqual({ enabled: true });
+    for (const enabled of ["true", 1, null]) {
+      expect(sanitizeAiProviderSettingsPatch({ enabled })).toEqual({});
+    }
+  });
+
+  it("keeps a consent time only when it is a zoned ISO instant, stored as UTC", () => {
+    expect(
+      sanitizeAiProviderSettingsPatch({ consentAcceptedAt: "2026-09-01T14:00:00+02:00" })
+    ).toEqual({ consentAcceptedAt: "2026-09-01T12:00:00.000Z" });
+    for (const consentAcceptedAt of [
+      "1",
+      "2026-09-01",
+      "2026-09-01T12:00:00",
+      "2026-13-45T99:00:00Z",
+      "yesterday",
+      Date.now(),
+      null
+    ]) {
+      expect(sanitizeAiProviderSettingsPatch({ consentAcceptedAt })).toEqual({});
+    }
+  });
 });
 
 describe("applyAiProviderSettingsPatch", () => {
   function configured(): AiProviderSettings {
     return {
+      enabled: true,
+      consentAcceptedAt: "2026-09-01T12:00:00.000Z",
       codex: { mode: "pinned", pinnedPath: abs("codex"), authProfile: "work" },
       acp: {
         enabledAgentIds: ["grok", "qwen"],
@@ -273,6 +300,32 @@ describe("applyAiProviderSettingsPatch", () => {
     expect(cleared.jobs.rebaseReview).toEqual({});
   });
 
+  it("is off by default, and cannot be switched on before the disclosure was accepted", () => {
+    expect(DEFAULT_AI_PROVIDER_SETTINGS.enabled).toBe(false);
+    expect(DEFAULT_AI_PROVIDER_SETTINGS.consentAcceptedAt).toBeNull();
+    const refused = applyAiProviderSettingsPatch(DEFAULT_AI_PROVIDER_SETTINGS, { enabled: true });
+    expect(refused.enabled).toBe(false);
+    expect(refused.consentAcceptedAt).toBeNull();
+  });
+
+  it("switches on with the disclosure's acceptance, and keeps that acceptance across off and on", () => {
+    const on = applyAiProviderSettingsPatch(DEFAULT_AI_PROVIDER_SETTINGS, {
+      enabled: true,
+      consentAcceptedAt: "2026-09-01T12:00:00.000Z"
+    });
+    expect(on).toMatchObject({ enabled: true, consentAcceptedAt: "2026-09-01T12:00:00.000Z" });
+    const off = applyAiProviderSettingsPatch(on, { enabled: false });
+    expect(off).toMatchObject({ enabled: false, consentAcceptedAt: "2026-09-01T12:00:00.000Z" });
+    expect(applyAiProviderSettingsPatch(off, { enabled: true }).enabled).toBe(true);
+  });
+
+  it("leaves the switch where it was when a patch is about something else", () => {
+    expect(applyAiProviderSettingsPatch(configured(), { guidance: "x" }).enabled).toBe(true);
+    expect(
+      applyAiProviderSettingsPatch(DEFAULT_AI_PROVIDER_SETTINGS, { guidance: "x" }).enabled
+    ).toBe(false);
+  });
+
   it("clears guidance with '' and keeps it when the patch is silent", () => {
     expect(applyAiProviderSettingsPatch(configured(), { guidance: "" }).guidance).toBe("");
     expect(applyAiProviderSettingsPatch(configured(), { codex: { mode: "auto" } }).guidance).toBe(
@@ -290,6 +343,8 @@ describe("normalizeStoredAiProviderSettings", () => {
 
   it("round-trips a well-formed stored row unchanged", () => {
     const stored: AiProviderSettings = {
+      enabled: true,
+      consentAcceptedAt: "2026-09-01T12:00:00.000Z",
       codex: { mode: "pinned", pinnedPath: abs("codex"), authProfile: "" },
       acp: {
         enabledAgentIds: ["qwen", "kimi"],
@@ -299,6 +354,13 @@ describe("normalizeStoredAiProviderSettings", () => {
       guidance: "Line one.\n\tIndented."
     };
     expect(normalizeStoredAiProviderSettings(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
+  });
+
+  it("reads a stored switch that is on without an acceptance as off", () => {
+    expect(normalizeStoredAiProviderSettings({ enabled: true }).enabled).toBe(false);
+    expect(
+      normalizeStoredAiProviderSettings({ enabled: true, consentAcceptedAt: "not a time" }).enabled
+    ).toBe(false);
   });
 
   it("makes a stored Gemini choice disappear, wherever it was written", () => {

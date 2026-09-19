@@ -144,6 +144,16 @@ separately.
   that actually loaded, because an empty one may just be a failed read.
 - **`update` returns the failure** (`null` on success), like `writeHost` in
   Forges, so each field can put its error beside itself.
+- **AI is off until someone turns it on, per profile.** The switch lives at
+  the bottom of the sidebar (`sidebar/AiFeaturesSwitch.tsx`) and again as AI
+  Features' first card. Both go through `resolveAiToggleAction`
+  (`ai-enablement.ts`), so they agree on when `AiConsentDialog` is shown: the
+  first switch-on, and never again. Main refuses `enabled` without
+  `consentAcceptedAt`, so skipping the dialog cannot switch it on. Only the
+  sidebar checks readiness, and only when the switch is clicked; a switch that
+  probed on mount would start `codex` in every window at launch. The dialog
+  copy states what leaves the machine, so **a feature that sends more must
+  update `AiConsentDialog` before it ships.**
 
 Deep links: `settings:open {page, sub?, profileId?}` opens or focuses the
 window. A new window boots on `#settings?page=…` (`parseSettingsRouteHash`); an

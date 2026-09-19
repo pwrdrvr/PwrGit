@@ -41,6 +41,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlySet<SettingsPage> = new Set(
 /** Card title for each AI Features section. The pane titles its cards from
  *  this too, so a jump link always names the card it lands on. */
 export const AI_FEATURE_SECTION_LABELS: Readonly<Record<AiFeaturesSettingsSub, string>> = {
+  availability: "Availability",
   "default-agents": "Default agents",
   guidance: "Guidance"
 };
