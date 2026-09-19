@@ -3,6 +3,8 @@ import { join } from "node:path";
 import {
   type BranchRef,
   type BranchTrackingStatus,
+  changeRequestMatch,
+  changeRequestNumberQuery,
   type ChangeSet,
   CHANGE_LIST_LIMIT,
   type Commit,
@@ -11,6 +13,7 @@ import {
   type DivergenceCommitAlignment,
   type DivergenceCommit,
   type LocalBranchSummary,
+  type OpenChangeRequest,
   type PushPublishTarget,
   type PushRefPlan,
   type PushRefResult,
@@ -1189,6 +1192,20 @@ async function fetchWithRefRaceRetry(
   }
   // The loop always returns on its second attempt.
   return ok(undefined);
+}
+
+/**
+ * Fetch exactly one refspec from one remote — a change request's head, which
+ * no configured fetch refspec covers. Same concurrent-ref retry as every other
+ * fetch here. The caller owns validating what it puts in the refspec.
+ */
+export async function fetchRefspec(
+  git: GitExec,
+  cwd: string,
+  remote: string,
+  refspec: string
+): Promise<Result<void>> {
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--no-tags", remote, refspec]);
 }
 
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
@@ -3733,6 +3750,12 @@ export type RemoteBranchPageOptions = {
   query?: string;
   offset?: number;
   limit?: number;
+  /**
+   * Origin's open change requests by head branch. An origin row whose head
+   * one of them is carries it as `pr`, and the query matches that PR's number
+   * and title as well as the ref — `106` finds #106's branch, first.
+   */
+  originPrs?: ReadonlyMap<string, OpenChangeRequest>;
 };
 
 /**
@@ -3748,7 +3771,13 @@ export async function listRemoteBranchPage(
   cwd: string,
   options: RemoteBranchPageOptions = {}
 ): Promise<Result<RemoteBranchPage>> {
-  const { remote, query = "", offset = 0, limit = REMOTE_BRANCH_PAGE_SIZE } = options;
+  const {
+    remote,
+    query = "",
+    offset = 0,
+    limit = REMOTE_BRANCH_PAGE_SIZE,
+    originPrs
+  } = options;
   // The configured remotes are both the guard on `remote` and what makes the
   // ref split exact — a name the repository does not have cannot reach argv,
   // so `--sort=…` and friends are rejected without a pattern to maintain.
@@ -3792,9 +3821,11 @@ export async function listRemoteBranchPage(
     // genuinely named `feature/HEAD` is a branch, and stays listed.
     if (name === "HEAD") continue;
     const subject = fields.slice(4).join("\t");
+    const pr = split.remote === "origin" ? originPrs?.get(name) : undefined;
     if (
       needle !== "" &&
-      !`${shortName} ${subject}`.toLowerCase().includes(needle)
+      !`${shortName} ${subject}`.toLowerCase().includes(needle) &&
+      (pr === undefined || changeRequestMatch(pr, query) === null)
     ) {
       continue;
     }
@@ -3804,8 +3835,17 @@ export async function listRemoteBranchPage(
       fullName,
       head,
       ...(lastCommitAt === "" ? {} : { lastCommitAt }),
-      ...(subject === "" ? {} : { subject })
+      ...(subject === "" ? {} : { subject }),
+      ...(pr === undefined ? {} : { pr })
     });
+  }
+  // The branch whose change request the query names outright leads; the
+  // rest keep their newest-commit order.
+  const number = changeRequestNumberQuery(query);
+  if (number !== null) {
+    const named = (row: RemoteBranchSummary): number =>
+      row.pr?.number === number ? 0 : 1;
+    matches.sort((left, right) => named(left) - named(right));
   }
 
   const start = Math.max(0, offset);

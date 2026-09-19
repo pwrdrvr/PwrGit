@@ -1,4 +1,4 @@
-import type { PrSummary } from "@pwrgit/shared";
+import type { OpenChangeRequest, PrSummary } from "@pwrgit/shared";
 import { toPrLifecycle } from "../types";
 
 /**
@@ -54,6 +54,8 @@ export type MrNode = {
     deletions?: number | null;
     fileCount?: number | null;
   } | null;
+  /** Asked for only where a head has to be located: the open list, a lookup. */
+  sourceProject?: { fullPath?: string | null } | null;
 };
 
 export type MrPage = { nodes: MrNode[]; endCursor: string | null; hasNextPage: boolean };
@@ -99,7 +101,7 @@ export function buildMrNumberQuery(
     query: `query ($path: ID!, $iids: [String!], $first: Int!) {
   project(fullPath: $path) {
     mergeRequests(iids: $iids, first: $first) {
-      nodes { ${MR_FIELDS} }
+      nodes { ${MR_FIELDS} sourceProject { fullPath } }
       pageInfo { endCursor hasNextPage }
     }
   }
@@ -110,6 +112,80 @@ export function buildMrNumberQuery(
       first: MR_PAGE_SIZE
     }
   };
+}
+
+/**
+ * One page of the project's open merge requests, most recently updated first.
+ *
+ * `opened` excludes `locked` — a locked MR is still live (see `toPrLifecycle`),
+ * but it takes no new work, which is what this list is for finding.
+ */
+export function buildOpenMrQuery(
+  fullPath: string,
+  after: string | null
+): { query: string; variables: Record<string, unknown> } {
+  return {
+    query: `query ($path: ID!, $first: Int!, $after: String) {
+  project(fullPath: $path) {
+    mergeRequests(state: opened, first: $first, after: $after, sort: UPDATED_DESC) {
+      nodes { ${MR_FIELDS} updatedAt author { username } sourceProject { fullPath } }
+      pageInfo { endCursor hasNextPage }
+    }
+  }
+}`,
+    variables: { path: fullPath, first: MR_PAGE_SIZE, after }
+  };
+}
+
+type OpenMrNode = MrNode & {
+  updatedAt?: string | null;
+  author?: { username?: string | null } | null;
+};
+
+/**
+ * The open list page, or null when the response resolved no project.
+ *
+ * Unlike a branch lookup, where a project nobody can see negative-caches as
+ * intended, a null project here would replace the whole cached list with
+ * nothing — so the caller treats it as the refusal it usually is.
+ */
+export function parseOpenMrPage(
+  data: unknown,
+  basePath: string
+): { items: OpenChangeRequest[]; endCursor: string | null; hasNextPage: boolean } | null {
+  const project = (data as { project?: unknown } | null)?.project;
+  if (typeof project !== "object" || project === null) return null;
+  const page = parseMrPage(data);
+  const items = page.nodes.map((node): OpenChangeRequest => {
+    const open = node as OpenMrNode;
+    const summary: OpenChangeRequest = { ...toSummary(open) };
+    const author = open.author?.username?.trim();
+    if (author !== undefined && author !== "") summary.author = author;
+    const fork = mrForkPath(open, basePath);
+    if (fork !== undefined) summary.headRepoPath = fork;
+    const updated = typeof open.updatedAt === "string" ? Date.parse(open.updatedAt) : NaN;
+    if (Number.isFinite(updated)) summary.updatedAt = updated;
+    return summary;
+  });
+  return { items: items.filter((item) => item.number > 0), endCursor: page.endCursor, hasNextPage: page.hasNextPage };
+}
+
+/**
+ * A merge request's source project when it is not the target — a fork. One
+ * GitLab will not name (deleted, or private to this token) is left as "the
+ * same project", since that is the only one whose branches a checkout could
+ * see anyway.
+ */
+export function mrForkPath(
+  node: { sourceProject?: { fullPath?: string | null } | null },
+  basePath: string
+): string | undefined {
+  const source = node.sourceProject?.fullPath?.trim();
+  return source !== undefined &&
+    source !== "" &&
+    source.toLowerCase() !== basePath.toLowerCase()
+    ? source
+    : undefined;
 }
 
 /** Pull the merge-request page out of a GraphQL response, tolerating nulls. */

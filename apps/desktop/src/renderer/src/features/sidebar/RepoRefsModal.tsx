@@ -1,13 +1,20 @@
 import { LocateGlyph } from "../../lib/LocateGlyph";
 import { useEffect, useMemo, useState } from "react";
-import type {
-  LocalBranchSummary,
-  RemoteBranchSummary,
-  RemoteSummary,
-  Repo,
-  RepoRefs,
-  TagSummary,
-  Worktree
+import {
+  changeRequestMatch,
+  changeRequestNoun,
+  changeRequestNumberQuery,
+  changeRequestPluralLabel,
+  changeRequestSigil,
+  type ForgeKind,
+  type LocalBranchSummary,
+  type PrSummary,
+  type RemoteBranchSummary,
+  type RemoteSummary,
+  type Repo,
+  type RepoRefs,
+  type TagSummary,
+  type Worktree
 } from "@pwrgit/shared";
 import { shortWhen } from "../graph/graph-view";
 import { switchWorktreeToBranch } from "../shell/branchSwitch";
@@ -30,6 +37,13 @@ import { PushRefsDialog } from "./PushRefsDialog";
 import { CreateTagDialog } from "./CreateTagDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
 import { TagRemoteDialog } from "./TagRemoteDialog";
+import { PrChip } from "./PrChip";
+import {
+  ChangeRequestTable,
+  filterChangeRequests,
+  useChangeRequestList,
+  useChangeRequestLookup
+} from "./RepoChangeRequests";
 
 export function trackingLabel(branch: LocalBranchSummary): string {
   switch (branch.tracking) {
@@ -51,6 +65,11 @@ export function trackingLabel(branch: LocalBranchSummary): string {
   }
 }
 
+/** What a local branch row's own filter reads. */
+function localBranchText(branch: LocalBranchSummary): string {
+  return `${branch.name} ${branch.upstream ?? ""} ${branch.subject ?? ""}`;
+}
+
 export function localBranchForRemote(
   refs: RepoRefs,
   branch: RemoteBranchSummary
@@ -61,6 +80,82 @@ export function localBranchForRemote(
 type BrowserBranch =
   | { kind: "local"; branch: LocalBranchSummary }
   | { kind: "remote"; branch: RemoteBranchSummary };
+
+export type RefsTab = "branches" | "tags" | "remotes" | "changeRequests";
+
+/**
+ * Whether a branch row is on screen because of its change request rather than
+ * its own text — the row then says so, with the PR's title where the commit
+ * subject would be, so the reader can see why `106` found `codex/console-…`.
+ */
+export function matchedViaChangeRequest(
+  text: string,
+  pr: PrSummary | undefined,
+  query: string
+): boolean {
+  const needle = query.trim().toLowerCase();
+  if (needle === "" || pr === undefined) return false;
+  if (changeRequestMatch(pr, query) === null) return false;
+  // A number query names the PR even when the digits also appear in the
+  // branch name: `106` is asking for #106, not for `issue-1060`.
+  return (
+    changeRequestNumberQuery(query) !== null ||
+    !text.toLowerCase().includes(needle)
+  );
+}
+
+/** The footer's "why these rows": `matched on pull request #106`. */
+function viaPrNote(forge: ForgeKind, query: string): string {
+  const number = changeRequestNumberQuery(query);
+  const noun = changeRequestNoun(forge);
+  return number === null
+    ? `some matched on their ${noun}`
+    : `matched on ${noun} ${changeRequestSigil(forge)}${number}`;
+}
+
+/** Branch-row identity: name, its PR's chip, and the line under it. */
+function BranchIdentity({
+  name,
+  hint,
+  subject,
+  pr,
+  matchedText,
+  query
+}: {
+  name: string;
+  hint: string;
+  subject: string | undefined;
+  pr: PrSummary | undefined;
+  /** The text the row's own filter matches, to tell a PR match apart. */
+  matchedText: string;
+  query: string;
+}) {
+  const viaPr = matchedViaChangeRequest(matchedText, pr, query);
+  const second = viaPr && pr !== undefined ? pr.title : subject;
+  return (
+    <div className="refs-table__identity">
+      <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+      <div>
+        <span className="refs-branch-name-line">
+          <CopyTarget
+            value={name}
+            label={`Copy branch name ${name}`}
+            hint={hint}
+            className="refs-copyable-name copyable"
+          >
+            <strong>{name}</strong>
+          </CopyTarget>
+          {pr !== undefined && <PrChip pr={pr} />}
+        </span>
+        {second !== undefined && (
+          <small className={viaPr ? "refs-branch-via-pr" : undefined}>
+            {second}
+          </small>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * "Move the working target onto this branch" — the verb this browser was
@@ -142,7 +237,8 @@ function RefsPageFooter({
   shown,
   total,
   search,
-  noun = "branches"
+  noun = "branches",
+  note
 }: {
   shown: number;
   total: number;
@@ -151,6 +247,8 @@ function RefsPageFooter({
     "error" | "loading" | "hasMore" | "loadMore"
   >;
   noun?: string;
+  /** Why some rows matched, when it is not the obvious reason. */
+  note?: string | undefined;
 }) {
   if (search.error !== null) {
     return <div className="refs-page-footer is-error">{search.error}</div>;
@@ -163,6 +261,7 @@ function RefsPageFooter({
     <div className="refs-page-footer">
       <span>
         Showing {shown} of {total}
+        {note === undefined ? "" : ` · ${note}`}
       </span>
       {search.hasMore && (
         <button
@@ -210,14 +309,17 @@ function RemoteBranchList({
           <div className="refs-remote-branch" key={branch.fullName}>
             <span className="refs-branch-icon" aria-hidden="true">⑂</span>
             <div>
-              <CopyTarget
-                value={branch.name}
-                label={`Copy branch name ${branch.name}`}
-                hint={`${branch.qualifiedName}\nClick to copy branch name`}
-                className="refs-copyable-name copyable"
-              >
-                <strong>{branch.name}</strong>
-              </CopyTarget>
+              <span className="refs-branch-name-line">
+                <CopyTarget
+                  value={branch.name}
+                  label={`Copy branch name ${branch.name}`}
+                  hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                  className="refs-copyable-name copyable"
+                >
+                  <strong>{branch.name}</strong>
+                </CopyTarget>
+                {branch.pr !== undefined && <PrChip pr={branch.pr} />}
+              </span>
               {branch.subject !== undefined && <small>{branch.subject}</small>}
             </div>
             <span className="refs-table__muted">
@@ -282,7 +384,7 @@ export function RepoRefsModal({
    *  reason in the label, rather than silently absent. */
   focusedWorktree: Worktree | null;
   now: number;
-  initialTab: "branches" | "tags" | "remotes";
+  initialTab: RefsTab;
   onRefresh: () => void | Promise<void>;
   onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
@@ -294,7 +396,7 @@ export function RepoRefsModal({
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
-  const [tab, setTab] = useState(initialTab);
+  const [tab, setTab] = useState<RefsTab>(initialTab);
   const [query, setQuery] = useState("");
   const [pushOpen, setPushOpen] = useState(false);
   const [createTagOpen, setCreateTagOpen] = useState(false);
@@ -310,34 +412,52 @@ export function RepoRefsModal({
   const q = query.trim().toLowerCase();
   // Locals arrive whole on `repo:refs` and are bounded in practice, so they
   // still filter here. Remote branches are not: they page in from main.
-  const localMatches = useMemo<BrowserBranch[]>(
-    () =>
-      refs.branches
-        .filter(
-          (branch) =>
-            q === "" ||
-            `${branch.name} ${branch.upstream ?? ""} ${branch.subject ?? ""}`
-              .toLowerCase()
-              .includes(q)
-        )
-        .map((branch) => ({ kind: "local" as const, branch })),
-    [q, refs.branches]
-  );
+  // A branch also answers to its change request's number and title.
+  const localMatches = useMemo<BrowserBranch[]>(() => {
+    const matched = refs.branches.filter(
+      (branch) =>
+        q === "" ||
+        localBranchText(branch).toLowerCase().includes(q) ||
+        (branch.pr !== undefined && changeRequestMatch(branch.pr, q) !== null)
+    );
+    return matched.map((branch) => ({ kind: "local" as const, branch }));
+  }, [q, refs.branches]);
   const localNames = useMemo(
     () => new Set(refs.branches.map((branch) => branch.name)),
     [refs.branches]
   );
+  // With a query typed, every tab reports its own match count, so these run
+  // for the tab counts even while another tab is showing.
+  const counting = q !== "";
   const remoteSearch = useRemoteBranchSearch({
     repoId: repo.id,
     query,
-    enabled: tab === "branches"
+    enabled: tab === "branches" || tab === "remotes" || counting
   });
   const tagSearch = useTagSearch({
     repoId: repo.id,
     query,
-    enabled: tab === "tags",
+    enabled: tab === "tags" || counting,
     refreshKey: tagEpoch
   });
+  const changeRequests = useChangeRequestList(repo.id);
+  const forge = changeRequests.list?.forge ?? null;
+  const lookup = useChangeRequestLookup({
+    repoId: repo.id,
+    query,
+    list: changeRequests.list,
+    enabled: forge !== null
+  });
+  const changeRequestMatches = useMemo(
+    () =>
+      changeRequests.list === null
+        ? []
+        : filterChangeRequests(changeRequests.list.entries, query),
+    [changeRequests.list, query]
+  );
+  // A tab whose forge went away (origin re-pointed) has nothing to show.
+  const shownTab: RefsTab =
+    tab === "changeRequests" && forge === null ? "branches" : tab;
   // A remote branch that shadows a local one is still one branch to the user,
   // so it is dropped — per page, since that is the scope we have.
   const remoteMatches = useMemo<BrowserBranch[]>(
@@ -347,13 +467,66 @@ export function RepoRefsModal({
         .map((branch) => ({ kind: "remote" as const, branch })),
     [localNames, remoteSearch.rows]
   );
-  const branches = useMemo(
-    () => [...localMatches, ...remoteMatches],
-    [localMatches, remoteMatches]
-  );
+  // Locals list above remotes, except that the branch whose change request
+  // the query names by number leads — `106` is asking for #106's branch, not
+  // for `issue-10604`, wherever each of them lives.
+  const branches = useMemo(() => {
+    const all = [...localMatches, ...remoteMatches];
+    const number = changeRequestNumberQuery(q);
+    if (number === null) return all;
+    const named = (item: BrowserBranch): number =>
+      item.branch.pr?.number === number ? 0 : 1;
+    return all.sort((a, b) => named(a) - named(b));
+  }, [localMatches, q, remoteMatches]);
   const branchTabCount =
     refs.branches.length +
     refs.remotes.reduce((total, remote) => total + remote.branchCount, 0);
+  const lookupHit =
+    lookup.state === "done" && lookup.entry !== null ? 1 : 0;
+  const tabCounts: Record<RefsTab, number> = counting
+    ? {
+        branches: localMatches.length + remoteMatches.length,
+        tags: tagSearch.total,
+        remotes: remoteSearch.total,
+        changeRequests: changeRequestMatches.length + lookupHit
+      }
+    : {
+        branches: branchTabCount,
+        tags: refs.tagCount,
+        remotes: refs.remotes.length,
+        changeRequests: changeRequests.list?.entries.length ?? 0
+      };
+  // Under a query the counts are hit counts: a tab with hits takes the
+  // accent and an empty one dims, so nobody has to guess where to look.
+  // Nothing is claimed while a count is still loading.
+  const tabCountLoading: Record<RefsTab, boolean> = {
+    branches: remoteSearch.loading,
+    tags: tagSearch.loading,
+    remotes: remoteSearch.loading,
+    changeRequests: changeRequests.list === null || lookup.state === "loading"
+  };
+  const tabClass = (value: RefsTab): string =>
+    [
+      shownTab === value ? "is-active" : "",
+      counting && !tabCountLoading[value]
+        ? tabCounts[value] > 0
+          ? "has-hits"
+          : "is-empty"
+        : ""
+    ]
+      .filter(Boolean)
+      .join(" ");
+  const branchesMatchedViaPr =
+    counting &&
+    branches.some((item) =>
+      matchedViaChangeRequest(
+        item.kind === "local"
+          ? localBranchText(item.branch)
+          : `${item.branch.qualifiedName} ${item.branch.subject ?? ""}`,
+        item.branch.pr,
+        query
+      )
+    );
 
   /**
    * Move the working target onto `branchName`, through the one helper every
@@ -565,23 +738,34 @@ export function RepoRefsModal({
         <div className="refs-browser__toolbar">
           <div className="refs-tabs">
             <button
-              className={tab === "branches" ? "is-active" : ""}
+              className={tabClass("branches")}
               onClick={() => setTab("branches")}
             >
-              Branches <span>{branchTabCount}</span>
+              Branches <span>{tabCounts.branches}</span>
             </button>
             <button
-              className={tab === "tags" ? "is-active" : ""}
+              className={tabClass("tags")}
               onClick={() => setTab("tags")}
             >
-              Tags <span>{refs.tagCount}</span>
+              Tags <span>{tabCounts.tags}</span>
             </button>
             <button
-              className={tab === "remotes" ? "is-active" : ""}
+              className={tabClass("remotes")}
               onClick={() => setTab("remotes")}
             >
-              Remotes <span>{refs.remotes.length}</span>
+              Remotes <span>{tabCounts.remotes}</span>
             </button>
+            {/* The forge's own noun, and no tab at all where origin has no
+                forge: there is no list to show. */}
+            {forge !== null && (
+              <button
+                className={tabClass("changeRequests")}
+                onClick={() => setTab("changeRequests")}
+              >
+                {changeRequestPluralLabel(forge)}{" "}
+                <span>{tabCounts.changeRequests}</span>
+              </button>
+            )}
           </div>
           <label className="refs-search">
             <span aria-hidden="true">⌕</span>
@@ -589,20 +773,24 @@ export function RepoRefsModal({
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={`Filter ${tab}…`}
+              placeholder={
+                shownTab === "changeRequests" && forge !== null
+                  ? "Filter by number, title, branch, author…"
+                  : `Filter ${shownTab}…`
+              }
             />
           </label>
-          {tab !== "tags" && (
+          {shownTab !== "tags" && (
             <button className="refs-action" onClick={() => setPushOpen(true)}>
               Push to remotes…
             </button>
           )}
-          {tab === "tags" && (
+          {shownTab === "tags" && (
             <button className="refs-action" onClick={() => setCreateTagOpen(true)}>
               Create tag…
             </button>
           )}
-          {tab === "remotes" && (
+          {shownTab === "remotes" && (
             <button className="refs-action" onClick={() => setRemoteEditor("new")}>
               Add remote…
             </button>
@@ -610,7 +798,7 @@ export function RepoRefsModal({
         </div>
 
         <div className="refs-browser__body">
-          {tab === "branches" && (
+          {shownTab === "branches" && (
             <div className="refs-table">
               <div className="refs-table__header">
                 <span>Branch</span>
@@ -624,22 +812,14 @@ export function RepoRefsModal({
                   const branch = item.branch;
                   return (
                     <div className="refs-table__row" key={branch.fullName}>
-                      <div className="refs-table__identity">
-                        <span className="refs-branch-icon" aria-hidden="true">⑂</span>
-                        <div>
-                          <CopyTarget
-                            value={branch.name}
-                            label={`Copy branch name ${branch.name}`}
-                            hint={`${branch.qualifiedName}\nClick to copy branch name`}
-                            className="refs-copyable-name copyable"
-                          >
-                            <strong>{branch.name}</strong>
-                          </CopyTarget>
-                          {branch.subject !== undefined && (
-                            <small>{branch.subject}</small>
-                          )}
-                        </div>
-                      </div>
+                      <BranchIdentity
+                        name={branch.name}
+                        hint={`${branch.qualifiedName}\nClick to copy branch name`}
+                        subject={branch.subject}
+                        pr={branch.pr}
+                        matchedText={`${branch.qualifiedName} ${branch.subject ?? ""}`}
+                        query={query}
+                      />
                       <CopyTarget
                         value={branch.qualifiedName}
                         label={`Copy remote branch ${branch.qualifiedName}`}
@@ -677,22 +857,14 @@ export function RepoRefsModal({
                 const branch = item.branch;
                 return (
                   <div className="refs-table__row" key={branch.fullName}>
-                    <div className="refs-table__identity">
-                      <span className="refs-branch-icon" aria-hidden="true">⑂</span>
-                      <div>
-                        <CopyTarget
-                          value={branch.name}
-                          label={`Copy branch name ${branch.name}`}
-                          hint={`${branch.name}\nClick to copy branch name`}
-                          className="refs-copyable-name copyable"
-                        >
-                          <strong>{branch.name}</strong>
-                        </CopyTarget>
-                        {branch.subject !== undefined && (
-                          <small>{branch.subject}</small>
-                        )}
-                      </div>
-                    </div>
+                    <BranchIdentity
+                      name={branch.name}
+                      hint={`${branch.name}\nClick to copy branch name`}
+                      subject={branch.subject}
+                      pr={branch.pr}
+                      matchedText={localBranchText(branch)}
+                      query={query}
+                    />
                     {branch.upstream === undefined ? (
                       <span className="refs-table__muted">—</span>
                     ) : (
@@ -791,7 +963,22 @@ export function RepoRefsModal({
                 );
               })}
               {branches.length === 0 && !remoteSearch.loading && (
-                <div className="refs-browser__empty">No matching branches.</div>
+                <div className="refs-browser__empty">
+                  No matching branches.
+                  {/* A fork's PR, or one never fetched, has no branch here to
+                      match — but the other tab can reach it. */}
+                  {forge !== null && tabCounts.changeRequests > 0 && (
+                    <>
+                      {" "}
+                      <button
+                        className="refs-empty-link"
+                        onClick={() => setTab("changeRequests")}
+                      >
+                        Show it in {changeRequestPluralLabel(forge)} →
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
               {/* Count fetched rows, not rendered ones: a remote branch that
                   shadows a local one is still represented on screen — by the
@@ -802,11 +989,36 @@ export function RepoRefsModal({
                 shown={localMatches.length + remoteSearch.rows.length}
                 total={localMatches.length + remoteSearch.total}
                 search={remoteSearch}
+                note={
+                  branchesMatchedViaPr && forge !== null
+                    ? viaPrNote(forge, query)
+                    : undefined
+                }
               />
             </div>
           )}
 
-          {tab === "tags" && (
+          {shownTab === "changeRequests" &&
+            forge !== null &&
+            changeRequests.list !== null && (
+              <ChangeRequestTable
+                repoId={repo.id}
+                forge={forge}
+                list={changeRequests.list}
+                error={changeRequests.error}
+                query={query}
+                lookup={lookup}
+                now={now}
+                focusedWorktree={focusedWorktree}
+                switching={switching}
+                onSwitch={switchHere}
+                onRevealWorktree={onRevealWorktree}
+                onCreateWorktree={onCreateWorktree}
+                onClose={onClose}
+              />
+            )}
+
+          {shownTab === "tags" && (
             <div className="refs-table refs-tag-table">
               {/* Object and Target were separate columns, and for a
                   lightweight tag they are the same object with the same type —
@@ -964,7 +1176,7 @@ export function RepoRefsModal({
             </div>
           )}
 
-          {tab === "remotes" && (
+          {shownTab === "remotes" && (
             <div className="refs-remotes">
               {refs.remotes.map((remote) => (
                 <section className="refs-remote-card" key={remote.name}>

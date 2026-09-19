@@ -2,6 +2,7 @@ export * from "./result";
 export * from "./types";
 export * from "./forge-host-name";
 export * from "./forge-product";
+export * from "./change-request-query";
 export * from "./forge-remote";
 export * from "./image";
 export * from "./protocol";

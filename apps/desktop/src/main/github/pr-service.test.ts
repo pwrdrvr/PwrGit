@@ -37,6 +37,7 @@ function fakeForge(
     fetchPrsForBranches: async () => new Map(),
     fetchPrsForCommits: async () => new Map(),
     fetchPrsByNumbers: async () => new Map(),
+    fetchOpenPrs: async () => ({ items: [], truncated: false }),
     ...overrides
   };
   return () => ({ provider, repo });

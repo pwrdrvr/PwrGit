@@ -1,4 +1,8 @@
-import type { RepoSearchHit } from "@pwrgit/shared";
+import {
+  changeRequestNumberQuery,
+  type OpenChangeRequest,
+  type RepoSearchHit
+} from "@pwrgit/shared";
 
 /**
  * Final ordering for ⌘F results, applied over the bm25 order the index
@@ -41,8 +45,9 @@ const answersTo = (hit: RepoSearchHit): string[] =>
     ? [hit.name, pathLeaf(hit.path)]
     : [hit.name];
 
-/** 0 = the query names this hit, 1 = it begins one of its names, 2 = the
- *  match is somewhere else entirely (mid-name, deep in a path, a PR title). */
+/** 0 = the query names this hit (or its change request's number), 1 = it
+ *  begins one of its names, 2 = the match is somewhere else entirely
+ *  (mid-name, deep in a path, a PR title). */
 export type SearchMatchTier = 0 | 1 | 2;
 
 export function searchMatchTier(
@@ -51,6 +56,10 @@ export function searchMatchTier(
 ): SearchMatchTier {
   const wanted = normalizeSearchName(query);
   if (wanted === "") return 2;
+  // `106` names change request #106 as surely as a branch's name names the
+  // branch — and the index only knows it as a prefix, so #1060 matched too.
+  const number = changeRequestNumberQuery(query);
+  if (number !== null && hit.pr?.number === number) return 0;
   let tier: SearchMatchTier = 2;
   for (const name of answersTo(hit)) {
     const candidate = normalizeSearchName(name);
@@ -72,6 +81,39 @@ export function searchMatchTier(
  */
 const searchKindRank = (hit: RepoSearchHit): 0 | 1 =>
   hit.kind === "repo" || hit.kind === "worktree" ? 0 : 1;
+
+/** unicode61's view of a string: letter/digit runs, folded. */
+const searchTokens = (value: string): string[] =>
+  normalizeSearchName(value)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 0);
+
+/**
+ * Whether an open change request's index row matched `query` for a reason of
+ * its own, rather than only through the repository name every row carries.
+ *
+ * Without this, typing a repository's name returns every open PR in it, and a
+ * busy repository's list fills the result cap before its own worktrees are
+ * reached. A number query is stricter still: `106` asks for #106, and the
+ * index's prefix match would also have offered #1060.
+ */
+export function changeRequestAnswersQuery(
+  pr: Pick<OpenChangeRequest, "number" | "title" | "headRefName">,
+  repoName: string,
+  query: string
+): boolean {
+  const number = changeRequestNumberQuery(query);
+  if (number !== null) return pr.number === number;
+  const own = searchTokens(`${pr.number} ${pr.title} ${pr.headRefName ?? ""}`);
+  const repo = searchTokens(repoName);
+  const hits = (words: string[], token: string): boolean =>
+    words.some((word) => word.startsWith(token));
+  const tokens = searchTokens(query);
+  return (
+    tokens.some((token) => hits(own, token)) &&
+    tokens.every((token) => hits(own, token) || hits(repo, token))
+  );
+}
 
 /**
  * Re-rank hits in place of their bm25 order, most directly-named first.

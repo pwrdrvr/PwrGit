@@ -1,12 +1,19 @@
 import type { PrSummary } from "@pwrgit/shared";
 import {
+  fetchOpenPrs,
   fetchPrsByNumbers,
   fetchPrsForCommits,
   fetchPrsForRepo,
   getGitHubToken
 } from "../../github/pr-client";
+import { ForgeResponseError } from "../repo-provider";
 import { githubOwnerAndName } from "../resolve";
-import { stampForge, type ForgeProvider, type ForgeRepo } from "../types";
+import {
+  stampForge,
+  stampOpenList,
+  type ForgeProvider,
+  type ForgeRepo
+} from "../types";
 
 /**
  * GitHub as a `ForgeProvider`.
@@ -49,6 +56,19 @@ export const githubProvider: ForgeProvider = {
     if (parts === null) return new Map<number, PrSummary | null>();
     return stampForge(
       await fetchPrsByNumbers(token, repo, parts.owner, parts.name, numbers),
+      repo
+    );
+  },
+
+  fetchOpenPrs: async (token, repo) => {
+    const parts = githubOwnerAndName(repo);
+    // Not a repository GitHub can be asked about; there is no list to replace
+    // the cached one with, so this is a refusal rather than an empty answer.
+    if (parts === null) {
+      throw new ForgeResponseError("Not a GitHub owner/name repository path.");
+    }
+    return stampOpenList(
+      await fetchOpenPrs(token, repo, parts.owner, parts.name),
       repo
     );
   }

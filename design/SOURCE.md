@@ -85,6 +85,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
 | `Palette Kind Glyphs - UX Review.dc.html` | The &#8984;K palette's leading kind glyph &mdash; why branch and worktree do not separate at 15&nbsp;px, the channels that survive that size, the labels that shipped, and the redraws offered for worktree and for the remote branch that never had a mark of its own. Interactive. |
+| `Change Requests in Refs - UX Review.dc.html` | Why the refs browser cannot find a pull request by its number, the open-change-request cache that fixes it, and the three places PRs could live in the browser: matched on the Branches tab, a Pull requests / Merge requests sibling tab, or both with per-tab match counts. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -241,6 +242,20 @@ this one stays PwrGit's. Its first push went up with the **repo** spelling of
 the image paths and rendered every chip broken in the project — which is why
 the `../` rewrite for it is written down in the next section rather than left
 to memory.
+
+`Change Requests in Refs - UX Review.dc.html` was written here and pushed up
+through the `claude-design` MCP server's `write_files`, the same session it was
+drafted in; the project copy was verified at the same 50,940 bytes. It is a
+proposal, not a record of what is built: nothing in the app changed with it.
+Turn **1** is the diagnosis (the refs browser filters on name, upstream and
+subject, while the only PR data that knows #106 sits in `commit_pr`), turn
+**2** draws the three options with **2c** recommended and **2d** a live
+`DCLogic` prototype of it, and turn **3** sizes the cache as one open-list call
+per repo. Its specimens (`orbit-deploy`, `octo-contrib`, `~/src/orbit-deploy`)
+are invented; the one real name in it is the head branch of
+[pwrdrvr/microapps-app-release#106](https://github.com/pwrdrvr/microapps-app-release/pull/106),
+a public repository, quoted in finding 1a as the report that started it. It
+carries no `assets/`.
 
 ## Deliberately NOT copied in
 
