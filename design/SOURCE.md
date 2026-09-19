@@ -85,6 +85,7 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
 | `Palette Kind Glyphs - UX Review.dc.html` | The &#8984;K palette's leading kind glyph &mdash; why branch and worktree do not separate at 15&nbsp;px, the channels that survive that size, the labels that shipped, and the redraws offered for worktree and for the remote branch that never had a mark of its own. Interactive. |
+| `Agent History Editing - UX Review.dc.html` | Agent-assisted history editing &mdash; why #149's review-only panel is a toy, the proof boundary (every commit once, clean isolated replay, identical tree) that lets an agent author the plan, squash messages, Tidy, the failure paths, and where the agent is chosen. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -179,9 +180,11 @@ were written here the same way, during the &#8984;K palette glyph review. Unlike
 files above, this one took the route **because Claude Design was unreachable** &mdash;
 both the `claude-design` MCP server and the built-in `DesignSync` tool answer
 HTTP&nbsp;403 `FIRST_PARTY_AUTH_REJECTED` until `/design-login` has been run in an
-interactive session, and a non-interactive one cannot run it. **So this artboard is
-not yet in the project, and a re-export will delete it** &mdash; push it up before
-running one.
+interactive session, and a non-interactive one cannot run it. It sat in the repo
+only until 2026-09-19, when it and its image were pushed up during the review of
+[#149](https://github.com/pwrdrvr/PwrGit/pull/149). The artboard in the project is
+byte-identical to this copy; the image is identical apart from the content
+credentials chunk every uploaded PNG gains (see step 6 of "How to re-export").
 
 Its specimens are invented (`Demo`, `feature/requested`, `spike/no-checkout`,
 `release/1.4`), and its one image is generated rather than captured: the glyphs are
@@ -189,6 +192,17 @@ drawn at 15&nbsp;px by headless Chromium and blown up with nearest-neighbour
 sampling, which is the whole argument &mdash; vector magnification flatters an icon
 and hides the defect. Card **4e** is a live `DCLogic` prototype that swaps the whole
 glyph set and blurs it, because the read being argued about is a peripheral one.
+
+`Agent History Editing - UX Review.dc.html` was written here and pushed up the
+same way, during the review of [#149](https://github.com/pwrdrvr/PwrGit/pull/149).
+It is in the project, byte-identical to this copy. It owns agent-assisted
+history editing: the six findings against #149's review-only panel, the proof
+ledger every plan must pass before Apply unlocks, Squash messages, Tidy, the
+three failure paths, and the agent chip and Settings › AI Features it is chosen
+from. It carries no `assets/`; every frame is drawn from PwrGit's tokens and
+markup, and its commits, branches and file names are invented. Card **4b** is a
+live `DCLogic` prototype of Tidy &mdash; keep a fixup separate, run the check,
+apply.
 
 The Tag Chips captures are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a
@@ -321,6 +335,15 @@ reviewable choice.
    (5,945 here against 5,990 there), `github.md` (1,211 against 1,210), and
    `README Header.dc.html` (17,833 against 17,773). Do not "correct" those
    three toward the project.
+
+   **PNGs never match by size, and that is not drift.** Claude Design inserts a
+   `caBX` chunk (a signed C2PA content credential, "Claude provided this
+   file…") after `IHDR` in every PNG uploaded to it, so the project's copy is a
+   few KB larger than the one pushed. Every other chunk is untouched. Compare
+   images chunk by chunk with `caBX` excluded instead; verified that way for
+   `assets/tag-locate-before.png` (121,532 here, 127,302 there) on 2026-09-19.
+   Keep the repo's unstamped originals rather than pulling the stamped copies
+   down, which would rewrite every image for no change in a single pixel.
 7. Update the "Exported" date above.
 
 `support.js` is generated (`dc-runtime`) and is shared byte-for-byte across Pwr
