@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800;
+            --line-faint: rgba(247, 243, 235, 0.06);
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14); --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(156, 229, 179, 0.1); --okbord: rgba(156, 229, 179, 0.35);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.12); --warnbord: rgba(217, 154, 61, 0.4);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badbord: rgba(185, 66, 50, 0.28); --badt: #ffb0a1;
+            --gA: #ff8a1f; --gB: #9ce5b3; --gC: #8fb8ff;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          button { font-family: inherit; cursor: pointer; }
+
+          /* ---- review chrome (matches "Reset to Remote - UX Review") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 760px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); max-width: 900px; text-wrap: pretty; }
+          .dv-next b { color: var(--t2); font-weight: 600; }
+          .dv-next code, .cap code { font: 500 11px/1.4 var(--mono); color: var(--t2); }
+          .cap { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- right rail, lifted from RebaseTab / app.css (344px as shipped) ---- */
+          .rail { width: 344px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-app); overflow: hidden; }
+          .rtabs { display: flex; gap: 2px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+          .rtab { padding: 6px 10px; border-radius: 6px; font: 600 11.5px/1 var(--sans); color: var(--t3); }
+          .rtab.on { background: var(--bg-elev); color: var(--t1); }
+          .bdg { margin-left: 5px; padding: 1px 5px; border-radius: 999px; background: var(--asoft); color: var(--accb); font: 700 9.5px/1.3 var(--mono); }
+          .rbody { padding: 14px; }
+          .rh { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; }
+          .rh-i { flex: none; width: 26px; height: 26px; border-radius: 7px; background: var(--bg-row-active); border: 1px solid var(--abord); display: flex; align-items: center; justify-content: center; color: var(--accb); font-size: 13px; }
+          .rh-t { font: 700 13px/1 var(--sans); color: var(--t1); }
+          .rh > div { flex: 1; min-width: 0; }
+          .rh-s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; font: 500 10.5px/1 var(--mono); color: var(--t3); }
+          .rs { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; font: 600 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t3); }
+          .rs .r { margin-left: auto; letter-spacing: 0; text-transform: none; font: 500 10px/1 var(--sans); color: var(--tsub); }
+          .rcl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .rc { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border-bottom: 1px solid var(--line-faint); }
+          .rc:last-child { border-bottom: 0; }
+          .rc .dot { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--acc); }
+          .rc .m { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px/1.3 var(--sans); color: var(--t1); }
+          .rc .h { font: 500 9.5px/1 var(--mono); color: var(--tsub); }
+          .plan { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-input); padding: 10px 13px; }
+          .pr { display: flex; gap: 8px; font: 500 11px/1.7 var(--mono); color: var(--t2); }
+          .pr .op { flex: none; width: 46px; }
+          .pr .tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .pr.sum { color: var(--tsub); }
+          .op-pick { color: var(--okt); } .op-sq { color: var(--acc); } .op-fx { color: var(--accb); }
+          .acts { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+          .acts .row { display: flex; gap: 8px; }
+          .bchk { height: 34px; border-radius: 7px; border: 1px solid var(--abord); background: var(--bg-elev); color: var(--acc); font: 700 12px/1 var(--sans); }
+          .bchk.done { border-color: var(--okbord); color: var(--okt); }
+          .bapp { flex: 1; height: 34px; border-radius: 7px; border: none; background: var(--acc); color: var(--accon); font: 700 12px/1 var(--sans); }
+          .bapp.off { opacity: 0.4; cursor: not-allowed; }
+          .bclr { height: 34px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--line2); background: var(--bg-elev); color: var(--t2); font: 600 12px/1 var(--sans); }
+          .note { margin-top: 10px; font: 500 10.5px/1.5 var(--sans); color: var(--tsub); text-wrap: pretty; }
+
+          /* ---- #149's agent panel, as shipped ---- */
+          .ast { display: grid; grid-template-columns: auto 1fr; gap: 8px; padding: 9px 11px; border: 1px solid rgba(255,138,31,0.35); border-radius: 7px; background: var(--bg-panel); font: 500 11px/1.45 var(--sans); color: var(--t2); }
+          .ast > span:first-child { color: var(--acc); font-weight: 700; }
+          .aprop { margin-top: 8px; padding: 11px; border: 1px solid var(--abord); border-radius: 8px; background: rgba(255,138,31,0.06); font: 500 11px/1.5 var(--sans); color: var(--t2); }
+          .aprop-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 600 9.5px/1 var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--tsub); }
+          .verd { padding: 3px 6px; border-radius: 999px; color: var(--okt); background: rgba(156,229,179,0.12); }
+          .aprop-t { margin-top: 9px; font-weight: 700; color: var(--t1); }
+          .aprop-s { margin-top: 4px; }
+          .aprop ul { margin: 7px 0 0; padding-left: 17px; }
+          .arisk { margin-top: 8px; color: var(--warn); }
+          .arisk ul { color: var(--t2); }
+          .aguard { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line-faint); font-size: 10px; color: var(--tsub); }
+
+          /* ---- findings legend ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); vertical-align: middle; }
+          .pinw { position: relative; }
+          .pinw > .pin { position: absolute; top: -6px; right: -6px; box-shadow: 0 0 0 2px #000; }
+          .find { width: 400px; display: flex; flex-direction: column; gap: 11px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0,1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .keep { margin-top: 4px; padding: 10px 11px; border: 1px solid var(--okbord); border-radius: 8px; background: var(--oksoft); font: 400 10.5px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .keep b { color: var(--okt); font-weight: 650; }
+
+          /* ---- flow + comparison ---- */
+          .flow { width: 1040px; display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 10px; }
+          .fb { position: relative; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .fb + .fb::before { content: "→"; position: absolute; left: -10px; top: 14px; width: 10px; text-align: center; font: 600 11px/1 var(--mono); color: var(--t3); }
+          .fb.ag { border-color: var(--line3); background: var(--bg-elev); }
+          .fb.pv { border-color: var(--okbord); background: var(--oksoft); }
+          .fb.you { border-color: var(--abord); background: var(--asoft); }
+          .fb .who { margin-bottom: 7px; font: 600 9px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+          .fb h4 { margin: 0 0 7px; font: 650 12px/1.3 var(--sans); color: var(--t1); }
+          .fb ul { margin: 0; padding-left: 14px; font: 400 10.5px/1.5 var(--sans); color: var(--t3); }
+          .fb li + li { margin-top: 3px; }
+          .fb code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .cmp { width: 1040px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .cr3 { display: grid; grid-template-columns: 150px minmax(0,1fr) minmax(0,1fr); border-bottom: 1px solid var(--line-faint); }
+          .cr3:last-child { border-bottom: 0; }
+          .cr3 > div { padding: 8px 12px; font: 400 11px/1.45 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .cr3 > div:first-child { font-weight: 600; color: var(--t1); }
+          .cr3 > div:nth-child(2) { color: var(--t3); border-right: 1px solid var(--line-faint); }
+          .cr3.head > div { font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); background: var(--bg-hover); }
+          .cr3.head > div:nth-child(3) { color: var(--accb); }
+
+          /* ---- agent chip (split pill, after PwrAgnt .composer__run-split) ---- */
+          .achip { margin-left: auto; display: inline-flex; align-items: stretch; height: 24px; border: 1px solid var(--line2); border-radius: 999px; overflow: hidden; background: var(--bg-elev); font: 600 10px/1 var(--sans); color: var(--t2); white-space: nowrap; }
+          .achip .a { display: flex; align-items: center; gap: 5px; padding: 0 8px; }
+          .achip .a i { font-style: normal; font-family: var(--mono); color: var(--tsub); font-weight: 500; }
+          .achip .d { display: flex; align-items: center; padding: 0 7px; border-left: 1px solid var(--line2); color: var(--t3); }
+          .achip.open { border-color: var(--abord); }
+          .achip.none { color: var(--tsub); border-style: dashed; }
+          .sdot { flex: none; display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: var(--ok); }
+          .sdot.warn { background: var(--warn); } .sdot.off { background: var(--t3); opacity: 0.5; }
+
+          /* ---- commit message editor ---- */
+          .msg { border: 1px solid var(--line2); border-radius: 9px; background: var(--bg-input); overflow: hidden; }
+          .msg.on { border-color: var(--abord); }
+          .msg-b { padding: 10px 12px; font: 500 10.5px/1.55 var(--mono); color: var(--t2); white-space: pre-wrap; }
+          .msg-b .subj { color: var(--t1); font-weight: 650; }
+          .msg-b .ph { color: var(--tsub); }
+          .msg-b .caret { display: inline-block; width: 1px; height: 12px; margin-left: 1px; background: var(--acc); vertical-align: -2px; }
+          .msg-f { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; padding: 6px 8px 6px 10px; border-top: 1px solid var(--line); background: var(--bg-panel); font: 500 10px/1.35 var(--sans); color: var(--t3); }
+          .msg-f .src { display: inline-flex; align-items: center; gap: 5px; color: var(--accb); }
+          .msg-f .src.q { color: var(--t3); }
+          .msg-f .src.warn { color: var(--warn); }
+          .msg-f .sp { flex: 1; }
+          .lk { background: none; border: none; padding: 2px 4px; font: 600 10px/1 var(--sans); color: var(--accb); }
+          .lk.q { color: var(--t3); }
+          .skel { height: 8px; margin: 7px 0; border-radius: 4px; background: rgba(247,243,235,0.08); }
+          .scan { position: relative; overflow: hidden; }
+          .scan::after { content: ""; position: absolute; left: 0; right: 0; top: 30%; height: 2px; background: rgba(255,138,31,0.55); }
+          .style { margin-top: 6px; font: 500 10px/1.4 var(--sans); color: var(--tsub); }
+          .style b { color: var(--t2); font-weight: 600; }
+
+          /* ---- what the agent saw ---- */
+          .saw { margin-top: 8px; font: 500 10px/1.45 var(--sans); color: var(--tsub); }
+          .saw b { color: var(--t2); font-weight: 600; }
+          .saw .lk { padding: 0 2px; }
+          .sawx { width: 344px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .sawx h5 { margin: 0 0 8px; font: 600 10px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+          .sf { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; font: 500 10.5px/1.65 var(--mono); color: var(--t2); }
+          .sf > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .sf .n { color: var(--tsub); }
+          .sf.cut .n { color: var(--warn); }
+          .sf.no > span:first-child { color: var(--tsub); text-decoration: line-through; }
+          .sf.no .n { color: var(--tsub); }
+          .sawx .div { height: 1px; margin: 7px 0; background: var(--line-faint); }
+          .sawx p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .sawx p + p { margin-top: 4px; }
+
+          /* ---- invariant ledger ---- */
+          .inv { margin-top: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .iv { display: grid; grid-template-columns: 14px minmax(0,1fr) auto; gap: 8px; align-items: baseline; padding: 7px 11px; border-bottom: 1px solid var(--line-faint); font: 500 11px/1.4 var(--sans); color: var(--t2); }
+          .iv:last-child { border-bottom: 0; }
+          .iv .g { font: 700 11px/1 var(--mono); text-align: center; }
+          .iv .v { font: 500 10px/1 var(--mono); color: var(--tsub); white-space: nowrap; }
+          .iv.ok .g { color: var(--okt); }
+          .iv.wait .g { color: var(--t3); }
+          .iv.wait { color: var(--t3); }
+          .iv.bad { background: var(--badsoft); color: var(--badt); }
+          .iv.bad .g, .iv.bad .v { color: var(--badt); }
+          .inv-set { width: 344px; display: flex; flex-direction: column; gap: 6px; }
+          .inv-set .inv { margin-top: 0; }
+          .inv-lbl { margin-top: 6px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+
+          /* ---- check result ---- */
+          .cres { display: grid; grid-template-columns: auto 1fr; gap: 8px; margin-top: 12px; padding: 9px 11px; border: 1px solid var(--line2); border-radius: 7px; font: 500 11px/1.45 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .cres > span:first-child { font-weight: 700; }
+          .cres.clean { border-color: var(--okbord); } .cres.clean > span:first-child { color: var(--okt); }
+          .cres.snag { border-color: var(--warnbord); } .cres.snag > span:first-child { color: var(--warn); }
+          .cres.bad { border-color: var(--badbord); background: var(--badsoft); color: var(--badt); } .cres.bad > span:first-child { color: var(--badt); }
+          .cres code { font: 500 10px/1.4 var(--mono); color: var(--t1); }
+          .rev { margin-top: 8px; padding: 10px 11px; border: 1px solid var(--abord); border-radius: 8px; background: rgba(255,138,31,0.06); font: 500 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .rev-h { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font: 600 9.5px/1 var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--accb); }
+          .rev-h .r { margin-left: auto; color: var(--tsub); }
+          .pd { margin-top: 7px; border-radius: 6px; background: var(--bg-input); padding: 6px 9px; font: 500 10.5px/1.6 var(--mono); }
+          .pd .del { color: var(--badt); } .pd .add { color: var(--okt); }
+
+          /* ---- tidy: grouped proposal ---- */
+          .grp { border: 1px solid var(--line); border-left-width: 3px; border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .grp + .grp { margin-top: 8px; }
+          .grp.A { border-left-color: var(--gA); } .grp.B { border-left-color: var(--gB); } .grp.C { border-left-color: var(--gC); } .grp.S { border-left-color: var(--t3); }
+          .grp-h { padding: 9px 11px 8px; }
+          .grp-s { display: flex; align-items: baseline; gap: 6px; font: 650 11px/1.35 var(--mono); color: var(--t1); }
+          .grp-s span { flex: 1; min-width: 0; }
+          .grp-s .lk { flex: none; }
+          .grp-bd { margin-top: 4px; font: 400 10.5px/1.45 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .mem { display: grid; grid-template-columns: 38px 54px minmax(0,1fr) auto; gap: 6px; align-items: center; padding: 4px 11px; border-top: 1px solid var(--line-faint); font: 500 10.5px/1.5 var(--mono); color: var(--t2); }
+          .mem .rl { color: var(--accb); } .mem .rl.pick { color: var(--okt); }
+          .mem .hs { color: var(--tsub); }
+          .mem .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .mem .tl { display: flex; align-items: center; gap: 6px; }
+          .mem.sep { background: rgba(247,243,235,0.035); }
+          .mem.sep .sub { color: var(--t1); }
+          .x { background: none; border: none; padding: 0; font: 600 9.5px/1 var(--sans); color: var(--t3); white-space: nowrap; }
+          .x:hover { color: var(--accb); }
+          .mv { padding: 1px 5px; border-radius: 999px; background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); font: 700 8px/1.3 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .applied { margin-top: 10px; padding: 9px 11px; border: 1px solid var(--okbord); border-radius: 7px; background: var(--oksoft); font: 500 11px/1.45 var(--sans); color: var(--okt); }
+          .applied .lk { color: var(--t2); }
+
+          /* ---- tidy: review sheet ---- */
+          .sheet { width: 820px; border: 1px solid var(--line3); border-radius: 12px; background: var(--bg-elev); box-shadow: 0 18px 48px rgba(0,0,0,0.42); overflow: hidden; }
+          .sh-h { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+          .sh-t { font: 700 13px/1.2 var(--sans); color: var(--t1); }
+          .sh-s { margin-top: 3px; font: 500 10.5px/1 var(--mono); color: var(--t3); }
+          .sh-cols { display: grid; grid-template-columns: 300px 26px minmax(0,1fr); padding: 14px 16px 4px; }
+          .sh-arrow { display: flex; align-items: center; justify-content: center; font: 600 14px/1 var(--mono); color: var(--t3); }
+          .old { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .or { display: grid; grid-template-columns: 4px 54px minmax(0,1fr); gap: 8px; align-items: center; padding: 0 10px 0 0; border-bottom: 1px solid var(--line-faint); font: 500 10.5px/2.1 var(--mono); color: var(--t2); }
+          .or:last-child { border-bottom: 0; }
+          .or .sw { align-self: stretch; }
+          .or .hs { color: var(--tsub); padding-left: 6px; }
+          .or .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .swA { background: var(--gA); } .swB { background: var(--gB); } .swC { background: var(--gC); }
+          .colh { margin-bottom: 7px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .sh-f { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line); }
+          .sh-f .inv { margin: 0; flex: 1; display: flex; }
+          .sh-f .iv { flex: 1; border-bottom: 0; border-right: 1px solid var(--line-faint); grid-template-columns: 14px minmax(0,1fr); }
+          .sh-f .iv:last-child { border-right: 0; }
+          .sh-f .bapp, .sh-f .bclr { flex: none; }
+          .sh-f .bapp { padding: 0 16px; }
+
+          /* ---- selection bar + menu ---- */
+          .selbar { width: 660px; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--abord); border-radius: 10px; background: var(--bg-row-active); box-shadow: 0 12px 28px rgba(0,0,0,0.36); }
+          .selbar .cnt { font: 700 12px/1 var(--sans); color: var(--accb); }
+          .selbar .vs { width: 1px; height: 16px; background: var(--line2); }
+          .selbar .sp { flex: 1; }
+          .sbb { height: 28px; padding: 0 11px; border-radius: 6px; border: 1px solid var(--line2); background: var(--bg-elev); color: var(--t1); font: 600 11.5px/1 var(--sans); white-space: nowrap; }
+          .sbb.ai { border-color: var(--abord); color: var(--accb); }
+          .sbb.go { border: none; background: var(--acc); color: var(--accon); font-weight: 700; }
+          .sbb.x2 { width: 28px; padding: 0; color: var(--t3); background: transparent; }
+          .menu { width: 300px; padding: 5px; border: 1px solid var(--line3); border-radius: 8px; background: var(--bg-elev); box-shadow: 0 18px 48px rgba(0,0,0,0.42); }
+          .mh { padding: 7px 9px 5px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .mi { display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: 5px; font: 500 11.5px/1.35 var(--sans); color: var(--t2); }
+          .mi.on { background: var(--asoft); color: var(--t1); }
+          .mi.dis { opacity: 0.5; }
+          .mi .mm { margin-left: auto; font: 500 10px/1 var(--mono); color: var(--tsub); white-space: nowrap; }
+          .mi .ck { width: 10px; color: var(--acc); font: 700 11px/1 var(--mono); }
+          .mi small { display: block; margin-top: 2px; font: 400 10px/1.3 var(--sans); color: var(--tsub); }
+          .msep { height: 1px; margin: 4px 5px; background: var(--line); }
+          .seg { display: flex; gap: 2px; margin: 2px 9px 6px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-input); }
+          .seg span { flex: 1; padding: 5px 0; border-radius: 5px; text-align: center; font: 600 10.5px/1 var(--sans); color: var(--t3); }
+          .seg span.on { background: var(--bg-elev); color: var(--t1); box-shadow: inset 0 0 0 1px var(--line2); }
+          .mfoot { padding: 6px 9px 4px; font: 500 10px/1.4 var(--sans); color: var(--tsub); }
+          .mfoot .lk { padding: 0; }
+          .stack { display: flex; flex-direction: column; gap: 12px; }
+
+          /* ---- settings window ---- */
+          .swin { width: 820px; display: grid; grid-template-columns: 206px minmax(0,1fr); border: 1px solid var(--line3); border-radius: 12px; background: var(--bg-app); overflow: hidden; }
+          .snav { padding: 12px 8px; border-right: 1px solid var(--line); background: var(--bg-panel); }
+          .sng { margin: 10px 9px 5px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+          .sng:first-child { margin-top: 2px; }
+          .sni { display: flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 6px; font: 500 12px/1.3 var(--sans); color: var(--t2); }
+          .sni .cv { margin-left: auto; font: 500 9px/1 var(--mono); color: var(--t3); }
+          .sni.on { background: var(--bg-row-active); color: var(--t1); box-shadow: inset 2px 0 0 var(--acc); }
+          .snc { display: flex; align-items: center; gap: 7px; padding: 4px 9px 4px 22px; font: 500 11px/1.3 var(--sans); color: var(--t3); }
+          .snc.on { color: var(--accb); }
+          .snc .chip { margin-left: auto; font: 500 9.5px/1 var(--sans); color: var(--tsub); }
+          .spane { padding: 18px 22px 22px; }
+          .sp-t { font: 700 16px/1.2 var(--sans); color: var(--t1); }
+          .sp-d { margin-top: 4px; font: 500 11.5px/1.5 var(--sans); color: var(--t3); }
+          .ssec { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .ssec-h { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+          .ssec-h .eb { font: 600 9px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+          .ssec-h .tt { font: 650 12.5px/1.2 var(--sans); color: var(--t1); }
+          .ssec.jump { border-color: var(--abord); }
+          .srow { display: grid; grid-template-columns: 180px minmax(0,1fr); gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line-faint); }
+          .srow:last-child { border-bottom: 0; }
+          .srow .l { font: 600 11.5px/1.3 var(--sans); color: var(--t1); }
+          .srow .l em { display: block; margin-top: 3px; font: 400 10.5px/1.4 var(--sans); font-style: normal; color: var(--t3); }
+          .srow .h { margin-top: 5px; font: 400 10.5px/1.4 var(--sans); color: var(--t3); }
+          .spick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-input); font: 500 11px/1 var(--sans); color: var(--t1); }
+          .spick i { font-style: normal; font-family: var(--mono); color: var(--tsub); }
+          .spick .cv { margin-left: 6px; color: var(--t3); }
+          .sseg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-input); }
+          .sseg span { padding: 6px 10px; border-radius: 5px; font: 600 10.5px/1 var(--sans); color: var(--t3); }
+          .sseg span.on { background: var(--bg-elev); color: var(--t1); box-shadow: inset 0 0 0 1px var(--line2); }
+          .ta { padding: 7px 9px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-input); font: 500 10.5px/1.55 var(--mono); color: var(--t2); white-space: pre; }
+
+          /* ---- changes tab + commit box ---- */
+          .fch { display: flex; align-items: center; gap: 8px; padding: 5px 11px; font: 500 11px/1.4 var(--mono); color: var(--t2); }
+          .fst { flex: none; width: 16px; height: 16px; border-radius: 4px; background: var(--warnsoft); color: var(--warn); font: 700 9px/16px var(--mono); text-align: center; }
+          .fst.a { background: var(--oksoft); color: var(--okt); }
+          .draft { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--abord); border-radius: 999px; background: var(--bg-elev); color: var(--accb); font: 600 10px/1 var(--sans); }
+          .bcommit { width: 100%; height: 34px; margin-top: 10px; border-radius: 7px; border: none; background: var(--acc); color: var(--accon); font: 700 12px/1 var(--sans); }
+        </style>
+      </helmet>
+
+      <!-- =====================================================================
+           1. As shipped
+           ===================================================================== -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings: #149's agent panel as it ships</span>
+        </div>
+        <p class="dv-sub">PR #149 recreated with contrived data: four commits on fix/webhook-retries, Squash selected, Ask Codex to review clicked, proposal complete. The plumbing underneath is solid. The feature on top is a second opinion from a model that can't see the code and can't change anything.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a As shipped">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Rebase rail, proposal complete</div>
+            <div class="rail">
+              <div class="rtabs"><span class="rtab">Changes</span><span class="rtab on">Rebase<span class="bdg">4</span></span></div>
+              <div class="rbody">
+                <div class="rh pinw">
+                  <span class="rh-i">↻</span>
+                  <div><div class="rh-t">Rebase tool</div><div class="rh-s">Isolated check · hooks and signing disabled</div></div>
+                  <span class="pin">5</span>
+                </div>
+                <div class="rs">Squash · 4 commits</div>
+                <div class="rcl">
+                  <div class="rc"><span class="dot"></span><span class="m">bump max delay to 30s</span><span class="h">8e1d2a4</span></div>
+                  <div class="rc"><span class="dot"></span><span class="m">add jitter</span><span class="h">3c7f0b9</span></div>
+                  <div class="rc"><span class="dot"></span><span class="m">fix test flake</span><span class="h">f20a6e1</span></div>
+                  <div class="rc"><span class="dot"></span><span class="m">retry webhook deliveries with backoff</span><span class="h">6d94c3e</span></div>
+                </div>
+                <div class="rs">PwrGit safe plan</div>
+                <div class="plan pinw">
+                  <div class="pr"><span class="op op-pick">pick</span><span class="tx">6d94c3e retry webhook deliveries…</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">f20a6e1 fix test flake</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">3c7f0b9 add jitter</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">8e1d2a4 bump max delay to 30s</span></div>
+                  <div class="pr sum"><span class="tx">→ 1 commit, message built from 4 subjects</span></div>
+                  <span class="pin">4</span>
+                </div>
+                <div class="rs">Agent proposal</div>
+                <div class="ast pinw"><span>Ready</span><span>Codex 0.51.0 will review this exact plan without tools or repo access.</span><span class="pin">1</span></div>
+                <div class="aprop">
+                  <div class="aprop-h pinw"><span>Codex proposes · high confidence</span><span class="verd">Proceed</span><span class="pin" style="right:-18px;">2</span></div>
+                  <div class="aprop-t">Squash webhook retry work into one commit</div>
+                  <div class="aprop-s">These four commits all relate to webhook retry behavior and form a coherent unit. Squashing them produces a cleaner history.</div>
+                  <ul class="pinw">
+                    <li>All subjects reference retry or backoff behavior.</li>
+                    <li>The oldest commit introduces the feature; later commits refine it.</li>
+                    <li>The test fix appears related to the same change.</li>
+                    <span class="pin" style="top:-2px;right:-18px;">3</span>
+                  </ul>
+                  <div class="arisk"><strong>Watch for</strong>
+                    <ul><li>The combined message may need editing.</li><li>Verify tests still pass after squashing.</li></ul>
+                  </div>
+                  <div class="aguard">Proposal only. Codex cannot run Git. PwrGit still requires an isolated check and your explicit Apply click.</div>
+                </div>
+                <div class="acts pinw">
+                  <button class="bchk">Check in isolated copy</button>
+                  <div class="row"><button class="bapp off">Apply</button><button class="bclr">Clear</button></div>
+                  <span class="pin">6</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Six findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>It reviews titles, not code</h4><p>The request carries hashes and subjects, nothing else (<code>promptFor</code> in agent-session.ts). No diffs are sent, so every rationale and risk is a guess from commit titles.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>A verdict with nothing behind it</h4><p>“High confidence · Proceed” comes from a model that saw no code, and it shows up above the isolated check, the one signal that actually knows whether this works.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>It can only agree</h4><p>Every step has to match PwrGit's canonical plan exactly or the response is discarded. The rationale can only restate the selection. Nothing the agent writes changes the outcome.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>It skips the one job a squash needs</h4><p>The squashed commit's message is still Git's list of subjects. The agent even flags “the combined message may need editing”. Writing that message is the most useful thing it could do here.</p></div></div>
+              <div class="fitem"><span class="pin">5</span><div><h4>The agent can't be seen until you're mid-rebase</h4><p>It's Codex or nothing, at whatever version discovery found. There's no provider, model or effort choice and no settings page. Claude Code and other ACP agents are detected and then refused.</p></div></div>
+              <div class="fitem"><span class="pin">6</span><div><h4>The real gate is at the bottom</h4><p>Check → Apply is the decision. The agent panel sits between the plan and that decision and makes it harder to reach. For Reorder, which just reverses the selection, the review is a paragraph describing a reversal.</p></div></div>
+              <div class="keep"><b>Keep all of #149's plumbing.</b> Request ids, cancel, the 20 s / 60 s timeouts, the scratch workspace with no tools and a read-only sandbox, schema-checked JSON output, the honest unavailable states, the bounded quit drain and the E2E. Turns 2–5 run on it unchanged. Only the question sent and what's done with the answer are new.</div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "show 1a in the unavailable state" · "what would #149 look like for Reorder?"</p>
+      </section>
+
+      <!-- =====================================================================
+           2. The boundary
+           ===================================================================== -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The boundary that lets the agent write the plan</span>
+        </div>
+        <p class="dv-sub">#149's safety rule is “the agent must copy PwrGit's plan”, and that rule is exactly what stops it helping. The property that matters is weaker, and PwrGit can prove it: whatever the agent proposes must leave the code byte-for-byte identical and must replay cleanly. PwrGit checks both before a plan can be applied, so the agent is free to propose instead of just review.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Flow">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Who does what: the agent proposes, PwrGit proves, you apply</div>
+            <div class="flow">
+              <div class="fb you"><div class="who">You</div><h4>Pick commits and an intent</h4><ul><li>Squash, Tidy, or Reorder</li><li>Only your own unpushed commits on this branch</li></ul></div>
+              <div class="fb"><div class="who">PwrGit</div><h4>Builds the request</h4><ul><li>Subjects and diffs, up to a line budget</li><li>Lockfiles, snapshots, binaries and <em>Never send</em> paths removed and listed</li><li>Last 20 subjects on the base, for message style only</li></ul></div>
+              <div class="fb ag"><div class="who">Agent · no tools</div><h4>Proposes a plan and messages</h4><ul><li>Scratch workspace, read-only sandbox, no repo path</li><li>Returns schema-checked JSON: steps (<code>pick</code> <code>fixup</code> <code>squash</code>, any order) plus one message per resulting commit</li></ul></div>
+              <div class="fb pv"><div class="who">PwrGit · before you see Apply</div><h4>Proves it</h4><ul><li>Every selected commit used once, none from outside</li><li>Replays cleanly in an isolated copy</li><li>Final tree identical to the current tip</li><li>Messages are data, written with <code>commit -F</code>, never executed</li></ul></div>
+              <div class="fb you"><div class="who">You</div><h4>Edit, then Apply</h4><ul><li>Every message stays editable</li><li>Apply unlocks only when every proof passes, with no override</li><li>Runs locally. Nothing is pushed.</li></ul></div>
+            </div>
+            <div class="cmp" style="margin-top:12px;">
+              <div class="cr3 head"><div></div><div>#149 today</div><div>Proposed</div></div>
+              <div class="cr3"><div>Agent sees</div><div>Hashes and subjects</div><div>Subjects and diffs within a budget, with what was cut listed</div></div>
+              <div class="cr3"><div>Agent returns</div><div>A copy of PwrGit's plan, plus prose and a verdict</div><div>A plan and the commit messages</div></div>
+              <div class="cr3"><div>PwrGit checks</div><div>The copy matches, step for step</div><div>Range, each commit once, clean isolated replay, tree unchanged</div></div>
+              <div class="cr3"><div>You get</div><div>A paragraph to read</div><div>A history you can apply, with messages you can edit</div></div>
+              <div class="cr3"><div>Git runs</div><div>PwrGit's plan; the agent's output is thrown away</div><div>The proven plan, with messages written in as data</div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Proof ledger">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The proof ledger: three rows on every plan, whoever wrote it</div>
+            <div class="inv-set">
+              <div class="inv-lbl">Before the check</div>
+              <div class="inv">
+                <div class="iv ok"><span class="g">✓</span><span>9 commits, each used once</span><span class="v">0b3f6c2‥e41c09a</span></div>
+                <div class="iv wait"><span class="g">○</span><span>Code unchanged at the tip</span><span class="v">needs replay</span></div>
+                <div class="iv wait"><span class="g">○</span><span>Replays cleanly</span><span class="v">not run</span></div>
+              </div>
+              <div class="inv-lbl">Passed: Apply unlocks</div>
+              <div class="inv">
+                <div class="iv ok"><span class="g">✓</span><span>9 commits, each used once</span><span class="v">0b3f6c2‥e41c09a</span></div>
+                <div class="iv ok"><span class="g">✓</span><span>Code unchanged at the tip</span><span class="v">tree 4c1f9e0</span></div>
+                <div class="iv ok"><span class="g">✓</span><span>Replays cleanly</span><span class="v">9 steps · 1.2 s</span></div>
+              </div>
+              <div class="inv-lbl">Failed: plan discarded, no Apply</div>
+              <div class="inv">
+                <div class="iv ok"><span class="g">✓</span><span>9 commits, each used once</span><span class="v">0b3f6c2‥e41c09a</span></div>
+                <div class="iv bad"><span class="g">✕</span><span>Code changed in 1 file</span><span class="v">csv.ts +2 −2</span></div>
+                <div class="iv ok"><span class="g">✓</span><span>Replays cleanly</span><span class="v">9 steps · 1.1 s</span></div>
+              </div>
+              <p class="cap" style="margin-top:4px;">The same ledger covers the deterministic Squash and Reorder, so the agent path and the manual path share one definition of “safe”.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c What the agent saw">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>What the agent saw: one click from every draft</div>
+            <div class="sawx">
+              <h5>Sent to Codex · gpt-5.5</h5>
+              <div class="sf"><span>src/webhooks/deliver.ts</span><span class="n">+48 −9</span></div>
+              <div class="sf"><span>src/webhooks/backoff.ts</span><span class="n">+31 new</span></div>
+              <div class="sf"><span>test/webhooks/deliver.test.ts</span><span class="n">+61 −40</span></div>
+              <div class="sf cut"><span>test/webhooks/fixtures/payloads.json</span><span class="n">40 of 380 lines</span></div>
+              <div class="sf no"><span>package-lock.json</span><span class="n">lockfile, not sent</span></div>
+              <div class="sf no"><span>.env.test</span><span class="n">Never send</span></div>
+              <div class="div"></div>
+              <div class="sf"><span>4 commit subjects</span><span class="n">as data</span></div>
+              <div class="sf"><span>20 recent subjects on main</span><span class="n">style only</span></div>
+              <div class="sf"><span>Budget</span><span class="n">212 of 2,000 lines</span></div>
+              <div class="div"></div>
+              <p>Scratch workspace, no tools, read-only sandbox, no repo path. Commit text and diffs are sent as data; instructions inside them are ignored.</p>
+              <p>Never send and the budget are set in Settings › AI Features › Data sent.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Tree equality is free for squash and fixup of adjacent commits in order. It only bites when the agent reorders, and that's exactly where a model can go wrong without anyone noticing. Try next: "what if the selection isn't at the tip?" · "show the budget-exceeded state"</p>
+      </section>
+
+      <!-- =====================================================================
+           3. Squash writes its message
+           ===================================================================== -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Squash: the agent writes the commit message</span>
+        </div>
+        <p class="dv-sub">The plan stays deterministic. What's new is the message: the agent reads the four diffs and writes the message a reviewer wants, in the repo's style. The box starts as Git's joined subjects, so Squash works with no agent at all, and anything you type always wins.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Draft ready">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Draft ready: edit in place; the footer says who wrote it</div>
+            <div class="rail">
+              <div class="rtabs"><span class="rtab">Changes</span><span class="rtab on">Rebase<span class="bdg">4</span></span></div>
+              <div class="rbody">
+                <div class="rh">
+                  <span class="rh-i">↻</span>
+                  <div><div class="rh-t">Squash</div><div class="rh-s">4 → 1 · fix/webhook-retries</div></div>
+                  <span class="achip"><span class="a"><span class="sdot"></span>Codex <i>gpt-5.5</i></span><span class="d">▾</span></span>
+                </div>
+                <div class="rcl">
+                  <div class="rc"><span class="dot"></span><span class="m">bump max delay to 30s</span><span class="h">8e1d2a4</span></div>
+                  <div class="rc"><span class="dot"></span><span class="m">add jitter</span><span class="h">3c7f0b9</span></div>
+                  <div class="rc"><span class="dot"></span><span class="m">fix test flake</span><span class="h">f20a6e1</span></div>
+                  <div class="rc"><span class="dot"></span><span class="m">retry webhook deliveries with backoff</span><span class="h">6d94c3e</span></div>
+                </div>
+                <div class="rs">Commit message</div>
+                <div class="msg on">
+                  <div class="msg-b"><span class="subj">fix(webhooks): retry failed deliveries with jittered backoff</span>
+
+Deliveries that failed with a 5xx or a timeout were dropped after one attempt. Retry them with exponential backoff (2 s base, 30 s cap) and full jitter, so an outage at the receiver doesn't turn into synchronized retry bursts.
+
+The delivery test now uses a fake clock instead of real sleeps, which removes the timing flake.</div>
+                  <div class="msg-f"><span class="src">✦ Codex, from 4 diffs</span><span class="sp"></span><button class="lk">Regenerate</button><button class="lk q">Use subjects</button></div>
+                </div>
+                <div class="style">Style: <b>conventional commits</b>, matched from 18 of the last 20 subjects on main</div>
+                <div class="saw">Saw <b>4 diffs · 3 files · 212 lines</b>, no repo access, no tools · <button class="lk">Details</button></div>
+                <div class="rs">Plan <span class="r">oldest first</span></div>
+                <div class="plan">
+                  <div class="pr"><span class="op op-pick">pick</span><span class="tx">6d94c3e retry webhook deliveries…</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">f20a6e1 fix test flake</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">3c7f0b9 add jitter</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">8e1d2a4 bump max delay to 30s</span></div>
+                </div>
+                <div class="inv">
+                  <div class="iv ok"><span class="g">✓</span><span>4 commits, each used once</span><span class="v">6d94c3e‥8e1d2a4</span></div>
+                  <div class="iv wait"><span class="g">○</span><span>Code unchanged at the tip</span><span class="v">needs replay</span></div>
+                  <div class="iv wait"><span class="g">○</span><span>Replays cleanly</span><span class="v">not run</span></div>
+                </div>
+                <div class="acts">
+                  <button class="bchk">Check in isolated copy</button>
+                  <div class="row"><button class="bapp off">Apply</button><button class="bclr">Clear</button></div>
+                </div>
+                <div class="note">Hooks, signing and rerere are off for both check and apply. Nothing is pushed.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Drafting and edited">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Drafting never blocks, and your typing always wins</div>
+            <div class="stack" style="width:344px;">
+              <div class="inv-lbl" style="margin-top:0;">While drafting · the check can already run</div>
+              <div class="msg">
+                <div class="msg-b scan"><span class="subj">retry webhook deliveries with backoff</span>
+
+fix test flake
+add jitter
+bump max delay to 30s</div>
+                <div class="msg-f"><span class="src">✦ Codex is reading 4 diffs…</span><span class="sp"></span><button class="lk q">Cancel</button></div>
+              </div>
+              <p class="cap">The box holds Git's joined subjects until the draft lands. The draft replaces that text only if you haven't touched it. Check and Apply work throughout, and Apply commits whatever the box says at that moment.</p>
+              <div class="inv-lbl">You typed first · the draft waits</div>
+              <div class="msg on">
+                <div class="msg-b"><span class="subj">fix(webhooks): retry deliveries w/ backoff<span class="caret"></span></span>
+
+fix test flake
+add jitter
+bump max delay to 30s</div>
+                <div class="msg-f"><span class="src">✦ Codex draft ready</span><span class="sp"></span><button class="lk">Compare</button><button class="lk">Use draft</button></div>
+              </div>
+              <p class="cap">Once you've typed, nothing overwrites you. Compare opens the draft beside your text; Use draft is a single step you can undo.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c No agent">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>No agent set up: the tool works without one; no warning banner</div>
+            <div class="rail">
+              <div class="rtabs"><span class="rtab">Changes</span><span class="rtab on">Rebase<span class="bdg">4</span></span></div>
+              <div class="rbody">
+                <div class="rh">
+                  <span class="rh-i">↻</span>
+                  <div><div class="rh-t">Squash</div><div class="rh-s">4 → 1 · fix/webhook-retries</div></div>
+                  <span class="achip none"><span class="a"><span class="sdot off"></span>No agent</span><span class="d">▾</span></span>
+                </div>
+                <div class="rs">Commit message</div>
+                <div class="msg">
+                  <div class="msg-b"><span class="subj">retry webhook deliveries with backoff</span>
+
+fix test flake
+add jitter
+bump max delay to 30s</div>
+                  <div class="msg-f"><span class="src q">Joined from 4 subjects</span><span class="sp"></span><button class="lk">✦ Draft with an agent…</button></div>
+                </div>
+                <div class="note" style="margin-top:8px;">Draft with an agent opens Settings › AI Providers. Codex and Claude Code are the providers PwrGit can find on this machine.</div>
+                <div class="rs">Plan <span class="r">oldest first</span></div>
+                <div class="plan">
+                  <div class="pr"><span class="op op-pick">pick</span><span class="tx">6d94c3e retry webhook deliveries…</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">f20a6e1 fix test flake</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">3c7f0b9 add jitter</span></div>
+                  <div class="pr"><span class="op op-sq">squash</span><span class="tx">8e1d2a4 bump max delay to 30s</span></div>
+                </div>
+                <div class="inv">
+                  <div class="iv ok"><span class="g">✓</span><span>4 commits, each used once</span><span class="v">6d94c3e‥8e1d2a4</span></div>
+                  <div class="iv ok"><span class="g">✓</span><span>Code unchanged at the tip</span><span class="v">tree 7a03b1c</span></div>
+                  <div class="iv ok"><span class="g">✓</span><span>Replays cleanly</span><span class="v">4 steps · 0.6 s</span></div>
+                </div>
+                <div class="cres clean"><span>Clean</span><span>The isolated copy applied all 4 steps.</span></div>
+                <div class="acts">
+                  <div class="row"><button class="bapp">Apply</button><button class="bclr">Clear</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">The agent chip replaces #149's Discovering / Ready / No safe agent status boxes. Availability becomes a dot, and the absence of an agent is a link, not a warning. Try next: "show Compare from 3b" · "what does Regenerate with a hint look like?"</p>
+      </section>
+
+      <!-- =====================================================================
+           4. Tidy
+           ===================================================================== -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Tidy: the agent proposes the history</span>
+        </div>
+        <p class="dv-sub">This is the job people really hand off to an agent: nine commits of wip, fix lint and address review turned into three a reviewer can read. The agent picks the grouping and the order and writes the messages. PwrGit proves the result contains exactly the same code. That's the difference between this and a toy.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Review sheet">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Review sheet over the graph: before and after, colour-matched, newest first</div>
+            <div class="sheet">
+              <div class="sh-h">
+                <span class="rh-i">✦</span>
+                <div><div class="sh-t">Tidy feat/csv-export</div><div class="sh-s">9 commits → 3 · proposed by Codex gpt-5.5 · 3 moved</div></div>
+                <span class="achip"><span class="a"><span class="sdot"></span>Codex <i>gpt-5.5</i></span><span class="d">▾</span></span>
+              </div>
+              <div class="sh-cols">
+                <div>
+                  <div class="colh">Now · 9 commits</div>
+                  <div class="old">
+                    <div class="or"><span class="sw swC"></span><span class="hs">e41c09a</span><span class="sub">address review: rename exporter option</span></div>
+                    <div class="or"><span class="sw swB"></span><span class="hs">7b2d4f1</span><span class="sub">fix lint</span></div>
+                    <div class="or"><span class="sw swB"></span><span class="hs">c93a0e8</span><span class="sub">wip tests</span></div>
+                    <div class="or"><span class="sw swB"></span><span class="hs">5f81b22</span><span class="sub">add CSV exporter tests</span></div>
+                    <div class="or"><span class="sw swA"></span><span class="hs">a06e3d7</span><span class="sub">oops, forgot header row</span></div>
+                    <div class="or"><span class="sw swA"></span><span class="hs">91cc4b0</span><span class="sub">handle quoting in CSV fields</span></div>
+                    <div class="or"><span class="sw swC"></span><span class="hs">2e7f915</span><span class="sub">wire export button into invoices page</span></div>
+                    <div class="or"><span class="sw swA"></span><span class="hs">d4a8830</span><span class="sub">wip</span></div>
+                    <div class="or"><span class="sw swA"></span><span class="hs">0b3f6c2</span><span class="sub">add CSV exporter for invoices</span></div>
+                  </div>
+                </div>
+                <div class="sh-arrow">→</div>
+                <div>
+                  <div class="colh">Proposed · 3 commits</div>
+                  <div class="grp C">
+                    <div class="grp-h"><div class="grp-s"><span>feat(invoices): add Export CSV button</span><button class="lk q">Edit</button></div><div class="grp-bd">Adds Export CSV to the invoices toolbar and renames the exporter's includeVoided option to includeVoid to match the invoice filter.</div></div>
+                    <div class="mem"><span class="rl pick">pick</span><span class="hs">2e7f915</span><span class="sub">wire export button into invoices page</span><span class="tl"><span class="mv">moved</span></span></div>
+                    <div class="mem"><span class="rl">fixup</span><span class="hs">e41c09a</span><span class="sub">address review: rename exporter option</span><button class="x">Keep separate</button></div>
+                  </div>
+                  <div class="grp B">
+                    <div class="grp-h"><div class="grp-s"><span>test(export): cover quoting, header row and empty invoices</span><button class="lk q">Edit</button></div></div>
+                    <div class="mem"><span class="rl pick">pick</span><span class="hs">5f81b22</span><span class="sub">add CSV exporter tests</span><span class="tl"></span></div>
+                    <div class="mem"><span class="rl">fixup</span><span class="hs">c93a0e8</span><span class="sub">wip tests</span><button class="x">Keep separate</button></div>
+                    <div class="mem"><span class="rl">fixup</span><span class="hs">7b2d4f1</span><span class="sub">fix lint</span><button class="x">Keep separate</button></div>
+                  </div>
+                  <div class="grp A">
+                    <div class="grp-h"><div class="grp-s"><span>feat(export): add CSV exporter for invoices</span><button class="lk q">Edit</button></div><div class="grp-bd">Streams invoices as RFC 4180 CSV with a header row; fields with commas, quotes or newlines are quoted.</div></div>
+                    <div class="mem"><span class="rl pick">pick</span><span class="hs">0b3f6c2</span><span class="sub">add CSV exporter for invoices</span><span class="tl"></span></div>
+                    <div class="mem"><span class="rl">fixup</span><span class="hs">d4a8830</span><span class="sub">wip</span><button class="x">Keep separate</button></div>
+                    <div class="mem"><span class="rl">fixup</span><span class="hs">91cc4b0</span><span class="sub">handle quoting in CSV fields</span><span class="tl"><span class="mv">moved</span></span></div>
+                    <div class="mem"><span class="rl">fixup</span><span class="hs">a06e3d7</span><span class="sub">oops, forgot header row</span><span class="tl"><span class="mv">moved</span></span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="sh-f">
+                <div class="inv">
+                  <div class="iv ok"><span class="g">✓</span><span>9 used once</span></div>
+                  <div class="iv ok"><span class="g">✓</span><span>Code unchanged</span></div>
+                  <div class="iv ok"><span class="g">✓</span><span>Replays cleanly</span></div>
+                </div>
+                <button class="bclr">Discard</button>
+                <button class="bapp">Apply to feat/csv-export</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Rail live">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Same proposal in the rail, live: keep a commit separate, run the check, apply</div>
+            <div class="rail">
+              <div class="rtabs"><span class="rtab">Changes</span><span class="rtab on">Rebase<span class="bdg">9</span></span></div>
+              <div class="rbody">
+                <div class="rh">
+                  <span class="rh-i">✦</span>
+                  <div><div class="rh-t">Tidy</div><div class="rh-s">{{headSub}}</div></div>
+                  <span class="achip"><span class="a"><span class="sdot"></span>Codex <i>gpt-5.5</i></span><span class="d">▾</span></span>
+                </div>
+                <div class="rs">Proposed history <span class="r">newest first</span></div>
+                <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+                  <div class="grp {{g.cls}}">
+                    <div class="grp-h"><div class="grp-s"><span>{{g.subj}}</span><button class="lk q">Edit</button></div></div>
+                    <sc-for list="{{g.rows}}" as="m" hint-placeholder-count="3">
+                      <div class="{{m.cls}}">
+                        <span class="{{m.roleCls}}">{{m.role}}</span><span class="hs">{{m.hash}}</span><span class="sub">{{m.sub}}</span>
+                        <span class="tl">
+                          <sc-if value="{{m.moved}}" hint-placeholder-val="{{ false }}"><span class="mv">moved</span></sc-if>
+                          <sc-if value="{{m.canToggle}}" hint-placeholder-val="{{ true }}"><button class="x" onClick="{{m.onToggle}}">{{m.toggleLabel}}</button></sc-if>
+                        </span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-for>
+                <div class="saw">Saw <b>9 diffs · 6 files · 604 lines</b>, no repo access, no tools · <button class="lk">Details</button></div>
+                <div class="inv">
+                  <sc-for list="{{ledger}}" as="lg" hint-placeholder-count="3">
+                    <div class="iv {{lg.cls}}"><span class="g">{{lg.glyph}}</span><span>{{lg.label}}</span><span class="v">{{lg.value}}</span></div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{showClean}}" hint-placeholder-val="{{ false }}">
+                  <div class="cres clean"><span>Clean</span><span>{{cleanMsg}}</span></div>
+                </sc-if>
+                <sc-if value="{{showApplied}}" hint-placeholder-val="{{ false }}">
+                  <div class="applied">{{appliedMsg}} <button class="lk" onClick="{{onReset}}">Reset demo</button></div>
+                </sc-if>
+                <div class="acts">
+                  <button class="{{checkCls}}" onClick="{{onCheck}}">{{checkLabel}}</button>
+                  <div class="row"><button class="{{applyCls}}" onClick="{{onApply}}">{{applyLabel}}</button><button class="bclr" onClick="{{onReset}}">Discard</button></div>
+                </div>
+                <div class="note">Keep separate turns a fixup back into its own commit with its original message and resets the check. Nothing is pushed.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Entry point: select your own commits → <b>✦ Tidy…</b> on the selection bar (6a). With no selection, Tidy offers “all 9 unpushed commits on feat/csv-export”. v1 keeps whole commits together: the agent can group, order and reword, but can't split a commit by hunk. Try next: "pick 4a or 4b" · "show Edit on a group message" · "what does Tidy do with a merge commit in range?"</p>
+      </section>
+
+      <!-- =====================================================================
+           5. When it goes wrong
+           ===================================================================== -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">When it goes wrong</span>
+        </div>
+        <p class="dv-sub">Three failures, three responses. A conflict is information the agent can use. A plan that changes code is a hard stop. A stalled agent costs nothing, because the plan and message box already work without it.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="5a" data-screen-label="5a Conflict revision">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Replay conflict: the agent revises once, PwrGit re-checks on its own</div>
+            <div class="rail">
+              <div class="rtabs"><span class="rtab">Changes</span><span class="rtab on">Rebase<span class="bdg">9</span></span></div>
+              <div class="rbody">
+                <div class="rh">
+                  <span class="rh-i">✦</span>
+                  <div><div class="rh-t">Tidy</div><div class="rh-s">9 → 3 · feat/csv-export</div></div>
+                  <span class="achip"><span class="a"><span class="sdot"></span>Codex <i>gpt-5.5</i></span><span class="d">▾</span></span>
+                </div>
+                <div class="cres snag" style="margin-top:0;"><span>Conflict</span><span>Step 5 of 9: <code>e41c09a</code> edits lines of <code>InvoicesPage.tsx</code> that <code>2e7f915</code> adds, so it can't move ahead of it.</span></div>
+                <div class="rev">
+                  <div class="rev-h">✦ Codex revised the plan<span class="r">revision 1 of 2</span></div>
+                  Fold the review rename into the button commit instead of the exporter commit. The rename touches both files, and the button has to exist first.
+                  <div class="pd"><div class="del">− fixup e41c09a → feat(export): add CSV exporter…</div><div class="add">+ fixup e41c09a → feat(invoices): add Export CSV…</div></div>
+                </div>
+                <div class="inv">
+                  <div class="iv ok"><span class="g">✓</span><span>9 commits, each used once</span><span class="v">0b3f6c2‥e41c09a</span></div>
+                  <div class="iv ok"><span class="g">✓</span><span>Code unchanged at the tip</span><span class="v">tree 4c1f9e0</span></div>
+                  <div class="iv ok"><span class="g">✓</span><span>Replays cleanly</span><span class="v">re-checked · 1.2 s</span></div>
+                </div>
+                <div class="acts">
+                  <div class="row"><button class="bapp">Apply revised plan</button><button class="bclr">Discard</button></div>
+                </div>
+                <div class="note">The agent gets the conflict's file, step and commit pair, never the working tree. After two failed revisions, PwrGit stops and shows the last conflict.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="5b" data-screen-label="5b Tree changed">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>The code would change: the plan is discarded, and there's no override</div>
+            <div class="rail">
+              <div class="rtabs"><span class="rtab">Changes</span><span class="rtab on">Rebase<span class="bdg">9</span></span></div>
+              <div class="rbody">
+                <div class="rh">
+                  <span class="rh-i">✦</span>
+                  <div><div class="rh-t">Tidy</div><div class="rh-s">9 → 3 · feat/csv-export</div></div>
+                  <span class="achip"><span class="a"><span class="sdot"></span>Codex <i>gpt-5.5</i></span><span class="d">▾</span></span>
+                </div>
+                <div class="cres bad" style="margin-top:0;"><span>Discarded</span><span>The replay finished, but <code>src/export/csv.ts</code> would end up different from the current tip (+2 −2). A history edit can't change code.</span></div>
+                <div class="inv">
+                  <div class="iv ok"><span class="g">✓</span><span>9 commits, each used once</span><span class="v">0b3f6c2‥e41c09a</span></div>
+                  <div class="iv bad"><span class="g">✕</span><span>Code changed in 1 file</span><span class="v">csv.ts +2 −2</span></div>
+                  <div class="iv ok"><span class="g">✓</span><span>Replays cleanly</span><span class="v">9 steps · 1.1 s</span></div>
+                </div>
+                <div class="acts">
+                  <button class="bchk">Ask Codex for another plan</button>
+                  <div class="row"><button class="bclr" style="flex:1;">Show the 4-line difference</button><button class="bclr">Discard</button></div>
+                </div>
+                <div class="note">This happens when a reorder lets a hunk apply at a different offset. The worktree was never touched. If the code really should change, that's a new commit, not a rebase.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="5c" data-screen-label="5c Stopped">
+            <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>Timed out, cancelled or failed: said once, in the footer</div>
+            <div class="stack" style="width:344px;">
+              <div class="msg">
+                <div class="msg-b"><span class="subj">retry webhook deliveries with backoff</span>
+
+fix test flake
+add jitter
+bump max delay to 30s</div>
+                <div class="msg-f"><span class="src warn">Codex stopped after 60 s. Nothing changed.</span><span class="sp"></span><button class="lk">Retry</button></div>
+              </div>
+              <div class="msg">
+                <div class="msg-b"><span class="subj">retry webhook deliveries with backoff</span>
+
+fix test flake
+add jitter
+bump max delay to 30s</div>
+                <div class="msg-f"><span class="src q">Draft cancelled</span><span class="sp"></span><button class="lk">✦ Draft</button></div>
+              </div>
+              <div class="msg">
+                <div class="msg-b"><span class="ph">Tidy needs an agent. Squash and Reorder don't.</span></div>
+                <div class="msg-f"><span class="src warn">Codex isn't signed in for this profile</span><span class="sp"></span><button class="lk">Open AI Providers</button></div>
+              </div>
+              <p class="cap">No red banners and no “the deterministic plan remains usable” disclaimer. When the plan is on screen and the buttons still work, that says it. The failure is one line in the footer of the thing that failed.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "show 5a when the second revision also conflicts" · "show the difference view from 5b"</p>
+      </section>
+
+      <!-- =====================================================================
+           6. Where the agent shows up
+           ===================================================================== -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t6">6</a>
+          <span class="dv-tname">Where the agent shows up, and where it's chosen</span>
+        </div>
+        <p class="dv-sub">One chip, set by a default in Settings and changeable per request. The same message-drafting parts come back in the commit box. The Settings pages are the PwrSnap port: AI Providers and AI Features with nav children, no Gemini.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="6a" data-screen-label="6a Entry and chip">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>Selection bar gains ✦ Tidy; the rail chip opens the agent menu</div>
+            <div class="stack">
+              <div class="selbar">
+                <span class="cnt">9 selected</span><span class="vs"></span>
+                <button class="sbb">Squash</button><button class="sbb">Reorder</button><button class="sbb ai">✦ Tidy…</button>
+                <span class="sp"></span>
+                <button class="sbb go">Open rebase tool →</button><button class="sbb x2">×</button>
+              </div>
+              <div style="display:flex; gap:14px; align-items:flex-start;">
+                <div style="width:344px; padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:#000;">
+                  <div class="rh" style="margin:0;">
+                    <span class="rh-i">✦</span>
+                    <div><div class="rh-t">Tidy</div><div class="rh-s">9 → 3 · feat/csv-export</div></div>
+                    <span class="achip open"><span class="a"><span class="sdot"></span>Codex <i>gpt-5.5</i></span><span class="d">▴</span></span>
+                  </div>
+                </div>
+                <div class="menu">
+                  <div class="mh">History editing agent</div>
+                  <div class="mi on"><span class="ck">✓</span><span class="sdot"></span><span>Codex</span><span class="mm">gpt-5.5</span></div>
+                  <div class="mi"><span class="ck"></span><span class="sdot"></span><span>Codex</span><span class="mm">gpt-5.5-mini</span></div>
+                  <div class="mi"><span class="ck"></span><span class="sdot"></span><span>Claude Code<small>ACP · every tool request denied</small></span><span class="mm">Sonnet 5</span></div>
+                  <div class="mi dis"><span class="ck"></span><span class="sdot off"></span><span>OpenCode<small>not installed</small></span></div>
+                  <div class="msep"></div>
+                  <div class="mh">Effort</div>
+                  <div class="seg"><span>Low</span><span class="on">Medium</span><span>High</span></div>
+                  <div class="msep"></div>
+                  <div class="mfoot">Only this request. The default is in <button class="lk">Settings › AI Features</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="6b" data-screen-label="6b Settings AI Features">
+            <div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>Settings › AI Features: per-job defaults, style, and what's allowed to leave the machine</div>
+            <div class="swin">
+              <div class="snav">
+                <div class="sng">App</div>
+                <div class="sni">General</div>
+                <div class="sni">Updates</div>
+                <div class="sni">Profiles</div>
+                <div class="sni">Forges<span class="cv">›</span></div>
+                <div class="sng">AI</div>
+                <div class="sni">AI Providers<span class="cv">⌄</span></div>
+                <div class="snc"><span class="sdot"></span>Codex<span class="chip">ready</span></div>
+                <div class="snc"><span class="sdot"></span>Claude Code<span class="chip">ready</span></div>
+                <div class="snc"><span class="sdot off"></span>OpenCode<span class="chip">not found</span></div>
+                <div class="sni on">AI Features<span class="cv">⌄</span></div>
+                <div class="snc on">Default agents</div>
+                <div class="snc">Message style</div>
+                <div class="snc">Data sent</div>
+                <div class="sni">Agent Access</div>
+                <div class="sng">Advanced</div>
+                <div class="sni">Experimental</div>
+                <div class="sni">About</div>
+              </div>
+              <div class="spane">
+                <div class="sp-t">AI Features</div>
+                <div class="sp-d">What PwrGit does with the agents on AI Providers. Nothing runs until you ask for it.</div>
+                <div class="ssec jump">
+                  <div class="ssec-h"><span class="tt">Default agents</span></div>
+                  <div class="srow"><div class="l">Commit messages<em>✦ Draft in the commit box</em></div><div><span class="spick"><span class="sdot"></span>Codex <i>gpt-5.5-mini · low</i><span class="cv">▾</span></span></div></div>
+                  <div class="srow"><div class="l">History editing<em>Squash messages, Tidy, conflict revisions</em></div><div><span class="spick"><span class="sdot"></span>Codex <i>gpt-5.5 · medium</i><span class="cv">▾</span></span></div></div>
+                </div>
+                <div class="ssec">
+                  <div class="ssec-h"><span class="tt">Message style</span></div>
+                  <div class="srow"><div class="l">Format</div><div><span class="sseg"><span class="on">Follow the repo</span><span>Conventional</span><span>Plain</span></span><div class="h">Follow the repo reads the last 20 subjects on the base branch.</div></div></div>
+                </div>
+                <div class="ssec">
+                  <div class="ssec-h"><span class="tt">Data sent</span></div>
+                  <div class="srow"><div class="l">Diff budget<em>Per request</em></div><div><span class="spick">2,000 lines<span class="cv">▾</span></span></div></div>
+                  <div class="srow"><div class="l">Never send<em>Paths removed before any request, and listed as removed</em></div><div><div class="ta">.env*
+secrets/**
+*.pem</div><div class="h">Lockfiles, snapshots and binaries are always left out.</div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="6c" data-screen-label="6c Commit box draft">
+            <div class="dv-olabel"><a class="dv-oid" href="#6c">6c</a>Commit box: the same draft, footer and “saw” line</div>
+            <div class="rail">
+              <div class="rtabs"><span class="rtab on">Changes</span><span class="rtab">Rebase</span></div>
+              <div class="rbody">
+                <div class="rs" style="margin-top:0;">Staged · 3</div>
+                <div class="rcl">
+                  <div class="fch"><span class="fst">M</span>src/webhooks/deliver.ts</div>
+                  <div class="fch"><span class="fst a">A</span>src/webhooks/backoff.ts</div>
+                  <div class="fch"><span class="fst">M</span>test/webhooks/deliver.test.ts</div>
+                </div>
+                <div class="rs">Commit</div>
+                <div class="msg on">
+                  <div class="msg-b"><span class="subj">fix(webhooks): retry failed deliveries with backoff</span>
+
+Retry 5xx and timed-out deliveries with exponential backoff (2 s base, 30 s cap) and full jitter.</div>
+                  <div class="msg-f"><span class="src">✦ Codex, from 3 staged files</span><span class="sp"></span><button class="lk">Regenerate</button></div>
+                </div>
+                <div class="saw">Saw <b>staged changes only · 140 lines</b> · <button class="lk">Details</button></div>
+                <button class="bcommit">Commit to fix/webhook-retries</button>
+                <div class="note">An empty box shows <span class="draft">✦ Draft</span> in the footer. It reads staged changes only; unstaged edits are never sent.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next"><b>Naming:</b> the existing Settings › Agents page (inbound MCP access for external agents) sits next to AI Providers and AI Features. It's drawn here renamed <b>Agent Access</b> so the three don't blur together. <b>Open question:</b> #149 refuses ACP because it can't enforce the no-tools boundary. Is denying every permission request, with an empty scratch directory as cwd, enough for Claude Code? If not, Claude Code stays listed in 6a but greyed out with that reason. Try next: "draw AI Providers › Claude Code" · "move ✦ Tidy into the branch chip menu instead"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { sep: {}, check: "idle", applied: false };
+          this.groupsDef = [
+            { key: "C", subj: "feat(invoices): add Export CSV button", members: [
+              { h: "2e7f915", s: "wire export button into invoices page", pick: true, moved: true },
+              { h: "e41c09a", s: "address review: rename exporter option" }
+            ] },
+            { key: "B", subj: "test(export): cover quoting, header row and empty invoices", members: [
+              { h: "5f81b22", s: "add CSV exporter tests", pick: true },
+              { h: "c93a0e8", s: "wip tests" },
+              { h: "7b2d4f1", s: "fix lint" }
+            ] },
+            { key: "A", subj: "feat(export): add CSV exporter for invoices", members: [
+              { h: "0b3f6c2", s: "add CSV exporter for invoices", pick: true },
+              { h: "d4a8830", s: "wip" },
+              { h: "91cc4b0", s: "handle quoting in CSV fields", moved: true },
+              { h: "a06e3d7", s: "oops, forgot header row", moved: true }
+            ] }
+          ];
+          this.timer = null;
+        }
+        componentWillUnmount() {
+          if (this.timer !== null) { clearTimeout(this.timer); }
+        }
+        renderVals() {
+          const s = this.state;
+          const sepCount = Object.keys(s.sep).length;
+          const after = this.groupsDef.length + sepCount;
+          const groups = this.groupsDef.map((g) => {
+            const rows = g.members.map((m) => {
+              const isSep = Boolean(s.sep[m.h]);
+              const ownCommit = m.pick || isSep;
+              return {
+                hash: m.h,
+                sub: m.s,
+                role: ownCommit ? "pick" : "fixup",
+                roleCls: ownCommit ? "rl pick" : "rl",
+                cls: isSep ? "mem sep" : "mem",
+                moved: Boolean(m.moved),
+                canToggle: !m.pick && !s.applied,
+                toggleLabel: isSep ? "Fold back" : "Keep separate",
+                onToggle: () => {
+                  const sep = Object.assign({}, this.state.sep);
+                  if (sep[m.h]) { delete sep[m.h]; } else { sep[m.h] = true; }
+                  if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
+                  this.setState({ sep: sep, check: "idle" });
+                }
+              };
+            });
+            return { cls: g.key, subj: g.subj, rows: rows };
+          });
+          const clean = s.check === "clean";
+          const checking = s.check === "checking";
+          const ledger = [
+            { cls: "ok", glyph: "✓", label: "9 commits, each used once", value: "0b3f6c2‥e41c09a" },
+            clean
+              ? { cls: "ok", glyph: "✓", label: "Code unchanged at the tip", value: "tree 4c1f9e0" }
+              : { cls: "wait", glyph: "○", label: "Code unchanged at the tip", value: "needs replay" },
+            clean
+              ? { cls: "ok", glyph: "✓", label: "Replays cleanly", value: "9 steps · 1.2 s" }
+              : { cls: "wait", glyph: "○", label: "Replays cleanly", value: checking ? "replaying…" : "not run" }
+          ];
+          return {
+            headSub: "9 → " + after + " · feat/csv-export",
+            groups: groups,
+            ledger: ledger,
+            showClean: clean && !s.applied,
+            cleanMsg: "The isolated copy produced " + after + " commits with an identical tree.",
+            showApplied: s.applied,
+            appliedMsg: "Applied locally · " + after + " commits · nothing pushed.",
+            checkCls: clean ? "bchk done" : "bchk",
+            checkLabel: checking ? "Checking in isolated copy…" : clean ? "Checked ✓" : "Check in isolated copy",
+            onCheck: () => {
+              if (this.state.check !== "idle" || this.state.applied) { return; }
+              this.setState({ check: "checking" });
+              this.timer = setTimeout(() => {
+                this.timer = null;
+                this.setState({ check: "clean" });
+              }, 900);
+            },
+            applyCls: clean && !s.applied ? "bapp" : "bapp off",
+            applyLabel: s.applied ? "Applied" : "Apply " + after + " commits",
+            onApply: () => {
+              if (this.state.check !== "clean" || this.state.applied) { return; }
+              this.setState({ applied: true });
+            },
+            onReset: () => {
+              if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
+              this.setState({ sep: {}, check: "idle", applied: false });
+            }
+          };
+        }
+      }
+    </script>
+  </body>
+</html>
