@@ -101,6 +101,18 @@ import type {
   McpAgentRolePatch,
   McpAgentSession
 } from "./mcp-policy";
+import type {
+  AcpAgentDiscovery,
+  AcpAgentModelList,
+  AiProviderSettingsPatch,
+  AiProviderSettingsSnapshot,
+  BuiltInAcpAgentId,
+  CodexAuthProfileList,
+  CodexLoginResult,
+  CodexModelList,
+  CodexProviderDiscovery
+} from "./ai-providers";
+import type { SettingsRoute } from "./settings-pages";
 
 export type ProfileList = {
   activeProfileId: ProfileId | null;
@@ -1766,6 +1778,51 @@ export interface Commands {
   "agentAccess:consentDecide": { req: AgentConsentDecision; res: null };
   /** Current preference plus native-resolved palette; closes bootstrap races. */
   "appearance:read": { req: void; res: AppAppearance };
+  /** Open (or focus) the Settings window on a page, and a card within it.
+   *  Checked against `SETTINGS_PAGE_SUBS`; an unknown sub still lands on the
+   *  page. */
+  "settings:open": { req: SettingsRoute; res: null };
+
+  // AI providers (Settings → AI Providers / AI Features) — the agents PwrGit
+  // hands work to, per profile. Every call names its profile because the
+  // Settings window is shared by all of them. Discovery answers from cache
+  // unless `force`; model lists answer from cache unless `refresh`.
+  "aiProviders:read": {
+    req: { profileId: ProfileId };
+    res: AiProviderSettingsSnapshot;
+  };
+  "aiProviders:update": {
+    req: { profileId: ProfileId; patch: AiProviderSettingsPatch };
+    res: AiProviderSettingsSnapshot;
+  };
+  "aiProviders:discoverCodex": {
+    req: { profileId: ProfileId; force?: boolean };
+    res: CodexProviderDiscovery;
+  };
+  "aiProviders:discoverAcp": {
+    req: { profileId: ProfileId; force?: boolean };
+    res: AcpAgentDiscovery;
+  };
+  "aiProviders:codexModels": {
+    req: { profileId: ProfileId; refresh?: boolean };
+    res: CodexModelList;
+  };
+  /** Spawns the agent on a cache miss — only the AI pages ask, and only for
+   *  agents a job is routed to or the operator refreshed. */
+  "aiProviders:acpModels": {
+    req: { profileId: ProfileId; agentId: BuiltInAcpAgentId; refresh?: boolean };
+    res: AcpAgentModelList;
+  };
+  "aiProviders:codexAuthProfiles": {
+    req: { profileId: ProfileId };
+    res: CodexAuthProfileList;
+  };
+  /** Start `codex login` for the auth profile this PwrGit profile resolves to;
+   *  the OAuth page opens in the default browser. */
+  "aiProviders:codexLogin": {
+    req: { profileId: ProfileId };
+    res: CodexLoginResult;
+  };
 
   // Desktop auto-update (Settings → Updates)
   "app:readIdentity": { req: void; res: AppIdentity };
@@ -1885,6 +1942,10 @@ export interface Events {
   /** Sessions, roles, or repository boundaries changed in Settings. */
   "localAgents:changed": McpAgentPolicySnapshot;
   "agentAccess:changed": AgentAccessSnapshot;
+  /** One profile's AI provider settings changed. */
+  "aiProviders:changed": AiProviderSettingsSnapshot;
+  /** Move an already-open Settings window to a page (see `settings:open`). */
+  "settings:navigate": SettingsRoute;
   /** Resolved color theme changed, including a live OS change in System mode. */
   "appearance:changed": AppAppearance;
   /** Auto-update status changed — Settings and the update toast subscribe. */

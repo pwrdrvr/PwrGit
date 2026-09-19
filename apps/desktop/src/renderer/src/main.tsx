@@ -5,6 +5,7 @@ import { App } from "./App";
 import { AppDocumentWindow } from "./features/documents/AppDocumentWindow";
 import { LogsWindow } from "./features/logs/LogsWindow";
 import { SettingsWindow } from "./features/settings/SettingsWindow";
+import { isSettingsHash } from "@pwrgit/shared";
 import { startAppearanceSync } from "./lib/appearance";
 import { startWindowFrameSync } from "./lib/window-frame";
 import "./styles/app.css";
@@ -30,14 +31,15 @@ startAppearanceSync();
 
 // Auxiliary windows boot on a hash route (PwrAgnt pattern): `#logs` renders
 // the Logs window and `#settings` the Settings window instead of the app
-// shell.
+// shell. Settings also boots on a deep link, `#settings?page=…`, which
+// `settings:open` mints for a window that is not open yet.
 const hash = window.location.hash;
 
 createRoot(container).render(
   <StrictMode>
     {hash === "#agent-consent" ? (
       <AgentConsentWindow />
-    ) : hash === "#settings" ? (
+    ) : isSettingsHash(hash) ? (
       <SettingsWindow />
     ) : hash === "#logs" ? (
       <LogsWindow />

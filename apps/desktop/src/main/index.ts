@@ -12,10 +12,12 @@ import {
 } from "electron";
 import {
   GENERAL_DEFAULTS,
+  err,
   isAppearanceTheme,
   ok,
   resolveProfileAppearance,
   resolveUpdateSelection,
+  sanitizeSettingsRoute,
   type AppAppearance,
   type Profile,
   type BranchReveal
@@ -125,6 +127,11 @@ import { openSettingsWindow } from "./settings-window";
 import { createNativeThemeController } from "./native-theme";
 import { McpPolicyStore } from "@pwrgit/mcp-server/access-policy";
 import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers";
+import { AcpModelCache } from "./ai/acp-model-cache";
+import { registerAiProviderHandlers } from "./ai/ai-provider-handlers";
+import { createAiProviderService } from "./ai/ai-provider-service";
+import { AiProviderSettingsStore } from "./ai/ai-provider-settings";
+import { CodexModelCache } from "./ai/codex-model-cache";
 import { ConsentBroker } from "./agent-access/consent-broker";
 import { createConsentWindow } from "./agent-access/consent-window";
 import { createDesktopMcpRunner } from "./agent-access/desktop-mcp-runner";
@@ -358,6 +365,21 @@ if (!gotSingleInstanceLock) {
     bus.register("logs:read", () => ok(readLogSnapshot()));
     bus.register("logs:openWindow", (_req, context) => {
       openAuxiliaryWindow(openLogsWindow, senderWindow(context));
+      return ok(null);
+    });
+    bus.register("settings:open", (req, context) => {
+      const route = sanitizeSettingsRoute(req);
+      if (route === null) {
+        return err({
+          kind: "validation",
+          code: "invalid_settings_route",
+          message: "Unknown Settings page."
+        });
+      }
+      openAuxiliaryWindow(
+        (palette) => openSettingsWindow(palette, route),
+        senderWindow(context)
+      );
       return ok(null);
     });
     registerAppDocumentHandlers(bus, (kind, context) => {
@@ -1007,6 +1029,31 @@ if (!gotSingleInstanceLock) {
     registerLocalAgentHandlers(bus, mcpPolicy, () => {
       emitEvent("localAgents:changed", mcpPolicy.snapshot());
     });
+    // Agents PwrGit hands work TO (Settings → AI Providers / AI Features) —
+    // the opposite direction from Local Agents above. Per profile, and
+    // nothing is probed until Settings asks or a job resolves its agent.
+    const aiProviderSettings = new AiProviderSettingsStore(db);
+    const aiProviders = createAiProviderService({
+      settings: aiProviderSettings,
+      acpModelCache: new AcpModelCache(
+        join(app.getPath("userData"), "cache", "acp-models.json")
+      ),
+      codexModelCache: new CodexModelCache(
+        join(app.getPath("userData"), "cache", "codex-models.json")
+      ),
+      scratchDir: join(app.getPath("temp"), "pwrgit-agent"),
+      // Built-app E2E pins "nothing installed" so a spec never probes the
+      // developer's own CLIs. Packaged builds ignore it.
+      discoveryDisabled:
+        !app.isPackaged && process.env["PWRGIT_E2E_AGENT_UNAVAILABLE"] === "1"
+    });
+    registerAiProviderHandlers(bus, {
+      service: aiProviders,
+      store: aiProviderSettings,
+      profiles,
+      onChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot)
+    });
+    app.on("before-quit", () => aiProviders.dispose());
     // The loopback listener stays off until the operator turns it on: it is a
     // standing grant on their repositories, not a default.
     const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");

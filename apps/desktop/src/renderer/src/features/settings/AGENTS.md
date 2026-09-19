@@ -113,3 +113,50 @@ reads cannot catch that table being wrong.
 
 The rest is in `src/main/forge/AGENTS.md`, which owns why a product is chosen and
 never guessed from a hostname.
+
+## AI Providers and AI Features are per profile, in a window that is not
+
+`AiProvidersSettings.tsx` has one card per provider (Codex, then the ACP
+agents). `AiFeaturesSettings.tsx` has one card per section. Both read
+`AiProvidersContext`, which sits above the nav **and** the panes. That
+placement is deliberate: a provider's nav dot and its card chip are two
+renderings of one `describeAiProviders` answer (`ai-provider-status.ts`), and
+PwrAgnt shipped a green dot over a broken card when the two were computed
+separately.
+
+- **The window picks a profile; the panes show it.** Settings serves every
+  profile, but AI settings belong to one. `SettingsWindow` resolves which one:
+  the deep link's `profile`, else the reader's pick, else the active profile,
+  else the first. The context is keyed by that id and drops every answer when
+  it changes. The picker sits in each pane head, so nobody edits another
+  profile's settings unawares.
+- **Nothing is probed until someone asks.** `request()` is called when either
+  AI pane mounts or the AI Providers group unfolds. Opening Settings on General
+  spawns nothing. Main serves from cache; only Re-check forces a re-probe.
+- **Model probes start the agent.** `aiProviders:acpModels` really starts the
+  agent, so only an agent a job is routed to is probed on its own
+  (`useInUseAcpModelProbes`). Any other agent is probed only when someone
+  clicks "Check session".
+- **Show what runs, not what is stored.** The provider select and the "Default
+  for" rows both go through `effectiveJobProvider`. A job that refuses ACP
+  (`AI_JOBS[job].acp === false`) offers only Codex and says why. A stored model
+  the running backend doesn't list is cleared once, and only against a list
+  that actually loaded, because an empty one may just be a failed read.
+- **`update` returns the failure** (`null` on success), like `writeHost` in
+  Forges, so each field can put its error beside itself.
+- **AI is off until someone turns it on, per profile.** The switch lives at
+  the bottom of the sidebar (`sidebar/AiFeaturesSwitch.tsx`) and again as AI
+  Features' first card. Both go through `resolveAiToggleAction`
+  (`ai-enablement.ts`), so they agree on when `AiConsentDialog` is shown: the
+  first switch-on, and never again. Main refuses `enabled` without
+  `consentAcceptedAt`, so skipping the dialog cannot switch it on. Only the
+  sidebar checks readiness, and only when the switch is clicked; a switch that
+  probed on mount would start `codex` in every window at launch. The dialog
+  copy states what leaves the machine, so **a feature that sends more must
+  update `AiConsentDialog` before it ships.**
+
+Deep links: `settings:open {page, sub?, profileId?}` opens or focuses the
+window. A new window boots on `#settings?page=…` (`parseSettingsRouteHash`); an
+open one receives `settings:navigate`. Both are checked against
+`SETTINGS_PAGE_SUBS` in `@pwrgit/shared`, the same table that decides which
+nav rows expand. The main-side contract is in `src/main/ai/AGENTS.md`.
