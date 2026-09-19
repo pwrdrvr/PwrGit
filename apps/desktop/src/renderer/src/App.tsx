@@ -5,6 +5,7 @@ import type {
   Commit,
   FileInsightContext,
   Profile,
+  RebaseOperation,
   Repo,
   RepoSearchHit,
   TagSummary,
@@ -172,9 +173,9 @@ export function App() {
   const [selectedCommits, setSelectedCommits] = useState<Set<string>>(
     new Set()
   );
-  const [rebaseAction, setRebaseAction] = useState<
-    "squash" | "reorder" | null
-  >(null);
+  const [rebaseAction, setRebaseAction] = useState<RebaseOperation | null>(
+    null
+  );
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
   const [fileInsightTarget, setFileInsightTarget] = useState<{
     path: string;
@@ -256,7 +257,7 @@ export function App() {
     setRebaseAction(null);
   }, []);
 
-  const startRebase = useCallback((op: "squash" | "reorder") => {
+  const startRebase = useCallback((op: RebaseOperation) => {
     setRebaseAction(op);
     setRailCollapsed(false);
   }, []);
@@ -803,6 +804,7 @@ export function App() {
                     count={selectedCommits.size}
                     onSquash={() => startRebase("squash")}
                     onReorder={() => startRebase("reorder")}
+                    onTidy={() => startRebase("tidy")}
                     onOpenRebaseTool={() =>
                       startRebase(rebaseAction ?? "squash")
                     }

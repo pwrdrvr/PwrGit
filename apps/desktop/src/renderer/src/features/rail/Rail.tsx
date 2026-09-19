@@ -5,7 +5,12 @@ import {
   useState,
   useSyncExternalStore
 } from "react";
-import type { OperationState, Worktree, WorktreeState } from "@pwrgit/shared";
+import type {
+  OperationState,
+  RebaseOperation,
+  Worktree,
+  WorktreeState
+} from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import {
   commitNudgeCount,
@@ -45,7 +50,7 @@ export function Rail({
   state: WorktreeState | null;
   activeEmail: string;
   selectedHashes: string[];
-  rebaseAction: "squash" | "reorder" | null;
+  rebaseAction: RebaseOperation | null;
   /** A commit clicked in the lineage — the Changes tab shows ITS files. */
   commitFocus: CommitFocus | null;
   onCloseCommit: () => void;
@@ -203,6 +208,7 @@ export function Rail({
           sourceHead={state?.head ?? null}
           selectedHashes={selectedHashes}
           op={rebaseAction}
+          branch={worktree?.branch ?? null}
           onClear={onClearSelection}
         />
       )}
