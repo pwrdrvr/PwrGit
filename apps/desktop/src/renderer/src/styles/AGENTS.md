@@ -132,6 +132,24 @@ The block is a **subset** of PwrAgnt's contract on purpose: tokens no PwrGit
 surface paints with are left out, because an unread token drifts silently.
 Pull one back in from PwrAgnt's `docs/UI-THEME.md` when something needs it.
 
+## A bundled font is requested by its `@font-face` name
+
+A bundled face loads only when a rule names its exact `@font-face` family, and
+nothing warns when none does: text falls through the stack. @fontsource calls
+Geist's sans "Geist Sans", not upstream's "Geist" (the name PwrAgnt's
+`docs/UI-THEME.md` uses). Asking for "Geist" left the bundled sans unloaded from
+v0.1.0 through 0.17.0, so sans text drew in whatever the machine had installed:
+the platform font, on a machine without Geist. `bundled-fonts.test.ts` fails
+unless a font token leads with each family `fonts.css` imports.
+
+`document.fonts.check('13px Geist')` returned `true` throughout. `check()` is
+vacuously true for a family no face in the set matches, so it cannot show a face
+loaded. Ask CDP's `CSS.getPlatformFontsForNode`, which names the font that drew
+the glyphs and whether it is a web font.
+
+The bundled Geist Sans is latin only. A glyph outside it — the `↻` in the sans
+"Fetch all repos" label — is still drawn by the OS font, beside Geist.
+
 ## Theme selection uses one light attribute
 
 The dark palette is the bare `:root`; Light (including resolved System mode)

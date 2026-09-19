@@ -16,8 +16,15 @@
 :root {
   color-scheme: dark;
 
-  /* Type */
-  --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+  /* Type. Each stack leads with the family name its bundled @font-face
+     registers (fonts.css), which for the sans is @fontsource's "Geist Sans",
+     not upstream's "Geist". Through 0.17.0 this asked for "Geist": no rule ever
+     requested the bundled face, it never loaded, and sans text drew in
+     whatever the machine had installed — the platform UI font, without a
+     system Geist. "Geist" stays second, so a system-wide install of upstream
+     Geist is tried for glyphs outside the bundled latin subset.
+     bundled-fonts.test.ts holds the lead. */
+  --font-sans: "Geist Sans", "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
   --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
 
   /* Sidebar title size — the user-adjustable text-size axis (Settings →
