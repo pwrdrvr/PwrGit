@@ -62,8 +62,8 @@ one screen; see `design/Refresh Affordances - Normalization.dc.html`.
 Three rules fall out of that, and a new refresh control needs all three:
 
 - **Draw the glyph with `lib/RefreshGlyph.tsx`**, never a `↻` text character.
-  `--font-mono` contains no U+21BB, so that character resolves through an OS
-  fallback and changes shape per platform. A text node also gives an animation
+  Neither bundled face contains U+21BB, so that character resolves through an
+  OS fallback and changes shape per platform. A text node also gives an animation
   nothing to target: the rule had to spin the *button*, and a bordered 24px box
   cartwheeled.
 - **Paint busy from `[aria-busy="true"]`, not a class.** The blanket
@@ -131,6 +131,26 @@ a shared package. PwrGit-only tokens (`--border-default`, `--accent-tint`,
 The block is a **subset** of PwrAgnt's contract on purpose: tokens no PwrGit
 surface paints with are left out, because an unread token drifts silently.
 Pull one back in from PwrAgnt's `docs/UI-THEME.md` when something needs it.
+
+## A bundled font is requested by its `@font-face` name
+
+A bundled face loads only when a rule names its exact `@font-face` family, and
+nothing warns when none does: text falls through the stack. @fontsource calls
+Geist's sans "Geist Sans", not upstream's "Geist" (the name PwrAgnt's
+`docs/UI-THEME.md` uses). Asking for "Geist" left the bundled sans unloaded from
+v0.1.0 through 0.17.0, so sans text drew in whatever the machine had installed:
+the platform font, on a machine without Geist. `bundled-fonts.test.ts` fails
+unless a font token leads with each family `fonts.css` imports.
+
+`document.fonts.check('13px Geist')` returned `true` throughout. `check()` is
+vacuously true for a family no face in the set matches, so it cannot show a face
+loaded. Ask CDP's `CSS.getPlatformFontsForNode`, which names the font that drew
+the glyphs and whether it is a web font.
+
+The bundled Geist Sans is latin only, so a glyph outside it draws in the OS
+font beside Geist. "↻ Fetch all repos" came apart exactly that way once Geist
+loaded. That is why an icon is an SVG from `lib/*Glyph.tsx`, never a text
+character.
 
 ## Theme selection uses one light attribute
 
