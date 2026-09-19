@@ -62,8 +62,8 @@ one screen; see `design/Refresh Affordances - Normalization.dc.html`.
 Three rules fall out of that, and a new refresh control needs all three:
 
 - **Draw the glyph with `lib/RefreshGlyph.tsx`**, never a `↻` text character.
-  `--font-mono` contains no U+21BB, so that character resolves through an OS
-  fallback and changes shape per platform. A text node also gives an animation
+  Neither bundled face contains U+21BB, so that character resolves through an
+  OS fallback and changes shape per platform. A text node also gives an animation
   nothing to target: the rule had to spin the *button*, and a bordered 24px box
   cartwheeled.
 - **Paint busy from `[aria-busy="true"]`, not a class.** The blanket
@@ -147,8 +147,10 @@ vacuously true for a family no face in the set matches, so it cannot show a face
 loaded. Ask CDP's `CSS.getPlatformFontsForNode`, which names the font that drew
 the glyphs and whether it is a web font.
 
-The bundled Geist Sans is latin only. A glyph outside it — the `↻` in the sans
-"Fetch all repos" label — is still drawn by the OS font, beside Geist.
+The bundled Geist Sans is latin only, so a glyph outside it draws in the OS
+font beside Geist. "↻ Fetch all repos" came apart exactly that way once Geist
+loaded. That is why an icon is an SVG from `lib/*Glyph.tsx`, never a text
+character.
 
 ## Theme selection uses one light attribute
 

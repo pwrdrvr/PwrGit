@@ -4,14 +4,15 @@ import type { ReactElement } from "react";
  * The one refresh/fetch glyph.
  *
  * Every control that re-reads state draws this — over the network
- * (`git fetch`) or from disk. It replaced a `↻` text node in three places,
+ * (`git fetch`) or from disk. It replaced a `↻` text node in four places,
  * for two reasons that both bit.
  *
- * PwrGit's `--font-mono` stack contains no U+21BB. The character therefore
- * resolved through whatever fallback the OS happened to supply, so the remotes
- * buttons drew a different shape, weight and baseline per platform and never
- * matched the stroked 13px icons beside them. (`--font-sans` does resolve it,
- * which is why only the mono callers looked wrong.)
+ * Neither bundled face, Geist Mono or Geist Sans, contains U+21BB. The
+ * character therefore resolved through whatever fallback the OS happened to
+ * supply, so the remotes buttons drew a different shape, weight and baseline
+ * per platform and never matched the stroked 13px icons beside them. The sans
+ * caller, "Fetch all repos", only looked right while Geist Sans was failing to
+ * load and its whole label was already in the OS font.
  *
  * And a text node gives an animation nothing to target. `.ref-fetch-all` had
  * to spin the *button*, so a bordered 24px box cartwheeled — border, radius
