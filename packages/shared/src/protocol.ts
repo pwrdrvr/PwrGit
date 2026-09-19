@@ -13,8 +13,11 @@
 import type { ForgeHostMap } from "./forge-remote";
 import type {
   AgentAvailability,
-  AgentRebaseProposal,
-  AgentRequestPhase,
+  AgentChoice,
+  AgentMessageDraft,
+  AgentModelList,
+  AgentTidyProposal,
+  AgentTidyRevision,
   BranchRef,
   BulkSyncMode,
   BulkSyncProgress,
@@ -71,6 +74,7 @@ import type {
   RebaseCheckResult,
   RebaseOperation,
   RebasePlan,
+  HistoryEditProgram,
   RemoteBranchPage,
   RemoteTagAction,
   RemoteTagPlan,
@@ -1621,42 +1625,77 @@ export interface Commands {
       worktreeId: string;
       commits: RebaseCommitRef[];
       op: RebaseOperation;
+      /** Required for `tidy`; for `squash` it carries the edited message. */
+      program?: HistoryEditProgram;
     };
     res: RebasePlan;
   };
+  /**
+   * Replays the program in a disposable clone and proves it: every selected
+   * commit used exactly once, a clean replay, and a final tree identical to
+   * the current tip. Only a clean result carries an approval token.
+   */
   "rebase:check": {
     req: {
       worktreeId: string;
       commits: RebaseCommitRef[];
       op: RebaseOperation;
+      program?: HistoryEditProgram;
     };
     res: RebaseCheckResult;
   };
+  /**
+   * The approval binds the program's shape — which commits fold into which,
+   * in what order. Messages may still be edited after the check: they are
+   * data, and cannot change the tree the check proved.
+   */
   "rebase:apply": {
     req: {
       worktreeId: string;
       commits: RebaseCommitRef[];
       op: RebaseOperation;
+      program?: HistoryEditProgram;
       approvalToken: string;
     };
     res: null;
   };
 
-  // Proposal-only local-agent workflow. Agent output is display metadata; the
-  // existing rebase:check -> approvalToken -> rebase:apply path remains the
-  // sole route to a Git mutation.
+  // Local agents author text and history proposals from data PwrGit sends
+  // them; they get no tools, no repo path, and no Git primitive. Every Tidy
+  // proposal still goes through rebase:check -> approvalToken -> rebase:apply,
+  // the sole route to a Git mutation.
   "agent:availability": {
     req: { profileId: ProfileId; refresh?: boolean };
     res: AgentAvailability;
   };
-  "agent:rebaseDraft": {
+  "agent:models": {
+    req: { profileId: ProfileId };
+    res: AgentModelList;
+  };
+  /** A commit message for selected commits (Squash) or for staged changes
+   *  (the commit box). */
+  "agent:draftMessage": {
+    req: {
+      requestId: string;
+      worktreeId: string;
+      source:
+        | { kind: "commits"; commits: RebaseCommitRef[] }
+        | { kind: "staged" };
+      choice?: AgentChoice;
+    };
+    res: AgentMessageDraft;
+  };
+  /** A proposed history for the selected commits, or a revision of one whose
+   *  isolated check failed. */
+  "agent:tidyPlan": {
     req: {
       requestId: string;
       worktreeId: string;
       commits: RebaseCommitRef[];
-      op: RebaseOperation;
+      revision?: AgentTidyRevision;
+      choice?: AgentChoice;
     };
-    res: AgentRebaseProposal;
+    res: AgentTidyProposal;
   };
   "agent:cancel": {
     req: { requestId: string };
@@ -1942,13 +1981,6 @@ export type Res<C extends CommandName> = Commands[C]["res"];
 
 /** Server → renderer push events. */
 export interface Events {
-  "agent:requestState": {
-    requestId: string;
-    profileId: ProfileId;
-    worktreeId: string;
-    phase: AgentRequestPhase;
-    message?: string;
-  };
   "profile:changed": ProfileList;
   "repo:changed": { profileId: ProfileId };
   /** Live Git progress for one clone command, correlated by operation id. */

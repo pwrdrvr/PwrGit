@@ -37,12 +37,14 @@ test("an unavailable agent leaves the deterministic isolated rebase workflow usa
 
   await expect(window.locator(".rebase-plan")).toContainText("pick");
   await expect(window.locator(".rebase-plan")).toContainText("squash");
-  await expect(window.locator(".rebase-agent__status")).toContainText(
-    "No safe agent"
+  // No agent is a dashed chip and a link, not a warning: the message box
+  // starts as Git's joined subjects and everything below it still works.
+  await expect(window.locator(".agent-chip")).toContainText("No agent");
+  await expect(window.locator(".msg-foot")).toContainText("Joined from 2 subjects");
+  await expect(window.locator(".msg-box__input")).toHaveValue(
+    "first focused change\n\nsecond focused change"
   );
-  await expect(window.locator(".rebase-agent__status")).toContainText(
-    "deterministic plan"
-  );
+  await expect(window.locator(".proof-ledger")).toContainText("needs replay");
 
   const check = window.getByRole("button", { name: "Check in isolated copy" });
   await expect(check).toBeEnabled();
@@ -52,6 +54,8 @@ test("an unavailable agent leaves the deterministic isolated rebase workflow usa
     { timeout: 20_000 }
   );
   await expect(window.getByRole("button", { name: "Apply rebase" })).toBeEnabled();
+  await expect(window.locator(".proof-ledger")).toContainText("Replays cleanly");
+  await expect(window.locator(".proof-ledger")).not.toContainText("needs replay");
 
   // The test intentionally stops before Apply: discovery and drafting must not
   // mutate history, and the final local rewrite remains a distinct user action.
