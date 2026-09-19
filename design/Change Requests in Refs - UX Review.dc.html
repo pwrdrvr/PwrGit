@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-elev: #101010; --bg-hover: #14110d; --bg-row-active: #120800; --bg-active-strong: #241000;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14); --line3: rgba(247, 243, 235, 0.2);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3;
+            --warn: #d99a3d;
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badbord: rgba(185, 66, 50, 0.28); --badt: #ffb0a1;
+            /* PR dot palette, from tokens.css --status-* and --brand-purple */
+            --pr-pass: #5fa969; --pr-fail: #c45a3a; --pr-pend: #d99a3d; --pr-unk: #6b6660; --pr-merged: #8a6dc4;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Branch Switching and Ref Relevance") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-sub code { font: 500 10.5px/1.4 var(--mono); color: var(--t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 900px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 900px; }
+          .note b { color: var(--t2); font-weight: 650; }
+          .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .rec { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--acc); color: var(--accon); font: 700 8.5px/1 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 440px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0 0 5px; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem p:last-child { margin-bottom: 0; }
+
+          /* ---- matrix table ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 190px 170px 150px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.4 var(--sans); color: var(--t2); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; justify-self: start; }
+          .st.keep { background: rgba(95, 169, 105, 0.16); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          /* ---- refs dialog, true size from the shipped .refs-* CSS ---- */
+          .modal { width: 940px; border: 1px solid var(--line2); border-radius: 12px; background: var(--bg-panel); overflow: hidden; }
+          .mhead { display: flex; align-items: flex-end; gap: 22px; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
+          .mhead .eyebrow { display: block; margin-bottom: 5px; color: var(--acc); font: 700 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+          .mhead h3 { margin: 0; color: var(--t1); font: 650 16px/1.1 var(--sans); }
+          .mhead .path { color: var(--t3); font: 500 10.5px/1.2 var(--mono); padding-bottom: 2px; }
+          .mbar { display: flex; align-items: center; gap: 10px; min-height: 55px; padding: 9px 16px; border-bottom: 1px solid var(--line); }
+          .tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-input); }
+          .tabs button { appearance: none; height: 27px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--t3); font: 600 11px/1 var(--sans); cursor: pointer; white-space: nowrap; }
+          .tabs button.on { background: var(--bg-row-active); color: var(--accb); }
+          .tabs button span { margin-left: 4px; color: var(--tsub); font-family: var(--mono); }
+          .tabs button.hit span { color: var(--accb); }
+          .tabs button.miss span { opacity: .55; }
+          .search { display: flex; align-items: center; gap: 7px; flex: 1; max-width: 310px; height: 34px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-input); color: var(--t3); font: 500 11.5px/1 var(--sans); }
+          .search b { color: var(--t1); font-weight: 500; }
+          .search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--t1); font: 500 11.5px/1 var(--sans); }
+          .mbar .ra { margin-left: auto; }
+          .mbody { padding: 10px 14px 14px; }
+          .foot { padding: 10px 0 2px; text-align: center; color: var(--t3); font: 500 10.5px/1 var(--sans); }
+          .foot b { color: var(--t2); font-weight: 600; }
+
+          /* branch rows (.refs-table) */
+          .btr { display: grid; grid-template-columns: minmax(150px, 1.5fr) minmax(100px, 1fr) 72px 78px 200px; gap: 12px; align-items: center; padding: 7px 9px; border-top: 1px solid var(--line); }
+          .btr.h { border-top: 0; height: 30px; padding: 0 9px; color: var(--tsub); font: 700 9px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; }
+          .btr.sel { background: var(--bg-hover); border-radius: 6px; }
+          .bid { display: flex; align-items: center; gap: 8px; min-width: 0; }
+          .bid .bico { flex: none; display: inline-flex; color: var(--tsub); }
+          .bid > div { min-width: 0; }
+          .bid strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 600 11.5px/1.2 var(--mono); }
+          .bid small { display: flex; align-items: center; gap: 6px; margin-top: 3px; min-width: 0; color: var(--t3); font: 500 10px/1.25 var(--sans); }
+          .bid small .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .bid small.viapr .tx { color: var(--t2); }
+          .bmut { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font: 500 10px/1.3 var(--mono); }
+          .bstat { font: 600 10px/1.3 var(--mono); color: var(--t2); }
+          .bstat.warn { color: var(--warn); }
+          .bstat.ok { color: var(--okt); }
+          .bstat.rem { color: var(--accb); }
+          .bstat.mer { color: #b9a2e8; }
+          .bact { display: flex; justify-content: flex-end; gap: 6px; }
+          .ra { height: 30px; padding: 0 11px; border: 1px solid var(--abord); border-radius: 7px; background: var(--asoft); color: var(--accb); font: 600 10.5px/1 var(--sans); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+          .ra.quiet { border-color: var(--line2); background: transparent; color: var(--t2); }
+          .ra.ico { width: 30px; padding: 0; justify-content: center; font: 600 12px/1 var(--mono); }
+          mark { background: rgba(255, 138, 31, 0.22); color: var(--t1); border-radius: 2px; padding: 0 1px; }
+
+          /* change-request rows */
+          .ptr { display: grid; grid-template-columns: minmax(260px, 2.1fr) 92px 112px 56px 236px; gap: 12px; align-items: center; padding: 7px 9px; border-top: 1px solid var(--line); }
+          .ptr.h { border-top: 0; height: 30px; padding: 0 9px; color: var(--tsub); font: 700 9px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; }
+          .pid { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+          .pid .l1 { display: flex; align-items: center; gap: 7px; min-width: 0; }
+          .pid .l1 strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 600 11.5px/1.2 var(--sans); }
+          .pid .l2 { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 1px; }
+          .pid .ref { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font: 500 10px/1.2 var(--mono); }
+          .pid .ref i { font-style: normal; color: var(--tsub); }
+          .loc { flex: none; display: inline-flex; align-items: center; height: 15px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--t3); font: 600 8.5px/1 var(--mono); white-space: nowrap; }
+          .loc.here { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .loc.fork { border-color: rgba(138, 109, 196, .45); color: #b9a2e8; }
+          .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); font: 500 10.5px/1.2 var(--sans); }
+          .who.bot { color: var(--t3); font-family: var(--mono); font-size: 10px; }
+          .chk { display: flex; align-items: center; gap: 6px; color: var(--t2); font: 600 10px/1.2 var(--mono); white-space: nowrap; }
+          .chk .d { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--pr-unk); }
+          .chk.passing .d { background: var(--pr-pass); } .chk.failing .d, .chk.conflicting .d { background: var(--pr-fail); }
+          .chk.pending .d { background: var(--pr-pend); } .chk.merged .d { background: var(--pr-merged); }
+          .chk.failing, .chk.conflicting { color: var(--badt); }
+
+          /* the shipped .pr-chip, dark theme */
+          .prc { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-panel); color: var(--t2); font: 600 9.5px/1 var(--mono); }
+          .prc .d { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--pr-unk); }
+          .prc.passing .d { background: var(--pr-pass); } .prc.failing .d, .prc.conflicting .d { background: var(--pr-fail); }
+          .prc.pending .d { background: var(--pr-pend); } .prc.merged .d { background: var(--pr-merged); }
+          .prc.draft::after { content: ""; position: absolute; bottom: 2px; left: 50%; width: 16px; height: 2px; border-radius: 999px; transform: translateX(-50%); background: var(--pr-unk); }
+          .prc.hit { border-color: var(--abord); color: var(--t1); }
+
+          /* inline notice under the table */
+          .lookup { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 9px 11px; border: 1px dashed var(--line2); border-radius: 8px; color: var(--t3); font: 500 10.5px/1.45 var(--sans); }
+          .lookup b { color: var(--t2); font-weight: 600; }
+
+          .empty { padding: 26px 0 14px; text-align: center; color: var(--t3); font: 500 11px/1.5 var(--sans); }
+          .empty b { color: var(--t2); }
+          .empty button { appearance: none; border: 0; padding: 0; background: transparent; color: var(--accb); font: 600 11px/1.5 var(--sans); cursor: pointer; }
+          .btr.h span, .ptr.h span { white-space: nowrap; }
+
+          /* ---- live prototype chrome ---- */
+          .proto { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--abord); border-radius: 12px; background: #050505; }
+          .readout { font: 500 10px/1.5 var(--mono); color: var(--tsub); }
+          .hint { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 900px; }
+          .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+          .chips button { appearance: none; height: 22px; padding: 0 8px; border: 1px solid var(--line2); border-radius: 999px; background: transparent; color: var(--t2); font: 600 9.5px/1 var(--mono); cursor: pointer; }
+          .chips button:hover { border-color: var(--abord); color: var(--accb); }
+          .hide { display: none !important; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the dialog cannot find a PR that the graph behind it has already found</span>
+        </div>
+        <p class="dv-sub">Typing <code>106</code> into the refs browser returns nothing, while the lineage graph under the dialog shows a <code>#106</code> chip on ten of that PR&#8217;s commits. The number is already cached, but the search never looks at it. This is a join we skipped, not a missing crawl.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Three misses">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Three places the number drops out</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>Local rows match on three strings, and the PR is not one of them</h4><p><code>RepoRefsModal</code> filters locals in the renderer on <code>name + upstream + subject</code>. A local branch with an open PR that the chip in the sidebar already shows is still unfindable by its number or title.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>Remote rows come straight from git</h4><p><code>repo:remoteBranches</code> pages <code>for-each-ref</code> output and filters it by name. Git has no PR numbers. Separately, <code>search_fts.pr</code> is filled only for <code>kind = 'worktree'</code>. The <code>remote_branch</code> trigger inserts <code>NULL</code>, so &#8984;K is blind here too.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>The branch sweep only asks about local branches</h4><p><code>branch_pr</code> is keyed by the branches in <code>refs/heads</code>. #106&#8217;s head is fetched (<code>origin/codex/&#8230;</code>) but has never been checked out, so the sweep has no row for it. The ask was &#8220;the branch is local&#8221;, but it is only fetched, and that is exactly the case these tables miss.</p></div></div>
+              <div class="fitem"><span class="pin q">?</span><div><h4>But <code>commit_pr</code> already knows</h4><p>The graph resolves PRs by commit SHA. In the real repo, <code>commit_pr</code> holds <code>#106 &#183; open &#183; head_ref codex/release-console-rebuild-plan</code> ten times over, so the fix can start from data already on disk. It is incomplete, though: it covers only PRs whose commits someone has scrolled past.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b What is cached">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>What each cache can answer today</div>
+            <div class="tbl" style="width:660px">
+              <div class="tr head"><span>Cache</span><span>Filled by</span><span>Covers</span><span>Can it find #106?</span></div>
+              <div class="tr"><span><code>branch_pr</code></span><span>250-branch sweep, 10&#8239;min TTL</span><span>Local branches only</span><span class="st bug">No row</span></div>
+              <div class="tr"><span><code>commit_pr</code></span><span>Graph viewport, by SHA</span><span>Commits someone scrolled past</span><span class="st keep">Yes, by luck</span></div>
+              <div class="tr"><span><code>search_fts.pr</code></span><span>Triggers on <code>branch_pr</code></span><span>Worktree rows only</span><span class="st bug">No</span></div>
+              <div class="tr last"><span><em style="font-style:normal;color:var(--accb)">open change requests</em></span><span>Nothing yet</span><span>Every open PR, fetched or not</span><span class="st chg">Proposed, turn 3</span></div>
+            </div>
+            <p class="note" style="max-width:660px">The missing row is the cheap one. One list call per repo returns every <b>open</b> change request with its number, title, head, base, author and checks, which is everything this dialog needs. Merged and closed ones come later, one lookup at a time, when someone types their number.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;should &#8984;K find PRs too, not just this dialog?&#8221; &#183; &#8220;what does a PR from a fork look like here?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Where PRs live in the refs browser &#8212; the same query, three ways</span>
+        </div>
+        <p class="dv-sub">Every frame shows the same moment: the reader has typed <code>106</code> in <code>orbit-deploy</code>, whose PR #106 heads a branch that is fetched but not checked out. The sibling tab follows the forge&#8217;s own noun, via <code>changeRequestLabel</code>: <b style="color:var(--t2)">Pull requests</b> on GitHub and GitCafe, <b style="color:var(--t2)">Merge requests</b> with a <code>!</code> sigil on GitLab. A repo whose origin has no forge gets no tab.</p>
+        <div class="dv-opts">
+
+          <!-- 2a -->
+          <div class="dv-opt" id="2a" data-screen-label="2a Branches learn PRs">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>No new tab. Branches match on their PR&#8217;s number and title, and wear its chip</div>
+            <div class="modal">
+              <div class="mhead"><div><span class="eyebrow">Repository refs</span><h3>orbit-deploy</h3></div><span class="path">~/src/orbit-deploy</span></div>
+              <div class="mbar">
+                <div class="tabs"><button class="on">Branches<span>19</span></button><button>Tags<span>25</span></button><button>Remotes<span>1</span></button></div>
+                <div class="search">&#8981; <b>106</b></div>
+                <span class="ra">Push to remotes&#8230;</span>
+              </div>
+              <div class="mbody">
+                <div class="btr h"><span>Branch</span><span>Upstream</span><span>Status</span><span>Last commit</span><span></span></div>
+                <div class="btr sel"><div class="bid"><span class="bico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span><div><strong>codex/console-rebuild-plan</strong><small class="viapr"><span class="prc passing hit"><span class="d"></span><mark>#106</mark></span><span class="tx">feat: rebuild the deploy console</span></small></div></div><span class="bmut">origin/codex/console-rebuild-plan</span><span class="bstat rem">Remote</span><span class="bmut">5mo</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span></div></div>
+                <div class="foot">Showing <b>1</b> of 1 &#183; matched on pull request #106</div>
+              </div>
+            </div>
+            <p class="note" style="max-width:940px"><b>The smallest change.</b> When the match came from the PR, the second line shows the PR title instead of the last commit subject, so the reader can see <i>why</i> the row matched. Bare digits and <code>#106</code> both hit the number exactly and rank first. Title words match too (&#8220;console&#8221; finds it).</p>
+            <p class="note" style="max-width:940px"><b>What it cannot do:</b> show a PR whose head was never fetched, most often one from a fork. Its branch is not in <code>refs/remotes</code>, so no row exists for it to decorate. A contributor&#8217;s PR stays unfindable, and the reader is back to the browser.</p>
+          </div>
+
+          <!-- 2b -->
+          <div class="dv-opt" id="2b" data-screen-label="2b Sibling tab">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>A Pull requests tab beside Remotes. Each row carries its branch&#8217;s verbs, not a link out</div>
+            <div class="modal">
+              <div class="mhead"><div><span class="eyebrow">Repository refs</span><h3>orbit-deploy</h3></div><span class="path">~/src/orbit-deploy</span></div>
+              <div class="mbar">
+                <div class="tabs"><button>Branches<span>19</span></button><button>Tags<span>25</span></button><button>Remotes<span>1</span></button><button class="on">Pull requests<span>6</span></button></div>
+                <div class="search">&#8981; <span style="color:var(--tsub)">Filter by number, title, branch, author&#8230;</span></div>
+                <span class="ra">Push to remotes&#8230;</span>
+              </div>
+              <div class="mbody">
+                <div class="ptr h"><span>Pull request</span><span>Author</span><span>Checks</span><span>Updated</span><span></span></div>
+                <div class="ptr"><div class="pid"><div class="l1"><span class="prc passing"><span class="d"></span>#121</span><strong>docs: fix a typo in the quickstart</strong></div><div class="l2"><span class="loc fork">fork</span><span class="ref">octo-contrib:fix/quickstart-typo <i>&#8594; main</i></span></div></div><span class="who">octo-contrib</span><span class="chk passing"><span class="d"></span>passing</span><span class="bmut">2d</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span><span class="ra quiet ico">&#8599;</span></div></div>
+                <div class="ptr"><div class="pid"><div class="l1"><span class="prc pending"><span class="d"></span>#119</span><strong>Bump jest from 29.7.0 to 30.1.3</strong></div><div class="l2"><span class="loc">origin</span><span class="ref">dependabot/npm_and_yarn/jest-30.1.3 <i>&#8594; main</i></span></div></div><span class="who bot">dependabot</span><span class="chk pending"><span class="d"></span>pending</span><span class="bmut">3d</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span><span class="ra quiet ico">&#8599;</span></div></div>
+                <div class="ptr"><div class="pid"><div class="l1"><span class="prc passing draft"><span class="d"></span>#112</span><strong>feat: per-tenant deploy windows</strong></div><div class="l2"><span class="loc here">&#8962; orbit-deploy-windows</span><span class="ref">tenant-deploy-windows <i>&#8594; main</i></span></div></div><span class="who">you</span><span class="chk passing"><span class="d"></span>draft &#183; passing</span><span class="bmut">5d</span><div class="bact"><span class="ra">Reveal worktree</span><span class="ra quiet ico">&#8599;</span></div></div>
+                <div class="ptr"><div class="pid"><div class="l1"><span class="prc failing"><span class="d"></span>#117</span><strong>Bump aws-cdk-lib from 2.248.0 to 2.260.0</strong></div><div class="l2"><span class="loc">origin</span><span class="ref">dependabot/npm_and_yarn/aws-cdk-lib-2.260.0 <i>&#8594; main</i></span></div></div><span class="who bot">dependabot</span><span class="chk failing"><span class="d"></span>failing</span><span class="bmut">1w</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span><span class="ra quiet ico">&#8599;</span></div></div>
+                <div class="ptr"><div class="pid"><div class="l1"><span class="prc passing"><span class="d"></span>#106</span><strong>feat: rebuild the deploy console</strong></div><div class="l2"><span class="loc">origin</span><span class="ref">codex/console-rebuild-plan <i>&#8594; main</i></span></div></div><span class="who">you</span><span class="chk passing"><span class="d"></span>passing</span><span class="bmut">5mo</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span><span class="ra quiet ico">&#8599;</span></div></div>
+                <div class="ptr"><div class="pid"><div class="l1"><span class="prc conflicting"><span class="d"></span>#103</span><strong>Bump semver from 6.3.0 to 6.3.1</strong></div><div class="l2"><span class="loc">origin</span><span class="ref">dependabot/npm_and_yarn/semver-6.3.1 <i>&#8594; main</i></span></div></div><span class="who bot">dependabot</span><span class="chk conflicting"><span class="d"></span>conflicts</span><span class="bmut">8mo</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span><span class="ra quiet ico">&#8599;</span></div></div>
+                <div class="foot">6 open &#183; refreshed 2&#8239;min ago</div>
+              </div>
+            </div>
+            <p class="note" style="max-width:940px"><b>The verbs are the branch verbs.</b> You come here to get onto a PR, not to review it, so the primary is <b>Switch here</b>, just as on the Branches tab. A PR already checked out offers <b>Reveal worktree</b> instead. <b>&#8599;</b> is the only way out to the forge. The second-line tag says where the head lives: <code>origin</code> (fetched), <code>&#8962; worktree</code> (checked out), or <code>fork</code>.</p>
+            <p class="note" style="max-width:940px"><b>Fork rows are why this is a tab and not a decoration.</b> For #121, Switch here fetches <code>pull/121/head</code> into a local <code>pr/121</code>, the way <code>gh pr checkout</code> does, and sets its upstream to the fork so a later pull still works. On GitLab it fetches <code>merge-requests/N/head</code>. No other surface in PwrGit can reach that branch. Sorted by last update, newest first, the same way the forge sorts them.</p>
+          </div>
+
+          <!-- 2c -->
+          <div class="dv-opt" id="2c" data-screen-label="2c Both, with counts">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><span class="rec">Recommended</span> Both. The query is shared, so each tab reports its own hit count</div>
+            <div class="modal">
+              <div class="mhead"><div><span class="eyebrow">Repository refs</span><h3>orbit-deploy</h3></div><span class="path">~/src/orbit-deploy</span></div>
+              <div class="mbar">
+                <div class="tabs"><button class="on hit">Branches<span>1</span></button><button class="miss">Tags<span>0</span></button><button class="miss">Remotes<span>0</span></button><button class="hit">Pull requests<span>1</span></button></div>
+                <div class="search">&#8981; <b>106</b></div>
+                <span class="ra">Push to remotes&#8230;</span>
+              </div>
+              <div class="mbody">
+                <div class="btr h"><span>Branch</span><span>Upstream</span><span>Status</span><span>Last commit</span><span></span></div>
+                <div class="btr sel"><div class="bid"><span class="bico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span><div><strong>codex/console-rebuild-plan</strong><small class="viapr"><span class="prc passing hit"><span class="d"></span><mark>#106</mark></span><span class="tx">feat: rebuild the deploy console</span></small></div></div><span class="bmut">origin/codex/console-rebuild-plan</span><span class="bstat rem">Remote</span><span class="bmut">5mo</span><div class="bact"><span class="ra">Switch here</span><span class="ra quiet">New worktree</span></div></div>
+                <div class="foot">Showing <b>1</b> of 1 &#183; matched on pull request #106</div>
+              </div>
+            </div>
+            <p class="note" style="max-width:940px"><b>The query already survives a tab switch.</b> <code>RepoRefsModal</code> keeps one <code>query</code> for all tabs. With a query typed, the tab counts turn into match counts: tabs with a hit take the accent, and a zero dims. Nobody has to guess which tab to search, and the Branches tab stays the answer for &#8220;get me onto #106&#8221;. The Pull requests tab covers what Branches cannot hold: forks, and the list view.</p>
+            <div class="stage" style="width:940px; margin-top:4px">
+              <div class="stage-h"><span class="pin ok">+</span>Same dialog, a number that is not open <em>98 &#183; Pull requests tab</em></div>
+              <div class="ptr h" style="padding:0 9px"><span>Pull request</span><span>Author</span><span>Checks</span><span>Updated</span><span></span></div>
+              <div class="ptr"><div class="pid"><div class="l1"><span class="prc merged hit"><span class="d"></span><mark>#98</mark></span><strong>fix: local rewrites drop the query string</strong></div><div class="l2"><span class="loc">local</span><span class="ref">fix-local-rewrites <i>&#8594; main</i></span></div></div><span class="who">you</span><span class="chk merged"><span class="d"></span>merged</span><span class="bmut">3w</span><div class="bact"><span class="ra quiet">Switch here</span><span class="ra quiet ico">&#8599;</span></div></div>
+              <div class="lookup"><span><b>#98 isn&#8217;t open</b>, so it wasn&#8217;t in the cached list. Looked it up by number on GitHub. Shown here, not added to the open list.</span></div>
+              <p class="note">A query that is only digits (or <code>#</code>/<code>!</code> plus digits) and misses the open list sends one <code>fetchPrsByNumbers</code> call, which already exists for the status monitor. The result is written to <code>commit_pr</code>/<code>branch_pr</code> like every other answer, so asking twice costs nothing. Every verb on a merged row is quiet: switching to a merged branch is allowed but rarely what you meant.</p>
+            </div>
+          </div>
+
+          <!-- 2d -->
+          <div class="dv-opt" id="2d" data-screen-label="2d Live">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Live: 2c. Type a number, a title word, a branch, or an author</div>
+            <div class="proto" style="width:968px">
+              <div class="chips"><button onClick="{{q106}}">106</button><button onClick="{{qHash}}">#121</button><button onClick="{{qConsole}}">console</button><button onClick="{{qBot}}">dependabot</button><button onClick="{{q98}}">98</button><button onClick="{{qBlur}}">blur</button><button onClick="{{qClear}}">clear</button></div>
+              <div class="modal" style="width:940px">
+                <div class="mhead"><div><span class="eyebrow">Repository refs</span><h3>orbit-deploy</h3></div><span class="path">~/src/orbit-deploy</span></div>
+                <div class="mbar">
+                  <div class="tabs"><button class="{{tabBCls}}" onClick="{{toB}}">Branches<span>{{nB}}</span></button><button class="{{tabTCls}}">Tags<span>{{nT}}</span></button><button class="{{tabRCls}}">Remotes<span>{{nR}}</span></button><button class="{{tabPCls}}" onClick="{{toP}}">Pull requests<span>{{nP}}</span></button></div>
+                  <label class="search">&#8981; <input value="{{q}}" onInput="{{onQ}}" placeholder="Filter by number, title, branch, author&#8230;" /></label>
+                  <span class="ra">Push to remotes&#8230;</span>
+                </div>
+                <div class="mbody">
+                  <div class="{{paneBCls}}">
+                    <div class="btr h"><span>Branch</span><span>Upstream</span><span>Status</span><span>Last commit</span><span></span></div>
+                    <sc-for list="{{bRows}}" as="r" hint-placeholder-count="4">
+                      <div class="btr"><div class="bid"><span class="bico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span><div><strong>{{r.name}}</strong><small class="{{r.smallCls}}"><span class="{{r.chipCls}}"><span class="d"></span>{{r.chip}}</span><span class="tx">{{r.sub}}</span></small></div></div><span class="bmut">{{r.up}}</span><span class="{{r.statCls}}">{{r.stat}}</span><span class="bmut">{{r.age}}</span><div class="bact"><span class="ra">{{r.primary}}</span><span class="{{r.secCls}}">New worktree</span></div></div>
+                    </sc-for>
+                    <sc-if value="{{bEmpty}}"><div class="empty">No branches match <b>{{q}}</b>. {{bEmptyHint}} <sc-if value="{{bForkHint}}"><button onClick="{{toP}}">Show it in Pull requests &#8594;</button></sc-if></div></sc-if>
+                  </div>
+                  <div class="{{panePCls}}">
+                    <div class="ptr h"><span>Pull request</span><span>Author</span><span>Checks</span><span>Updated</span><span></span></div>
+                    <sc-for list="{{pRows}}" as="r" hint-placeholder-count="4">
+                      <div class="ptr"><div class="pid"><div class="l1"><span class="{{r.chipCls}}"><span class="d"></span>#{{r.num}}</span><strong>{{r.title}}</strong></div><div class="l2"><span class="{{r.locCls}}">{{r.loc}}</span><span class="ref">{{r.head}} <i>&#8594; {{r.base}}</i></span></div></div><span class="{{r.whoCls}}">{{r.who}}</span><span class="{{r.chkCls}}"><span class="d"></span>{{r.chk}}</span><span class="bmut">{{r.age}}</span><div class="bact"><span class="{{r.primCls}}">{{r.primary}}</span><span class="{{r.secCls}}">New worktree</span><span class="ra quiet ico">&#8599;</span></div></div>
+                    </sc-for>
+                    <sc-if value="{{pLookup}}"><div class="lookup"><span>{{lookupText}}</span></div></sc-if>
+                    <sc-if value="{{pEmpty}}"><div class="empty">No open pull requests match <b>{{q}}</b>.</div></sc-if>
+                  </div>
+                  <div class="foot">{{foot}}</div>
+                </div>
+              </div>
+              <div class="readout">{{readout}}</div>
+              <p class="hint">Branches is a toy list of five, only enough to show the join. Tags and Remotes counts are faked to 0 for any query. Switch tabs with a query typed: it follows you. Try <code style="font:500 10px var(--mono);color:var(--t2)">98</code> on Pull requests for the on-demand lookup, and <code style="font:500 10px var(--mono);color:var(--t2)">#121</code> on Branches for the fork case that 2a alone cannot answer.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;how does the sidebar&#8217;s Remotes section show a fork PR once it&#8217;s checked out?&#8221; &#183; &#8220;draw &#8984;K results with a PR kind&#8221; &#183; &#8220;light theme, 1000&#8239;px window&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">The cache: one list call per repo, not a crawler</span>
+        </div>
+        <p class="dv-sub">ghcrawl was hard because it wanted <i>everything</i>: bodies, comments, closed history, embeddings and clusters across ~12k items. This dialog needs the open set&#8217;s metadata and nothing else. That is one GraphQL page on GitHub and one REST page on GitLab, and it fits under <code>ForgeProvider</code> as a fifth method beside the four that exist.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a What we fetch">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>What is fetched, when, and what it costs</div>
+            <div class="tbl" style="width:860px">
+              <div class="tr head" style="grid-template-columns:170px 250px 170px minmax(0,1fr)"><span>Question</span><span>How</span><span>When</span><span>Cost</span></div>
+              <div class="tr" style="grid-template-columns:170px 250px 170px minmax(0,1fr)"><span>Every open change request</span><span><code>fetchOpenPrs(repo)</code>. GitHub: <code>pullRequests(states: OPEN, first: 100, orderBy: UPDATED_AT)</code>. GitLab: <code>merge_requests?state=opened&amp;per_page=100</code></span><span>With the existing repo sweep (10&#8239;min TTL), on dialog open, and after a fetch</span><span>1 request per repo; a second page only past 100 open</span></div>
+              <div class="tr" style="grid-template-columns:170px 250px 170px minmax(0,1fr)"><span>A merged or closed one, by number</span><span><code>fetchPrsByNumbers</code>, which already exists</span><span>Only when a digits query misses the open list</span><span>1 request per distinct miss, then cached</span></div>
+              <div class="tr" style="grid-template-columns:170px 250px 170px minmax(0,1fr)"><span>Branch &#8596; PR link</span><span>A join on <code>head_ref</code> (and <code>head_repo</code> for forks) against local and remote branch names</span><span>At query time, in SQL</span><span>Free</span></div>
+              <div class="tr" style="grid-template-columns:170px 250px 170px minmax(0,1fr)"><span>A fork&#8217;s head commits</span><span><code>git fetch origin pull/N/head:pr/N</code> (or <code>merge-requests/N/head</code>)</span><span>Only on Switch here / New worktree</span><span>One fetch the reader asked for</span></div>
+              <div class="tr last" style="grid-template-columns:170px 250px 170px minmax(0,1fr)"><span>Bodies, comments, reviews</span><span>Not fetched. &#8599; opens the forge</span><span>Never</span><span class="st keep">None</span></div>
+            </div>
+            <p class="note" style="max-width:860px"><b>Storage:</b> a <code>repo_open_pr</code> table keyed <code>(repo_id, number)</code> with the <code>PR_DETAIL_COLUMNS</code> set plus <code>author</code>, <code>head_repo</code>, <code>updated_at</code>. It is replaced wholesale on each successful list, so a PR that closed simply disappears, with no tombstones. A refused or failed list writes nothing and leaves the last good set in place, per &#8220;a refusal is not an answer&#8221; in <code>forge/AGENTS.md</code>. The same list also fills <code>branch_pr</code> for any head that is a local branch, so the sidebar chips get fresher as a side effect.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Open questions">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Open questions for Harold</div>
+            <div class="find" style="width:420px">
+              <div class="fitem"><span class="pin q">A</span><div><h4>Ship 2a first, then 2b?</h4><p>2a is renderer plus one SQL join against data the list call will produce. 2b adds a tab, fork checkout and the lookup notice. They share the same cache, so the order only decides which one ships first.</p></div></div>
+              <div class="fitem"><span class="pin q">B</span><div><h4>&#8984;K too?</h4><p>Giving <code>search_fts</code> a <code>change_request</code> kind would make <code>106</code> in the palette jump to the branch from anywhere. It is the same table, one more trigger, and the palette already has a kind-glyph slot.</p></div></div>
+              <div class="fitem"><span class="pin q">C</span><div><h4>Name the fork branch <code>pr/121</code> or <code>octo-contrib/fix/quickstart-typo</code>?</h4><p><code>gh pr checkout</code> uses the head branch name, which can collide with a local one. <code>pr/N</code> never collides but hides what the branch is. Showing both in the row is cheap either way.</p></div></div>
+              <div class="fitem"><span class="pin q">D</span><div><h4>Draft PRs</h4><p>Listed, with the shipped draft underline on the chip. Filtering them out would hide the reader&#8217;s own work in progress, which is the PR they are most likely to be looking for.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;sketch the ForgeProvider signature and the table&#8221; &#183; &#8220;what happens on a repo with 400 open PRs?&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const PRS = [
+        { num: 121, title: "docs: fix a typo in the quickstart", head: "octo-contrib:fix/quickstart-typo", base: "main", loc: "fork", who: "octo-contrib", chk: "passing", age: "2d" },
+        { num: 119, title: "Bump jest from 29.7.0 to 30.1.3", head: "dependabot/npm_and_yarn/jest-30.1.3", base: "main", loc: "origin", who: "dependabot", chk: "pending", age: "3d" },
+        { num: 112, title: "feat: per-tenant deploy windows", head: "tenant-deploy-windows", base: "main", loc: "wt", who: "you", chk: "passing", draft: true, age: "5d" },
+        { num: 117, title: "Bump aws-cdk-lib from 2.248.0 to 2.260.0", head: "dependabot/npm_and_yarn/aws-cdk-lib-2.260.0", base: "main", loc: "origin", who: "dependabot", chk: "failing", age: "1w" },
+        { num: 106, title: "feat: rebuild the deploy console", head: "codex/console-rebuild-plan", base: "main", loc: "origin", who: "you", chk: "passing", age: "5mo" },
+        { num: 103, title: "Bump semver from 6.3.0 to 6.3.1", head: "dependabot/npm_and_yarn/semver-6.3.1", base: "main", loc: "origin", who: "dependabot", chk: "conflicting", age: "8mo" }
+      ];
+      const MERGED = { 98: { num: 98, title: "fix: local rewrites drop the query string", head: "fix-local-rewrites", base: "main", loc: "local", who: "you", chk: "merged", age: "3w" } };
+      const BRANCHES = [
+        { name: "main", up: "origin/main", stat: "Current", statCls: "bstat ok", sub: "chore(release): prepare v2.4.0", age: "2d", local: true },
+        { name: "tenant-deploy-windows", up: "origin/tenant-deploy-windows", stat: "In worktree", statCls: "bstat", sub: "feat: add the per-tenant window picker", age: "5d", local: true, wt: true },
+        { name: "fix-local-rewrites", up: "origin/fix-local-rewrites", stat: "Merged", statCls: "bstat mer", sub: "fix: keep the query string on rewrite", age: "3w", local: true },
+        { name: "codex/console-rebuild-plan", up: "origin/codex/console-rebuild-plan", stat: "Remote", statCls: "bstat rem", sub: "ci: cap tarball report check summaries", age: "5mo" },
+        { name: "dependabot/npm_and_yarn/jest-30.1.3", up: "origin/dependabot/npm_and_yarn/jest-30.1.3", stat: "Remote", statCls: "bstat rem", sub: "Bump jest from 29.7.0 to 30.1.3", age: "3d" }
+      ];
+      function prForBranch(name) {
+        for (const p of PRS) { if (p.head === name) return p; }
+        if (name === "fix-local-rewrites") return MERGED[98];
+        return null;
+      }
+      function numQuery(q) {
+        const m = /^[#!]?(\d+)$/.exec(q);
+        return m ? Number(m[1]) : null;
+      }
+      function prMatches(p, q) {
+        const n = numQuery(q);
+        if (n !== null) return p.num === n;
+        return (p.title + " " + p.head + " " + p.who).toLowerCase().indexOf(q) >= 0;
+      }
+      function chipCls(p) {
+        return "prc " + p.chk + (p.draft ? " draft" : "");
+      }
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { q: "106", tab: "b" };
+        }
+        renderVals() {
+          const s = this.state;
+          const q = s.q.trim().toLowerCase();
+          const n = numQuery(q);
+          const bRows = [];
+          for (const b of BRANCHES) {
+            const pr = prForBranch(b.name);
+            const nameHit = q === "" || (b.name + " " + b.up + " " + b.sub).toLowerCase().indexOf(q) >= 0;
+            const prHit = pr !== null && q !== "" && prMatches(pr, q);
+            if (!nameHit && !prHit) continue;
+            const viaPr = prHit && !nameHit;
+            bRows.push({
+              rank: n !== null && prHit ? 0 : 1,
+              name: b.name,
+              up: b.up,
+              stat: b.stat,
+              statCls: b.statCls,
+              age: b.age,
+              chip: pr ? "#" + pr.num : "",
+              chipCls: pr ? chipCls(pr) + (prHit ? " hit" : "") : "hide",
+              sub: viaPr ? pr.title : b.sub,
+              smallCls: viaPr ? "viapr" : "",
+              primary: b.wt ? "Reveal worktree" : b.stat === "Current" ? "Current" : "Switch here",
+              secCls: b.wt || b.stat === "Current" ? "hide" : "ra quiet"
+            });
+          }
+          bRows.sort((a, b) => a.rank - b.rank);
+          let pRows = PRS.filter((p) => q === "" || prMatches(p, q));
+          let lookup = false;
+          if (pRows.length === 0 && n !== null && MERGED[n]) {
+            pRows = [MERGED[n]];
+            lookup = true;
+          }
+          const pView = pRows.map((p) => ({
+            num: p.num,
+            title: p.title,
+            head: p.head,
+            base: p.base,
+            loc: p.loc === "wt" ? "⌂ orbit-deploy-windows" : p.loc,
+            locCls: p.loc === "wt" ? "loc here" : p.loc === "fork" ? "loc fork" : "loc",
+            who: p.who,
+            whoCls: p.who === "dependabot" ? "who bot" : "who",
+            chk: p.chk === "conflicting" ? "conflicts" : p.draft ? "draft · " + p.chk : p.chk,
+            chkCls: "chk " + p.chk,
+            chipCls: chipCls(p) + (q !== "" ? " hit" : ""),
+            age: p.age,
+            primary: p.loc === "wt" ? "Reveal worktree" : "Switch here",
+            primCls: p.chk === "merged" ? "ra quiet" : "ra",
+            secCls: p.loc === "wt" || p.chk === "merged" ? "hide" : "ra quiet"
+          }));
+          const nB = q === "" ? 19 : bRows.length;
+          const nP = q === "" ? PRS.length : pView.length;
+          const tabCls = (key, count) => {
+            const parts = [];
+            if (s.tab === key) parts.push("on");
+            if (q !== "") parts.push(count > 0 ? "hit" : "miss");
+            return parts.join(" ");
+          };
+          const onB = s.tab === "b";
+          const viaPrCount = bRows.filter((r) => r.smallCls === "viapr").length;
+          let foot;
+          if (onB) {
+            foot = q === "" ? "Showing 4 of 19" : bRows.length === 0 ? "" : "Showing " + bRows.length + " of " + bRows.length + (viaPrCount > 0 ? " · " + viaPrCount + " matched on a pull request" : "");
+          } else {
+            foot = lookup ? "0 open match · 1 found by number" : pView.length + " open · refreshed 2 min ago";
+          }
+          const forkHit = n !== null && PRS.some((p) => p.num === n && p.loc === "fork");
+          const set = (q) => () => { this.setState({ q: q }); };
+          return {
+            q: s.q,
+            onQ: (e) => { this.setState({ q: e.target.value }); },
+            q106: set("106"), qHash: set("#121"), qConsole: set("console"), qBot: set("dependabot"), q98: set("98"), qBlur: set("blur"), qClear: set(""),
+            toB: () => { this.setState({ tab: "b" }); },
+            toP: () => { this.setState({ tab: "p" }); },
+            tabBCls: tabCls("b", nB), tabTCls: tabCls("t", 0), tabRCls: tabCls("r", 0), tabPCls: tabCls("p", nP),
+            nB: nB, nT: q === "" ? 25 : 0, nR: q === "" ? 1 : 0, nP: nP,
+            paneBCls: onB ? "" : "hide",
+            panePCls: onB ? "hide" : "",
+            bRows: q === "" ? bRows.slice(0, 4) : bRows,
+            pRows: pView,
+            bEmpty: bRows.length === 0,
+            bEmptyHint: forkHit ? "#" + n + " is a pull request from a fork, and its branch was never fetched." : "",
+            bForkHint: forkHit,
+            pEmpty: pView.length === 0,
+            pLookup: lookup,
+            lookupText: lookup ? "#" + n + " isn’t open, so it wasn’t in the cached list. Looked it up by number on GitHub." : "",
+            foot: foot,
+            readout: q === ""
+              ? "no query — tab counts are totals"
+              : "query “" + s.q + "” — branches " + nB + " (" + viaPrCount + " via PR) · pull requests " + nP + (lookup ? " (by-number lookup)" : "")
+          };
+        }
+      }
+    </script>
+  </body>
+</html>
