@@ -25,9 +25,12 @@ Keep the string short — it is read aloud on **every** arrow key through the
 list, so a sentence is punishing. `hitKindLabel()` is the one place it is
 spelled.
 
-Only three glyphs exist for four kinds: `isWorktreelessBranch()` sends both
+Only four glyphs exist for five kinds: `isWorktreelessBranch()` sends both
 `local_branch` and `remote_branch` to `BranchIcon`, so those two rows are the
-identical drawing and only the label and `__meta` tell them apart. Options for
+identical drawing and only the label and `__meta` tell them apart. The fifth,
+`change_request` (an open PR whose head is not in the checkout), draws
+`ChangeRequestIcon` and says the forge's own noun — "Pull request" or "Merge
+request" — through `changeRequestLabel`, never a hard-coded word. Options for
 giving the remote its own mark are in
 [design/Palette Kind Glyphs - UX Review.dc.html](../../../../../../../design/Palette%20Kind%20Glyphs%20-%20UX%20Review.dc.html),
 turn 4. Legibility rules for a mark this small: "A 15px glyph separates by
@@ -38,3 +41,21 @@ silhouette, not by counting" in `styles/AGENTS.md`.
 Several specs in `apps/desktop/e2e` locate rows with `.overlay-result` plus a
 `hasText` filter, so **text added to a row lands in those filters**. The
 sr-only kind label is deliberately a word no fixture branch name contains.
+
+## A PR is found through the ref that holds it
+
+Main resolves a PR search hit to the worktree or branch holding its head
+(`RepoIndexer.searchAll`), so a palette row keeps its own kind and only gains
+`pr`. Two consequences in the renderer:
+
+- **`buildPaletteItems` lifts the hit whose `pr.number` the query names** into
+  the leading group beside an exactly-named repo. A bare number also reads as
+  a commit-hash prefix and a path, and those groups otherwise sit above it.
+- **A `change_request` hit has nothing to pin or poll** (`hasNoCheckout`), and
+  picking it fetches first: `pr:fetchHead`, then `hitForLocation` turns the
+  answer back into the branch hit the existing New-worktree path expects.
+
+The refs browser (`RepoRefsModal` + `RepoChangeRequests.tsx`) matches with the
+shared `changeRequestMatch`, so `106` means #106 — never #1060 — in both places.
+With a query typed, every tab shows its own hit count, which is why the tag and
+remote searches run while their tabs are hidden.

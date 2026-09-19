@@ -1,6 +1,7 @@
 import type { RepoSearchHit } from "@pwrgit/shared";
 import { describe, expect, it } from "vitest";
 import {
+  changeRequestAnswersQuery,
   pathLeafLikePatterns,
   rankSearchHits,
   searchMatchTier
@@ -116,5 +117,46 @@ describe("pathLeafLikePatterns", () => {
       "%/wip\\_1\\%",
       "%\\\\wip\\_1\\%"
     ]);
+  });
+});
+
+describe("change requests", () => {
+  const pr = (number: number, title = "feat: rebuild the console") => ({
+    number,
+    url: `https://github.com/o/r/pull/${number}`,
+    title,
+    state: "open" as const,
+    isDraft: false,
+    headRefName: "codex/console-rebuild-plan"
+  });
+
+  it("puts the hit whose PR the query names by number in the first tier", () => {
+    const named = localBranch("codex/console-rebuild-plan");
+    named.pr = pr(106);
+    const lookalike = localBranch("autofix/issue-10604");
+    expect(searchMatchTier(named, "106")).toBe(0);
+    expect(searchMatchTier(named, "#106")).toBe(0);
+    expect(searchMatchTier(lookalike, "106")).toBe(2);
+    expect(rankSearchHits([lookalike, named], "106")[0]).toBe(named);
+  });
+
+  it("does not let #1060 answer a query for 106", () => {
+    const other = localBranch("other");
+    other.pr = pr(1060);
+    expect(searchMatchTier(other, "106")).toBe(2);
+    expect(changeRequestAnswersQuery(pr(1060), "orbit", "106")).toBe(false);
+    expect(changeRequestAnswersQuery(pr(106), "orbit", "106")).toBe(true);
+    expect(changeRequestAnswersQuery(pr(106), "orbit", "!106")).toBe(true);
+  });
+
+  it("needs a match of the PR's own, not just its repository's name", () => {
+    // Otherwise typing a repo's name lists every open PR in it.
+    expect(changeRequestAnswersQuery(pr(106), "orbit-deploy", "orbit")).toBe(false);
+    expect(changeRequestAnswersQuery(pr(106), "orbit-deploy", "orbit console")).toBe(true);
+    expect(changeRequestAnswersQuery(pr(106), "orbit-deploy", "rebuild")).toBe(true);
+    // The head branch counts as the PR's own text.
+    expect(changeRequestAnswersQuery(pr(106), "orbit-deploy", "codex plan")).toBe(true);
+    // Every token has to land somewhere.
+    expect(changeRequestAnswersQuery(pr(106), "orbit-deploy", "console zebra")).toBe(false);
   });
 });

@@ -1,4 +1,9 @@
-import type { PrLifecycle, PrSummary } from "@pwrgit/shared";
+import type {
+  OpenChangeRequest,
+  PrLifecycle,
+  PrSummary
+} from "@pwrgit/shared";
+import { UNAVAILABLE_FORK } from "../forge/types";
 
 /**
  * Fields every PR read shares. The tail beyond `isDraft` feeds the hover card;
@@ -18,6 +23,12 @@ const PR_NODE_FIELDS = `number title url state isDraft mergeable headRefName bas
       }
       createdAt mergedAt closedAt`;
 const PR_FIELDS = `nodes { ${PR_NODE_FIELDS} }`;
+/**
+ * Where a PR's head lives. Read by the open list and by a lookup by number —
+ * the two reads that locate a head in the checkout, where a fork's `main` must
+ * not be mistaken for ours.
+ */
+const PR_ORIGIN_FIELDS = "isCrossRepository headRepository { nameWithOwner }";
 
 type PrNode = {
   number: number;
@@ -226,7 +237,9 @@ export function buildPrNumberQuery(
   numbers.forEach((number, i) => {
     variables[`n${i}`] = number;
     decls.push(`$n${i}: Int!`);
-    aliases.push(`n${i}: pullRequest(number: $n${i}) { ${PR_NODE_FIELDS} }`);
+    aliases.push(
+      `n${i}: pullRequest(number: $n${i}) { ${PR_NODE_FIELDS} ${PR_ORIGIN_FIELDS} }`
+    );
   });
   const query = `query (${decls.join(", ")}) {
   repository(owner: $owner, name: $name) {
@@ -236,16 +249,118 @@ export function buildPrNumberQuery(
   return { query, variables };
 }
 
-/** Map PR number → current status (null only if GitHub returned no node). */
+/** Open pull requests per list page. Smaller than GraphQL's 100 ceiling because
+ *  every node carries a check rollup, and the list is the one query whose
+ *  nodes-times-rollups cost grows with how busy the repository is. */
+export const OPEN_PR_PAGE_SIZE = 50;
+
+/**
+ * One page of a repository's open pull requests, most recently updated first.
+ *
+ * `$after` is declared but only bound once a cursor exists: the transport's
+ * variables cannot carry a null, and an unbound optional variable is null.
+ */
+export function buildOpenPrQuery(
+  owner: string,
+  repo: string,
+  after: string | null
+): { query: string; variables: Record<string, string | number> } {
+  const variables: Record<string, string | number> = {
+    owner,
+    name: repo,
+    first: OPEN_PR_PAGE_SIZE,
+    ...(after === null ? {} : { after })
+  };
+  const query = `query ($owner: String!, $name: String!, $first: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: [OPEN], first: $first, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes { ${PR_NODE_FIELDS} ${PR_ORIGIN_FIELDS} updatedAt author { login } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`;
+  return { query, variables };
+}
+
+type OpenPrNode = PrNode & {
+  updatedAt?: string | null;
+  isCrossRepository?: boolean | null;
+  author?: { login?: string | null } | null;
+  headRepository?: { nameWithOwner?: string | null } | null;
+};
+
+export type OpenPrPage = {
+  items: OpenChangeRequest[];
+  endCursor: string | null;
+  hasNextPage: boolean;
+};
+
+/**
+ * One list page. A null node — GraphQL nulls a node it could not resolve, and
+ * the transport salvages the rest — is skipped rather than failing the page.
+ *
+ * `headRepoPath` is set only for a cross-repository PR, and then even when the
+ * fork itself was deleted (`headRepository: null`): its head is still reachable
+ * through `refs/pull/N/head`, and calling it same-repository would send a
+ * checkout looking for a branch origin never had.
+ */
+export function parseOpenPrPage(data: unknown): OpenPrPage {
+  const connection = (
+    data as {
+      repository?: {
+        pullRequests?: {
+          nodes?: (OpenPrNode | null)[] | null;
+          pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null };
+        } | null;
+      } | null;
+    } | null
+  )?.repository?.pullRequests;
+  const items: OpenChangeRequest[] = [];
+  for (const node of connection?.nodes ?? []) {
+    if (node == null || typeof node.number !== "number") continue;
+    const summary: OpenChangeRequest = { ...toSummary(node) };
+    const author = node.author?.login?.trim();
+    if (author !== undefined && author !== "") summary.author = author;
+    const fork = forkPath(node);
+    if (fork !== undefined) summary.headRepoPath = fork;
+    const updated = optionalTime("updatedAt", node.updatedAt).updatedAt;
+    if (updated !== undefined) summary.updatedAt = updated;
+    items.push(summary);
+  }
+  return {
+    items,
+    endCursor: connection?.pageInfo?.endCursor ?? null,
+    hasNextPage: connection?.pageInfo?.hasNextPage === true
+  };
+}
+
+/** A cross-repository PR's head repository, or undefined for our own. */
+function forkPath(node: {
+  isCrossRepository?: boolean | null;
+  headRepository?: { nameWithOwner?: string | null } | null;
+}): string | undefined {
+  if (node.isCrossRepository !== true) return undefined;
+  return node.headRepository?.nameWithOwner?.trim() || UNAVAILABLE_FORK;
+}
+
+/**
+ * Map PR number → current status (null only if GitHub returned no node).
+ * A fork's carries `headRepoPath`: a lookup locates the head by it.
+ */
 export function parsePrNumberResponse(
   numbers: number[],
   data: unknown
 ): Map<number, PrSummary | null> {
   const repo =
-    (data as { repository?: Record<string, PrNode | null> } | null)?.repository ?? {};
+    (data as { repository?: Record<string, OpenPrNode | null> } | null)
+      ?.repository ?? {};
   return new Map(numbers.map((number, i) => {
     const node = repo[`n${i}`];
-    return [number, node == null ? null : toSummary(node)] as const;
+    if (node == null) return [number, null] as const;
+    const summary: OpenChangeRequest = { ...toSummary(node) };
+    const fork = forkPath(node);
+    if (fork !== undefined) summary.headRepoPath = fork;
+    return [number, summary] as const;
   }));
 }
 

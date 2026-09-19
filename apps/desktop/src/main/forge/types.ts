@@ -1,4 +1,9 @@
-import type { ForgeKind, PrLifecycle, PrSummary } from "@pwrgit/shared";
+import type {
+  ForgeKind,
+  OpenChangeRequest,
+  PrLifecycle,
+  PrSummary
+} from "@pwrgit/shared";
 
 // Defined in the shared contract because the renderer needs it too, to label a
 // change request "pull request" or "merge request".
@@ -32,6 +37,33 @@ export type ForgeRepo = {
 export function forgeOrigin(repo: Pick<ForgeRepo, "host" | "port">): string {
   return `https://${repo.host}${repo.port === undefined ? "" : `:${repo.port}`}`;
 }
+
+/**
+ * One complete walk of a repository's open change requests, newest update
+ * first.
+ *
+ * "Complete" is the contract: a provider that could not read every page it set
+ * out to read throws rather than returning the pages it got, because the
+ * service replaces its cached list wholesale and a short walk would silently
+ * drop the change requests on the pages never read. `truncated` is the one
+ * honest short answer — the walk stopped at its own page cap, and what it
+ * returned is the newest of a longer list.
+ */
+export type OpenPrList = {
+  items: OpenChangeRequest[];
+  truncated: boolean;
+};
+
+/** How many open change requests one list refresh reads before it stops. */
+export const OPEN_PR_LIST_CAP = 500;
+
+/**
+ * `headRepoPath` for a change request the forge says came from a fork it will
+ * not name (deleted, or private to this token). The head is still reachable
+ * through the change-request ref, and calling it same-repository would send a
+ * checkout looking for a branch origin never had.
+ */
+export const UNAVAILABLE_FORK = "(fork unavailable)";
 
 /**
  * Everything `PrService` needs from a forge, and nothing more.
@@ -72,6 +104,8 @@ export type TokenForgeProvider = {
     repo: ForgeRepo,
     numbers: number[]
   ): Promise<Map<number, PrSummary | null>>;
+  /** Every open change request, newest update first — see `OpenPrList`. */
+  fetchOpenPrs(token: string, repo: ForgeRepo): Promise<OpenPrList>;
 };
 
 /**
@@ -134,6 +168,7 @@ export type ForgeConnection = {
     repo: ForgeRepo,
     numbers: number[]
   ): Promise<Map<number, PrSummary | null>>;
+  fetchOpenPrs(repo: ForgeRepo): Promise<OpenPrList>;
 };
 export type CliForgeProvider = ForgeConnection & {
   kind: ForgeKind;
@@ -155,6 +190,20 @@ export async function connectForge(
     fetchPrsForCommits: (repo, commits) =>
       provider.fetchPrsForCommits(token, repo, commits),
     fetchPrsByNumbers: (repo, numbers) =>
-      provider.fetchPrsByNumbers(token, repo, numbers)
+      provider.fetchPrsByNumbers(token, repo, numbers),
+    fetchOpenPrs: (repo) => provider.fetchOpenPrs(token, repo)
+  };
+}
+
+/** `stampForge` for a list: every item learns which instance issued it. */
+export function stampOpenList(list: OpenPrList, repo: ForgeRepo): OpenPrList {
+  return {
+    truncated: list.truncated,
+    items: list.items.map((item) => ({
+      ...item,
+      forge: repo.kind,
+      host: repo.host,
+      repoPath: repo.path
+    }))
   };
 }

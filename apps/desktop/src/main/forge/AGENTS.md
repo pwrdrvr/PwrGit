@@ -1,14 +1,33 @@
 # forge — AGENTS.md
 
 Which hosting product a repo's `origin` points at, and how to ask it for
-change-request status. `PrService` (in `../github/`) is the only consumer; it
-speaks `PrSummary` and never learns which forge answered.
+change-request status. `PrService` and `OpenPrService` (in `../github/`) are
+the consumers; they speak `PrSummary` and never learn which forge answered.
 
-- **The seam is `ForgeProvider`** (`types.ts`): four methods — token, branches,
-  commits, numbers. That is exactly what `PrService` used to inject as four
-  loose functions, which is why the service body did not change. Add a forge by
-  implementing those four, not by touching the service — and see **Adding a
-  forge** below for the other six entries a product owes.
+- **The seam is `ForgeProvider`** (`types.ts`): five methods — token, branches,
+  commits, numbers, and the open list. The first four are exactly what
+  `PrService` used to inject as four loose functions, which is why the service
+  body did not change; the fifth is `OpenPrService`'s (`../github/`). Add a
+  forge by implementing those, not by touching either service — and see
+  **Adding a forge** below for the other six entries a product owes.
+- **The open list is the one read not keyed by a local ref** (`fetchOpenPrs`),
+  so it is the only one that can find a change request whose head the
+  checkout has never seen — every fork's, and any opened since the last fetch.
+  Two rules a provider owes it:
+  - **A complete walk, or a throw.** `OpenPrService` replaces the stored list by
+    diff, so a short answer *deletes* the change requests it left out. Walk
+    every page up to `OPEN_PR_LIST_CAP` and say `truncated` past it; a page that
+    fails, a repeated cursor, or a null project throws. This is the list-shaped
+    version of "a refusal is not an answer" below.
+  - **Mark a fork with `headRepoPath`** — in the list AND in
+    `fetchPrsByNumbers`, because a lookup by number locates its head the same
+    way. Heads are matched to local branches by name, and a fork's `main` is
+    not ours: without the mark, a merged fork PR looked up by number would
+    offer "Show worktree" on the user's own `main`. A fork the forge will not
+    name still counts —
+    `UNAVAILABLE_FORK` — since its head stays reachable by the product's
+    change-request ref (`FORGE_PRODUCTS[kind].changeRequestHeadRef`, checked
+    out as `changeRequestLocalBranch`, `pr/121`).
 - **`ForgeRepo.path` is one string, deliberately.** A GitLab project can live at
   any depth (`pwrdrvr/qa/forge/PwrGit-Test`), so `{owner, repo}` cannot hold it.
   GitHub paths are always exactly one slash and `githubOwnerAndName()` splits

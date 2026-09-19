@@ -47,6 +47,24 @@ export type ForgeProduct = {
   readonly changeRequestLabel: string;
   /** The product's own reference sigil — `owner/repo#4` vs `owner/repo!4`. */
   readonly changeRequestSigil: string;
+  /**
+   * The ref the base repository publishes each change request's head under,
+   * with `{n}` standing for its number.
+   *
+   * It is how a fork's branch is reachable from `origin` at all: the fork is a
+   * different repository, but the forge mirrors every change request's head
+   * into the base one. Absent when the product publishes none PwrGit has
+   * verified, and then a fork's change request has nothing to check out.
+   */
+  readonly changeRequestHeadRef?: string;
+  /**
+   * The local branch a fork's change request is checked out as: `pr/121`.
+   *
+   * Named by number rather than after the fork's branch, because two forks'
+   * `main` or `fix-typo` would collide with each other and with ours — and the
+   * number is what the reader searched for in the first place.
+   */
+  readonly changeRequestBranchPrefix: string;
   /** What this product calls a non-personal account. Calling a GitLab group
    *  an "organization" is wrong in the one screen where the user is choosing
    *  between them. */
@@ -135,6 +153,8 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     saasHost: "git.cafe",
     changeRequestLabel: "Pull request",
     changeRequestSigil: "#",
+    // cafe 0.5.0 documents no pull-request ref; do not guess GitHub's.
+    changeRequestBranchPrefix: "pr",
     organizationNoun: "organization",
     maxPathSegments: 2,
     hostAllowlistEnv: "PWRGIT_GITCAFE_HOSTS",
@@ -155,6 +175,8 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     saasHost: "github.com",
     changeRequestLabel: "Pull request",
     changeRequestSigil: "#",
+    changeRequestHeadRef: "refs/pull/{n}/head",
+    changeRequestBranchPrefix: "pr",
     organizationNoun: "organization",
     maxPathSegments: 2,
     hostAllowlistEnv: "PWRGIT_GITHUB_HOSTS",
@@ -181,6 +203,8 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     saasHost: "gitlab.com",
     changeRequestLabel: "Merge request",
     changeRequestSigil: "!",
+    changeRequestHeadRef: "refs/merge-requests/{n}/head",
+    changeRequestBranchPrefix: "mr",
     organizationNoun: "group",
     maxPathSegments: Number.MAX_SAFE_INTEGER,
     hostAllowlistEnv: "PWRGIT_GITLAB_HOSTS",
@@ -296,6 +320,33 @@ export function changeRequestNoun(kind: ForgeKind): string {
 /** The product's reference sigil — `owner/repo#4` against `owner/repo!4`. */
 export function changeRequestSigil(kind: ForgeKind): string {
   return FORGE_PRODUCTS[kind].changeRequestSigil;
+}
+
+/** The plural UI noun for a tab or heading: "Pull requests", "Merge requests". */
+export function changeRequestPluralLabel(kind: ForgeKind): string {
+  return `${changeRequestLabel(kind)}s`;
+}
+
+/**
+ * The ref change request `number`'s head is published under in the base
+ * repository, or null when the product publishes none PwrGit has verified.
+ */
+export function changeRequestHeadRef(
+  kind: ForgeKind,
+  number: number
+): string | null {
+  const template = FORGE_PRODUCTS[kind].changeRequestHeadRef;
+  return template === undefined
+    ? null
+    : template.replace("{n}", String(number));
+}
+
+/** The local branch a fork's change request is checked out as: `pr/121`. */
+export function changeRequestLocalBranch(
+  kind: ForgeKind,
+  number: number
+): string {
+  return `${FORGE_PRODUCTS[kind].changeRequestBranchPrefix}/${number}`;
 }
 
 /** What a product can answer at all. */

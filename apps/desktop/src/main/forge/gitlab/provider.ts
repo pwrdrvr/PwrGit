@@ -2,9 +2,10 @@ import { getGitLabToken } from "./glab-cli";
 import {
   fetchMrsByNumbers,
   fetchMrsForBranches,
-  fetchMrsForCommits
+  fetchMrsForCommits,
+  fetchOpenMrs
 } from "./mr-client";
-import { stampForge, type ForgeProvider } from "../types";
+import { stampForge, stampOpenList, type ForgeProvider } from "../types";
 
 /**
  * GitLab as a `ForgeProvider`.
@@ -21,5 +22,7 @@ export const gitlabProvider: ForgeProvider = {
   fetchPrsForCommits: async (token, repo, commitHashes) =>
     stampForge(await fetchMrsForCommits(token, repo, commitHashes), repo),
   fetchPrsByNumbers: async (token, repo, numbers) =>
-    stampForge(await fetchMrsByNumbers(token, repo, numbers), repo)
+    stampForge(await fetchMrsByNumbers(token, repo, numbers), repo),
+  fetchOpenPrs: async (token, repo) =>
+    stampOpenList(await fetchOpenMrs(token, repo), repo)
 };
