@@ -4,12 +4,17 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_AI_PROVIDER_SETTINGS,
   FORGE_KINDS,
   GENERAL_DEFAULTS,
   forgeProduct,
   ok,
+  type AcpAgentDiscovery,
+  type AiProviderSettings,
   type AppSettingsSnapshot,
-  type ForgeStatus
+  type CodexProviderDiscovery,
+  type ForgeStatus,
+  type Profile
 } from "@pwrgit/shared";
 
 // Without this React warns on every `act`, and the warning is the only thing
@@ -24,7 +29,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: mocks.dispatch,
-  subscribe: mocks.subscribe
+  subscribe: mocks.subscribe,
+  // The Settings window is bound to no profile; `useProfiles` asks.
+  windowProfileId: () => null
 }));
 
 import { SettingsWindow } from "./SettingsWindow";
@@ -45,6 +52,46 @@ let root: Root;
 let forges: ForgeStatus[];
 
 const SNAPSHOT = { general: GENERAL_DEFAULTS } as AppSettingsSnapshot;
+
+const PERSONAL: Profile = {
+  id: "personal",
+  name: "Personal",
+  email: "me@example.com",
+  mono: "P",
+  roots: [],
+  onboardingCompleted: true
+};
+const ACME: Profile = {
+  id: "acme",
+  name: "Acme",
+  email: "me@acme.example",
+  mono: "A",
+  roots: [],
+  onboardingCompleted: true
+};
+
+/** What the AI reads answer, per test. */
+let aiSettings: AiProviderSettings;
+let codexDiscovery: CodexProviderDiscovery;
+let acpDiscovery: AcpAgentDiscovery;
+
+function codex(overrides: Partial<CodexProviderDiscovery> = {}): CodexProviderDiscovery {
+  return {
+    candidates: [
+      { path: "/opt/homebrew/bin/codex", source: "path", version: "0.200.0", available: true }
+    ],
+    resolvedPath: "/opt/homebrew/bin/codex",
+    auth: {
+      status: "authenticated",
+      profile: "",
+      profileLabel: "System default",
+      codexHome: "/Users/you/.codex",
+      email: "dev@example.com"
+    },
+    refreshedAt: "2026-09-19T00:00:00.000Z",
+    ...overrides
+  };
+}
 
 /** A status shaped the way main's probe shapes one, as `ForgesSettings.test`
  *  shapes it — `hosts` derived from the same values the summary reads. */
@@ -94,6 +141,38 @@ function installBridge(): void {
   };
 }
 
+/** Every read the window makes on open, answered from the fixtures above. */
+async function answer(name: string, req?: unknown): Promise<unknown> {
+  // General is the window's opening pane, so it renders in every test and
+  // reads its half of the snapshot. No other pane here looks inside one.
+  if (name === "settings:read") return ok(SNAPSHOT);
+  if (name === "forge:status") return ok({ forges });
+  if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
+  if (name === "profile:list") {
+    return ok({ activeProfileId: PERSONAL.id, profiles: [PERSONAL, ACME] });
+  }
+  const profileId = (req as { profileId?: string } | undefined)?.profileId;
+  if (name === "aiProviders:read") return ok({ profileId, settings: aiSettings });
+  if (name === "aiProviders:discoverCodex") return ok(codexDiscovery);
+  if (name === "aiProviders:discoverAcp") return ok(acpDiscovery);
+  if (name === "aiProviders:codexAuthProfiles") {
+    return ok({
+      profiles: [
+        {
+          name: "",
+          displayName: "System default",
+          codexHome: "/Users/you/.codex",
+          hasAuthFile: true,
+          email: "dev@example.com"
+        }
+      ],
+      followed: ""
+    });
+  }
+  if (name === "aiProviders:codexModels") return ok({ models: [] });
+  return ok(undefined);
+}
+
 beforeEach(() => {
   // The Forges pane's real id is `forges` and collapse state is module-level,
   // so a fold made in one test is the next one's starting state.
@@ -101,15 +180,37 @@ beforeEach(() => {
   installBridge();
   vi.clearAllMocks();
   forges = [];
+  aiSettings = DEFAULT_AI_PROVIDER_SETTINGS;
+  codexDiscovery = codex();
+  acpDiscovery = {
+    agents: [
+      {
+        id: "grok",
+        displayName: "Grok",
+        installed: true,
+        version: "1.2.0",
+        instances: [{ command: "/usr/local/bin/grok", version: "1.2.0", source: "path" }],
+        activeCommand: "/usr/local/bin/grok"
+      },
+      {
+        id: "kimi",
+        displayName: "Kimi Code CLI",
+        installed: false,
+        detail: "Install Kimi Code CLI",
+        instances: []
+      },
+      {
+        id: "qwen",
+        displayName: "Qwen Code",
+        installed: false,
+        detail: "Install Qwen Code",
+        instances: []
+      }
+    ]
+  };
+  window.location.hash = "#settings";
   mocks.subscribe.mockReturnValue(() => {});
-  mocks.dispatch.mockImplementation(async (name: string) => {
-    // General is the window's opening pane, so it renders in every test and
-    // reads its half of the snapshot. No other pane here looks inside one.
-    if (name === "settings:read") return ok(SNAPSHOT);
-    if (name === "forge:status") return ok({ forges });
-    if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
-    return ok(undefined);
-  });
+  mocks.dispatch.mockImplementation(answer);
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -193,7 +294,7 @@ describe("Settings nav — groups", () => {
     await render();
 
     const labels = [
-      ...container.querySelectorAll(".settings-nav__sublabel")
+      ...sublist("forges").querySelectorAll(".settings-nav__sublabel")
     ].map((node) => node.textContent?.trim());
     expect(labels).toEqual(FORGE_KINDS.map((kind) => forgeProduct(kind).label));
   });
@@ -357,11 +458,9 @@ describe("Settings nav — forge status", () => {
   it("shows nothing at all until a probe has answered", async () => {
     // "We do not know" is honest; a neutral dot would be a guess and a green
     // one a wrong guess. The row's name stays the bare product label.
-    mocks.dispatch.mockImplementation(async (name: string) => {
-      if (name === "settings:read") return ok(SNAPSHOT);
-      if (name === "forge:status") return new Promise(() => {});
-      return ok(undefined);
-    });
+    mocks.dispatch.mockImplementation(async (name: string, req: unknown) =>
+      name === "forge:status" ? new Promise(() => {}) : answer(name, req)
+    );
     await render();
 
     const [first] = FORGE_KINDS;
@@ -424,5 +523,121 @@ describe("Settings nav — reveal", () => {
       navChild(forgeProduct(first).label).getAttribute("aria-current")
     ).toBeNull();
     expect(navButton("Forges").getAttribute("aria-current")).toBe("page");
+  });
+});
+
+describe("Settings nav — AI", () => {
+  /** Every name `dispatch` was called with, in order. */
+  function dispatched(): string[] {
+    return mocks.dispatch.mock.calls.map(([name]) => String(name));
+  }
+
+  it("names Local Agents apart from the two AI pages", async () => {
+    // Agents calling IN (MCP) and agents PwrGit calls OUT to share a word and
+    // nothing else; a bare "Agents" beside "AI Providers" reads as either.
+    await render();
+
+    const rows = [
+      ...container.querySelectorAll(".settings-nav__button")
+    ].map((node) => node.textContent?.trim());
+    expect(rows).toContain("AI Providers");
+    expect(rows).toContain("AI Features");
+    expect(rows).toContain("Local Agents");
+    expect(rows).not.toContain("Agents");
+  });
+
+  it("probes nothing until the reader goes near AI", async () => {
+    await render();
+    expect(dispatched()).not.toContain("aiProviders:discoverCodex");
+    expect(dispatched()).not.toContain("aiProviders:discoverAcp");
+
+    await act(async () => navButton("AI Providers").click());
+
+    expect(dispatched()).toContain("aiProviders:discoverCodex");
+    expect(dispatched()).toContain("aiProviders:discoverAcp");
+  });
+
+  it("gives AI Providers a child per provider, with no Gemini", async () => {
+    await render();
+    await act(async () => navButton("AI Providers").click());
+
+    const labels = [
+      ...sublist("ai-providers").querySelectorAll(".settings-nav__sublabel")
+    ].map((node) => node.textContent?.trim());
+    expect(labels).toEqual(["Codex", "Grok", "Kimi Code CLI", "Qwen Code"]);
+    expect(container.textContent).not.toMatch(/gemini/i);
+  });
+
+  it("reports each provider's state from the same read as its card", async () => {
+    codexDiscovery = codex({
+      auth: {
+        status: "unauthenticated",
+        profile: "",
+        profileLabel: "System default",
+        codexHome: "/Users/you/.codex"
+      }
+    });
+    aiSettings = {
+      ...DEFAULT_AI_PROVIDER_SETTINGS,
+      acp: { enabledAgentIds: ["grok"], agents: {} }
+    };
+    await render();
+    await act(async () => navButton("AI Providers").click());
+
+    const codexRow = navChild("Codex");
+    expect(dotTone(codexRow)).toBe("warn");
+    expect(chip(codexRow)).toBe("sign in");
+    expect(codexRow.getAttribute("aria-label")).toBe("Codex: Sign in");
+    // The card says the same thing in its chip.
+    expect(card("Codex").textContent).toContain("Sign in");
+
+    // Enabled and installed: fine, so a dot and no word.
+    expect(dotTone(navChild("Grok"))).toBe("ok");
+    expect(chip(navChild("Grok"))).toBeUndefined();
+    // Not enabled, not installed: grey, and says which.
+    expect(dotTone(navChild("Kimi Code CLI"))).toBe("off");
+    expect(chip(navChild("Kimi Code CLI"))).toBe("missing");
+  });
+
+  it("gives AI Features a jump link per section", async () => {
+    await render();
+    await act(async () => navButton("AI Features").click());
+
+    const labels = [
+      ...sublist("ai-features").querySelectorAll(".settings-nav__sublabel")
+    ].map((node) => node.textContent?.trim());
+    expect(labels).toEqual(["Default agents", "Guidance"]);
+    await act(async () => navChild("Guidance").click());
+    expect(navChild("Guidance").getAttribute("aria-current")).toBe("page");
+  });
+
+  it("boots on a deep link: page, card and profile", async () => {
+    window.location.hash = "#settings?page=ai-features&sub=guidance&profile=acme";
+    await render();
+
+    expect(sublist("ai-features").hasAttribute("inert")).toBe(false);
+    expect(navChild("Guidance").getAttribute("aria-current")).toBe("page");
+    expect(card("Guidance")).toBeDefined();
+    // The AI pages edit the profile the link named, not the active one.
+    const picker = container.querySelector<HTMLSelectElement>(
+      "select[aria-label='Profile these AI settings belong to']"
+    );
+    expect(picker?.value).toBe("acme");
+    expect(mocks.dispatch).toHaveBeenCalledWith("aiProviders:read", { profileId: "acme" });
+  });
+
+  it("follows settings:navigate when the window is already open", async () => {
+    let navigate: ((route: unknown) => void) | undefined;
+    mocks.subscribe.mockImplementation((channel: string, handler: (route: unknown) => void) => {
+      if (channel === "settings:navigate") navigate = handler;
+      return () => {};
+    });
+    await render();
+    expect(navigate).toBeDefined();
+
+    await act(async () => navigate?.({ page: "ai-providers", sub: "codex", profileId: "acme" }));
+
+    expect(navChild("Codex").getAttribute("aria-current")).toBe("page");
+    expect(mocks.dispatch).toHaveBeenCalledWith("aiProviders:read", { profileId: "acme" });
   });
 });

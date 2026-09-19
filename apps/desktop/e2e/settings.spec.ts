@@ -318,7 +318,7 @@ test("Agents columns fit the settings pane at narrow widths and increased zoom",
   await openSettingsFromMenu(app);
   const settings = await nextWindow;
   await settings.waitForSelector(".settings-screen");
-  await settings.getByRole("button", { name: "Agents", exact: true }).click();
+  await settings.getByRole("button", { name: "Local Agents", exact: true }).click();
   await expect(settings.locator(".agent-auth-column")).toHaveCount(3);
   for (const [width, zoom] of [[1040, 1], [1144, 1.3], [1440, 1], [1440, 1.3]]) {
     await app.evaluate(({ BrowserWindow }, size) => {

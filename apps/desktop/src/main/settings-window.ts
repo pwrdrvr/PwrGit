@@ -1,12 +1,18 @@
 import { showWindowWhenReady } from "./show-window-when-ready";
 import { join } from "node:path";
 import { BrowserWindow } from "electron";
-import { serializeAppearanceArg, type AppAppearance } from "@pwrgit/shared";
+import {
+  serializeAppearanceArg,
+  settingsRouteHash,
+  type AppAppearance,
+  type SettingsRoute
+} from "@pwrgit/shared";
 import {
   auxiliaryWindowChromeOptions,
   hideAuxiliaryWindowMenuBar
 } from "./auxiliary-window-chrome";
 import { windowChrome } from "./window-chrome";
+import { emitEventToWindow } from "./ipc";
 import { applyWindowSecurityHardening } from "./window-security";
 
 /**
@@ -17,13 +23,22 @@ import { applyWindowSecurityHardening } from "./window-security";
  * profile from one place. Its *palette* is borrowed from whichever window
  * opened it (see `window-appearance.ts`), so summoning Settings from a
  * light-pinned profile window doesn't hand back a dark one.
+ *
+ * `route` deep-links a page (and a card on it). A window that is already open
+ * is told over `settings:navigate`; a new one boots on the route's hash, so
+ * the page is right on the first paint instead of one push after it —
+ * a push to a renderer still loading would land before anything subscribed.
  */
 let settingsWindow: BrowserWindow | undefined;
 
-export function openSettingsWindow(appearance: AppAppearance): BrowserWindow {
+export function openSettingsWindow(
+  appearance: AppAppearance,
+  route?: SettingsRoute
+): BrowserWindow {
   if (settingsWindow !== undefined && !settingsWindow.isDestroyed()) {
     if (settingsWindow.isMinimized()) settingsWindow.restore();
     settingsWindow.focus();
+    if (route !== undefined) emitEventToWindow("settings:navigate", route, settingsWindow);
     return settingsWindow;
   }
 
@@ -50,12 +65,13 @@ export function openSettingsWindow(appearance: AppAppearance): BrowserWindow {
   showWindowWhenReady(window);
   applyWindowSecurityHardening(window);
 
+  const hash = settingsRouteHash(route);
   const rendererUrl = process.env["ELECTRON_RENDERER_URL"];
   if (rendererUrl !== undefined) {
-    void window.loadURL(`${rendererUrl}#settings`);
+    void window.loadURL(`${rendererUrl}${hash}`);
   } else {
     void window.loadFile(join(__dirname, "../renderer/index.html"), {
-      hash: "settings"
+      hash: hash.slice(1)
     });
   }
 

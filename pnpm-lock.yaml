@@ -45,9 +45,15 @@ importers:
       '@octokit/graphql':
         specifier: ^8.2.1
         version: 8.2.2
+      '@pwrdrvr/agent-acp':
+        specifier: ^0.15.0
+        version: 0.15.0(zod@4.5.4)
       '@pwrdrvr/agent-core':
         specifier: ^0.2.0
         version: 0.2.0
+      '@pwrdrvr/agent-transport':
+        specifier: ^0.1.7
+        version: 0.1.7
       '@pwrdrvr/codex-discovery':
         specifier: ^0.4.0
         version: 0.4.0
@@ -149,6 +155,11 @@ importers:
   packages/shared: {}
 
 packages:
+
+  '@agentclientprotocol/sdk@1.3.0':
+    resolution: {integrity: sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ==}
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
 
   '@asamuzakjp/css-color@6.0.5':
     resolution: {integrity: sha512-mbhpPMmnw/kwW19aRNmSUl1QzLbdGo1SCuE49BT98MNwqF6zaHb3o2owssFc/PEO/4t2UjqtCNwocuDtJornzA==}
@@ -925,6 +936,9 @@ packages:
     resolution: {integrity: sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==}
     engines: {node: '>=20'}
     hasBin: true
+
+  '@pwrdrvr/agent-acp@0.15.0':
+    resolution: {integrity: sha512-xUDZtiOGHQvX2cSlGGQ6KGfh37cLrqgxQgT6F/eh6j4M3xyvLdgr61vIJMltBsmuaYMoCI8gXmsTAoJnQxXo0A==}
 
   '@pwrdrvr/agent-core@0.2.0':
     resolution: {integrity: sha512-zTo7vJGekyZX2h9xWYiZfQvt+qKTPhuciWyCouow1shaKgg0Bn6B8S5lTRvMzxvT7feKOZ7zy/To2Cu6+1i1+A==}
@@ -3005,6 +3019,10 @@ packages:
 
 snapshots:
 
+  '@agentclientprotocol/sdk@1.3.0(zod@4.5.4)':
+    dependencies:
+      zod: 4.5.4
+
   '@asamuzakjp/css-color@6.0.5':
     dependencies:
       '@csstools/css-calc': 3.3.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
@@ -3662,6 +3680,14 @@ snapshots:
   '@playwright/test@1.63.0':
     dependencies:
       playwright: 1.63.0
+
+  '@pwrdrvr/agent-acp@0.15.0(zod@4.5.4)':
+    dependencies:
+      '@agentclientprotocol/sdk': 1.3.0(zod@4.5.4)
+      '@pwrdrvr/agent-core': 0.2.0
+      '@pwrdrvr/agent-transport': 0.1.7
+    transitivePeerDependencies:
+      - zod
 
   '@pwrdrvr/agent-core@0.2.0': {}
 
