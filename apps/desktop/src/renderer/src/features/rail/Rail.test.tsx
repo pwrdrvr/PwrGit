@@ -12,7 +12,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: mocks.dispatch,
-  subscribe: mocks.subscribe
+  subscribe: mocks.subscribe,
+  // No profile: the agent store never asks, so no agent footer appears.
+  windowProfileId: () => null
 }));
 // The tabs own their own command contracts and suites; this file is about
 // which of them the rail lets you reach while Git is mid-operation.

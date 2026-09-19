@@ -12,6 +12,12 @@
 
 import type { ForgeHostMap } from "./forge-remote";
 import type {
+  AgentAvailability,
+  AgentChoice,
+  AgentMessageDraft,
+  AgentModelList,
+  AgentTidyProposal,
+  AgentTidyRevision,
   BranchRef,
   BulkSyncMode,
   BulkSyncProgress,
@@ -65,6 +71,7 @@ import type {
   RebaseCheckResult,
   RebaseOperation,
   RebasePlan,
+  HistoryEditProgram,
   RemoteBranchPage,
   RemoteTagAction,
   RemoteTagPlan,
@@ -1553,25 +1560,81 @@ export interface Commands {
       worktreeId: string;
       commits: RebaseCommitRef[];
       op: RebaseOperation;
+      /** Required for `tidy`; for `squash` it carries the edited message. */
+      program?: HistoryEditProgram;
     };
     res: RebasePlan;
   };
+  /**
+   * Replays the program in a disposable clone and proves it: every selected
+   * commit used exactly once, a clean replay, and a final tree identical to
+   * the current tip. Only a clean result carries an approval token.
+   */
   "rebase:check": {
     req: {
       worktreeId: string;
       commits: RebaseCommitRef[];
       op: RebaseOperation;
+      program?: HistoryEditProgram;
     };
     res: RebaseCheckResult;
   };
+  /**
+   * The approval binds the program's shape — which commits fold into which,
+   * in what order. Messages may still be edited after the check: they are
+   * data, and cannot change the tree the check proved.
+   */
   "rebase:apply": {
     req: {
       worktreeId: string;
       commits: RebaseCommitRef[];
       op: RebaseOperation;
+      program?: HistoryEditProgram;
       approvalToken: string;
     };
     res: null;
+  };
+
+  // Local agents author text and history proposals from data PwrGit sends
+  // them; they get no tools, no repo path, and no Git primitive. Every Tidy
+  // proposal still goes through rebase:check -> approvalToken -> rebase:apply,
+  // the sole route to a Git mutation.
+  "agent:availability": {
+    req: { profileId: ProfileId; refresh?: boolean };
+    res: AgentAvailability;
+  };
+  "agent:models": {
+    req: { profileId: ProfileId };
+    res: AgentModelList;
+  };
+  /** A commit message for selected commits (Squash) or for staged changes
+   *  (the commit box). */
+  "agent:draftMessage": {
+    req: {
+      requestId: string;
+      worktreeId: string;
+      source:
+        | { kind: "commits"; commits: RebaseCommitRef[] }
+        | { kind: "staged" };
+      choice?: AgentChoice;
+    };
+    res: AgentMessageDraft;
+  };
+  /** A proposed history for the selected commits, or a revision of one whose
+   *  isolated check failed. */
+  "agent:tidyPlan": {
+    req: {
+      requestId: string;
+      worktreeId: string;
+      commits: RebaseCommitRef[];
+      revision?: AgentTidyRevision;
+      choice?: AgentChoice;
+    };
+    res: AgentTidyProposal;
+  };
+  "agent:cancel": {
+    req: { requestId: string };
+    res: { cancelled: boolean };
   };
 
   // Changes (U11 / U12)
