@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_AI_PROVIDER_SETTINGS,
+  jobProviders,
   type AiProviderSettings,
   type CodexProviderDiscovery
 } from "@pwrgit/shared";
-import { aiJobProviders, firstUnreadyAiProvider, resolveAiToggleAction } from "./ai-enablement";
+import { firstUnreadyAiProvider, resolveAiToggleAction } from "./ai-enablement";
 
 const ACCEPTED = "2026-09-01T12:00:00.000Z";
 
@@ -68,7 +69,7 @@ describe("firstUnreadyAiProvider", () => {
   it("asks only about Codex while rebase review is the one feature", () => {
     // Rebase review refuses ACP, so a stored agent choice does not count.
     expect(
-      aiJobProviders({ ...settings, jobs: { rebaseReview: { provider: "grok" } } })
+      jobProviders({ ...settings, jobs: { rebaseReview: { provider: "grok" } } })
     ).toEqual(["codex"]);
   });
 

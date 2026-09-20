@@ -7,8 +7,7 @@
 // when the disclosure is shown.
 
 import {
-  AI_JOB_IDS,
-  effectiveJobProvider,
+  jobProviders,
   type AcpAgentDiscovery,
   type AiProviderId,
   type AiProviderSettings,
@@ -40,11 +39,6 @@ export function resolveAiToggleAction(params: {
   return "enable";
 }
 
-/** The providers the profile's features would run on, in job order. */
-export function aiJobProviders(settings: AiProviderSettings): AiProviderId[] {
-  return [...new Set(AI_JOB_IDS.map((jobId) => effectiveJobProvider(settings, jobId)))];
-}
-
 /**
  * The first provider a feature runs on that cannot run, `null` when every one
  * can, or `undefined` while any answer is missing.
@@ -59,7 +53,7 @@ export function firstUnreadyAiProvider(
   acp: AcpAgentDiscovery | null
 ): AiProviderId | null | undefined {
   let unknown = false;
-  for (const provider of aiJobProviders(settings)) {
+  for (const provider of jobProviders(settings)) {
     if (provider === "codex") {
       if (codex === null) unknown = true;
       else if (codex.resolvedPath === null || codex.auth?.status === "unauthenticated") {

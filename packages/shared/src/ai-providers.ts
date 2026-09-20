@@ -265,6 +265,23 @@ export function effectiveJobProvider(
   return settings.acp.enabledAgentIds.includes(provider) ? provider : "codex";
 }
 
+/**
+ * Every provider some job runs on, in job order, deduped — what a profile
+ * would actually start. Through `effectiveJobProvider`, so a disabled agent
+ * and an agent on a Codex-only job count as Codex, exactly as they run.
+ */
+export function jobProviders(settings: AiProviderSettings): AiProviderId[] {
+  return [...new Set(AI_JOB_IDS.map((jobId) => effectiveJobProvider(settings, jobId)))];
+}
+
+/** The ACP agents among them. An agent no job is routed to is absent, so a
+ *  caller never probes — or spawns — a CLI nothing would use. */
+export function acpJobProviders(settings: AiProviderSettings): BuiltInAcpAgentId[] {
+  return jobProviders(settings).filter(
+    (provider): provider is BuiltInAcpAgentId => provider !== "codex"
+  );
+}
+
 // ---- Discovery ------------------------------------------------------------
 
 /** Where a Codex candidate came from: the PWRDRVR_CODEX_COMMAND override, the

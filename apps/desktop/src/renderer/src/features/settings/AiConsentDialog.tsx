@@ -1,5 +1,4 @@
 import { useId, useRef } from "react";
-import { createPortal } from "react-dom";
 import { useModal } from "../../lib/useModal";
 
 /**
@@ -14,10 +13,10 @@ import { useModal } from "../../lib/useModal";
  * Cancel is the default focus: the dialog exists so that turning AI on is a
  * decision, and Enter on an unread dialog should not make it.
  *
- * Portalled to `<body>` because the sidebar opens it: `.pane--sidebar` is a
- * size container, and a container is the containing block for its `fixed`
- * descendants, so rendered in place the backdrop would cover only the sidebar
- * and the dialog would be squeezed to its width.
+ * Rendered in place, from the sidebar footer as from the Settings card, the
+ * way every other dialog in this app is: `.overlay-backdrop` is `position:
+ * fixed`, which the sidebar pane does not confine — measured, because
+ * `container-type: inline-size` reads as though it would.
  */
 export function AiConsentDialog(props: {
   profileName: string;
@@ -28,7 +27,7 @@ export function AiConsentDialog(props: {
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const modalRef = useModal<HTMLDivElement>({ onClose: props.onCancel, initialFocusRef: cancelRef });
 
-  return createPortal(
+  return (
     <div className="overlay-backdrop" onClick={props.onCancel}>
       <div
         ref={modalRef}
@@ -63,7 +62,6 @@ export function AiConsentDialog(props: {
           </button>
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
   );
 }

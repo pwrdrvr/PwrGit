@@ -27,10 +27,15 @@ const { backend, model, effort, guidance } = job.value;
 
 - **`disabled` is the default answer.** Each profile has an AI switch
   (`settings.enabled`), off until the operator turns it on from the sidebar
-  footer or Settings → AI Features, after accepting a disclosure
-  (`consentAcceptedAt`). `applyAiProviderSettingsPatch` refuses `enabled`
-  without consent. A feature should treat `disabled` as "offer the
-  non-AI path", not as an error to report.
+  footer or Settings → AI Features, after accepting a disclosure. A feature
+  should treat `disabled` as "offer the non-AI path", not as an error to
+  report.
+  `applyAiProviderSettingsPatch` refuses `enabled` unless a
+  `consentAcceptedAt` accompanies or precedes it, which is a shape rule, not
+  proof a human read anything: the renderer stamps that timestamp, so it says
+  "a caller asserted consent", and any renderer bug that writes one turns the
+  switch on. Don't build an audit trail or a "re-consent when the copy
+  changes" rule on it without recording the disclosure in main.
 - `backend.env` is complete: the profile's CODEX_HOME and `PWRGIT_PROFILE_ID`
   are already applied. Pass it through; don't rebuild it with
   `agentEnvForPwrGitProfile`.

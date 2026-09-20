@@ -45,8 +45,9 @@ sr-only kind label is deliberately a word no fixture branch name contains.
 It is a footer and not a list row because the switch belongs to the profile,
 not to a repo. The rules it follows are in `settings/AGENTS.md`.
 
-`.pane--sidebar` is a size container, and a size container is the containing
-block for its `position: fixed` descendants. An overlay opened from inside the
-sidebar must be portalled to `<body>`, as `AiConsentDialog` is. Rendered in
-place, its backdrop covers only the sidebar and the dialog is squeezed to the
-sidebar's width.
+A dialog opened from here renders in place, like `NewWorktreeModal` and the
+rest: `.overlay-backdrop` is `position: fixed` and covers the window, even
+though `.pane--sidebar` carries `container-type: inline-size`. That reads as
+though it would confine a fixed child — layout containment does — but Chromium
+does not confine one here, measured at 1000×700 with the pane at 300px. Don't
+portal a sidebar overlay to `<body>` on that theory.

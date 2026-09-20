@@ -11,9 +11,8 @@ import {
   type LocalAcpDiscoveryOptions
 } from "@pwrdrvr/agent-acp";
 import {
-  AI_JOB_IDS,
+  acpJobProviders,
   BUILT_IN_ACP_AGENT_IDS,
-  effectiveJobProvider,
   isBuiltInAcpAgentId,
   type AcpAgentPreference,
   type AiProviderSettings,
@@ -121,13 +120,8 @@ export function acpDiscoveryOptionsForEnabledAgent(
 
 /** The enabled agents some job actually runs on. Disabled agents never appear:
  *  a job routed to one runs on Codex, so probing it would spawn a CLI nothing
- *  uses. */
+ *  uses. The rule itself lives in `@pwrgit/shared`, beside
+ *  `effectiveJobProvider`, because the renderer asks the same question. */
 export function enabledAcpAgentIdsInUse(settings: AiProviderSettings): BuiltInAcpAgentId[] {
-  return [
-    ...new Set(
-      AI_JOB_IDS.map((jobId) => effectiveJobProvider(settings, jobId)).filter(
-        (provider): provider is BuiltInAcpAgentId => provider !== "codex"
-      )
-    )
-  ];
+  return acpJobProviders(settings);
 }

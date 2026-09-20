@@ -32,6 +32,27 @@ type CacheFile = {
   agents: Record<string, AcpModelCacheEntry>;
 };
 
+/** Entries whose shape a caller can rely on. "Corrupt is empty" has to hold
+ *  entry by entry, not just for the file: a half-written or hand-edited row
+ *  reaches `entry.models.find(…)` in the service, where a missing array is a
+ *  TypeError rather than a cache miss. */
+function usableEntries(
+  agents: Record<string, AcpModelCacheEntry>
+): Record<string, AcpModelCacheEntry> {
+  const usable: Record<string, AcpModelCacheEntry> = {};
+  for (const [agentId, entry] of Object.entries(agents)) {
+    if (
+      typeof entry === "object" &&
+      entry !== null &&
+      Array.isArray(entry.models) &&
+      typeof entry.command === "string"
+    ) {
+      usable[agentId] = entry;
+    }
+  }
+  return usable;
+}
+
 export class AcpModelCache {
   /** Parsed file. This process is the only writer, and `save` refreshes it,
    *  so a memo hit is always current. */
@@ -89,7 +110,7 @@ export class AcpModelCache {
         typeof parsed.agents === "object" &&
         parsed.agents !== null
       ) {
-        file = { version: CACHE_VERSION, agents: parsed.agents };
+        file = { version: CACHE_VERSION, agents: usableEntries(parsed.agents) };
       }
     } catch {
       // Missing, unreadable, or corrupt → empty; re-listed on demand. Memoized

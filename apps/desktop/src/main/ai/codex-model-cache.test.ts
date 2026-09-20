@@ -93,6 +93,24 @@ describe("CodexModelCache", () => {
     expect(new CodexModelCache(file).load(key(1))).toBeUndefined();
   });
 
+  it("drops an entry whose shape it cannot rely on, and keeps the rest", () => {
+    const file = join(tempDir(), "codex-models.json");
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        lists: { [key(1)]: { discoveredAt: "earlier" }, [key(2)]: entry(model("gpt-5")) }
+      })
+    );
+    const cache = new CodexModelCache(file);
+
+    // A half-written row would otherwise reach `entry.models.find(…)` in the
+    // service, where a missing array is a TypeError, not a miss.
+    expect(cache.load(key(1))).toBeUndefined();
+    expect(cache.load(key(2))?.models).toHaveLength(1);
+    expect(cache.findLabel("gpt-5")).toBeUndefined();
+  });
+
   it("creates its directory and leaves no temp file behind", () => {
     const dir = tempDir();
     const file = join(dir, "cache", "codex-models.json");

@@ -1,17 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  AcpAgentDiscovery,
-  AiProviderSettings,
-  CodexProviderDiscovery,
-  Profile
+import {
+  jobProviders,
+  type AcpAgentDiscovery,
+  type AiProviderSettings,
+  type CodexProviderDiscovery,
+  type Profile
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { AiConsentDialog } from "../settings/AiConsentDialog";
-import {
-  aiJobProviders,
-  firstUnreadyAiProvider,
-  resolveAiToggleAction
-} from "../settings/ai-enablement";
+import { firstUnreadyAiProvider, resolveAiToggleAction } from "../settings/ai-enablement";
 import { SettingsSwitch } from "../settings/SettingsSwitch";
 
 function message(cause: unknown): string {
@@ -79,7 +76,7 @@ export function AiFeaturesSwitch(props: { profile: Profile }) {
 
   /** The readiness of the providers the features run on, from main's cache. */
   const readiness = async (current: AiProviderSettings) => {
-    const providers = aiJobProviders(current);
+    const providers = jobProviders(current);
     const [codex, acp] = await Promise.all([
       providers.includes("codex")
         ? dispatch("aiProviders:discoverCodex", { profileId })

@@ -363,8 +363,10 @@ export class AiProviderService {
     const { command } = resolution.selected;
     const key = codexModelCacheKey(command, resolution.environment.codexHome);
     if (options.refresh !== true) {
+      // Empty is never a hit, for the reason the ACP path gives below: it
+      // would shadow a re-probe that might now succeed.
       const memory = this.codexModelLists.get(key);
-      if (memory !== undefined) return ok({ models: memory });
+      if (memory !== undefined && memory.length > 0) return ok({ models: memory });
       const persisted = this.deps.codexModelCache.load(key);
       if (persisted !== undefined && persisted.models.length > 0) {
         this.codexModelLists.set(key, persisted.models);
@@ -458,11 +460,16 @@ export class AiProviderService {
         if (this.acpModelsInFlight.get(key) === listing) this.acpModelsInFlight.delete(key);
       }
       this.acpModelLists.set(key, models);
-      this.deps.acpModelCache.save(agentId, {
-        models,
-        command: active.command,
-        discoveredAt: new Date(this.deps.now()).toISOString()
-      });
+      // Only a list with something in it is persisted — an empty answer is
+      // not a hit on the way back in, so saving it would erase a good list
+      // and buy nothing.
+      if (models.length > 0) {
+        this.deps.acpModelCache.save(agentId, {
+          models,
+          command: active.command,
+          discoveredAt: new Date(this.deps.now()).toISOString()
+        });
+      }
       return ok({ agentId, models });
     } catch (cause) {
       return err(agentError("acp_models_failed", agentErrorMessage(cause), cause));

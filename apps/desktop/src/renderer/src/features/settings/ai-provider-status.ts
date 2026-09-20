@@ -12,6 +12,7 @@
 // Colour is the redundant channel, never the only one.
 
 import {
+  acpJobProviders,
   AI_JOB_IDS,
   AI_PROVIDER_IDS,
   aiProviderDisplayName,
@@ -214,12 +215,5 @@ export function routedJobs(settings: AiProviderSettings | null, sub: AiProviderI
 export function enabledAcpAgentIdsForModelProbes(
   settings: AiProviderSettings | null
 ): BuiltInAcpAgentId[] {
-  if (settings === null) return [];
-  return [
-    ...new Set(
-      AI_JOB_IDS.map((jobId) => effectiveJobProvider(settings, jobId)).filter(
-        (provider): provider is BuiltInAcpAgentId => provider !== "codex"
-      )
-    )
-  ];
+  return settings === null ? [] : acpJobProviders(settings);
 }

@@ -14,6 +14,7 @@ import {
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { AiProfilePicker, type AiProfileSelection } from "./AiProfilePicker";
 import { useAiProvidersContext, useInUseAcpModelProbes } from "./AiProvidersContext";
 import { aiProviderChipTone, routedJobs, type AiProviderStatus } from "./ai-provider-status";
@@ -274,6 +275,9 @@ function CodexInstalls(props: {
   onPin: (path: string) => Promise<string | null>;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // The path ellipsises, so the full string has to stay readable — through a
+  // card, never a native `title` (lib/AGENTS.md).
+  const tip = useViewportTooltip();
   if (props.candidates === undefined) {
     return <p className="settings-empty">{props.loading ? "Looking for Codex…" : "Not checked yet."}</p>;
   }
@@ -299,7 +303,7 @@ function CodexInstalls(props: {
           return (
             <li key={candidate.path} className={`settings-ai-install${using ? " is-using" : ""}`}>
               <span className="settings-ai-install__body">
-                <span className="settings-ai-install__path" title={candidate.path}>
+                <span className="settings-ai-install__path" {...hoverTooltip(tip, candidate.path)}>
                   {candidate.path}
                 </span>
                 <span className="settings-ai-install__meta">{meta}</span>
@@ -333,6 +337,7 @@ function CodexInstalls(props: {
           {error}
         </p>
       )}
+      {tip.tooltipNode}
     </>
   );
 }
@@ -608,6 +613,7 @@ function AcpInstalls(props: {
   onPick: (command: string) => Promise<string | null>;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const tip = useViewportTooltip();
   const { entry } = props;
   if (entry === undefined) {
     return <p className="settings-empty">{props.loading ? "Looking for installs…" : "Not checked yet."}</p>;
@@ -634,7 +640,7 @@ function AcpInstalls(props: {
           return (
             <li key={instance.command} className={`settings-ai-install${active ? " is-using" : ""}`}>
               <span className="settings-ai-install__body">
-                <span className="settings-ai-install__path" title={instance.command}>
+                <span className="settings-ai-install__path" {...hoverTooltip(tip, instance.command)}>
                   {instance.command}
                 </span>
                 <span className="settings-ai-install__meta">{meta}</span>
@@ -668,6 +674,7 @@ function AcpInstalls(props: {
           {error}
         </p>
       )}
+      {tip.tooltipNode}
     </>
   );
 }

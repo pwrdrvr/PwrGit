@@ -87,7 +87,11 @@ export function AiProvidersProvider(props: {
   const { profileId } = props;
   const [settings, setSettings] = useState<AiProviderSettings | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  /** How many writes are in flight, not whether one is: two fields saving at
+   *  once must not have the first to land clear the busy state for the
+   *  second. `saving` is the boolean that falls out of it. */
+  const [writesInFlight, setWritesInFlight] = useState(0);
+  const saving = writesInFlight > 0;
   const [codexSnapshot, setCodexSnapshot] = useState<CodexProviderDiscovery | null>(null);
   const [codexSnapshotLoading, setCodexSnapshotLoading] = useState(true);
   const [codexError, setCodexError] = useState<string | null>(null);
@@ -138,7 +142,7 @@ export function AiProvidersProvider(props: {
   const update = useCallback(
     async (patch: AiProviderSettingsPatch): Promise<string | null> => {
       if (profileId === null) return "Choose a profile first.";
-      setSaving(true);
+      setWritesInFlight((count) => count + 1);
       try {
         const result = await dispatch("aiProviders:update", { profileId, patch });
         if (!result.ok) return result.error.message;
@@ -150,7 +154,7 @@ export function AiProvidersProvider(props: {
       } catch (cause) {
         return message(cause);
       } finally {
-        setSaving(false);
+        setWritesInFlight((count) => count - 1);
       }
     },
     [profileId]

@@ -71,6 +71,24 @@ describe("AcpModelCache", () => {
     expect(new AcpModelCache(file).load("grok")).toBeUndefined();
   });
 
+  it("drops an entry whose shape it cannot rely on, and keeps the rest", () => {
+    const file = cacheFile();
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        agents: { grok: { command: "/bin/grok" }, qwen: entry("/bin/qwen", { id: "q", label: "Q" }) }
+      })
+    );
+    const cache = new AcpModelCache(file);
+
+    // `entry.models` is read straight off a loaded entry, so a row without one
+    // has to read as a miss rather than throw where it is used.
+    expect(cache.load("grok")).toBeUndefined();
+    expect(cache.load("qwen")?.models).toEqual([{ id: "q", label: "Q" }]);
+    expect(cache.findLabel("q")).toBe("Q");
+  });
+
   it("leaves no temp file beside the cache", () => {
     const file = cacheFile();
     new AcpModelCache(file).save("grok", entry("/bin/grok"));

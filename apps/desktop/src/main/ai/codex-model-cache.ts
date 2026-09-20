@@ -37,6 +37,21 @@ export function codexModelCacheKey(command: string, codexHome: string): string {
   return JSON.stringify([command, codexHome]);
 }
 
+/** Lists whose shape a caller can rely on — the per-entry half of "corrupt is
+ *  empty". `models` is read straight off an entry by the service (and by
+ *  `findLabel` below), where a missing array is a TypeError, not a miss. */
+function usableLists(
+  lists: Record<string, CodexModelCacheEntry>
+): Record<string, CodexModelCacheEntry> {
+  const usable: Record<string, CodexModelCacheEntry> = {};
+  for (const [key, entry] of Object.entries(lists)) {
+    if (typeof entry === "object" && entry !== null && Array.isArray(entry.models)) {
+      usable[key] = entry;
+    }
+  }
+  return usable;
+}
+
 export class CodexModelCache {
   private memo: CacheFile | null = null;
 
@@ -93,7 +108,7 @@ export class CodexModelCache {
         typeof parsed.lists === "object" &&
         parsed.lists !== null
       ) {
-        file = { version: CACHE_VERSION, lists: parsed.lists };
+        file = { version: CACHE_VERSION, lists: usableLists(parsed.lists) };
       }
     } catch {
       // Missing, unreadable, or corrupt → empty; re-listed on demand.

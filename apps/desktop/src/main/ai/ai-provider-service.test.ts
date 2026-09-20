@@ -416,6 +416,15 @@ describe("AiProviderService", () => {
       expect(deps.codexModelCache.save).not.toHaveBeenCalled();
     });
 
+    it("does not treat an empty listing as a memory hit, so the next ask re-lists", async () => {
+      const { service, deps } = harness();
+      deps.listCodexModels.mockResolvedValue([]);
+      await service.codexModels("personal");
+      await service.codexModels("personal");
+      // An empty answer held in memory would shadow a list that is there now.
+      expect(deps.listCodexModels).toHaveBeenCalledTimes(2);
+    });
+
     it("bypasses memory and disk on refresh", async () => {
       const { service, deps } = harness();
       deps.codexModelCache.load.mockReturnValue({ models: [codexModel("old")], discoveredAt: "x" });
@@ -517,6 +526,24 @@ describe("AiProviderService", () => {
         "grok",
         expect.objectContaining({ command: "/b/grok", models: [{ id: "grok-4", label: "Grok 4" }] })
       );
+    });
+
+    it("does not persist an empty list over a good one", async () => {
+      const { service, deps, configure } = harness();
+      configure("personal", (settings) => {
+        settings.acp.enabledAgentIds = ["grok"];
+      });
+      deps.discoverAcp.mockResolvedValue([acpGroup("grok", ["/a/grok"])]);
+      deps.listAcpModels.mockResolvedValue([]);
+
+      expect(await service.acpModels("personal", "grok")).toEqual({
+        ok: true,
+        value: { agentId: "grok", models: [] }
+      });
+      // The list on disk is a good one until a probe brings back a better one;
+      // an empty answer is not a hit on the way back in, so writing it would
+      // only cost the next launch a spawn.
+      expect(deps.acpModelCache.save).not.toHaveBeenCalled();
     });
 
     it("serves a persisted list only when it came from the active install", async () => {
