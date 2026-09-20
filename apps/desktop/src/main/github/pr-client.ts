@@ -3,14 +3,21 @@ import type { PrSummary } from "@pwrgit/shared";
 import { delay } from "../util/timing";
 import { fetchInChunks } from "../forge/chunked";
 import { forgeRetryDelayMs } from "../forge/retry";
-import { forgeOrigin, type ForgeRepo } from "../forge/types";
+import {
+  forgeOrigin,
+  OPEN_PR_LIST_CAP,
+  type ForgeRepo,
+  type OpenPrList
+} from "../forge/types";
 import { runGh } from "./gh-cli";
 import { ForgeResponseError } from "../forge/repo-provider";
 import {
   buildCommitPrQuery,
+  buildOpenPrQuery,
   buildPrQuery,
   buildPrNumberQuery,
   parseCommitPrResponse,
+  parseOpenPrPage,
   parsePrNumberResponse,
   parsePrResponse,
   repositoryResolved
@@ -293,4 +300,40 @@ export async function fetchPrsByNumbers(
     },
     parsePrNumberResponse
   );
+}
+
+/**
+ * Every open pull request, newest update first, up to `OPEN_PR_LIST_CAP`.
+ *
+ * Any page failing fails the walk — see `OpenPrList` for why a short walk is
+ * not an answer. A repeated cursor is a server bug that would otherwise spin
+ * until the cap; it is treated the same way.
+ */
+export async function fetchOpenPrs(
+  token: string,
+  repo: Pick<ForgeRepo, "host" | "port">,
+  owner: string,
+  name: string
+): Promise<OpenPrList> {
+  const items: OpenPrList["items"] = [];
+  const seen = new Set<string>();
+  let after: string | null = null;
+  for (;;) {
+    const { query, variables } = buildOpenPrQuery(owner, name, after);
+    const page = parseOpenPrPage(
+      await runQuery(token, repo, query, variables)
+    );
+    items.push(...page.items);
+    if (!page.hasNextPage || page.endCursor === null) {
+      return { items, truncated: false };
+    }
+    if (items.length >= OPEN_PR_LIST_CAP) {
+      return { items: items.slice(0, OPEN_PR_LIST_CAP), truncated: true };
+    }
+    if (seen.has(page.endCursor)) {
+      throw new ForgeResponseError("GitHub repeated a pagination cursor.");
+    }
+    seen.add(page.endCursor);
+    after = page.endCursor;
+  }
 }

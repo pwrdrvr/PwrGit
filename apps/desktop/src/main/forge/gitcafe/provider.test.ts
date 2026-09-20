@@ -151,3 +151,34 @@ it("does not negative-cache a branch when provenance cannot be read", async () =
     createGitCafeProvider(run).fetchPrsForBranches(repo, ["feature"])
   ).rejects.toThrow("network");
 });
+
+describe("GitCafe open pull requests", () => {
+  it("keeps open and draft rows, newest update first, and names forks", async () => {
+    const run = vi
+      .fn<CafeRunner>()
+      .mockResolvedValueOnce(
+        page(
+          [
+            pr(1, { updatedAt: "2026-09-02T00:00:00Z", author: { login: "maintainer" } }),
+            pr(2, { state: "merged" }),
+            pr(3, {
+              state: "draft",
+              updatedAt: "2026-09-03T00:00:00Z",
+              crossFork: true,
+              sourceRepo: { owner: "someone", name: "demo" }
+            })
+          ],
+          "second"
+        )
+      )
+      // A row that reports only that it crossed a fork names no repository.
+      .mockResolvedValueOnce(page([pr(4, { crossFork: true })]));
+    const list = await createGitCafeProvider(run).fetchOpenPrs(repo);
+    expect(list.truncated).toBe(false);
+    expect(list.items.map((item) => item.number)).toEqual([3, 1, 4]);
+    expect(list.items[0]).toMatchObject({ headRepoPath: "someone/demo" });
+    expect(list.items[1]).toMatchObject({ author: "maintainer" });
+    expect(list.items[1]?.headRepoPath).toBeUndefined();
+    expect(list.items[2]).toMatchObject({ headRepoPath: "(fork unavailable)" });
+  });
+});

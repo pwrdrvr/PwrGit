@@ -135,6 +135,9 @@ export type LocalBranchSummary = {
   checkedOutWorktreeIds: WorktreeId[];
   lastCommitAt?: string;
   subject?: string;
+  /** The branch's change request when one is known: `branch_pr`, else the
+   *  open list (which alone knows a fork's numbered `pr/121` branch). */
+  pr?: PrSummary;
 };
 
 /** A fetched snapshot of one branch on a named remote. */
@@ -147,6 +150,12 @@ export type RemoteBranchSummary = {
   head: string;
   lastCommitAt?: string;
   subject?: string;
+  /**
+   * The open change request whose head this is, from origin's open list.
+   * Only origin's branches carry one: the list is origin's, and a same-named
+   * branch on another remote is a different branch.
+   */
+  pr?: PrSummary;
 };
 
 export type RemoteResetMode = "soft" | "hard";
@@ -714,6 +723,71 @@ export type PrSummary = {
   /** Epoch milliseconds; set only on the matching terminal state. */
   mergedAt?: number;
   closedAt?: number;
+};
+
+/**
+ * One entry of a repository's open change-request list.
+ *
+ * The list is the one forge read keyed by nothing local — every other read asks
+ * about a branch or a commit this checkout already has — so it is the only one
+ * that can name a change request whose head was never fetched, which is every
+ * pull request from a fork.
+ */
+export type OpenChangeRequest = PrSummary & {
+  /** The author's login, when the forge reports one. */
+  author?: string;
+  /**
+   * Forge path of the repository holding the head branch, set only when that
+   * is NOT the base repository — a fork. Absent means the base repository, or
+   * a forge that did not say.
+   */
+  headRepoPath?: string;
+  /** Epoch milliseconds of the last update; the forge sorts by it. */
+  updatedAt?: number;
+};
+
+/**
+ * Where a change request's head lives relative to this checkout — which is
+ * what decides the verbs its row can offer.
+ */
+export type ChangeRequestLocation =
+  /** Checked out in a worktree: the only verb is to go there. */
+  | { kind: "worktree"; branch: string; worktreeId: WorktreeId }
+  /** A local branch nothing has checked out. */
+  | { kind: "local"; branch: string }
+  /** Fetched from origin (`fullName` is the remote-tracking ref), never checked out. */
+  | { kind: "remote"; branch: string; fullName: string }
+  /** On origin but not fetched yet; one fetch away from `remote`. */
+  | { kind: "unfetched"; branch: string }
+  /**
+   * In another repository. `localBranch` is what checking it out creates, and
+   * `fetchable` is false when the forge publishes no change-request ref PwrGit
+   * has verified — the row then has nothing to switch to.
+   */
+  | {
+      kind: "fork";
+      branch: string;
+      headRepoPath: string;
+      localBranch: string;
+      fetchable: boolean;
+    }
+  /** A merged or closed change request whose branch is gone everywhere. */
+  | { kind: "missing"; branch: string | null };
+
+export type ChangeRequestEntry = {
+  pr: OpenChangeRequest;
+  location: ChangeRequestLocation;
+};
+
+/** `pr:openList` — a repository's open change requests, from main's cache. */
+export type ChangeRequestList = {
+  /** The forge `origin` resolves to; null means none, and so no list at all. */
+  forge: ForgeKind | null;
+  /** Epoch ms the last complete list landed, or null before the first. */
+  fetchedAt: number | null;
+  /** The forge had more open than one refresh walks; these are the newest. */
+  truncated: boolean;
+  entries: ChangeRequestEntry[];
 };
 
 export type Repo = {
@@ -1792,8 +1866,11 @@ export type BranchReveal =
 
 export type RepoSearchHit = {
   /** Repo itself, checked-out worktree, or a branch with no worktree —
-   *  fetched remote-only, or local with nothing checked out on it. */
-  kind: "repo" | "worktree" | "remote_branch" | "local_branch";
+   *  fetched remote-only, or local with nothing checked out on it. A
+   *  `change_request` is an open PR whose head is none of those: a fork's, or
+   *  one not fetched yet. A PR whose branch IS one of them comes back as that
+   *  branch's hit, carrying `pr`. */
+  kind: "repo" | "worktree" | "remote_branch" | "local_branch" | "change_request";
   repoId: RepoId;
   /** Repo name, checked-out branch, or worktree-less branch name. */
   name: string;
@@ -1811,8 +1888,9 @@ export type RepoSearchHit = {
   remoteName?: string;
   /** Owning repo's name, shown as context on branch hits. */
   repoName?: string;
-  /** The branch's PR, when known (worktree hits only). */
-  pr?: PrSummary;
+  /** The branch's change request, when known. Always set on `change_request`
+   *  hits, whose `name` is the PR's title. */
+  pr?: OpenChangeRequest;
 };
 
 /**

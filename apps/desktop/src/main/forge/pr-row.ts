@@ -1,4 +1,9 @@
-import { isForgeKind, type ForgeKind, type PrSummary } from "@pwrgit/shared";
+import {
+  isForgeKind,
+  type ForgeKind,
+  type OpenChangeRequest,
+  type PrSummary
+} from "@pwrgit/shared";
 
 /**
  * Every column that makes up a cached `PrSummary`, in one place.
@@ -83,6 +88,40 @@ export function prSummaryFromRow(
     ...optional("createdAt", count(row[`${prefix}opened_at`])),
     ...optional("mergedAt", count(row[`${prefix}merged_at`])),
     ...optional("closedAt", count(row[`${prefix}closed_at`]))
+  };
+}
+
+/** What `repo_open_pr` stores beyond a `PrSummary`. */
+export const OPEN_PR_EXTRA_COLUMNS = [
+  "author",
+  "head_repo_path",
+  "updated_at"
+] as const;
+
+export const OPEN_PR_COLUMNS = [
+  ...PR_SUMMARY_COLUMNS,
+  ...OPEN_PR_EXTRA_COLUMNS
+] as const;
+
+/** `prSummarySelect` for a joined `repo_open_pr` row. */
+export function openPrSelect(table: string, prefix = "pr_"): string {
+  return OPEN_PR_COLUMNS.map(
+    (column) => `${table}.${column} AS ${prefix}${column}`
+  ).join(", ");
+}
+
+/** `prSummaryFromRow`, plus the three open-list columns. */
+export function openPrFromRow(
+  row: Record<string, unknown>,
+  prefix = "pr_"
+): OpenChangeRequest | undefined {
+  const summary = prSummaryFromRow(row, prefix);
+  if (summary === undefined) return undefined;
+  return {
+    ...summary,
+    ...optional("author", text(row[`${prefix}author`])),
+    ...optional("headRepoPath", text(row[`${prefix}head_repo_path`])),
+    ...optional("updatedAt", count(row[`${prefix}updated_at`]))
   };
 }
 

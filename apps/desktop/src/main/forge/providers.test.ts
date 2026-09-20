@@ -45,6 +45,7 @@ describe("providerFor", () => {
       expect(typeof provider.fetchPrsForBranches).toBe("function");
       expect(typeof provider.fetchPrsForCommits).toBe("function");
       expect(typeof provider.fetchPrsByNumbers).toBe("function");
+      expect(typeof provider.fetchOpenPrs).toBe("function");
     }
   });
 });

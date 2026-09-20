@@ -1,14 +1,21 @@
-import type { PrSummary } from "@pwrgit/shared";
+import type { OpenChangeRequest, PrSummary } from "@pwrgit/shared";
 import { fetchInChunks } from "../chunked";
 import { mapLimit } from "../../util/map-limit";
 import { delay } from "../../util/timing";
 import { forgeRetryDelayMs } from "../retry";
-import type { ForgeRepo } from "../types";
+import type { ForgeRepo, OpenPrList } from "../types";
 import { ForgeResponseError } from "../repo-provider";
-import { forgeOrigin, withNullsForMissing } from "../types";
 import {
+  forgeOrigin,
+  OPEN_PR_LIST_CAP,
+  withNullsForMissing
+} from "../types";
+import {
+  buildOpenMrQuery,
+  parseOpenMrPage,
   buildMrBranchQuery,
   buildMrNumberQuery,
+  mrForkPath,
   parseMrPage,
   pickBestAssociation,
   pickBestByBranch,
@@ -211,7 +218,10 @@ export async function fetchMrsByNumbers(
     (chunk, parsed: MrPage) => {
       const found = new Map<number, PrSummary>();
       for (const node of parsed.nodes) {
-        const summary = toSummary(node);
+        // A fork's carries `headRepoPath`: a lookup locates the head by it.
+        const summary: OpenChangeRequest = { ...toSummary(node) };
+        const fork = mrForkPath(node, repo.path);
+        if (fork !== undefined) summary.headRepoPath = fork;
         if (summary.number > 0) found.set(summary.number, summary);
       }
       return withNullsForMissing(chunk, found);
@@ -263,4 +273,43 @@ export async function fetchMrsForCommits(
   // rule as every other client here — "nothing resolved" must fail.
   if (resolved.size === 0 && failure !== undefined) throw failure.error;
   return resolved;
+}
+
+/**
+ * Every open merge request, newest update first, up to `OPEN_PR_LIST_CAP`.
+ *
+ * Any page failing — or resolving no project — fails the walk; see
+ * `OpenPrList` for why a short walk is not an answer.
+ */
+export async function fetchOpenMrs(
+  token: string,
+  repo: ForgeRepo
+): Promise<OpenPrList> {
+  const items: OpenPrList["items"] = [];
+  const seen = new Set<string>();
+  let after: string | null = null;
+  for (;;) {
+    const { query, variables } = buildOpenMrQuery(repo.path, after);
+    const page = parseOpenMrPage(
+      await graphql(repo, token, query, variables),
+      repo.path
+    );
+    if (page === null) {
+      throw new ForgeResponseError(
+        "GitLab answered without the project this list asked for."
+      );
+    }
+    items.push(...page.items);
+    if (!page.hasNextPage || page.endCursor === null) {
+      return { items, truncated: false };
+    }
+    if (items.length >= OPEN_PR_LIST_CAP) {
+      return { items: items.slice(0, OPEN_PR_LIST_CAP), truncated: true };
+    }
+    if (seen.has(page.endCursor)) {
+      throw new ForgeResponseError("GitLab repeated a pagination cursor.");
+    }
+    seen.add(page.endCursor);
+    after = page.endCursor;
+  }
 }

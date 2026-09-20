@@ -84,11 +84,11 @@ it("copies the clicked worktree's exact path and PR URL, independent of prior se
   await openRow(1);
   expect(menuText()).toContain("Copy branch name");
   expect(menuText()).toContain("Copy worktree path");
-  expect(menuText()).toContain("Copy PR URL");
+  expect(menuText()).toContain("Copy pull request URL");
   await choose("Copy worktree path");
   expect(mocks.copyText).toHaveBeenLastCalledWith(path);
   await openRow(1);
-  await choose("Copy PR URL");
+  await choose("Copy pull request URL");
   expect(mocks.copyText).toHaveBeenLastCalledWith(url);
 });
 it("copies the repository path and reports clipboard failure on that row", async () => {
@@ -135,4 +135,51 @@ it("leaves normal copy alone and has no actions without results", async () => {
   expect(mocks.copyText).not.toHaveBeenCalled();
   expect(container.querySelector(".overlay-result__actions")).toBeNull();
   expect(container.querySelector(".overlay-copy-actions")).toBeNull();
+});
+it("offers a change request's head, URL and an Open action, and opens it in the browser", async () => {
+  const url = "https://github.com/octo/orbit/pull/130";
+  const request: RepoSearchHit = {
+    ...hit, kind: "change_request", repoId: "orbit", name: "feat: never fetched",
+    pr: { number: 130, url, title: "feat: never fetched", state: "open", isDraft: false, headRefName: "feat/unfetched" }
+  };
+  const fork: RepoSearchHit = {
+    ...request, name: "docs: typo",
+    pr: { ...request.pr!, number: 121, headRefName: "main", headRepoPath: "someone/orbit" }
+  };
+  await render([request, fork]);
+  await openRow(0);
+  expect(menuText()).toBe(
+    "Copy branch nameCopy pull request URLOpen pull request #130"
+  );
+  await choose("Copy branch name");
+  expect(mocks.copyText).toHaveBeenLastCalledWith("feat/unfetched");
+  await openRow(0);
+  await choose("Open pull request #130");
+  expect(mocks.dispatch).toHaveBeenCalledWith("shell:openExternal", { url });
+  // A fork's head is a branch of somebody else's repository.
+  await openRow(1);
+  expect(menuText()).not.toContain("Copy branch name");
+});
+it("fetches a change request's head on Enter, then picks the branch it landed on", async () => {
+  const request: RepoSearchHit = {
+    ...hit, kind: "change_request", repoId: "orbit", name: "feat: never fetched",
+    pr: { number: 130, url: "https://github.com/octo/orbit/pull/130", title: "feat: never fetched", state: "open", isDraft: false, headRefName: "feat/unfetched" }
+  };
+  mocks.dispatch.mockImplementation(async (channel: string) =>
+    channel === "pr:fetchHead"
+      ? ok({ kind: "remote", branch: "feat/unfetched", fullName: "refs/remotes/origin/feat/unfetched" })
+      : ok([request])
+  );
+  await act(async () => root.render(<RepoSwitcherOverlay
+    commits={[]} commitContext={null} onClose={onClose} onPick={onPick}
+    onPickCommit={vi.fn()} onPickFile={vi.fn()} platform="darwin"
+  />));
+  await key("Enter");
+  expect(mocks.dispatch).toHaveBeenCalledWith("pr:fetchHead", { repoId: "orbit", number: 130 });
+  expect(onPick).toHaveBeenCalledWith(expect.objectContaining({
+    kind: "remote_branch",
+    name: "feat/unfetched",
+    remoteRef: "refs/remotes/origin/feat/unfetched",
+    pr: expect.objectContaining({ number: 130 })
+  }));
 });

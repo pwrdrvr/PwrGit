@@ -1,7 +1,9 @@
-import { err, ok, type Result } from "@pwrgit/shared";
+import { err, ok, type PrSummary, type Result } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
+import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
+import type { OpenPrService } from "../github/open-pr-service";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
@@ -56,8 +58,32 @@ export function registerBranchHandlers(
   indexer: RepoIndexer,
   refresher: WorktreeRefresher,
   operations: WorktreeOperationQueue,
-  settings: SettingsService
+  settings: SettingsService,
+  /** Decorates branch rows with open change requests; omitted by tests. */
+  openPrs?: Pick<OpenPrService, "branchPrs">
 ): void {
+  /**
+   * Each local branch's change request: `branch_pr` first — it is the one
+   * PrService keeps current per branch — then the open list, which is the
+   * only one that knows a fork's numbered branch (`pr/121`) or a PR opened
+   * since the last sweep.
+   */
+  const localBranchPrs = (repoId: string): Map<string, PrSummary> => {
+    const out = new Map<string, PrSummary>(openPrs?.branchPrs(repoId).local);
+    const rows = db
+      .prepare(
+        `SELECT p.branch AS branch, ${prSummarySelect("p")}
+           FROM branch_pr p
+          WHERE p.repo_id = ? AND p.number IS NOT NULL`
+      )
+      .all(repoId) as (Record<string, unknown> & { branch: string })[];
+    for (const row of rows) {
+      const pr = prSummaryFromRow(row);
+      if (pr !== undefined) out.set(row.branch, pr);
+    }
+    return out;
+  };
+
   // Not-found and a gone checkout both refuse in the lookup itself, so no
   // handler below can reach git without the check.
   const rowOf = (worktreeId: string): Result<Row> => {
@@ -138,7 +164,17 @@ export function registerBranchHandlers(
       ids.push(worktree.id);
       checkedOut.set(worktree.branch, ids);
     }
-    return listRepoRefs(execGit, repo.path, checkedOut);
+    const refs = await listRepoRefs(execGit, repo.path, checkedOut);
+    if (!refs.ok) return refs;
+    const prs = localBranchPrs(req.repoId);
+    if (prs.size === 0) return refs;
+    return ok({
+      ...refs.value,
+      branches: refs.value.branches.map((branch) => {
+        const pr = prs.get(branch.name);
+        return pr === undefined ? branch : { ...branch, pr };
+      })
+    });
   });
 
   bus.register("repo:remotes", async (req) => {
@@ -162,7 +198,10 @@ export function registerBranchHandlers(
       ...(req.remote === undefined ? {} : { remote: req.remote }),
       ...(req.query === undefined ? {} : { query: req.query }),
       ...(req.offset === undefined ? {} : { offset: req.offset }),
-      ...(req.limit === undefined ? {} : { limit: req.limit })
+      ...(req.limit === undefined ? {} : { limit: req.limit }),
+      ...(openPrs === undefined
+        ? {}
+        : { originPrs: openPrs.branchPrs(req.repoId).origin })
     });
   });
 

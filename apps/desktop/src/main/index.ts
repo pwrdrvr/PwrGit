@@ -85,6 +85,8 @@ import {
 } from "./github/avatar-thumbnail-cache";
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
+import { OpenPrService } from "./github/open-pr-service";
+import { registerChangeRequestHandlers } from "./github/change-request-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
 import { delay } from "./util/timing";
@@ -684,6 +686,9 @@ if (!gotSingleInstanceLock) {
       // `other` and silently produces no change-request status at all.
       resolveForge: (url) => resolveEnabledForge(url)
     });
+    const openPrService = new OpenPrService(db, execGit, {
+      resolveForge: (url) => resolveEnabledForge(url)
+    });
     const avatarThumbnails = new GitHubAvatarThumbnailCache(db, {
       cacheDir: join(app.getPath("userData"), "cache", "github-avatar-thumbnails")
     });
@@ -879,6 +884,7 @@ if (!gotSingleInstanceLock) {
         pendingReveals.delete(deletedProfileId);
         profileScans.abort(deletedProfileId);
         prService.invalidatePendingWrites();
+        openPrService.invalidatePendingWrites();
         activeWorktreeId = survivingActiveWorktreeId(db, activeWorktreeId);
         if (windows.close(deletedProfileId)) {
           openProfileWindow(activeProfileId);
@@ -914,7 +920,8 @@ if (!gotSingleInstanceLock) {
       indexer,
       refresher,
       worktreeOperations,
-      settings
+      settings,
+      openPrService
     );
     registerTagHandlers(bus, db);
     const refreshIdentity = (
@@ -980,12 +987,24 @@ if (!gotSingleInstanceLock) {
     registerDialogHandlers(bus);
     registerClipboardHandlers(bus);
     registerShellHandlers(bus);
+    const changeRequestHandlers = registerChangeRequestHandlers(
+      bus,
+      openPrService,
+      {
+        // A fetched head is a new remote-tracking ref; index it so ⌘K and the
+        // refs browser find the branch rather than the bare change request.
+        onHeadFetched: async (repoId) => {
+          await indexer.refreshRepoRemoteBranches(repoId);
+        }
+      }
+    );
     const githubHandlers = registerGitHubHandlers(
       bus,
       prService,
       commitAuthorIdentityService,
       forgeStatus,
-      forgeHostsView
+      forgeHostsView,
+      (repoId) => changeRequestHandlers.refreshInBackground(repoId, "scheduled")
     );
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {

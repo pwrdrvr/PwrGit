@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchMrsByNumbers,
   fetchMrsForBranches,
-  fetchMrsForCommits
+  fetchMrsForCommits,
+  fetchOpenMrs
 } from "./mr-client";
 import type { ForgeRepo } from "../types";
 
@@ -352,5 +353,65 @@ describe("backoff", () => {
 
     expect((await pending).get("a")).toMatchObject({ number: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("fetchOpenMrs", () => {
+  it("walks every page and marks a fork by its source project", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          graphqlPage(
+            [
+              {
+                ...(mr({ iid: "3", sourceBranch: "feat" }) as object),
+                author: { username: "maintainer" },
+                sourceProject: { fullPath: REPO.path.toUpperCase() }
+              }
+            ],
+            true,
+            "P1"
+          )
+        )
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          graphqlPage([
+            {
+              ...(mr({ iid: "2", draft: true, sourceBranch: "main" }) as object),
+              sourceProject: { fullPath: "someone/PwrGit-Test" }
+            }
+          ])
+        )
+      );
+    const list = await fetchOpenMrs("t", REPO);
+    expect(list.truncated).toBe(false);
+    expect(list.items.map((item) => item.number)).toEqual([3, 2]);
+    // Same project in another case is still the same project.
+    expect(list.items[0]).toMatchObject({ author: "maintainer" });
+    expect(list.items[0]?.headRepoPath).toBeUndefined();
+    expect(list.items[1]).toMatchObject({ isDraft: true, headRepoPath: "someone/PwrGit-Test" });
+    const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(second.variables.after).toBe("P1");
+  });
+
+  it("refuses a response that resolved no project rather than emptying the list", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { project: null } }));
+    await expect(fetchOpenMrs("t", REPO)).rejects.toThrow();
+  });
+
+  it("says whether a merge request found by number came from a fork", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        graphqlPage([
+          {
+            ...(mr({ iid: "9", state: "merged", sourceBranch: "main" }) as object),
+            sourceProject: { fullPath: "someone/PwrGit-Test" }
+          }
+        ])
+      )
+    );
+    const found = await fetchMrsByNumbers("t", REPO, [9]);
+    expect(found.get(9)).toMatchObject({ number: 9, headRepoPath: "someone/PwrGit-Test" });
   });
 });

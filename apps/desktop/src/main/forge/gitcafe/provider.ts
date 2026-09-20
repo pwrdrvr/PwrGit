@@ -1,6 +1,12 @@
-import type { PrSummary } from "@pwrgit/shared";
+import type { OpenChangeRequest, PrSummary } from "@pwrgit/shared";
 import { ForgeResponseError } from "../repo-provider";
-import { forgeOrigin, type CliForgeProvider, type ForgeRepo } from "../types";
+import {
+  forgeOrigin,
+  OPEN_PR_LIST_CAP,
+  UNAVAILABLE_FORK,
+  type CliForgeProvider,
+  type ForgeRepo
+} from "../types";
 import {
   cafeHostArgs,
   cafePage,
@@ -173,7 +179,8 @@ export function createGitCafeProvider(
           if (found.size === 0) throw error;
           break;
         }
-        const pr = parseCafePr(cafeResource(stdout), repo);
+        // A fork's carries `headRepoPath`: a lookup locates the head by it.
+        const pr = cafePrWithFork(cafeResource(stdout), repo);
         if (pr.number !== number)
           throw new ForgeResponseError(
             "GitCafe returned a different pull request."
@@ -181,10 +188,111 @@ export function createGitCafeProvider(
         found.set(number, pr);
       }
       return found;
+    },
+    async fetchOpenPrs(repo) {
+      // cafe 0.5.0 documents no state filter on `pr list`, so the open set is
+      // the same every-state walk the branch lookup makes, filtered here.
+      const open: OpenChangeRequest[] = [];
+      const seen = new Set<string>();
+      let cursor: string | null = null;
+      let complete = false;
+      for (let pageNumber = 0; pageNumber < 50; pageNumber++) {
+        const page = cafePage(
+          await run([
+            "pr",
+            "list",
+            "--repo",
+            repo.path,
+            "--limit",
+            "200",
+            "--json",
+            ...cafeHostArgs(repo.host, repo.port),
+            ...(cursor === null ? [] : ["--cursor", cursor])
+          ])
+        );
+        for (const item of page.items) {
+          const row = object(item);
+          if (row.state !== "open" && row.state !== "draft") continue;
+          open.push(openCafePr(row, repo));
+        }
+        cursor = page.nextCursor;
+        if (cursor === null) {
+          complete = true;
+          break;
+        }
+        if (seen.has(cursor))
+          throw new ForgeResponseError("GitCafe repeated a pagination cursor.");
+        seen.add(cursor);
+      }
+      open.sort(
+        (a, b) =>
+          (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0) ||
+          b.number - a.number
+      );
+      return {
+        items: open.slice(0, OPEN_PR_LIST_CAP),
+        truncated: !complete || open.length > OPEN_PR_LIST_CAP
+      };
     }
   };
 }
 export const gitcafeProvider = createGitCafeProvider();
+
+/**
+ * A list row as an open change request. Provenance a list row does not carry
+ * stays unknown and reads as the base repository — the only one whose branches
+ * a checkout of it could see — and no per-row detail read is spent learning
+ * it: unlike pruning, nothing here is authorized by a same-named branch.
+ */
+function openCafePr(
+  row: Record<string, unknown>,
+  repo: ForgeRepo
+): OpenChangeRequest {
+  const summary = cafePrWithFork(row, repo);
+  const author = row.author;
+  const login =
+    typeof author === "string"
+      ? author
+      : typeof author === "object" && author !== null
+        ? (author as Record<string, unknown>).login ??
+          (author as Record<string, unknown>).username
+        : undefined;
+  if (typeof login === "string" && login.trim() !== "") {
+    summary.author = login.trim();
+  }
+  if (typeof row.updatedAt === "string") {
+    const time = Date.parse(row.updatedAt);
+    if (Number.isFinite(time)) summary.updatedAt = time;
+  }
+  return summary;
+}
+
+/** A row parsed as a change request, marked with the fork it came from. */
+function cafePrWithFork(
+  row: Record<string, unknown>,
+  repo: ForgeRepo
+): OpenChangeRequest {
+  const pr: OpenChangeRequest = { ...parseCafePr(row, repo) };
+  const fork = cafeForkPath(row, repo);
+  if (fork !== undefined) pr.headRepoPath = fork;
+  return pr;
+}
+
+/**
+ * A fork's source repository, or undefined for the base repository — and for
+ * a row that does not say, which reads as the base like everywhere else here.
+ * A row that reports only `crossFork` names no repository at all.
+ */
+function cafeForkPath(
+  row: Record<string, unknown>,
+  repo: ForgeRepo
+): string | undefined {
+  if (sourceMatches(row, repo) !== false) return undefined;
+  const source = row.sourceRepo ?? row.headRepo;
+  if (source === undefined || source === null) return UNAVAILABLE_FORK;
+  const head = object(source);
+  return `${String(head.owner)}/${String(head.name)}`;
+}
 
 /** Undefined means the list needs a detail read before it can prove ownership. */
 function sourceMatches(

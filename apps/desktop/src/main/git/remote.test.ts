@@ -1709,6 +1709,48 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
     }
   });
 
+  it("matches origin's rows on their open change request, number first", async () => {
+    const pr = (number: number, head: string) => ({
+      number,
+      url: `https://github.com/o/r/pull/${number}`,
+      title: `feat: console rebuild ${number}`,
+      state: "open" as const,
+      isDraft: false,
+      headRefName: head
+    });
+    // #6 heads page-06 on origin; the fork carries page-01 and page-02 under
+    // the same names, and a same-named branch there is not origin's PR.
+    const originPrs = new Map([
+      ["feature/page-06", pr(6, "feature/page-06")],
+      ["feature/page-01", pr(1, "feature/page-01")]
+    ]);
+    const byNumber = await listRemoteBranchPage(systemGit, fixture.local, {
+      query: "6",
+      originPrs
+    });
+    expect(byNumber.ok).toBe(true);
+    if (!byNumber.ok) return;
+    // Named by number: it leads, above rows whose names merely contain a 6.
+    expect(byNumber.value.rows[0]).toMatchObject({
+      qualifiedName: "origin/feature/page-06",
+      pr: { number: 6 }
+    });
+
+    const byTitle = await listRemoteBranchPage(systemGit, fixture.local, {
+      query: "console rebuild",
+      originPrs
+    });
+    expect(byTitle.ok).toBe(true);
+    if (!byTitle.ok) return;
+    expect(byTitle.value.rows.map((row) => row.qualifiedName).sort()).toEqual([
+      "origin/feature/page-01",
+      "origin/feature/page-06"
+    ]);
+    expect(
+      byTitle.value.rows.every((row) => row.qualifiedName.startsWith("origin/"))
+    ).toBe(true);
+  });
+
   it("scopes to one remote, and searches every remote when unscoped", async () => {
     const fork = await listRemoteBranchPage(systemGit, fixture.local, {
       remote: "fork"
