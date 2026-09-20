@@ -46,8 +46,16 @@ const DEPENDENCY_FIELDS = [
 // Match the spec shapes pnpm itself recognizes as git fetches. The
 // last alternation (`user/repo#ref?`) is the GitHub shortcut form npm
 // supports — pnpm treats it the same as `github:user/repo`.
+//
+// That last alternation excludes `:` from its first character class
+// for a reason: without it, any protocol spec whose path is a single
+// segment parses as a `user/repo` shortcut and is blocked. Reading
+// `file:../local` as `file:..` + `/` + `local` is the case that bit
+// us; `link:../local` and `workspace:../pkg` fail the same way. Specs
+// with two or more path segments (`file:./packages/x`) only escape by
+// accident, because the trailing class cannot match a second `/`.
 const GIT_SPEC_PATTERN =
-  /^(?:git(?:\+|:)|git@|ssh:\/\/git@|github:|gitlab:|bitbucket:|https?:\/\/(?:www\.)?(?:github|gitlab|bitbucket)\.com\/|[^/@\s]+\/[^/\s]+(?:#.*)?$)/;
+  /^(?:git(?:\+|:)|git@|ssh:\/\/git@|github:|gitlab:|bitbucket:|https?:\/\/(?:www\.)?(?:github|gitlab|bitbucket)\.com\/|[^/@\s:]+\/[^/\s]+(?:#.*)?$)/;
 
 function isGitSpec(spec) {
   return typeof spec === "string" && GIT_SPEC_PATTERN.test(spec);
