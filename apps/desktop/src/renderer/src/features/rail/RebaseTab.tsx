@@ -6,6 +6,7 @@ import type {
   RebasePlan
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { RebaseGlyph } from "../../lib/RebaseGlyph";
 
 async function orderedSelection(
   worktreeId: string,
@@ -127,7 +128,9 @@ export function RebaseTab({
   return (
     <div className="rebase-tab">
       <div className="rebase-head">
-        <span className="rebase-head__icon">↻</span>
+        <span className="rebase-head__icon">
+          <RebaseGlyph />
+        </span>
         <div>
           <div className="rebase-head__title">Rebase tool</div>
           <div className="rebase-head__sub">

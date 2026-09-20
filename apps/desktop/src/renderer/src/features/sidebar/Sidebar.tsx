@@ -26,6 +26,10 @@ import {
   hasPrimaryModifier,
   shortcutLabel
 } from "../../lib/platform";
+import { CloneGlyph } from "../../lib/CloneGlyph";
+import { PlusGlyph } from "../../lib/PlusGlyph";
+import { PullGlyph } from "../../lib/PullGlyph";
+import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -982,7 +986,7 @@ export function Sidebar({
                 : undefined
             )}
           >
-            <span className="new-wt__plus">+</span> Add folders…
+            <PlusGlyph /> Add folders…
           </button>
           {/* Clone and fork share their own row beneath Add folders. Three
               labels do not fit one row at the 240px width floor — the sizing
@@ -1011,7 +1015,7 @@ export function Sidebar({
                   : "Clone a repository from GitHub or GitLab"
               )}
             >
-              <span className="new-wt__plus">↓</span> Clone…
+              <CloneGlyph /> Clone…
             </button>
             <button
               className="fork-repo"
@@ -1041,21 +1045,22 @@ export function Sidebar({
                 all remotes of ONE repo. Same words, two blast radii — so the
                 wider one states its scope.
 
-                These two keep their `↻` / `↓` text glyphs while the rest of
-                the app moved to <RefreshGlyph />, and the exception is
-                deliberate. Both reasons for retiring the character are absent
-                here: they are --font-sans, which does resolve U+21BB (the mono
-                stack does not), and neither has a busy state to animate — they
-                open BulkSyncDialog, which owns the progress. Swapping only
-                this one would also split a matched pair, since there is no
-                fetch-shaped counterpart for "Try pull all". */}
+                The glyphs are the worktree toolbar's own Fetch and Pull marks,
+                so each bulk action reads as the same verb as the single one.
+                They used to be `↻` / `↓` text, kept on the reasoning that
+                --font-sans resolves U+21BB. It only ever did through the OS
+                font: the bundled Geist Sans has no U+21BB, so once Geist
+                actually loaded, the arrow drew in a different face from its
+                label. Neither button animates; each opens BulkSyncDialog,
+                which owns the progress. */}
             <button
               className="bulk-sync-action"
               disabled={activeProfile === null || repos.length === 0}
               {...hoverTooltip(tip, "Fetch configured remotes once for every repository")}
               onClick={() => setBulkSyncMode("fetch")}
             >
-              ↻ Fetch all repos
+              <RefreshGlyph size={12} />
+              <span className="bulk-sync-action__label">Fetch all repos</span>
             </button>
             <button
               className="bulk-sync-action"
@@ -1063,7 +1068,8 @@ export function Sidebar({
               {...hoverTooltip(tip, "Fast-forward only clean, safe tracked worktrees")}
               onClick={() => setBulkSyncMode("soft-pull")}
             >
-              ↓ Try pull all
+              <PullGlyph size={12} />
+              <span className="bulk-sync-action__label">Try pull all</span>
             </button>
           </div>
           {/* Its own row, for the reason recorded on .clone-repo-row: three
@@ -1079,7 +1085,8 @@ export function Sidebar({
               {...hoverTooltip(tip, "Find worktrees that are safe to remove, across every repository")}
               onClick={() => setPruning(true)}
             >
-              <PruneGlyph /> Prune worktrees…
+              <PruneGlyph />
+              <span className="bulk-sync-action__label">Prune worktrees…</span>
             </button>
           </div>
           {activeProfile !== null && activeProfile.roots.length === 0 && (

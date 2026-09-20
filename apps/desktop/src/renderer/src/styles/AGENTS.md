@@ -62,8 +62,8 @@ one screen; see `design/Refresh Affordances - Normalization.dc.html`.
 Three rules fall out of that, and a new refresh control needs all three:
 
 - **Draw the glyph with `lib/RefreshGlyph.tsx`**, never a `↻` text character.
-  `--font-mono` contains no U+21BB, so that character resolves through an OS
-  fallback and changes shape per platform. A text node also gives an animation
+  Neither bundled face contains U+21BB, so that character resolves through an
+  OS fallback and changes shape per platform. A text node also gives an animation
   nothing to target: the rule had to spin the *button*, and a bordered 24px box
   cartwheeled.
 - **Paint busy from `[aria-busy="true"]`, not a class.** The blanket
@@ -131,6 +131,55 @@ a shared package. PwrGit-only tokens (`--border-default`, `--accent-tint`,
 The block is a **subset** of PwrAgnt's contract on purpose: tokens no PwrGit
 surface paints with are left out, because an unread token drifts silently.
 Pull one back in from PwrAgnt's `docs/UI-THEME.md` when something needs it.
+
+## A bundled font is requested by its `@font-face` name
+
+A bundled face loads only when a rule names its exact `@font-face` family, and
+nothing warns when none does: text falls through the stack. @fontsource calls
+Geist's sans "Geist Sans", not upstream's "Geist" (the name PwrAgnt's
+`docs/UI-THEME.md` uses). Asking for "Geist" left the bundled sans unloaded from
+v0.1.0 through 0.17.0, so sans text drew in whatever the machine had installed:
+the platform font, on a machine without Geist. `bundled-fonts.test.ts` fails
+unless a font token leads with each family `fonts.css` imports.
+
+`document.fonts.check('13px Geist')` returned `true` throughout. `check()` is
+vacuously true for a family no face in the set matches, so it cannot show a face
+loaded. Ask CDP's `CSS.getPlatformFontsForNode`, which names the font that drew
+the glyphs and whether it is a web font.
+
+The bundled Geist Sans is latin only, so a glyph outside it draws in the OS
+font beside Geist. "↻ Fetch all repos" came apart exactly that way once Geist
+loaded. That is why an icon is a stroked SVG component — `lib/*Glyph.tsx`, or
+a local one like Sidebar's `ForkGlyph` — and not a text character. The refs
+sections' `+` and `●` were the last two icons drawn as text; they are now
+`<PlusGlyph />` and `<CheckoutGlyph />`.
+
+**Don't convert the rest of the arrows on suspicion — probe first.** "Latin
+only" is narrower than it sounds, and the characters this renderer actually
+uses are mostly inside it. Asking `CSS.getPlatformFontsForNode` which font drew
+each one, against `geist-sans-latin-600-normal.woff2`:
+
+| char | drew in |
+|---|---|
+| `↑` U+2191, `↓` U+2193 (ahead/behind counts) | Geist SemiBold |
+| `●` U+25CF, `→` U+2192, `·` U+00B7, `…` U+2026, `↵` U+21B5 | Geist SemiBold |
+| `↻` U+21BB | **Menlo** — the OS |
+
+So `↑3 ↓2` in a ref row and `●{dirty}` in the repo switcher are typographic
+notation that renders in the bundled face, not latent bugs. U+21BB was the
+outlier, and it is gone. A NEW character still needs the probe before it ships
+— the answer is per-codepoint, and nothing warns when it falls through.
+
+**An SVG in a flex button needs `flex: 0 0 auto`, and the label needs its own
+element.** Both fall out of the swap and neither announces itself. A text node
+sitting on the baseline draws the mark ~2px above the label's optical centre,
+so the button wants `display: flex; align-items: center` — at which point the
+glyph becomes a flex item, inherits `0 1 auto`, and gives up width to the label
+(measured: a 12px mark drawn at 9.86px at the 240px sidebar floor). And
+`text-overflow` needs a block container, so a button that used to ellipsize its
+own text stops doing anything once its text is one of two flex items; the
+truncation moves to a `__label` span. `.bulk-sync-action` is the worked
+example.
 
 ## Theme selection uses one light attribute
 
