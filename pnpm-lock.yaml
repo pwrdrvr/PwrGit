@@ -133,6 +133,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.30.0
         version: 1.30.0(zod@4.5.4)
+      dugite:
+        specifier: ^3.2.3
+        version: 3.2.3
       ws:
         specifier: ^8.18.3
         version: 8.21.3

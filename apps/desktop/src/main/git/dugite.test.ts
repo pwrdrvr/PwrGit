@@ -19,7 +19,7 @@ describe("gitExecutionEnvironment", () => {
         GIT_OPTIONAL_LOCKS: "0",
         CUSTOM_SETTING: "kept"
       })
-    ).toEqual({
+    ).toMatchObject({
       GIT_TERMINAL_PROMPT: "0",
       GCM_INTERACTIVE: "Never",
       GIT_OPTIONAL_LOCKS: "0",

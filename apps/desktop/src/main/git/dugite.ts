@@ -1,12 +1,23 @@
 // dugite is CommonJS; default-import + destructure so the strict-ESM main
 // bundle loads it (a named `import { exec }` throws at runtime).
 import type { ExecFileOptions } from "node:child_process";
+import { bundledGitEnvironment } from "@pwrgit/mcp-server";
 import { tmpdir } from "node:os";
 import dugite from "dugite";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import { logMain } from "../logs";
 
 const { exec, spawn: spawnGit } = dugite;
+let bundledDirectory = dugite.resolveEmbeddedGitDir();
+
+/** Set once at startup: packaged Git lives outside the asar. */
+export function configureBundledGit(directory: string): void {
+  bundledDirectory = directory;
+}
+
+export function bundledGitPath(): string {
+  return dugite.resolveGitBinary(bundledDirectory);
+}
 
 export type GitOutput = { stdout: string; stderr: string; exitCode: number };
 
@@ -86,7 +97,7 @@ export function gitProcessInvocation(
 export function gitExecutionEnvironment(
   overrides: GitExecOptions["env"] = {}
 ): Record<string, string | undefined> {
-  return { ...overrides, ...NON_INTERACTIVE_GIT_ENV };
+  return { ...bundledGitEnvironment(bundledDirectory, overrides), ...NON_INTERACTIVE_GIT_ENV };
 }
 
 /** Read-only probes should never compete with a mutating Git command's lock. */
