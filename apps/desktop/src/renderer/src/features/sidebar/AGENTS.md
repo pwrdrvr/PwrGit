@@ -60,15 +60,17 @@ shared `changeRequestMatch`, so `106` means #106 — never #1060 — in both pla
 With a query typed, every tab shows its own hit count, which is why the tag and
 remote searches run while their tabs are hidden.
 
-## The palette shows every profile, and says so on every row
+## The palette asks in this window's profile
 
-`repo:search` is not scoped to this window's profile: a hit carries its
-`profileId`/`profileName`, `.overlay-result__profile` badges every row with it,
-and `App.tsx` routes a pick in another profile to **that** profile's window
-instead of acting here. That is one of the three ways to reach another
-profile's window, so the badge is load-bearing rather than decoration.
+`repo:search` carries `windowProfileId()`, and main answers from that profile
+alone unless General → Search all profiles is on. Two consequences here:
 
-The ranking owes the reader this profile's rows first, and that ordering
-belongs in main — the index caps its answer at 60 rows before the renderer sees
-any of them, so a filter or a sort here arrives too late to matter. See "Main
-cannot tell which profile is asking" in `src/main/AGENTS.md`.
+- **The profile badge on each row is load-bearing, not decoration.** With the
+  setting on, rows from elsewhere appear, and `App.tsx` routes a pick in
+  another profile to **that** profile's window instead of acting in this one —
+  one of the three ways to reach it.
+- **Do not filter or re-sort by profile in the renderer.** The index caps its
+  answer at 60 rows before any of it arrives, so a pass here is too late to put
+  back a row that was never sent. Both the scope and this-profile-first
+  ordering live in `searchAll` — see "Main cannot tell which profile is asking"
+  in `src/main/AGENTS.md`.

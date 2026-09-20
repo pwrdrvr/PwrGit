@@ -27,6 +27,8 @@ describe("settings handlers", () => {
     expect(r.value.general.developerMode).toBe(false);
     expect(r.value.general.sidebarTextSize).toBe("md");
     expect(r.value.general.sidebarDensity).toBe("comfortable");
+    // ⌘K answers from this window's profile until the reader says otherwise.
+    expect(r.value.general.searchAllProfiles).toBe(false);
     expect(r.value.experimental.lineageAllBranches).toBe(false);
     expect(r.value.diagnostics.heapMonitorEnabled).toBe(false);
     expect(r.value.diagnostics.hotCpuProfilingTriggerMode).toBe("sustained");
@@ -55,13 +57,14 @@ describe("settings handlers", () => {
 
     const r = await bus.dispatch("settings:update", {
       patch: {
-        general: { developerMode: true },
+        general: { developerMode: true, searchAllProfiles: true },
         diagnostics: { hotCpuProfilingEnabled: true, heapMonitorEnabled: true }
       }
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.general.developerMode).toBe(true);
+    expect(r.value.general.searchAllProfiles).toBe(true);
     expect(r.value.diagnostics.hotCpuProfilingEnabled).toBe(true);
     // Untouched keys keep their defaults.
     expect(r.value.diagnostics.hotCpuProfilingStartDelayMs).toBe(0);
@@ -189,6 +192,8 @@ describe("appearance axes", () => {
     if (!r.ok) return;
     expect(r.value.general.sidebarTextSize).toBe("md");
     expect(r.value.general.sidebarDensity).toBe("comfortable");
+    // ⌘K answers from this window's profile until the reader says otherwise.
+    expect(r.value.general.searchAllProfiles).toBe(false);
     expect(service.get().general ?? {}).toEqual({});
   });
 });

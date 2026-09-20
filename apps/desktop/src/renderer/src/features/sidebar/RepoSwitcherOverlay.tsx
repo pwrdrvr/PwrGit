@@ -17,7 +17,7 @@ import {
   currentPlatform,
   shortcutLabel
 } from "../../lib/platform";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, windowProfileId } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
   hoverTooltip,
@@ -517,7 +517,13 @@ export function RepoSwitcherOverlay({
 
   useEffect(() => {
     let active = true;
-    void dispatch("repo:search", { query }).then((r) => {
+    // This window's profile decides the scope; main widens it only when
+    // Settings → General → Search all profiles is on.
+    const profileId = windowProfileId();
+    void dispatch("repo:search", {
+      query,
+      ...(profileId === null ? {} : { profileId })
+    }).then((r) => {
       if (active && r.ok) {
         setResults(resolvePaletteHits(r.value, resolvedBranches.current));
       }

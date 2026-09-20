@@ -28,12 +28,20 @@ take result slots, and this profile's rows never reach the reader. Filtering the
 answer afterwards, in the renderer or in main, does not give the slots back. If
 a query is capped, scope it in SQL.
 
-`RepoIndexer.searchAll` (⌘K) is deliberately cross-profile: a hit carries its
-`profileId`/`profileName`, the palette badges every row with it, and picking
-another profile's hit opens or focuses **that** profile's window rather than
-acting here (`App.tsx`). Do not "fix" that by adding a filter — it is how two of
-the three routes to another profile's window work. What it does owe the reader
-is order: this profile's rows first.
+`RepoIndexer.searchAll` (⌘K) takes a `SearchScope` — which profile's window
+asked, and whether it wants the others too (General → Search all profiles, off
+by default). Two things about it are easy to get wrong:
+
+- **The filter is a WHERE clause, not a pass over the answer.** `search_fts`
+  carries a `profile_id` column for exactly this (0033), because both of its
+  queries are capped.
+- **Widened is not unordered.** With the setting on, other profiles' rows are
+  reachable but never ahead of this profile's — `profile_id = ? DESC` sits
+  between the exact-name tier and bm25. Those rows are how two of the three
+  routes to another profile's window work: a hit carries its
+  `profileId`/`profileName`, the palette badges every row, and picking one
+  opens or focuses **that** profile's window rather than acting here
+  (`App.tsx`). Keep them reachable.
 
 ## Test it with two profiles, or you have not tested it
 
@@ -42,7 +50,13 @@ a test with **two** profiles in the database and the answer asserted against
 one of them. One profile in a fixture cannot fail this way, which is why the
 bleeds get found by hand.
 
-The ones worth copying: `profiles/profile-deletion.persistence.test.ts`
+The one written for this rule is `git/repo-indexer.profile-scope.test.ts`:
+two profiles whose repositories share a branch name and a change-request
+number, asserting the scope, the widened order, and that another profile's 200
+rows cannot spend the result cap. It needs no git at all — the FTS rows are
+written by triggers on insert.
+
+The others worth copying: `profiles/profile-deletion.persistence.test.ts`
 ("clears owned indexes and selections without touching repositories on disk")
 builds two complete profiles and asserts only one is swept;
 `git/repo-indexer.test.ts` ("hydrates remote-only search entries for every

@@ -4,7 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ok, type RepoSearchHit } from "@pwrgit/shared";
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), copyText: vi.fn() }));
-vi.mock("../../lib/pwrgit", () => ({ dispatch: mocks.dispatch }));
+vi.mock("../../lib/pwrgit", () => ({
+  dispatch: mocks.dispatch,
+  windowProfileId: () => "default"
+}));
 vi.mock("../../lib/copyText", () => ({ copyText: mocks.copyText }));
 import { RepoSwitcherOverlay } from "./RepoSwitcherOverlay";
 

@@ -14,7 +14,10 @@ import { RepoSwitcherOverlay } from "./RepoSwitcherOverlay";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
 const dispatch = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/pwrgit", () => ({ dispatch }));
+vi.mock("../../lib/pwrgit", () => ({
+  dispatch,
+  windowProfileId: () => "default"
+}));
 
 const base = {
   repoId: "repo", repoName: "Demo", path: "/repo",

@@ -904,7 +904,15 @@ if (!gotSingleInstanceLock) {
         return reveal;
       }
     });
-    registerRepoHandlers(bus, indexer, profiles, refresher);
+    registerRepoHandlers(
+      bus,
+      indexer,
+      profiles,
+      refresher,
+      () =>
+        settingsSnapshot(settings, diagnosticsOutputRoot, appVersion).general
+          .searchAllProfiles
+    );
     registerCloneHandlers(bus, cloneService);
     registerSshHostTrustHandlers(bus, new SshHostTrustService({
       allowed: (kind, hostname) => forgeHosts.kindFor(hostname).kind === kind && forgeHosts.isEnabled(hostname).enabled

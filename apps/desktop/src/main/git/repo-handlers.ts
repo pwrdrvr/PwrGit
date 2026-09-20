@@ -9,7 +9,13 @@ export function registerRepoHandlers(
   bus: CommandBus,
   indexer: RepoIndexer,
   profiles: ProfileService,
-  refresher: WorktreeRefresher
+  refresher: WorktreeRefresher,
+  /**
+   * Settings → General → Search all profiles. Read per search rather than
+   * captured, so toggling it takes effect on the next keystroke. Tests and the
+   * E2E fixture omit it and get the shipped default.
+   */
+  searchAllProfiles: () => boolean = () => false
 ): void {
   bus.register("repo:list", (req) => {
     const profileId = req.profileId ?? profiles.getActiveId();
@@ -71,7 +77,17 @@ export function registerRepoHandlers(
     return ok(null);
   });
 
-  bus.register("repo:search", (req) => ok(indexer.searchAll(req.query)));
+  // The asking window names its own profile; `repo:list`'s fallback covers a
+  // request that did not. Both null only when no profile exists at all, and
+  // then there is nothing indexed to scope to either.
+  bus.register("repo:search", (req) =>
+    ok(
+      indexer.searchAll(req.query, {
+        profileId: req.profileId ?? profiles.getActiveId(),
+        allProfiles: searchAllProfiles()
+      })
+    )
+  );
 
   // Shared across visible hits, searches and windows. Keep in-flight work in
   // the cache too: three rows from one repository cost one worktree listing.

@@ -45,12 +45,14 @@ export function GeneralSettings(props: {
   snapshot: AppSettingsSnapshot;
   onThemeChange: (theme: AppearanceTheme) => void;
   onDeveloperModeChange: (enabled: boolean) => void;
+  onSearchAllProfilesChange: (enabled: boolean) => void;
   onSidebarTextSizeChange: (size: SidebarTextSize) => void;
   onSidebarDensityChange: (density: SidebarDensity) => void;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
   const developerMode = props.snapshot.general.developerMode;
+  const searchAllProfiles = props.snapshot.general.searchAllProfiles;
   const theme = props.snapshot.general.theme;
   const textSize = props.snapshot.general.sidebarTextSize;
   const density = props.snapshot.general.sidebarDensity;
@@ -134,6 +136,30 @@ export function GeneralSettings(props: {
                 options={DENSITIES}
                 value={density}
                 onChange={props.onSidebarDensityChange}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        eyebrow="Search"
+        title="Search scope"
+        description="Which profiles the command palette looks in."
+        chip={searchAllProfiles ? "All profiles" : "This profile"}
+        chipKind={searchAllProfiles ? "ok" : "default"}
+      >
+        <div className="settings-fields">
+          <SettingsField
+            label="Search all profiles"
+            sub="Find repositories, branches and change requests in your other profiles too."
+            help="Each result says which profile it belongs to, and picking one opens that profile's window rather than changing this one. Off by default: a result from a profile you are not looking at is a surprise unless you asked for it."
+            control={
+              <SettingsSwitch
+                checked={searchAllProfiles}
+                disabled={props.saving}
+                label="Search all profiles"
+                onChange={props.onSearchAllProfilesChange}
               />
             }
           />

@@ -271,4 +271,29 @@ describe("repo handlers", () => {
     // must not also publish the stale pre-probe tree.
     expect(emitEvent).not.toHaveBeenCalled();
   });
+  // The window says which profile it is; main decides how wide to read. See
+  // "Main cannot tell which profile is asking" in ../AGENTS.md.
+  it.each([
+    ["scopes to the asking window's profile by default", false, undefined, "window-profile", false],
+    ["falls back to the active profile when the window did not say", false, "active-profile", "active-profile", false],
+    ["searches every profile once the reader turned it on", true, undefined, "window-profile", true]
+  ] as const)("%s", async (_name, setting, activeId, expectedProfile, expectedAll) => {
+    const searchAll = vi.fn(() => []);
+    const indexer = { searchAll } as unknown as RepoIndexer;
+    const profiles = {
+      getActiveId: () => activeId ?? null
+    } as unknown as ProfileService;
+    const bus = new CommandBus();
+    registerRepoHandlers(bus, indexer, profiles, refresher, () => setting);
+
+    await bus.dispatch("repo:search", {
+      query: "106",
+      ...(activeId === undefined ? { profileId: "window-profile" } : {})
+    });
+
+    expect(searchAll).toHaveBeenCalledExactlyOnceWith("106", {
+      profileId: expectedProfile,
+      allProfiles: expectedAll
+    });
+  });
 });
