@@ -151,7 +151,35 @@ The bundled Geist Sans is latin only, so a glyph outside it draws in the OS
 font beside Geist. "↻ Fetch all repos" came apart exactly that way once Geist
 loaded. That is why an icon is a stroked SVG component — `lib/*Glyph.tsx`, or
 a local one like Sidebar's `ForkGlyph` — and not a text character. The refs
-sections still draw `+` and `●` that way; converting them is outstanding.
+sections' `+` and `●` were the last two icons drawn as text; they are now
+`<PlusGlyph />` and `<CheckoutGlyph />`.
+
+**Don't convert the rest of the arrows on suspicion — probe first.** "Latin
+only" is narrower than it sounds, and the characters this renderer actually
+uses are mostly inside it. Asking `CSS.getPlatformFontsForNode` which font drew
+each one, against `geist-sans-latin-600-normal.woff2`:
+
+| char | drew in |
+|---|---|
+| `↑` U+2191, `↓` U+2193 (ahead/behind counts) | Geist SemiBold |
+| `●` U+25CF, `→` U+2192, `·` U+00B7, `…` U+2026, `↵` U+21B5 | Geist SemiBold |
+| `↻` U+21BB | **Menlo** — the OS |
+
+So `↑3 ↓2` in a ref row and `●{dirty}` in the repo switcher are typographic
+notation that renders in the bundled face, not latent bugs. U+21BB was the
+outlier, and it is gone. A NEW character still needs the probe before it ships
+— the answer is per-codepoint, and nothing warns when it falls through.
+
+**An SVG in a flex button needs `flex: 0 0 auto`, and the label needs its own
+element.** Both fall out of the swap and neither announces itself. A text node
+sitting on the baseline draws the mark ~2px above the label's optical centre,
+so the button wants `display: flex; align-items: center` — at which point the
+glyph becomes a flex item, inherits `0 1 auto`, and gives up width to the label
+(measured: a 12px mark drawn at 9.86px at the 240px sidebar floor). And
+`text-overflow` needs a block container, so a button that used to ellipsize its
+own text stops doing anything once its text is one of two flex items; the
+truncation moves to a `__label` span. `.bulk-sync-action` is the worked
+example.
 
 ## Theme selection uses one light attribute
 

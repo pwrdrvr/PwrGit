@@ -1059,7 +1059,8 @@ export function Sidebar({
               {...hoverTooltip(tip, "Fetch configured remotes once for every repository")}
               onClick={() => setBulkSyncMode("fetch")}
             >
-              <RefreshGlyph size={12} /> Fetch all repos
+              <RefreshGlyph size={12} />
+              <span className="bulk-sync-action__label">Fetch all repos</span>
             </button>
             <button
               className="bulk-sync-action"
@@ -1067,7 +1068,8 @@ export function Sidebar({
               {...hoverTooltip(tip, "Fast-forward only clean, safe tracked worktrees")}
               onClick={() => setBulkSyncMode("soft-pull")}
             >
-              <PullGlyph size={12} /> Try pull all
+              <PullGlyph size={12} />
+              <span className="bulk-sync-action__label">Try pull all</span>
             </button>
           </div>
           {/* Its own row, for the reason recorded on .clone-repo-row: three
@@ -1083,7 +1085,8 @@ export function Sidebar({
               {...hoverTooltip(tip, "Find worktrees that are safe to remove, across every repository")}
               onClick={() => setPruning(true)}
             >
-              <PruneGlyph /> Prune worktrees…
+              <PruneGlyph />
+              <span className="bulk-sync-action__label">Prune worktrees…</span>
             </button>
           </div>
           {activeProfile !== null && activeProfile.roots.length === 0 && (

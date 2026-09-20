@@ -2974,20 +2974,46 @@ textarea,
   flex: 1 1 100%;
   display: flex;
 }
+/* Flex, so the glyph is centred against the label rather than sitting on its
+   baseline: an inline SVG's bottom edge lands ON the baseline, which hung all
+   three marks 2px above the text's optical centre. The label keeps the
+   truncation the button used to own — `text-overflow` needs a block container,
+   so it moves to `__label` rather than staying here doing nothing. */
 .bulk-sync-action {
   flex: 1 1 0;
   min-width: 0;
   height: 30px;
   padding: 0 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: transparent;
   color: var(--text-muted);
   font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.bulk-sync-action__label {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
+}
+/* Same `flex: 0 0 auto` as `.overlay-result > svg`, and for the same reason:
+   a glyph that declares no `flex` inherits `0 1 auto` and gives up space to
+   the label beside it. Measured at the 240px resize floor, where the row's
+   buttons are 107px wide: "Prune worktrees…" drew its 12px mark at 9.86px.
+   Shrink belongs to `__label`, which says so and is built to ellipsize.
+   These five share the guard but not a rule, so it is spelled once here. */
+.bulk-sync-action > svg,
+.new-wt > svg,
+.clone-repo > svg,
+.fork-repo > svg,
+.add-folder > svg {
+  flex: 0 0 auto;
 }
 .bulk-sync-action:hover:not(:disabled) {
   border-color: var(--accent-border);
