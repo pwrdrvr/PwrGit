@@ -247,7 +247,7 @@ export function ledgerRows(
   const range =
     ordered.length === 0
       ? ""
-      : `${short(ordered[0]!.hash)}‥${short(ordered[ordered.length - 1]!.hash)}`;
+      : `${short(ordered[0]!.hash)}…${short(ordered[ordered.length - 1]!.hash)}`;
   const used: LedgerRow = {
     state: "ok",
     label: `${commits.length} commits, each used once`,

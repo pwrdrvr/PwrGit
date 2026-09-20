@@ -1,3 +1,5 @@
+import { AgentGlyph } from "../../lib/AgentGlyph";
+
 export function SelectionBar({
   count,
   onSquash,
@@ -31,7 +33,8 @@ export function SelectionBar({
           className="selection-bar__btn selection-bar__btn--agent"
           onClick={onTidy}
         >
-          <span aria-hidden="true">✦ </span>Tidy…
+          <AgentGlyph />
+          Tidy…
         </button>
       )}
       <span style={{ flex: 1 }} />

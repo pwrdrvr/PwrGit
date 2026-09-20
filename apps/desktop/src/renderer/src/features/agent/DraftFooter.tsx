@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AgentGlyph } from "../../lib/AgentGlyph";
 import type { MessageDraft } from "./useMessageDraft";
 import { draftText } from "./useMessageDraft";
 
@@ -42,13 +43,19 @@ export function DraftFooter({
   const [comparing, setComparing] = useState(false);
   const status = draft.status;
   let source: { text: string; tone: "agent" | "quiet" | "warn" };
-  const links: { label: string; quiet?: boolean; onClick: () => void }[] = [];
+  const links: {
+    label: string;
+    quiet?: boolean;
+    /** Leads with the agent mark: this link asks a model for something. */
+    agent?: boolean;
+    onClick: () => void;
+  }[] = [];
 
   if (status.kind === "drafting") {
-    source = { text: `✦ ${agentName} is reading ${unitLabel}…`, tone: "agent" };
+    source = { text: `${agentName} is reading ${unitLabel}…`, tone: "agent" };
     links.push({ label: "Cancel", quiet: true, onClick: draft.cancel });
   } else if (draft.pending && draft.draft !== null) {
-    source = { text: `✦ ${agentName} draft ready`, tone: "agent" };
+    source = { text: `${agentName} draft ready`, tone: "agent" };
     links.push({
       label: comparing ? "Hide draft" : "Compare",
       onClick: () => setComparing((v) => !v)
@@ -61,13 +68,14 @@ export function DraftFooter({
     };
     if (agentReady) {
       links.push({
-        label: status.code === "cancelled" ? "✦ Draft" : "Retry",
+        label: status.code === "cancelled" ? "Draft" : "Retry",
+        agent: status.code === "cancelled",
         onClick: draft.request
       });
     }
   } else if (draft.origin === "agent" && draft.draft !== null) {
     source = {
-      text: `✦ ${draft.draft.providerName}, from ${unitLabel}`,
+      text: `${draft.draft.providerName}, from ${unitLabel}`,
       tone: "agent"
     };
     links.push({ label: "Regenerate", onClick: draft.request });
@@ -76,13 +84,13 @@ export function DraftFooter({
     }
   } else if (draft.origin === "user") {
     source = { text: "Edited", tone: "quiet" };
-    if (agentReady) links.push({ label: "✦ Draft", onClick: draft.request });
+    if (agentReady) links.push({ label: "Draft", agent: true, onClick: draft.request });
   } else {
     source = { text: fallbackLabel ?? "", tone: "quiet" };
     links.push(
       agentReady
-        ? { label: "✦ Draft", onClick: draft.request }
-        : { label: "✦ Draft with an agent…", onClick: onNoAgent }
+        ? { label: "Draft", agent: true, onClick: draft.request }
+        : { label: "Draft with an agent…", agent: true, onClick: onNoAgent }
     );
   }
   if (draft.undo !== null && status.kind !== "drafting") {
@@ -92,6 +100,7 @@ export function DraftFooter({
   return (
     <>
       <div className="msg-foot" role="status">
+        {source.tone === "agent" && <AgentGlyph />}
         <span className={`msg-foot__src msg-foot__src--${source.tone}`}>
           {source.text}
         </span>
@@ -103,6 +112,7 @@ export function DraftFooter({
             className={`agent-link${link.quiet === true ? " agent-link--quiet" : ""}`}
             onClick={link.onClick}
           >
+            {link.agent === true && <AgentGlyph size={10} />}
             {link.label}
           </button>
         ))}

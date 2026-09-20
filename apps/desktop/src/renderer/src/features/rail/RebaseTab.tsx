@@ -9,6 +9,7 @@ import type {
   RebaseSnagDetail
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { AgentGlyph } from "../../lib/AgentGlyph";
 import { RebaseGlyph } from "../../lib/RebaseGlyph";
 import { AgentChip } from "../agent/AgentChip";
 import { AgentSaw } from "../agent/AgentSaw";
@@ -564,7 +565,7 @@ export function RebaseTab({
     <div className="rebase-tab">
       <div className="rebase-head">
         <span className="rebase-head__icon">
-          {op === "tidy" ? "✦" : <RebaseGlyph />}
+          {op === "tidy" ? <AgentGlyph size={15} /> : <RebaseGlyph />}
         </span>
         <div className="rebase-head__text">
           <div className="rebase-head__title">{op === null ? "Rebase tool" : OP_LABEL[op]}</div>
@@ -578,7 +579,9 @@ export function RebaseTab({
           Select commits in the graph, then choose{" "}
           <span className="rebase-accent">Squash</span>,{" "}
           <span className="rebase-accent">Reorder</span> or{" "}
-          <span className="rebase-accent">✦ Tidy</span>. You can inspect the
+          <span className="rebase-accent">
+            <AgentGlyph size={11} /> Tidy
+          </span>. You can inspect the
           exact plan and check it safely before changing the worktree.
         </div>
       ) : (
@@ -840,7 +843,7 @@ function TidyBody({
         {tidy.revisedFrom !== null && (
           <div className="tidy-revision">
             <div className="tidy-revision__head">
-              ✦ {proposal.providerName} revised the plan
+              <AgentGlyph /> {proposal.providerName} revised the plan
               <span>
                 revision {tidy.revisions} of {MAX_REVISIONS}
               </span>
@@ -882,12 +885,22 @@ function TidyBody({
     );
   }
 
-  let footer: { text: string; tone: "agent" | "quiet" | "warn"; link?: { label: string; quiet?: boolean; onClick: () => void } };
+  let footer: {
+    text: string;
+    tone: "agent" | "quiet" | "warn";
+    link?: {
+      label: string;
+      quiet?: boolean;
+      /** Leads with the agent mark: this link asks a model for something. */
+      agent?: boolean;
+      onClick: () => void;
+    };
+  };
   if (tidy.kind === "requesting") {
     footer = {
       text: tidy.revising
-        ? `✦ ${agentName} is revising the plan…`
-        : `✦ ${agentName} is reading ${commits.length} diffs…`,
+        ? `${agentName} is revising the plan…`
+        : `${agentName} is reading ${commits.length} diffs…`,
       tone: "agent",
       link: { label: "Cancel", quiet: true, onClick: onCancel }
     };
@@ -900,7 +913,15 @@ function TidyBody({
             ? `${agentName} stopped after ${Math.max(1, Math.round(tidy.afterMs / 1000))} s. Nothing changed.`
             : tidy.message,
       tone: tidy.code === "cancelled" ? "quiet" : "warn",
-      ...(agentReady ? { link: { label: tidy.code === "cancelled" ? "✦ Tidy" : "Retry", onClick: onRequest } } : {})
+      ...(agentReady
+        ? {
+            link: {
+              label: tidy.code === "cancelled" ? "Tidy" : "Retry",
+              agent: tidy.code === "cancelled",
+              onClick: onRequest
+            }
+          }
+        : {})
     };
   } else if (!agentReady) {
     footer = {
@@ -909,7 +930,7 @@ function TidyBody({
       link: { label: "Choose an agent…", onClick: onChooseAgent }
     };
   } else {
-    footer = { text: "", tone: "quiet", link: { label: "✦ Tidy", onClick: onRequest } };
+    footer = { text: "", tone: "quiet", link: { label: "Tidy", agent: true, onClick: onRequest } };
   }
 
   return (
@@ -930,6 +951,7 @@ function TidyBody({
           )}
         </div>
         <div className="msg-foot" role="status">
+          {footer.tone === "agent" && <AgentGlyph />}
           <span className={`msg-foot__src msg-foot__src--${footer.tone}`}>{footer.text}</span>
           <span className="msg-foot__sp" />
           {footer.link !== undefined && (
@@ -938,6 +960,7 @@ function TidyBody({
               className={`agent-link${footer.link.quiet === true ? " agent-link--quiet" : ""}`}
               onClick={footer.link.onClick}
             >
+              {footer.link.agent === true && <AgentGlyph size={10} />}
               {footer.link.label}
             </button>
           )}

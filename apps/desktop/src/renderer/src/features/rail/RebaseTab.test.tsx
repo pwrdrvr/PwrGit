@@ -198,7 +198,7 @@ describe("Squash with an agent", () => {
     await render("squash");
 
     expect(textarea().value).toBe("feat(export): add CSV exporter\n\nWhy it exists.");
-    expect(container.textContent).toContain("✦ Codex, from 3 diffs");
+    expect(container.textContent).toContain("Codex, from 3 diffs");
     expect(container.textContent).toContain("conventional commits");
     expect(container.textContent).toContain("Saw 3 diffs · 1 file · 30 lines");
     expect(container.textContent).toContain("3 → 1 · feat/csv-export");
@@ -238,14 +238,14 @@ describe("Squash with an agent", () => {
         })
     });
     await render("squash");
-    expect(container.textContent).toContain("✦ Codex is reading 3 diffs…");
+    expect(container.textContent).toContain("Codex is reading 3 diffs…");
     // Joined subjects hold the box while the draft is out.
     expect(textarea().value).toBe("add CSV exporter\n\nwip\n\nfix lint");
 
     await type(textarea(), "mine");
     await act(async () => resolve(undefined));
     expect(textarea().value).toBe("mine");
-    expect(container.textContent).toContain("✦ Codex draft ready");
+    expect(container.textContent).toContain("Codex draft ready");
 
     await act(async () => button("Use draft").click());
     expect(textarea().value).toContain("feat(export): add CSV exporter");
@@ -275,7 +275,7 @@ describe("Squash with no agent", () => {
     expect(container.textContent).toContain("No agent");
     expect(calls("agent:draftMessage")).toHaveLength(0);
 
-    await act(async () => button("✦ Draft with an agent…").click());
+    await act(async () => button("Draft with an agent…").click());
     expect(container.querySelector(".agent-menu")?.textContent).toContain("No compatible Codex CLI was found.");
   });
 });

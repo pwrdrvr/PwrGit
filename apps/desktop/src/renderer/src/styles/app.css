@@ -3883,6 +3883,12 @@ textarea,
   color: var(--text-muted);
 }
 .rebase-accent {
+  /* Mid-sentence, so the mark rides the text baseline rather than a flex
+     row's centre line. */
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: -2px;
   color: var(--accent);
 }
 .rebase-section {
@@ -4166,12 +4172,20 @@ button.agent-menu__item:hover {
   padding: 0;
 }
 .agent-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 2px 4px;
   border: none;
   background: none;
   font: 600 10px/1 var(--font-sans);
   color: var(--accent);
   cursor: pointer;
+}
+/* An SVG in a flex button inherits `0 1 auto` and gives up width to the
+   label. See styles/AGENTS.md. */
+.agent-link svg {
+  flex: 0 0 auto;
 }
 .agent-link--quiet {
   color: var(--text-muted);
@@ -4273,6 +4287,12 @@ button.agent-menu__item:hover {
 }
 .msg-foot__sp {
   flex: 1;
+}
+/* The agent mark leads the line, and must not be squeezed by the sentence
+   beside it when the footer wraps. */
+.msg-foot > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
 }
 .msg-compare {
   border-top: 1px solid var(--border-subtle);
@@ -4555,6 +4575,9 @@ button.agent-menu__item:hover {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--accent-bright);
+}
+.tidy-revision .tidy-revision__head svg {
+  flex: 0 0 auto;
 }
 .tidy-revision .tidy-revision__head span {
   margin-left: auto;
@@ -7314,9 +7337,15 @@ button.ref-chip:focus-visible {
   cursor: pointer;
 }
 .selection-bar__btn--agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   white-space: nowrap;
   border-color: var(--accent-border);
   color: var(--accent);
+}
+.selection-bar__btn--agent svg {
+  flex: 0 0 auto;
 }
 .selection-bar__rebase {
   height: 28px;

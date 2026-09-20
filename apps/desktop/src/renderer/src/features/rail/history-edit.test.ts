@@ -116,7 +116,7 @@ describe("ledgerRows", () => {
 
   it("knows only the first row before the check", () => {
     expect(ledgerRows(commits, { kind: "idle" })).toEqual([
-      { state: "ok", label: "5 commits, each used once", value: "aaaaaaa‥eeeeeee" },
+      { state: "ok", label: "5 commits, each used once", value: "aaaaaaa…eeeeeee" },
       { state: "wait", label: "Code unchanged at the tip", value: "needs replay" },
       { state: "wait", label: "Replays cleanly", value: "not run" }
     ]);

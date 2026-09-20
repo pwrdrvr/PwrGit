@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentEffort } from "@pwrgit/shared";
+import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { useDismissable } from "../../lib/useDismissable";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
 import {
@@ -77,8 +78,8 @@ export function AgentChip({
           {loading ? "Agent…" : agent.ready ? agent.name : "No agent"}
           {model !== null && <i className="agent-chip__model">{model}</i>}
         </span>
-        <span className="agent-chip__caret" aria-hidden="true">
-          {open ? "▴" : "▾"}
+        <span className="agent-chip__caret">
+          <ChevronGlyph up={open} />
         </span>
       </button>
 
