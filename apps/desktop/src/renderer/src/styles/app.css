@@ -3792,6 +3792,9 @@ textarea,
   gap: 8px;
   margin-bottom: 14px;
 }
+/* The tile; lib/RebaseGlyph.tsx draws the mark inside it and takes its color
+   from `color` here. No font-size: the `↻` text node it used to hold resolved
+   through an OS fallback, since neither bundled face carries U+21BB. */
 .rebase-head__icon {
   width: 26px;
   height: 26px;
@@ -3802,7 +3805,6 @@ textarea,
   align-items: center;
   justify-content: center;
   color: var(--accent-bright);
-  font-size: 14px;
 }
 .rebase-head__title {
   font: 700 13px/1 var(--font-sans);
