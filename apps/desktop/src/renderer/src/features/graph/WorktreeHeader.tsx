@@ -11,6 +11,7 @@ import type {
   WorktreeState
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { PullGlyph } from "../../lib/PullGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast } from "../../lib/toast";
 import {
@@ -770,11 +771,7 @@ export function WorktreeHeader({
             {running === "pull" ? (
               <span className="wt-btn__spinner" />
             ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 4v11" />
-                <path d="m7 10 5 5 5-5" />
-                <path d="M5 20h14" />
-              </svg>
+              <PullGlyph />
             )}
             <span className="wt-btn__label">
               {running === "pull" ? busyLabel("pull") : "Pull"}

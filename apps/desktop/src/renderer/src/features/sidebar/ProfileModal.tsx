@@ -6,6 +6,7 @@ import type {
   UpdateProfileRequest
 } from "@pwrgit/shared";
 import { SettingsSegmented } from "../settings/SettingsLayout";
+import { PlusGlyph } from "../../lib/PlusGlyph";
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import {
@@ -227,7 +228,7 @@ export function ProfileModal({
             ))}
           </div>
           <button className="rootlist__add" onClick={() => void addFolders()}>
-            <span className="new-wt__plus">+</span> Add folders…
+            <PlusGlyph /> Add folders…
           </button>
         </div>
 

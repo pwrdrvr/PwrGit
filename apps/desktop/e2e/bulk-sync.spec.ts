@@ -28,7 +28,7 @@ test("Try pull all fast-forwards safe repos and leaves dirty work untouched", as
   handle = await launchApp();
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "safe");
-  await window.getByRole("button", { name: "↓ Try pull all" }).click();
+  await window.getByRole("button", { name: "Try pull all", exact: true }).click();
 
   const dialog = window.getByRole("dialog", {
     name: "Try to pull all safely"
@@ -62,7 +62,7 @@ test("Fetch all reports one broken remote without stopping other repositories", 
   handle = await launchApp();
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "partial");
-  await window.getByRole("button", { name: "↻ Fetch all repos" }).click();
+  await window.getByRole("button", { name: "Fetch all repos", exact: true }).click();
 
   const dialog = window.getByRole("dialog", {
     name: "Fetch all repositories"

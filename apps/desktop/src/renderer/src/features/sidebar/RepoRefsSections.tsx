@@ -1,4 +1,6 @@
+import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { LocateGlyph } from "../../lib/LocateGlyph";
+import { PlusGlyph } from "../../lib/PlusGlyph";
 import {
   useCallback,
   useEffect,
@@ -539,9 +541,10 @@ export function RepoRefsSections({
                         )}
                       </button>
                     ) : (
-                      // The accessible name of a button comes from its CONTENT
-                      // before its `title`, so this announced as "+" — "plus,
-                      // button" (SC 4.1.2). An explicit label wins over both.
+                      // The glyph is aria-hidden, so this button has no
+                      // content to name it — the label is its only name, and
+                      // it has to carry the branch (SC 4.1.2). It announced as
+                      // "plus, button" back when the mark was a `+` text node.
                       <button
                         className="ref-mini-action"
                         aria-label={`Create worktree for ${branch.name}`}
@@ -551,7 +554,7 @@ export function RepoRefsSections({
                           onCreateWorktree(branch.name, false);
                         }}
                       >
-                        <span aria-hidden="true">+</span>
+                        <PlusGlyph />
                       </button>
                     )}
                   </div>
@@ -955,9 +958,14 @@ export function RepoRefsSections({
                                 }
                               }}
                             >
-                              <span aria-hidden="true">
-                                {checkedOutId === undefined ? "+" : "●"}
-                              </span>
+                              {checkedOutId === undefined ? (
+                                <PlusGlyph />
+                              ) : (
+                                /* The graph's ref chips draw this same house
+                                   for "checked out in a worktree", and this
+                                   button opens that worktree. */
+                                <CheckoutGlyph />
+                              )}
                             </button>
                           </div>
                         );

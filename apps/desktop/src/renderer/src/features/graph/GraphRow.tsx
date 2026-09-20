@@ -1,5 +1,6 @@
 import type { MouseEvent } from "react";
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
+import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
 import { TagGlyph } from "../../lib/TagGlyph";
@@ -468,10 +469,7 @@ export function GraphRow({
                           onRevealWorktree?.(wtId);
                         }}
                       >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 10.5 12 3l9 7.5" />
-                          <path d="M5 9.5V20h14V9.5" />
-                        </svg>
+                        <CheckoutGlyph size={10} />
                       </button>
                     )}
                   </span>

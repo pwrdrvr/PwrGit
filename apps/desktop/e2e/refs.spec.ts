@@ -268,11 +268,16 @@ test("browses local branches and nested remotes, then pushes to a test target", 
     box.git(repo.path, "remote", "get-url", "origin")
   );
   await expect(compactOrigin.locator(".ref-remote__open")).toHaveCount(0);
+  // The mark is <CheckoutGlyph />, not the `●` this asserted while it was a
+  // text node. Matching its first path rather than merely "has an svg" keeps
+  // what the old assertion could do: tell the checkout mark apart from the
+  // `+` that the same button draws when the branch has no worktree.
   await expect(
     compactOrigin
       .locator(".ref-remote-branch-row", { hasText: "main" })
       .getByRole("button", { name: "Show worktree checked out at main" })
-  ).toHaveText("●");
+      .locator('svg path[d="M3 10.5 12 3l9 7.5"]')
+  ).toHaveCount(1);
 
   await window
     .getByRole("button", { name: "Manage remotes and remote branches…" })
