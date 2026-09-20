@@ -1,9 +1,16 @@
 import { createHash } from "node:crypto";
-import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
+import {
+  openPrFromRow,
+  openPrSelect,
+  prSummaryFromRow,
+  prSummarySelect
+} from "../forge/pr-row";
 import { type Dirent, readdirSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
+  changeRequestLocalBranch,
+  changeRequestNumberQuery,
   err,
   ok,
   toForgeHost,
@@ -25,7 +32,11 @@ import { parseJsonStringList } from "../persistence/json-string-list";
 import { mapLimit } from "../util/map-limit";
 import { requireExit0, type GitExec } from "./dugite";
 import { buildFtsQuery } from "./fts-query";
-import { pathLeafLikePatterns, rankSearchHits } from "./search-rank";
+import {
+  changeRequestAnswersQuery,
+  pathLeafLikePatterns,
+  rankSearchHits
+} from "./search-rank";
 import {
   listBranches,
   listRemoteNames,
@@ -206,6 +217,22 @@ export type RepoRescanOptions = {
 
 const defaultYieldToEventLoop = (): Promise<void> =>
   new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * How many `change_request` rows one search reads, out of the 60 the rest of
+ * the index gets. Small on purpose: a repository with hundreds of open change
+ * requests must not be able to answer a search about the repository itself.
+ */
+const CHANGE_REQUEST_SEARCH_LIMIT = 15;
+
+/** A matched open change request, and the ref in the checkout holding its head. */
+type ChangeRequestMatch = {
+  hit: RepoSearchHit;
+  heldBy: {
+    kind: "worktree" | "local_branch" | "remote_branch";
+    entityId: string;
+  } | null;
+};
 
 /**
  * Discovers git repositories under a profile's root folders and persists a
@@ -733,22 +760,50 @@ export class RepoIndexer {
     // the repo/branch name outranks one buried in a path; PR number/title hits
     // rank just under names.
     const [leafPosix, leafWindows] = pathLeafLikePatterns(query);
-    const matches = this.db
+    // A bare number names a change request exactly; its `pr` text begins with
+    // that number and a space. Without this the index's prefix match lets
+    // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
+    const prNumber = changeRequestNumberQuery(query);
+    const prLike = prNumber === null ? null : `${prNumber} %`;
+    const refs = this.db
       .prepare(
         `SELECT entity_id, kind FROM search_fts
-         WHERE search_fts MATCH ?
+         WHERE search_fts MATCH ? AND kind <> 'change_request'
          ORDER BY CASE WHEN name = ? COLLATE NOCASE
                          OR (kind IN ('repo', 'worktree')
                              AND (path LIKE ? ESCAPE '\\'
                                   OR path LIKE ? ESCAPE '\\'))
+                         OR pr LIKE ?
                        THEN 0 ELSE 1 END,
                   bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
          LIMIT 60`
       )
-      .all(fts, query.trim(), leafPosix, leafWindows) as {
+      .all(fts, query.trim(), leafPosix, leafWindows, prLike) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
     }[];
+    // Change requests take their own small slice rather than competing for
+    // those 60 rows. Every one of them carries its repository's name in the
+    // indexed `repo_name` column, so a query naming a busy repository matches
+    // all of them — and `changeRequestAnswersQuery` discards them only AFTER
+    // the cap has been spent, which would leave the worktrees the reader was
+    // looking for off the list entirely.
+    const changeRequestRows = this.db
+      .prepare(
+        `SELECT entity_id, kind FROM search_fts
+         WHERE search_fts MATCH ? AND kind = 'change_request'
+         ORDER BY CASE WHEN pr LIKE ? THEN 0 ELSE 1 END,
+                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
+         LIMIT ${CHANGE_REQUEST_SEARCH_LIMIT}`
+      )
+      .all(fts, prLike) as {
+      entity_id: string;
+      kind: RepoSearchHit["kind"];
+    }[];
+    // Appended, not interleaved: a change request the query named by number is
+    // lifted to the front by `rankSearchHits` anyway (tier 0), and one matched
+    // only by its title belongs under the refs that matched by name.
+    const matches = [...refs, ...changeRequestRows];
     if (matches.length === 0) return [];
 
     // One hit per entity: a dirty index (fossil DBs could double-insert via
@@ -762,16 +817,26 @@ export class RepoIndexer {
       return true;
     });
 
-    const repoIds = unique.filter((m) => m.kind === "repo").map((m) => m.entity_id);
-    const wtIds = unique
-      .filter((m) => m.kind === "worktree")
-      .map((m) => m.entity_id);
-    const remoteBranchIds = unique
-      .filter((m) => m.kind === "remote_branch")
-      .map((m) => m.entity_id);
-    const localBranchIds = unique
-      .filter((m) => m.kind === "local_branch")
-      .map((m) => m.entity_id);
+    const idsOf = (kind: RepoSearchHit["kind"]): string[] =>
+      unique.filter((m) => m.kind === kind).map((m) => m.entity_id);
+    const repoIds = idsOf("repo");
+    // An open change request is found by its own row and answered by the ref
+    // that holds its head, so those refs join the hydration lists below.
+    const changeRequests = this.changeRequestMatches(
+      idsOf("change_request"),
+      query
+    );
+    const heldIds = (kind: RepoSearchHit["kind"]): string[] => [
+      ...new Set([
+        ...idsOf(kind),
+        ...[...changeRequests.values()].flatMap((match) =>
+          match.heldBy?.kind === kind ? [match.heldBy.entityId] : []
+        )
+      ])
+    ];
+    const wtIds = heldIds("worktree");
+    const remoteBranchIds = heldIds("remote_branch");
+    const localBranchIds = heldIds("local_branch");
 
     const marks = (n: number): string => Array(n).fill("?").join(",");
     const repoHits = new Map<string, RepoSearchHit>();
@@ -877,8 +942,16 @@ export class RepoIndexer {
         profile_id: string;
         profile_name: string;
       }[];
+      // Only origin's branches: the open list is origin's, and a same-named
+      // branch on another remote is somebody else's.
+      const openForHead = this.db.prepare(
+        `SELECT ${openPrSelect("o")} FROM repo_open_pr o
+          WHERE o.repo_id = ? AND o.head_ref = ? AND o.head_repo_path IS NULL
+          ORDER BY COALESCE(o.updated_at, o.opened_at, 0) DESC
+          LIMIT 1`
+      );
       for (const branch of rows) {
-        remoteBranchHits.set(branch.id, {
+        const hit: RepoSearchHit = {
           kind: "remote_branch",
           repoId: branch.repo_id,
           name: branch.name,
@@ -890,7 +963,15 @@ export class RepoIndexer {
           repoName: branch.repo_name,
           remoteRef: branch.full_name,
           remoteName: branch.remote_name
-        });
+        };
+        if (branch.remote_name === "origin") {
+          const row = openForHead.get(branch.repo_id, branch.name) as
+            | Record<string, unknown>
+            | undefined;
+          const pr = row === undefined ? undefined : openPrFromRow(row);
+          if (pr !== undefined) hit.pr = pr;
+        }
+        remoteBranchHits.set(branch.id, hit);
       }
     }
 
@@ -900,10 +981,13 @@ export class RepoIndexer {
         .prepare(
           `SELECT b.id, b.repo_id, b.name,
                   r.name AS repo_name, r.path, r.profile_id,
-                  p.name AS profile_name
+                  p.name AS profile_name,
+                  ${prSummarySelect("pr")}
            FROM local_branches b
            JOIN repos r ON r.id = b.repo_id
            JOIN profiles p ON p.id = r.profile_id
+           LEFT JOIN branch_pr pr
+             ON pr.repo_id = b.repo_id AND pr.branch = b.name
            WHERE b.id IN (${marks(localBranchIds.length)})`
         )
         .all(...localBranchIds) as {
@@ -916,7 +1000,7 @@ export class RepoIndexer {
         profile_name: string;
       }[];
       for (const branch of rows) {
-        localBranchHits.set(branch.id, {
+        const hit: RepoSearchHit = {
           kind: "local_branch",
           repoId: branch.repo_id,
           name: branch.name,
@@ -926,7 +1010,10 @@ export class RepoIndexer {
           worktreeCount: 0,
           pinned: false,
           repoName: branch.repo_name
-        });
+        };
+        const pr = prSummaryFromRow(branch as unknown as Record<string, unknown>);
+        if (pr !== undefined) hit.pr = pr;
+        localBranchHits.set(branch.id, hit);
       }
     }
 
@@ -937,19 +1024,141 @@ export class RepoIndexer {
     // can outrank the literal branch the user pasted, and a checkout the user
     // named by its directory loses to any branch merely starting with the same
     // word.
+    //
+    // A change request answers as the ref holding its head, carrying the PR,
+    // so the thing the user gets is the checkout, branch or remote ref they
+    // would act on. A ref the query ALSO named directly is emitted once, at
+    // whichever position came first.
+    const hydrated = (
+      kind: RepoSearchHit["kind"],
+      entityId: string
+    ): RepoSearchHit | undefined =>
+      kind === "repo"
+        ? repoHits.get(entityId)
+        : kind === "worktree"
+          ? wtHits.get(entityId)
+          : kind === "remote_branch"
+            ? remoteBranchHits.get(entityId)
+            : kind === "local_branch"
+              ? localBranchHits.get(entityId)
+              : undefined;
     const out: RepoSearchHit[] = [];
+    const emitted = new Set<RepoSearchHit>();
     for (const m of unique) {
-      const hit =
-        m.kind === "repo"
-          ? repoHits.get(m.entity_id)
-          : m.kind === "worktree"
-            ? wtHits.get(m.entity_id)
-            : m.kind === "remote_branch"
-              ? remoteBranchHits.get(m.entity_id)
-              : localBranchHits.get(m.entity_id);
-      if (hit !== undefined) out.push(hit);
+      let hit: RepoSearchHit | undefined;
+      if (m.kind === "change_request") {
+        const match = changeRequests.get(m.entity_id);
+        if (match === undefined) continue;
+        const held =
+          match.heldBy === null
+            ? undefined
+            : hydrated(match.heldBy.kind, match.heldBy.entityId);
+        if (held !== undefined && held.pr === undefined && match.hit.pr !== undefined) {
+          held.pr = match.hit.pr;
+        }
+        hit = held ?? match.hit;
+      } else {
+        hit = hydrated(m.kind, m.entity_id);
+      }
+      if (hit === undefined || emitted.has(hit)) continue;
+      emitted.add(hit);
+      out.push(hit);
     }
     return rankSearchHits(out, query);
+  }
+
+  /**
+   * Hydrate matched `change_request` index rows (`<repoId>:<number>`), keeping
+   * only those the query named for a reason of their own, and find the ref in
+   * this checkout that holds each one's head.
+   *
+   * Same-repository heads are looked up by name, worktree first — the order
+   * the derived branch tables already imply, since `local_branches` drops
+   * anything checked out and `remote_branches` anything with a local branch.
+   * A fork's head is only ever the product's numbered branch (`pr/121`).
+   */
+  private changeRequestMatches(
+    entityIds: string[],
+    query: string
+  ): Map<string, ChangeRequestMatch> {
+    const out = new Map<string, ChangeRequestMatch>();
+    if (entityIds.length === 0) return out;
+    const read = this.db.prepare(
+      `SELECT ${openPrSelect("o")},
+              r.name AS repo_name, r.path, r.profile_id, p.name AS profile_name
+         FROM repo_open_pr o
+         JOIN repos r ON r.id = o.repo_id
+         JOIN profiles p ON p.id = r.profile_id
+        WHERE o.repo_id = ? AND o.number = ?`
+    );
+    const worktreeFor = this.db.prepare(
+      "SELECT id FROM worktrees WHERE repo_id = ? AND branch = ? LIMIT 1"
+    );
+    const localFor = this.db.prepare(
+      "SELECT id FROM local_branches WHERE repo_id = ? AND name = ? LIMIT 1"
+    );
+    const originFor = this.db.prepare(
+      `SELECT id FROM remote_branches
+        WHERE repo_id = ? AND remote_name = 'origin' AND name = ? LIMIT 1`
+    );
+    const idOf = (row: unknown): string | null =>
+      (row as { id: string } | undefined)?.id ?? null;
+    for (const entityId of entityIds) {
+      const colon = entityId.lastIndexOf(":");
+      const number = Number(entityId.slice(colon + 1));
+      if (colon < 1 || !Number.isSafeInteger(number)) continue;
+      const repoId = entityId.slice(0, colon);
+      const row = read.get(repoId, number) as
+        | (Record<string, unknown> & {
+            repo_name: string;
+            path: string;
+            profile_id: string;
+            profile_name: string;
+          })
+        | undefined;
+      const pr = row === undefined ? undefined : openPrFromRow(row);
+      if (row === undefined || pr === undefined) continue;
+      if (!changeRequestAnswersQuery(pr, row.repo_name, query)) continue;
+      const fork = pr.headRepoPath !== undefined;
+      const branch = fork
+        ? pr.forge === undefined
+          ? null
+          : changeRequestLocalBranch(pr.forge, pr.number)
+        : (pr.headRefName ?? null);
+      let heldBy: ChangeRequestMatch["heldBy"] = null;
+      if (branch !== null) {
+        const worktree = idOf(worktreeFor.get(repoId, branch));
+        const local = worktree === null ? idOf(localFor.get(repoId, branch)) : null;
+        const remote =
+          worktree === null && local === null && !fork
+            ? idOf(originFor.get(repoId, branch))
+            : null;
+        heldBy =
+          worktree !== null
+            ? { kind: "worktree", entityId: worktree }
+            : local !== null
+              ? { kind: "local_branch", entityId: local }
+              : remote !== null
+                ? { kind: "remote_branch", entityId: remote }
+                : null;
+      }
+      out.set(entityId, {
+        hit: {
+          kind: "change_request",
+          repoId,
+          name: pr.title,
+          path: row.path,
+          profileId: row.profile_id,
+          profileName: row.profile_name,
+          worktreeCount: 0,
+          pinned: false,
+          repoName: row.repo_name,
+          pr
+        },
+        heldBy
+      });
+    }
+    return out;
   }
 
   /** The overlay's empty-query state: all repos, pinned first, alphabetical. */

@@ -3,8 +3,10 @@ import {
   buildPrQuery,
   parsePrResponse,
   buildCommitPrQuery,
+  buildOpenPrQuery,
   buildPrNumberQuery,
   parseCommitPrResponse,
+  parseOpenPrPage,
   parsePrNumberResponse
 } from "./pr-query";
 
@@ -147,5 +149,84 @@ describe("check rollups", () => {
     expect(parsePrNumberResponse([1], { repository: { n0: {
       number: 1, state: "OPEN", commits: { nodes: [{ commit: { statusCheckRollup: null } }] }
     } } }).get(1)).toMatchObject({ checkState: "unknown", checksStillRunning: false });
+  });
+});
+
+describe("open pull request list", () => {
+  const node = (number: number, extra: Record<string, unknown> = {}) => ({
+    number,
+    title: `PR ${number}`,
+    url: `https://github.com/octo/orbit/pull/${number}`,
+    state: "OPEN",
+    isDraft: false,
+    headRefName: "feature",
+    ...extra
+  });
+
+  it("binds a cursor only once there is one", () => {
+    expect(buildOpenPrQuery("octo", "orbit", null).variables).toEqual({
+      owner: "octo",
+      name: "orbit",
+      first: 50
+    });
+    const next = buildOpenPrQuery("octo", "orbit", "Y3Vyc29y");
+    expect(next.variables).toMatchObject({ after: "Y3Vyc29y" });
+    expect(next.query).toContain("states: [OPEN]");
+    expect(next.query).toContain("orderBy: { field: UPDATED_AT, direction: DESC }");
+  });
+
+  it("reads author, update time and a fork's head repository", () => {
+    const page = parseOpenPrPage({
+      repository: {
+        pullRequests: {
+          nodes: [
+            node(106, {
+              author: { login: "octocat" },
+              updatedAt: "2026-09-01T00:00:00Z",
+              isCrossRepository: false,
+              headRepository: { nameWithOwner: "octo/orbit" }
+            }),
+            null,
+            node(121, {
+              isDraft: true,
+              isCrossRepository: true,
+              headRepository: { nameWithOwner: "octo-contrib/orbit" }
+            }),
+            // A fork since deleted is still a fork.
+            node(122, { isCrossRepository: true, headRepository: null })
+          ],
+          pageInfo: { hasNextPage: true, endCursor: "next" }
+        }
+      }
+    });
+    expect(page.hasNextPage).toBe(true);
+    expect(page.endCursor).toBe("next");
+    expect(page.items.map((item) => item.number)).toEqual([106, 121, 122]);
+    expect(page.items[0]).toMatchObject({
+      author: "octocat",
+      updatedAt: Date.parse("2026-09-01T00:00:00Z")
+    });
+    expect(page.items[0]?.headRepoPath).toBeUndefined();
+    expect(page.items[1]).toMatchObject({ isDraft: true, headRepoPath: "octo-contrib/orbit" });
+    expect(page.items[2]?.headRepoPath).toBe("(fork unavailable)");
+  });
+
+  it("says whether a PR found by number came from a fork", () => {
+    expect(buildPrNumberQuery("octo", "orbit", [98]).query).toContain(
+      "isCrossRepository headRepository { nameWithOwner }"
+    );
+    const found = parsePrNumberResponse([97, 98], {
+      repository: {
+        n0: node(97, {
+          state: "MERGED",
+          headRefName: "main",
+          isCrossRepository: true,
+          headRepository: { nameWithOwner: "someone/orbit" }
+        }),
+        n1: node(98, { state: "MERGED", isCrossRepository: false })
+      }
+    });
+    expect(found.get(97)).toMatchObject({ headRepoPath: "someone/orbit" });
+    expect(found.get(98)).not.toHaveProperty("headRepoPath");
   });
 });

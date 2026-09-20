@@ -26,7 +26,12 @@ export function registerGitHubHandlers(
   commitAuthorIdentities: GitHubCommitAuthorIdentityService,
   forgeStatus: ForgeStatusService = new ForgeStatusService(),
   /** Omitted by tests and the E2E fixture, which have no host directory. */
-  forgeHosts?: ForgeHostsView
+  forgeHosts?: ForgeHostsView,
+  /**
+   * A whole-repository sweep ran (a repo row expanded). The open
+   * change-request list rides the same trigger, under its own TTL.
+   */
+  onRepoSweep?: (repoId: string) => void
 ): {
   stop: () => void;
   releaseWebContents: (webContentsId: number) => void;
@@ -145,6 +150,7 @@ export function registerGitHubHandlers(
   });
 
   bus.register("pr:refresh", async (req) => {
+    if (req.branches === undefined) onRepoSweep?.(req.repoId);
     const changed = await prs.refreshRepo(req.repoId, {
       ...(req.branches !== undefined ? { branches: req.branches } : {}),
       ...(req.trigger !== undefined ? { trigger: req.trigger } : {}),

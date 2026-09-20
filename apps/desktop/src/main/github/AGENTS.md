@@ -88,5 +88,27 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
 - **Commit-author identity is forge-wide** — see `../forge/AGENTS.md`. The
   service keeps its historical `GitHub*` names and IPC channel, but resolves any
   recognized `origin` and routes to that forge's credential-opaque transport.
+- **`OpenPrService` holds each repository's open change requests**
+  (`repo_open_pr`, migration 0032) — the list the refs browser's Pull requests
+  tab and ⌘K search read, and the only cache that knows a PR whose head was
+  never fetched. Same shape as `PrService`, deliberately separate state: its
+  own TTLs (10 min on the repo-expand sweep, 60 s when the refs browser opens),
+  its own `lastFailedAt`, its own generation guard. Reads never wait on a
+  forge: `pr:openList` answers from the table and re-lists behind it,
+  announcing `pr:openChanged` only when the diff-written list actually moved.
+  - **Every row is indexed** (`change_request` in `search_fts`, by trigger), and
+    `RepoIndexer.searchAll` answers a hit on one with the worktree, local branch
+    or origin branch holding its head — carrying the PR — so ⌘K returns the
+    thing to act on. Only a head nothing here holds comes back as a
+    `change_request` hit, and Enter on it runs `pr:fetchHead` first.
+  - **`fetchHead` never overwrites a branch.** An unfetched same-repository head
+    is fetched into `refs/remotes/origin/<head>` (forced — it is a tracking
+    ref); a fork's into `pr/N` *without* `+`, with `branch.pr/N.merge` set to
+    the forge's change-request ref so a later pull follows the PR. A head
+    already here is returned as-is. Forge-supplied names reach a refspec only
+    after `git check-ref-format --branch`.
+  - A number the list does not hold (merged, closed, or opened since) is asked
+    of `fetchPrsByNumbers` once and remembered for five minutes; an omitted
+    answer is not remembered.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

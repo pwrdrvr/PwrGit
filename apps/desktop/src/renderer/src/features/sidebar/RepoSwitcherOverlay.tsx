@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type {
-  Commit,
-  FileSearchHit,
-  RepoSearchHit,
-  SearchHitStatus
+import {
+  ASSUMED_FORGE_KIND,
+  ok,
+  changeRequestLabel,
+  changeRequestNoun,
+  changeRequestNumberQuery,
+  type ChangeRequestLocation,
+  type Commit,
+  type FileSearchHit,
+  type RepoSearchHit,
+  type SearchHitStatus
 } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
 import { copyText } from "../../lib/copyText";
@@ -27,8 +33,14 @@ import { PinIcon } from "./WorktreeRow";
 // The kind's own identity within its repo: a worktree id, a fetched ref, or —
 // for a local branch, which carries neither — the branch name itself. Two local
 // branches in one repo would otherwise share a React key.
+// A change request's name is its title, which two PRs can share; its number
+// cannot be.
 const hitKey = (hit: RepoSearchHit): string =>
-  `${hit.kind}:${hit.repoId}:${hit.worktreeId ?? hit.remoteRef ?? hit.name}`;
+  `${hit.kind}:${hit.repoId}:${
+    hit.worktreeId ??
+    hit.remoteRef ??
+    (hit.kind === "change_request" ? `#${hit.pr?.number ?? hit.name}` : hit.name)
+  }`;
 
 function resolvePaletteHits(
   hits: RepoSearchHit[],
@@ -47,6 +59,15 @@ function resolvePaletteHits(
  *  and picking it opens the New worktree modal instead of selecting a row. */
 const isWorktreelessBranch = (hit: RepoSearchHit): boolean =>
   hit.kind === "remote_branch" || hit.kind === "local_branch";
+
+/** Nothing on disk to pin or read status from: a bare branch, or an open
+ *  change request whose head is not in this checkout at all. */
+const hasNoCheckout = (hit: RepoSearchHit): boolean =>
+  isWorktreelessBranch(hit) || hit.kind === "change_request";
+
+/** The forge's own word for a hit's change request ("Pull request"). */
+const changeRequestWord = (hit: RepoSearchHit): string =>
+  changeRequestLabel(hit.pr?.forge ?? ASSUMED_FORGE_KIND);
 
 /** The directory a worktree hit lives in, when its branch name doesn't say.
  *  Paths are indexed too (0008_search_fts weights them below names), so a query
@@ -71,6 +92,8 @@ const hitKindLabel = (hit: RepoSearchHit): string =>
     ? "Local branch"
     : hit.kind === "remote_branch"
     ? "Remote branch"
+    : hit.kind === "change_request"
+    ? changeRequestWord(hit)
     : "Repo";
 
 export type PaletteItem =
@@ -78,7 +101,8 @@ export type PaletteItem =
   | { kind: "file"; hit: FileSearchHit }
   | { kind: "repo"; hit: RepoSearchHit };
 
-type CopyAction = { label: string; value: string };
+/** A row's menu entry: copy a value, or open a URL in the browser. */
+type CopyAction = { label: string; value: string; open?: true };
 
 function paletteCopyActions(item: PaletteItem | undefined): CopyAction[] {
   if (item === undefined) return [];
@@ -96,14 +120,35 @@ function paletteCopyActions(item: PaletteItem | undefined): CopyAction[] {
     ];
   }
   const actions: CopyAction[] = [];
-  if (hit.kind !== "worktree" || !hit.name.startsWith("detached@")) {
-    actions.push({ label: "Copy branch name", value: hit.name });
+  // A change request's name is its title; its branch is the head. A fork's
+  // head is a branch in somebody else's repository, so there is no name here
+  // worth copying until it has been fetched as `pr/N`.
+  const branch =
+    hit.kind === "change_request"
+      ? hit.pr?.headRepoPath === undefined
+        ? hit.pr?.headRefName
+        : undefined
+      : hit.kind !== "worktree" || !hit.name.startsWith("detached@")
+        ? hit.name
+        : undefined;
+  if (branch !== undefined) {
+    actions.push({ label: "Copy branch name", value: branch });
   }
   // Branch-only hits carry the repository path, not a checked-out worktree.
   if (hit.kind === "worktree") {
     actions.push({ label: "Copy worktree path", value: hit.path });
   }
-  if (hit.pr?.url) actions.push({ label: "Copy PR URL", value: hit.pr.url });
+  if (hit.pr?.url) {
+    // The forge's own noun, in both: "Copy PR URL" over "Open merge request
+    // #12" is one menu contradicting itself.
+    const noun = changeRequestNoun(hit.pr.forge ?? ASSUMED_FORGE_KIND);
+    actions.push({ label: `Copy ${noun} URL`, value: hit.pr.url });
+    actions.push({
+      label: `Open ${noun} #${hit.pr.number}`,
+      value: hit.pr.url,
+      open: true
+    });
+  }
   return actions;
 }
 
@@ -130,12 +175,17 @@ export function buildPaletteItems(
   files: FileSearchHit[] = []
 ): PaletteItem[] {
   const exactName = query.trim().normalize("NFC").toLowerCase();
+  // `106` names change request #106 as surely as a repo's full name names the
+  // repo, and a bare number also looks like a commit hash prefix and a path —
+  // so whatever holds #106 leads, above both.
+  const prNumber = changeRequestNumberQuery(query);
   const exactRepos: RepoSearchHit[] = [];
   const otherResults: RepoSearchHit[] = [];
   for (const hit of results) {
     if (
-      hit.kind === "repo" &&
-      hit.name.normalize("NFC").toLowerCase() === exactName
+      (hit.kind === "repo" &&
+        hit.name.normalize("NFC").toLowerCase() === exactName) ||
+      (prNumber !== null && hit.pr?.number === prNumber)
     ) {
       exactRepos.push(hit);
     } else {
@@ -229,6 +279,58 @@ function BranchIcon() {
   );
 }
 
+/** Lucide `git-pull-request`, hand-transcribed like the other glyphs here. */
+function ChangeRequestIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+      <path d="M6 9v12" />
+    </svg>
+  );
+}
+
+/**
+ * The hit a change request becomes once its head is here: the worktree,
+ * local branch or remote ref that holds it, carrying the PR along. The
+ * caller's existing path for that kind does the rest — select, or offer a
+ * new worktree.
+ */
+export function hitForLocation(
+  hit: RepoSearchHit,
+  location: ChangeRequestLocation
+): RepoSearchHit | null {
+  // The spread carries `pr` along: the located branch is the same hit, moved.
+  const base = { ...hit };
+  switch (location.kind) {
+    case "worktree":
+      return { ...base, kind: "worktree", name: location.branch, worktreeId: location.worktreeId };
+    case "local":
+      return { ...base, kind: "local_branch", name: location.branch };
+    case "remote":
+      return {
+        ...base,
+        kind: "remote_branch",
+        name: location.branch,
+        remoteRef: location.fullName,
+        remoteName: "origin"
+      };
+    default:
+      return null;
+  }
+}
+
 export function RepoSwitcherOverlay({
   commits,
   commitContext,
@@ -282,18 +384,25 @@ export function RepoSwitcherOverlay({
       repoId: hit.repoId,
       branch: hit.name
     });
-    if (r.ok && mounted.current) {
+    if (!r.ok) return r;
+    // The worktree's own PR comes from `branch_pr`, which knows nothing of a
+    // fork's `pr/N` branch — keep the one the search found.
+    const resolved =
+      r.value !== null && r.value.pr === undefined && hit.pr !== undefined
+        ? { ...r.value, pr: hit.pr }
+        : r.value;
+    if (mounted.current) {
       const key = hitKey(hit);
-      resolvedBranches.current.set(key, r.value);
+      resolvedBranches.current.set(key, resolved);
       setResults((prev) => resolvePaletteHits(prev, resolvedBranches.current));
-      if (r.value !== null) {
-        const replacement = `repo:${hitKey(r.value)}`;
+      if (resolved !== null) {
+        const replacement = `repo:${hitKey(resolved)}`;
         setSelectedItemKey((prev) =>
           prev === `repo:${key}` ? replacement : prev
         );
       }
     }
-    return r;
+    return ok(resolved);
   }, []);
   const idPrefix = useId();
   const resultsId = `${idPrefix}-results`;
@@ -338,6 +447,10 @@ export function RepoSwitcherOverlay({
 
   const copy = async (item: PaletteItem, action: CopyAction): Promise<void> => {
     const key = paletteItemKey(item);
+    if (action.open === true) {
+      void dispatch("shell:openExternal", { url: action.value });
+      return;
+    }
     try {
       await copyText(action.value);
       setCopyStatus({ key, message: "Copied" });
@@ -390,7 +503,7 @@ export function RepoSwitcherOverlay({
   // the handler's repo:changed event, and our copy keeps results stable (no
   // re-query, so rows don't jump while the overlay is open).
   const togglePin = (hit: RepoSearchHit) => {
-    if (isWorktreelessBranch(hit)) return;
+    if (hasNoCheckout(hit)) return;
     const pinned = !hit.pinned;
     setResults((prev) =>
       prev.map((h) => (hitKey(h) === hitKey(hit) ? { ...h, pinned } : h))
@@ -479,19 +592,57 @@ export function RepoSwitcherOverlay({
     if (item?.kind === "commit") onPickCommit(item.commit);
     else if (item?.kind === "file") onPickFile(item.hit.path);
     else if (item?.kind === "repo") {
+      if (item.hit.kind === "change_request") {
+        void pickChangeRequest(item.hit);
+        return;
+      }
       if (item.hit.kind !== "local_branch") {
         onPick(item.hit);
         return;
       }
-      // Enter/click can beat the visibility debounce. Resolve through the same
-      // backend cache before offering to create a checkout.
-      setBranchError(null);
-      void resolveBranch(item.hit).then((result) => {
-        if (!mounted.current) return;
-        if (result.ok) onPick(result.value ?? item.hit);
-        else setBranchError(result.error.message);
-      });
+      pickLocalBranch(item.hit);
     }
+  };
+
+  // Enter/click can beat the visibility debounce. Resolve through the same
+  // backend cache before offering to create a checkout.
+  const pickLocalBranch = (hit: RepoSearchHit): void => {
+    setBranchError(null);
+    void resolveBranch(hit).then((result) => {
+      if (!mounted.current) return;
+      if (result.ok) onPick(result.value ?? hit);
+      else setBranchError(result.error.message);
+    });
+  };
+
+  /**
+   * A change request nothing here holds: fetch its head (origin's branch, or
+   * a fork's as `pr/N`), then carry on exactly as for the branch that fetch
+   * produced — the New worktree offer, or the worktree if one appeared.
+   */
+  const [fetchingPr, setFetchingPr] = useState<string | null>(null);
+  const pickChangeRequest = async (hit: RepoSearchHit): Promise<void> => {
+    const pr = hit.pr;
+    if (pr === undefined || fetchingPr !== null) return;
+    setBranchError(null);
+    setFetchingPr(hitKey(hit));
+    const result = await dispatch("pr:fetchHead", {
+      repoId: hit.repoId,
+      number: pr.number
+    });
+    if (!mounted.current) return;
+    setFetchingPr(null);
+    if (!result.ok) {
+      setBranchError(result.error.message);
+      return;
+    }
+    const next = hitForLocation(hit, result.value);
+    if (next === null) {
+      setBranchError(`${changeRequestWord(hit)} #${pr.number} has no branch to check out.`);
+      return;
+    }
+    if (next.kind === "local_branch") pickLocalBranch(next);
+    else onPick(next);
   };
 
   /** One card for the whole result list — see `hoverTooltip`. The palette
@@ -589,7 +740,7 @@ export function RepoSwitcherOverlay({
             }
             continue;
           }
-          if (isWorktreelessBranch(hit)) continue;
+          if (hasNoCheckout(hit)) continue;
           fill.request(key, async () => {
             const r = await dispatch("search:status", {
               repoId: hit.repoId,
@@ -774,6 +925,8 @@ export function RepoSwitcherOverlay({
               >
                 {isWorktreelessBranch(r) ? (
                   <BranchIcon />
+                ) : r.kind === "change_request" ? (
+                  <ChangeRequestIcon />
                 ) : r.kind === "worktree" ? (
                   <svg
                     width="15"
@@ -846,7 +999,7 @@ export function RepoSwitcherOverlay({
                   </>
                 );
               })()}
-              {!isWorktreelessBranch(r) && (
+              {!hasNoCheckout(r) && (
                 <button
                   type="button"
                   className={`pin${r.pinned ? " is-pinned" : ""}`}
@@ -903,10 +1056,14 @@ export function RepoSwitcherOverlay({
                 );
               })()}
               <span className="overlay-result__meta">
-                {r.kind === "remote_branch"
+                {fetchingPr === hitKey(r)
+                  ? "fetching…"
+                  : r.kind === "remote_branch"
                   ? `${r.repoName ?? ""} · ${r.remoteName ?? "remote"}`
                   : r.kind === "local_branch"
                   ? `${r.repoName ?? ""} · no worktree`
+                  : r.kind === "change_request"
+                  ? `${r.repoName ?? ""} · ${r.pr?.headRepoPath !== undefined ? "fork" : "not fetched"}`
                   : r.kind === "worktree"
                   ? (r.repoName ?? "")
                   : `${r.worktreeCount} ${r.worktreeCount === 1 ? "wt" : "wts"}`}
@@ -930,7 +1087,7 @@ export function RepoSwitcherOverlay({
           <span>↵ open</span>
           {items.length > 0 && <span>tab actions</span>}
           {items[sel]?.kind === "repo" &&
-            !isWorktreelessBranch(items[sel].hit) && (
+            !hasNoCheckout(items[sel].hit) && (
               <span>{shortcutLabel({ key: "P" }, platform)} pin</span>
             )}
           <span style={{ flex: 1 }} />

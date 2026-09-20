@@ -52,6 +52,9 @@ import type {
   LaneGraph,
   ForgeStatus,
   PrSummary,
+  ChangeRequestEntry,
+  ChangeRequestList,
+  ChangeRequestLocation,
   Profile,
   PruneScanProgress,
   PruneScanSummary,
@@ -1047,6 +1050,35 @@ export interface Commands {
     res: null;
   };
   /**
+   * The repository's open change requests, answered from main's cache, each
+   * with where its head lives in this checkout. `refresh` also re-lists them
+   * from the forge in the background — throttled like every other PR read —
+   * and `pr:openChanged` announces a list that moved.
+   */
+  "pr:openList": {
+    req: { repoId: string; refresh?: boolean };
+    res: ChangeRequestList;
+  };
+  /**
+   * One change request by number, open or not: the numbered query the open
+   * list could not answer (a merged PR, or one opened since the last list).
+   * Null when the forge has no such number, or cannot be asked.
+   */
+  "pr:lookup": {
+    req: { repoId: string; number: number };
+    res: ChangeRequestEntry | null;
+  };
+  /**
+   * Bring a change request's head into this checkout so the branch verbs can
+   * take over: a same-repository head is fetched into origin's remote-tracking
+   * ref, a fork's through the forge's change-request ref into a new local
+   * branch. Answers where the head now lives.
+   */
+  "pr:fetchHead": {
+    req: { repoId: string; number: number };
+    res: ChangeRequestLocation;
+  };
+  /**
    * Which forges are usable right now, and what each can do.
    *
    * Answered entirely from main's cached probe: the renderer must never shell a
@@ -1915,6 +1947,8 @@ export interface Events {
     repoId: string;
     prs: Record<string, PrSummary | null>;
   };
+  /** A repository's open change-request list changed; re-read `pr:openList`. */
+  "pr:openChanged": { repoId: string };
   /**
    * A forge became usable, stopped being usable, or changed what it can do.
    *
