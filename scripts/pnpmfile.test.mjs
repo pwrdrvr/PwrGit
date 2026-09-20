@@ -88,3 +88,69 @@ describe("pnpmfile git-dependency guard", () => {
     expect(readPackage(pkg).devDependencies).toEqual({ tap: "^16.0.0", local: "file:../local" });
   });
 });
+
+// `pnpm.overrides` is the quietest place to hide a git spec: it
+// repoints a transitive package, so it appears in no dependencies
+// block at all. `resolutions` is the yarn-style alias, and pnpm
+// honours it — verified against pnpm 10.33.0, which folds it into the
+// lockfile's `overrides` block exactly as `pnpm.overrides`.
+describe("pnpmfile override scanning", () => {
+  const overrideFields = [
+    ["pnpm.overrides", (map) => ({ pnpm: { overrides: map } })],
+    ["resolutions", (map) => ({ resolutions: map })]
+  ];
+
+  describe.each(overrideFields)("%s", (label, wrap) => {
+    it("blocks a git spec and names the field", () => {
+      const pkg = { name: "pwrgit-workspace", ...wrap({ "is-number": "github:a/time-require" }) };
+      expect(() => readPackage(pkg)).toThrow(
+        new RegExp(`Blocked git dependency is-number@github:a/time-require, declared in ${label.replace(".", "\\.")}`)
+      );
+    });
+
+    // Real override values, including the ones this repo already
+    // ships and pnpm's `$dep` reference form. A guard that trips on
+    // these would break every install.
+    it.each([
+      "0.5.1",
+      "24.12.4",
+      "4.3.2",
+      ">=4.0.0",
+      "^1.2.3",
+      "npm:other@1.0.0",
+      "npm:@scope/pkg@1.0.0",
+      "$some-dep",
+      "$@types/node",
+      "file:../local",
+      "link:./patched",
+      "workspace:*",
+      "catalog:"
+    ])("allows the legitimate override value %s", (spec) => {
+      const pkg = { name: "pwrgit-workspace", ...wrap({ "some-dep": spec }) };
+      expect(() => readPackage(pkg)).not.toThrow();
+    });
+
+    // pnpm only honours overrides from the workspace root, so a
+    // registry package's own copy is inert — flagging it would be a
+    // false positive with nothing behind it.
+    it("ignores a transitive package's own override map", () => {
+      const pkg = { name: "some-registry-package", ...wrap({ lodash: "github:a/b" }) };
+      expect(() => readPackage(pkg)).not.toThrow();
+    });
+  });
+
+  it("tolerates manifests with no override map", () => {
+    expect(() => readPackage({ name: "pwrgit-workspace" })).not.toThrow();
+    expect(() => readPackage({ name: "pwrgit-workspace", pnpm: {} })).not.toThrow();
+    expect(() => readPackage({ name: "pwrgit-workspace", pnpm: { overrides: null } })).not.toThrow();
+  });
+
+  // The real root manifest, not a hand-written stand-in: the guard
+  // has to stay green against what this repo actually ships.
+  it("accepts this repository's own root manifest", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const root = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+    expect(root.pnpm.overrides).toBeTruthy();
+    expect(() => readPackage(root)).not.toThrow();
+  });
+});

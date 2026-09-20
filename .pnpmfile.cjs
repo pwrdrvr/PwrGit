@@ -85,15 +85,52 @@ function readPackage(pkg) {
         delete deps[name];
         continue;
       }
-      throw new Error(
-        `[pwrgit pnpmfile] Blocked git dependency ${name}@${spec}. ` +
-          `Git specs bypass tarball integrity checks and run arbitrary ` +
-          `lifecycle scripts against arbitrary remotes. If you need this ` +
-          `package, publish a registry tarball or vendor the source.`
-      );
+      throw blockedGitSpecError(name, spec, field, pkg.name);
     }
   }
+
+  // `pnpm.overrides` — and `resolutions`, the yarn-compatible alias
+  // pnpm folds into the same mechanism — are not dependency fields,
+  // but pnpm resolves their values exactly like specs. Without this,
+  // a git spec parked in an override slipped past the manifest scan
+  // and was caught only by the fetcher below, whose error names
+  // neither the package nor where it was declared.
+  //
+  // That is the quietest injection point in the manifest: an override
+  // repoints a TRANSITIVE package, so it lands in nobody's
+  // `dependencies` block and a reviewer skimming the diff for a git
+  // URL in the usual place will not see it.
+  //
+  // Scanned only for our own manifests, because pnpm only honours
+  // overrides declared by the workspace root — scanning a registry
+  // package's own copy would be a false positive with nothing behind
+  // it. If that ever stops being true, the fetcher still refuses the
+  // fetch; the cost would be a vaguer error, not a bypass.
+  if (isWorkspaceRootPackage(pkg)) {
+    scanOverrides(pkg.pnpm && pkg.pnpm.overrides, "pnpm.overrides", pkg.name);
+    scanOverrides(pkg.resolutions, "resolutions", pkg.name);
+  }
+
   return pkg;
+}
+
+// Override maps have no devDependencies-style carve-out: every value
+// here is a spec pnpm will resolve, so any git shape is a hard stop.
+function scanOverrides(overrides, label, owner) {
+  if (!overrides || typeof overrides !== "object") return;
+  for (const [name, spec] of Object.entries(overrides)) {
+    if (isGitSpec(spec)) throw blockedGitSpecError(name, spec, label, owner);
+  }
+}
+
+function blockedGitSpecError(name, spec, field, owner) {
+  return new Error(
+    `[pwrgit pnpmfile] Blocked git dependency ${name}@${spec}, ` +
+      `declared in ${field}${owner ? ` of ${owner}` : ""}. ` +
+      `Git specs bypass tarball integrity checks and run arbitrary ` +
+      `lifecycle scripts against arbitrary remotes. If you need this ` +
+      `package, publish a registry tarball or vendor the source.`
+  );
 }
 
 // Workspace packages live under @pwrgit/* (plus the unscoped root
