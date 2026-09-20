@@ -26,6 +26,8 @@ import {
   hasPrimaryModifier,
   shortcutLabel
 } from "../../lib/platform";
+import { CloneGlyph } from "../../lib/CloneGlyph";
+import { PlusGlyph } from "../../lib/PlusGlyph";
 import { PullGlyph } from "../../lib/PullGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
@@ -984,7 +986,7 @@ export function Sidebar({
                 : undefined
             )}
           >
-            <span className="new-wt__plus">+</span> Add folders…
+            <PlusGlyph /> Add folders…
           </button>
           {/* Clone and fork share their own row beneath Add folders. Three
               labels do not fit one row at the 240px width floor — the sizing
@@ -1013,7 +1015,7 @@ export function Sidebar({
                   : "Clone a repository from GitHub or GitLab"
               )}
             >
-              <span className="new-wt__plus">↓</span> Clone…
+              <CloneGlyph /> Clone…
             </button>
             <button
               className="fork-repo"

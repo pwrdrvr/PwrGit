@@ -13,6 +13,7 @@ import {
   hasPrimaryModifier,
   shortcutLabel
 } from "../../lib/platform";
+import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
@@ -767,7 +768,7 @@ export function RepoRow({
                   onNewWorktree();
                 }}
               >
-                <span className="new-wt__plus">+</span> New worktree
+                <PlusGlyph /> New worktree
               </button>
             </div>
           )}
