@@ -308,6 +308,7 @@ export function RebaseTab({
   const [chipSignal, setChipSignal] = useState(0);
   const checkGeneration = useRef(0);
   const tidyRequest = useRef<{ id: string; startedAt: number } | null>(null);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Read after an await: the revision that triggered a re-check has landed by
   // the time its result does, and a closure would still hold the old state.
   const tidyRef = useRef(tidy);
@@ -331,6 +332,10 @@ export function RebaseTab({
   const key = selectedHashes.join(",");
   useEffect(() => {
     cancelTidyRequest();
+    if (clearTimer.current !== null) {
+      clearTimeout(clearTimer.current);
+      clearTimer.current = null;
+    }
     checkGeneration.current += 1;
     setCheck({ kind: "idle" });
     setApplied(false);
@@ -356,7 +361,13 @@ export function RebaseTab({
     };
   }, [worktreeId, sourceHead, op, key]);
 
-  useEffect(() => cancelTidyRequest, []);
+  useEffect(
+    () => () => {
+      cancelTidyRequest();
+      if (clearTimer.current !== null) clearTimeout(clearTimer.current);
+    },
+    []
+  );
 
   const program: HistoryEditProgram | null = useMemo(() => {
     if (op === "squash") {
@@ -500,7 +511,9 @@ export function RebaseTab({
     setApplying(false);
     if (result.ok) {
       setApplied(true);
-      setTimeout(onClear, 900);
+      // Held so it can be cancelled: firing after a new selection was made
+      // would clear that one instead of this finished rebase.
+      clearTimer.current = setTimeout(onClear, 900);
     } else {
       setCheck({ kind: "snag", code: result.error.code, message: result.error.message });
     }

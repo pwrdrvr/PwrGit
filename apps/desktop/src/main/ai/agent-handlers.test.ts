@@ -43,7 +43,7 @@ const manifest: AgentInputManifest = {
   budget: { used: 0, limit: 2000 },
   styleSubjects: 0
 };
-const style = { convention: "plain" as const, matched: 0, sampled: 0, ref: null };
+const style = { convention: "plain" as const, matched: 0, sampled: 0 };
 const commitsInput: CommitsInput = { commits: [], styleSubjects: [], style, manifest };
 
 function draft(requestId: string): AgentMessageDraft {
@@ -97,6 +97,7 @@ function fakeSession(overrides: Partial<AgentSession> = {}): AgentSession {
     models: vi.fn(async () => ok({ providerId: "codex", models: [] })),
     draftMessage: vi.fn(async (input) => ok(draft(input.requestId))),
     proposeTidy: vi.fn(async (input) => ok(tidy(input.requestId))),
+    reset: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     ...overrides
   };
@@ -375,7 +376,10 @@ describe("agent command safety", () => {
     ]);
 
     expect(!result.ok && result.error.code).toBe("timeout");
-    expect(session.close).toHaveBeenCalledOnce();
+    // Only this profile's backend is reset: another profile's pooled client
+    // may be mid-request, and a deadline here is not its business.
+    expect(session.reset).toHaveBeenCalledWith("work");
+    expect(session.close).not.toHaveBeenCalled();
     await expect(
       bus.dispatch("agent:cancel", { requestId: "agent-draft-timeout" })
     ).resolves.toEqual(ok({ cancelled: false }));

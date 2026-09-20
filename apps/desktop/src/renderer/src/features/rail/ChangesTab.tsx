@@ -838,7 +838,12 @@ export function ChangesTab({
             <DraftFooter
               draft={draft}
               agentName={agent.name}
-              agentReady={agent.ready && staged.length > 0}
+              // Whether an agent exists, not whether there is anything to
+              // draft from: gating on the staged count here would offer
+              // "Draft with an agent…" to someone who already has one, and
+              // that link has nowhere to lead from the commit box. With
+              // nothing staged, main answers with what to do about it.
+              agentReady={agent.ready}
               fallbackLabel={null}
               fallbackAction={null}
               unitLabel={`${stagedTotal} staged file${stagedTotal === 1 ? "" : "s"}`}

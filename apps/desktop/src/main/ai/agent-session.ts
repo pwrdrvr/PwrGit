@@ -195,6 +195,9 @@ export interface AgentSession {
   proposeTidy(
     input: AgentTidyInput
   ): Promise<Result<AgentTidyProposal, PwrGitError>>;
+  /** Drop one profile's backend, after a request it ignored the abort of.
+   *  Every other profile's pooled client keeps running. */
+  reset(profileId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -204,6 +207,18 @@ function abortError(): DOMException {
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) throw abortError();
+}
+
+/** Rejects when `signal` aborts, so one caller can stop waiting on work it
+ *  shares with others. Never resolves. */
+function whenAborted(signal: AbortSignal): Promise<never> {
+  return new Promise<never>((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(abortError());
+      return;
+    }
+    signal.addEventListener("abort", () => reject(abortError()), { once: true });
+  });
 }
 
 function safeProfileSegment(profileId: string): string {
@@ -275,8 +290,11 @@ export function parseTidyProposal(
   const chronological = [...commits].reverse().map((c) => c.hash);
   const position = new Map(chronological.map((hash, i) => [hash, i]));
   const resolve = (candidate: unknown): string | null => {
-    if (typeof candidate !== "string" || candidate.length < 7) return null;
+    if (typeof candidate !== "string") return null;
+    // Measure the hash itself: padding must not buy a shorter prefix than the
+    // seven characters that make "names exactly one commit" worth asserting.
     const needle = candidate.trim().toLowerCase();
+    if (needle.length < 7) return null;
     const matches = chronological.filter((hash) => hash.toLowerCase().startsWith(needle));
     return matches.length === 1 ? matches[0]! : null;
   };
@@ -516,6 +534,9 @@ export class LocalAgentSession implements AgentSession {
     string,
     { key: string; client: StructuredAgentClient }
   >();
+  /** Discovery spawns processes, so concurrent asks for one profile share a
+   *  single pass rather than each starting their own. */
+  private readonly discovering = new Map<string, Promise<AgentAvailability>>();
 
   constructor(overrides: Partial<AgentSessionDependencies> = {}) {
     this.dependencies = { ...DEFAULT_DEPENDENCIES, ...overrides };
@@ -532,6 +553,32 @@ export class LocalAgentSession implements AgentSession {
       return cached.snapshot;
     }
 
+    // One pass per profile, however many callers ask at once: discovery
+    // spawns processes, and a renderer that asks in a loop must not be able
+    // to decide how many of them exist.
+    let pass = this.discovering.get(input.profileId);
+    if (pass === undefined) {
+      pass = this.discover(input.profileId).finally(() => {
+        this.discovering.delete(input.profileId);
+      });
+      this.discovering.set(input.profileId, pass);
+    }
+    // The pass belongs to every caller, so one caller's abort ends its own
+    // wait rather than the shared discovery.
+    const snapshot = await (input.signal === undefined
+      ? pass
+      : Promise.race([pass, whenAborted(input.signal)]));
+    throwIfAborted(input.signal);
+    return snapshot;
+  }
+
+  /**
+   * One discovery pass, shared by every caller waiting on this profile. It
+   * carries no caller's signal: a pass belongs to all of them, and each one
+   * leaves by its own abort.
+   */
+  private async discover(profileId: string): Promise<AgentAvailability> {
+    const input = { profileId };
     if (this.dependencies.discoveryDisabled) {
       const snapshot: AgentAvailability = {
         profileId: input.profileId,
@@ -547,14 +594,9 @@ export class LocalAgentSession implements AgentSession {
 
     const env = this.dependencies.envForProfile(input.profileId);
     const [codexResult, acpResult] = await Promise.allSettled([
-      this.dependencies.discoverCodex({ env, signal: input.signal }),
-      this.dependencies.discoverAcp({
-        env,
-        strategies: LISTED_ACP_STRATEGIES,
-        ...(input.signal !== undefined ? { signal: input.signal } : {})
-      })
+      this.dependencies.discoverCodex({ env }),
+      this.dependencies.discoverAcp({ env, strategies: LISTED_ACP_STRATEGIES })
     ]);
-    throwIfAborted(input.signal);
     if (
       codexResult.status === "fulfilled" &&
       codexResult.value.error === COMMAND_DISCOVERY_ABORTED
@@ -714,6 +756,19 @@ export class LocalAgentSession implements AgentSession {
     } catch (cause) {
       return err(this.failure(cause, input.signal, "plan"));
     }
+  }
+
+  /**
+   * Forget one profile's backend. A request whose deadline passed may have
+   * left its app-server stuck, and it must not serve the next request — but
+   * every other profile's pooled client is still healthy and possibly mid-run,
+   * so only this one is closed.
+   */
+  async reset(profileId: string): Promise<void> {
+    const current = this.clients.get(profileId);
+    this.clients.delete(profileId);
+    this.modelsCache.delete(profileId);
+    if (current !== undefined) await current.client.close();
   }
 
   async close(): Promise<void> {

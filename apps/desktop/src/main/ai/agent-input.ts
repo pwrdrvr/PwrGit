@@ -23,7 +23,11 @@ const PER_FILE_LINE_CAP = 400;
 const STYLE_SAMPLE = 20;
 const MAX_BODY_CHARS = 1_000;
 
-const LOCKFILES = new Set([
+/** Every name here is matched against a lower-cased basename. */
+const lowerSet = (names: string[]): Set<string> =>
+  new Set(names.map((name) => name.toLowerCase()));
+
+const LOCKFILES = lowerSet([
   "package-lock.json",
   "npm-shrinkwrap.json",
   "pnpm-lock.yaml",
@@ -44,7 +48,7 @@ const LOCKFILES = new Set([
   "packages.lock.json"
 ]);
 
-const NEVER_SEND_NAMES = new Set([
+const NEVER_SEND_NAMES = lowerSet([
   ".npmrc",
   ".pypirc",
   ".netrc",
@@ -70,18 +74,22 @@ export function exclusionFor(
   binary: boolean
 ): Exclude<AgentInputFile["treatment"], "sent" | "cut"> | null {
   const name = baseName(path);
+  // Every never-send test is case-insensitive: macOS and Windows resolve
+  // `.ENV` and `ID_RSA` to the same file, and a guard that only catches one
+  // spelling is not a guard.
   const lower = name.toLowerCase();
+  const segments = path.toLowerCase().split("/");
   if (
-    (/^\.env(\..+)?$/.test(name) && !SHAREABLE_ENV.test(name)) ||
-    NEVER_SEND_NAMES.has(name) ||
+    (/^\.env(\..+)?$/.test(lower) && !SHAREABLE_ENV.test(lower)) ||
+    NEVER_SEND_NAMES.has(lower) ||
     NEVER_SEND_EXTENSIONS.some((ext) => lower.endsWith(ext)) ||
-    path.split("/").includes("secrets")
+    segments.includes("secrets")
   ) {
     return "never_send";
   }
   if (binary) return "binary";
-  if (LOCKFILES.has(name) || lower.endsWith(".lock")) return "lockfile";
-  if (lower.endsWith(".snap") || path.split("/").includes("__snapshots__")) {
+  if (LOCKFILES.has(lower) || lower.endsWith(".lock")) return "lockfile";
+  if (lower.endsWith(".snap") || segments.includes("__snapshots__")) {
     return "snapshot";
   }
   return null;
@@ -106,15 +114,34 @@ export function parseNumstat(stdout: string): NumstatEntry[] {
     .filter((entry) => entry.path !== "");
 }
 
+const DIFF_HEADER = "diff --git ";
+
+/**
+ * The destination path of a `diff --git a/<x> b/<y>` line. A path may itself
+ * contain " b/", so the halves are split where they agree — which is every
+ * path here, since the diffs are taken with `--no-renames`. A rename, or a
+ * path that cannot be split that way, falls back to the last candidate.
+ */
+export function destinationPath(line: string): string | null {
+  if (!line.startsWith(DIFF_HEADER)) return null;
+  const body = line.slice(DIFF_HEADER.length);
+  if (!body.startsWith("a/")) return null;
+  for (let at = body.indexOf(" b/"); at !== -1; at = body.indexOf(" b/", at + 1)) {
+    if (body.slice(2, at) === body.slice(at + 3)) return body.slice(at + 3);
+  }
+  const last = body.lastIndexOf(" b/");
+  return last === -1 ? null : body.slice(last + 3);
+}
+
 /** Split a multi-file patch into per-path chunks, keyed by the `b/` path. */
 export function splitPatch(patch: string): Map<string, string[]> {
   const byPath = new Map<string, string[]>();
   let current: string[] | null = null;
   for (const line of patch.split("\n")) {
-    const header = /^diff --git a\/.* b\/(.*)$/.exec(line);
-    if (header !== null) {
+    const path = destinationPath(line);
+    if (path !== null) {
       current = [line];
-      byPath.set(header[1] ?? "", current);
+      byPath.set(path, current);
       continue;
     }
     current?.push(line);
@@ -152,6 +179,13 @@ async function readUnit(
     if (excluded === null) sendable.push(entry);
   }
   if (sendable.length === 0) return "";
+  if (budget.used >= budget.limit) {
+    // The budget is spent, so every line of this patch would be dropped —
+    // don't read it. The manifest says `cut` with nothing sent, which is
+    // exactly what happened to these files.
+    for (const entry of sendable) files.get(entry.path)!.treatment = "cut";
+    return "";
+  }
 
   const chunks = splitPatch(await unit.patch(sendable.map((entry) => entry.path)));
   const out: string[] = [];
@@ -218,8 +252,7 @@ export async function readMessageStyle(
       convention:
         subjects.length >= 5 && matched / subjects.length >= 0.6 ? "conventional" : "plain",
       matched,
-      sampled: subjects.length,
-      ref: null
+      sampled: subjects.length
     },
     subjects: subjects.map((subject) => subject.slice(0, 200))
   };

@@ -115,6 +115,11 @@ Codex worker thread.
 
 ### Providers
 
+Discovery spawns processes, so `LocalAgentSession` runs **one pass per
+profile** however many callers ask at once, and a deadline resets only the
+profile that hit it (`reset`, not `close`) — another profile's pooled client
+may be mid-request. The renderer does not own process lifetime; bound it here.
+
 Codex runs with no tools in a scratch workspace outside every repository. ACP
 agents are listed as detected but unsupported until they can run under the
 same boundary. Gemini is left out of discovery entirely: its CLI does not work

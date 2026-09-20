@@ -67,7 +67,7 @@ const base = {
     budget: { used: 30, limit: 2000 },
     styleSubjects: 20
   },
-  style: { convention: "conventional" as const, matched: 18, sampled: 20, ref: null },
+  style: { convention: "conventional" as const, matched: 18, sampled: 20 },
   generatedAt: "2026-09-19T12:00:00.000Z"
 };
 

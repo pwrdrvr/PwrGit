@@ -78,6 +78,15 @@ describe("exclusionFor", () => {
     expect(exclusionFor("logo.png", true)).toBe("binary");
     expect(exclusionFor("keys/prod.p12", true)).toBe("never_send");
   });
+
+  // macOS and Windows resolve these to the same file as the lower-case
+  // spelling, so a case-sensitive guard would send the same secret.
+  it.each([".ENV", "home/.ssh/ID_RSA", "Deploy/Secrets/token.txt", "certs/server.PEM"])(
+    "holds back %s whatever its case",
+    (path) => {
+      expect(exclusionFor(path, false)).toBe("never_send");
+    }
+  );
 });
 
 describe("patch parsing", () => {
@@ -95,6 +104,11 @@ describe("patch parsing", () => {
     );
     expect([...chunks.keys()]).toEqual(["one.ts", "two.ts"]);
     expect(chunks.get("two.ts")).toEqual(["diff --git a/two.ts b/two.ts", "+2", ""]);
+  });
+
+  it("keys a path that itself contains \" b/\" on the whole path", () => {
+    const chunks = splitPatch("diff --git a/my b/dir/n.md b/my b/dir/n.md\n+1\n");
+    expect([...chunks.keys()]).toEqual(["my b/dir/n.md"]);
   });
 });
 
@@ -146,6 +160,31 @@ describe("collectCommitsInput (system git)", () => {
     expect(input!.manifest.budget).toEqual({ used: 100, limit: 100 });
   });
 
+  it("stops reading patches once the budget is spent", async () => {
+    const dir = repo();
+    commit(dir, { "README.md": "hi\n" }, "init");
+    commit(dir, { "big.txt": lines(300, "row") }, "big one");
+    for (let i = 0; i < 4; i++) commit(dir, { [`later-${i}.txt`]: "x\n" }, `later ${i}`);
+
+    // A patch nobody can keep a line of is a git process spawned for nothing.
+    let patches = 0;
+    const counted: typeof systemGit = async (args, cwd) => {
+      if (args.includes("--patch")) patches += 1;
+      return systemGit(args, cwd);
+    };
+
+    const input = await collectCommitsInput(counted, dir, top(dir, 5), 20);
+
+    expect(patches).toBe(1);
+    expect(input!.manifest.budget.used).toBe(20);
+    expect(
+      input!.manifest.files.filter((file) => file.path.startsWith("later-"))
+    ).toHaveLength(4);
+    for (const file of input!.manifest.files.filter((f) => f.path.startsWith("later-"))) {
+      expect(file).toEqual(expect.objectContaining({ treatment: "cut", sentLines: 0 }));
+    }
+  });
+
   it("learns a conventional-commit repository from its recent subjects", async () => {
     const dir = repo();
     for (const subject of ["feat: a", "fix(core): b", "chore: c", "docs: d", "feat(ui)!: e"]) {
@@ -155,7 +194,7 @@ describe("collectCommitsInput (system git)", () => {
     commit(dir, { "y.txt": "1\n" }, "y");
 
     const input = await collectCommitsInput(systemGit, dir, top(dir, 2));
-    expect(input!.style).toEqual({ convention: "conventional", matched: 5, sampled: 5, ref: null });
+    expect(input!.style).toEqual({ convention: "conventional", matched: 5, sampled: 5 });
   });
 });
 

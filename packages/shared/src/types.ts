@@ -1970,8 +1970,6 @@ export type AgentMessageStyle = {
   /** Subjects that matched, of the recent ones read. */
   matched: number;
   sampled: number;
-  /** Branch the sample was read from, when there is one. */
-  ref: string | null;
 };
 
 type AgentResultBase = {

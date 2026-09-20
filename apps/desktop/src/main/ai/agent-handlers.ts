@@ -139,32 +139,33 @@ export function registerAgentHandlers(
    * One request lifecycle for every agent command: a request id the renderer
    * can cancel by, a hard deadline, and cleanup that holds even when the
    * backend never settles. Every outcome — cancelled and timed out included —
-   * comes back as this command's own result.
+   * comes back as this command's own result. The request was reserved before
+   * the first await, so it is cancellable for its whole life.
    */
   const run = async <T>(
     requestId: string,
+    request: ActiveRequest,
+    profileId: string,
     context: CommandContext,
     work: (signal: AbortSignal) => Promise<Result<T, PwrGitError>>
   ): Promise<Result<T, PwrGitError>> => {
-    const controller = new AbortController();
-    const request: ActiveRequest = {
-      controller,
-      ...(context.webContentsId !== undefined
-        ? { webContentsId: context.webContentsId }
-        : {}),
-      timedOut: false
-    };
-    active.set(requestId, request);
+    const controller = request.controller;
+    // A cancel that arrived while the selection was being checked has already
+    // fired; the listener below would never see it.
+    if (controller.signal.aborted) {
+      return err(error("cancelled", "Cancelled. Nothing changed."));
+    }
     const onContextAbort = (): void => controller.abort();
     context.signal?.addEventListener("abort", onContextAbort, { once: true });
     const timeout = setTimeout(() => {
       request.timedOut = true;
       controller.abort();
       // A backend that ignored abort must not remain pooled for the next
-      // request. Reset it out-of-band so the deadline response is not held up
-      // by an app-server that is itself stuck while closing.
+      // request. Reset THIS profile's backend out-of-band: the deadline
+      // response is not held up by an app-server that is itself stuck while
+      // closing, and another profile's in-flight request keeps its own client.
       void Promise.resolve()
-        .then(() => dependencies.session.close())
+        .then(() => dependencies.session.reset(profileId))
         .catch(() => undefined);
     }, dependencies.requestTimeoutMs);
     timeout.unref?.();
@@ -202,14 +203,36 @@ export function registerAgentHandlers(
     }
   };
 
-  const admit = (requestId: string): Result<null, PwrGitError> => {
+  /**
+   * Take the request id before the first await. The reservation IS the
+   * request — `run` adopts it — so two messages carrying one id cannot both
+   * be admitted, and a cancel that arrives during the selection check reaches
+   * the work that follows it.
+   */
+  const reserve = (
+    requestId: string,
+    context: CommandContext
+  ): Result<ActiveRequest, PwrGitError> => {
     if (!REQUEST_ID_PATTERN.test(requestId)) {
       return err(error("invalid_request_id", "The agent request id is not valid."));
     }
     if (active.has(requestId)) {
       return err(error("request_in_progress", "That agent request is already running."));
     }
-    return ok(null);
+    const request: ActiveRequest = {
+      controller: new AbortController(),
+      ...(context.webContentsId !== undefined
+        ? { webContentsId: context.webContentsId }
+        : {}),
+      timedOut: false
+    };
+    active.set(requestId, request);
+    return ok(request);
+  };
+
+  /** Give the id back, whether or not `run` already did. */
+  const release = (requestId: string, request: ActiveRequest): void => {
+    if (active.get(requestId) === request) active.delete(requestId);
   };
 
   const profileExists = (profileId: string): boolean =>
@@ -260,92 +283,120 @@ export function registerAgentHandlers(
   });
 
   bus.register("agent:draftMessage", async (req, context) => {
-    const admitted = admit(req.requestId);
-    if (!admitted.ok) return admitted;
-    const row = worktreeRow(req.worktreeId);
-    if (!row.ok) return row;
+    const reserved = reserve(req.requestId, context);
+    if (!reserved.ok) return reserved;
+    const request = reserved.value;
+    try {
+      const row = worktreeRow(req.worktreeId);
+      if (!row.ok) return row;
 
-    if (req.source.kind === "commits") {
-      const commits = req.source.commits;
-      const selection = await checkSelection(row.value, commits, MAX_MESSAGE_COMMITS);
-      if (!selection.ok) return selection;
-      return run(req.requestId, context, async (signal) => {
-        const data = await dependencies.collectCommits(dependencies.git, row.value.path, commits);
-        if (data === null) {
-          return err(error("input_unavailable", "PwrGit could not read those commits."));
+      if (req.source.kind === "commits") {
+        const commits = req.source.commits;
+        const selection = await checkSelection(row.value, commits, MAX_MESSAGE_COMMITS);
+        if (!selection.ok) return selection;
+        return await run(
+          req.requestId,
+          request,
+          row.value.profile_id,
+          context,
+          async (signal) => {
+            const data = await dependencies.collectCommits(dependencies.git, row.value.path, commits);
+            if (data === null) {
+              return err(error("input_unavailable", "PwrGit could not read those commits."));
+            }
+            return dependencies.session.draftMessage({
+              requestId: req.requestId,
+              profileId: row.value.profile_id,
+              source: "commits",
+              data,
+              signal,
+              ...(req.choice !== undefined ? { choice: req.choice } : {})
+            });
+          }
+        );
+      }
+
+      return await run(
+        req.requestId,
+        request,
+        row.value.profile_id,
+        context,
+        async (signal) => {
+          const data = await dependencies.collectStaged(dependencies.git, row.value.path);
+          if (data === null) {
+            return err(error("input_unavailable", "PwrGit could not read the staged changes."));
+          }
+          if (data.manifest.files.length === 0) {
+            return err(error("nothing_staged", "Stage something first; Codex drafts from staged changes only."));
+          }
+          return dependencies.session.draftMessage({
+            requestId: req.requestId,
+            profileId: row.value.profile_id,
+            source: "staged",
+            data,
+            signal,
+            ...(req.choice !== undefined ? { choice: req.choice } : {})
+          });
         }
-        return dependencies.session.draftMessage({
-          requestId: req.requestId,
-          profileId: row.value.profile_id,
-          source: "commits",
-          data,
-          signal,
-          ...(req.choice !== undefined ? { choice: req.choice } : {})
-        });
-      });
+      );
+    } finally {
+      release(req.requestId, request);
     }
-
-    return run(req.requestId, context, async (signal) => {
-      const data = await dependencies.collectStaged(dependencies.git, row.value.path);
-      if (data === null) {
-        return err(error("input_unavailable", "PwrGit could not read the staged changes."));
-      }
-      if (data.manifest.files.length === 0) {
-        return err(error("nothing_staged", "Stage something first; Codex drafts from staged changes only."));
-      }
-      return dependencies.session.draftMessage({
-        requestId: req.requestId,
-        profileId: row.value.profile_id,
-        source: "staged",
-        data,
-        signal,
-        ...(req.choice !== undefined ? { choice: req.choice } : {})
-      });
-    });
   });
 
   bus.register("agent:tidyPlan", async (req, context) => {
-    const admitted = admit(req.requestId);
-    if (!admitted.ok) return admitted;
-    const row = worktreeRow(req.worktreeId);
-    if (!row.ok) return row;
-    const selection = await checkSelection(row.value, req.commits, MAX_TIDY_COMMITS);
-    if (!selection.ok) return selection;
-    if (req.revision !== undefined) {
-      if (
-        !Number.isInteger(req.revision.attempt) ||
-        req.revision.attempt < 1 ||
-        req.revision.attempt > MAX_TIDY_REVISIONS
-      ) {
-        return err(
-          error(
-            "revision_limit",
-            `Codex has already revised this plan ${MAX_TIDY_REVISIONS} times. Edit it by hand, or start over.`
-          )
-        );
+    const reserved = reserve(req.requestId, context);
+    if (!reserved.ok) return reserved;
+    const request = reserved.value;
+    try {
+      const row = worktreeRow(req.worktreeId);
+      if (!row.ok) return row;
+      const selection = await checkSelection(row.value, req.commits, MAX_TIDY_COMMITS);
+      if (!selection.ok) return selection;
+      if (req.revision !== undefined) {
+        if (
+          !Number.isInteger(req.revision.attempt) ||
+          req.revision.attempt < 1 ||
+          req.revision.attempt > MAX_TIDY_REVISIONS
+        ) {
+          return err(
+            error(
+              "revision_limit",
+              `Codex has already revised this plan ${MAX_TIDY_REVISIONS} times. Edit it by hand, or start over.`
+            )
+          );
+        }
+        // The failed plan is quoted back into the prompt, so it must name the
+        // selection and nothing else.
+        if (!validateProgramShape(req.commits, req.revision.program).ok) {
+          return err(error("invalid_revision", "The plan to revise does not match the selection."));
+        }
       }
-      // The failed plan is quoted back into the prompt, so it must name the
-      // selection and nothing else.
-      if (!validateProgramShape(req.commits, req.revision.program).ok) {
-        return err(error("invalid_revision", "The plan to revise does not match the selection."));
-      }
-    }
 
-    return run(req.requestId, context, async (signal) => {
-      const data = await dependencies.collectCommits(dependencies.git, row.value.path, req.commits);
-      if (data === null) {
-        return err(error("input_unavailable", "PwrGit could not read those commits."));
-      }
-      return dependencies.session.proposeTidy({
-        requestId: req.requestId,
-        profileId: row.value.profile_id,
-        commits: req.commits,
-        data,
-        signal,
-        ...(req.revision !== undefined ? { revision: req.revision } : {}),
-        ...(req.choice !== undefined ? { choice: req.choice } : {})
-      });
-    });
+      return await run(
+        req.requestId,
+        request,
+        row.value.profile_id,
+        context,
+        async (signal) => {
+          const data = await dependencies.collectCommits(dependencies.git, row.value.path, req.commits);
+          if (data === null) {
+            return err(error("input_unavailable", "PwrGit could not read those commits."));
+          }
+          return dependencies.session.proposeTidy({
+            requestId: req.requestId,
+            profileId: row.value.profile_id,
+            commits: req.commits,
+            data,
+            signal,
+            ...(req.revision !== undefined ? { revision: req.revision } : {}),
+            ...(req.choice !== undefined ? { choice: req.choice } : {})
+          });
+        }
+      );
+    } finally {
+      release(req.requestId, request);
+    }
   });
 
   bus.register("agent:cancel", (req, context) => {

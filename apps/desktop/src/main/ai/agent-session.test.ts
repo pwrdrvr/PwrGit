@@ -56,7 +56,7 @@ const input: CommitsInput = {
     diff: `diff --git a/src/export.ts b/src/export.ts\n+${commit.subject}`
   })),
   styleSubjects: ["feat(ui): one", "fix(core): two", "chore: three"],
-  style: { convention: "conventional", matched: 3, sampled: 3, ref: null },
+  style: { convention: "conventional", matched: 3, sampled: 3 },
   manifest
 };
 

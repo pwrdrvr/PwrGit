@@ -569,6 +569,13 @@ async function rewriteHistory(
   }
 
   const tree = await readTree(git, cwd, "HEAD");
+  if (tree === null) {
+    // "Could not look" is not "the code changed": reporting it as a changed
+    // tree would send the operator — and a Tidy revision — after a difference
+    // that was never observed.
+    await restore();
+    return err(rebaseError("tree_unavailable", "Could not read the rewritten commit's files."));
+  }
   if (tree !== expectedTree) {
     const files = await treeChanges(git, cwd, expectedTreeOf, "HEAD");
     await restore();
