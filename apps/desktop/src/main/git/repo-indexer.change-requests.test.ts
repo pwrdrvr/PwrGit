@@ -177,6 +177,32 @@ describe("searchAll with open change requests", () => {
     expect(indexer.searchAll("never fetched")).toHaveLength(0);
   });
 
+  // The filter that stops a repository's PRs from answering FOR the repository
+  // runs on rows the index has already returned, so it cannot hand back a
+  // result slot a PR spent. Every row carries the repository's name, and bm25
+  // ranks partly by document length — so a short PR title outranks a worktree
+  // at a deep path, and a busy repository fills the cap with rows that are
+  // then all discarded. Measured on this fixture before the split query: the
+  // 60 candidates were 59 change requests, and this search answered with one
+  // worktree out of sixty.
+  it("leaves the result cap to refs when the repository is busy", () => {
+    const worktree = db.prepare(
+      "INSERT INTO worktrees (id, repo_id, path, branch, is_primary) VALUES (?, ?, ?, ?, 0)"
+    );
+    for (let n = 0; n < 60; n++) {
+      worktree.run(
+        `wt-deep-${n}`,
+        repoId,
+        `/Users/dev/clients/acme/checkouts/platform/services/api/feature-${n}`,
+        `feature-${n}`
+      );
+    }
+    for (let n = 200; n < 400; n++) openPr(n, `Fix ${n}`, `bump/${n}`);
+    const hits = indexer.searchAll("orbit");
+    expect(hits.filter((hit) => hit.kind === "worktree").length).toBeGreaterThan(50);
+    expect(hits.some((hit) => hit.kind === "change_request")).toBe(false);
+  });
+
   it("follows a title change into the index", () => {
     db.prepare(
       "UPDATE repo_open_pr SET title = 'feat: renamed console work' WHERE repo_id = ? AND number = 106"

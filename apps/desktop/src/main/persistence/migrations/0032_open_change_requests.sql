@@ -70,7 +70,13 @@ END;
 
 -- Only the indexed text: check and merge state change constantly and would
 -- otherwise rewrite the index row on every refresh of a busy repository.
+--
+-- The WHEN clause is what actually enforces that. `UPDATE OF` is syntactic —
+-- it asks whether the statement MENTIONS those columns, not whether it changed
+-- them — and OpenPrService writes every row through one upsert that assigns
+-- all of them, so the column list alone suppresses nothing.
 CREATE TRIGGER repo_open_pr_au_fts AFTER UPDATE OF title, head_ref ON repo_open_pr
+WHEN NEW.title IS NOT OLD.title OR NEW.head_ref IS NOT OLD.head_ref
 BEGIN
   UPDATE search_fts
      SET name = NEW.title,

@@ -179,11 +179,8 @@ export function createGitCafeProvider(
           if (found.size === 0) throw error;
           break;
         }
-        const row = cafeResource(stdout);
         // A fork's carries `headRepoPath`: a lookup locates the head by it.
-        const pr: OpenChangeRequest = { ...parseCafePr(row, repo) };
-        const fork = cafeForkPath(row, repo);
-        if (fork !== undefined) pr.headRepoPath = fork;
+        const pr = cafePrWithFork(cafeResource(stdout), repo);
         if (pr.number !== number)
           throw new ForgeResponseError(
             "GitCafe returned a different pull request."
@@ -251,9 +248,7 @@ function openCafePr(
   row: Record<string, unknown>,
   repo: ForgeRepo
 ): OpenChangeRequest {
-  const summary: OpenChangeRequest = { ...parseCafePr(row, repo) };
-  const fork = cafeForkPath(row, repo);
-  if (fork !== undefined) summary.headRepoPath = fork;
+  const summary = cafePrWithFork(row, repo);
   const author = row.author;
   const login =
     typeof author === "string"
@@ -270,6 +265,17 @@ function openCafePr(
     if (Number.isFinite(time)) summary.updatedAt = time;
   }
   return summary;
+}
+
+/** A row parsed as a change request, marked with the fork it came from. */
+function cafePrWithFork(
+  row: Record<string, unknown>,
+  repo: ForgeRepo
+): OpenChangeRequest {
+  const pr: OpenChangeRequest = { ...parseCafePr(row, repo) };
+  const fork = cafeForkPath(row, repo);
+  if (fork !== undefined) pr.headRepoPath = fork;
+  return pr;
 }
 
 /**

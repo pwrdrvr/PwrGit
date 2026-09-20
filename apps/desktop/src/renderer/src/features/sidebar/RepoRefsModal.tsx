@@ -432,7 +432,9 @@ export function RepoRefsModal({
   const remoteSearch = useRemoteBranchSearch({
     repoId: repo.id,
     query,
-    enabled: tab === "branches" || tab === "remotes" || counting
+    // The Remotes tab is not here: it renders its own per-remote list, and its
+    // count is the remote count until a query makes `counting` true.
+    enabled: tab === "branches" || counting
   });
   const tagSearch = useTagSearch({
     repoId: repo.id,
@@ -485,7 +487,10 @@ export function RepoRefsModal({
     lookup.state === "done" && lookup.entry !== null ? 1 : 0;
   const tabCounts: Record<RefsTab, number> = counting
     ? {
-        branches: localMatches.length + remoteMatches.length,
+        // The footer's total, not the rows fetched so far — the two sit one
+        // above the other, and a tab reading 47 over "Showing 47 of 140" is
+        // the same search disagreeing with itself.
+        branches: localMatches.length + remoteSearch.total,
         tags: tagSearch.total,
         remotes: remoteSearch.total,
         changeRequests: changeRequestMatches.length + lookupHit
@@ -1005,6 +1010,7 @@ export function RepoRefsModal({
                 repoId={repo.id}
                 forge={forge}
                 list={changeRequests.list}
+                matches={changeRequestMatches}
                 error={changeRequests.error}
                 query={query}
                 lookup={lookup}

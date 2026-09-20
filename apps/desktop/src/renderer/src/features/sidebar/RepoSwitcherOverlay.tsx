@@ -139,9 +139,12 @@ function paletteCopyActions(item: PaletteItem | undefined): CopyAction[] {
     actions.push({ label: "Copy worktree path", value: hit.path });
   }
   if (hit.pr?.url) {
-    actions.push({ label: "Copy PR URL", value: hit.pr.url });
+    // The forge's own noun, in both: "Copy PR URL" over "Open merge request
+    // #12" is one menu contradicting itself.
+    const noun = changeRequestNoun(hit.pr.forge ?? ASSUMED_FORGE_KIND);
+    actions.push({ label: `Copy ${noun} URL`, value: hit.pr.url });
     actions.push({
-      label: `Open ${changeRequestNoun(hit.pr.forge ?? ASSUMED_FORGE_KIND)} #${hit.pr.number}`,
+      label: `Open ${noun} #${hit.pr.number}`,
       value: hit.pr.url,
       open: true
     });
@@ -308,7 +311,8 @@ export function hitForLocation(
   hit: RepoSearchHit,
   location: ChangeRequestLocation
 ): RepoSearchHit | null {
-  const base = { ...hit, ...(hit.pr === undefined ? {} : { pr: hit.pr }) };
+  // The spread carries `pr` along: the located branch is the same hit, moved.
+  const base = { ...hit };
   switch (location.kind) {
     case "worktree":
       return { ...base, kind: "worktree", name: location.branch, worktreeId: location.worktreeId };

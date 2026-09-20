@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   changeRequestLabel,
   changeRequestMatch,
@@ -238,6 +238,7 @@ export function ChangeRequestTable({
   repoId,
   forge,
   list,
+  matches,
   error,
   query,
   lookup,
@@ -252,6 +253,9 @@ export function ChangeRequestTable({
   repoId: string;
   forge: ForgeKind;
   list: ChangeRequestList;
+  /** `filterChangeRequests(list.entries, query)` — the same array the tab
+   *  count is taken from, so the count cannot disagree with the rows. */
+  matches: readonly ChangeRequestEntry[];
   error: string | null;
   query: string;
   lookup: ChangeRequestLookup;
@@ -272,10 +276,6 @@ export function ChangeRequestTable({
   const [fetching, setFetching] = useState<number | null>(null);
   const noun = changeRequestNoun(forge);
   const plural = changeRequestPluralLabel(forge).toLowerCase();
-  const matches = useMemo(
-    () => filterChangeRequests(list.entries, query),
-    [list.entries, query]
-  );
   const looked =
     lookup.state === "done" && lookup.entry !== null ? lookup.entry : null;
   const rows = looked === null ? matches : [looked, ...matches];

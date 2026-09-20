@@ -218,6 +218,13 @@ export type RepoRescanOptions = {
 const defaultYieldToEventLoop = (): Promise<void> =>
   new Promise((resolve) => setImmediate(resolve));
 
+/**
+ * How many `change_request` rows one search reads, out of the 60 the rest of
+ * the index gets. Small on purpose: a repository with hundreds of open change
+ * requests must not be able to answer a search about the repository itself.
+ */
+const CHANGE_REQUEST_SEARCH_LIMIT = 15;
+
 /** A matched open change request, and the ref in the checkout holding its head. */
 type ChangeRequestMatch = {
   hit: RepoSearchHit;
@@ -758,10 +765,10 @@ export class RepoIndexer {
     // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
     const prNumber = changeRequestNumberQuery(query);
     const prLike = prNumber === null ? null : `${prNumber} %`;
-    const matches = this.db
+    const refs = this.db
       .prepare(
         `SELECT entity_id, kind FROM search_fts
-         WHERE search_fts MATCH ?
+         WHERE search_fts MATCH ? AND kind <> 'change_request'
          ORDER BY CASE WHEN name = ? COLLATE NOCASE
                          OR (kind IN ('repo', 'worktree')
                              AND (path LIKE ? ESCAPE '\\'
@@ -775,6 +782,28 @@ export class RepoIndexer {
       entity_id: string;
       kind: RepoSearchHit["kind"];
     }[];
+    // Change requests take their own small slice rather than competing for
+    // those 60 rows. Every one of them carries its repository's name in the
+    // indexed `repo_name` column, so a query naming a busy repository matches
+    // all of them — and `changeRequestAnswersQuery` discards them only AFTER
+    // the cap has been spent, which would leave the worktrees the reader was
+    // looking for off the list entirely.
+    const changeRequestRows = this.db
+      .prepare(
+        `SELECT entity_id, kind FROM search_fts
+         WHERE search_fts MATCH ? AND kind = 'change_request'
+         ORDER BY CASE WHEN pr LIKE ? THEN 0 ELSE 1 END,
+                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
+         LIMIT ${CHANGE_REQUEST_SEARCH_LIMIT}`
+      )
+      .all(fts, prLike) as {
+      entity_id: string;
+      kind: RepoSearchHit["kind"];
+    }[];
+    // Appended, not interleaved: a change request the query named by number is
+    // lifted to the front by `rankSearchHits` anyway (tier 0), and one matched
+    // only by its title belongs under the refs that matched by name.
+    const matches = [...refs, ...changeRequestRows];
     if (matches.length === 0) return [];
 
     // One hit per entity: a dirty index (fossil DBs could double-insert via

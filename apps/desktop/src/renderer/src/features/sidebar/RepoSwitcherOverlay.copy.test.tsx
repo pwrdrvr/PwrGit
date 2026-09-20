@@ -84,11 +84,11 @@ it("copies the clicked worktree's exact path and PR URL, independent of prior se
   await openRow(1);
   expect(menuText()).toContain("Copy branch name");
   expect(menuText()).toContain("Copy worktree path");
-  expect(menuText()).toContain("Copy PR URL");
+  expect(menuText()).toContain("Copy pull request URL");
   await choose("Copy worktree path");
   expect(mocks.copyText).toHaveBeenLastCalledWith(path);
   await openRow(1);
-  await choose("Copy PR URL");
+  await choose("Copy pull request URL");
   expect(mocks.copyText).toHaveBeenLastCalledWith(url);
 });
 it("copies the repository path and reports clipboard failure on that row", async () => {
@@ -148,7 +148,9 @@ it("offers a change request's head, URL and an Open action, and opens it in the 
   };
   await render([request, fork]);
   await openRow(0);
-  expect(menuText()).toBe("Copy branch nameCopy PR URLOpen pull request #130");
+  expect(menuText()).toBe(
+    "Copy branch nameCopy pull request URLOpen pull request #130"
+  );
   await choose("Copy branch name");
   expect(mocks.copyText).toHaveBeenLastCalledWith("feat/unfetched");
   await openRow(0);
