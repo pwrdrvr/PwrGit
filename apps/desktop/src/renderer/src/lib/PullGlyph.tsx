@@ -5,8 +5,8 @@ import type { ReactElement } from "react";
  * draws it, and so does the sidebar's "Try pull all", so the bulk action reads
  * as the same verb as the single one. It is also the partner of
  * <RefreshGlyph /> in the sidebar's bulk-sync pair, which is why neither of
- * those is a text character any more. See `styles/AGENTS.md` for what a `↻`
- * text node cost once Geist Sans actually loaded.
+ * those is a text character any more — it replaced a `↓`, its partner a `↻`.
+ * See `styles/AGENTS.md` for what those text nodes cost once Geist loaded.
  *
  * It never spins. An arrow that means "down" is not a rotation, so a busy Pull
  * swaps it for `.wt-btn__spinner` instead.

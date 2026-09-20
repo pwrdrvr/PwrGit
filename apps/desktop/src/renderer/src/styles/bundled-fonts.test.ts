@@ -31,9 +31,10 @@ const unquote = (family: string): string =>
 const fontsCss = strip(readFileSync(resolve(here, "fonts.css"), "utf8"));
 const tokensCss = strip(readFileSync(resolve(here, "tokens.css"), "utf8"));
 
-const imports = [...fontsCss.matchAll(/@import\s+["']([^"']+)["']/g)].map(
-  (m) => m[1]!
-);
+/** Both spellings CSS allows: `@import "x.css"` and `@import url("x.css")`.
+ *  A form this missed would drop its families from the check silently. */
+const IMPORT = /@import\s+(?:url\(\s*)?["']([^"']+)["']/g;
+const imports = [...fontsCss.matchAll(IMPORT)].map((m) => m[1]!);
 
 /** The families each imported stylesheet registers, resolved the way Vite
  *  resolves the `@import` — through the package's own `exports`. */
@@ -45,22 +46,32 @@ const registered = imports.map((spec) => {
   return { spec, families: [...new Set(families)] };
 });
 
-/** A `:root` font stack, first family first. */
-function stack(token: string): string[] {
-  const start = tokensCss.indexOf(":root {");
-  const root = tokensCss.slice(start, tokensCss.indexOf("\n}", start));
-  const match = root.match(new RegExp(`${token}\\s*:\\s*([^;]+);`));
-  if (match === null) throw new Error(`${token} is not declared in :root`);
-  return match[1]!.split(",").map(unquote);
+const FONT_TOKENS = ["--font-sans", "--font-mono"] as const;
+
+/** EVERY stack a token is declared with, first family first — not just the
+ *  dark `:root` one. The light block may redeclare a token, and a wrong lead
+ *  there is this same bug in a theme a single-block check would never see. */
+function stacks(token: string): string[][] {
+  const declared = [
+    ...tokensCss.matchAll(new RegExp(`${token}\\s*:\\s*([^;]+);`, "g"))
+  ];
+  if (declared.length === 0) {
+    throw new Error(`${token} is not declared in tokens.css`);
+  }
+  return declared.map((m) => m[1]!.split(",").map(unquote));
 }
 
-const FONT_TOKENS = ["--font-sans", "--font-mono"] as const;
+/** Parsed once: every assertion below reads these, and the failure message
+ *  prints them. */
+const STACKS = new Map(FONT_TOKENS.map((token) => [token, stacks(token)]));
 
 describe("bundled fonts", () => {
   it("reads at least one @font-face out of every stylesheet fonts.css imports", () => {
     // Without this, a package that moved its faces elsewhere would leave
     // nothing to check and the test below would pass vacuously.
     expect(imports.length).toBeGreaterThan(0);
+    // ...and that no @import was skipped by the form it was written in.
+    expect(imports).toHaveLength((fontsCss.match(/@import\b/g) ?? []).length);
     for (const { spec, families } of registered) {
       expect(families, spec).not.toHaveLength(0);
     }
@@ -74,12 +85,13 @@ describe("bundled fonts", () => {
     // Leads, not merely names: a family ahead of the bundled one that happens
     // to be installed would mask the bundle on that machine only — the same
     // machine-dependent rendering this exists to prevent.
-    const leads = FONT_TOKENS.filter((token) => stack(token)[0] === family);
+    const leads = FONT_TOKENS.filter((token) =>
+      STACKS.get(token)!.every((declared) => declared[0] === family)
+    );
     expect(
       leads,
-      `no font token leads with "${family}"; stacks are ${JSON.stringify(
-        Object.fromEntries(FONT_TOKENS.map((token) => [token, stack(token)]))
-      )}`
+      `no font token leads with "${family}" in every block that declares it; ` +
+        `stacks are ${JSON.stringify(Object.fromEntries(STACKS))}`
     ).toHaveLength(1);
   });
 });

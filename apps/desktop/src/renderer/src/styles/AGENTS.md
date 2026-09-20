@@ -149,8 +149,9 @@ the glyphs and whether it is a web font.
 
 The bundled Geist Sans is latin only, so a glyph outside it draws in the OS
 font beside Geist. "↻ Fetch all repos" came apart exactly that way once Geist
-loaded. That is why an icon is an SVG from `lib/*Glyph.tsx`, never a text
-character.
+loaded. That is why an icon is a stroked SVG component — `lib/*Glyph.tsx`, or
+a local one like Sidebar's `ForkGlyph` — and not a text character. The refs
+sections still draw `+` and `●` that way; converting them is outstanding.
 
 ## Theme selection uses one light attribute
 
