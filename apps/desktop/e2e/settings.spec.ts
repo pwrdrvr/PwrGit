@@ -309,7 +309,11 @@ test("menu opens the Settings window; panes render and settings persist", async 
   const stored = JSON.parse(
     readFileSync(join(userData, "settings.json"), "utf8")
   ) as Record<string, unknown>;
-  expect(stored["general"]).toEqual({ theme: "light", developerMode: true });
+  expect(stored["general"]).toEqual({
+    theme: "light",
+    developerMode: true,
+    searchAllProfiles: true
+  });
   expect(stored["updates"]).toEqual({
     train: "beta",
     channel: "latest",
