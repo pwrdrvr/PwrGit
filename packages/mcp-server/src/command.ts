@@ -1,3 +1,6 @@
+import dugite from "dugite";
+import { tmpdir } from "node:os";
+import { bundledGitEnvironment } from "./git-runtime.js";
 import { execFile } from "node:child_process";
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -18,8 +21,19 @@ export type CommandRunner = (
 /** Spawn without a shell, a TTY, inherited credentials in arguments, or an
  * interactive prompt. Output is bounded because forge CLIs talk to remote
  * services and a malformed response must not consume the MCP process. */
-export const runCommand: CommandRunner = async (command, args, options) =>
-  new Promise((resolve, reject) => {
+export const runCommand: CommandRunner = async (command, args, options) => {
+  if (command === "git") {
+    return dugite.exec(["-C", options.cwd, ...args], tmpdir(), {
+      env: {
+        ...bundledGitEnvironment(undefined, options.env),
+        GCM_INTERACTIVE: "never", GIT_OPTIONAL_LOCKS: "0",
+        GIT_TERMINAL_PROMPT: "0", LC_ALL: "C"
+      },
+      signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      maxBuffer: MAX_OUTPUT_BYTES
+    });
+  }
+  return new Promise((resolve, reject) => {
     execFile(
       command,
       [...args],
@@ -59,6 +73,7 @@ export const runCommand: CommandRunner = async (command, args, options) =>
       }
     );
   });
+};
 
 export async function git(
   cwd: string,

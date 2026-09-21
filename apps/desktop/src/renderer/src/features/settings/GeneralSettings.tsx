@@ -1,3 +1,4 @@
+import { GitRuntimeSettings } from "./GitRuntimeSettings";
 import type {
   AppearanceTheme,
   AppSettingsSnapshot,
@@ -139,6 +140,8 @@ export function GeneralSettings(props: {
           />
         </div>
       </SettingsSection>
+
+      <GitRuntimeSettings />
 
       <SettingsSection
         eyebrow="General"

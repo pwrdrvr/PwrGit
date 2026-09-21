@@ -1,3 +1,4 @@
+import { execGit } from "./dugite";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
@@ -8,13 +9,20 @@ import { canonicalForgeHostname, type ForgeKind, type SshHostTrustProposal } fro
 import { createForgeSshHostKeyProviders, parseSshPublicKey, type ForgeSshHostKeyProvider } from "../forge/ssh-host-keys";
 
 type Run = (binary: string, args: string[]) => Promise<{ stdout: string; code: number }>;
-const runTool: Run = (binary, args) => new Promise((resolveRun, reject) => {
+const runTool: Run = async (binary, args) => {
+  if (binary === "git") {
+    const result = await execGit(args, homedir(), { signal: AbortSignal.timeout(15_000) });
+    if (!result.ok) throw new Error(result.error.message);
+    return { stdout: result.value.stdout, code: result.value.exitCode };
+  }
+  return new Promise((resolveRun, reject) => {
   execFile(binary, args, { timeout: 15000, maxBuffer: 256 * 1024, windowsHide: true, cwd: homedir() }, (error, stdout) => {
     if (error && (typeof error.code !== "number" || error.killed)) {
       reject(new Error("OpenSSH could not inspect this host. Use the terminal command instead."));
     } else resolveRun({ stdout, code: error ? Number(error.code) : 0 });
   });
-});
+  });
+};
 
 type Context = { host: string; port: number; files: string[]; config: string; destination: string };
 type Pending = { owner: number; at: number; kind: ForgeKind; originalHost: string; context: Context; snapshots: string[]; key: string; proposal: SshHostTrustProposal };

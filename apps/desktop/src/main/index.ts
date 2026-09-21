@@ -37,7 +37,8 @@ import {
 import { CommandBus, type CommandContext } from "./command-bus";
 import { registerClipboardHandlers } from "./clipboard-handlers";
 import { registerDialogHandlers } from "./dialog-handlers";
-import { execGit } from "./git/dugite";
+import { registerGitRuntimeHandlers } from "./git/runtime-status";
+import { configureBundledGit, execGit } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -169,16 +170,9 @@ app.setAboutPanelOptions({
   applicationVersion: app.getVersion()
 });
 
-// Packaged builds ship dugite's embedded git under Contents/Resources/git
-// (resources/git on Windows) via electron-builder extraResources, because the
-// distribution's ~150 `git-<builtin> → git` symlinks cannot live inside
-// app.asar.unpacked (the universal-merge asar writer refuses duplicate
-// symlinks). dugite reads LOCAL_GIT_DIRECTORY at every exec, so pointing it
-// at resourcesPath redirects all git spawns. Dev builds keep dugite's default
-// node_modules-relative path.
-if (app.isPackaged && !process.env["LOCAL_GIT_DIRECTORY"]) {
-  process.env["LOCAL_GIT_DIRECTORY"] = join(process.resourcesPath, "git");
-}
+// Packaged Git lives outside the asar so universal builds can merge its symlinks.
+// Never let a parent process select the app's Git runtime through its environment.
+if (app.isPackaged) configureBundledGit(join(process.resourcesPath, "git"));
 
 // Relocate all app data (db, settings, profiles) to an explicit directory when
 // PWRGIT_USER_DATA_DIR is set. e2e uses this to give each run an isolated,
@@ -906,6 +900,7 @@ if (!gotSingleInstanceLock) {
     });
     registerRepoHandlers(bus, indexer, profiles, refresher);
     registerCloneHandlers(bus, cloneService);
+    registerGitRuntimeHandlers(bus);
     registerSshHostTrustHandlers(bus, new SshHostTrustService({
       allowed: (kind, hostname) => forgeHosts.kindFor(hostname).kind === kind && forgeHosts.isEnabled(hostname).enabled
     }));
