@@ -179,6 +179,8 @@ textarea,
 .commit-align__commit code,
 .about-identity-value,
 .about-resource-url,
+.settings-field__value,
+.settings-field__detail,
 .clone-destination-choice,
 .ssh-trust__fingerprint,
 .refs-tag-resolved__sha,
@@ -11487,10 +11489,20 @@ body.is-col-resizing {
 }
 
 /* About: copyable runtime identity + offline-friendly canonical addresses. */
-.about-identity-value {
+/* A machine value in a settings row — a version, a build — is set in mono at
+   the row's own scale. `.settings-field__value` is the pane-neutral name for
+   the same rule, so Git runtime does not borrow About's class or restate it: a
+   bare span in the control column inherits the document's 16px instead, and
+   out-shouts the section title above it. */
+.about-identity-value,
+.settings-field__value {
   color: var(--text-primary);
   font: 550 11.5px/1.45 var(--font-mono);
   overflow-wrap: anywhere;
+}
+/* Known to be missing: read as absence, not as one more value. */
+.settings-field__value--absent {
+  color: var(--text-subtle);
 }
 .about-identity-state {
   display: flex;
@@ -11522,7 +11534,11 @@ body.is-col-resizing {
   flex-wrap: wrap;
   gap: 6px;
 }
-.about-resource-url {
+/* A machine string beneath a value — a URL, an executable path, a tool's own
+   version line. Breaks anywhere because none of them has a word boundary worth
+   keeping, and a path at the Settings window's minimum width has to. */
+.about-resource-url,
+.settings-field__detail {
   max-width: 100%;
   overflow-wrap: anywhere;
   color: var(--text-subtle);
