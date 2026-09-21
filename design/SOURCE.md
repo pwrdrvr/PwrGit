@@ -15,10 +15,13 @@ drift apart, and the mirror is the one that loses.
 ## Source
 
 - Project: **PwrGit** — <https://claude.ai/design/p/88030015-bdd6-424d-8202-005feb3cee12>
-- Exported: **2026-09-13**.
+- Exported: **2026-09-21**.
 - Reflects the project's "as built" reconciliation pass of **2026-09-02**, which
   checked the design against `apps/desktop/src/renderer/src/**` and
-  `styles/tokens.css` at `main @ bc11343`.
+  `styles/tokens.css` at `main @ bc11343`. The coverage index's sections 2 and
+  3 were swept again on **2026-09-20**, against every artboard in the project
+  and every renderer component added since, at `main @ 9889543f`; its section 1
+  and the baseline artboard were not re-verified.
 
 Sibling projects, for reference — **do not export these here**: PwrSnap
 `019deed3-8009-7107-bd1e-68bcd3fd192f`, PwrAgent `019df437-879b-7ea9-89a7-aa689d28f06f`,
@@ -38,10 +41,13 @@ sessions:
   `PROJECT_TYPE_DESIGN_SYSTEM`, and PwrGit is a plain `PROJECT_TYPE_PROJECT`.
   An empty or PwrGit-less listing is not evidence the project is missing or
   unreachable — address it by id and it answers.
-- **`mcp__claude-design__*` is not the route here.** That server is not
-  available in Claude Code, so a step that names it reads as "Claude Design
-  cannot be reached from this session". It can. `DesignSync` by id is the
-  route, and step 2 of "How to re-export" below is written against it.
+- **A session without the `claude-design` MCP server can still reach the
+  project.** Where that server is connected (the Claude desktop app's Code tab
+  has it), `mcp__claude-design__*` reaches the project by id too: `list_files`,
+  `read_file`, `render_preview`, `finalize_plan`, `write_files`. Where it is
+  not, a step that names it reads as "Claude Design cannot be reached from this
+  session". It can: `DesignSync` by id is the other route, and step 2 of "How
+  to re-export" below covers both.
 
 `finalize_plan` wants a `deletes` array even when it is empty, and its
 `localDir` is the directory `write_files` may read `localPath` values from —
@@ -67,12 +73,14 @@ live.
 
 **[PwrGit As-Built Coverage.dc.html](PwrGit%20As-Built%20Coverage.dc.html)** is
 the index. It lists every shipped renderer surface, says which artboard draws it,
-and records where the retired wireframe disagreed with the code. Read it first.
+records where the retired wireframe disagreed with the code, and names the
+artboards, or turns of them, that draw something which has not shipped. Read it
+first.
 
 | File | What it is |
 |---|---|
 | `PwrGit App Baseline.dc.html` | **Current** main window — sidebar, lineage graph, right rail. Interactive. |
-| `PwrGit As-Built Coverage.dc.html` | Surface-by-surface coverage map + the wireframe-vs-code drift table. |
+| `PwrGit As-Built Coverage.dc.html` | Surface-by-surface coverage map + the wireframe-vs-code drift table + what is drawn but not shipped. |
 | `Hunk Lane Staging.dc.html` | Two-lane hunk/line staging gutter. |
 | `Image Diff Lightbox.dc.html` | Binary image diff — inline layout rule, lightbox, pixel compare. |
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
@@ -86,6 +94,8 @@ and records where the retired wireframe disagreed with the code. Read it first.
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
 | `Palette Kind Glyphs - UX Review.dc.html` | The &#8984;K palette's leading kind glyph &mdash; why branch and worktree do not separate at 15&nbsp;px, the channels that survive that size, the labels that shipped, and the redraws offered for worktree and for the remote branch that never had a mark of its own. Interactive. |
 | `Change Requests in Refs - UX Review.dc.html` | Why the refs browser cannot find a pull request by its number, the open-change-request cache that fixes it, and the three places PRs could live in the browser: matched on the Branches tab, a Pull requests / Merge requests sibling tab, or both with per-tab match counts. Interactive. |
+| `Git Runtime Settings - UX Review.dc.html` | Settings &rsaquo; General &rsaquo; Git runtime &mdash; the read-only card that names which Git and Git LFS PwrGit runs. The card reproduced at shipped size at both the 760&nbsp;px column and the Settings window's own 760&nbsp;px minimum, five findings against it, the redraw, and the state table it should answer. |
+| `Agent History Editing - UX Review.dc.html` | A review of open PR #149's agent-assisted rebase &mdash; six findings against its review-only agent panel &mdash; and a counter-proposal: the agent proposes a history, PwrGit proves it (every commit once, a clean isolated replay, an identical tree), you apply it. Squash messages, &#10022;&nbsp;Tidy, the failure paths, and where the agent is chosen. A proposal; nothing in it is built. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -180,9 +190,11 @@ were written here the same way, during the &#8984;K palette glyph review. Unlike
 files above, this one took the route **because Claude Design was unreachable** &mdash;
 both the `claude-design` MCP server and the built-in `DesignSync` tool answer
 HTTP&nbsp;403 `FIRST_PARTY_AUTH_REJECTED` until `/design-login` has been run in an
-interactive session, and a non-interactive one cannot run it. **So this artboard is
-not yet in the project, and a re-export will delete it** &mdash; push it up before
-running one.
+interactive session, and a non-interactive one cannot run it. It sat in the repo
+only until 2026-09-19, when it and its image were pushed up during the review of
+[#149](https://github.com/pwrdrvr/PwrGit/pull/149). The project holds the artboard
+at 46,007 bytes and the image at 4,628, both matching this copy, so a re-export no
+longer threatens either.
 
 Its specimens are invented (`Demo`, `feature/requested`, `spike/no-checkout`,
 `release/1.4`), and its one image is generated rather than captured: the glyphs are
@@ -190,6 +202,21 @@ drawn at 15&nbsp;px by headless Chromium and blown up with nearest-neighbour
 sampling, which is the whole argument &mdash; vector magnification flatters an icon
 and hides the defect. Card **4e** is a live `DCLogic` prototype that swaps the whole
 glyph set and blurs it, because the read being argued about is a peripheral one.
+
+`Agent History Editing - UX Review.dc.html` was written here and pushed up the
+same way, during the review of [#149](https://github.com/pwrdrvr/PwrGit/pull/149).
+It is in the project, byte-identical to this copy. For two days it was in the
+project but not on `main`, because its first mirror,
+[#293](https://github.com/pwrdrvr/PwrGit/pull/293), was still open, and that
+made it look like a file authored in Claude Design. It was not: the project's
+one chat is empty. It owns agent-assisted history editing: the six findings
+against #149's review-only panel, the proof ledger every plan must pass before
+Apply unlocks, Squash messages, Tidy, the three failure paths, and the agent
+chip and the Settings › AI Providers and AI Features pages it is chosen from.
+It is a proposal: none of that is built. It carries no `assets/`; every frame
+is drawn from PwrGit's tokens and markup, and its commits, branches and file
+names are invented. Card **4b** is a live `DCLogic` prototype of Tidy &mdash;
+keep a fixup separate, run the check, apply.
 
 The Tag Chips captures are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a
@@ -235,6 +262,12 @@ the second time with `apps/desktop/src` and `packages` checked out at the base
 commit — so the two frames differ only by the change. It uses no selector the
 older build lacks, which is what makes that possible; keep it that way.
 
+The project copy lagged this one until 2026-09-21. It predated #255's last
+change, the neutral `.sgone` count, so it still drew the branch summary's
+`2 gone` in the amber warning tier, without the note explaining why that is
+wrong. Its `assets/branch-switch-sidebar-after.png` was the matching earlier
+capture. The repo's artboard and image were pushed up to close the gap.
+
 `README Header.dc.html` was written here and pushed up the same way, alongside
 the README change that ships the chips it specifies. It is the reference header
 for the Pwr family, so PwrAgent and PwrSnap will carry their own version of it;
@@ -256,6 +289,19 @@ are invented; the one real name in it is the head branch of
 [pwrdrvr/microapps-app-release#106](https://github.com/pwrdrvr/microapps-app-release/pull/106),
 a public repository, quoted in finding 1a as the report that started it. It
 carries no `assets/`.
+
+`Git Runtime Settings - UX Review.dc.html` was written here and pushed up the
+same way, during [#296](https://github.com/pwrdrvr/PwrGit/pull/296). It carries no
+screenshots: every specimen is the shipped Settings card rebuilt from the real
+`app.css` rules, so the before and the after sit at the same size in one frame and
+the proposals can be drawn in states the app cannot be put into on demand (a
+missing bundled Git, a probe that timed out). The sizes and wrap points the review
+asserts &mdash; the 16&nbsp;px value, the 478&nbsp;px and 182&nbsp;px control
+columns &mdash; were measured in headless Chromium against the real
+`GitRuntimeSettings` component mounted on the app's own stylesheets, not eyeballed
+from the artboard. Its version strings are invented; the Git LFS build tail is the
+real shape of `git lfs version` output. Turn **1** is the card as #296 builds it;
+turns **2&ndash;3**, the redraw and the state table, are a proposal.
 
 ## Deliberately NOT copied in
 
@@ -320,6 +366,14 @@ reviewable choice.
    per path) against the project id in "Source". A person without tool access
    can take the zip from the Projects tab at <https://claude.ai/design>
    instead, but that is the fallback, not the first move.
+
+   With the `claude-design` MCP server, the cheapest byte-exact pull of a large
+   `.dc.html` is `render_preview`, then a download of its `serve_url`. The
+   served page has three lines injected after `<head>` (lines 4&ndash;6: a
+   `<style data-omelette-injected>` element, a `<script data-omelette-injected>`
+   element that ends on the next line, and a blank line). Delete exactly those
+   and the size equals the `list_files` size. A `serve_url` carries a project
+   token: never paste one into a file, a commit, or a PR.
 3. **Diff before replacing.** Do not `rm -rf` this directory: `PwrGit.dc.html`
    and `fork-flow/` are not produced by the export and would be lost.
 4. Skip `apps/desktop/**`. `.thumbnail`, `chats/` and `uploads/` are already
@@ -336,6 +390,19 @@ reviewable choice.
    (5,945 here against 5,990 there), `github.md` (1,211 against 1,210), and
    `README Header.dc.html` (17,833 against 17,773). Do not "correct" those
    three toward the project.
+
+   **A downloaded PNG never matches by size, and that is not drift.** Claude
+   Design stores a PNG as pushed: `list_files` reports the pushed size, and on
+   2026-09-21 every image in the project listed at exactly its repo size. What
+   it *serves* is stamped: a `caBX` chunk (a signed C2PA content credential,
+   "Claude provided this file…") is inserted after `IHDR`, and every other
+   chunk is untouched. An earlier version of this note gave 127,302 bytes
+   (measured 2026-09-19) for `assets/tag-locate-before.png`, a 121,532-byte
+   file. That was a served copy: the gap is the same 5,770-byte chunk measured on
+   `branch-switch-sidebar-after.png` (129,953 served against 124,183 listed).
+   So compare an image's size against `list_files`, never against a download.
+   Compare a downloaded image chunk by chunk with `caBX` excluded, and keep the
+   repo's unstamped originals rather than pulling stamped copies down.
 7. Update the "Exported" date above.
 
 `support.js` is generated (`dc-runtime`) and is shared byte-for-byte across Pwr
