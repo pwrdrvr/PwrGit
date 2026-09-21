@@ -108,6 +108,41 @@ describe("searchAll profile scope", () => {
     expect(hits.some((hit) => hit.profileId === theirs)).toBe(true);
   });
 
+  // A repo's id is a hash of its path, so scanning a path another profile
+  // already holds moves the repo (upsertRepoRow). Every row under it has to
+  // move too, or its old profile keeps finding it and its new one cannot.
+  it("follows a repository that moves to another profile", () => {
+    db.prepare("UPDATE repos SET profile_id = ? WHERE id = ?").run(
+      theirs,
+      "repo-ours"
+    );
+    const moved = (hit: { profileId?: string | null }) => hit.profileId === theirs;
+    expect(scoped("deploy")).toEqual([]);
+    expect(scoped("106")).toEqual([]);
+    const theirHits = indexer.searchAll("shared", {
+      profileId: theirs,
+      allProfiles: false
+    });
+    // Both repositories' worktree, local branch, remote branch and change
+    // request (its head ref is `shared/branch-name-pr`), and nothing else.
+    expect(theirHits.filter(moved)).toHaveLength(8);
+    expect(theirHits).toHaveLength(8);
+    expect(
+      indexer
+        .searchAll("106", { profileId: theirs, allProfiles: false })
+        .filter((hit) => hit.kind === "change_request")
+    ).toHaveLength(2);
+  });
+
+  // syncWorktrees reclaims a worktree for whichever repo lists its path now.
+  it("follows a worktree reclaimed by another profile's repository", () => {
+    db.prepare("UPDATE worktrees SET repo_id = ? WHERE id = ?").run(
+      "repo-theirs",
+      "wt-ours"
+    );
+    expect(scoped("shared").some((hit) => hit.kind === "worktree")).toBe(false);
+  });
+
   // The filter has to run in SQL: both queries are capped, so rows excluded
   // afterwards would already have spent slots this profile needed.
   it("never spends the result cap on another profile's rows", () => {

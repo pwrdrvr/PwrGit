@@ -14,8 +14,12 @@
 -- profile_id is UNINDEXED: it is a filter, never a search term, and indexing
 -- it would let a profile's id match as text.
 --
--- repos.profile_id is never updated — a repo row is created under a profile
--- and deleted with it — so nothing has to follow a repo between profiles.
+-- A row's profile can change after it is written, two ways, and the column
+-- has to follow both. A repo's id is a hash of its path, so scanning or adding
+-- a path another profile already holds moves that repo — and everything
+-- under it — to the new profile (upsertRepoRow). And a worktree or branch can
+-- be reclaimed by a different repo (syncWorktrees). The existing UPDATE
+-- triggers follow neither; the *_profile_fts triggers at the end do.
 
 DROP TRIGGER repos_ai_fts;
 DROP TRIGGER worktrees_ai_fts;
@@ -127,3 +131,46 @@ INSERT INTO search_fts (entity_id, kind, name, path, repo_name, pr, profile_id)
 SELECT o.repo_id || ':' || o.number, 'change_request', o.title, o.head_ref,
        r.name, CAST(o.number AS TEXT) || ' ' || o.title, r.profile_id
   FROM repo_open_pr o JOIN repos r ON r.id = o.repo_id;
+
+-- Keep profile_id true after the row is written.
+
+CREATE TRIGGER repos_au_profile_fts AFTER UPDATE OF profile_id ON repos
+WHEN NEW.profile_id IS NOT OLD.profile_id
+BEGIN
+  UPDATE search_fts SET profile_id = NEW.profile_id
+   WHERE (kind = 'repo' AND entity_id = NEW.id)
+      OR (kind = 'worktree'
+          AND entity_id IN (SELECT id FROM worktrees WHERE repo_id = NEW.id))
+      OR (kind = 'local_branch'
+          AND entity_id IN (SELECT id FROM local_branches WHERE repo_id = NEW.id))
+      OR (kind = 'remote_branch'
+          AND entity_id IN (SELECT id FROM remote_branches WHERE repo_id = NEW.id))
+      OR (kind = 'change_request'
+          AND entity_id IN (
+            SELECT repo_id || ':' || number FROM repo_open_pr WHERE repo_id = NEW.id
+          ));
+END;
+
+CREATE TRIGGER worktrees_au_profile_fts AFTER UPDATE OF repo_id ON worktrees
+WHEN NEW.repo_id IS NOT OLD.repo_id
+BEGIN
+  UPDATE search_fts
+     SET profile_id = (SELECT profile_id FROM repos WHERE id = NEW.repo_id)
+   WHERE kind = 'worktree' AND entity_id = NEW.id;
+END;
+
+CREATE TRIGGER local_branches_au_profile_fts AFTER UPDATE OF repo_id ON local_branches
+WHEN NEW.repo_id IS NOT OLD.repo_id
+BEGIN
+  UPDATE search_fts
+     SET profile_id = (SELECT profile_id FROM repos WHERE id = NEW.repo_id)
+   WHERE kind = 'local_branch' AND entity_id = NEW.id;
+END;
+
+CREATE TRIGGER remote_branches_au_profile_fts AFTER UPDATE OF repo_id ON remote_branches
+WHEN NEW.repo_id IS NOT OLD.repo_id
+BEGIN
+  UPDATE search_fts
+     SET profile_id = (SELECT profile_id FROM repos WHERE id = NEW.repo_id)
+   WHERE kind = 'remote_branch' AND entity_id = NEW.id;
+END;

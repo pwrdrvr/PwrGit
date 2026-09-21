@@ -975,7 +975,8 @@ export interface Commands {
   /**
    * ⌘K/⌘F search. `profileId` is the asking window's profile: its own rows
    * rank first, and unless General → Search all profiles is on, they are the
-   * only rows. Omitting it searches every profile.
+   * only rows. Omitting it falls back to the globally active profile, which
+   * is not necessarily the asking window's — always send it.
    */
   "repo:search": {
     req: { query: string; profileId?: ProfileId };
