@@ -9,7 +9,7 @@ overrides:
   js-yaml: 4.3.2
   hono: 4.13.5
 
-pnpmfileChecksum: sha256-z7z5S09JSAM8pIuwwHRTnStAMzFlYQ4JZdEFDtctgSA=
+pnpmfileChecksum: sha256-nRR5Sc76JwWXOp9jCS3HnvGJPUnmWL0OyEHf3aFR3Nw=
 
 importers:
 

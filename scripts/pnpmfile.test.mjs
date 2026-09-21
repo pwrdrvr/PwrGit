@@ -51,6 +51,12 @@ describe("pnpmfile git-dependency guard", () => {
     "git://github.com/user/repo.git",
     "git@github.com:user/repo.git",
     "ssh://git@github.com/user/repo.git",
+    // pnpm hands these to resolveGit whoever the username is, and
+    // resolution hits the remote before the fetcher hook can refuse.
+    "alice@github.com:user/repo.git",
+    "ssh://alice@github.com/user/repo.git",
+    "ssh://git.example.com/user/repo.git",
+    "deploy-key@internal.corp:team/repo.git",
     "gitlab:x/y",
     "bitbucket:x/y",
     "https://github.com/user/repo",

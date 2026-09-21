@@ -47,6 +47,13 @@ const DEPENDENCY_FIELDS = [
 // last alternation (`user/repo#ref?`) is the GitHub shortcut form npm
 // supports — pnpm treats it the same as `github:user/repo`.
 //
+// The scp-style (`user@host:path`) and `ssh://` alternations match any
+// username, not just `git`. pnpm hands both to `resolveGit` whoever
+// the user is, and resolution runs `git ls-remote` against the remote
+// BEFORE the fetcher hook below can refuse anything — so a spec this
+// pattern misses has already contacted an arbitrary host. `git@` and
+// `ssh://git@` alone let `alice@github.com:user/repo.git` through.
+//
 // That last alternation excludes `:` from its first character class
 // for a reason: without it, any protocol spec whose path is a single
 // segment parses as a `user/repo` shortcut and is blocked. Reading
@@ -55,7 +62,7 @@ const DEPENDENCY_FIELDS = [
 // with two or more path segments (`file:./packages/x`) only escape by
 // accident, because the trailing class cannot match a second `/`.
 const GIT_SPEC_PATTERN =
-  /^(?:git(?:\+|:)|git@|ssh:\/\/git@|github:|gitlab:|bitbucket:|https?:\/\/(?:www\.)?(?:github|gitlab|bitbucket)\.com\/|[^/@\s:]+\/[^/\s]+(?:#.*)?$)/;
+  /^(?:git(?:\+|:)|[^/\s@]+@[^/\s@:]+:|ssh:\/\/|github:|gitlab:|bitbucket:|https?:\/\/(?:www\.)?(?:github|gitlab|bitbucket)\.com\/|[^/@\s:]+\/[^/\s]+(?:#.*)?$)/;
 
 function isGitSpec(spec) {
   return typeof spec === "string" && GIT_SPEC_PATTERN.test(spec);
@@ -101,11 +108,21 @@ function readPackage(pkg) {
   // `dependencies` block and a reviewer skimming the diff for a git
   // URL in the usual place will not see it.
   //
-  // Scanned only for our own manifests, because pnpm only honours
-  // overrides declared by the workspace root — scanning a registry
-  // package's own copy would be a false positive with nothing behind
-  // it. If that ever stops being true, the fetcher still refuses the
-  // fetch; the cost would be a vaguer error, not a bypass.
+  // Gated on first-party manifests. pnpm only honours overrides from
+  // the workspace root, so a registry package's own copy is inert and
+  // flagging it would be a false positive with nothing behind it. This
+  // gate is slightly wider than the root — it also covers @pwrgit/*
+  // packages, where an override is dead config pnpm ignores; a git URL
+  // sitting in one is still worth failing on rather than leaving to
+  // rot.
+  //
+  // NOT covered: specs declared in a pnpm-workspace.yaml `catalog:` /
+  // `catalogs:` block. readPackage only ever sees manifests, and the
+  // importer's spec is the literal string `catalog:` — the git URL
+  // lives in a file this hook never reads, so closing that would mean
+  // parsing YAML here with no dependencies available. The fetcher
+  // below still refuses the fetch, so a catalog entry is a worse error
+  // message, not a bypass.
   if (isWorkspaceRootPackage(pkg)) {
     scanOverrides(pkg.pnpm && pkg.pnpm.overrides, "pnpm.overrides", pkg.name);
     scanOverrides(pkg.resolutions, "resolutions", pkg.name);
