@@ -29,8 +29,9 @@ answer afterwards, in the renderer or in main, does not give the slots back. If
 a query is capped, scope it in SQL.
 
 `RepoIndexer.searchAll` (⌘K) takes a `SearchScope` — which profile's window
-asked, and whether it wants the others too (General → Search all profiles, off
-by default). Two things about it are easy to get wrong:
+asked, and whether it wants the others too (General → Search all profiles, or
+the palette's ⇧⌘A footer toggle, which writes the same setting; off by
+default). Two things about it are easy to get wrong:
 
 - **The filter is a WHERE clause, not a pass over the answer.** `search_fts`
   carries a `profile_id` column for exactly this (0033), because both of its

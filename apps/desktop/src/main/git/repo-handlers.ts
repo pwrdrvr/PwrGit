@@ -84,7 +84,7 @@ export function registerRepoHandlers(
     ok(
       indexer.searchAll(req.query, {
         profileId: req.profileId ?? profiles.getActiveId(),
-        allProfiles: searchAllProfiles()
+        allProfiles: req.allProfiles ?? searchAllProfiles()
       })
     )
   );

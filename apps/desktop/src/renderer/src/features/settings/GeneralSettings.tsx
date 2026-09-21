@@ -153,7 +153,7 @@ export function GeneralSettings(props: {
           <SettingsField
             label="Search all profiles"
             sub="Find repositories, branches and change requests in your other profiles too."
-            help="Each result says which profile it belongs to, and picking one opens that profile's window rather than changing this one. Off by default: a result from a profile you are not looking at is a surprise unless you asked for it."
+            help="Each result says which profile it belongs to, and picking one opens that profile's window rather than changing this one. Off by default: a result from a profile you are not looking at is a surprise unless you asked for it. The palette's footer toggles this same setting."
             control={
               <SettingsSwitch
                 checked={searchAllProfiles}

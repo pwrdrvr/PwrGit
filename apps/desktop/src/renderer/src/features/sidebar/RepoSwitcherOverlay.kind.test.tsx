@@ -15,7 +15,13 @@ import { RepoSwitcherOverlay } from "./RepoSwitcherOverlay";
   .IS_REACT_ACT_ENVIRONMENT = true;
 const dispatch = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/pwrgit", () => ({
-  dispatch,
+  // The footer's scope toggle reads the setting on mount; these suites are
+  // about rows, so answer it here instead of in every dispatch mock.
+  dispatch: (command: string, req: unknown) =>
+    command === "settings:read"
+      ? Promise.resolve({ ok: true, value: { general: { searchAllProfiles: false } } })
+      : dispatch(command, req),
+  subscribe: () => () => {},
   windowProfileId: () => "default"
 }));
 
@@ -50,7 +56,7 @@ beforeEach(async () => {
   await act(async () => {
     root.render(<RepoSwitcherOverlay platform="darwin" commits={[]} commitContext={null}
       onClose={() => {}} onPick={() => {}} onPickCommit={() => {}}
-      onPickFile={() => {}} />);
+      onPickFile={() => {}} profileCount={1} />);
   });
 });
 

@@ -63,7 +63,12 @@ remote searches run while their tabs are hidden.
 ## The palette asks in this window's profile
 
 `repo:search` carries `windowProfileId()`, and main answers from that profile
-alone unless General → Search all profiles is on. Two consequences here:
+alone unless the search is widened. The footer's scope toggle (⇧⌘A, shown only
+with two or more profiles) **is** General → Search all profiles — it writes
+that setting rather than keeping its own, and follows `settings:changed`, so
+the palette and Settings cannot disagree. Each search also sends the scope the
+footer shows (`allProfiles`), so results never lag a toggle still being saved.
+Two consequences here:
 
 - **The profile badge on each row is load-bearing, not decoration.** With the
   setting on, rows from elsewhere appear, and `App.tsx` routes a pick in

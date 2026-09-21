@@ -974,12 +974,16 @@ export interface Commands {
   };
   /**
    * ⌘K/⌘F search. `profileId` is the asking window's profile: its own rows
-   * rank first, and unless General → Search all profiles is on, they are the
-   * only rows. Omitting it falls back to the globally active profile, which
-   * is not necessarily the asking window's — always send it.
+   * rank first, and unless the search is widened, they are the only rows.
+   * Omitting it falls back to the globally active profile, which is not
+   * necessarily the asking window's — always send it.
+   *
+   * `allProfiles` widens it. The palette sends the scope its footer toggle
+   * shows, so the answer cannot lag a toggle that is still being saved;
+   * omitted, main reads General → Search all profiles.
    */
   "repo:search": {
-    req: { query: string; profileId?: ProfileId };
+    req: { query: string; profileId?: ProfileId; allProfiles?: boolean };
     res: RepoSearchHit[];
   };
   /** Verify a visible local-branch hit using a short-lived, shared worktree

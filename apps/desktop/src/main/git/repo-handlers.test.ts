@@ -296,4 +296,28 @@ describe("repo handlers", () => {
       allProfiles: expectedAll
     });
   });
+
+  // The palette's footer toggle saves the setting and searches in the same
+  // breath; the scope it sends wins, so results never lag the toggle.
+  it.each([true, false])(
+    "answers the scope the palette asked for over a setting of %s",
+    async (setting) => {
+      const searchAll = vi.fn(() => []);
+      const indexer = { searchAll } as unknown as RepoIndexer;
+      const profiles = { getActiveId: () => null } as unknown as ProfileService;
+      const bus = new CommandBus();
+      registerRepoHandlers(bus, indexer, profiles, refresher, () => setting);
+
+      await bus.dispatch("repo:search", {
+        query: "106",
+        profileId: "window-profile",
+        allProfiles: !setting
+      });
+
+      expect(searchAll).toHaveBeenCalledExactlyOnceWith("106", {
+        profileId: "window-profile",
+        allProfiles: !setting
+      });
+    }
+  );
 });
