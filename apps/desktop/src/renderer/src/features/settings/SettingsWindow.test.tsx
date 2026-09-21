@@ -14,7 +14,8 @@ import {
   type AppSettingsSnapshot,
   type CodexProviderDiscovery,
   type ForgeStatus,
-  type Profile
+  type Profile,
+  type Res
 } from "@pwrgit/shared";
 
 // Without this React warns on every `act`, and the warning is the only thing
@@ -35,6 +36,17 @@ vi.mock("../../lib/pwrgit", () => ({
 }));
 
 import { SettingsWindow } from "./SettingsWindow";
+
+/** General's Git runtime card reads this on mount, and General renders in every
+ *  test. The catch-all `ok(undefined)` below is not a runtime status, and the
+ *  card is right to trust the typed IPC rather than guard against one. */
+const GIT_RUNTIME: Res<"git:runtimeStatus"> = {
+  active: "bundled",
+  default: "bundled",
+  path: "/fixture/git/bin/git",
+  bundled: { git: "git version 2.50.9", lfs: "git-lfs/3.6.9" },
+  installed: { git: null, lfs: null }
+};
 import { __resetCollapsedPanesForTests } from "./SettingsLayout";
 
 /**
@@ -148,6 +160,7 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "settings:read") return ok(SNAPSHOT);
   if (name === "forge:status") return ok({ forges });
   if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
+  if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);
   if (name === "profile:list") {
     return ok({ activeProfileId: PERSONAL.id, profiles: [PERSONAL, ACME] });
   }

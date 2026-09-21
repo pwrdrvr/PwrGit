@@ -46,8 +46,23 @@ const DEPENDENCY_FIELDS = [
 // Match the spec shapes pnpm itself recognizes as git fetches. The
 // last alternation (`user/repo#ref?`) is the GitHub shortcut form npm
 // supports — pnpm treats it the same as `github:user/repo`.
+//
+// The scp-style (`user@host:path`) and `ssh://` alternations match any
+// username, not just `git`. pnpm hands both to `resolveGit` whoever
+// the user is, and resolution runs `git ls-remote` against the remote
+// BEFORE the fetcher hook below can refuse anything — so a spec this
+// pattern misses has already contacted an arbitrary host. `git@` and
+// `ssh://git@` alone let `alice@github.com:user/repo.git` through.
+//
+// That last alternation excludes `:` from its first character class
+// for a reason: without it, any protocol spec whose path is a single
+// segment parses as a `user/repo` shortcut and is blocked. Reading
+// `file:../local` as `file:..` + `/` + `local` is the case that bit
+// us; `link:../local` and `workspace:../pkg` fail the same way. Specs
+// with two or more path segments (`file:./packages/x`) only escape by
+// accident, because the trailing class cannot match a second `/`.
 const GIT_SPEC_PATTERN =
-  /^(?:git(?:\+|:)|git@|ssh:\/\/git@|github:|gitlab:|bitbucket:|https?:\/\/(?:www\.)?(?:github|gitlab|bitbucket)\.com\/|[^/@\s]+\/[^/\s]+(?:#.*)?$)/;
+  /^(?:git(?:\+|:)|[^/\s@]+@[^/\s@:]+:|ssh:\/\/|github:|gitlab:|bitbucket:|https?:\/\/(?:www\.)?(?:github|gitlab|bitbucket)\.com\/|[^/@\s:]+\/[^/\s]+(?:#.*)?$)/;
 
 function isGitSpec(spec) {
   return typeof spec === "string" && GIT_SPEC_PATTERN.test(spec);
@@ -77,15 +92,62 @@ function readPackage(pkg) {
         delete deps[name];
         continue;
       }
-      throw new Error(
-        `[pwrgit pnpmfile] Blocked git dependency ${name}@${spec}. ` +
-          `Git specs bypass tarball integrity checks and run arbitrary ` +
-          `lifecycle scripts against arbitrary remotes. If you need this ` +
-          `package, publish a registry tarball or vendor the source.`
-      );
+      throw blockedGitSpecError(name, spec, field, pkg.name);
     }
   }
+
+  // `pnpm.overrides` — and `resolutions`, the yarn-compatible alias
+  // pnpm folds into the same mechanism — are not dependency fields,
+  // but pnpm resolves their values exactly like specs. Without this,
+  // a git spec parked in an override slipped past the manifest scan
+  // and was caught only by the fetcher below, whose error names
+  // neither the package nor where it was declared.
+  //
+  // That is the quietest injection point in the manifest: an override
+  // repoints a TRANSITIVE package, so it lands in nobody's
+  // `dependencies` block and a reviewer skimming the diff for a git
+  // URL in the usual place will not see it.
+  //
+  // Gated on first-party manifests. pnpm only honours overrides from
+  // the workspace root, so a registry package's own copy is inert and
+  // flagging it would be a false positive with nothing behind it. This
+  // gate is slightly wider than the root — it also covers @pwrgit/*
+  // packages, where an override is dead config pnpm ignores; a git URL
+  // sitting in one is still worth failing on rather than leaving to
+  // rot.
+  //
+  // NOT covered: specs declared in a pnpm-workspace.yaml `catalog:` /
+  // `catalogs:` block. readPackage only ever sees manifests, and the
+  // importer's spec is the literal string `catalog:` — the git URL
+  // lives in a file this hook never reads, so closing that would mean
+  // parsing YAML here with no dependencies available. The fetcher
+  // below still refuses the fetch, so a catalog entry is a worse error
+  // message, not a bypass.
+  if (isWorkspaceRootPackage(pkg)) {
+    scanOverrides(pkg.pnpm && pkg.pnpm.overrides, "pnpm.overrides", pkg.name);
+    scanOverrides(pkg.resolutions, "resolutions", pkg.name);
+  }
+
   return pkg;
+}
+
+// Override maps have no devDependencies-style carve-out: every value
+// here is a spec pnpm will resolve, so any git shape is a hard stop.
+function scanOverrides(overrides, label, owner) {
+  if (!overrides || typeof overrides !== "object") return;
+  for (const [name, spec] of Object.entries(overrides)) {
+    if (isGitSpec(spec)) throw blockedGitSpecError(name, spec, label, owner);
+  }
+}
+
+function blockedGitSpecError(name, spec, field, owner) {
+  return new Error(
+    `[pwrgit pnpmfile] Blocked git dependency ${name}@${spec}, ` +
+      `declared in ${field}${owner ? ` of ${owner}` : ""}. ` +
+      `Git specs bypass tarball integrity checks and run arbitrary ` +
+      `lifecycle scripts against arbitrary remotes. If you need this ` +
+      `package, publish a registry tarball or vendor the source.`
+  );
 }
 
 // Workspace packages live under @pwrgit/* (plus the unscoped root

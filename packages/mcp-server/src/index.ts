@@ -28,3 +28,5 @@ export type * from "./types.js";
 export * from "./access-policy.js";
 export { runCommand, type CommandRunner } from "./command.js";
 export type { AppBackend, AppCatalog, AppRepository, AppWorktree } from "./app-tools.js";
+
+export { bundledGitEnvironment } from "./git-runtime.js";

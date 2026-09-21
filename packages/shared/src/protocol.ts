@@ -1786,6 +1786,17 @@ export interface Commands {
     res: FileSearchHit[];
   };
 
+  "git:runtimeStatus": {
+    req: void;
+    res: {
+      active: "bundled";
+      default: "bundled";
+      path: string;
+      bundled: { git: string | null; lfs: string | null };
+      installed: { git: string | null; lfs: string | null };
+    };
+  };
+
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };
   "settings:update": { req: { patch: AppSettingsPatch }; res: AppSettingsSnapshot };
