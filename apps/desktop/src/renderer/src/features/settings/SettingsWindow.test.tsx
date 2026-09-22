@@ -42,10 +42,17 @@ import { SettingsWindow } from "./SettingsWindow";
  *  card is right to trust the typed IPC rather than guard against one. */
 const GIT_RUNTIME: Res<"git:runtimeStatus"> = {
   active: "bundled",
-  default: "bundled",
   path: "/fixture/git/bin/git",
-  bundled: { git: "git version 2.50.9", lfs: "git-lfs/3.6.9" },
-  installed: { git: null, lfs: null }
+  keychainHelper: null,
+  candidates: [
+    {
+      path: "/fixture/git/bin/git",
+      source: "bundled",
+      git: "git version 2.50.9",
+      lfs: "git-lfs/3.6.9",
+      problem: null
+    }
+  ]
 };
 import { __resetCollapsedPanesForTests } from "./SettingsLayout";
 

@@ -13,27 +13,55 @@ import { describeVersion, GitRuntimeSettings } from "./GitRuntimeSettings";
 
 type Status = Res<"git:runtimeStatus">;
 
+const BUNDLED = "/fixture/PwrGit.app/Contents/Resources/git/bin/git";
+
 // Contrived, but in the shapes the probes really return: `git lfs version`
 // carries a build tail that `git --version` does not.
 const HEALTHY: Status = {
   active: "bundled",
-  default: "bundled",
-  path: "/fixture/git/bin/git",
-  bundled: {
-    git: "git version 2.50.9",
-    lfs: "git-lfs/3.6.9 (GitHub; fixture arm64; go 1.0.0)"
-  },
-  installed: {
-    git: "git version 2.40.9",
-    lfs: "git-lfs/3.5.9 (GitHub; fixture arm64; go 1.0.0)"
-  }
+  path: BUNDLED,
+  keychainHelper: "/fixture/homebrew/Cellar/git/2.40.9/libexec/git-core/git-credential-osxkeychain",
+  candidates: [
+    {
+      path: BUNDLED,
+      source: "bundled",
+      git: "git version 2.50.9",
+      lfs: "git-lfs/3.6.9 (GitHub; fixture arm64; go 1.0.0)",
+      problem: null
+    },
+    {
+      path: "/fixture/homebrew/bin/git",
+      source: "homebrew",
+      git: "git version 2.40.9",
+      lfs: "git-lfs/3.5.9 (GitHub; fixture arm64; go 1.0.0)",
+      problem: null
+    },
+    {
+      path: "/fixture/Developer/usr/bin/git",
+      source: "xcode",
+      git: "git version 2.30.9 (Apple Git-1)",
+      lfs: null,
+      problem: "lfs_missing"
+    }
+  ]
+};
+
+const HOMEBREW_SELECTED: Status = {
+  ...HEALTHY,
+  active: "installed",
+  path: "/fixture/homebrew/bin/git"
 };
 
 let container: HTMLDivElement;
 let root: Root;
 
+function installBridge(platform: string): void {
+  (window as unknown as { pwrgit: { platform: string } }).pwrgit = { platform };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  installBridge("darwin");
   mocks.dispatch.mockResolvedValue(ok(HEALTHY));
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -51,8 +79,9 @@ async function render(): Promise<void> {
   });
 }
 
+/** The header's status chip. Install rows carry chips of their own. */
 function chip(): HTMLElement | null {
-  return container.querySelector(".settings-card__chip");
+  return container.querySelector(".settings-panel__header .settings-card__chip");
 }
 
 function values(): string[] {
@@ -67,6 +96,22 @@ function details(): string[] {
     container.querySelectorAll(".settings-field__detail"),
     (detail) => detail.textContent ?? ""
   );
+}
+
+function rows(): Array<{ path: string; meta: string; action: string }> {
+  return Array.from(container.querySelectorAll(".settings-ai-install"), (row) => ({
+    path: row.querySelector(".settings-ai-install__path")?.textContent ?? "",
+    meta: row.querySelector(".settings-ai-install__meta")?.textContent ?? "",
+    action: row.querySelector("button, .settings-card__chip")?.textContent ?? ""
+  }));
+}
+
+function button(name: string): HTMLButtonElement {
+  const match = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find(
+    (candidate) => (candidate.getAttribute("aria-label") ?? candidate.textContent) === name
+  );
+  if (match === undefined) throw new Error(`Button not found: ${name}`);
+  return match;
 }
 
 function field(label: string): HTMLElement {
@@ -104,72 +149,177 @@ describe("describeVersion", () => {
 });
 
 describe("GitRuntimeSettings", () => {
-  it("names the runtime in use and keeps bundled and installed versions distinct", async () => {
+  it("names the runtime in use, its versions, and every Git it could run instead", async () => {
     await render();
 
     expect(mocks.dispatch).toHaveBeenCalledWith("git:runtimeStatus", undefined);
     expect(chip()?.textContent).toBe("Bundled");
     expect(chip()?.className).toBe("settings-card__chip");
-    expect(values()).toEqual(["2.50.9", "3.6.9", "2.40.9", "3.5.9"]);
-    // The path, and each LFS build tail; git's own sentence adds nothing.
-    expect(details()).toEqual([
-      "/fixture/git/bin/git",
-      "git-lfs/3.6.9 (GitHub; fixture arm64; go 1.0.0)",
-      "git-lfs/3.5.9 (GitHub; fixture arm64; go 1.0.0)"
+    expect(values().slice(0, 2)).toEqual(["2.50.9", "3.6.9"]);
+    expect(details()).toContain(BUNDLED);
+    expect(details()).toContain("git-lfs/3.6.9 (GitHub; fixture arm64; go 1.0.0)");
+    expect(rows()).toEqual([
+      { path: BUNDLED, meta: "Bundled · 2.50.9 · LFS 3.6.9", action: "Using" },
+      { path: "/fixture/homebrew/bin/git", meta: "Homebrew · 2.40.9 · LFS 3.5.9", action: "Use" },
+      // Listed, so its absence from the choices is explained — never offered.
+      { path: "/fixture/Developer/usr/bin/git", meta: "Apple · 2.30.9", action: "LFS missing" }
     ]);
     expect(container.textContent).not.toContain("git version");
     expect(container.querySelector("[role='alert']")).toBeNull();
   });
 
-  it("says the installed caveat once, for the pair", async () => {
+  it("says which keychain helper bundled Git signs in to HTTPS remotes with", async () => {
     await render();
 
-    expect(container.querySelectorAll(".settings-field__sub")).toHaveLength(1);
-    expect(field("Installed Git").textContent).toContain("never runs an installed Git or Git LFS");
-    expect(field("Installed Git LFS").querySelector(".settings-field__sub")).toBeNull();
+    expect(field("HTTPS sign-in").textContent).toContain("macOS keychain");
+    expect(field("HTTPS sign-in").textContent).toContain(HEALTHY.keychainHelper);
   });
 
-  it("reads nothing installed as absence, not as a fault", async () => {
-    mocks.dispatch.mockResolvedValue(
-      ok({ ...HEALTHY, installed: { git: null, lfs: null } })
-    );
+  it("says plainly when bundled Git has no keychain helper to sign in with", async () => {
+    mocks.dispatch.mockResolvedValue(ok({ ...HEALTHY, keychainHelper: null }));
     await render();
 
+    const signIn = field("HTTPS sign-in");
+    expect(signIn.querySelector(".settings-field__value--absent")?.textContent).toBe("No keychain helper");
+    expect(signIn.textContent).toContain("use an SSH remote");
+    // Guidance, not an outage: the runtime itself still runs.
     expect(chip()?.textContent).toBe("Bundled");
-    const absent = Array.from(
-      container.querySelectorAll(".settings-field__value--absent"),
-      (value) => value.textContent
-    );
-    expect(absent).toEqual(["Not installed", "Not installed"]);
-    expect(container.querySelector(".settings-field__error")).toBeNull();
   });
 
-  it("turns the chip red when the bundled Git cannot run", async () => {
+  it("leaves HTTPS sign-in out off macOS, and while an installed Git reads its own config", async () => {
+    installBridge("linux");
+    await render();
+    expect(() => field("HTTPS sign-in")).toThrow();
+
+    installBridge("darwin");
+    mocks.dispatch.mockResolvedValue(ok(HOMEBREW_SELECTED));
+    act(() => root.unmount());
+    root = createRoot(container);
+    await render();
+    expect(() => field("HTTPS sign-in")).toThrow();
+  });
+
+  it("switches to an installed Git from its row, and shows the answer main sends back", async () => {
+    await render();
+    mocks.dispatch.mockResolvedValueOnce(ok(HOMEBREW_SELECTED));
+
+    await act(async () => button("Use /fixture/homebrew/bin/git").click());
+
+    expect(mocks.dispatch).toHaveBeenLastCalledWith("git:selectRuntime", { path: "/fixture/homebrew/bin/git" });
+    expect(chip()?.textContent).toBe("Installed");
+    expect(details()).toContain("/fixture/homebrew/bin/git");
+    expect(rows().map((row) => row.action)).toEqual(["Use", "Using", "LFS missing"]);
+    // The custom-path field names what is in use, so Clear has something to clear.
+    expect(container.querySelector<HTMLInputElement>("input[aria-label='Custom Git path']")?.value).toBe(
+      "/fixture/homebrew/bin/git"
+    );
+  });
+
+  it("returns to the bundle through its own row", async () => {
+    mocks.dispatch.mockResolvedValueOnce(ok(HOMEBREW_SELECTED)).mockResolvedValueOnce(ok(HEALTHY));
+    await render();
+
+    await act(async () => button(`Use ${BUNDLED}`).click());
+
+    expect(mocks.dispatch).toHaveBeenLastCalledWith("git:selectRuntime", { path: null });
+    expect(chip()?.textContent).toBe("Bundled");
+  });
+
+  it("puts main's refusal beside the list, and changes nothing", async () => {
+    await render();
+    mocks.dispatch.mockResolvedValueOnce(
+      err(pwrGitError("git", "git_runtime_lfs_missing", "/fixture/homebrew/bin/git has no working Git LFS."))
+    );
+
+    await act(async () => button("Use /fixture/homebrew/bin/git").click());
+
+    expect(container.querySelector("[role='alert']")?.textContent).toBe(
+      "/fixture/homebrew/bin/git has no working Git LFS."
+    );
+    expect(chip()?.textContent).toBe("Bundled");
+  });
+
+  it("uses a typed path through the same command", async () => {
+    await render();
+    mocks.dispatch.mockResolvedValueOnce(ok({ ...HOMEBREW_SELECTED, path: "/opt/fixture/bin/git" }));
+    const input = container.querySelector<HTMLInputElement>("input[aria-label='Custom Git path']");
+    if (input === null) throw new Error("no custom path field");
+
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setValue?.call(input, "/opt/fixture/bin/git");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => button("Use path").click());
+
+    expect(mocks.dispatch).toHaveBeenLastCalledWith("git:selectRuntime", { path: "/opt/fixture/bin/git" });
+  });
+
+  it("re-checks on request, keeping the last answer on screen meanwhile", async () => {
+    await render();
+    let answer: (value: unknown) => void = () => undefined;
+    mocks.dispatch.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+
+    await act(async () => button("Re-check").click());
+
+    expect(mocks.dispatch).toHaveBeenCalledTimes(2);
+    expect(button("Checking…").getAttribute("aria-busy")).toBe("true");
+    expect(rows()).toHaveLength(3);
+    await act(async () => answer(ok(HEALTHY)));
+    expect(button("Re-check")).toBeDefined();
+  });
+
+  it("turns the chip red, and says so on the Git row, when the chosen Git cannot run", async () => {
     mocks.dispatch.mockResolvedValue(
-      ok({ ...HEALTHY, bundled: { git: null, lfs: null } })
+      ok({
+        ...HEALTHY,
+        active: "installed",
+        path: "/fixture/removed/git",
+        candidates: [
+          ...HEALTHY.candidates,
+          { path: "/fixture/removed/git", source: "custom", git: null, lfs: null, problem: "not_found" }
+        ]
+      })
     );
     await render();
 
     expect(chip()?.textContent).toBe("Unavailable");
     expect(chip()?.classList.contains("settings-card__chip--err")).toBe(true);
-    expect(field("Bundled Git").querySelector(".settings-field__error")?.textContent).toContain(
-      "repository operations will fail"
-    );
+    expect(field("Git").querySelector(".settings-field__error")?.textContent).toContain("Choose another Git");
+    expect(rows().at(-1)).toEqual({ path: "/fixture/removed/git", meta: "Custom", action: "Not found" });
     // One statement of the outage: LFS does not add a second one.
     expect(container.querySelectorAll(".settings-field__error")).toHaveLength(1);
-    expect(field("Bundled Git").textContent).toContain("/fixture/git/bin/git");
+  });
+
+  it("turns the chip red when the bundled Git cannot run", async () => {
+    mocks.dispatch.mockResolvedValue(
+      ok({
+        ...HEALTHY,
+        candidates: [{ path: BUNDLED, source: "bundled", git: null, lfs: null, problem: "no_version" }]
+      })
+    );
+    await render();
+
+    expect(chip()?.textContent).toBe("Unavailable");
+    expect(chip()?.classList.contains("settings-card__chip--err")).toBe(true);
+    expect(field("Git").querySelector(".settings-field__error")?.textContent).toContain(
+      "repository operations will fail"
+    );
+    expect(container.querySelectorAll(".settings-field__error")).toHaveLength(1);
+    expect(field("Git").textContent).toContain(BUNDLED);
   });
 
   it("flags a missing bundled Git LFS on its own row, without changing the chip", async () => {
     mocks.dispatch.mockResolvedValue(
-      ok({ ...HEALTHY, bundled: { git: HEALTHY.bundled.git, lfs: null } })
+      ok({
+        ...HEALTHY,
+        candidates: [{ path: BUNDLED, source: "bundled", git: "git version 2.50.9", lfs: null, problem: "lfs_missing" }]
+      })
     );
     await render();
 
     expect(chip()?.textContent).toBe("Bundled");
-    expect(
-      field("Bundled Git LFS").querySelector(".settings-field__error")?.textContent
-    ).toContain("Git LFS will fail");
+    expect(field("Git LFS").querySelector(".settings-field__error")?.textContent).toContain("Git LFS will fail");
   });
 
   it("offers Try again when the probe itself fails, and says it could not look", async () => {

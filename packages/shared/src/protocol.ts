@@ -91,6 +91,7 @@ import type {
   SearchHitStatus,
   SubmoduleSnapshot,
   SshRemoteRecovery,
+  GitRuntimeStatus,
   WorktreeState
 } from "./types";
 import type { ImagePreview, ImageRevision } from "./image";
@@ -1807,16 +1808,13 @@ export interface Commands {
     res: FileSearchHit[];
   };
 
-  "git:runtimeStatus": {
-    req: void;
-    res: {
-      active: "bundled";
-      default: "bundled";
-      path: string;
-      bundled: { git: string | null; lfs: string | null };
-      installed: { git: string | null; lfs: string | null };
-    };
-  };
+  "git:runtimeStatus": { req: void; res: GitRuntimeStatus };
+  /**
+   * Run repository commands with an installed Git, or `null` for the bundle.
+   * Main probes the path first and refuses one that cannot run Git and Git
+   * LFS, so a typo is never written as the runtime.
+   */
+  "git:selectRuntime": { req: { path: string | null }; res: GitRuntimeStatus };
 
   // App settings (Settings window)
   "settings:read": { req: void; res: AppSettingsSnapshot };

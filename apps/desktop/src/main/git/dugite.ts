@@ -1,22 +1,77 @@
-// dugite is CommonJS; default-import + destructure so the strict-ESM main
-// bundle loads it (a named `import { exec }` throws at runtime).
-import type { ExecFileOptions } from "node:child_process";
-import { bundledGitEnvironment } from "@pwrgit/mcp-server";
+// dugite is CommonJS; default-import it so the strict-ESM main bundle loads
+// it (a named `import { exec }` throws at runtime).
+import { execFile, spawn, type ChildProcessWithoutNullStreams, type ExecFileOptions } from "node:child_process";
+import { bundledGitEnvironment, installedKeychainHelper } from "@pwrgit/mcp-server";
 import { tmpdir } from "node:os";
+import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
 import dugite from "dugite";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
+import { cliSearchPath } from "../forge/cli-runner";
 import { logMain } from "../logs";
 
-const { exec, spawn: spawnGit } = dugite;
 let bundledDirectory = dugite.resolveEmbeddedGitDir();
+let generatedConfigDirectory: string | null = null;
+let installedGit: string | null = null;
 
 /** Set once at startup: packaged Git lives outside the asar. */
 export function configureBundledGit(directory: string): void {
   bundledDirectory = directory;
 }
 
+/**
+ * Set once at startup: where the system config PwrGit writes for the bundle
+ * lives. Until it is set the bundle runs with Dugite's own config — no LFS
+ * filter and no keychain helper — which is what keeps unit tests from writing
+ * into the real app data directory.
+ */
+export function configureBundledGitConfig(directory: string | null): void {
+  generatedConfigDirectory = directory;
+}
+
+/**
+ * The installed Git chosen in Settings, or null for the bundle. Never checked
+ * here: a choice that has since broken fails every command loudly instead of
+ * quietly running a different Git than the one Settings names.
+ */
+export function useInstalledGit(path: string | null): void {
+  installedGit = path;
+}
+
+export function installedGitSelection(): string | null {
+  return installedGit;
+}
+
 export function bundledGitPath(): string {
   return dugite.resolveGitBinary(bundledDirectory);
+}
+
+/** What `git` the app runs right now. */
+export function activeGitPath(): string {
+  return installedGit ?? bundledGitPath();
+}
+
+/** Directories launchd hands an app opened from Finder or the Dock. */
+const LAUNCHD_PATH = new Set(["/usr/bin", "/bin", "/usr/sbin", "/sbin"]);
+
+/**
+ * The PATH walked to the installed Git whose keychain helper the bundle
+ * borrows. A keychain item stays readable without a prompt only by the helper
+ * that stored it, which is the one the user's terminal Git runs. An app opened
+ * from Finder inherits launchd's PATH, where Apple's /usr/bin/git comes before
+ * Homebrew's — the reverse of a shell that ran `brew shellenv` — so Homebrew's
+ * directories are tried before launchd's, and everything else keeps its order.
+ */
+function keychainSearchPath(): string {
+  const entries = [...new Set(cliSearchPath().split(delimiter).filter(Boolean))];
+  const own = entries.filter((entry) => !LAUNCHD_PATH.has(entry));
+  const system = entries.filter((entry) => LAUNCHD_PATH.has(entry));
+  return [...own, ...system].join(delimiter);
+}
+
+/** The installed `git-credential-osxkeychain` the bundle runs, if any. */
+export function bundledKeychainHelper(): string | null {
+  if (process.platform !== "darwin") return null;
+  return installedKeychainHelper({ PATH: keychainSearchPath(), DEVELOPER_DIR: process.env.DEVELOPER_DIR }) ?? null;
 }
 
 export type GitOutput = { stdout: string; stderr: string; exitCode: number };
@@ -97,7 +152,140 @@ export function gitProcessInvocation(
 export function gitExecutionEnvironment(
   overrides: GitExecOptions["env"] = {}
 ): Record<string, string | undefined> {
-  return { ...bundledGitEnvironment(bundledDirectory, overrides), ...NON_INTERACTIVE_GIT_ENV };
+  return {
+    ...bundledGitEnvironment(bundledDirectory, overrides, {
+      configDirectory: generatedConfigDirectory,
+      searchPath: keychainSearchPath()
+    }),
+    ...NON_INTERACTIVE_GIT_ENV
+  };
+}
+
+const within = (directory: string, value: string): boolean => {
+  const path = relative(directory, value);
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
+};
+
+/**
+ * An environment for an installed Git: nothing of the bundle's. Each bundle
+ * variable would redirect it — `GIT_EXEC_PATH` to the bundle's helpers, the
+ * generated `GIT_CONFIG_SYSTEM` in place of the installed Git's own, and the
+ * bundle's directories on PATH ahead of its `git-lfs`. The installed Git's
+ * own directory goes first, then the CLI search path, because an app opened
+ * from Finder has no Homebrew on PATH for that Git's hooks and LFS to find.
+ */
+export function installedGitEnvironment(
+  source: NodeJS.ProcessEnv,
+  command: string
+): NodeJS.ProcessEnv {
+  const env = { ...source };
+  const bundle = resolve(bundledDirectory);
+  const inBundle = (value: string): boolean => within(bundle, value);
+  let inheritedPath = "";
+  for (const key of Object.keys(env)) {
+    const upper = key.toUpperCase();
+    const value = env[key];
+    if (upper === "PATH") {
+      inheritedPath = value ?? "";
+      delete env[key];
+    } else if (
+      ["LOCAL_GIT_DIRECTORY", "GIT_EXEC_PATH", "GIT_TEMPLATE_DIR"].includes(upper) ||
+      (["GIT_CONFIG_SYSTEM", "PREFIX", "GIT_SSL_CAINFO"].includes(upper) &&
+        value !== undefined &&
+        inBundle(value)) ||
+      (upper === "GIT_CONFIG_SYSTEM" &&
+        value !== undefined &&
+        generatedConfigDirectory !== null &&
+        within(resolve(generatedConfigDirectory), value))
+    ) {
+      delete env[key];
+    }
+  }
+  const searchPath = process.platform === "win32" ? inheritedPath : [inheritedPath, cliSearchPath()].join(delimiter);
+  env.PATH = [
+    ...new Set([
+      dirname(command),
+      ...searchPath.split(delimiter).filter((entry) => entry !== "" && !inBundle(entry))
+    ])
+  ].join(delimiter);
+  return { ...env, ...NON_INTERACTIVE_GIT_ENV };
+}
+
+export type GitLaunch = { binary: string; env: NodeJS.ProcessEnv };
+
+/**
+ * The executable and complete environment for one Git process: the installed
+ * Git chosen in Settings, or the bundle. `installed` names a runtime other
+ * than the one in use — Settings probes every candidate this way.
+ */
+export function gitLaunch(
+  overrides: GitExecOptions["env"] = {},
+  installed: string | null = installedGit
+): GitLaunch {
+  if (installed !== null) {
+    return { binary: installed, env: installedGitEnvironment({ ...process.env, ...overrides }, installed) };
+  }
+  // What `dugite.exec` does with the same overlay: process.env beneath it,
+  // then the bundle's own GIT_EXEC_PATH, templates and (unset) system config.
+  const { env, gitLocation } = dugite.setupEnvironment(gitExecutionEnvironment(overrides));
+  return { binary: gitLocation, env };
+}
+
+/** Name the Git that failed to start; for an installed one, say where it was chosen. */
+function spawnFailureMessage(binary: string, cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const code = (cause as { code?: unknown } | null)?.code;
+  if (binary === installedGit) {
+    return `The Git selected in Settings could not run (${binary}): ${message}. Choose another Git, or the bundled one, in Settings › General › Git runtime.`;
+  }
+  return code === "ENOENT"
+    ? `PwrGit's bundled Git could not run (${binary}). Reinstalling PwrGit restores it.`
+    : message;
+}
+
+type ExecFileResult<T> = { stdout: T; stderr: T; exitCode: number };
+
+/** `dugite.exec`'s contract for any Git: a non-zero exit resolves; only a
+ *  failure to start (a string error code, such as ENOENT) rejects. */
+function execFileGit(
+  launch: GitLaunch,
+  args: string[],
+  cwd: string,
+  options: {
+    encoding: "utf8" | "buffer";
+    signal?: AbortSignal;
+    killSignal?: ExecFileOptions["killSignal"];
+    processCallback?: (child: ReturnType<typeof execFile>) => void;
+  }
+): Promise<ExecFileResult<string | Buffer>> {
+  return new Promise((resolveExec, rejectExec) => {
+    const child = execFile(
+      launch.binary,
+      args,
+      {
+        cwd,
+        env: launch.env,
+        encoding: options.encoding,
+        maxBuffer: Infinity,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.killSignal === undefined ? {} : { killSignal: options.killSignal })
+      },
+      (error, stdout, stderr) => {
+        if (error === null || typeof error.code === "number") {
+          resolveExec({
+            stdout,
+            stderr,
+            exitCode: typeof error?.code === "number" ? error.code : 0
+          });
+          return;
+        }
+        rejectExec(new Error(spawnFailureMessage(launch.binary, error), { cause: error }));
+      }
+    );
+    // Git can close stdin before a write lands; the exit code says what happened.
+    child.stdin?.on("error", () => undefined);
+    options.processCallback?.(child);
+  });
 }
 
 /** Read-only probes should never compete with a mutating Git command's lock. */
@@ -182,14 +370,15 @@ export type GitExec = (
   options?: GitExecOptions
 ) => Promise<Result<GitOutput, PwrGitError>>;
 
-/** Production GitExec backed by dugite's bundled git binary (KTD1). */
+/** Production GitExec: dugite's bundled git binary (KTD1), or the installed
+ *  Git chosen in Settings. */
 export const execGit: GitExec = async (args, cwd, options) => {
   const alreadyAborted = abortedSignal(options);
   if (alreadyAborted !== null) return err(abortError(alreadyAborted));
   try {
     const invocation = gitProcessInvocation(args, cwd);
-    const result = await exec(invocation.args, invocation.processCwd, {
-      env: gitExecutionEnvironment(options?.env),
+    const result = await execFileGit(gitLaunch(options?.env), invocation.args, invocation.processCwd, {
+      encoding: "utf8",
       ...(options?.signal !== undefined ? { signal: options.signal } : {}),
       ...(options?.killSignal !== undefined
         ? { killSignal: options.killSignal }
@@ -216,8 +405,8 @@ export const execGit: GitExec = async (args, cwd, options) => {
       );
     }
     return ok({
-      stdout: result.stdout,
-      stderr: result.stderr,
+      stdout: String(result.stdout),
+      stderr: String(result.stderr),
       exitCode: result.exitCode
     });
   } catch (cause) {
@@ -250,11 +439,13 @@ const MAX_STREAM_STDERR_CHARS = 32_768;
  */
 export const execGitRecords: GitRecordExec = (args, cwd, options) =>
   new Promise((resolveResult) => {
-    let child: ReturnType<typeof spawnGit>;
+    let child: ChildProcessWithoutNullStreams;
+    const launch = gitLaunch(options.env);
     try {
       const invocation = gitProcessInvocation(args, cwd);
-      child = spawnGit(invocation.args, invocation.processCwd, {
-        env: gitExecutionEnvironment(options.env)
+      child = spawn(launch.binary, invocation.args, {
+        cwd: invocation.processCwd,
+        env: launch.env
       });
     } catch (cause) {
       resolveResult(
@@ -322,7 +513,7 @@ export const execGitRecords: GitRecordExec = (args, cwd, options) =>
         err({
           kind: "git",
           code: "spawn_failed",
-          message: cause.message,
+          message: spawnFailureMessage(launch.binary, cause),
           cause
         })
       );
@@ -357,16 +548,15 @@ export type GitExecBinary = (
   cwd: string
 ) => Promise<Result<GitBinaryOutput, PwrGitError>>;
 
-/** Production GitExecBinary backed by dugite's bundled git binary. */
+/** Production GitExecBinary: the same runtime as `execGit`. */
 export const execGitBinary: GitExecBinary = async (args, cwd) => {
   try {
     const invocation = gitProcessInvocation(args, cwd);
-    const result = await exec(invocation.args, invocation.processCwd, {
-      encoding: "buffer",
-      env: gitExecutionEnvironment(NO_OPTIONAL_LOCKS.env)
+    const result = await execFileGit(gitLaunch(NO_OPTIONAL_LOCKS.env), invocation.args, invocation.processCwd, {
+      encoding: "buffer"
     });
     return ok({
-      stdout: result.stdout,
+      stdout: Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout),
       stderr: result.stderr.toString(),
       exitCode: result.exitCode
     });

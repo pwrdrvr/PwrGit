@@ -45,6 +45,48 @@ fail on the Windows runner, so a green local run proves nothing about them:
   everywhere, and a bracket expression exercises glob-escaping just as well
   (see `gitignore.test.ts`). Keep `*` / `?` cases to pure string assertions.
 
+## Which Git runs: the bundle, set up the way an installed Git would be
+
+Every Git process goes through `gitLaunch` in `dugite.ts`. It returns the
+bundled Git unless Settings › General › Git runtime chose an installed one
+(`useInstalledGit`, persisted as `gitPath`). `execGit`, `execGitRecords` and
+`execGitBinary` spawn whatever `gitLaunch` returns and do not call
+`dugite.exec`. Three things here are easy to undo:
+
+- **The bundle needs a system config of PwrGit's own.** Dugite points
+  `GIT_CONFIG_SYSTEM` at its `etc/gitconfig`. That file only includes
+  `/etc/gitconfig`, so it never reads the config file of the Git the user
+  installed. Homebrew and Apple set `credential.helper = osxkeychain` there,
+  and with no helper every keychain-backed HTTPS fetch fails with "terminal
+  prompts disabled". The file also sets no LFS filter, so LFS repositories
+  check out pointer files. `bundledGitEnvironment`
+  (`packages/mcp-server/src/git-runtime.ts`) writes a content-named file under
+  `<userData>/git` with the `git lfs install --system` filter. On macOS it
+  adds the installed Git's own `git-credential-osxkeychain`, then includes
+  Dugite's config. The file is system scope, so the user's global config
+  still wins, and `credential.helper =` still opts out. Until
+  `configureBundledGitConfig` runs, nothing is written. That keeps unit tests
+  out of the real data directory, and tests that need the file configure a
+  temp one.
+- **Borrow the keychain helper from the Git the user runs in their terminal.**
+  A keychain item stays readable without an access prompt only for the helper
+  binary that stored it. An app opened from Finder has launchd's PATH, which
+  puts Apple's `/usr/bin/git` before Homebrew's, the opposite of a shell that
+  ran `brew shellenv`. So `keychainSearchPath` tries launchd's directories
+  last.
+- **A chosen Git never falls back.** If it breaks, every command fails with a
+  message that names it and points at Settings. Running the bundle instead
+  would make Settings wrong about which Git is running. `installedGitEnvironment`
+  strips every bundle variable: `GIT_EXEC_PATH`, the generated
+  `GIT_CONFIG_SYSTEM`, and the bundle's directories on PATH. Any one of them
+  would quietly send that Git to the bundle's helpers or config.
+
+Discovery (`runtime-status.ts`) never runs Apple's `/usr/bin/git`. Without
+developer tools that shim opens the installer dialog. Discovery lists the Git
+under `xcode-select -p` instead, and only when that Git exists. A Git without
+working Git LFS is listed but cannot be chosen, and `git:selectRuntime` probes
+a path before saving it.
+
 ## Main decides how many Git processes exist, not the renderer
 
 `file-insights-handlers.ts` tracks live reads per renderer **and kind**

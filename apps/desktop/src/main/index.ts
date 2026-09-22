@@ -40,7 +40,7 @@ import { CommandBus, type CommandContext } from "./command-bus";
 import { registerClipboardHandlers } from "./clipboard-handlers";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { registerGitRuntimeHandlers } from "./git/runtime-status";
-import { configureBundledGit, execGit } from "./git/dugite";
+import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -217,6 +217,13 @@ if (dataDirOverride !== undefined && dataDirOverride !== "") {
 const settings = new SettingsService(
   join(app.getPath("userData"), "settings.json")
 );
+// Before any Git runs. The bundle's generated system config (LFS filter,
+// keychain helper) lives with the rest of the app's data; an installed Git
+// chosen in Settings is applied as stored — if it has broken since, commands
+// fail naming it rather than quietly running the bundle instead.
+configureBundledGitConfig(join(app.getPath("userData"), "git"));
+const storedGitPath = settings.get().gitPath;
+useInstalledGit(typeof storedGitPath === "string" && storedGitPath.trim() !== "" ? storedGitPath : null);
 const storedTheme = settings.get().general?.theme;
 // Assigned once the window registries exist (below). A window with a palette
 // of its own — a profile window, or an auxiliary window that borrowed a
@@ -930,7 +937,7 @@ if (!gotSingleInstanceLock) {
           .searchAllProfiles
     );
     registerCloneHandlers(bus, cloneService);
-    registerGitRuntimeHandlers(bus);
+    registerGitRuntimeHandlers(bus, settings);
     registerSshHostTrustHandlers(bus, new SshHostTrustService({
       allowed: (kind, hostname) => forgeHosts.kindFor(hostname).kind === kind && forgeHosts.isEnabled(hostname).enabled
     }));

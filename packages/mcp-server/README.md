@@ -2,8 +2,10 @@
 
 PwrGit app profiles, indexed repositories, recent navigation, open/refresh actions,
 and read-only Git metadata and live status. App-backed tools require the desktop
-HTTP server; standalone stdio remains filesystem-based. Both use bundled Git
-and Git LFS; installing Git on the system does not change the selected runtime.
+HTTP server; standalone stdio remains filesystem-based. Standalone stdio always
+runs the bundled Git and Git LFS, with the app's Git LFS filter and macOS keychain
+helper. App-backed tools run whichever Git is chosen in the app's Settings, which
+is the bundled Git unless someone picks an installed one.
 
 The desktop app exposes OAuth-protected MCP at
 `http://127.0.0.1:51731/mcp`. Enable local-agent access in Settings → Agents,
