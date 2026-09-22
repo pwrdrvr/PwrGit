@@ -52,10 +52,8 @@ test("manages the Git-native repository stash stack across worktrees", async () 
   const stashesTab = window.getByRole("button", { name: "Stashes 2" });
   await expect(stashesTab).toBeVisible({ timeout: 20_000 });
   await stashesTab.click();
-  await expect(
-    window.getByText("One Git stash stack for this repository.")
-  ).toBeVisible();
-  await expect(window.getByText("PwrGit pull recovery")).toBeVisible();
+  await expect(window.getByText("Shared by every worktree")).toBeVisible();
+  await expect(window.getByText("Pull recovery", { exact: true })).toBeVisible();
   await expect(window.getByText("older CLI stash")).toBeVisible();
 
   // Seed the live repository-stack watcher, then change refs/stash through
@@ -80,7 +78,7 @@ test("manages the Git-native repository stash stack across worktrees", async () 
   // Inspect the PwrGit-created recovery stash just like any interoperable
   // entry, including its files and complete patch.
   const recovery = window.locator(".stash-entry", {
-    hasText: "PwrGit pull recovery"
+    has: window.locator(".stash-entry__recovery")
   });
   await recovery.locator(".stash-entry__toggle").click();
   await expect(recovery.getByText("other.txt")).toBeVisible();

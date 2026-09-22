@@ -144,15 +144,28 @@ describe("StashesTab", () => {
     return found;
   };
 
-  it("labels repository/worktree scope and PwrGit pull recovery entries", () => {
-    expect(container.textContent).toContain(
-      "One Git stash stack for this repository."
-    );
-    expect(container.textContent).toContain(
-      "Every linked worktree sees these entries."
-    );
-    expect(container.textContent).toContain("PwrGit pull recovery");
+  it("labels repository/worktree scope and PwrGit pull recovery entries", async () => {
     expect(container.textContent).toContain("Repository stack · 2");
+    expect(container.textContent).toContain("Shared by every worktree");
+
+    // The chip sits outside the truncating name, so it can never be the part
+    // that gets ellipsized away on the (long) auto-stash message.
+    const chip = container.querySelector(".stash-entry__recovery");
+    expect(chip?.textContent).toBe("Pull recovery");
+    expect(chip?.closest(".stash-entry__name")).toBeNull();
+    expect(
+      container.querySelectorAll(".stash-entry__recovery")
+    ).toHaveLength(1);
+
+    // Where Apply/Pop land is stated beside the actions, per worktree.
+    const inspect = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Inspect older CLI stash"]'
+    );
+    if (inspect === null) throw new Error("inspect button missing");
+    await act(async () => inspect.click());
+    expect(container.querySelector(".stash-entry__target")?.textContent).toContain(
+      "Apply and Pop restore into main"
+    );
   });
 
   it("inspects and pops the selected non-top entry by stable hash", async () => {
@@ -316,8 +329,65 @@ describe("StashesTab", () => {
     expect(container.textContent).toContain(
       "same Git stash object appears 2 times"
     );
-    expect(button("Pop").disabled).toBe(true);
-    expect(button("Drop").disabled).toBe(true);
-    expect(button("Apply").disabled).toBe(false);
+    // aria-disabled rather than `disabled`, so the pointer still gets the
+    // tooltip saying why — and a click is refused by the handler.
+    expect(button("Pop").getAttribute("aria-disabled")).toBe("true");
+    expect(button("Drop").getAttribute("aria-disabled")).toBe("true");
+    expect(button("Apply").hasAttribute("aria-disabled")).toBe(false);
+    expect(container.querySelector(".stash-entry__target")?.textContent).toContain(
+      "Apply restores into main"
+    );
+    await act(async () => button("Pop").click());
+    await act(async () => button("Drop").click());
+    expect(mocks.dispatch).not.toHaveBeenCalledWith(
+      "stash:pop",
+      expect.anything()
+    );
+    expect(mocks.confirmDialog).not.toHaveBeenCalled();
+  });
+
+  it("keeps focus and the file list in place while a command runs", async () => {
+    const pending = deferred<Result<undefined>>();
+    mocks.dispatch.mockImplementation(async (command: string) => {
+      if (command === "stash:details") {
+        return ok({
+          entry: older,
+          files: [{ path: "README.md", additions: 2, deletions: 1 }],
+          additions: 2,
+          deletions: 1
+        });
+      }
+      if (command === "stash:apply") return pending.promise;
+      return ok(null);
+    });
+    const inspect = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Inspect older CLI stash"]'
+    );
+    if (inspect === null) throw new Error("inspect button missing");
+    await act(async () => inspect.click());
+    const apply = button("Apply");
+    apply.focus();
+    await act(async () => apply.click());
+
+    // In flight is aria-disabled, never `disabled`: a disabled button drops
+    // focus to <body> for the length of the command.
+    expect(apply.disabled).toBe(false);
+    expect(apply.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(apply);
+    expect(container.textContent).toContain("Applying…");
+    expect(container.textContent).toContain("README.md");
+
+    // A second command is refused while the first is running.
+    await act(async () => button("Pop").click());
+    expect(mocks.dispatch).not.toHaveBeenCalledWith(
+      "stash:pop",
+      expect.anything()
+    );
+
+    await act(async () => {
+      pending.resolve(ok(undefined));
+      await pending.promise;
+    });
+    expect(apply.hasAttribute("aria-disabled")).toBe(false);
   });
 });

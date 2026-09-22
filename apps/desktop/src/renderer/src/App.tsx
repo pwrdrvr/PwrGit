@@ -915,9 +915,12 @@ export function App() {
                 });
               }
             }}
-            onOpenStashPatch={(hash, subject) =>
-              setDiffTarget({ kind: "stash", hash, subject })
-            }
+            onOpenStashPatch={(hash, subject) => {
+              // File details would otherwise keep the diff pane hidden, and
+              // View patch would do nothing visible.
+              setFileInsightTarget(null);
+              setDiffTarget({ kind: "stash", hash, subject });
+            }}
             onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
             onOpenDiff={(path, staged) => {

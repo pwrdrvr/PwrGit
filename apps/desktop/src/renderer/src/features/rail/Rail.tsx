@@ -187,7 +187,9 @@ export function Rail({
           className={`rail-tab${tab === "changes" ? " is-active" : ""}`}
           onClick={() => setTab("changes")}
         >
-          {commitFocus !== null ? "Commit" : "Changes"}
+          <span className="rail-tab__label">
+            {commitFocus !== null ? "Commit" : "Changes"}
+          </span>
           {commitFocus === null && dirty > 0 && (
             <span className="rail-tab__badge">{dirty}</span>
           )}
@@ -196,23 +198,24 @@ export function Rail({
           className={`rail-tab${tab === "stashes" ? " is-active" : ""}`}
           onClick={() => setTab("stashes")}
         >
-          Stashes
+          <span className="rail-tab__label">Stashes</span>
           {stashes.length > 0 && (
-            <span className="rail-tab__badge">{stashes.length}</span>
+            <span className="rail-tab__badge rail-tab__badge--count">
+              {stashes.length}
+            </span>
           )}
         </button>
         <button
           className={`rail-tab${tab === "rebase" ? " is-active" : ""}`}
           onClick={() => setTab("rebase")}
         >
-          Rebase
+          <span className="rail-tab__label">Rebase</span>
           {selectedHashes.length > 0 && (
             <span className="rail-tab__badge">{selectedHashes.length}</span>
           )}
         </button>
-        <span style={{ flex: 1 }} />
         <button
-          className="icon-btn"
+          className="icon-btn rail__collapse"
           onClick={onCollapse}
           {...hoverTooltip(tip, "Collapse panel")}
           aria-label="Collapse panel"

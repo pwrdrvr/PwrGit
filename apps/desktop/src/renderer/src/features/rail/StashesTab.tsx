@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { StashDetails, StashEntry, Worktree } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { relativeAge } from "../../lib/relativeAge";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { confirmDialog } from "../shell/dialogs";
 
 type DetailsState =
@@ -22,6 +27,18 @@ function entryKey(entry: StashEntry): string {
   return entry.selector + ":" + entry.hash;
 }
 
+// What the one status line under an open entry's actions says while a command
+// runs. It replaces the destination line in place, so the file list below
+// never jumps while Git works.
+const BUSY_LABEL: Record<string, string> = {
+  "stash:apply": "Applying",
+  "stash:pop": "Popping",
+  "stash:drop": "Dropping"
+};
+
+const DUPLICATE_REASON =
+  "Unavailable while this stash object occurs more than once";
+
 export function StashesTab({
   worktree,
   entries,
@@ -40,6 +57,7 @@ export function StashesTab({
   const [expandedEntryKey, setExpandedEntryKey] = useState<string | null>(null);
   const [details, setDetails] = useState<DetailsState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const tip = useViewportTooltip();
   const detailsGeneration = useRef(0);
   const currentWorktreeId = useRef(worktree?.id ?? null);
   // Update during render rather than in an effect: an old promise can settle
@@ -97,7 +115,7 @@ export function StashesTab({
   };
 
   const create = async (): Promise<void> => {
-    if (worktree === null || name.trim() === "") return;
+    if (worktree === null || name.trim() === "" || busy !== null) return;
     const worktreeId = worktree.id;
     const message = name.trim();
     setBusy("create");
@@ -138,7 +156,8 @@ export function StashesTab({
     entry: StashEntry,
     command: "stash:apply" | "stash:pop"
   ): Promise<void> => {
-    if (worktree === null) return;
+    if (worktree === null || busy !== null) return;
+    if (command === "stash:pop" && entry.occurrenceCount > 1) return;
     const worktreeId = worktree.id;
     setBusy(command + ":" + entry.hash);
     const result = await dispatch(command, {
@@ -172,7 +191,9 @@ export function StashesTab({
   };
 
   const drop = async (entry: StashEntry): Promise<void> => {
-    if (worktree === null || entry.occurrenceCount > 1) return;
+    if (worktree === null || busy !== null || entry.occurrenceCount > 1) {
+      return;
+    }
     const worktreeId = worktree.id;
     const confirmed = await confirmDialog({
       title: "Drop repository stash?",
@@ -206,31 +227,33 @@ export function StashesTab({
     return <div className="rail-empty">Select a worktree to manage stashes.</div>;
   }
 
+  // In flight is aria-disabled, never `disabled`: Chromium blurs a control
+  // the moment it becomes disabled, which would throw keyboard focus to
+  // <body> for the length of every Git command. The handlers guard instead.
+  const inFlight = busy !== null ? true : undefined;
+
   return (
     <div className="stashes-tab">
-      <div className="stash-scope" role="note">
-        <strong>One Git stash stack for this repository.</strong>
-        <span>
-          Every linked worktree sees these entries. Apply and Pop restore into{" "}
-          <code>{worktree.branch}</code> in this worktree.
-        </span>
-      </div>
-
       <div className="stash-create">
-        <label htmlFor="stash-name">Name this stash</label>
+        <label className="changes-section__label" htmlFor="stash-name">
+          Name this stash
+        </label>
         <div className="stash-create__row">
           <input
             id="stash-name"
+            className="commit-input"
             value={name}
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") void create();
             }}
-            placeholder="e.g. parser experiment"
+            placeholder="e.g. parser spike"
           />
           <button
+            className="commit-btn"
             onClick={() => void create()}
-            disabled={name.trim() === "" || busy !== null}
+            disabled={name.trim() === ""}
+            aria-disabled={inFlight}
           >
             Stash changes
           </button>
@@ -246,20 +269,28 @@ export function StashesTab({
       </div>
 
       <div className="stash-list">
-        <div className="stash-list__head">
-          Repository stack · {entries.length}
+        <div className="changes-section stash-list__head">
+          <span className="changes-section__label">
+            Repository stack · {entries.length}
+          </span>
+          <span className="stash-list__scope">Shared by every worktree</span>
         </div>
         {loading && entries.length === 0 ? (
           <div className="stash-empty">Loading stashes…</div>
         ) : entries.length === 0 ? (
           <div className="stash-empty">
-            No stash entries. Terminal-created stashes appear here too.
+            No stashes yet. Ones you create in a terminal appear here too.
           </div>
         ) : (
           entries.map((entry) => {
             const renderedEntryKey = entryKey(entry);
             const expanded = expandedEntryKey === renderedEntryKey;
-            const entryBusy = busy?.endsWith(entry.hash) === true;
+            const busyCommand =
+              busy !== null && busy.endsWith(":" + entry.hash)
+                ? busy.slice(0, busy.length - entry.hash.length - 1)
+                : null;
+            const duplicate = entry.occurrenceCount > 1;
+            const created = dateTime.format(new Date(entry.createdAt));
             return (
               <article className="stash-entry" key={renderedEntryKey}>
                 <button
@@ -269,26 +300,31 @@ export function StashesTab({
                   aria-label={
                     (expanded ? "Hide " : "Inspect ") + displayName(entry)
                   }
+                  {...hoverTooltip(tip, entry.subject + " · " + created)}
                 >
                   <span className="stash-entry__twisty" aria-hidden="true">
-                    {expanded ? "⌄" : "›"}
+                    <span
+                      className={`ref-section__chev${expanded ? " is-open" : ""}`}
+                    />
                   </span>
                   <span className="stash-entry__identity">
-                    <strong title={entry.subject}>
+                    <span className="stash-entry__name">
                       {displayName(entry)}
+                    </span>
+                    <span className="stash-entry__meta">
                       {entry.kind === "pwrgit-pull-recovery" && (
                         <span className="stash-entry__recovery">
-                          PwrGit pull recovery
+                          Pull recovery
                         </span>
                       )}
-                    </strong>
-                    <span>
-                      {entry.selector} · {entry.shortHash} · on{" "}
-                      {entry.branch ?? "unknown branch"}
+                      <span className="stash-entry__where">
+                        {entry.selector} · on{" "}
+                        {entry.branch ?? "unknown branch"} · {entry.shortHash}
+                      </span>
                     </span>
                   </span>
-                  <time dateTime={entry.createdAt}>
-                    {dateTime.format(new Date(entry.createdAt))}
+                  <time className="stash-entry__age" dateTime={entry.createdAt}>
+                    {relativeAge(entry.createdAt)}
                   </time>
                 </button>
 
@@ -297,45 +333,71 @@ export function StashesTab({
                     <div className="stash-entry__actions">
                       <button
                         onClick={() => void restore(entry, "stash:apply")}
-                        disabled={busy !== null}
-                        title="Restore here and keep this stash"
+                        aria-disabled={inFlight}
+                        {...hoverTooltip(
+                          tip,
+                          "Restore into " + worktree.branch + " and keep this stash"
+                        )}
                       >
                         Apply
                       </button>
                       <button
                         onClick={() => void restore(entry, "stash:pop")}
-                        disabled={busy !== null || entry.occurrenceCount > 1}
-                        title={
-                          entry.occurrenceCount > 1
-                            ? "Unavailable while this stash object occurs more than once"
-                            : "Restore here; Git drops it only if apply succeeds"
-                        }
+                        aria-disabled={inFlight ?? (duplicate || undefined)}
+                        {...hoverTooltip(
+                          tip,
+                          duplicate
+                            ? DUPLICATE_REASON
+                            : "Restore into " +
+                                worktree.branch +
+                                "; Git drops the stash only if it applies cleanly"
+                        )}
                       >
                         Pop
                       </button>
                       <button
-                        onClick={() =>
-                          onOpenPatch(entry.hash, displayName(entry))
-                        }
-                        disabled={busy !== null}
+                        onClick={() => {
+                          if (busy === null) {
+                            onOpenPatch(entry.hash, displayName(entry));
+                          }
+                        }}
+                        aria-disabled={inFlight}
                       >
                         View patch
                       </button>
                       <button
                         className="stash-entry__drop"
                         onClick={() => void drop(entry)}
-                        disabled={busy !== null || entry.occurrenceCount > 1}
-                        title={
-                          entry.occurrenceCount > 1
-                            ? "Unavailable while this stash object occurs more than once"
+                        aria-disabled={inFlight ?? (duplicate || undefined)}
+                        {...hoverTooltip(
+                          tip,
+                          duplicate
+                            ? DUPLICATE_REASON
                             : "Permanently remove this repository stash"
-                        }
+                        )}
                       >
                         Drop
                       </button>
                     </div>
+                    <div className="stash-entry__target" aria-live="polite">
+                      <span
+                        className={busyCommand === null ? undefined : "is-hidden"}
+                        aria-hidden={busyCommand === null ? undefined : true}
+                      >
+                        {duplicate ? "Apply restores" : "Apply and Pop restore"}{" "}
+                        into <code>{worktree.branch}</code>
+                      </span>
+                      <span
+                        className={busyCommand === null ? "is-hidden" : undefined}
+                        aria-hidden={busyCommand === null ? true : undefined}
+                      >
+                        {busyCommand === null
+                          ? ""
+                          : (BUSY_LABEL[busyCommand] ?? "Working") + "…"}
+                      </span>
+                    </div>
 
-                    {entry.occurrenceCount > 1 && (
+                    {duplicate && (
                       <div className="stash-details__duplicate" role="note">
                         This same Git stash object appears {entry.occurrenceCount} times.
                         Apply and inspection are safe; Pop and Drop are
@@ -344,8 +406,8 @@ export function StashesTab({
                       </div>
                     )}
 
-                    {entryBusy || details?.kind === "loading" ? (
-                      <div className="stash-details__status">Working…</div>
+                    {details?.kind === "loading" ? (
+                      <div className="stash-details__status">Loading files…</div>
                     ) : details?.kind === "error" ? (
                       <div className="stash-details__status stash-details__status--error">
                         {details.message}
@@ -355,26 +417,31 @@ export function StashesTab({
                         <div className="stash-details__summary">
                           {details.value.files.length} file
                           {details.value.files.length === 1 ? "" : "s"} ·{" "}
-                          <span>+{details.value.additions}</span>{" "}
-                          <span>−{details.value.deletions}</span>
+                          <span className="stash-stat--add">
+                            +{details.value.additions}
+                          </span>{" "}
+                          <span className="stash-stat--del">
+                            −{details.value.deletions}
+                          </span>
                         </div>
                         <div className="stash-files">
                           {details.value.files.map((file) => (
                             <div className="stash-file" key={file.path}>
-                              <span
-                                className="stash-file__path"
-                                title={file.path}
-                              >
+                              <span className="file-path" title={file.path}>
                                 {file.path}
                               </span>
-                              <span className="stash-file__stat">
-                                {file.additions === null
-                                  ? "binary"
-                                  : "+" +
-                                    file.additions +
-                                    " −" +
-                                    (file.deletions ?? 0)}
-                              </span>
+                              {file.additions === null ? (
+                                <span className="stash-file__stat">binary</span>
+                              ) : (
+                                <span className="stash-file__stat">
+                                  <span className="stash-stat--add">
+                                    +{file.additions}
+                                  </span>{" "}
+                                  <span className="stash-stat--del">
+                                    −{file.deletions ?? 0}
+                                  </span>
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -387,6 +454,7 @@ export function StashesTab({
           })
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }
