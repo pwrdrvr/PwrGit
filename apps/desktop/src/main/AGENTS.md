@@ -30,7 +30,7 @@ a query is capped, scope it in SQL.
 
 `RepoIndexer.searchAll` (⌘K) takes a `SearchScope` — which profile's window
 asked, and whether it wants the others too (General → Search all profiles, or
-the palette's ⇧⌘A footer toggle, which writes the same setting; off by
+the palette's This profile / All profiles control, which writes it; off by
 default). Two things about it are easy to get wrong:
 
 - **The filter is a WHERE clause, not a pass over the answer.** `search_fts`

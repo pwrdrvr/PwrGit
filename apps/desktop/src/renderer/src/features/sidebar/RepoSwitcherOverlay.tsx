@@ -27,6 +27,7 @@ import {
 import { shortWhen } from "../graph/graph-view";
 import { commitHashQuery, searchCommits } from "./commit-search";
 import { ContextMenu } from "../shell/ContextMenu";
+import { SettingsSegmented } from "../settings/SettingsLayout";
 import { PrChip } from "./PrChip";
 import { worktreeFolderLabel } from "./repo-view";
 import { PinIcon } from "./WorktreeRow";
@@ -364,7 +365,7 @@ export function RepoSwitcherOverlay({
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoSearchHit[]>([]);
-  // General → Search all profiles; null until the first read lands. The footer
+  // General → Search all profiles; null until the first read lands. The scope
   // toggle writes that same setting rather than keeping its own, so the
   // palette and Settings can never disagree about what ⌘K searches.
   const [allProfiles, setAllProfiles] = useState<boolean | null>(null);
@@ -539,9 +540,8 @@ export function RepoSwitcherOverlay({
   }, []);
 
   const showScope = profileCount > 1 && allProfiles !== null;
-  const toggleScope = (): void => {
-    if (allProfiles === null) return;
-    const next = !allProfiles;
+  const chooseScope = (next: boolean): void => {
+    if (allProfiles === null || next === allProfiles) return;
     setAllProfiles(next);
     void dispatch("settings:update", {
       patch: { general: { searchAllProfiles: next } }
@@ -553,7 +553,7 @@ export function RepoSwitcherOverlay({
   useEffect(() => {
     let active = true;
     // This window's profile decides the scope. The toggle's value travels with
-    // the query so the answer matches what the footer shows even while the
+    // the query so the answer matches the scope shown even while the
     // setting is still being saved; before the first read, main uses its own.
     const profileId = windowProfileId();
     void dispatch("repo:search", {
@@ -715,7 +715,7 @@ export function RepoSwitcherOverlay({
       event.key.toLowerCase() === "a"
     ) {
       event.preventDefault();
-      toggleScope();
+      chooseScope(allProfiles !== true);
       return;
     }
     // Tab reaches the selected row's visible action, then returns to search.
@@ -857,7 +857,42 @@ export function RepoSwitcherOverlay({
             spellCheck={false}
             placeholder="Search repos, branches, commits & files…"
           />
-          <span className="kbd">esc</span>
+          {showScope && (
+            // Beside the query it qualifies, and above the list, so the
+            // control stays under the pointer when the results change height.
+            <div
+              className="overlay-search__scope"
+              {...hoverTooltip(
+                tip,
+                `Which profiles to search (${shortcutLabel(
+                  { key: "A", shift: true },
+                  platform
+                )})`
+              )}
+            >
+              <SettingsSegmented
+                aria-label="Search scope"
+                options={[
+                  { value: "this", label: "This profile" },
+                  { value: "all", label: "All profiles" }
+                ]}
+                value={allProfiles ? "all" : "this"}
+                onChange={(value) => chooseScope(value === "all")}
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            className="overlay-close"
+            aria-label="Close"
+            onClick={onClose}
+            {...hoverTooltip(tip, "Close (Esc)")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
         </div>
 
         {branchError !== null && (
@@ -1144,29 +1179,6 @@ export function RepoSwitcherOverlay({
               <span>{shortcutLabel({ key: "P" }, platform)} pin</span>
             )}
           <span style={{ flex: 1 }} />
-          {showScope && (
-            <button
-              type="button"
-              role="switch"
-              aria-checked={allProfiles}
-              aria-label="Search all profiles"
-              className={`overlay-scope${allProfiles ? " is-on" : ""}`}
-              tabIndex={-1}
-              // Keep the caret in the search field: the toggle is a modifier
-              // on the query, not somewhere to move to.
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={toggleScope}
-              {...hoverTooltip(
-                tip,
-                allProfiles
-                  ? "Searching every profile. Results from others open their own window."
-                  : "Searching this profile only."
-              )}
-            >
-              {allProfiles ? "All profiles" : "This profile"}
-              <kbd>{shortcutLabel({ key: "A", shift: true }, platform)}</kbd>
-            </button>
-          )}
           <span>
             {items.length} {items.length === 1 ? "result" : "results"}
           </span>

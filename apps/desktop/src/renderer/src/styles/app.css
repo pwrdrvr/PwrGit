@@ -2413,6 +2413,9 @@ textarea,
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-muted);
 }
+.overlay-search__scope {
+  flex: 0 0 auto;
+}
 .overlay-search input {
   flex: 1;
   background: transparent;
@@ -2592,43 +2595,6 @@ textarea,
   font: 500 10.5px/1 var(--font-mono);
   color: var(--text-subtle);
 }
-/* The palette's search scope: this profile, or every profile. A pill so it
-   reads as a control among the footer's hints; tinted when widened, because
-   widened is the state a reader needs to notice. */
-.overlay-scope {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 20px;
-  padding: 0 4px 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  cursor: pointer;
-}
-.overlay-scope:hover {
-  color: var(--text-primary);
-  border-color: var(--border-default);
-}
-.overlay-scope.is-on {
-  color: var(--accent-bright);
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-}
-.overlay-scope:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-.overlay-scope kbd {
-  font: 600 9.5px/1 var(--font-mono);
-  color: var(--text-subtle);
-  border: 1px solid var(--border-default);
-  border-radius: 4px;
-  padding: 2px 4px;
-}
-
 /* ---- Clone repository dialog ---- */
 
 .clone-backdrop {
@@ -9063,7 +9029,8 @@ body.is-col-resizing {
    sidebar-contrast.test.ts). Hover keeps that floored surface and firms the
    ring to solid accent, so it stays the same object under the pointer and
    never paints the icon on an unmeasured tint. */
-.diff-pane__close {
+.diff-pane__close,
+.overlay-close {
   width: 26px;
   height: 26px;
   padding: 0;
@@ -9077,10 +9044,12 @@ body.is-col-resizing {
   color: var(--accent-bright);
   cursor: pointer;
 }
-.diff-pane__close:hover {
+.diff-pane__close:hover,
+.overlay-close:hover {
   border-color: var(--accent);
 }
-.diff-pane__close:focus-visible {
+.diff-pane__close:focus-visible,
+.overlay-close:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }

@@ -978,7 +978,7 @@ export interface Commands {
    * Omitting it falls back to the globally active profile, which is not
    * necessarily the asking window's — always send it.
    *
-   * `allProfiles` widens it. The palette sends the scope its footer toggle
+   * `allProfiles` widens it. The palette sends the scope its control
    * shows, so the answer cannot lag a toggle that is still being saved;
    * omitted, main reads General → Search all profiles.
    */

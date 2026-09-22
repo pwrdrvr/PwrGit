@@ -297,7 +297,7 @@ describe("repo handlers", () => {
     });
   });
 
-  // The palette's footer toggle saves the setting and searches in the same
+  // The palette's scope control saves the setting and searches in the same
   // breath; the scope it sends wins, so results never lag the toggle.
   it.each([true, false])(
     "answers the scope the palette asked for over a setting of %s",
