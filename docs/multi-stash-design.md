@@ -31,7 +31,9 @@ metadata required to recover an entry.
 - Named creation runs `git stash push --message …`; the explicit
   “Include untracked files” option adds `--include-untracked`. Ignored files
   remain outside scope, matching ordinary Git's distinction between `-u` and
-  `-a`.
+  `-a`. A blank name becomes `Stash YYYY-MM-DD HH:MM` in local time: Git's
+  own `WIP on <branch>` subject would read the same for every unnamed stash
+  made on one commit, in PwrGit and in `git stash list` alike.
 - Apply, pop, and drop send the selected stash **commit hash**, not a cached
   numeric index. Apply passes the immutable hash to Git. Pop and Drop acquire
   Git's `refs/stash.lock` before reading and validating the reflog, then remove
@@ -64,6 +66,13 @@ metadata required to recover an entry.
   even when another linked worktree made the change.
 - The UI states the scope directly: all worktrees see the same stack, while
   Apply and Pop restore into the currently selected worktree.
+- File history, Blame and View file, opened from a stash's patch, read the
+  stash as a stash rather than as a commit. A stash commit's second and third
+  parents are Git's bookkeeping (the index, and the untracked files), so read
+  as an ordinary merge they leak into history and blame. Contents come from
+  the stash commit, or from its untracked-files parent; lines Git blames on
+  any of the stash's own commits read as uncommitted work; history starts at
+  the commit the stash was made on.
 
 ## PwrGit pull recovery entries
 
@@ -73,8 +82,8 @@ Pull's existing recovery path creates an ordinary named stash with
 conflicts or fails, so command-line `git stash list/show/apply` can always
 inspect or recover it.
 
-PwrGit recognizes that exact public message only to add a **PwrGit pull
-recovery** label. It does not move, rewrite, or privately tag the entry.
+PwrGit recognizes that exact public message only to add a **Pull recovery**
+chip. It does not move, rewrite, or privately tag the entry.
 Affected files, full patch, apply, pop, and drop use the same guarded paths as
 every other stash. Pull announces a stack refresh after its auto-stash sequence
 so a kept recovery entry appears immediately.
