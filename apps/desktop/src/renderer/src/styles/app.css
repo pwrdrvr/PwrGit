@@ -11707,6 +11707,16 @@ body.is-col-resizing {
   opacity: 0.45;
   cursor: default;
 }
+/* The house focus indicator, at the 1px offset the app's other bordered
+   buttons use (the shared block above `.pin:focus-visible`). Without a rule of
+   their own, every settings button fell back to Chromium's `outline: auto`
+   ring — a second, platform-drawn indicator in a window whose switches, slots
+   and section headers already draw this one. */
+.settings-button:focus-visible,
+.settings-inline-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 /* A glyph beside the label — the Re-check buttons' <RefreshGlyph />. As inline
    content the svg sat flush against the text, 0px apart, and on the baseline,
    2.5px above the label's centre. Keyed off the child, so a text-only button
@@ -11762,10 +11772,16 @@ body.is-col-resizing {
    and says so with `aria-disabled` rather than `disabled` (SettingsLayout says
    why). So the state has to be painted here, and it has to cancel the base
    hover fill, or the button lights up under the pointer like a live one while
-   its guarded handler drops the click. */
+   its guarded handler drops the click.
+
+   Dimmed by colour, not `opacity`: opacity would fade the focus ring with it,
+   and this button goes unavailable exactly while it holds focus — press Enter
+   on Expand all and it is the control keyboard focus stays on. 45% matches
+   `.settings-button:disabled`. */
 .settings-button--quiet[aria-disabled="true"] {
+  border-color: color-mix(in srgb, var(--border-subtle) 45%, transparent);
   background: transparent;
-  opacity: 0.45;
+  color: color-mix(in srgb, var(--text-secondary) 45%, transparent);
   cursor: default;
 }
 .settings-pathlink {
