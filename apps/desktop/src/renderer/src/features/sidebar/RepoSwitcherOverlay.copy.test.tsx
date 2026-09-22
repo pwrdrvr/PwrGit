@@ -4,7 +4,16 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ok, type RepoSearchHit } from "@pwrgit/shared";
 const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), copyText: vi.fn() }));
-vi.mock("../../lib/pwrgit", () => ({ dispatch: mocks.dispatch }));
+vi.mock("../../lib/pwrgit", () => ({
+  // The footer's scope toggle reads the setting on mount; these suites are
+  // about rows, so answer it here instead of in every dispatch mock.
+  dispatch: (command: string, req: unknown) =>
+    command === "settings:read"
+      ? Promise.resolve({ ok: true, value: { general: { searchAllProfiles: false } } })
+      : mocks.dispatch(command, req),
+  subscribe: () => () => {},
+  windowProfileId: () => "default"
+}));
 vi.mock("../../lib/copyText", () => ({ copyText: mocks.copyText }));
 import { RepoSwitcherOverlay } from "./RepoSwitcherOverlay";
 
@@ -36,7 +45,7 @@ async function render(hits: RepoSearchHit[], platform = "darwin") {
   mocks.dispatch.mockResolvedValue(ok(hits));
   await act(async () => root.render(<RepoSwitcherOverlay
     commits={[]} commitContext={null} onClose={onClose} onPick={onPick}
-    onPickCommit={vi.fn()} onPickFile={vi.fn()} platform={platform}
+    onPickCommit={vi.fn()} onPickFile={vi.fn()} platform={platform} profileCount={1}
   />));
 }
 async function key(key: string, modifiers: KeyboardEventInit = {}) {
@@ -172,7 +181,7 @@ it("fetches a change request's head on Enter, then picks the branch it landed on
   );
   await act(async () => root.render(<RepoSwitcherOverlay
     commits={[]} commitContext={null} onClose={onClose} onPick={onPick}
-    onPickCommit={vi.fn()} onPickFile={vi.fn()} platform="darwin"
+    onPickCommit={vi.fn()} onPickFile={vi.fn()} platform="darwin" profileCount={1}
   />));
   await key("Enter");
   expect(mocks.dispatch).toHaveBeenCalledWith("pr:fetchHead", { repoId: "orbit", number: 130 });

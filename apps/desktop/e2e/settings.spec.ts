@@ -274,6 +274,18 @@ test("menu opens the Settings window; panes render and settings persist", async 
   await lineageSwitch.click();
   await expect(lineageSwitch).toHaveAttribute("aria-checked", "true");
 
+  // General: the search-scope toggle round-trips the same way, and starts off
+  // — ⌘K answers from this window's profile until the reader widens it.
+  await settings
+    .locator(".settings-nav__button", { hasText: "General" })
+    .click();
+  const searchSwitch = settings.getByRole("switch", {
+    name: "Search all profiles"
+  });
+  await expect(searchSwitch).toHaveAttribute("aria-checked", "false");
+  await searchSwitch.click();
+  await expect(searchSwitch).toHaveAttribute("aria-checked", "true");
+
   // Memory / CPU: arming hot CPU capture enables its dependent controls.
   await settings
     .locator(".settings-nav__button", { hasText: "Memory / CPU" })
@@ -297,7 +309,11 @@ test("menu opens the Settings window; panes render and settings persist", async 
   const stored = JSON.parse(
     readFileSync(join(userData, "settings.json"), "utf8")
   ) as Record<string, unknown>;
-  expect(stored["general"]).toEqual({ theme: "light", developerMode: true });
+  expect(stored["general"]).toEqual({
+    theme: "light",
+    developerMode: true,
+    searchAllProfiles: true
+  });
   expect(stored["updates"]).toEqual({
     train: "beta",
     channel: "latest",

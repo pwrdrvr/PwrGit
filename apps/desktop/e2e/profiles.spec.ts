@@ -349,7 +349,11 @@ test("a cross-profile remote branch opens its new-worktree flow in the owning wi
   boxA.git(repo.path, "push", "origin", "releases/1.0");
   boxA.git(repo.path, "branch", "-D", "releases/1.0");
 
-  handle = await launchApp({ worktreeRoot: boxA.worktreeRoot });
+  // ⌘K only reaches another profile when the reader asked it to.
+  handle = await launchApp({
+    worktreeRoot: boxA.worktreeRoot,
+    searchAllProfiles: true
+  });
   const { window } = handle;
   await window.locator(".profile-chip").click();
   await window.locator(".profile-menu__action", { hasText: "New profile" }).click();
@@ -387,7 +391,7 @@ test("a queued cross-profile reveal wins over a stale restored worktree", async 
   boxA = createGitSandbox();
   boxA.makeRepo("queued-reveal", { worktrees: ["feature/requested"] });
 
-  handle = await launchApp();
+  handle = await launchApp({ searchAllProfiles: true });
   const { window } = handle;
   await window.locator(".profile-chip").click();
   await window

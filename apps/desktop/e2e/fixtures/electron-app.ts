@@ -102,6 +102,9 @@ export async function launchApp(
     gitConfig?: string;
     forgeFixturePath?: string;
     theme?: "system" | "dark" | "light";
+    /** Let ⌘K answer with other profiles' rows (General → Search all
+     *  profiles). Off in the app, so a cross-profile spec must ask. */
+    searchAllProfiles?: boolean;
     /** Override the seeded profile identity. Must REPLACE the default block
      *  rather than append after it: `readGitIdentityDefaults` regexes the
      *  first `name`/`email` in the file, so a second [user] section is
@@ -122,12 +125,24 @@ export async function launchApp(
   } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
-  if (opts.worktreeRoot !== undefined || opts.theme !== undefined) {
+  if (
+    opts.worktreeRoot !== undefined ||
+    opts.theme !== undefined ||
+    opts.searchAllProfiles !== undefined
+  ) {
+    // One `general` object: settings.json is merged shallowly per group, so a
+    // second one would replace the first rather than join it.
+    const general = {
+      ...(opts.theme !== undefined ? { theme: opts.theme } : {}),
+      ...(opts.searchAllProfiles !== undefined
+        ? { searchAllProfiles: opts.searchAllProfiles }
+        : {})
+    };
     const seededSettings = {
       ...(opts.worktreeRoot !== undefined
         ? { worktreeRoot: opts.worktreeRoot }
         : {}),
-      ...(opts.theme !== undefined ? { general: { theme: opts.theme } } : {})
+      ...(Object.keys(general).length === 0 ? {} : { general })
     };
     writeFileSync(
       join(userData, "settings.json"),

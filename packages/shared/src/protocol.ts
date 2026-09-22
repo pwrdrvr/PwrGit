@@ -592,6 +592,13 @@ export type GeneralSettings = {
   sidebarTextSize: SidebarTextSize;
   /** Sidebar row density — trims row padding and list gaps. */
   sidebarDensity: SidebarDensity;
+  /**
+   * Let ⌘K answer with repositories, branches and change requests belonging to
+   * the OTHER profiles, not just this window's. Picking one opens that
+   * profile's window. Off by default: a result from a profile you are not
+   * looking at is a surprise unless you asked for it.
+   */
+  searchAllProfiles: boolean;
 };
 
 export type ExperimentalSettings = {
@@ -676,7 +683,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   theme: APPEARANCE_THEME_DEFAULT,
   developerMode: false,
   sidebarTextSize: "md",
-  sidebarDensity: "comfortable"
+  sidebarDensity: "comfortable",
+  searchAllProfiles: false
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
@@ -964,7 +972,20 @@ export interface Commands {
     req: { profileId: ProfileId; repoId?: RepoId; force?: boolean };
     res: { changed: number; outcomes: RepoIdentityRefreshOutcome[] };
   };
-  "repo:search": { req: { query: string }; res: RepoSearchHit[] };
+  /**
+   * ⌘K/⌘F search. `profileId` is the asking window's profile: its own rows
+   * rank first, and unless the search is widened, they are the only rows.
+   * Omitting it falls back to the globally active profile, which is not
+   * necessarily the asking window's — always send it.
+   *
+   * `allProfiles` widens it. The palette sends the scope its control
+   * shows, so the answer cannot lag a toggle that is still being saved;
+   * omitted, main reads General → Search all profiles.
+   */
+  "repo:search": {
+    req: { query: string; profileId?: ProfileId; allProfiles?: boolean };
+    res: RepoSearchHit[];
+  };
   /** Verify a visible local-branch hit using a short-lived, shared worktree
    *  listing. Null means the branch still has no checkout. */
   "search:branchWorktree": {

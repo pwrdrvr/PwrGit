@@ -8,7 +8,16 @@ import { RepoSwitcherOverlay } from "./RepoSwitcherOverlay";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
 const dispatch = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/pwrgit", () => ({ dispatch }));
+vi.mock("../../lib/pwrgit", () => ({
+  // The footer's scope toggle reads the setting on mount; these suites are
+  // about rows, so answer it here instead of in every dispatch mock.
+  dispatch: (command: string, req: unknown) =>
+    command === "settings:read"
+      ? Promise.resolve({ ok: true, value: { general: { searchAllProfiles: false } } })
+      : dispatch(command, req),
+  subscribe: () => () => {},
+  windowProfileId: () => "default"
+}));
 
 const branch = (name: string): RepoSearchHit => ({
   kind: "local_branch", repoId: "repo", repoName: "Demo", name,
@@ -45,7 +54,7 @@ beforeEach(async () => {
   await act(async () => {
     root.render(<RepoSwitcherOverlay platform="darwin" commits={[]} commitContext={null}
       onClose={() => {}} onPick={onPick} onPickCommit={() => {}}
-      onPickFile={() => {}} />);
+      onPickFile={() => {}} profileCount={1} />);
   });
 });
 

@@ -85,6 +85,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
     if (typeof gen.developerMode === "boolean") {
       general.developerMode = gen.developerMode;
     }
+    if (typeof gen.searchAllProfiles === "boolean") {
+      general.searchAllProfiles = gen.searchAllProfiles;
+    }
     // Narrow to the known notches: these cross IPC as plain strings and end up
     // stamped on <html>, so an unvalidated value would ship an attribute no
     // stylesheet answers to.
