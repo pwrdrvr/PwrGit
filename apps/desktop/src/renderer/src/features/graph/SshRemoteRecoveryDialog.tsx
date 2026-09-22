@@ -1,10 +1,39 @@
 import { useEffect, useRef, useState } from "react";
-import type { SshRemoteRecovery } from "@pwrgit/shared";
+import type { RemoteActivityKind, SshRemoteRecovery } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useModal } from "../../lib/useModal";
 
 type Busy = "test" | "apply" | null;
+
+/**
+ * What the dialog says about the operation Git refused. The test and the
+ * change are the same for all three; only the operation to try again, and
+ * what the read-only test leaves undone, differ.
+ */
+const OPERATION_COPY: Record<
+  RemoteActivityKind,
+  { label: string; refused: string; untested: string }
+> = {
+  fetch: {
+    label: "Fetch",
+    refused: "Fetch could not find a usable HTTPS credential.",
+    untested: "It does not fetch or update local refs."
+  },
+  pull: {
+    label: "Pull",
+    // Checkout-time LFS smudge runs inside a pull and fails the same way.
+    refused:
+      "Pull—or Git LFS during checkout—could not find a usable HTTPS credential.",
+    untested:
+      "It does not pull, update local refs, or download Git LFS objects. LFS access is exercised when you choose Pull again."
+  },
+  push: {
+    label: "Push",
+    refused: "Push could not find a usable HTTPS credential.",
+    untested: "It does not push or update local refs."
+  }
+};
 
 function firstLine(message: string): string {
   return message.split("\n")[0] ?? message;
@@ -12,11 +41,14 @@ function firstLine(message: string): string {
 
 export function SshRemoteRecoveryDialog({
   worktreeId,
+  operation,
   recovery,
   onClose,
   onChanged
 }: {
   worktreeId: string;
+  /** The operation Git refused, which the copy names and never retries. */
+  operation: RemoteActivityKind;
   recovery: SshRemoteRecovery;
   onClose: () => void;
   onChanged: () => void;
@@ -26,6 +58,7 @@ export function SshRemoteRecoveryDialog({
   const [error, setError] = useState<string | null>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const activeRef = useRef(true);
+  const copy = OPERATION_COPY[operation];
 
   useEffect(() => {
     activeRef.current = true;
@@ -80,7 +113,7 @@ export function SshRemoteRecoveryDialog({
     }
     showInfoToast({
       title: "Remote changed to SSH",
-      message: `${recovery.remote} now uses SSH. Pull again when you are ready.`
+      message: `${recovery.remote} now uses SSH. ${copy.label} again when you are ready.`
     });
     onChanged();
   };
@@ -111,10 +144,9 @@ export function SshRemoteRecoveryDialog({
           Try this remote with SSH?
         </div>
         <p className="ssh-recovery__intro">
-          Pull—or Git LFS during checkout—could not find a usable HTTPS
-          credential. The tracked remote <code>{recovery.remote}</code> points
-          to GitHub over HTTPS. PwrGit can test the equivalent SSH address
-          without fetching or changing this repository.
+          {copy.refused} The tracked remote <code>{recovery.remote}</code>{" "}
+          points to GitHub over HTTPS. PwrGit can test the equivalent SSH
+          address without fetching or changing this repository.
         </p>
         <dl className="ssh-recovery__urls">
           <div>
@@ -127,9 +159,7 @@ export function SshRemoteRecoveryDialog({
           </div>
         </dl>
         <p className="ssh-recovery__note">
-          The test checks Git read access only. It does not pull, update local
-          refs, or download Git LFS objects. LFS access is exercised when you
-          choose Pull again.
+          The test checks Git read access only. {copy.untested}
         </p>
         {recovery.pushUrlWillAlsoChange ? (
           <p className="ssh-recovery__note">
@@ -145,7 +175,7 @@ export function SshRemoteRecoveryDialog({
           <p className="ssh-recovery__success" role="status">
             SSH can read this repository. You can now change the fetch URL
             {recovery.pushUrlWillAlsoChange && " and effective push URL"};
-            PwrGit will not retry Pull automatically.
+            PwrGit will not retry {copy.label} automatically.
           </p>
         )}
         {error !== null && <p className="ssh-recovery__error">{error}</p>}

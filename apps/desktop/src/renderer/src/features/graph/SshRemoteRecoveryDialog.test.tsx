@@ -38,6 +38,7 @@ beforeEach(async () => {
     root.render(
       <SshRemoteRecoveryDialog
         worktreeId="worktree-1"
+        operation="pull"
         recovery={recovery}
         onClose={vi.fn()}
         onChanged={vi.fn()}
@@ -60,12 +61,65 @@ describe("SshRemoteRecoveryDialog", () => {
     );
   });
 
+  it.each([
+    ["fetch", "Fetch", "It does not fetch or update local refs."],
+    ["push", "Push", "It does not push or update local refs."]
+  ] as const)(
+    "names the %s Git refused, and promises nothing about LFS for it",
+    async (operation, label, untested) => {
+      const onChanged = vi.fn();
+      await act(async () => {
+        root.render(
+          <SshRemoteRecoveryDialog
+            worktreeId="worktree-1"
+            operation={operation}
+            recovery={recovery}
+            onClose={vi.fn()}
+            onChanged={onChanged}
+          />
+        );
+      });
+
+      expect(container.textContent).toContain(
+        `${label} could not find a usable HTTPS credential.`
+      );
+      expect(container.textContent).toContain(untested);
+      expect(container.textContent).not.toContain("Pull");
+      expect(container.textContent).not.toContain("LFS");
+
+      const primary = () =>
+        container.querySelector<HTMLButtonElement>(".modal__create");
+      await act(async () => {
+        primary()?.click();
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain(
+        `PwrGit will not retry ${label} automatically.`
+      );
+      await act(async () => {
+        primary()?.click();
+        await Promise.resolve();
+      });
+      expect(mocks.showInfoToast).toHaveBeenCalledWith({
+        title: "Remote changed to SSH",
+        message: `origin now uses SSH. ${label} again when you are ready.`
+      });
+      expect(
+        mocks.dispatch.mock.calls.some(([name]) =>
+          ["remote:fetch", "remote:pull", "remote:push"].includes(name)
+        )
+      ).toBe(false);
+      expect(onChanged).toHaveBeenCalledOnce();
+    }
+  );
+
   it("tests first, changes only after success, and never retries Pull", async () => {
     const onChanged = vi.fn();
     await act(async () => {
       root.render(
         <SshRemoteRecoveryDialog
           worktreeId="worktree-1"
+          operation="pull"
           recovery={recovery}
           onClose={vi.fn()}
           onChanged={onChanged}
@@ -124,6 +178,7 @@ describe("SshRemoteRecoveryDialog", () => {
       root.render(
         <SshRemoteRecoveryDialog
           worktreeId="worktree-1"
+          operation="pull"
           recovery={{ ...recovery, pushUrlWillAlsoChange: false }}
           onClose={vi.fn()}
           onChanged={vi.fn()}

@@ -34,6 +34,7 @@ import type {
   PushRefResult,
   PushPublishTarget,
   RemoteActivity,
+  RemoteActivityKind,
   ChangeSet,
   GitOperationKind,
   OperationContinueOutcome,
@@ -1491,9 +1492,14 @@ export interface Commands {
     };
     res: null;
   };
-  /** Inspect the checked-out branch for a GitHub HTTPS upstream. */
+  /**
+   * Inspect the checked-out branch for a GitHub HTTPS upstream, after
+   * `operation` failed for want of a credential. `null` when changing that
+   * remote to SSH would not change how `operation` reaches it — for a push,
+   * one that goes through a separate push URL or another remote.
+   */
   "remote:inspectSshRecovery": {
-    req: { worktreeId: string };
+    req: { worktreeId: string; operation: RemoteActivityKind };
     res: SshRemoteRecovery | null;
   };
   /** Test the reviewed SSH URL without fetching or changing local refs. */
