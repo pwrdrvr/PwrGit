@@ -287,7 +287,9 @@ export function DiffPane({
   const insightContext: FileInsightContext =
     target.kind === "file"
       ? { kind: "workingTree" }
-      : { kind: "commit", hash: target.hash };
+      : target.kind === "stash"
+        ? { kind: "stash", hash: target.hash }
+        : { kind: "commit", hash: target.hash };
   // A STAGED diff numbers its new side in INDEX coordinates, and blame reads
   // the working tree — with unstaged edits above the clicked line those
   // disagree, and the aim would confidently mark the wrong line. No aim is
@@ -749,7 +751,9 @@ export function DiffPane({
                 label:
                   target.kind === "file"
                     ? "View file"
-                    : "View file at this commit",
+                    : target.kind === "stash"
+                      ? "View file in this stash"
+                      : "View file at this commit",
                 onSelect: () =>
                   onOpenFileInsight(path, insightContext, "contents")
               },

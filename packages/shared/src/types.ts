@@ -1373,10 +1373,14 @@ export type Commit = {
 };
 
 /** The file contents a history/blame view is anchored to. Working-tree
- *  history walks through HEAD while blame includes uncommitted lines. */
+ *  history walks through HEAD while blame includes uncommitted lines.
+ *  A stash is its own kind, not a commit: its merge commit's other parents are
+ *  Git bookkeeping (the index, the untracked files), so history walks from the
+ *  commit it was made on and its changes blame as uncommitted. */
 export type FileInsightContext =
   | { kind: "workingTree" }
-  | { kind: "commit"; hash: string };
+  | { kind: "commit"; hash: string }
+  | { kind: "stash"; hash: string };
 
 /** One rename-aware commit in a file's lineage. */
 export type FileHistoryEntry = Commit & {

@@ -15,7 +15,7 @@ vi.mock("../../lib/pwrgit", () => ({
   subscribe: subscribeMock
 }));
 
-import { FileInsightsPane } from "./FileInsightsPane";
+import { FileInsightsPane, insightContextKey } from "./FileInsightsPane";
 
 const HASH_A = "a".repeat(40);
 const HASH_B = "b".repeat(40);
@@ -778,6 +778,60 @@ describe("FileInsightsPane", () => {
         (node) => node.textContent
       )
     ).toEqual(["1", "2"]);
+  });
+
+  it("names a stash scope as a stash and reads the file inside it", async () => {
+    dispatchMock.mockImplementation((name: string) =>
+      Promise.resolve(
+        name === "file:contents"
+          ? ok({
+              path: "draft.txt",
+              effectiveContext: { kind: "stash", hash: HASH_A },
+              lines: ["untracked idea"],
+              bytes: 15,
+              notice: "This file was untracked when stashed, so it has no commit history."
+            })
+          : ok({ entries: [], nextCursor: null })
+      )
+    );
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="draft.txt"
+          context={{ kind: "stash", hash: HASH_A }}
+          initialTab="contents"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    expect(
+      container.querySelector(".file-insight-pane__context")?.textContent
+    ).toBe("Stash aaaaaaa");
+    expect(dispatchMock).toHaveBeenCalledWith(
+      "file:contents",
+      expect.objectContaining({ context: { kind: "stash", hash: HASH_A } })
+    );
+    expect(
+      container.querySelector("[data-testid=file-contents]")?.textContent
+    ).toContain("untracked idea");
+    expect(container.querySelector(".file-insight__notice")?.textContent).toContain(
+      "untracked when stashed"
+    );
+  });
+
+  it("keys a stash apart from the same hash read as a commit", () => {
+    expect(
+      new Set([
+        insightContextKey({ kind: "workingTree" }),
+        insightContextKey({ kind: "commit", hash: HASH_A }),
+        insightContextKey({ kind: "stash", hash: HASH_A })
+      ]).size
+    ).toBe(3);
   });
 
   it("drills from a history row to the file as of that commit", async () => {

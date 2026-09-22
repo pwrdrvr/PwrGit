@@ -581,3 +581,170 @@ describe("server-owned blame paging", () => {
     }
   });
 });
+
+describe("a stash, read as the work it saved", () => {
+  let stashRoot: string;
+  let stashRepo: string;
+  let added: string;
+  let base: string;
+  let stash: string;
+  let bookkeeping: string[];
+
+  beforeAll(() => {
+    stashRoot = mkdtempSync(join(tmpdir(), "pwrgit-file-insights-stash-"));
+    stashRepo = join(stashRoot, "repo");
+    mkdirSync(stashRepo);
+    git(stashRepo, "init", "-b", "main");
+    git(stashRepo, "config", "core.autocrlf", "false");
+    // `git stash` commits as the configured user, not as commitAs's env.
+    git(stashRepo, "config", "user.name", ADA.name);
+    git(stashRepo, "config", "user.email", ADA.email);
+
+    writeFileSync(join(stashRepo, "notes.txt"), "one\ntwo\nthree\n");
+    writeFileSync(join(stashRepo, "doomed.txt"), "farewell\n");
+    git(stashRepo, "add", ".");
+    added = commitAs(stashRepo, "add the notes", ADA);
+    writeFileSync(join(stashRepo, "notes.txt"), "one\ntwo, tidied\nthree\n");
+    git(stashRepo, "add", "notes.txt");
+    base = commitAs(stashRepo, "tidy the notes", GRACE);
+
+    // One stash carrying every kind of change: a staged edit and an unstaged
+    // edit to one file, a deletion, and a file Git has never tracked.
+    writeFileSync(join(stashRepo, "notes.txt"), "one, staged\ntwo, tidied\nthree\n");
+    git(stashRepo, "add", "notes.txt");
+    writeFileSync(
+      join(stashRepo, "notes.txt"),
+      "one, staged\ntwo, tidied\nthree, unstaged\n"
+    );
+    rmSync(join(stashRepo, "doomed.txt"));
+    writeFileSync(join(stashRepo, "draft.txt"), "untracked idea\nsecond thought\n");
+    git(stashRepo, "stash", "push", "--include-untracked", "-m", "parked");
+    stash = git(stashRepo, "rev-parse", "refs/stash");
+    bookkeeping = [
+      stash,
+      git(stashRepo, "rev-parse", "refs/stash^2"),
+      git(stashRepo, "rev-parse", "refs/stash^3")
+    ];
+  });
+
+  afterAll(() => rmSync(stashRoot, { recursive: true, force: true }));
+
+  it("shows an untracked file from the stash's untracked-files commit", async () => {
+    const contents = await readFileContents(systemGit, stashRepo, {
+      path: "draft.txt",
+      context: { kind: "stash", hash: stash }
+    });
+    expect(contents.ok).toBe(true);
+    if (!contents.ok) return;
+    expect(contents.value).toMatchObject({
+      effectiveContext: { kind: "stash", hash: stash },
+      lines: ["untracked idea", "second thought"],
+      notice: expect.stringContaining("untracked when stashed")
+    });
+    expect(contents.value.unavailableReason).toBeUndefined();
+  });
+
+  it("blames an untracked file as wholly stashed work", async () => {
+    const blame = await readFileBlame(systemGit, stashRepo, {
+      path: "draft.txt",
+      context: { kind: "stash", hash: stash }
+    });
+    expect(blame.ok).toBe(true);
+    if (!blame.ok) return;
+    expect(blame.value.hunks).toMatchObject([
+      {
+        hash: null,
+        uncommitted: true,
+        subject: "Stashed changes",
+        startLine: 1,
+        lines: ["untracked idea", "second thought"]
+      }
+    ]);
+  });
+
+  it("gives an untracked file no history rather than Git's bookkeeping commit", async () => {
+    const history = await readFileHistory(systemGit, stashRepo, {
+      path: "draft.txt",
+      context: { kind: "stash", hash: stash }
+    });
+    expect(history.ok).toBe(true);
+    if (!history.ok) return;
+    expect(history.value).toEqual({ entries: [], nextCursor: null });
+  });
+
+  it("blames staged and unstaged stashed lines as stashed work, the rest to history", async () => {
+    const blame = await readFileBlame(systemGit, stashRepo, {
+      path: "notes.txt",
+      context: { kind: "stash", hash: stash }
+    });
+    expect(blame.ok).toBe(true);
+    if (!blame.ok) return;
+    expect(
+      blame.value.hunks.map((hunk) => [hunk.startLine, hunk.hash, hunk.subject])
+    ).toEqual([
+      [1, null, "Stashed changes"],
+      [2, base, "tidy the notes"],
+      [3, null, "Stashed changes"]
+    ]);
+    for (const hunk of blame.value.hunks) {
+      expect(bookkeeping).not.toContain(hunk.hash);
+    }
+  });
+
+  it("walks history from the commit the stash was made on, across pages", async () => {
+    const context = { kind: "stash" as const, hash: stash };
+    const first = await readFileHistory(systemGit, stashRepo, {
+      path: "notes.txt",
+      context,
+      limit: 1
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.entries.map((entry) => entry.hash)).toEqual([base]);
+    const cursor = first.value.nextCursor;
+    if (cursor === null) throw new Error("expected another history page");
+
+    const second = await readFileHistory(systemGit, stashRepo, {
+      path: "notes.txt",
+      context,
+      cursor,
+      limit: 1
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.entries.map((entry) => entry.hash)).toEqual([added]);
+
+    // The cursor is bound to the stash: it is not a commit cursor for W.
+    const asCommit = await readFileHistory(systemGit, stashRepo, {
+      path: "notes.txt",
+      context: { kind: "commit", hash: stash },
+      cursor,
+      limit: 1
+    });
+    expect(asCommit.ok).toBe(false);
+  });
+
+  it("shows a file the stash deleted as of the commit it was made on", async () => {
+    const contents = await readFileContents(systemGit, stashRepo, {
+      path: "doomed.txt",
+      context: { kind: "stash", hash: stash }
+    });
+    expect(contents.ok).toBe(true);
+    if (!contents.ok) return;
+    expect(contents.value).toMatchObject({
+      effectiveContext: { kind: "commit", hash: base },
+      lines: ["farewell"],
+      notice: expect.stringContaining("deleted in this stash")
+    });
+  });
+
+  it("refuses a stash context on a commit that is not a stash", async () => {
+    const contents = await readFileContents(systemGit, stashRepo, {
+      path: "notes.txt",
+      context: { kind: "stash", hash: base }
+    });
+    expect(contents.ok).toBe(false);
+    if (contents.ok) return;
+    expect(contents.error).toMatchObject({ code: "not_a_stash" });
+  });
+});
