@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.18.0 - 2026-09-21
+
+- Git runtime - All PwrGit repository commands, SSH trust checks, and the standalone MCP server now use PwrGit's bundled Git and Git LFS consistently. Settings shows the bundled runtime and installed versions, with clear recovery guidance when the bundled runtime cannot run.
+- Pull requests - Find open pull requests and merge requests by number or title in the Refs browser and Command Palette, see where each head lives, and open, switch to, or create a worktree for it directly.
+- Search - Command Palette searches now start within the current profile, preventing unrelated profile results from taking over. Switch to all profiles from the palette or General settings whenever you want the broader view.
+- Push - Toolbar Push can now publish a new branch by choosing its remote, then sets its upstream so later pushes work normally. Operation receipts also keep their layout stable and lead with actionable failure reasons.
+- Appearance and accessibility - PwrGit now renders sans-serif text with its bundled Geist Sans font, with consistent SVG action icons and clearer names for Command Palette result types.
+
 ## v0.17.0 - 2026-09-17
 
 - Remote operations - Fetch, pull, and push now open their status card as soon as you click, then keep a readable receipt of the work completed. Successful operations close after a short pause; failures stay open until dismissed.
