@@ -10826,6 +10826,13 @@ body.is-col-resizing {
   background: var(--bg-row-active);
   color: var(--accent-bright);
 }
+/* Inset for the reason the caret's is. Without a rule the page rows fell back
+   to Chromium's own ring while the caret and sub-rows beside them drew this
+   one. */
+.settings-nav__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 
 /* Sub-list under a group row — the same 0fr→1fr grid collapse the section
    bodies use, so the window has one fold animation and not two. */
@@ -11272,6 +11279,10 @@ body.is-col-resizing {
 .settings-select:disabled {
   opacity: 0.55;
 }
+.settings-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 
 /* ---- Settings → AI Providers / AI Features ---- */
 
@@ -11474,6 +11485,12 @@ body.is-col-resizing {
 .settings-segmented__button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+/* Inset: the segments sit 1px apart inside the group's 2px padding, so a ring
+   drawn outside one would cross its neighbour and the group's own border. */
+.settings-segmented__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .settings-segmented__meta {
   font: 400 10px/1.2 var(--font-sans);
@@ -11798,6 +11815,13 @@ body.is-col-resizing {
 .settings-pathlink:hover {
   text-decoration: underline;
 }
+/* Borderless, so it rings the way `.settings-notes-link` does: off the text,
+   with a radius of its own to follow. */
+.settings-pathlink:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
 
 /* About: copyable runtime identity + offline-friendly canonical addresses. */
 /* A machine value in a settings row — a version, a build — is set in mono at
@@ -12060,6 +12084,24 @@ button.agent-auth-node {
 .agent-auth-link:disabled {
   opacity: 0.45;
   cursor: default;
+}
+/* Local Agents draws the house ring like the rest of the Settings window —
+   none of these had a rule, so each fell back to Chromium's own. Bordered
+   controls ring 1px out; the borderless pick and Revoke ring 2px off their
+   text with a radius to follow, as `.settings-pathlink` does. */
+button.agent-auth-node:focus-visible,
+.agent-auth-select:focus-visible,
+.agent-auth-input:focus-visible,
+.agent-role-editor input[type="checkbox"]:focus-visible,
+.agent-role-editor input[type="radio"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.agent-auth-node__pick:focus-visible,
+.agent-auth-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 .agent-auth-scope {
   display: flex;
