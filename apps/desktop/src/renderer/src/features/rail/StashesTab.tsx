@@ -23,6 +23,15 @@ function displayName(entry: StashEntry): string {
   return entry.name ?? entry.subject;
 }
 
+// A blank name still stashes. Local time to the minute tells entries apart in
+// the list and in `git stash list`, where Git's own "WIP on <branch>" would
+// repeat for every unnamed stash made on the same commit.
+function defaultStashName(now: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return `Stash ${day} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 function entryKey(entry: StashEntry): string {
   return entry.selector + ":" + entry.hash;
 }
@@ -115,9 +124,9 @@ export function StashesTab({
   };
 
   const create = async (): Promise<void> => {
-    if (worktree === null || name.trim() === "" || busy !== null) return;
+    if (worktree === null || busy !== null) return;
     const worktreeId = worktree.id;
-    const message = name.trim();
+    const message = name.trim() || defaultStashName(new Date());
     setBusy("create");
     const result = await dispatch("stash:create", {
       worktreeId,
@@ -247,12 +256,11 @@ export function StashesTab({
             onKeyDown={(event) => {
               if (event.key === "Enter") void create();
             }}
-            placeholder="e.g. parser spike"
+            placeholder="Optional"
           />
           <button
             className="commit-btn"
             onClick={() => void create()}
-            disabled={name.trim() === ""}
             aria-disabled={inFlight}
           >
             Stash changes

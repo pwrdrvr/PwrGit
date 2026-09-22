@@ -208,6 +208,31 @@ describe("StashesTab", () => {
     });
   });
 
+  it("names a blank stash by the local time instead of refusing it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // Local time, single digits in every field, so a missing pad shows.
+      vi.setSystemTime(new Date(2026, 0, 5, 7, 4, 59));
+      await setName("   ");
+      const stash = button("Stash changes");
+      expect(stash.disabled).toBe(false);
+      await act(async () => stash.click());
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("stash:create", {
+      worktreeId: "worktree-1",
+      message: "Stash 2026-01-05 07:04",
+      includeUntracked: true
+    });
+    expect(mocks.showInfoToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Stash 2026-01-05 07:04 was added to the repository stack."
+      })
+    );
+  });
+
   it("warns that dropping removes a repository-wide entry", async () => {
     const inspect = container.querySelector<HTMLButtonElement>(
       '[aria-label="Inspect older CLI stash"]'
