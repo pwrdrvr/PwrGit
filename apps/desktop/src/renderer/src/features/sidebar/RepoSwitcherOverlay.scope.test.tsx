@@ -104,6 +104,11 @@ async function press(init: KeyboardEventInit) {
 
 it("starts on this profile, and says so", async () => {
   await render();
+  expect(
+    container
+      .querySelector('[role="radiogroup"][aria-label="Search scope"]')
+      ?.getAttribute("aria-keyshortcuts")
+  ).toBe("Meta+Shift+A");
   expect(scope()).toBe("this");
   expect(option("This profile")?.getAttribute("aria-checked")).toBe("true");
   expect(lastSearch()).toEqual({ query: "", profileId: "ours", allProfiles: false });

@@ -16,6 +16,7 @@ import { copyText } from "../../lib/copyText";
 import {
   currentPlatform,
   hasPrimaryModifier,
+  isMacPlatform,
   shortcutLabel
 } from "../../lib/platform";
 import { dispatch, subscribe, windowProfileId } from "../../lib/pwrgit";
@@ -872,6 +873,11 @@ export function RepoSwitcherOverlay({
             >
               <SettingsSegmented
                 aria-label="Search scope"
+                // Tab never reaches this control (it cycles the query and the
+                // row's actions), so the shortcut must be announced here too.
+                aria-keyshortcuts={
+                  isMacPlatform(platform) ? "Meta+Shift+A" : "Control+Shift+A"
+                }
                 options={[
                   { value: "this", label: "This profile" },
                   { value: "all", label: "All profiles" }
