@@ -7,6 +7,12 @@
 
 /** A realistic example for a path field's placeholder, per platform. */
 export function executablePathExample(platform: string | undefined, executable: string): string {
+  // Git is not an npm CLI: these are where its own installers put it, and
+  // deliberately not Homebrew's, which the Git runtime list already offers.
+  if (executable === "git") {
+    if (platform === "win32") return String.raw`C:\Program Files\Git\cmd\git.exe`;
+    return platform === "darwin" ? "/usr/local/git/bin/git" : "/home/you/.local/bin/git";
+  }
   if (platform === "win32") {
     return executable === "codex"
       ? String.raw`C:\Program Files\OpenAI\Codex\bin\codex.exe`

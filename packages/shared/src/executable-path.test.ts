@@ -152,12 +152,16 @@ describe("executablePathExample", () => {
     );
     expect(executablePathExample("linux", "codex")).toBe("/home/you/.local/bin/codex");
     expect(executablePathExample(undefined, "grok")).toBe("/home/you/.local/bin/grok");
+    // Git's own installers, not an npm prefix.
+    expect(executablePathExample("win32", "git")).toBe(String.raw`C:\Program Files\Git\cmd\git.exe`);
+    expect(executablePathExample("darwin", "git")).toBe("/usr/local/git/bin/git");
+    expect(executablePathExample("linux", "git")).toBe("/home/you/.local/bin/git");
   });
 
   it.each(["win32", "darwin", "linux", undefined])(
     "offers only placeholders its own field would accept on %s",
     (platform) => {
-      for (const executable of ["codex", "grok", "kimi", "qwen"]) {
+      for (const executable of ["codex", "grok", "kimi", "qwen", "git"]) {
         const example = executablePathExample(platform, executable);
         expect(isAbsoluteExecutablePath(platform, example), example).toBe(true);
         expect(normalizeManualExecutablePath(platform, example)).toEqual({

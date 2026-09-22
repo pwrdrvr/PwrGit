@@ -334,6 +334,48 @@ export type SshRemoteRecovery = {
   pushUrlWillAlsoChange: boolean;
 };
 
+/** Where Settings found a Git. `custom` is a path somebody chose that
+ *  discovery would not have found on its own. */
+export type GitRuntimeSource = "bundled" | "path" | "homebrew" | "user" | "xcode" | "custom";
+
+/** Why a Git cannot be chosen, or why the chosen one cannot run. */
+export type GitRuntimeProblem =
+  /** Nothing executable at that path. */
+  | "not_found"
+  /** It ran, but did not answer `git --version`. */
+  | "no_version"
+  /** Git runs, `git lfs` does not: LFS repositories would check out pointers. */
+  | "lfs_missing";
+
+export type GitRuntimeCandidate = {
+  /** The executable, absolute. */
+  path: string;
+  source: GitRuntimeSource;
+  /** What `git --version` and `git lfs version` printed; null when it did
+   *  not answer. The renderer parses the version out (`describeVersion`). */
+  git: string | null;
+  lfs: string | null;
+  /** Null when this Git can be chosen. */
+  problem: GitRuntimeProblem | null;
+};
+
+/** Which Git PwrGit runs, and every one it could run instead. */
+export type GitRuntimeStatus = {
+  /** `installed` once a Git other than the bundle was chosen in Settings. */
+  active: "bundled" | "installed";
+  /** The executable every repository command runs. Always one candidate's
+   *  `path`, even when that Git is broken — PwrGit never silently falls back. */
+  path: string;
+  /**
+   * macOS: the installed `git-credential-osxkeychain` the bundled Git signs
+   * in to HTTPS remotes with. Null elsewhere, and when no installed Git ships
+   * one — HTTPS remotes then need a helper of the user's own, or SSH.
+   */
+  keychainHelper: string | null;
+  /** The bundle first, then what was found on this machine. */
+  candidates: GitRuntimeCandidate[];
+};
+
 /** Repository-wide refs and configured remote endpoints. */
 export type RepoRefs = {
   branches: LocalBranchSummary[];

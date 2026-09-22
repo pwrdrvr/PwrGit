@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { configureBundledGitConfigDirectory, defaultBundledGitConfigDirectory } from "./git-runtime.js";
 import { createPwrGitMcpServer } from "./server.js";
 
 function stderr(message: string, cause?: unknown): void {
@@ -14,6 +15,8 @@ function stderr(message: string, cause?: unknown): void {
 }
 
 async function main(): Promise<void> {
+  // The LFS filter and keychain helper the app's own Git runs with.
+  configureBundledGitConfigDirectory(defaultBundledGitConfigDirectory());
   const server = await createPwrGitMcpServer();
   let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
