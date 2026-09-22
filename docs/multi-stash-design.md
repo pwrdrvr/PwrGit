@@ -33,15 +33,28 @@ metadata required to recover an entry.
   remain outside scope, matching ordinary Git's distinction between `-u` and
   `-a`.
 - Apply, pop, and drop send the selected stash **commit hash**, not a cached
-  numeric index. Under the repository operation lock the main process re-lists
-  and maps that hash to its current selector immediately before mutation. If a
-  terminal added/dropped entries meanwhile, PwrGit either finds the same stash
-  at its new index or refuses because it is gone; it cannot act on the entry
-  that inherited a stale index. Git can store the same commit in the reflog
+  numeric index. Apply passes the immutable hash to Git. Pop and Drop acquire
+  Git's `refs/stash.lock` before reading and validating the reflog, then remove
+  exactly one occurrence of the selected hash. Pop applies that hash while
+  still holding the lock and only removes it after successful application.
+  This follows the synchronization used by
+  [Git's files ref backend](https://github.com/git/git/blob/master/refs/files-backend.c)
+  (`files_reflog_expire`). The reflog is rewritten with the same predecessor
+  chain as `reflog delete --rewrite --updateref`; no private store is created.
+  Git can store the same commit in the reflog
   more than once, but reflog occurrences have no immutable IDs. PwrGit keeps
   inspection and Apply available for that shared content and refuses Pop/Drop
   until the hash has only one occurrence rather than guessing which duplicate
   to remove.
+- Removal also holds `packed-refs.lock` to exclude concurrent ref packing.
+  Packed stash refs, symbolic refs, reftable storage, malformed logs, and
+  existing locks fail safely before Pop applies anything. Apply and inspection
+  remain available; users can remove entries with Git in unsupported layouts.
+  Like Git's files backend, updating the reflog and ref requires separate
+  filesystem operations; a process or machine crash is not a two-file atomic
+  transaction. Ordinary ref-commit errors restore the original log.
+- All stash commands reject worktrees flagged missing, so Git cannot discover
+  a containing repository after a nested checkout's `.git` link disappears.
 - Repository locking nests outside worktree locking, the same order used by
   pull. Stack mutations serialize across linked worktrees; apply/pop/create
   also serialize with operations in their destination worktree.

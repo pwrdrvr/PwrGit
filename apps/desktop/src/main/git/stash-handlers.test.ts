@@ -37,10 +37,10 @@ const entry = (
   createdAt: "2026-08-23T12:00:00Z"
 });
 
-function setup(listed: StashEntry[]) {
+function setup(listed: StashEntry[], missing = 0) {
   const db = {
     prepare: vi.fn(() => ({
-      get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+      get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1", missing }))
     }))
   } as unknown as DB;
   const refresher = {
@@ -75,7 +75,22 @@ function setup(listed: StashEntry[]) {
 describe("stash handlers", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("re-resolves a selected hash to its current non-top selector", async () => {
+  it("rejects every stash command for a missing checkout before invoking Git", async () => {
+    const { bus, dependencies } = setup([], 1);
+    const request = { worktreeId: "missing", stashHash: "a".repeat(40),
+      message: "save", includeUntracked: true };
+    for (const command of ["stash:list", "stash:details", "diff:stash",
+      "stash:create", "stash:apply", "stash:pop", "stash:drop"] as const) {
+      await expect(bus.dispatch(command, request)).resolves.toMatchObject({
+        ok: false, error: { code: "worktree_missing" }
+      });
+    }
+    for (const dependency of Object.values(dependencies)) {
+      expect(dependency).not.toHaveBeenCalled();
+    }
+  });
+
+  it("passes the immutable selected hash to the mutation service", async () => {
     const moved = entry("stash@{2}", "2".repeat(40), "selected");
     const { bus, dependencies } = setup([
       entry("stash@{0}", "0".repeat(40), "new top"),
@@ -93,7 +108,7 @@ describe("stash handlers", () => {
     expect(dependencies.pop).toHaveBeenCalledWith(
       dependencies.git,
       "/repos/project",
-      "stash@{2}"
+      moved.hash
     );
   });
 

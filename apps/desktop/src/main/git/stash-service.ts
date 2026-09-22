@@ -14,6 +14,7 @@ import {
   type GitExec,
   type GitOutput
 } from "./dugite";
+import { removeStashByHash } from "./stash-removal";
 
 const FIELD_SEPARATOR = "\x1f";
 const RECORD_SEPARATOR = "\x1e";
@@ -207,7 +208,7 @@ function stashMutationResult(
 async function mutateStash(
   git: GitExec,
   cwd: string,
-  verb: "apply" | "pop" | "drop",
+  verb: "apply",
   selector: string
 ): Promise<Result<void>> {
   const args = ["stash", verb, selector];
@@ -224,11 +225,12 @@ export const applyStash = (
 export const popStash = (
   git: GitExec,
   cwd: string,
-  selector: string
-): Promise<Result<void>> => mutateStash(git, cwd, "pop", selector);
+  hash: string
+): Promise<Result<void>> =>
+  removeStashByHash(git, cwd, hash, () => applyStash(git, cwd, hash));
 
 export const dropStash = (
   git: GitExec,
   cwd: string,
-  selector: string
-): Promise<Result<void>> => mutateStash(git, cwd, "drop", selector);
+  hash: string
+): Promise<Result<void>> => removeStashByHash(git, cwd, hash);

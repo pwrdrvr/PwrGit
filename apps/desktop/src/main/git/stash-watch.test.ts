@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -8,30 +8,17 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { err, ok } from "@pwrgit/shared";
-import type { GitExec, GitOutput } from "./dugite";
+import { gitProcessInvocation } from "./dugite";
+import { createSystemGit } from "./test-support/system-git";
 import { StashWatch } from "./stash-watch";
 
-const systemGit: GitExec = (args, cwd, options) =>
-  new Promise((resolve) => {
-    const proc = spawn("git", args, {
-      cwd,
-      env: { ...process.env, ...options?.env }
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    proc.on("error", (cause) =>
-      resolve(err({ kind: "git", code: "spawn_failed", message: cause.message }))
-    );
-    proc.on("close", (exitCode) =>
-      resolve(ok({ stdout, stderr, exitCode: exitCode ?? 1 } satisfies GitOutput))
-    );
-  });
+const systemGit = createSystemGit();
 
 function git(repo: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+  const invocation = gitProcessInvocation(args, repo);
+  return execFileSync("git", invocation.args, {
+    cwd: invocation.processCwd, encoding: "utf8"
+  }).trim();
 }
 
 describe("StashWatch (system git)", () => {

@@ -15,8 +15,9 @@ import {
 } from "./stash-service";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { worktreeMissingError } from "./worktree-liveness";
 
-type StashRow = { path: string; repoId: string };
+type StashRow = { path: string; repoId: string; missing?: number };
 
 export type StashHandlerDependencies = {
   git: GitExec;
@@ -51,13 +52,17 @@ export function registerStashHandlers(
   dependencyOverrides: Partial<StashHandlerDependencies> = {}
 ): void {
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...dependencyOverrides };
-  const rowOf = (worktreeId: string): StashRow | undefined =>
-    db
+  const rowOf = (worktreeId: string): Result<StashRow> => {
+    const row = db
       .prepare(
-        `SELECT w.path AS path, w.repo_id AS repoId
+        `SELECT w.path AS path, w.repo_id AS repoId, w.missing AS missing
          FROM worktrees w WHERE w.id = ?`
       )
       .get(worktreeId) as StashRow | undefined;
+    if (row === undefined) return notFound("Worktree not found.");
+    if (row.missing === 1) return err(worktreeMissingError(row.path));
+    return ok(row);
+  };
 
   const currentEntry = async (
     row: StashRow,
@@ -100,16 +105,18 @@ export function registerStashHandlers(
   };
 
   bus.register("stash:list", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return notFound("Worktree not found.");
+    const found = rowOf(req.worktreeId);
+    if (!found.ok) return found;
+    const row = found.value;
     return operations.runRepository(row.repoId, () =>
       dependencies.list(dependencies.git, row.path)
     );
   });
 
   bus.register("stash:details", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return notFound("Worktree not found.");
+    const found = rowOf(req.worktreeId);
+    if (!found.ok) return found;
+    const row = found.value;
     return operations.runRepository(row.repoId, async () => {
       const entry = await currentEntry(row, req.stashHash);
       return entry.ok
@@ -119,8 +126,9 @@ export function registerStashHandlers(
   });
 
   bus.register("diff:stash", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return notFound("Worktree not found.");
+    const found = rowOf(req.worktreeId);
+    if (!found.ok) return found;
+    const row = found.value;
     return operations.runRepository(row.repoId, async () => {
       const entry = await currentEntry(row, req.stashHash);
       return entry.ok
@@ -130,8 +138,9 @@ export function registerStashHandlers(
   });
 
   bus.register("stash:create", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return notFound("Worktree not found.");
+    const found = rowOf(req.worktreeId);
+    if (!found.ok) return found;
+    const row = found.value;
     const message = req.message.trim();
     if (message === "") {
       return err({
@@ -165,20 +174,20 @@ export function registerStashHandlers(
     requireUniqueOccurrence: boolean
   ): CommandHandler<C> =>
     async (req) => {
-      const row = rowOf(req.worktreeId);
-      if (row === undefined) return notFound("Worktree not found.");
+      const found = rowOf(req.worktreeId);
+      if (!found.ok) return found;
+      const row = found.value;
       const result = await operations.runRepository(row.repoId, () =>
         operations.run(req.worktreeId, async () => {
-          // Re-resolve the stable hash under the same repository lock as the
-          // mutation. A CLI push/drop can renumber stash@{n}; stale UI must
-          // never apply or delete the entry that inherited an old selector.
+          // The service uses immutable hashes and Git's on-disk ref lock.
+          // This queue only serializes operations originating in PwrGit.
           const entry = await currentEntry(
             row,
             req.stashHash,
             requireUniqueOccurrence
           );
           if (!entry.ok) return entry;
-          return operation(dependencies.git, row.path, entry.value.selector);
+          return operation(dependencies.git, row.path, entry.value.hash);
         })
       );
       // A failed apply/pop can leave conflict markers and index changes. The
@@ -207,12 +216,13 @@ export function registerStashHandlers(
   );
 
   bus.register("stash:drop", async (req) => {
-    const row = rowOf(req.worktreeId);
-    if (row === undefined) return notFound("Worktree not found.");
+    const found = rowOf(req.worktreeId);
+    if (!found.ok) return found;
+    const row = found.value;
     const result = await operations.runRepository(row.repoId, async () => {
       const entry = await currentEntry(row, req.stashHash, true);
       if (!entry.ok) return entry;
-      return dependencies.drop(dependencies.git, row.path, entry.value.selector);
+      return dependencies.drop(dependencies.git, row.path, entry.value.hash);
     });
     announceStack(row.repoId);
     if (!result.ok) return result;
