@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AgentChoice,
   AgentMessageDraft,
   RebaseCommitRef
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
-import { useAgent } from "./agent-store";
 
 export type DraftSource =
   | { kind: "commits"; commits: RebaseCommitRef[] }
@@ -36,6 +36,8 @@ export type MessageDraft = {
   reset: (fallback: string) => void;
 };
 
+const NO_CHOICE: AgentChoice = {};
+
 export function draftText(draft: AgentMessageDraft): string {
   return draft.body === "" ? draft.subject : `${draft.subject}\n\n${draft.body}`;
 }
@@ -50,15 +52,20 @@ export function useMessageDraft({
   worktreeId,
   source,
   fallback,
-  autoStart
+  autoStart,
+  ready,
+  choice = NO_CHOICE
 }: {
   worktreeId: string | null;
   source: DraftSource | null;
   fallback: string;
   /** Ask as soon as an agent is ready (Squash). The commit box waits to be asked. */
   autoStart: boolean;
+  /** The job's agent can run. With AI off nothing is ever asked on its own. */
+  ready: boolean;
+  /** This request's override of the Settings default, from the chip. */
+  choice?: AgentChoice;
 }): MessageDraft {
-  const agent = useAgent();
   const [text, setTextState] = useState(fallback);
   const [origin, setOrigin] = useState<MessageDraft["origin"]>("fallback");
   const [status, setStatus] = useState<DraftStatus>({ kind: "idle" });
@@ -72,8 +79,8 @@ export function useMessageDraft({
   fallbackRef.current = fallback;
   const sourceRef = useRef(source);
   sourceRef.current = source;
-  const choiceRef = useRef(agent.state.choice);
-  choiceRef.current = agent.state.choice;
+  const choiceRef = useRef(choice);
+  choiceRef.current = choice;
 
   const cancelActive = useCallback((): void => {
     const requestId = activeRequest.current;
@@ -90,13 +97,13 @@ export function useMessageDraft({
     const startedAt = Date.now();
     activeRequest.current = requestId;
     setStatus({ kind: "drafting", startedAt });
-    const choice = choiceRef.current;
+    const override = choiceRef.current;
     void dispatch("agent:draftMessage", {
       requestId,
       worktreeId,
       source: current,
-      ...(choice.model !== undefined || choice.effort !== undefined
-        ? { choice }
+      ...(override.model !== undefined || override.effort !== undefined
+        ? { choice: override }
         : {})
     }).then((result) => {
       if (activeRequest.current !== requestId) return;
@@ -148,10 +155,10 @@ export function useMessageDraft({
   }, [worktreeId, sourceKey, reset]);
 
   useEffect(() => {
-    if (!autoStart || !agent.ready || source === null || worktreeId === null) return;
+    if (!autoStart || !ready || source === null || worktreeId === null) return;
     request();
     // Once per selection: a failure or a cancel is the operator's to retry.
-  }, [autoStart, agent.ready, worktreeId, sourceKey]);
+  }, [autoStart, ready, worktreeId, sourceKey]);
 
   useEffect(() => cancelActive, [cancelActive]);
 

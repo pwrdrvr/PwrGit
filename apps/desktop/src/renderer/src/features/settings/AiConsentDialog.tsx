@@ -5,10 +5,16 @@ import { useModal } from "../../lib/useModal";
  * The disclosure shown the first time AI features are turned on for a
  * profile. Ported from PwrSnap's `AiConsentDialog`.
  *
- * It says what leaves the machine and when, in terms that are true today: the
- * one AI feature is rebase review, and #149's review sends commit hashes,
- * subjects and PwrGit's plan — no file contents. A feature that sends more
- * must change this copy before it ships, not after.
+ * It says what leaves the machine and when, in terms that are true today, and
+ * it has to stay that way: `main/ai/agent-input.ts` builds everything a job
+ * sends, and a change there that widens it must change this copy in the same
+ * commit, not after. Today that is the staged diff for a commit message, and
+ * the selected commits' subjects, bodies and diffs for Squash and Tidy — cut
+ * to a line budget, with lockfiles, snapshots, binaries, keys and `.env` files
+ * never sent — plus recent subjects as a style sample.
+ *
+ * Consent is not re-asked when this copy changes (see `main/ai/AGENTS.md`), so
+ * it describes the widest thing any shipped feature sends, not the first one.
  *
  * Cancel is the default focus: the dialog exists so that turning AI on is a
  * decision, and Enter on an unread dialog should not make it.
@@ -49,9 +55,17 @@ export function AiConsentDialog(props: {
           service.
         </p>
         <p className="dialog__message">
-          A rebase review, the first AI feature, sends the selected commits’ hashes and
-          subjects and the plan PwrGit computed. Nothing is sent until you use a feature,
-          and you can turn this off from the bottom of the sidebar at any time.
+          Drafting a commit message sends your staged changes — never unstaged edits.
+          Squash and Tidy send the selected commits’ subjects, messages and changes.
+          Changes are cut to a size limit, and lockfiles, snapshots, binary files, keys
+          and <code>.env</code> files are never sent. Recent commit subjects go along so a
+          draft matches your repository’s style, and Details, under every draft, lists
+          exactly what was sent.
+        </p>
+        <p className="dialog__message">
+          The agent gets no tools and no access to your repository, and PwrGit checks every
+          history change itself before you apply it. Nothing is sent until you use a
+          feature, and you can turn this off from the bottom of the sidebar at any time.
         </p>
         <div className="modal__actions">
           <button ref={cancelRef} className="modal__cancel" type="button" onClick={props.onCancel}>

@@ -1011,15 +1011,6 @@ if (!gotSingleInstanceLock) {
     bus.register("git:readIdentity", async () =>
       ok(await readEffectiveGitIdentity(execGit))
     );
-    const agentHandlers = registerAgentHandlers(bus, db, {
-      session: new LocalAgentSession({
-        // Built-app E2E can pin the honest unavailable state regardless of the
-        // developer machine's Codex install. Packaged builds ignore this seam.
-        discoveryDisabled:
-          !app.isPackaged &&
-          process.env["PWRGIT_E2E_AGENT_UNAVAILABLE"] === "1"
-      })
-    });
     registerDialogHandlers(bus);
     registerClipboardHandlers(bus);
     registerShellHandlers(bus);
@@ -1085,6 +1076,16 @@ if (!gotSingleInstanceLock) {
       store: aiProviderSettings,
       profiles,
       onChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot)
+    });
+    // History editing and commit-message drafts run on whatever the profile's
+    // AI settings resolve: the AI switch, the agent, the model and the effort
+    // are all `resolveJob`'s answer, so this session discovers nothing itself
+    // and inherits the E2E seam above.
+    const agentHandlers = registerAgentHandlers(bus, db, {
+      session: new LocalAgentSession({
+        resolveJob: (input) => aiProviders.resolveJob(input),
+        tempRoot: join(app.getPath("temp"), "pwrgit-agent")
+      })
     });
     app.on("before-quit", () => aiProviders.dispose());
     // The loopback listener stays off until the operator turns it on: it is a

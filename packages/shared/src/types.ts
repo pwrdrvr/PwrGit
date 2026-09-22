@@ -1901,43 +1901,16 @@ export type RebaseCheckResult =
       detail?: RebaseSnagDetail;
     };
 
-/** A locally discovered agent backend and whether PwrGit can safely use it. */
-export type AgentProviderAvailability = {
-  id: string;
-  kind: "codex" | "acp";
-  displayName: string;
-  status: "ready" | "unavailable" | "unsupported" | "error";
-  detail: string;
-  version?: string;
-};
-
-/** Discovery never rejects merely because no agent is installed. */
-export type AgentAvailability = {
-  profileId: ProfileId;
-  status: "ready" | "unavailable";
-  selectedProviderId: string | null;
-  message: string;
-  providers: AgentProviderAvailability[];
-};
-
-export type AgentEffort = "low" | "medium" | "high";
-
-/** Which model and effort a request should use; omitted fields take the
- *  provider's defaults. */
+/**
+ * One request's override of the job's Settings default (Settings → AI
+ * Features → Default agents). Omitted fields keep that default. `model` is a
+ * `CodexModelOption.id` and `effort` one of that model's
+ * `supportedReasoningEfforts` — the same values Settings stores, and checked
+ * by the same `isAiModelId` / `isAiReasoningEffort` in main.
+ */
 export type AgentChoice = {
   model?: string;
-  effort?: AgentEffort;
-};
-
-export type AgentModelOption = {
-  id: string;
-  displayName: string;
-  isDefault: boolean;
-};
-
-export type AgentModelList = {
-  providerId: string;
-  models: AgentModelOption[];
+  effort?: string;
 };
 
 /** How one changed file was treated when a request was built. */

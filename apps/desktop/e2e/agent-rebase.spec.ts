@@ -15,7 +15,7 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-test("an unavailable agent leaves the deterministic isolated rebase workflow usable", async () => {
+test("with AI off, the deterministic isolated rebase workflow is whole and usable", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("agent-fallback");
   sandbox.commit(repo.path, "one.txt", "first focused change");
@@ -33,14 +33,19 @@ test("an unavailable agent leaves the deterministic isolated rebase workflow usa
     await selection.click();
     await expect(selection).toBeChecked();
   }
+  // AI is off until the operator turns it on, and Tidy is an agent action
+  // from the start, so the selection bar offers only the Git operations.
+  await expect(window.locator(".selection-bar")).toContainText("Reorder");
+  await expect(window.locator(".selection-bar")).not.toContainText("Tidy");
   await window.getByRole("button", { name: "Squash", exact: true }).click();
 
   await expect(window.locator(".rebase-plan")).toContainText("pick");
   await expect(window.locator(".rebase-plan")).toContainText("squash");
-  // No agent is a dashed chip and a link, not a warning: the message box
-  // starts as Git's joined subjects and everything below it still works.
-  await expect(window.locator(".agent-chip")).toContainText("No agent");
+  // AI off is a dashed chip, not a warning and not an offer: the message box
+  // is Git's joined subjects and everything below it still works.
+  await expect(window.locator(".agent-chip")).toContainText("AI off");
   await expect(window.locator(".msg-foot")).toContainText("Joined from 2 subjects");
+  await expect(window.locator(".msg-foot")).not.toContainText("Draft with an agent");
   await expect(window.locator(".msg-box__input")).toHaveValue(
     "first focused change\n\nsecond focused change"
   );
@@ -57,7 +62,7 @@ test("an unavailable agent leaves the deterministic isolated rebase workflow usa
   await expect(window.locator(".proof-ledger")).toContainText("Replays cleanly");
   await expect(window.locator(".proof-ledger")).not.toContainText("needs replay");
 
-  // The test intentionally stops before Apply: discovery and drafting must not
-  // mutate history, and the final local rewrite remains a distinct user action.
+  // The test intentionally stops before Apply: the check must not mutate
+  // history, and the final local rewrite remains a distinct user action.
   expect(sandbox.git(repo.path, "rev-list", "--count", "HEAD")).toBe("3");
 });

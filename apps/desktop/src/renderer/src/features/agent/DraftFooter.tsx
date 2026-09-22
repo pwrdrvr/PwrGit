@@ -37,8 +37,9 @@ export function DraftFooter({
   fallbackAction: string | null;
   /** "4 diffs", "3 staged files": what a draft is read from. */
   unitLabel: string;
-  /** Where "Draft with an agent…" leads when none is set up. */
-  onNoAgent: () => void;
+  /** Where "Draft with an agent…" leads when the agent cannot run. Absent,
+   *  as with AI off, the box offers no agent at all. */
+  onNoAgent?: () => void;
 }) {
   const [comparing, setComparing] = useState(false);
   const status = draft.status;
@@ -87,11 +88,11 @@ export function DraftFooter({
     if (agentReady) links.push({ label: "Draft", agent: true, onClick: draft.request });
   } else {
     source = { text: fallbackLabel ?? "", tone: "quiet" };
-    links.push(
-      agentReady
-        ? { label: "Draft", agent: true, onClick: draft.request }
-        : { label: "Draft with an agent…", agent: true, onClick: onNoAgent }
-    );
+    if (agentReady) {
+      links.push({ label: "Draft", agent: true, onClick: draft.request });
+    } else if (onNoAgent !== undefined) {
+      links.push({ label: "Draft with an agent…", agent: true, onClick: onNoAgent });
+    }
   }
   if (draft.undo !== null && status.kind !== "drafting") {
     links.push({ label: "Undo", quiet: true, onClick: draft.undoReplace });

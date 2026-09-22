@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AgentChoice,
   AgentTidyProposal,
   HistoryEditProgram,
   RebaseCommitRef,
@@ -14,7 +15,7 @@ import { RebaseGlyph } from "../../lib/RebaseGlyph";
 import { AgentChip } from "../agent/AgentChip";
 import { AgentSaw } from "../agent/AgentSaw";
 import { DraftFooter } from "../agent/DraftFooter";
-import { useAgent } from "../agent/agent-store";
+import { openAiSettings, useAgent, type AgentView } from "../agent/agent-store";
 import { useMessageDraft } from "../agent/useMessageDraft";
 import {
   bodyOf,
@@ -298,7 +299,7 @@ export function RebaseTab({
   branch?: string | null;
   onClear: () => void;
 }) {
-  const agent = useAgent();
+  const agent = useAgent("historyEditing");
   const [plan, setPlan] = useState<RebasePlan | null>(null);
   const [commits, setCommits] = useState<RebaseCommitRef[]>([]);
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
@@ -306,7 +307,10 @@ export function RebaseTab({
   const [applied, setApplied] = useState(false);
   const [tidy, setTidy] = useState<TidyState>({ kind: "idle" });
   const [edits, setEdits] = useState<TidyEdits>(NO_EDITS);
-  const [chipSignal, setChipSignal] = useState(0);
+  /** The chip's override, for this request only; a new selection drops it. */
+  const [choice, setChoice] = useState<AgentChoice>({});
+  const choiceRef = useRef(choice);
+  choiceRef.current = choice;
   const checkGeneration = useRef(0);
   const tidyRequest = useRef<{ id: string; startedAt: number } | null>(null);
   const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -320,7 +324,9 @@ export function RebaseTab({
     source:
       op === "squash" && commits.length > 1 ? { kind: "commits", commits } : null,
     fallback: joinedSubjects(commits),
-    autoStart: true
+    autoStart: true,
+    ready: agent.ready,
+    choice
   });
 
   const cancelTidyRequest = (): void => {
@@ -344,6 +350,7 @@ export function RebaseTab({
     setCommits([]);
     setTidy({ kind: "idle" });
     setEdits(NO_EDITS);
+    setChoice({});
     if (worktreeId === null || op === null || selectedHashes.length === 0) {
       return;
     }
@@ -445,7 +452,7 @@ export function RebaseTab({
     const startedAt = Date.now();
     tidyRequest.current = { id, startedAt };
     setTidy({ kind: "requesting", revising: revision !== undefined });
-    const choice = agent.state.choice;
+    const override = choiceRef.current;
     void dispatch("agent:tidyPlan", {
       requestId: id,
       worktreeId,
@@ -459,7 +466,9 @@ export function RebaseTab({
             }
           }
         : {}),
-      ...(choice.model !== undefined || choice.effort !== undefined ? { choice } : {})
+      ...(override.model !== undefined || override.effort !== undefined
+        ? { choice: override }
+        : {})
     }).then((result) => {
       if (tidyRequest.current?.id !== id) return;
       tidyRequest.current = null;
@@ -571,7 +580,14 @@ export function RebaseTab({
           <div className="rebase-head__title">{op === null ? "Rebase tool" : OP_LABEL[op]}</div>
           <div className="rebase-head__sub">{headSub}</div>
         </div>
-        {op !== null && <AgentChip {...(lastModel !== undefined ? { lastModel } : {})} openSignal={chipSignal} />}
+        {op !== null && (
+          <AgentChip
+            jobId="historyEditing"
+            choice={choice}
+            onChoice={setChoice}
+            {...(lastModel !== undefined ? { lastModel } : {})}
+          />
+        )}
       </div>
 
       {op === null || plan === null ? (
@@ -622,7 +638,11 @@ export function RebaseTab({
                   fallbackLabel={`Joined from ${commits.length} subjects`}
                   fallbackAction="Use subjects"
                   unitLabel={`${commits.length} diffs`}
-                  onNoAgent={() => setChipSignal((n) => n + 1)}
+                  // With AI off the box is Git's joined subjects and says no
+                  // more; the chip reads "AI off" for anyone looking.
+                  {...(agent.loading || agent.off
+                    ? {}
+                    : { onNoAgent: () => openAiSettings("ai-providers") })}
                 />
               </div>
               {squash.draft !== null && (
@@ -655,12 +675,10 @@ export function RebaseTab({
               tidy={tidy}
               commits={commits}
               edits={edits}
-              agentName={agent.name}
-              agentReady={agent.ready}
+              agent={agent}
               locked={applying || applied || check.kind === "checking"}
               onRequest={() => requestTidy()}
               onCancel={cancelTidyRequest}
-              onChooseAgent={() => setChipSignal((n) => n + 1)}
               onToggle={(hash) =>
                 setEdits((current) => {
                   const separated = new Set(current.separated);
@@ -810,27 +828,25 @@ function TidyBody({
   tidy,
   commits,
   edits,
-  agentName,
-  agentReady,
+  agent,
   locked,
   onRequest,
   onCancel,
-  onChooseAgent,
   onToggle,
   onEditMessage
 }: {
   tidy: TidyState;
   commits: RebaseCommitRef[];
   edits: TidyEdits;
-  agentName: string;
-  agentReady: boolean;
+  agent: AgentView;
   locked: boolean;
   onRequest: () => void;
   onCancel: () => void;
-  onChooseAgent: () => void;
   onToggle: (hash: string) => void;
   onEditMessage: (index: number, message: string) => void;
 }) {
+  const agentName = agent.name;
+  const agentReady = agent.ready;
   if (tidy.kind === "ready") {
     const { proposal } = tidy;
     const diff =
@@ -923,11 +939,21 @@ function TidyBody({
           }
         : {})
     };
+  } else if (agent.loading) {
+    footer = { text: "Checking the AI provider settings…", tone: "quiet" };
+  } else if (agent.off) {
+    // Reachable only when AI was switched off with Tidy open; the selection
+    // bar stops offering Tidy once it is off.
+    footer = {
+      text: "AI features are off for this profile",
+      tone: "quiet",
+      link: { label: "Open AI Features", onClick: () => openAiSettings("ai-features", "availability") }
+    };
   } else if (!agentReady) {
     footer = {
-      text: "No agent is set up for this profile",
+      text: agent.reason ?? "No agent is set up for this profile",
       tone: "warn",
-      link: { label: "Choose an agent…", onClick: onChooseAgent }
+      link: { label: "Open AI Providers", onClick: () => openAiSettings("ai-providers") }
     };
   } else {
     footer = { text: "", tone: "quiet", link: { label: "Tidy", agent: true, onClick: onRequest } };

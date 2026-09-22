@@ -8,15 +8,25 @@ import {
   err,
   ok,
   type AgentAvailability,
+  type AgentJobState,
+  type AgentJobStatus,
   type AgentMessageDraft,
   type AgentTidyProposal,
+  type AiJobId,
+  type CodexModelOption,
   type HistoryEditProgram
 } from "@pwrgit/shared";
 
-const mocks = vi.hoisted(() => ({ dispatch: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  dispatch: vi.fn(),
+  events: new Map<string, (payload: unknown) => void>()
+}));
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: mocks.dispatch,
-  subscribe: () => () => undefined,
+  subscribe: (channel: string, handler: (payload: unknown) => void) => {
+    mocks.events.set(channel, handler);
+    return () => mocks.events.delete(channel);
+  },
   windowProfileId: () => "work"
 }));
 
@@ -33,28 +43,63 @@ const log = [
 ];
 const proof = { commitCount: 3, resultCount: 1, steps: 3, tree: "4c1f9e0".padEnd(40, "0"), durationMs: 600 };
 
-const ready: AgentAvailability = {
-  profileId: "work",
-  status: "ready",
-  selectedProviderId: "codex",
-  message: "Codex is ready.",
-  providers: [
-    { id: "codex", kind: "codex", displayName: "Codex", status: "ready", detail: "Ready." },
-    {
-      id: "acp:kimi",
-      kind: "acp",
-      displayName: "Kimi Code CLI",
-      status: "unsupported",
-      detail: "Detected, but PwrGit cannot yet run ACP agents without tools."
+function job(
+  jobId: AiJobId,
+  state: AgentJobState,
+  message: string,
+  overrides: Partial<AgentJobStatus>
+): AgentJobStatus {
+  return {
+    jobId,
+    state,
+    message,
+    providerName: state === "ready" ? "Codex" : null,
+    model: null,
+    modelLabel: null,
+    effort: null,
+    ...overrides
+  };
+}
+
+/** Both jobs answer alike: they share a profile's switch and its Codex. */
+function availability(
+  state: AgentJobState,
+  message = "",
+  overrides: Partial<AgentJobStatus> = {}
+): AgentAvailability {
+  return {
+    profileId: "work",
+    jobs: {
+      commitMessage: job("commitMessage", state, message, overrides),
+      historyEditing: job("historyEditing", state, message, overrides)
     }
-  ]
-};
-const unavailable: AgentAvailability = {
-  ...ready,
-  status: "unavailable",
-  selectedProviderId: null,
-  providers: [{ ...ready.providers[0]!, status: "unavailable", detail: "No compatible Codex CLI was found." }]
-};
+  };
+}
+
+const ready = availability("ready");
+const unavailable = availability(
+  "unavailable",
+  "History editing needs Codex, and no usable Codex CLI was found."
+);
+const signedOut = availability("signed_out", "Codex is not signed in for the default account.");
+const off = availability(
+  "disabled",
+  "AI features are off for this profile. Turn them on from the AI switch at the bottom of the sidebar."
+);
+
+function codexModel(id: string, displayName: string, overrides: Partial<CodexModelOption> = {}): CodexModelOption {
+  return {
+    id,
+    model: id,
+    displayName,
+    description: "",
+    hidden: false,
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+    defaultReasoningEffort: "medium",
+    isDefault: false,
+    ...overrides
+  };
+}
 
 const base = {
   providerId: "codex",
@@ -103,13 +148,16 @@ function route(overrides: Record<string, Handler>): void {
 let container: HTMLDivElement;
 let root: Root;
 
-async function render(op: "squash" | "reorder" | "tidy"): Promise<void> {
+async function render(
+  op: "squash" | "reorder" | "tidy",
+  selectedHashes = log.map((c) => c.hash)
+): Promise<void> {
   await act(async () => {
     root.render(
       <RebaseTab
         worktreeId="wt-1"
         sourceHead="head"
-        selectedHashes={log.map((c) => c.hash)}
+        selectedHashes={selectedHashes}
         op={op}
         branch="feat/csv-export"
         onClear={() => undefined}
@@ -130,6 +178,30 @@ function button(name: string): HTMLButtonElement {
     );
   }
   return found;
+}
+
+function chip(): HTMLButtonElement {
+  const el = container.querySelector<HTMLButtonElement>(".agent-chip");
+  if (el === null) throw new Error("no agent chip");
+  return el;
+}
+
+function menu(): HTMLElement {
+  const el = container.querySelector<HTMLElement>(".agent-menu");
+  if (el === null) throw new Error("the agent menu is closed");
+  return el;
+}
+
+function menuItem(model: string): HTMLButtonElement {
+  const found = [...menu().querySelectorAll<HTMLButtonElement>("button.agent-menu__item")].find(
+    (item) => item.querySelector(".agent-menu__model")?.textContent === model
+  );
+  if (found === undefined) throw new Error(`no model "${model}" in the menu`);
+  return found;
+}
+
+function effortLabels(): string[] {
+  return [...menu().querySelectorAll(".agent-menu__seg button")].map((b) => b.textContent ?? "");
 }
 
 function textarea(): HTMLTextAreaElement {
@@ -154,6 +226,7 @@ function calls(name: string): Record<string, unknown>[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.events.clear();
   resetAgentStore();
   container = document.createElement("div");
   document.body.append(container);
@@ -266,7 +339,7 @@ describe("Squash with an agent", () => {
 });
 
 describe("Squash with no agent", () => {
-  it("works from the joined subjects and points at the agent menu", async () => {
+  it("works from the joined subjects and points at AI Providers", async () => {
     route({ "agent:availability": () => ok(unavailable) });
     await render("squash");
 
@@ -276,7 +349,117 @@ describe("Squash with no agent", () => {
     expect(calls("agent:draftMessage")).toHaveLength(0);
 
     await act(async () => button("Draft with an agent…").click());
-    expect(container.querySelector(".agent-menu")?.textContent).toContain("No compatible Codex CLI was found.");
+    expect(calls("settings:open")).toEqual([{ page: "ai-providers", profileId: "work" }]);
+
+    await act(async () => chip().click());
+    expect(menu().textContent).toContain(
+      "History editing needs Codex, and no usable Codex CLI was found."
+    );
+  });
+});
+
+describe("Squash with AI off", () => {
+  it("is Git's joined subjects and nothing else: no request, no agent link", async () => {
+    route({ "agent:availability": () => ok(off) });
+    await render("squash");
+
+    expect(textarea().value).toBe("add CSV exporter\n\nwip\n\nfix lint");
+    expect(container.textContent).toContain("Joined from 3 subjects");
+    expect(container.textContent).not.toContain("Draft with an agent");
+    expect(calls("agent:draftMessage")).toHaveLength(0);
+    expect(chip().textContent).toContain("AI off");
+    expect(button("Check in isolated copy").disabled).toBe(false);
+
+    await act(async () => chip().click());
+    expect(menu().textContent).toContain("AI features are off");
+    await act(async () => button("Open AI Features").click());
+    expect(calls("settings:open")).toEqual([
+      { page: "ai-features", sub: "availability", profileId: "work" }
+    ]);
+  });
+
+  it("drafts on its own once AI is turned on for this profile, not another", async () => {
+    let answer = off;
+    route({
+      "agent:availability": () => ok(answer),
+      "agent:draftMessage": (req) => ok(message(String(req["requestId"])))
+    });
+    await render("squash");
+    expect(calls("agent:draftMessage")).toHaveLength(0);
+
+    answer = ready;
+    const changed = mocks.events.get("aiProviders:changed");
+    await act(async () => changed?.({ profileId: "home", settings: {} }));
+    for (let i = 0; i < 3; i++) await act(async () => undefined);
+    // Another profile's switch is not this window's.
+    expect(calls("agent:availability")).toHaveLength(1);
+
+    await act(async () => changed?.({ profileId: "work", settings: {} }));
+    for (let i = 0; i < 3; i++) await act(async () => undefined);
+    expect(calls("agent:availability")).toHaveLength(2);
+    expect(calls("agent:draftMessage")).toHaveLength(1);
+    expect(textarea().value).toBe("feat(export): add CSV exporter\n\nWhy it exists.");
+  });
+});
+
+describe("The agent chip", () => {
+  const models = [
+    codexModel("gpt-5.5", "GPT-5.5", { isDefault: true }),
+    codexModel("gpt-5.5-mini", "GPT-5.5 mini", { supportedReasoningEfforts: ["low", "medium"] }),
+    codexModel("gpt-internal", "Internal", { hidden: true })
+  ];
+
+  it("starts from the Settings default and overrides it for this request only", async () => {
+    route({
+      "agent:availability": () =>
+        ok(availability("ready", "", { model: "gpt-5.5", modelLabel: "GPT-5.5", effort: "high" })),
+      "aiProviders:codexModels": () => ok({ models }),
+      "agent:draftMessage": (req) => ok(message(String(req["requestId"])))
+    });
+    await render("squash");
+    expect(chip().textContent).toContain("GPT-5.5");
+    // The Settings default runs as it is: main applies it, not the request.
+    expect(calls("agent:draftMessage")[0]?.["choice"]).toBeUndefined();
+
+    await act(async () => chip().click());
+    expect(calls("aiProviders:codexModels")).toEqual([{ profileId: "work" }]);
+    expect(menu().textContent).not.toContain("Internal");
+    expect(menu().textContent).toContain("Only this request. The default is in");
+    await act(async () => menuItem("GPT-5.5 mini").click());
+    expect(chip().textContent).toContain("GPT-5.5 mini");
+
+    await act(async () => chip().click());
+    // The picked model's own efforts, not every model's.
+    expect(effortLabels()).toEqual(["Default", "Low", "Medium"]);
+    await act(async () => button("Medium").click());
+    await act(async () => button("Regenerate").click());
+    expect(calls("agent:draftMessage")[1]?.["choice"]).toEqual({
+      model: "gpt-5.5-mini",
+      effort: "medium"
+    });
+
+    await act(async () => button("Settings › AI Features").click());
+    expect(calls("settings:open")).toEqual([
+      { page: "ai-features", sub: "default-agents", profileId: "work" }
+    ]);
+
+    // A new selection is a new request, back on the Settings default.
+    await render("squash", log.slice(0, 2).map((c) => c.hash));
+    expect(chip().textContent).not.toContain("mini");
+    expect(calls("agent:draftMessage").at(-1)?.["choice"]).toBeUndefined();
+  });
+
+  it("drops an effort the newly picked model does not take", async () => {
+    route({
+      "aiProviders:codexModels": () => ok({ models }),
+      "agent:draftMessage": (req) => ok(message(String(req["requestId"])))
+    });
+    await render("squash");
+    await act(async () => chip().click());
+    await act(async () => button("Xhigh").click());
+    await act(async () => menuItem("GPT-5.5 mini").click());
+    await act(async () => button("Regenerate").click());
+    expect(calls("agent:draftMessage").at(-1)?.["choice"]).toEqual({ model: "gpt-5.5-mini" });
   });
 });
 
@@ -382,5 +565,24 @@ describe("Tidy", () => {
     // No plan, nothing to check or apply: Discard is the only action.
     expect(container.querySelector(".rebase-apply")).toBeNull();
     expect(container.querySelector(".rebase-check")).toBeNull();
+  });
+
+  it("says why the agent cannot run, once, and where to fix it", async () => {
+    route({ "agent:availability": () => ok(signedOut) });
+    await render("tidy");
+    expect(container.querySelector(".msg-foot")?.textContent).toContain(
+      "Codex is not signed in for the default account."
+    );
+    await act(async () => button("Open AI Providers").click());
+    expect(calls("settings:open")).toEqual([{ page: "ai-providers", profileId: "work" }]);
+    expect(calls("agent:tidyPlan")).toHaveLength(0);
+  });
+
+  it("asks for nothing with AI off", async () => {
+    route({ "agent:availability": () => ok(off) });
+    await render("tidy");
+    expect(container.textContent).toContain("AI features are off for this profile");
+    expect(calls("agent:tidyPlan")).toHaveLength(0);
+    expect(calls("aiProviders:codexModels")).toHaveLength(0);
   });
 });

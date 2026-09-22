@@ -16,7 +16,7 @@ import { confirmDialog } from "../shell/dialogs";
 import { SubmodulePanel } from "./SubmodulePanel";
 import { AgentSaw } from "../agent/AgentSaw";
 import { DraftFooter } from "../agent/DraftFooter";
-import { useAgent } from "../agent/agent-store";
+import { openAiSettings, useAgent } from "../agent/agent-store";
 import { useMessageDraft, type DraftSource } from "../agent/useMessageDraft";
 import {
   hoverTooltip,
@@ -357,7 +357,7 @@ export function ChangesTab({
 }) {
   const tip = useViewportTooltip();
   const [changes, setChanges] = useState<ChangeSet | null>(null);
-  const agent = useAgent();
+  const agent = useAgent("commitMessage");
   const messageRef = useRef<HTMLTextAreaElement>(null);
   /**
    * Answering "Commit on <branch> first" is a promise to put the reader where
@@ -398,7 +398,8 @@ export function ChangesTab({
     worktreeId: wtId,
     source: STAGED_SOURCE,
     fallback: "",
-    autoStart: false
+    autoStart: false,
+    ready: agent.ready
   });
   const message = draft.text;
 
@@ -834,20 +835,22 @@ export function ChangesTab({
             aria-label="Commit message"
             rows={1}
           />
-          {(agent.ready || draft.status.kind !== "idle" || draft.draft !== null) && (
+          {/* With AI off the commit box is a commit box: no footer at all. */}
+          {((!agent.loading && !agent.off) ||
+            draft.status.kind !== "idle" ||
+            draft.draft !== null) && (
             <DraftFooter
               draft={draft}
               agentName={agent.name}
-              // Whether an agent exists, not whether there is anything to
-              // draft from: gating on the staged count here would offer
-              // "Draft with an agent…" to someone who already has one, and
-              // that link has nowhere to lead from the commit box. With
-              // nothing staged, main answers with what to do about it.
+              // Whether the agent can run, not whether there is anything to
+              // draft from: gating on the staged count here would send
+              // someone whose agent works to AI Providers. With nothing
+              // staged, main answers with what to do about it.
               agentReady={agent.ready}
               fallbackLabel={null}
               fallbackAction={null}
               unitLabel={`${stagedTotal} staged file${stagedTotal === 1 ? "" : "s"}`}
-              onNoAgent={() => undefined}
+              onNoAgent={() => openAiSettings("ai-providers")}
             />
           )}
         </div>

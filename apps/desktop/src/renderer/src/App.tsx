@@ -12,6 +12,7 @@ import type {
   Worktree
 } from "@pwrgit/shared";
 import { showErrorToast } from "./lib/toast";
+import { useAgentOffered } from "./features/agent/agent-store";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import {
   FileInsightsPane,
@@ -261,6 +262,10 @@ export function App() {
     setRebaseAction(op);
     setRailCollapsed(false);
   }, []);
+  const startTidy = useCallback(() => startRebase("tidy"), [startRebase]);
+  // Tidy is an agent action from the start, so with AI off for this profile
+  // the selection bar does not offer it. Squash and Reorder always stay.
+  const tidyOffered = useAgentOffered("historyEditing");
 
   // ⌘K / ⌘F (and Ctrl variants) open the repo switcher; Escape closes it.
   // ⌘F is the muscle-memory "find" — nothing else claims find yet; if an
@@ -804,7 +809,7 @@ export function App() {
                     count={selectedCommits.size}
                     onSquash={() => startRebase("squash")}
                     onReorder={() => startRebase("reorder")}
-                    onTidy={() => startRebase("tidy")}
+                    {...(tidyOffered ? { onTidy: startTidy } : {})}
                     onOpenRebaseTool={() =>
                       startRebase(rebaseAction ?? "squash")
                     }

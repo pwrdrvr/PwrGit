@@ -57,10 +57,14 @@ function agent(
 }
 
 function settings(
-  jobs: AiProviderSettings["jobs"],
+  jobs: Partial<AiProviderSettings["jobs"]>,
   enabledAgentIds: BuiltInAcpAgentId[]
 ): AiProviderSettings {
-  return { ...DEFAULT_AI_PROVIDER_SETTINGS, acp: { enabledAgentIds, agents: {} }, jobs };
+  return {
+    ...DEFAULT_AI_PROVIDER_SETTINGS,
+    acp: { enabledAgentIds, agents: {} },
+    jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, ...jobs }
+  };
 }
 
 describe("describeCodexStatus", () => {
@@ -359,15 +363,18 @@ describe("routedJobs", () => {
   });
 
   it("gives Codex every unset job", () => {
-    expect(routedJobs(DEFAULT_AI_PROVIDER_SETTINGS, "codex")).toEqual(["rebaseReview"]);
+    expect(routedJobs(DEFAULT_AI_PROVIDER_SETTINGS, "codex")).toEqual([
+      "commitMessage",
+      "historyEditing"
+    ]);
     expect(routedJobs(DEFAULT_AI_PROVIDER_SETTINGS, "grok")).toEqual([]);
   });
 
   it("keeps a Codex-only job on Codex even when an enabled agent is stored for it", () => {
     // Counting the stored string would leave the Codex card claiming no jobs
-    // while the rebase review ran through it.
-    const stored = settings({ rebaseReview: { provider: "grok" } }, ["grok"]);
-    expect(routedJobs(stored, "codex")).toEqual(["rebaseReview"]);
+    // while History editing ran through it.
+    const stored = settings({ historyEditing: { provider: "grok" } }, ["grok"]);
+    expect(routedJobs(stored, "codex")).toEqual(["commitMessage", "historyEditing"]);
     expect(routedJobs(stored, "grok")).toEqual([]);
   });
 });
@@ -382,7 +389,7 @@ describe("enabledAcpAgentIdsForModelProbes", () => {
     // must not start that agent just to fill a picker the job cannot use.
     expect(
       enabledAcpAgentIdsForModelProbes(
-        settings({ rebaseReview: { provider: "grok" } }, ["grok", "kimi", "qwen"])
+        settings({ historyEditing: { provider: "grok" } }, ["grok", "kimi", "qwen"])
       )
     ).toEqual([]);
     expect(enabledAcpAgentIdsForModelProbes(DEFAULT_AI_PROVIDER_SETTINGS)).toEqual([]);

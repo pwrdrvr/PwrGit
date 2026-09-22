@@ -12,10 +12,8 @@
 
 import type { ForgeHostMap } from "./forge-remote";
 import type {
-  AgentAvailability,
   AgentChoice,
   AgentMessageDraft,
-  AgentModelList,
   AgentTidyProposal,
   AgentTidyRevision,
   BranchRef,
@@ -114,6 +112,7 @@ import type {
 import type {
   AcpAgentDiscovery,
   AcpAgentModelList,
+  AgentAvailability,
   AiProviderSettingsPatch,
   AiProviderSettingsSnapshot,
   BuiltInAcpAgentId,
@@ -1663,14 +1662,13 @@ export interface Commands {
   // Local agents author text and history proposals from data PwrGit sends
   // them; they get no tools, no repo path, and no Git primitive. Every Tidy
   // proposal still goes through rebase:check -> approvalToken -> rebase:apply,
-  // the sole route to a Git mutation.
+  // the sole route to a Git mutation. Which agent runs, and whether any may,
+  // is the AI provider settings' answer (`aiProviders:*`); these commands ask
+  // it and never discover on their own.
+  /** Each job's state for the window's profile. `refresh` re-probes. */
   "agent:availability": {
     req: { profileId: ProfileId; refresh?: boolean };
     res: AgentAvailability;
-  };
-  "agent:models": {
-    req: { profileId: ProfileId };
-    res: AgentModelList;
   };
   /** A commit message for selected commits (Squash) or for staged changes
    *  (the commit box). */

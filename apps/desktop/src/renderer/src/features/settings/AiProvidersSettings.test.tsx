@@ -324,11 +324,11 @@ describe("AI Providers pane", () => {
     settings = {
       ...DEFAULT_AI_PROVIDER_SETTINGS,
       acp: { enabledAgentIds: ["grok"], agents: {} },
-      jobs: { rebaseReview: { provider: "grok" } }
+      jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { provider: "grok" } }
     };
     await render();
 
-    expect(card("Codex").textContent).toContain("Rebase review");
+    expect(card("Codex").textContent).toContain("History editing");
     expect(card("Grok").textContent).toContain("No feature");
     expect(card("Grok").textContent).toContain("no-tools boundary");
   });

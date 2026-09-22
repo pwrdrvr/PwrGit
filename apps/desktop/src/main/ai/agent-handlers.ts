@@ -1,6 +1,9 @@
 import {
+  AI_JOB_IDS,
   err,
   ok,
+  type AgentJobStatus,
+  type AiJobId,
   type PwrGitError,
   type RebaseCommitRef,
   type Result
@@ -18,7 +21,6 @@ import {
   collectStagedInput
 } from "./agent-input";
 import {
-  LocalAgentSession,
   MAX_MESSAGE_COMMITS,
   MAX_TIDY_COMMITS,
   type AgentSession
@@ -88,12 +90,12 @@ function sameOwner(request: ActiveRequest, context: CommandContext): boolean {
 export function registerAgentHandlers(
   bus: CommandBus,
   db: DB,
-  overrides: Partial<AgentHandlerDependencies> = {}
+  overrides: Pick<AgentHandlerDependencies, "session"> &
+    Partial<AgentHandlerDependencies>
 ): AgentHandlerLifecycle {
   const dependencies: AgentHandlerDependencies = {
     ...DEFAULT_DEPENDENCIES,
-    ...overrides,
-    session: overrides.session ?? new LocalAgentSession()
+    ...overrides
   };
   const active = new Map<string, ActiveRequest>();
 
@@ -238,6 +240,9 @@ export function registerAgentHandlers(
   const profileExists = (profileId: string): boolean =>
     db.prepare("SELECT id FROM profiles WHERE id = ?").get(profileId) !== undefined;
 
+  // Each job's state for the window's profile. Both jobs resolve through the
+  // same cached, de-duplicated discovery in AiProviderService, so asking for
+  // both costs one probe at most.
   bus.register("agent:availability", async (req, context) => {
     if (!profileExists(req.profileId)) {
       return err({
@@ -247,13 +252,20 @@ export function registerAgentHandlers(
       });
     }
     try {
-      return ok(
-        await dependencies.session.availability({
-          profileId: req.profileId,
-          ...(req.refresh !== undefined ? { refresh: req.refresh } : {}),
-          ...(context.signal !== undefined ? { signal: context.signal } : {})
-        })
+      const statuses = await Promise.all(
+        AI_JOB_IDS.map((jobId) =>
+          dependencies.session.jobStatus({
+            profileId: req.profileId,
+            jobId,
+            ...(req.refresh !== undefined ? { refresh: req.refresh } : {}),
+            ...(context.signal !== undefined ? { signal: context.signal } : {})
+          })
+        )
       );
+      const jobs = Object.fromEntries(
+        statuses.map((status) => [status.jobId, status])
+      ) as Record<AiJobId, AgentJobStatus>;
+      return ok({ profileId: req.profileId, jobs });
     } catch (cause) {
       if (context.signal?.aborted === true) {
         return err(error("cancelled", "Agent discovery was cancelled."));
@@ -266,20 +278,6 @@ export function registerAgentHandlers(
         )
       );
     }
-  });
-
-  bus.register("agent:models", async (req, context) => {
-    if (!profileExists(req.profileId)) {
-      return err({
-        kind: "profile",
-        code: "not_found",
-        message: `No profile "${req.profileId}"`
-      });
-    }
-    return dependencies.session.models({
-      profileId: req.profileId,
-      ...(context.signal !== undefined ? { signal: context.signal } : {})
-    });
   });
 
   bus.register("agent:draftMessage", async (req, context) => {

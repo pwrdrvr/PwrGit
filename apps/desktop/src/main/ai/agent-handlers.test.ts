@@ -3,8 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   err,
   ok,
-  type AgentAvailability,
   type AgentInputManifest,
+  type AgentJobStatus,
+  type AiJobId,
   type AgentMessageDraft,
   type AgentTidyProposal,
   type RebaseCommitRef,
@@ -28,13 +29,18 @@ const commits: RebaseCommitRef[] = [
   { hash: "aaaaaaaa", subject: "older" }
 ];
 
-const unavailable: AgentAvailability = {
-  profileId: "work",
-  status: "unavailable",
-  selectedProviderId: null,
-  message: "No local agent is set up. Squash and Reorder work without one.",
-  providers: []
-};
+/** The default for every profile: the AI switch is off until turned on. */
+function disabled(jobId: AiJobId): AgentJobStatus {
+  return {
+    jobId,
+    state: "disabled",
+    message: "AI features are off for this profile.",
+    providerName: null,
+    model: null,
+    modelLabel: null,
+    effort: null
+  };
+}
 
 const manifest: AgentInputManifest = {
   source: "commits",
@@ -93,8 +99,7 @@ function fakeDb(): DB {
 
 function fakeSession(overrides: Partial<AgentSession> = {}): AgentSession {
   return {
-    availability: vi.fn(async () => unavailable),
-    models: vi.fn(async () => ok({ providerId: "codex", models: [] })),
+    jobStatus: vi.fn(async ({ jobId }) => disabled(jobId)),
     draftMessage: vi.fn(async (input) => ok(draft(input.requestId))),
     proposeTidy: vi.fn(async (input) => ok(tidy(input.requestId))),
     reset: vi.fn(async () => undefined),
@@ -148,7 +153,12 @@ describe("agent command safety", () => {
     const bus = new CommandBus();
     const deps = handlerDeps();
     const session = fakeSession({
-      availability: vi.fn(async () => ({ ...unavailable, status: "ready" as const }))
+      jobStatus: vi.fn(async ({ jobId }) => ({
+        ...disabled(jobId),
+        state: "ready" as const,
+        message: "",
+        providerName: "Codex"
+      }))
     });
     const lifecycle = registerAgentHandlers(bus, fakeDb(), { session, ...deps });
 
@@ -189,7 +199,7 @@ describe("agent command safety", () => {
     await lifecycle.dispose();
   });
 
-  it("reports an unavailable agent without disabling the deterministic draft and check", async () => {
+  it("reports AI switched off without disabling the deterministic draft and check", async () => {
     const bus = new CommandBus();
     const lifecycle = registerAgentHandlers(bus, fakeDb(), {
       session: fakeSession(),
@@ -218,7 +228,13 @@ describe("agent command safety", () => {
       op: "reorder"
     });
 
-    expect(availability).toEqual(ok(unavailable));
+    // Both jobs answer, each in the resolver's words.
+    expect(availability).toEqual(
+      ok({
+        profileId: "work",
+        jobs: { commitMessage: disabled("commitMessage"), historyEditing: disabled("historyEditing") }
+      })
+    );
     expect(deterministic.ok && deterministic.value.valid).toBe(true);
     expect(checked.ok && checked.value.status).toBe("clean");
     expect(checked.ok && checked.value.status === "clean" && checked.value.proof).toEqual(proof);

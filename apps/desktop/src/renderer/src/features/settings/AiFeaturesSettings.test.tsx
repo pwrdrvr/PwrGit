@@ -246,12 +246,12 @@ describe("AI Features — availability", () => {
 });
 
 describe("AI Features — default agents", () => {
-  it("offers only Codex for rebase review, and says why", async () => {
+  it("offers only Codex for history editing, and says why", async () => {
     // Grok is enabled, and would be offered for a job that accepts ACP.
     settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, acp: { enabledAgentIds: ["grok"], agents: {} } };
     await render();
 
-    const provider = select("Rebase review provider");
+    const provider = select("History editing provider");
     expect(options(provider)).toEqual(["Codex"]);
     expect(provider.disabled).toBe(true);
     expect(container.textContent).toContain("no-tools boundary");
@@ -261,22 +261,22 @@ describe("AI Features — default agents", () => {
     settings = {
       ...DEFAULT_AI_PROVIDER_SETTINGS,
       acp: { enabledAgentIds: ["grok"], agents: {} },
-      jobs: { rebaseReview: { provider: "grok" } }
+      jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { provider: "grok" } }
     };
     await render();
 
-    expect(select("Rebase review provider").value).toBe("codex");
+    expect(select("History editing provider").value).toBe("codex");
   });
 
   it("lists Codex's visible models and names what Default means", async () => {
     await render();
 
-    expect(options(select("Rebase review model"))).toEqual([
+    expect(options(select("History editing model"))).toEqual([
       "Default (GPT Luna)",
       "GPT Luna",
       "GPT Mini"
     ]);
-    expect(options(select("Rebase review reasoning effort"))).toEqual([
+    expect(options(select("History editing reasoning effort"))).toEqual([
       "Default (medium)",
       "low",
       "medium",
@@ -285,28 +285,28 @@ describe("AI Features — default agents", () => {
   });
 
   it("clears an effort the newly chosen model does not take", async () => {
-    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { rebaseReview: { reasoning: "high" } } };
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { reasoning: "high" } } };
     await render();
 
-    await choose(select("Rebase review model"), "gpt-mini");
+    await choose(select("History editing model"), "gpt-mini");
 
-    expect(updates()).toEqual([{ jobs: { rebaseReview: { model: "gpt-mini", reasoning: "" } } }]);
+    expect(updates()).toEqual([{ jobs: { historyEditing: { model: "gpt-mini", reasoning: "" } } }]);
   });
 
   it("clears a stored model the running provider does not offer, once", async () => {
     // Left behind by another provider: shown as Default, and still sent every
     // run until it is cleared.
-    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { rebaseReview: { model: "grok-build" } } };
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { model: "grok-build" } } };
     await render();
 
-    expect(select("Rebase review model").value).toBe("");
-    expect(updates()).toEqual([{ jobs: { rebaseReview: { model: "" } } }]);
+    expect(select("History editing model").value).toBe("");
+    expect(updates()).toEqual([{ jobs: { historyEditing: { model: "" } } }]);
   });
 
   it("leaves a stored model alone while Codex's list is unavailable", async () => {
     // An empty list may be a failed read, not proof the model is gone.
     models = [];
-    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { rebaseReview: { model: "gpt-luna" } } };
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { model: "gpt-luna" } } };
     await render();
 
     expect(updates()).toEqual([]);

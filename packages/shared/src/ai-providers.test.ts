@@ -128,13 +128,13 @@ describe("effectiveJobProvider", () => {
     return {
       ...DEFAULT_AI_PROVIDER_SETTINGS,
       acp: { enabledAgentIds, agents: {} },
-      jobs: { rebaseReview: job }
+      jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: job }
     };
   }
 
   it("runs an unset job on Codex", () => {
-    expect(effectiveJobProvider(DEFAULT_AI_PROVIDER_SETTINGS, "rebaseReview")).toBe("codex");
-    expect(effectiveJobProvider(settings({ model: "gpt-5.1-codex" }), "rebaseReview")).toBe(
+    expect(effectiveJobProvider(DEFAULT_AI_PROVIDER_SETTINGS, "historyEditing")).toBe("codex");
+    expect(effectiveJobProvider(settings({ model: "gpt-5.1-codex" }), "historyEditing")).toBe(
       "codex"
     );
   });
@@ -142,29 +142,29 @@ describe("effectiveJobProvider", () => {
   it("runs a job whose settings predate it on Codex rather than throwing", () => {
     // A blob written before the job existed has no entry for it at all.
     const stale = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: {} } as unknown as AiProviderSettings;
-    expect(effectiveJobProvider(stale, "rebaseReview")).toBe("codex");
+    expect(effectiveJobProvider(stale, "historyEditing")).toBe("codex");
   });
 
   it("runs a job pinned to Codex on Codex", () => {
-    expect(effectiveJobProvider(settings({ provider: "codex" }, ["grok"]), "rebaseReview")).toBe(
+    expect(effectiveJobProvider(settings({ provider: "codex" }, ["grok"]), "historyEditing")).toBe(
       "codex"
     );
   });
 
-  it("runs a rebase review on Codex even when an enabled ACP agent is stored for it", () => {
+  it("runs history editing on Codex even when an enabled ACP agent is stored for it", () => {
     // The job cannot hold an ACP agent to its no-tools boundary, so the stored
     // choice is overridden rather than honoured — the enablement is irrelevant.
-    expect(AI_JOBS.rebaseReview.acp).toBe(false);
+    expect(AI_JOBS.historyEditing.acp).toBe(false);
     expect(
-      effectiveJobProvider(settings({ provider: "grok" }, ["grok", "kimi"]), "rebaseReview")
+      effectiveJobProvider(settings({ provider: "grok" }, ["grok", "kimi"]), "historyEditing")
     ).toBe("codex");
   });
 
   it("runs a job whose stored ACP agent is no longer enabled on Codex", () => {
-    expect(effectiveJobProvider(settings({ provider: "kimi" }, ["grok"]), "rebaseReview")).toBe(
+    expect(effectiveJobProvider(settings({ provider: "kimi" }, ["grok"]), "historyEditing")).toBe(
       "codex"
     );
-    expect(effectiveJobProvider(settings({ provider: "kimi" }), "rebaseReview")).toBe("codex");
+    expect(effectiveJobProvider(settings({ provider: "kimi" }), "historyEditing")).toBe("codex");
   });
 
   it.each(AI_JOB_IDS)("routes %s to an enabled agent exactly when the job accepts one", (jobId) => {

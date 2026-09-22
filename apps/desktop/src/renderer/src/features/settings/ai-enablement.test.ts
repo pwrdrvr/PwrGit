@@ -66,10 +66,10 @@ describe("resolveAiToggleAction", () => {
 describe("firstUnreadyAiProvider", () => {
   const settings: AiProviderSettings = DEFAULT_AI_PROVIDER_SETTINGS;
 
-  it("asks only about Codex while rebase review is the one feature", () => {
-    // Rebase review refuses ACP, so a stored agent choice does not count.
+  it("asks only about Codex while every job is Codex-only", () => {
+    // History editing refuses ACP, so a stored agent choice does not count.
     expect(
-      jobProviders({ ...settings, jobs: { rebaseReview: { provider: "grok" } } })
+      jobProviders({ ...settings, jobs: { ...settings.jobs, historyEditing: { provider: "grok" } } })
     ).toEqual(["codex"]);
   });
 
