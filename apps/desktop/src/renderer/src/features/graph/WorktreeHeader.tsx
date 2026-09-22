@@ -276,6 +276,18 @@ export function WorktreeHeader({
   };
 
   /**
+   * Start counting one Fetch, Pull or Push. The returned guard answers whether
+   * its outcome still belongs on screen: the same checkout, and nothing started
+   * since (see `remoteOperation`).
+   */
+  const beginOperation = (worktreeId: string): (() => boolean) => {
+    const operation = ++remoteOperation.current;
+    return () =>
+      activeWorktreeId.current === worktreeId &&
+      remoteOperation.current === operation;
+  };
+
+  /**
    * Offer to switch the remote from HTTPS to SSH after Git refused `kind` for
    * want of a credential it may not prompt for.
    *
@@ -321,15 +333,12 @@ export function WorktreeHeader({
     label: string
   ): Promise<void> => {
     const worktreeId = worktree.id;
-    const operation = ++remoteOperation.current;
     // The same guard `onPull` and `onPush` carry, and now load-bearing for a
     // third reason: an outcome that settles the card of a checkout it does not
     // belong to puts one worktree's error under another's title — and reports
     // it as carried, so the toast that should have caught it never fires.
     // The reset effect above clears `busy` on the switch.
-    const current = (): boolean =>
-      activeWorktreeId.current === worktreeId &&
-      remoteOperation.current === operation;
+    const current = beginOperation(worktreeId);
     setBusy(kind);
     const result = await fn();
     if (!current()) return;
@@ -360,10 +369,7 @@ export function WorktreeHeader({
   };
   const onPull = (): void => {
     const worktreeId = id;
-    const operation = ++remoteOperation.current;
-    const current = (): boolean =>
-      activeWorktreeId.current === worktreeId &&
-      remoteOperation.current === operation;
+    const current = beginOperation(worktreeId);
     setBusy("pull");
     void dispatch("remote:pull", { worktreeId }).then(async (result) => {
       if (!result.ok) {
@@ -486,10 +492,7 @@ export function WorktreeHeader({
 
   const onPush = (publish?: PushPublishTarget): void => {
     const worktreeId = id;
-    const operation = ++remoteOperation.current;
-    const current = (): boolean =>
-      activeWorktreeId.current === worktreeId &&
-      remoteOperation.current === operation;
+    const current = beginOperation(worktreeId);
     setBusy("push");
     void dispatch("remote:push", {
       worktreeId,
