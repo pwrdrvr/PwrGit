@@ -181,7 +181,12 @@ describe("PR chip draft bar", () => {
           name: `sidebar pill, ${title}px titles`,
           height: font + sidebarPillOverType,
           font,
-          bar: px(declared(SIDEBAR_BAR, "height"), "sidebar bar height")
+          // Without its own override the sidebar draws the shared bar, as the
+          // cascade would; that is the case this check exists to reject.
+          bar: px(
+            declared(SIDEBAR_BAR, "height") ?? declared(BAR, "height"),
+            "sidebar bar height"
+          )
         };
       })
     ];
