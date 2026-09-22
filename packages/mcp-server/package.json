@@ -30,7 +30,7 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "ws": "^8.18.3",
     "dugite": "^3.2.3",
-    "zod": "^4.5.4"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1"

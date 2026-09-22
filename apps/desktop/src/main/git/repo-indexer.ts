@@ -225,6 +225,22 @@ const defaultYieldToEventLoop = (): Promise<void> =>
  */
 const CHANGE_REQUEST_SEARCH_LIMIT = 15;
 
+/**
+ * Which profile is searching, and whether it wants the others too.
+ *
+ * `profileId` is the profile whose window asked — it ranks its own rows first
+ * either way. `allProfiles` is the reader's choice (Settings → General →
+ * Search all profiles), off by default: another profile's branch answering a
+ * query here is a surprise unless it was asked for.
+ */
+export type SearchScope = {
+  profileId: ProfileId | null;
+  allProfiles: boolean;
+};
+
+/** No window in particular, every profile — the default for tests and tools. */
+const EVERY_PROFILE: SearchScope = { profileId: null, allProfiles: true };
+
 /** A matched open change request, and the ref in the checkout holding its head. */
 type ChangeRequestMatch = {
   hit: RepoSearchHit;
@@ -743,14 +759,22 @@ export class RepoIndexer {
   }
 
   /** ⌘F search: repos, worktrees (by branch/path), and branches with no
-   *  worktree — remote-only (0019) and local-only (0022) — across all profiles,
+   *  worktree — remote-only (0019) and local-only (0022) —
    *  through the FTS5 index (0008_search_fts) — prefix matching per token,
    *  any token order, diacritic/punctuation-insensitive, one bm25-ranked
    *  mixed list with names weighted above paths. Empty/junk queries fall
-   *  back to browsing repos by name (the overlay's initial state). */
-  searchAll(query: string): RepoSearchHit[] {
+   *  back to browsing repos by name (the overlay's initial state).
+   *
+   *  `scope` says which profile's window asked and whether it wants the other
+   *  profiles too (Settings → Search all profiles). The filter is a WHERE
+   *  clause rather than a pass over the answer because both queries below are
+   *  capped — see 0033_search_profile_scope.sql. Even unfiltered, the asking
+   *  profile's own rows rank first. */
+  searchAll(query: string, scope: SearchScope = EVERY_PROFILE): RepoSearchHit[] {
     const fts = buildFtsQuery(query);
-    if (fts === null) return this.browseRepos();
+    if (fts === null) return this.browseRepos(scope);
+    const only = scope.allProfiles ? null : scope.profileId;
+    const mine = scope.profileId;
 
     // Exact literal names come first so the intended row survives the result
     // cap — a name the user typed in full, or the final segment of a repo's or
@@ -767,18 +791,22 @@ export class RepoIndexer {
     const prLike = prNumber === null ? null : `${prNumber} %`;
     const refs = this.db
       .prepare(
+        // One statement for both scopes: a null `profileId` satisfies the
+        // first test and leaves every profile in.
         `SELECT entity_id, kind FROM search_fts
          WHERE search_fts MATCH ? AND kind <> 'change_request'
+           AND (? IS NULL OR profile_id = ?)
          ORDER BY CASE WHEN name = ? COLLATE NOCASE
                          OR (kind IN ('repo', 'worktree')
                              AND (path LIKE ? ESCAPE '\\'
                                   OR path LIKE ? ESCAPE '\\'))
                          OR pr LIKE ?
                        THEN 0 ELSE 1 END,
-                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
+                  profile_id = ? DESC,
+                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT 60`
       )
-      .all(fts, query.trim(), leafPosix, leafWindows, prLike) as {
+      .all(fts, only, only, query.trim(), leafPosix, leafWindows, prLike, mine) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
     }[];
@@ -792,11 +820,13 @@ export class RepoIndexer {
       .prepare(
         `SELECT entity_id, kind FROM search_fts
          WHERE search_fts MATCH ? AND kind = 'change_request'
+           AND (? IS NULL OR profile_id = ?)
          ORDER BY CASE WHEN pr LIKE ? THEN 0 ELSE 1 END,
-                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0)
+                  profile_id = ? DESC,
+                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT ${CHANGE_REQUEST_SEARCH_LIMIT}`
       )
-      .all(fts, prLike) as {
+      .all(fts, only, only, prLike, mine) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
     }[];
@@ -1162,15 +1192,21 @@ export class RepoIndexer {
   }
 
   /** The overlay's empty-query state: all repos, pinned first, alphabetical. */
-  private browseRepos(): RepoSearchHit[] {
+  private browseRepos(scope: SearchScope = EVERY_PROFILE): RepoSearchHit[] {
+    const only = scope.allProfiles ? null : scope.profileId;
     const rows = this.db
       .prepare(
+        // Scoped in SQL for the same reason the search is: this list is capped
+        // at 50, and another profile's pinned repos would otherwise take the
+        // slots before this profile's own repos are reached.
         `SELECT r.id, r.name, r.path, r.profile_id, r.pinned, p.name AS profile_name,
                 (SELECT COUNT(*) FROM worktrees w WHERE w.repo_id = r.id) AS wt_count
          FROM repos r JOIN profiles p ON p.id = r.profile_id
-         ORDER BY r.pinned DESC, r.name COLLATE NOCASE, r.name LIMIT 50`
+         WHERE ? IS NULL OR r.profile_id = ?
+         ORDER BY r.profile_id = ? DESC, r.pinned DESC,
+                  r.name COLLATE NOCASE, r.name LIMIT 50`
       )
-      .all() as {
+      .all(only, only, scope.profileId) as {
       id: string;
       name: string;
       path: string;

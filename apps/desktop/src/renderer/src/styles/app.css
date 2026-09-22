@@ -2441,6 +2441,9 @@ textarea,
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-muted);
 }
+.overlay-search__scope {
+  flex: 0 0 auto;
+}
 .overlay-search input {
   flex: 1;
   background: transparent;
@@ -2620,7 +2623,6 @@ textarea,
   font: 500 10.5px/1 var(--font-mono);
   color: var(--text-subtle);
 }
-
 /* ---- Clone repository dialog ---- */
 
 .clone-backdrop {
@@ -9114,7 +9116,8 @@ body.is-col-resizing {
    sidebar-contrast.test.ts). Hover keeps that floored surface and firms the
    ring to solid accent, so it stays the same object under the pointer and
    never paints the icon on an unmeasured tint. */
-.diff-pane__close {
+.diff-pane__close,
+.overlay-close {
   width: 26px;
   height: 26px;
   padding: 0;
@@ -9128,10 +9131,12 @@ body.is-col-resizing {
   color: var(--accent-bright);
   cursor: pointer;
 }
-.diff-pane__close:hover {
+.diff-pane__close:hover,
+.overlay-close:hover {
   border-color: var(--accent);
 }
-.diff-pane__close:focus-visible {
+.diff-pane__close:focus-visible,
+.overlay-close:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }

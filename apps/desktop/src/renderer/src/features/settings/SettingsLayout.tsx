@@ -627,6 +627,8 @@ export function SettingsField(props: {
 /** Segmented radio-group control (start delay, trigger mode, ...). */
 export function SettingsSegmented<TValue extends string | number>(props: {
   "aria-label": string;
+  /** Keyboard shortcut that changes the choice, in aria-keyshortcuts form. */
+  "aria-keyshortcuts"?: string;
   disabled?: boolean;
   options: Array<{ value: TValue; label: string; meta?: string }>;
   value: TValue;
@@ -637,6 +639,7 @@ export function SettingsSegmented<TValue extends string | number>(props: {
       className="settings-segmented"
       role="radiogroup"
       aria-label={props["aria-label"]}
+      aria-keyshortcuts={props["aria-keyshortcuts"]}
     >
       {props.options.map((option) => (
         <button

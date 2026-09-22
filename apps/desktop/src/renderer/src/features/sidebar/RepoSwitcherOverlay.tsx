@@ -15,9 +15,11 @@ import { createAsyncFill } from "../../lib/asyncFill";
 import { copyText } from "../../lib/copyText";
 import {
   currentPlatform,
+  hasPrimaryModifier,
+  isMacPlatform,
   shortcutLabel
 } from "../../lib/platform";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe, windowProfileId } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import {
   hoverTooltip,
@@ -26,6 +28,7 @@ import {
 import { shortWhen } from "../graph/graph-view";
 import { commitHashQuery, searchCommits } from "./commit-search";
 import { ContextMenu } from "../shell/ContextMenu";
+import { SettingsSegmented } from "../settings/SettingsLayout";
 import { PrChip } from "./PrChip";
 import { worktreeFolderLabel } from "./repo-view";
 import { PinIcon } from "./WorktreeRow";
@@ -338,6 +341,7 @@ export function RepoSwitcherOverlay({
   onPick,
   onPickCommit,
   onPickFile,
+  profileCount,
   platform = currentPlatform()
 }: {
   commits: Commit[];
@@ -350,6 +354,9 @@ export function RepoSwitcherOverlay({
   onPick: (hit: RepoSearchHit) => void;
   onPickCommit: (commit: Commit) => void;
   onPickFile: (path: string) => void;
+  /** How many profiles exist. The scope toggle only appears with two or more:
+   *  with one, "this profile" and "all profiles" are the same search. */
+  profileCount: number;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -359,6 +366,10 @@ export function RepoSwitcherOverlay({
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<RepoSearchHit[]>([]);
+  // General → Search all profiles; null until the first read lands. The scope
+  // toggle writes that same setting rather than keeping its own, so the
+  // palette and Settings can never disagree about what ⌘K searches.
+  const [allProfiles, setAllProfiles] = useState<boolean | null>(null);
   const [files, setFiles] = useState<FileSearchHit[]>([]);
   const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Map<string, SearchHitStatus>>(
@@ -517,7 +528,40 @@ export function RepoSwitcherOverlay({
 
   useEffect(() => {
     let active = true;
-    void dispatch("repo:search", { query }).then((r) => {
+    void dispatch("settings:read", undefined).then((r) => {
+      if (active && r.ok) setAllProfiles(r.value.general.searchAllProfiles);
+    });
+    const off = subscribe("settings:changed", (snapshot) => {
+      setAllProfiles(snapshot.general.searchAllProfiles);
+    });
+    return () => {
+      active = false;
+      off();
+    };
+  }, []);
+
+  const showScope = profileCount > 1 && allProfiles !== null;
+  const chooseScope = (next: boolean): void => {
+    if (allProfiles === null || next === allProfiles) return;
+    setAllProfiles(next);
+    void dispatch("settings:update", {
+      patch: { general: { searchAllProfiles: next } }
+    }).then((r) => {
+      if (!r.ok) setAllProfiles(!next);
+    });
+  };
+
+  useEffect(() => {
+    let active = true;
+    // This window's profile decides the scope. The toggle's value travels with
+    // the query so the answer matches the scope shown even while the
+    // setting is still being saved; before the first read, main uses its own.
+    const profileId = windowProfileId();
+    void dispatch("repo:search", {
+      query,
+      ...(profileId === null ? {} : { profileId }),
+      ...(allProfiles === null ? {} : { allProfiles })
+    }).then((r) => {
       if (active && r.ok) {
         setResults(resolvePaletteHits(r.value, resolvedBranches.current));
       }
@@ -525,7 +569,7 @@ export function RepoSwitcherOverlay({
     return () => {
       active = false;
     };
-  }, [query]);
+  }, [query, allProfiles]);
 
   // Tracked files in the selected worktree. This is the only way into a file
   // that has not changed recently: the app has no file browser, so history and
@@ -663,6 +707,16 @@ export function RepoSwitcherOverlay({
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
+      return;
+    }
+    if (
+      showScope &&
+      hasPrimaryModifier(event, platform) &&
+      event.shiftKey &&
+      event.key.toLowerCase() === "a"
+    ) {
+      event.preventDefault();
+      chooseScope(allProfiles !== true);
       return;
     }
     // Tab reaches the selected row's visible action, then returns to search.
@@ -804,7 +858,47 @@ export function RepoSwitcherOverlay({
             spellCheck={false}
             placeholder="Search repos, branches, commits & files…"
           />
-          <span className="kbd">esc</span>
+          {showScope && (
+            // Beside the query it qualifies, and above the list, so the
+            // control stays under the pointer when the results change height.
+            <div
+              className="overlay-search__scope"
+              {...hoverTooltip(
+                tip,
+                `Which profiles to search (${shortcutLabel(
+                  { key: "A", shift: true },
+                  platform
+                )})`
+              )}
+            >
+              <SettingsSegmented
+                aria-label="Search scope"
+                // Tab never reaches this control (it cycles the query and the
+                // row's actions), so the shortcut must be announced here too.
+                aria-keyshortcuts={
+                  isMacPlatform(platform) ? "Meta+Shift+A" : "Control+Shift+A"
+                }
+                options={[
+                  { value: "this", label: "This profile" },
+                  { value: "all", label: "All profiles" }
+                ]}
+                value={allProfiles ? "all" : "this"}
+                onChange={(value) => chooseScope(value === "all")}
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            className="overlay-close"
+            aria-label="Close"
+            onClick={onClose}
+            {...hoverTooltip(tip, "Close (Esc)")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
         </div>
 
         {branchError !== null && (

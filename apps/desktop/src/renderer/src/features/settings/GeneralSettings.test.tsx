@@ -15,6 +15,7 @@ function render(platform: string): string {
       snapshot={snapshot}
       onThemeChange={() => undefined}
       onDeveloperModeChange={() => undefined}
+      onSearchAllProfilesChange={() => undefined}
       onSidebarTextSizeChange={() => undefined}
       onSidebarDensityChange={() => undefined}
       platform={platform}

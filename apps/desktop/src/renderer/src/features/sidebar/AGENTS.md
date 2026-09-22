@@ -60,7 +60,29 @@ shared `changeRequestMatch`, so `106` means #106 — never #1060 — in both pla
 With a query typed, every tab shows its own hit count, which is why the tag and
 remote searches run while their tabs are hidden.
 
-## The footer holds the profile's AI switch
+## The palette asks in this window's profile
+
+`repo:search` carries `windowProfileId()`, and main answers from that profile
+alone unless the search is widened. The search line's This profile / All
+profiles control (`SettingsSegmented`, ⇧⌘A, shown only with two or more
+profiles) **is** General → Search all profiles — it writes that setting rather
+than keeping its own, and follows `settings:changed`, so the palette and
+Settings cannot disagree. It sits on the search line, not the footer, so it
+stays under the pointer when the result list changes height. Each search also
+sends the scope shown (`allProfiles`), so results never lag a save in flight.
+Two consequences here:
+
+- **The profile badge on each row is load-bearing, not decoration.** With the
+  setting on, rows from elsewhere appear, and `App.tsx` routes a pick in
+  another profile to **that** profile's window instead of acting in this one —
+  one of the three ways to reach it.
+- **Do not filter or re-sort by profile in the renderer.** The index caps its
+  answer at 60 rows before any of it arrives, so a pass here is too late to put
+  back a row that was never sent. Both the scope and this-profile-first
+  ordering live in `searchAll` — see "Main cannot tell which profile is asking"
+  in `src/main/AGENTS.md`.
+
+## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.
 It is a footer and not a list row because the switch belongs to the profile,

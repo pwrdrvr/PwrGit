@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-elev: #101010;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-sub b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 720px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          /* ---- specimen stage ---- */
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: center; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 760px; }
+          .note code, .dv-sub code, .fitem code, .tr code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .note b { color: var(--t2); font-weight: 600; }
+          .pair { display: flex; gap: 24px; align-items: flex-start; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 396px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0 0 3px; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem p:last-child { margin-bottom: 0; }
+          .fitem b { color: var(--t2); font-weight: 600; }
+
+          /* =======================================================
+             Settings card, reproduced at shipped size from app.css
+             ======================================================= */
+          .sp { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 10px; }
+          .sp-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); background: var(--bg-elev); border-radius: 10px 10px 0 0; }
+          .sp-chev { flex: 0 0 auto; width: 16px; height: 16px; color: var(--t3); }
+          .sp-hm { flex: 1; min-width: 0; }
+          .sp-eb { margin: 0 0 4px; font: 650 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--acc); }
+          .sp-t { margin: 0; font: 700 15px/1.2 var(--sans); letter-spacing: -0.005em; color: var(--t1); }
+          .sp-d { margin: 5px 0 0; font: 400 12px/1.5 var(--sans); color: var(--t3); max-width: 62ch; }
+          .sp-b { padding: 6px 16px 12px; }
+          .chip { flex: 0 0 auto; align-self: flex-start; font: 600 10.5px/1 var(--sans); letter-spacing: 0.03em; color: var(--t3); background: var(--bg-elev); border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; }
+          .chip.err { color: var(--badt); background: var(--badsoft); border-color: transparent; }
+          .chip.warn { color: var(--warn); background: var(--warnsoft); border-color: transparent; }
+
+          .f { display: flex; align-items: flex-start; gap: 18px; padding: 11px 0; }
+          .f + .f { border-top: 1px solid var(--line); }
+          .f-l { display: flex; flex-direction: column; gap: 3px; flex: 0 0 230px; font: 550 12.5px/1.35 var(--sans); color: var(--t1); }
+          .f-sub { font: 400 11.5px/1.45 var(--sans); color: var(--t3); }
+          .f-c { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; flex: 1; min-width: 0; }
+          .f-help { font: 400 11px/1.45 var(--sans); color: var(--tsub); max-width: 46ch; overflow-wrap: anywhere; }
+          .f-err { margin: 0; font: 500 11.5px/1.4 var(--sans); color: var(--badt); }
+
+          /* the value, as built: a bare span inheriting the 16px document font */
+          .v-now { font: 400 16px/normal var(--sans); color: var(--t1); overflow-wrap: anywhere; }
+          /* the value, proposed: .about-identity-value, already in app.css */
+          .v-new { font: 550 11.5px/1.45 var(--mono); color: var(--t1); overflow-wrap: anywhere; }
+          .v-absent { font: 550 11.5px/1.45 var(--mono); color: var(--tsub); }
+
+          .btn { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg-elev); color: var(--t1); font: 550 11.5px/1 var(--sans); }
+
+          /* ---- rulers / callouts ---- */
+          .ruler { position: relative; }
+          .rule-v { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--bad); opacity: 0.55; }
+          .tag { position: absolute; font: 600 9px/1 var(--mono); color: var(--badt); background: #050505; padding: 2px 4px; border-radius: 3px; white-space: nowrap; }
+
+          /* ---- matrix table ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 196px 92px 150px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr.last { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--t1); font-weight: 600; }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: var(--oksoft); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; a card whose loudest text is command output</span>
+        </div>
+        <p class="dv-sub"><a href="https://github.com/pwrdrvr/PwrGit/pull/296">PR&nbsp;#296</a> pins every PwrGit repository command to the bundled Git and Git&nbsp;LFS, and adds one read-only card to Settings&nbsp;&#8250;&nbsp;General to say so. Pinning the runtime is right and the card earns its place: "which Git is this actually running" was unanswerable before. What ships underneath it is four rows of raw <code>--version</code> stdout at 16&nbsp;px, under a status chip that cannot report a status. Every specimen below is reproduced at shipped size from <code>app.css</code>, with the version strings the probes really return &#8212; <b>the PR screenshot's fixture cropped the Git&nbsp;LFS build tail, which does not crop in the app.</b></p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a The card as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Settings &#8250; General &#8250; Git runtime, as built, at the 760&nbsp;px column</div>
+            <div class="stage" style="width:826px">
+              <div class="stage-h"><span class="pin">1</span>As built <em>GitRuntimeSettings.tsx &#183; realistic probe output</em></div>
+              <div class="sp ruler" style="width:760px">
+                <div class="sp-h">
+                  <svg class="sp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                  <div class="sp-hm">
+                    <p class="sp-eb">Git</p>
+                    <h3 class="sp-t">Git runtime</h3>
+                    <p class="sp-d">PwrGit uses its bundled Git and Git LFS by default for repository operations. Installed versions are shown for reference.</p>
+                  </div>
+                  <span class="chip">Bundled &#183; In use &#183; Default</span>
+                </div>
+                <div class="sp-b">
+                  <div class="f">
+                    <div class="f-l"><span>Bundled Git</span></div>
+                    <div class="f-c"><span class="v-now">git version 2.53.0</span><span class="f-help">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Bundled Git LFS</span></div>
+                    <div class="f-c"><span class="v-now">git-lfs/3.7.1 (GitHub; darwin arm64; go 1.24.0)</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git</span><span class="f-sub">Discovered on the CLI search path; not used by PwrGit.</span></div>
+                    <div class="f-c"><span class="v-now">git version 2.50.1</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git LFS</span><span class="f-sub">Discovered on the CLI search path; not used by PwrGit.</span></div>
+                    <div class="f-c"><span class="v-now">git-lfs/3.6.1 (GitHub; darwin arm64; go 1.23.4)</span></div>
+                  </div>
+                </div>
+                <div class="rule-v" style="left:262px"></div>
+                <span class="tag" style="left:266px; bottom:-9px">control column starts here &#183; 478&nbsp;px</span>
+              </div>
+              <p class="note">Measured in the browser against the shipped stylesheets: the value is <b>16&nbsp;px Geist&nbsp;400</b> &#8212; larger than the 15&nbsp;px section title, 28&nbsp;% larger than its own 12.5&nbsp;px label, and the largest text anywhere in the card. It is the only text in the body that nobody styled: <code>control={&lt;span&gt;{status.bundled.git}&lt;/span&gt;}</code> inherits the document's 16&nbsp;px, because <code>.settings-panel__body</code> sets no font. Four rows of stdout therefore outrank every word a person wrote.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Five findings</div>
+            <div class="stage find">
+              <div class="fitem">
+                <span class="pin">1</span>
+                <div>
+                  <h4>The value is prose where every peer is a specimen</h4>
+                  <p>Settings&nbsp;&#8250;&nbsp;About does this exact job one pane away, and does it in <code>.about-identity-value</code> &#8212; <b>11.5&nbsp;px mono, <code>overflow-wrap: anywhere</code>, selectable</b>. That class already exists in <code>app.css</code>. The new card reimplements half of it as an inline <code>style</code> object setting <code>overflowWrap: "anywhere"</code> on the container and skips the font entirely.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">2</span>
+                <div>
+                  <h4>It prints stdout, not a version</h4>
+                  <p>The label already says "Bundled Git"; the value says <code>git version 2.53.0</code> again. And <code>git lfs version</code> really returns <code>git-lfs/3.7.1 (GitHub; darwin arm64; go 1.24.0)</code> &#8212; platform and Go toolchain included. The PR screenshot's fixture shows a bare <code>git-lfs/3.7.1</code>, so <b>the noisiest thing the card renders is the one thing the screenshot does not show</b>.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">3</span>
+                <div>
+                  <h4>The chip cannot be wrong, so it is not a status</h4>
+                  <p><code>active</code> and <code>default</code> are typed <code>"bundled"</code> &#8212; the only value either can hold &#8212; and the renderer never reads them: the string is hardcoded. It says three things, and "Default" implies a non-default the app does not offer. Every other chip in this window reports something live: <code>On&#8239;/&#8239;Off</code>, <code>Listening&#8239;/&#8239;Failed</code>, <code>Packaged</code>, <code>Stable&nbsp;&#183;&nbsp;Latest</code>.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">4</span>
+                <div>
+                  <h4>The same sentence, four times</h4>
+                  <p>The description says bundled is the default. The chip says it again. Then <b>both</b> installed rows carry the identical two-line sub &#8212; "Discovered on the CLI search path; not used by PwrGit." &#8212; which is the tallest thing in the label column, verbatim, twice.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">5</span>
+                <div>
+                  <h4>Two states have no design</h4>
+                  <p>See <a href="#1d">1d</a>. A failed probe renders a bare sentence at 16&nbsp;px inside <code>role="status"</code> with no retry, and the probe runs once on mount &#8212; so a transient failure lasts until the window is reopened. A <b>missing bundled Git</b> prints "Unavailable" twice while the chip still says the runtime is in use.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c At the minimum width">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>The same card at the Settings window's own minimum</div>
+            <div class="pair">
+              <div class="stage" style="width:556px">
+                <div class="stage-h"><span class="pin">6</span>Window at 760&nbsp;px <em>minWidth &#183; settings-window.ts:33</em></div>
+                <div class="sp" style="width:508px">
+                  <div class="sp-h">
+                    <svg class="sp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                    <div class="sp-hm">
+                      <p class="sp-eb">Git</p>
+                      <h3 class="sp-t">Git runtime</h3>
+                      <p class="sp-d">PwrGit uses its bundled Git and Git LFS by default for repository operations. Installed versions are shown for reference.</p>
+                    </div>
+                    <span class="chip">Bundled &#183; In use &#183; Default</span>
+                  </div>
+                  <div class="sp-b">
+                    <div class="f">
+                      <div class="f-l"><span>Bundled Git</span></div>
+                      <div class="f-c"><span class="v-now">git version 2.53.0</span><span class="f-help">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span></div>
+                    </div>
+                    <div class="f">
+                      <div class="f-l"><span>Bundled Git LFS</span></div>
+                      <div class="f-c"><span class="v-now">git-lfs/3.7.1 (GitHub; darwin arm64; go 1.24.0)</span></div>
+                    </div>
+                    <div class="f">
+                      <div class="f-l"><span>Installed Git</span><span class="f-sub">Discovered on the CLI search path; not used by PwrGit.</span></div>
+                      <div class="f-c"><span class="v-now">git version 2.50.1</span></div>
+                    </div>
+                    <div class="f">
+                      <div class="f-l"><span>Installed Git LFS</span><span class="f-sub">Discovered on the CLI search path; not used by PwrGit.</span></div>
+                      <div class="f-c"><span class="v-now">git-lfs/3.6.1 (GitHub; darwin arm64; go 1.23.4)</span></div>
+                    </div>
+                  </div>
+                </div>
+                <p class="note">760&nbsp;px window &#8722; 208&nbsp;px nav &#8722; 44&nbsp;px content padding leaves a <b>508&nbsp;px card</b>. The label column is <code>flex: 0 0 230px</code> and does not yield, so the control gets <b>182&nbsp;px</b>: both Git&nbsp;LFS rows break across two lines and the executable path breaks mid&#8209;token. The column that holds the machine values is the one that gives up its width first.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1d" data-screen-label="1d The undrawn states">
+            <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>The two states nobody drew</div>
+            <div class="pair">
+              <div class="stage" style="width:556px">
+                <div class="stage-h"><span class="pin">7</span>Probe failed <em>dispatch rejected, or git:runtimeStatus errored</em></div>
+                <div class="sp" style="width:508px">
+                  <div class="sp-h">
+                    <svg class="sp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                    <div class="sp-hm">
+                      <p class="sp-eb">Git</p>
+                      <h3 class="sp-t">Git runtime</h3>
+                      <p class="sp-d">PwrGit uses its bundled Git and Git LFS by default for repository operations. Installed versions are shown for reference.</p>
+                    </div>
+                    <span class="chip">Bundled &#183; In use &#183; Default</span>
+                  </div>
+                  <div class="sp-b"><span class="v-now">Could not inspect Git versions.</span></div>
+                </div>
+                <p class="note">The message is <code>--text-primary</code> at 16&nbsp;px, carries no error tone, offers no retry, and sits under a chip still claiming the runtime is in use. <code>AboutSettings</code>' "This build" card answers the identical failure with <code>role="alert"</code>, a red sentence and a <b>Retry</b> button that re-runs the read.</p>
+              </div>
+              <div class="stage" style="width:556px">
+                <div class="stage-h"><span class="pin">8</span>Bundled Git missing <em>bundled.git === null</em></div>
+                <div class="sp" style="width:508px">
+                  <div class="sp-h">
+                    <svg class="sp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                    <div class="sp-hm">
+                      <p class="sp-eb">Git</p>
+                      <h3 class="sp-t">Git runtime</h3>
+                      <p class="sp-d">PwrGit uses its bundled Git and Git LFS by default for repository operations. Installed versions are shown for reference.</p>
+                    </div>
+                    <span class="chip">Bundled &#183; In use &#183; Default</span>
+                  </div>
+                  <div class="sp-b">
+                    <div class="f">
+                      <div class="f-l"><span>Bundled Git</span></div>
+                      <div class="f-c"><span class="v-now">Unavailable</span><span class="f-help">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span></div>
+                    </div>
+                    <div class="f">
+                      <div class="f-l"><span>Bundled Git LFS</span></div>
+                      <div class="f-c"><span class="v-now">Unavailable</span></div>
+                    </div>
+                    <div class="f">
+                      <div class="f-l"><span>Installed Git</span><span class="f-sub">Discovered on the CLI search path; not used by PwrGit.</span></div>
+                      <div class="f-c"><span class="v-now">git version 2.50.1</span></div>
+                    </div>
+                  </div>
+                </div>
+                <p class="note">This is the state where <b>no repository operation in PwrGit can run</b> &#8212; the PR is explicit that a missing bundled executable must not fall back to system Git. The card reports it in the same neutral grey as everything else, three rows down, while the header says "Bundled &#183; In&nbsp;use &#183; Default" and an installed Git the app has just refused to use sits directly underneath, reading like an answer.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Next &#8212; <a href="#2a">2a</a> the chip that can be wrong &#183; <a href="#2b">2b</a> the value ladder &#183; <a href="#2c">2c</a> saying the installed caveat once &#183; <a href="#2d">2d</a> the card redrawn</p>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The redraw &#8212; four changes, none of them new CSS</span>
+        </div>
+        <p class="dv-sub">Every class this needs is already in <code>app.css</code>, and the section primitive already takes the prop. <code>SettingsSection</code> accepts <code>chipKind</code> (<code>default&#8239;/&#8239;ok&#8239;/&#8239;warn&#8239;/&#8239;err</code>); <code>.about-identity-value</code> is the mono value type; <code>.settings-field__error</code> is the red sentence; <code>.settings-button</code> is Retry. The work is choosing what to say, not what to build.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a The chip">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>One word that can be wrong</div>
+            <div class="stage" style="width:470px">
+              <div class="stage-h"><span class="pin">3</span>Before <em>a constant, in every state</em></div>
+              <div style="display:flex; align-items:center; gap:10px; padding:8px 0"><span class="chip">Bundled &#183; In use &#183; Default</span></div>
+              <div class="stage-h" style="margin-top:4px"><span class="pin ok">3</span>After <em>chipKind follows bundled.git</em></div>
+              <div style="display:flex; align-items:center; gap:10px; padding:8px 0; flex-wrap:wrap">
+                <span class="chip">Bundled</span>
+                <span class="chip err">Unavailable</span>
+                <span class="chip warn">Unknown</span>
+              </div>
+              <p class="note"><b>Bundled</b> when the probe answered &#8212; the one fact the chip is for, and the one the description already explains. <b>Unavailable</b>, <code>chipKind="err"</code>, when <code>bundled.git</code> is null: the card must look broken in the state where Git cannot run. <b>Unknown</b>, <code>chipKind="warn"</code>, when the probe itself failed, which is not the same as Git being missing. "In use" and "Default" then stop competing with a description that says both in a full sentence.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b The value ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The value, at the size its neighbours use</div>
+            <div class="stage" style="width:560px">
+              <div class="stage-h"><span class="pin">1</span><span class="pin">2</span>Before <em>bare span &#183; 16&nbsp;px sans &#183; stdout verbatim</em></div>
+              <div style="padding:6px 0"><span class="v-now">git-lfs/3.7.1 (GitHub; darwin arm64; go 1.24.0)</span></div>
+              <div class="stage-h" style="margin-top:4px"><span class="pin ok">1</span><span class="pin ok">2</span>After <em>.about-identity-value &#183; 11.5&nbsp;px mono &#183; parsed</em></div>
+              <div style="padding:6px 0; display:flex; flex-direction:column; align-items:flex-start; gap:6px">
+                <span class="v-new">3.7.1</span>
+                <span class="f-help">git-lfs/3.7.1 (GitHub; darwin arm64; go 1.24.0)</span>
+              </div>
+              <p class="note">The label says which tool; the value says which version; the raw string keeps its receipt on the help line, where the executable path already lives. This is <code>AboutSettings</code>' ladder exactly &#8212; value in mono, provenance in <code>.settings-field__help</code> underneath &#8212; and it survives the 182&nbsp;px control column in <a href="#1c">1c</a> without wrapping. If parsing is judged too clever for a diagnostic, the weaker version of this finding still holds: <b>style the span</b>, and the 16&nbsp;px problem goes away on its own.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c The installed pair">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>The installed caveat, said once</div>
+            <div class="stage" style="width:560px">
+              <div class="stage-h"><span class="pin">4</span>Before <em>the same 11.5&nbsp;px sentence on both rows</em></div>
+              <div class="sp" style="border-radius:8px">
+                <div class="sp-b">
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git</span><span class="f-sub">Discovered on the CLI search path; not used by PwrGit.</span></div>
+                    <div class="f-c"><span class="v-now">git version 2.50.1</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git LFS</span><span class="f-sub">Discovered on the CLI search path; not used by PwrGit.</span></div>
+                    <div class="f-c"><span class="v-now">git-lfs/3.6.1 (GitHub; darwin arm64; go 1.23.4)</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="stage-h" style="margin-top:4px"><span class="pin ok">4</span>After <em>one caveat, on the pair</em></div>
+              <div class="sp" style="border-radius:8px">
+                <div class="sp-b">
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git</span><span class="f-sub">On your PATH. Shown for reference; PwrGit does not use it.</span></div>
+                    <div class="f-c"><span class="v-new">2.50.1</span><span class="f-help">git version 2.50.1</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git LFS</span></div>
+                    <div class="f-c"><span class="v-new">3.6.1</span><span class="f-help">git-lfs/3.6.1 (GitHub; darwin arm64; go 1.23.4)</span></div>
+                  </div>
+                </div>
+              </div>
+              <p class="note">The caveat belongs to the pair, not to each row, and reads better shorter: "CLI search path" is <code>cli-runner.ts</code>'s word for the user's PATH, not the user's. Stating it once also stops the label column from being the tallest thing in a card whose subject is four short strings.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d The card redrawn">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>All four together, at 760&nbsp;px</div>
+            <div class="stage" style="width:826px">
+              <div class="stage-h"><span class="pin ok">1</span><span class="pin ok">2</span><span class="pin ok">3</span><span class="pin ok">4</span>After <em>healthy state</em></div>
+              <div class="sp" style="width:760px">
+                <div class="sp-h">
+                  <svg class="sp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                  <div class="sp-hm">
+                    <p class="sp-eb">Git</p>
+                    <h3 class="sp-t">Git runtime</h3>
+                    <p class="sp-d">PwrGit always runs its own bundled Git and Git LFS, so repository operations do not depend on what is installed on this machine.</p>
+                  </div>
+                  <span class="chip">Bundled</span>
+                </div>
+                <div class="sp-b">
+                  <div class="f">
+                    <div class="f-l"><span>Git</span></div>
+                    <div class="f-c"><span class="v-new">2.53.0</span><span class="f-help">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Git LFS</span></div>
+                    <div class="f-c"><span class="v-new">3.7.1</span><span class="f-help">git-lfs/3.7.1 (GitHub; darwin arm64; go 1.24.0)</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git</span><span class="f-sub">On your PATH. Shown for reference; PwrGit does not use it.</span></div>
+                    <div class="f-c"><span class="v-new">2.50.1</span><span class="f-help">git version 2.50.1</span></div>
+                  </div>
+                  <div class="f">
+                    <div class="f-l"><span>Installed Git LFS</span></div>
+                    <div class="f-c"><span class="v-new">3.6.1</span><span class="f-help">git-lfs/3.6.1 (GitHub; darwin arm64; go 1.23.4)</span></div>
+                  </div>
+                </div>
+              </div>
+              <p class="note">The two bundled rows lose the word "Bundled" from their labels &#8212; the chip and the description both carry it, and the rows that are <i>not</i> the runtime are the ones that need qualifying. This is the one debatable change of the four: keeping <b>Bundled Git</b> as the label costs nothing and reads at a glance, and findings <a href="#1b">1</a>&#8211;<a href="#1b">4</a> all hold either way. Nothing in the body is now larger than the title, and the loudest thing in the card is the one word that would turn red if Git were missing.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2e" data-screen-label="2e The failure states redrawn">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>And the two states from <a href="#1d">1d</a></div>
+            <div class="pair">
+              <div class="stage" style="width:556px">
+                <div class="stage-h"><span class="pin ok">5</span>Bundled Git missing <em>chipKind="err"</em></div>
+                <div class="sp" style="width:508px">
+                  <div class="sp-h">
+                    <svg class="sp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                    <div class="sp-hm">
+                      <p class="sp-eb">Git</p>
+                      <h3 class="sp-t">Git runtime</h3>
+                      <p class="sp-d">PwrGit always runs its own bundled Git and Git LFS, so repository operations do not depend on what is installed on this machine.</p>
+                    </div>
+                    <span class="chip err">Unavailable</span>
+                  </div>
+                  <div class="sp-b">
+                    <div class="f">
+                      <div class="f-l"><span>Git</span></div>
+                      <div class="f-c"><span class="v-absent">Not found</span><p class="f-err">PwrGit cannot run repository operations until this build is repaired or reinstalled.</p><span class="f-help">/Applications/PwrGit.app/Contents/Resources/git/bin/git</span></div>
+                    </div>
+                    <div class="f">
+                      <div class="f-l"><span>Git LFS</span></div>
+                      <div class="f-c"><span class="v-absent">Not found</span></div>
+                    </div>
+                    <div class="f">
+                      <div class="f-l"><span>Installed Git</span><span class="f-sub">On your PATH. Shown for reference; PwrGit does not use it.</span></div>
+                      <div class="f-c"><span class="v-new">2.50.1</span><span class="f-help">git version 2.50.1</span></div>
+                    </div>
+                  </div>
+                </div>
+                <p class="note">The sentence is what stops the installed row below reading like a workaround. <code>.settings-field__error</code> already renders exactly this, and <code>SettingsField</code> already takes an <code>error</code> prop for it.</p>
+              </div>
+              <div class="stage" style="width:556px">
+                <div class="stage-h"><span class="pin ok">5</span>Probe failed <em>role="alert" + Retry</em></div>
+                <div class="sp" style="width:508px">
+                  <div class="sp-h">
+                    <svg class="sp-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                    <div class="sp-hm">
+                      <p class="sp-eb">Git</p>
+                      <h3 class="sp-t">Git runtime</h3>
+                      <p class="sp-d">PwrGit always runs its own bundled Git and Git LFS, so repository operations do not depend on what is installed on this machine.</p>
+                    </div>
+                    <span class="chip warn">Unknown</span>
+                  </div>
+                  <div class="sp-b" style="padding-top:10px; padding-bottom:14px">
+                    <p class="f-err" style="margin-bottom:9px">Could not read the Git versions.</p>
+                    <span class="btn">Retry</span>
+                  </div>
+                </div>
+                <p class="note">One read on mount and no way to ask again is the whole bug: the probe is a 5&nbsp;s <code>execFile</code> that can lose to a cold disk or a busy machine, and today losing means the card is wrong until the Settings window is closed and reopened. <code>AboutSettings</code> already ships this exact pattern, down to the <code>setIdentityRequest((n) =&gt; n + 1)</code> that re-runs it.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Next &#8212; <a href="#3a">3a</a> every state the card can be in, and what it should say in each</p>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">The state table, and one protocol note</span>
+        </div>
+        <p class="dv-sub">Four booleans reach this card &#8212; bundled Git, bundled LFS, installed Git, installed LFS, each present or not &#8212; plus "the probe did not answer". Only two of those states are drawn today, and only one of them is right.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a State table">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>What the card should report, per state</div>
+            <div class="stage" style="width:900px">
+              <div class="tbl">
+                <div class="tr head"><span>State</span><span>Chip</span><span>Body</span><span>Why</span></div>
+                <div class="tr"><span><b>Probe pending</b><br />first ~50&nbsp;ms after mount</span><span class="st q">none</span><span>Skeleton rows</span><span>A 16&nbsp;px sentence that replaces itself is a layout jump. The row count is known before the answer is.</span></div>
+                <div class="tr"><span><b>All four found</b></span><span class="st keep">Bundled</span><span>Four rows</span><span>The ordinary case. <a href="#2d">2d</a>.</span></div>
+                <div class="tr"><span><b>Bundled found, nothing installed</b></span><span class="st keep">Bundled</span><span>Installed rows read <i>Not installed</i></span><span>This is <b>fine</b>, and must not look like a problem &#8212; it is the case the whole PR exists to make safe. Today it renders "Not found" at 16&nbsp;px in primary text.</span></div>
+                <div class="tr"><span><b>Bundled Git missing</b></span><span class="st bug">Unavailable</span><span>Error sentence on the Git row</span><span>Nothing in PwrGit can run. <a href="#2e">2e</a>. Today: neutral grey, chip unchanged.</span></div>
+                <div class="tr"><span><b>Bundled LFS missing, Git present</b></span><span class="st chg">Bundled</span><span>LFS row reads <i>Not found</i>, plus one line</span><span>Narrower blast radius &#8212; only LFS repositories break &#8212; so it is not the card's headline, but it is not nothing either. Undrawn today.</span></div>
+                <div class="tr last"><span><b>Probe failed</b></span><span class="st bug">Unknown</span><span>Alert + Retry</span><span>"We could not look" is not "it is missing". <a href="#2e">2e</a>. Today: indistinguishable from a healthy card apart from one grey sentence.</span></div>
+              </div>
+              <p class="note" style="margin-top:4px">The <b>protocol note</b>: <code>git:runtimeStatus</code> returns <code>active: "bundled"</code> and <code>default: "bundled"</code> &#8212; both typed to that single literal, and neither read by the renderer, which hardcodes the chip text instead. They are placeholders for a runtime choice the PR deliberately does not offer ("There was no existing user-facing custom Git setting"). Either the chip should derive from them, or they should come out until something can vary; two fields that can only hold one value will not survive contact with the first person who tries to add a second runtime, because nothing today proves the UI would notice.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Provenance &#8212; specimens reproduced at shipped size from <code>apps/desktop/src/renderer/src/styles/app.css</code> and <code>tokens.css</code>; sizes and wrap points measured in headless Chromium against the real <code>GitRuntimeSettings</code> component; version strings are contrived, but the Git&nbsp;LFS build tail is the real shape of <code>git lfs version</code> output. Reviewed at <code>fix/bundled-git-runtime</code>&nbsp;@&nbsp;6f34ca4a &#183; 2026&#8209;09&#8209;20.</p>
+      </section>
+    </x-dc>
+  </body>
+</html>

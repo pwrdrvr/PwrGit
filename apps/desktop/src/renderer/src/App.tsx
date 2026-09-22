@@ -951,6 +951,7 @@ export function App() {
           onPick={onPickSearch}
           onPickCommit={onPickCommitSearch}
           onPickFile={onPickFileSearch}
+          profileCount={profiles.length}
         />
       )}
 

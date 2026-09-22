@@ -490,6 +490,9 @@ function SettingsSectionBody(props: {
         onDeveloperModeChange={(enabled) => {
           update({ general: { developerMode: enabled } });
         }}
+        onSearchAllProfilesChange={(enabled) => {
+          update({ general: { searchAllProfiles: enabled } });
+        }}
         onSidebarTextSizeChange={(sidebarTextSize) => {
           update({ general: { sidebarTextSize } });
         }}
