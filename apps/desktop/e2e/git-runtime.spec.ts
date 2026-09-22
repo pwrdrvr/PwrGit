@@ -14,7 +14,8 @@ test("Settings runs bundled Git and LFS by default and lists the Gits it could r
     });
     const page = await opened;
     const section = page.locator('section[aria-label="Git runtime"]');
-    await expect(section.locator(".settings-card__chip")).toHaveText("Bundled");
+    // The header's chip, not the install rows' own "Using" chip.
+    await expect(section.locator(".settings-panel__header .settings-card__chip")).toHaveText("Bundled");
     // The in-use rows show the version the probe parsed out of the real
     // `git --version` / `git lfs version`, and LFS keeps its build tail beneath.
     const values = section.locator(".settings-field__value");

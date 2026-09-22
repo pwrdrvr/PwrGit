@@ -79,8 +79,9 @@ async function render(): Promise<void> {
   });
 }
 
+/** The header's status chip. Install rows carry chips of their own. */
 function chip(): HTMLElement | null {
-  return container.querySelector(".settings-card__chip");
+  return container.querySelector(".settings-panel__header .settings-card__chip");
 }
 
 function values(): string[] {
