@@ -1306,9 +1306,11 @@ export type PartialFileDiff = {
   counterpartChanges: boolean;
 };
 
-/** One entry in Git's repository-wide `refs/stash` reflog, newest first. */
+/** The name pull gives the stash it makes before a fast-forward. The stash
+ *  list recognizes it by this exact text; nothing else marks the entry. */
 export const PWRGIT_PULL_STASH_MESSAGE = "pwrgit: auto-stash before pull";
 
+/** One entry in Git's repository-wide `refs/stash` reflog, newest first. */
 export type StashEntry = {
   /** Current reflog selector. This can move when another entry is added/dropped. */
   selector: string;

@@ -29,6 +29,15 @@ import { StashesTab } from "./StashesTab";
 
 type RailTab = "changes" | "stashes" | "rebase";
 
+/** The last read of `refs/stash`, kept with the repository it came from. */
+type StashStack = {
+  repoId: string | null;
+  entries: StashEntry[];
+  error: string | null;
+};
+
+const NO_STASHES: StashEntry[] = [];
+
 export type CommitFocus = { hash: string; subject: string };
 
 export function Rail({
@@ -76,13 +85,22 @@ export function Rail({
 }) {
   const tip = useViewportTooltip();
   const [tab, setTab] = useState<RailTab>("changes");
-  const [stashes, setStashes] = useState<StashEntry[]>([]);
+  const [stashStack, setStashStack] = useState<StashStack | null>(null);
   const [stashesLoading, setStashesLoading] = useState(false);
   const stashLoadGeneration = useRef(0);
   const selectedWorktreeId = useRef(worktree?.id ?? null);
   selectedWorktreeId.current = worktree?.id ?? null;
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
   const worktreeId = worktree?.id ?? null;
+  const repoId = worktree?.repoId ?? null;
+  // The stack is the repository's, so another worktree of the same repository
+  // keeps showing it while it reloads. A worktree of a different repository
+  // shows none of it, not even for the length of the reload, and not at all
+  // when that repository's stack cannot be read.
+  const shownStack =
+    stashStack !== null && stashStack.repoId === repoId ? stashStack
+      : null;
+  const stashes = shownStack?.entries ?? NO_STASHES;
 
   // Operation state is advisory: the banner appears when it arrives and the
   // rest of the rail never waits on it. Blocking the file list on an extra
@@ -124,11 +142,9 @@ export function Rail({
   }, [refreshOperation, worktreeId]);
 
   const reloadStashes = useCallback(async (): Promise<void> => {
-    const worktreeId = worktree?.id ?? null;
     if (selectedWorktreeId.current !== worktreeId) return;
     const generation = ++stashLoadGeneration.current;
     if (worktreeId === null) {
-      setStashes([]);
       setStashesLoading(false);
       return;
     }
@@ -140,18 +156,21 @@ export function Rail({
     ) {
       return;
     }
-    if (result.ok) setStashes(result.value);
+    setStashStack(
+      result.ok
+        ? { repoId, entries: result.value, error: null }
+        : { repoId, entries: [], error: result.error.message }
+    );
     setStashesLoading(false);
-  }, [worktree?.id]);
+  }, [worktreeId, repoId]);
 
   useEffect(() => {
     void reloadStashes();
-    const repoId = worktree?.repoId;
-    if (repoId === undefined) return;
+    if (repoId === null) return;
     return subscribe("stash:changed", (event) => {
       if (event.repoId === repoId) void reloadStashes();
     });
-  }, [reloadStashes, worktree?.repoId]);
+  }, [reloadStashes, repoId]);
 
   useEffect(() => {
     if (rebaseAction !== null) setTab("rebase");
@@ -258,6 +277,7 @@ export function Rail({
           worktree={worktree}
           entries={stashes}
           loading={stashesLoading}
+          error={shownStack?.error ?? null}
           reload={reloadStashes}
           onOpenPatch={onOpenStashPatch}
         />

@@ -8119,6 +8119,9 @@ button.ref-chip:focus-visible {
   text-align: center;
   text-wrap: balance;
 }
+.stash-empty--error {
+  color: var(--danger-text);
+}
 .stash-entry {
   margin-bottom: 6px;
   border: 1px solid var(--border-subtle);
@@ -8189,13 +8192,28 @@ button.ref-chip:focus-visible {
   font: 600 9px/1 var(--font-sans);
   letter-spacing: 0.02em;
 }
+/* The hash gives way before the branch, and all at once: when the line is
+   short it wraps onto a second line that this one-line box clips, rather than
+   leaving a two-character stub that identifies nothing. Only the branch
+   truncates, and only once the hash is gone. */
 .stash-entry__where {
   min-width: 0;
+  max-height: 1.2em;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1ch;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-muted);
   font: 500 10px/1.2 var(--font-mono);
+}
+.stash-entry__place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stash-entry__hash {
+  flex: none;
 }
 .stash-entry__age {
   align-self: start;
@@ -8267,7 +8285,8 @@ button.ref-chip:focus-visible {
 .stash-entry__target > span.is-hidden {
   visibility: hidden;
 }
-.stash-entry__target code {
+.stash-entry__target code,
+.stash-details__duplicate code {
   color: var(--text-secondary);
   font: 600 10px/1 var(--font-mono);
 }

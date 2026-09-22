@@ -80,7 +80,8 @@ describe("StashesTab", () => {
   const renderTab = async (
     selectedWorktree: Worktree = worktree,
     selectedEntries: StashEntry[] = [recovery, older],
-    selectedReload: () => Promise<void> = reload
+    selectedReload: () => Promise<void> = reload,
+    selectedError: string | null = null
   ): Promise<void> => {
     await act(async () => {
       root.render(
@@ -88,6 +89,7 @@ describe("StashesTab", () => {
           worktree={selectedWorktree}
           entries={selectedEntries}
           loading={false}
+          error={selectedError}
           reload={selectedReload}
           onOpenPatch={vi.fn()}
         />
@@ -351,9 +353,9 @@ describe("StashesTab", () => {
     if (olderInspect === undefined) throw new Error("older duplicate missing");
     await act(async () => olderInspect.click());
 
-    expect(container.textContent).toContain(
-      "same Git stash object appears 2 times"
-    );
+    expect(
+      container.querySelector(".stash-details__duplicate")?.textContent
+    ).toContain("This stash is listed twice, as stash@{0} and stash@{2}.");
     // aria-disabled rather than `disabled`, so the pointer still gets the
     // tooltip saying why — and a click is refused by the handler.
     expect(button("Pop").getAttribute("aria-disabled")).toBe("true");
@@ -414,5 +416,60 @@ describe("StashesTab", () => {
       await pending.promise;
     });
     expect(apply.hasAttribute("aria-disabled")).toBe(false);
+  });
+
+  it("keeps an open stash open when a new one lands on top of it", async () => {
+    const inspect = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Inspect older CLI stash"]'
+    );
+    if (inspect === null) throw new Error("inspect button missing");
+    await act(async () => inspect.click());
+    expect(container.textContent).toContain("README.md");
+
+    // A pull or a terminal pushes a stash: every existing entry renumbers.
+    const pushed = stash("stash@{0}", "2".repeat(40), "pushed from a terminal");
+    await renderTab(worktree, [
+      pushed,
+      { ...recovery, selector: "stash@{1}" },
+      { ...older, selector: "stash@{2}" }
+    ]);
+
+    expect(
+      container
+        .querySelector('[aria-label="Hide older CLI stash"]')
+        ?.getAttribute("aria-expanded")
+    ).toBe("true");
+    expect(container.textContent).toContain("README.md");
+    expect(
+      mocks.dispatch.mock.calls.filter(([command]) => command === "stash:details")
+    ).toHaveLength(1);
+  });
+
+  it("names the branch once: after a named stash, and only in the title of an unnamed one", async () => {
+    const unnamed: StashEntry = {
+      ...stash("stash@{2}", "3".repeat(40), "unused"),
+      subject: "WIP on main: 9f1c2e7 Bump lint config"
+    };
+    delete (unnamed as { name?: string }).name;
+    await renderTab(worktree, [older, unnamed]);
+
+    const where = [...container.querySelectorAll(".stash-entry__where")].map(
+      (node) => node.textContent
+    );
+    expect(where).toEqual([
+      "stash@{1} · on main · 1111111",
+      "stash@{2} · 3333333"
+    ]);
+    expect(container.textContent).toContain("WIP on main: 9f1c2e7 Bump lint config");
+  });
+
+  it("says why the stack is empty when it could not be read", async () => {
+    await renderTab(worktree, [], reload, "The worktree folder is missing.");
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toBe(
+      "Could not read the stash stack. The worktree folder is missing."
+    );
+    expect(container.textContent).not.toContain("No stashes yet");
   });
 });

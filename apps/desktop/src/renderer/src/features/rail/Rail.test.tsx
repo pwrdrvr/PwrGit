@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   stashRenders: [] as Array<{
     entries: StashEntry[];
     loading: boolean;
+    error: string | null;
     reload: () => Promise<void>;
   }>
 }));
@@ -42,12 +43,17 @@ vi.mock("./StashesTab", () => ({
   StashesTab: (props: {
     entries: StashEntry[];
     loading: boolean;
+    error: string | null;
     reload: () => Promise<void>;
   }) => {
     mocks.stashRenders.push(props);
     return (
       <div data-testid="stash-view">
-        {props.loading ? "loading" : props.entries.map((entry) => entry.name).join(",")}
+        {props.error ??
+          [
+            ...(props.loading ? ["loading"] : []),
+            ...props.entries.map((entry) => entry.name)
+          ].join(",")}
       </div>
     );
   }
@@ -305,6 +311,94 @@ describe("Rail stash loading", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+  });
+
+  const openStashesTab = async (): Promise<HTMLButtonElement> => {
+    const stashesButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent?.includes("Stashes") === true
+    );
+    if (stashesButton === undefined) throw new Error("Stashes tab missing");
+    await act(async () => stashesButton.click());
+    return stashesButton;
+  };
+  const stashView = (): string | null | undefined =>
+    container.querySelector('[data-testid="stash-view"]')?.textContent;
+
+  it("shows none of another repository's stack when its own cannot be read", async () => {
+    mocks.dispatch.mockImplementation(
+      async (command: string, req: { worktreeId: string }) =>
+        command === "operation:state"
+          ? ok({ operation: null, conflictCount: 0 } satisfies OperationState)
+          : req.worktreeId === "worktree-a"
+            ? ok([stash("a".repeat(40), "repo A")])
+            : err({
+                kind: "repo",
+                code: "worktree_missing",
+                message: "The worktree folder is missing."
+              })
+    );
+    await renderRail(stashWorktree("worktree-a", "repo-a"));
+    const stashesButton = await openStashesTab();
+    expect(stashesButton.textContent).toBe("Stashes1");
+
+    await renderRail(stashWorktree("worktree-b", "repo-b"));
+
+    expect(stashView()).toBe("The worktree folder is missing.");
+    expect(mocks.stashRenders.at(-1)?.entries).toEqual([]);
+    expect(stashesButton.textContent).toBe("Stashes");
+  });
+
+  it("hides the old repository's stack while the new one loads", async () => {
+    let finishB!: () => void;
+    mocks.dispatch.mockImplementation(
+      async (command: string, req: { worktreeId: string }) => {
+        if (command === "operation:state") {
+          return ok({ operation: null, conflictCount: 0 } satisfies OperationState);
+        }
+        if (req.worktreeId === "worktree-a") {
+          return ok([stash("a".repeat(40), "repo A")]);
+        }
+        await new Promise<void>((resolve) => {
+          finishB = resolve;
+        });
+        return ok([stash("b".repeat(40), "repo B")]);
+      }
+    );
+    await renderRail(stashWorktree("worktree-a", "repo-a"));
+    const stashesButton = await openStashesTab();
+
+    await renderRail(stashWorktree("worktree-b", "repo-b"));
+    expect(stashView()).toBe("loading");
+    expect(stashesButton.textContent).toBe("Stashes");
+
+    await act(async () => finishB());
+    expect(stashView()).toBe("repo B");
+  });
+
+  it("keeps the stack in view while another worktree of the same repository reloads it", async () => {
+    let finishSibling!: () => void;
+    mocks.dispatch.mockImplementation(
+      async (command: string, req: { worktreeId: string }) => {
+        if (command === "operation:state") {
+          return ok({ operation: null, conflictCount: 0 } satisfies OperationState);
+        }
+        if (req.worktreeId === "worktree-sibling") {
+          await new Promise<void>((resolve) => {
+            finishSibling = resolve;
+          });
+        }
+        return ok([stash("a".repeat(40), "shared")]);
+      }
+    );
+    await renderRail(stashWorktree("worktree-a", "repo-a"));
+    const stashesButton = await openStashesTab();
+
+    await renderRail(stashWorktree("worktree-sibling", "repo-a"));
+    expect(stashView()).toBe("loading,shared");
+    expect(stashesButton.textContent).toBe("Stashes1");
+
+    await act(async () => finishSibling());
+    expect(stashView()).toBe("shared");
   });
 
   it("ignores an old reload callback after another worktree is selected", async () => {

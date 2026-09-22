@@ -32,9 +32,20 @@ function defaultStashName(now: Date): string {
   return `Stash ${day} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 }
 
-function entryKey(entry: StashEntry): string {
-  return entry.selector + ":" + entry.hash;
+// Keyed by the stash commit and which copy of it this is, never by
+// `stash@{n}`: every push or drop above an entry renumbers it, and an entry
+// someone is reading must stay open when a pull or a terminal adds a stash.
+// A commit the stack holds twice still gets one key per copy.
+function entryKeys(entries: readonly StashEntry[]): string[] {
+  const copies = new Map<string, number>();
+  return entries.map((entry) => {
+    const copy = copies.get(entry.hash) ?? 0;
+    copies.set(entry.hash, copy + 1);
+    return entry.hash + ":" + copy;
+  });
 }
+
+const selectorList = new Intl.ListFormat("en", { type: "conjunction" });
 
 // What the one status line under an open entry's actions says while a command
 // runs. It replaces the destination line in place, so the file list below
@@ -45,19 +56,21 @@ const BUSY_LABEL: Record<string, string> = {
   "stash:drop": "Dropping"
 };
 
-const DUPLICATE_REASON =
-  "Unavailable while this stash object occurs more than once";
+const DUPLICATE_REASON = "Unavailable while this stash is listed more than once";
 
 export function StashesTab({
   worktree,
   entries,
   loading,
+  error,
   reload,
   onOpenPatch
 }: {
   worktree: Worktree | null;
   entries: StashEntry[];
   loading: boolean;
+  /** Why the stack could not be read; the rail shows no entries then. */
+  error: string | null;
   reload: () => Promise<void>;
   onOpenPatch: (hash: string, subject: string) => void;
 }) {
@@ -81,20 +94,17 @@ export function StashesTab({
     setBusy(null);
   }, [worktree?.id]);
 
+  const keys = entryKeys(entries);
   useEffect(() => {
-    if (
-      expandedEntryKey !== null &&
-      !entries.some((entry) => entryKey(entry) === expandedEntryKey)
-    ) {
+    if (expandedEntryKey !== null && !entryKeys(entries).includes(expandedEntryKey)) {
       detailsGeneration.current += 1;
       setExpandedEntryKey(null);
       setDetails(null);
     }
   }, [entries, expandedEntryKey]);
 
-  const toggleDetails = (entry: StashEntry): void => {
+  const toggleDetails = (entry: StashEntry, selectedEntryKey: string): void => {
     if (worktree === null) return;
-    const selectedEntryKey = entryKey(entry);
     const worktreeId = worktree.id;
     if (expandedEntryKey === selectedEntryKey) {
       detailsGeneration.current += 1;
@@ -283,15 +293,19 @@ export function StashesTab({
           </span>
           <span className="stash-list__scope">Shared by every worktree</span>
         </div>
-        {loading && entries.length === 0 ? (
+        {error !== null ? (
+          <div className="stash-empty stash-empty--error" role="alert">
+            Could not read the stash stack. {error}
+          </div>
+        ) : loading && entries.length === 0 ? (
           <div className="stash-empty">Loading stashes…</div>
         ) : entries.length === 0 ? (
           <div className="stash-empty">
             No stashes yet. Ones you create in a terminal appear here too.
           </div>
         ) : (
-          entries.map((entry) => {
-            const renderedEntryKey = entryKey(entry);
+          entries.map((entry, index) => {
+            const renderedEntryKey = keys[index] ?? entry.hash;
             const expanded = expandedEntryKey === renderedEntryKey;
             const busyCommand =
               busy !== null && busy.endsWith(":" + entry.hash)
@@ -303,7 +317,7 @@ export function StashesTab({
               <article className="stash-entry" key={renderedEntryKey}>
                 <button
                   className="stash-entry__toggle"
-                  onClick={() => toggleDetails(entry)}
+                  onClick={() => toggleDetails(entry, renderedEntryKey)}
                   aria-expanded={expanded}
                   aria-label={
                     (expanded ? "Hide " : "Inspect ") + displayName(entry)
@@ -325,9 +339,18 @@ export function StashesTab({
                           Pull recovery
                         </span>
                       )}
+                      {/* An unnamed stash's title is Git's own "WIP on
+                          <branch>: …", so its branch is not said twice. */}
                       <span className="stash-entry__where">
-                        {entry.selector} · on{" "}
-                        {entry.branch ?? "unknown branch"} · {entry.shortHash}
+                        <span className="stash-entry__place">
+                          {entry.selector}
+                          {entry.name !== undefined && entry.branch !== null
+                            ? " · on " + entry.branch
+                            : ""}
+                        </span>{" "}
+                        <span className="stash-entry__hash">
+                          · {entry.shortHash}
+                        </span>
                       </span>
                     </span>
                   </span>
@@ -407,10 +430,20 @@ export function StashesTab({
 
                     {duplicate && (
                       <div className="stash-details__duplicate" role="note">
-                        This same Git stash object appears {entry.occurrenceCount} times.
-                        Apply and inspection are safe; Pop and Drop are
-                        disabled because reflog occurrences have no stable
-                        identity.
+                        This stash is listed{" "}
+                        {entry.occurrenceCount === 2
+                          ? "twice"
+                          : entry.occurrenceCount + " times"}
+                        , as{" "}
+                        {selectorList.format(
+                          entries
+                            .filter((other) => other.hash === entry.hash)
+                            .map((other) => other.selector)
+                        )}
+                        . Apply works as usual. Pop and Drop stay off until
+                        one copy is left, because PwrGit can’t be sure which
+                        copy it would remove. Remove one with{" "}
+                        <code>git stash drop</code>.
                       </div>
                     )}
 
