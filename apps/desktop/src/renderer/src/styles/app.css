@@ -11717,6 +11717,25 @@ body.is-col-resizing {
   opacity: 0.45;
   cursor: default;
 }
+/* A glyph beside the label — the Re-check buttons' <RefreshGlyph />. As inline
+   content the svg sat flush against the text, 0px apart, and on the baseline,
+   2.5px above the label's centre. Keyed off the child, so a text-only button
+   keeps the inline layout it always had. `justify-content` keeps the centring
+   that inline content got from the button's own text-align. */
+.settings-button:has(> svg) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+/* `flex: 0 0 auto` for the reason styles/AGENTS.md gives. The negative block
+   margin lets the 13px glyph overhang the label's 12px line by half a pixel
+   instead of growing the button, so a glyph button stays the 28px of the
+   text-only buttons it sits beside in a pane head. */
+.settings-button > svg {
+  flex: 0 0 auto;
+  margin-block: -0.5px;
+}
 .settings-button--primary {
   background: var(--accent);
   border-color: transparent;
