@@ -81,3 +81,16 @@ Two consequences here:
   back a row that was never sent. Both the scope and this-profile-first
   ordering live in `searchAll` — see "Main cannot tell which profile is asking"
   in `src/main/AGENTS.md`.
+
+## The sidebar footer holds the profile's AI switch
+
+`.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.
+It is a footer and not a list row because the switch belongs to the profile,
+not to a repo. The rules it follows are in `settings/AGENTS.md`.
+
+A dialog opened from here renders in place, like `NewWorktreeModal` and the
+rest: `.overlay-backdrop` is `position: fixed` and covers the window, even
+though `.pane--sidebar` carries `container-type: inline-size`. That reads as
+though it would confine a fixed child — layout containment does — but Chromium
+does not confine one here, measured at 1000×700 with the pane at 300px. Don't
+portal a sidebar overlay to `<body>` on that theory.

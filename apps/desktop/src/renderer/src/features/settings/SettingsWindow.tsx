@@ -1,15 +1,26 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   FORGE_KINDS,
   forgeLabel,
+  parseSettingsRouteHash,
   type AppSettingsPatch,
   type AppSettingsSnapshot,
   type DiagnosticsSettings as DiagnosticsSettingsShape,
   type ForgeKind,
-  type ForgeStatus
+  type ForgeStatus,
+  type ProfileId,
+  type SettingsPage,
+  type SettingsRoute as SettingsDeepLink
 } from "@pwrgit/shared";
+import { subscribe } from "../../lib/pwrgit";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
+import { useProfiles } from "../../state/useProfiles";
 import { AuxiliaryTitleBar } from "../chrome/AuxiliaryTitleBar";
 import { AboutSettings } from "./AboutSettings";
+import type { AiProfileSelection } from "./AiProfilePicker";
+import { AiFeaturesSettings } from "./AiFeaturesSettings";
+import { AiProvidersProvider, useAiProvidersContext } from "./AiProvidersContext";
+import { AiProvidersSettings } from "./AiProvidersSettings";
 import { DiagnosticsSettings } from "./DiagnosticsSettings";
 import { ExperimentalSettings } from "./ExperimentalSettings";
 import { GeneralSettings } from "./GeneralSettings";
@@ -20,43 +31,41 @@ import { LocalAgentsSettings } from "./LocalAgentsSettings";
 import {
   FORGE_STATE_NAV,
   forgeProductState,
-  forgeStateSentence,
-  type ForgeNavDot
+  forgeStateSentence
 } from "./ForgeProductSection";
+import type { AiProviderStatus } from "./ai-provider-status";
+import {
+  SETTINGS_NAV_GROUPS,
+  aiFeatureNavChildren,
+  aiProviderNavChild,
+  paneScrollForRoute,
+  type SettingsNavChild
+} from "./settings-nav";
 import type { SettingsFocusRequest } from "./SettingsLayout";
 import { useForgeStatuses } from "./useForgeStatuses";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
 
-export type SettingsSection =
-  | "general"
-  | "updates"
-  | "profiles"
-  | "experimental"
-  | "diagnostics"
-  | "forges"
-  | "agents"
-  | "about";
-
-const SECTIONS: Array<{ id: SettingsSection; label: string }> = [
+/**
+ * Nav order and labels. The ids are `SETTINGS_PAGES` (@pwrgit/shared), the
+ * same list main validates a `settings:open` deep link against.
+ *
+ * "Local Agents" and not "Agents": the AI pages configure agents PwrGit calls
+ * OUT to, this one governs agents calling IN over MCP, and a bare "Agents"
+ * beside "AI Providers" reads as either. The id stays `agents` so nothing that
+ * already names the page moves.
+ */
+const SECTIONS: Array<{ id: SettingsPage; label: string }> = [
   { id: "general", label: "General" },
   { id: "updates", label: "Updates" },
   { id: "profiles", label: "Profiles" },
   { id: "forges", label: "Forges" },
-  { id: "agents", label: "Agents" },
+  { id: "ai-providers", label: "AI Providers" },
+  { id: "ai-features", label: "AI Features" },
+  { id: "agents", label: "Local Agents" },
   { id: "experimental", label: "Experimental" },
   { id: "diagnostics", label: "Memory / CPU" },
   { id: "about", label: "About" }
 ];
-
-/**
- * Sections whose nav row expands into a sub-list.
- *
- * A child is not a pane of its own: it names a card inside the parent's pane
- * and scrolls to it. That is the whole contract, and it is why a group's
- * children can carry live status — the nav is reporting on something already
- * on the other side of one click, not promising a screen that does not exist.
- */
-const SETTINGS_NAV_GROUPS = new Set<SettingsSection>(["forges"]);
 
 /**
  * Where the reader is.
@@ -64,25 +73,24 @@ const SETTINGS_NAV_GROUPS = new Set<SettingsSection>(["forges"]);
  * `focus` is an object rather than the child's slug, because the pane compares
  * requests by identity: clicking the same child twice has to scroll back to a
  * card the reader has since scrolled past, and two equal strings cannot say
- * "asked again". `openRoute` mints a fresh one per click.
+ * "asked again". `openRoute` mints a fresh one per click. `request` counts
+ * every navigation for the same reason, for the pane's own scroll.
  */
 type SettingsRoute = {
-  section: SettingsSection;
+  section: SettingsPage;
   focus?: SettingsFocusRequest;
+  request: number;
 };
 
-type SettingsNavChild = {
-  label: string;
-  /** The `SettingsSection` `sectionId` this scrolls the pane to. Also the
-   *  React key — one value, so the key and the route id cannot drift apart. */
-  sectionId: string;
-  /** Status dot tone. Absent while nothing is known. */
-  dot?: ForgeNavDot;
-  /** Trailing word, so colour is never the only channel. */
-  chip?: string;
-  /** Accessible name, once there is a state to report. */
-  stateLabel?: string;
-};
+/** The route a deep link lands on. */
+function routeFromDeepLink(link: SettingsDeepLink | null, request: number): SettingsRoute {
+  if (link === null) return { section: "general", request };
+  return {
+    section: link.page,
+    request,
+    ...(link.sub === undefined ? {} : { focus: { sectionId: link.sub } })
+  };
+}
 
 /**
  * One forge's nav row: its name, the card it scrolls to, and the state an
@@ -115,27 +123,72 @@ function forgeNavChild(
 }
 
 /**
- * The Settings window (boots on the `#settings` hash route). A shared
+ * The profile the AI pages edit.
+ *
+ * The Settings window serves every profile, and AI settings belong to one, so
+ * the window holds a choice: the one a deep link named, else the one the
+ * reader picked, else the active profile, else the first. A choice whose
+ * profile is deleted falls through to the next rule rather than editing a
+ * profile that no longer exists.
+ */
+function useAiProfileSelection(): AiProfileSelection & {
+  choose: (profileId: ProfileId) => void;
+} {
+  const { profiles, activeProfileId } = useProfiles();
+  const [chosen, setChosen] = useState<ProfileId | null>(
+    () => parseSettingsRouteHash(window.location.hash)?.profileId ?? null
+  );
+  const exists = (id: ProfileId | null): id is ProfileId =>
+    id !== null && profiles.some((profile) => profile.id === id);
+  const value = exists(chosen)
+    ? chosen
+    : exists(activeProfileId)
+      ? activeProfileId
+      : (profiles[0]?.id ?? null);
+  return { profiles, value, onChange: setChosen, choose: setChosen };
+}
+
+/**
+ * The Settings window (boots on the `#settings` hash route, or a deep link —
+ * `#settings?page=…&sub=…&profile=…` — minted by `settings:open`). A shared
  * auxiliary title strip sits above the section nav and content pane so
  * Windows caption controls and macOS traffic lights occupy the same chrome as
  * every helper window.
  */
 export function SettingsWindow() {
+  const aiProfile = useAiProfileSelection();
+  // Above the nav AND the panes: the AI Providers children's dots and the
+  // cards they point at are one read (AiProvidersContext).
+  return (
+    <AiProvidersProvider profileId={aiProfile.value}>
+      <SettingsWindowBody aiProfile={aiProfile} />
+    </AiProvidersProvider>
+  );
+}
+
+function SettingsWindowBody(props: {
+  aiProfile: ReturnType<typeof useAiProfileSelection>;
+}) {
+  const { aiProfile } = props;
   const settings = useAppSettings();
   // Read here rather than inside the Forges pane, because the nav shows a dot
   // for a product whose pane the reader has not opened — which is the point of
   // the children. Main answers from cache, so this costs one IPC per window.
   const forges = useForgeStatuses();
-  const [route, setRoute] = useState<SettingsRoute>({ section: "general" });
-  // Which groups are unfolded. Everything starts folded: the initial route is
-  // General, so no group holds the reader on open.
+  const ai = useAiProvidersContext();
+  const [route, setRoute] = useState<SettingsRoute>(() =>
+    routeFromDeepLink(parseSettingsRouteHash(window.location.hash), 0)
+  );
+  // Which groups are unfolded. A group the window boots into starts open —
+  // navigating to a group always reveals its children — and everything else
+  // starts folded.
   const [openGroups, setOpenGroups] = useState<
-    Partial<Record<SettingsSection, boolean>>
-  >({});
+    Partial<Record<SettingsPage, boolean>>
+  >(() => (SETTINGS_NAV_GROUPS.has(route.section) ? { [route.section]: true } : {}));
   const activeLabel =
     SECTIONS.find((entry) => entry.id === route.section)?.label ?? "Settings";
 
-  const toggleGroup = (target: SettingsSection): void => {
+  const toggleGroup = (target: SettingsPage): void => {
     setOpenGroups((current) => ({
       ...current,
       [target]: current[target] !== true
@@ -145,16 +198,66 @@ export function SettingsWindow() {
   // Navigating always reveals the destination's children; only the caret folds
   // a group. So clicking "Forges" both opens the pane and shows what is in it,
   // which is how a reader who never thinks to click a caret still finds them.
-  const openRoute = (target: SettingsSection, sectionId?: string): void => {
-    setRoute({
+  const openRoute = (target: SettingsPage, sectionId?: string): void => {
+    setRoute((current) => ({
       section: target,
+      request: current.request + 1,
       ...(sectionId === undefined ? {} : { focus: { sectionId } })
-    });
+    }));
     if (!SETTINGS_NAV_GROUPS.has(target)) return;
     setOpenGroups((current) =>
       current[target] === true ? current : { ...current, [target]: true }
     );
   };
+  const openRouteRef = useRef(openRoute);
+  openRouteRef.current = openRoute;
+
+  // A `settings:open` while this window is already up: main focuses it and
+  // pushes the route here instead of reloading the page.
+  const { choose } = aiProfile;
+  useEffect(
+    () =>
+      subscribe("settings:navigate", (link) => {
+        if (link.profileId !== undefined) choose(link.profileId);
+        openRouteRef.current(link.page, link.sub);
+      }),
+    [choose]
+  );
+
+  // The AI Providers children report discovery, so unfolding the group is a
+  // request for it — the same as opening either AI pane. Nothing is probed for
+  // a reader who never goes near AI.
+  const aiNavOpen = openGroups["ai-providers"] === true;
+  const { request } = ai;
+  useEffect(() => {
+    if (aiNavOpen) request();
+  }, [aiNavOpen, request]);
+
+  // The pane's own scroll, per `paneScrollForRoute`: a new page starts at the
+  // top instead of at the last one's offset, and a card request leaves the
+  // scroll to the card's reveal.
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const shownRoute = useRef(route);
+  useLayoutEffect(() => {
+    const prev = shownRoute.current;
+    shownRoute.current = route;
+    const element = contentRef.current;
+    if (element === null || prev === route) return;
+    const move = paneScrollForRoute(
+      { page: prev.section, sub: prev.focus?.sectionId ?? null, request: prev.request },
+      { page: route.section, sub: route.focus?.sectionId ?? null, request: route.request }
+    );
+    if (move === "none") return;
+    // Without `scrollTo` (jsdom) there is no travel to animate, only a place
+    // to be; `scrollTop` gets the reader there either way.
+    if (move === "top" || typeof element.scrollTo !== "function") {
+      element.scrollTop = 0;
+      return;
+    }
+    element.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  }, [route]);
+
+  const editDefaults = (): void => openRoute("ai-features", "default-agents");
 
   return (
     <section className="settings-screen" aria-label="Settings">
@@ -167,7 +270,7 @@ export function SettingsWindow() {
             const open = openGroups[item.id] === true;
             const sublistId = `settings-nav-sublist-${item.id}`;
             const holdsRoute = route.section === item.id;
-            const children = isGroup ? navChildren(item.id, forges) : [];
+            const children = isGroup ? navChildren(item.id, forges, ai.statuses) : [];
             // The child that actually carries the marker — routed to, and
             // reachable. Derived rather than inferred from "is there a focus,
             // is the group open", because those are proxies: a folded group's
@@ -277,11 +380,13 @@ export function SettingsWindow() {
         </nav>
 
         <div className="settings-main">
-          <div className="settings-content">
+          <div className="settings-content" ref={contentRef}>
             <SettingsSectionBody
               section={route.section}
               {...(route.focus === undefined ? {} : { focus: route.focus })}
               settings={settings}
+              aiProfile={aiProfile}
+              onEditDefaults={editDefaults}
             />
             {settings.error !== null && (
               <p className="settings-field__error" role="alert">
@@ -300,27 +405,51 @@ export function SettingsWindow() {
  *
  * Forges maps `FORGE_KINDS`, never a pair written here, so a third product
  * arrives in the nav the same way it arrives in the pane: as a registry entry.
+ * AI Providers maps the statuses its cards render, so a dot and its card are
+ * one answer; AI Features' children are plain jump links.
  */
 function navChildren(
-  section: SettingsSection,
-  forges: ForgeStatus[] | undefined
+  section: SettingsPage,
+  forges: ForgeStatus[] | undefined,
+  aiStatuses: readonly AiProviderStatus[]
 ): SettingsNavChild[] {
   if (section === "forges") {
     return FORGE_KINDS.map((kind) => forgeNavChild(kind, forges));
   }
+  if (section === "ai-providers") return aiStatuses.map(aiProviderNavChild);
+  if (section === "ai-features") return aiFeatureNavChildren();
   return [];
 }
 
 function SettingsSectionBody(props: {
-  section: SettingsSection;
+  section: SettingsPage;
   /** The card the nav asked the pane to reveal, if any. */
   focus?: SettingsFocusRequest;
   settings: AppSettingsState;
+  aiProfile: AiProfileSelection;
+  onEditDefaults: () => void;
 }) {
   const { settings } = props;
+  const focus = props.focus === undefined ? {} : { focusSection: props.focus };
 
   if (props.section === "profiles") {
     return <ProfilesSettings />;
+  }
+
+  // Neither AI pane reads the app snapshot: their settings are per profile
+  // and come from `AiProvidersContext`.
+  if (props.section === "ai-providers") {
+    return (
+      <AiProvidersSettings
+        profile={props.aiProfile}
+        onEditDefaults={props.onEditDefaults}
+        {...focus}
+      />
+    );
+  }
+
+  if (props.section === "ai-features") {
+    return <AiFeaturesSettings profile={props.aiProfile} {...focus} />;
   }
 
   if (props.section === "about") {
@@ -391,10 +520,7 @@ function SettingsSectionBody(props: {
     // list above a per-forge summary — which rendered outside `.settings-stack`
     // and so lost the 14px gap and 760px column every other pane has.
     return (
-      <ForgesSettings
-        saving={settings.saving}
-        {...(props.focus === undefined ? {} : { focusSection: props.focus })}
-      />
+      <ForgesSettings saving={settings.saving} {...focus} />
     );
   }
 

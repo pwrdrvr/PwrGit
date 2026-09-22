@@ -7,6 +7,7 @@ import type {
 } from "@pwrgit/shared";
 import { SettingsSegmented } from "../settings/SettingsLayout";
 import { PlusGlyph } from "../../lib/PlusGlyph";
+import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import {
   hoverTooltip,
@@ -230,6 +231,35 @@ export function ProfileModal({
             <PlusGlyph /> Add folders…
           </button>
         </div>
+
+        {/* AI settings are per profile, but they live in the Settings window
+            with everything else — this is the way in that already knows which
+            profile is meant. Edit only: a profile being created has no id to
+            point Settings at yet. */}
+        {mode === "edit" && profile !== undefined && (
+          <div className="field">
+            <span className="field__label">
+              AI agents{" "}
+              <span className="field__hint">
+                · which agent, model and sign-in this profile uses
+              </span>
+            </span>
+            <button
+              className="profile-modal__link"
+              type="button"
+              onClick={() => {
+                void dispatch("settings:open", {
+                  page: "ai-providers",
+                  profileId: profile.id
+                }).then((result) => {
+                  if (!result.ok) setError(result.error.message);
+                });
+              }}
+            >
+              Open AI settings…
+            </button>
+          </div>
+        )}
 
         {error !== null && <div className="modal__error">{error}</div>}
 

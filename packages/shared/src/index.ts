@@ -13,3 +13,6 @@ export * from "./appearance";
 export * from "./mcp-policy";
 export * from "./prunable";
 export * from "./reclaim";
+export * from "./ai-providers";
+export * from "./settings-pages";
+export * from "./executable-path";

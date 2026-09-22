@@ -248,12 +248,13 @@ test("menu opens the Settings window; panes render and settings persist", async 
     // sections come from, and each one a route back to its card. Clicking the
     // child unfolds the section the line above just folded and lands focus on
     // it, which is the whole contract: a child is a way to a card, not a pane.
-    await expect(settings.locator(".settings-nav__subbutton")).toHaveCount(
-      FORGE_KINDS.length
+    // Scoped to Forges' own sublist: AI Providers and AI Features are groups
+    // too, and their children share the class.
+    const forgeChildren = settings.locator(
+      "#settings-nav-sublist-forges .settings-nav__subbutton"
     );
-    await settings
-      .locator(".settings-nav__subbutton", { hasText: first })
-      .click();
+    await expect(forgeChildren).toHaveCount(FORGE_KINDS.length);
+    await forgeChildren.filter({ hasText: first }).click();
     await expect(
       section.getByRole("button", { name: first, exact: true })
     ).toHaveAttribute("aria-expanded", "true");
@@ -334,7 +335,7 @@ test("Agents columns fit the settings pane at narrow widths and increased zoom",
   await openSettingsFromMenu(app);
   const settings = await nextWindow;
   await settings.waitForSelector(".settings-screen");
-  await settings.getByRole("button", { name: "Agents", exact: true }).click();
+  await settings.getByRole("button", { name: "Local Agents", exact: true }).click();
   await expect(settings.locator(".agent-auth-column")).toHaveCount(3);
   for (const [width, zoom] of [[1040, 1], [1144, 1.3], [1440, 1], [1440, 1.3]]) {
     await app.evaluate(({ BrowserWindow }, size) => {
