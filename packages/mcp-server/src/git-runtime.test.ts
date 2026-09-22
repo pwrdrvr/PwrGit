@@ -80,6 +80,15 @@ describe.skipIf(!posix)("installedKeychainHelper", () => {
     }
   );
 
+  it("finds a Git installed after an earlier search found none", () => {
+    const root = temporary("pwrgit-brew-");
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    expect(installedKeychainHelper({ PATH: bin })).toBeUndefined();
+    const installed = homebrewGit(root, "9.1.0");
+    expect(installedKeychainHelper({ PATH: bin })).toBe(installed.helper);
+  });
+
   it("finds nothing on a PATH with no Git", () => {
     expect(installedKeychainHelper({ PATH: temporary("pwrgit-empty-") })).toBeUndefined();
   });

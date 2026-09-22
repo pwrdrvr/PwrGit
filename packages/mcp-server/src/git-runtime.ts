@@ -83,7 +83,7 @@ function mingitSystemConfig(root: string, execPath: string): string | undefined 
 
 const APPLE_GIT_SHIM = "/usr/bin/git";
 const KEYCHAIN_HELPER = "git-credential-osxkeychain";
-const keychainHelperBySearch = new Map<string, string | undefined>();
+const keychainHelperBySearch = new Map<string, string>();
 
 /**
  * The macOS keychain credential helper that ships with the Git the user
@@ -105,8 +105,9 @@ export function installedKeychainHelper(env: {
   const key = `${searchPath}\0${env.DEVELOPER_DIR ?? ""}`;
   const cached = keychainHelperBySearch.get(key);
   // The path is versioned (Homebrew's Cellar/git/<version>), and upgrading
-  // removes the old keg while the app keeps running.
-  if (cached === undefined ? keychainHelperBySearch.has(key) : existsSync(cached)) return cached;
+  // removes the old keg while the app keeps running. A miss is never cached:
+  // Settings tells the user to install a Git, and Re-check has to see it.
+  if (cached !== undefined && existsSync(cached)) return cached;
   let found: string | undefined;
   for (const entry of searchPath.split(delimiter)) {
     if (!isAbsolute(entry)) continue;
@@ -124,7 +125,8 @@ export function installedKeychainHelper(env: {
     }
   }
   if (keychainHelperBySearch.size > 32) keychainHelperBySearch.clear();
-  keychainHelperBySearch.set(key, found);
+  if (found === undefined) keychainHelperBySearch.delete(key);
+  else keychainHelperBySearch.set(key, found);
   return found;
 }
 
