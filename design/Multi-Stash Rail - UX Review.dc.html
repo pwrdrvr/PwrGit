@@ -163,7 +163,7 @@
           <a class="dv-tid" href="#t1">1</a>
           <span class="dv-tname">Findings &#8212; the Stashes tab at the rail&#8217;s real widths</span>
         </div>
-        <p class="dv-sub"><a href="https://github.com/pwrdrvr/PwrGit/pull/150">PR&nbsp;#150</a> adds a repository&#8209;wide Stashes tab to the right rail. Every number below was measured by mounting the real <code>Rail</code> and <code>StashesTab</code> in headless Chromium against contrived fixtures, at the rail&#8217;s default 344&nbsp;px and its 280&nbsp;px drag minimum. Specimens are drawn at shipped size from the shipped CSS. They use the Google Fonts build of Geist, so their overflow can differ from the measurements by a few pixels. The three defects that pinned red all read fine in a unit test and only show up at a real width.</p>
+        <p class="dv-sub"><a href="https://github.com/pwrdrvr/PwrGit/pull/150">PR&nbsp;#150</a> adds a repository&#8209;wide Stashes tab to the right rail. Every number below was measured by mounting the real <code>Rail</code> and <code>StashesTab</code> in headless Chromium against contrived fixtures, in the bundled Geist Sans that <code>main</code> now loads, at the rail&#8217;s default 344&nbsp;px and its 280&nbsp;px drag minimum. Specimens are drawn at shipped size from the shipped CSS. They use the Google Fonts build of Geist, so their overflow can differ from the measurements by a few pixels. The three defects that pinned red all read fine in a unit test and only show up at a real width.</p>
         <div class="dv-opts">
 
           <div class="dv-opt" id="1a" data-screen-label="1a The tab bar">
@@ -180,7 +180,7 @@
                   <div class="rbar"><span class="rtab">Changes<span class="rbadge">4</span></span><span class="rtab on">Stashes<span class="rbadge">4</span></span><span class="rtab">Rebase<span class="rbadge">2</span></span><span class="spacer"></span><span class="icob">&#8250;</span></div>
                   <span class="edge"></span>
                 </div>
-                <div class="meas"><span class="mchip bad">344: needs 350 of 343</span><span class="mchip bad">collapse +7 px outside</span><span class="mchip bad">280: +71 px outside</span></div>
+                <div class="meas"><span class="mchip bad">344: needs 349 of 343</span><span class="mchip bad">collapse +6 px outside</span><span class="mchip bad">280: +70 px (+48 with no rebase count)</span></div>
                 <p class="note">Nothing in the bar may shrink, so the extra tab spills out of the rail. The first thing to leave is <b>&#8250;</b>, the button that gets the rail out of the way. <code>main</code> fits in both frames because it has two tabs.</p>
               </div>
               <div class="stage">
@@ -209,7 +209,7 @@
                   <div class="card"><div class="bt"><span class="btw">&#8250;</span><span class="bid"><strong>parser experiment</strong><span>stash@{0} &#183; 4b7e21a &#183; on feat/parser&#8209;rewrite</span></span><span class="btime">Sep 21, 2026, 11:36 AM</span></div></div>
                   <div class="card"><div class="bt"><span class="btw">&#8250;</span><span class="bid"><strong>pwrgit: auto-stash before pull<span class="brec">PwrGit pull recovery</span></strong><span>stash@{1} &#183; c93d0f5 &#183; on main</span></span><span class="btime">Sep 20, 2026, 10:00 AM</span></div></div>
                 </div></div>
-                <p class="note">The recovery chip lived <em>inside</em> the truncating name. Git&#8217;s auto&#8209;stash message is 30 characters, so on the one row the chip exists for, it was always the part ellipsized away (measured: 70&nbsp;px of name hidden, chip invisible). The date is 8.5&nbsp;px and wraps to two lines. The branch, the most useful fact on the meta line, truncates first.</p>
+                <p class="note">The recovery chip lived <em>inside</em> the truncating name. Git&#8217;s auto&#8209;stash message is 30 characters, so on the one row the chip exists for, it was always the part ellipsized away (measured: 62&nbsp;px of name hidden, chip invisible). The date is 8.5&nbsp;px and wraps to two lines. The branch, the most useful fact on the meta line, truncates first.</p>
               </div>
               <div class="stage">
                 <div class="stage-h"><span class="pin ok">2</span>After</div>
