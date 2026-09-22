@@ -484,7 +484,7 @@ describe("dryRunRebase (disposable clone)", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("tree_changed");
-      expect(result.error.message).toContain("discarded");
+      expect(result.error.message).toContain("can't be applied");
       expect(result.error.snag).toEqual({
         kind: "tree_changed",
         files: [expect.objectContaining({ path: "shared.txt" })]

@@ -4146,9 +4146,12 @@ button.agent-menu__item:hover {
   border-radius: 7px;
   background: var(--bg-input);
 }
+/* Sized to their labels, then the slack shared: a model's efforts vary in
+   number and length ("Extra high"), and none of them may wrap. */
 .agent-menu__seg button {
-  flex: 1;
-  padding: 5px 0;
+  flex: 1 1 auto;
+  padding: 5px 6px;
+  white-space: nowrap;
   border: none;
   border-radius: 5px;
   background: transparent;
@@ -4491,6 +4494,7 @@ button.agent-menu__item:hover {
   margin-top: 4px;
 }
 .tidy-member {
+  position: relative;
   display: grid;
   grid-template-columns: 38px 54px minmax(0, 1fr) auto;
   gap: 6px;
@@ -4544,10 +4548,22 @@ button.agent-menu__item:hover {
   white-space: nowrap;
   cursor: pointer;
 }
-/* Revealed on the row it belongs to, so a member row's subject keeps its
-   room; still in the tab order, and shown whenever it holds focus. A
-   separated row keeps "Fold back" visible: that state needs its way back. */
+/* "Keep separate" lies over the end of its row rather than in it: hidden, it
+   takes no room from the subject, and shown, it moves nothing under the
+   pointer. It shows on the row's hover and whenever it holds focus, and its
+   tooltip says what it does. A separated row keeps "Fold back" in the row, in
+   plain sight: that state needs its way back. */
+.tidy-member:hover,
+.tidy-member:focus-within {
+  background: var(--bg-panel-hover);
+}
 .tidy-member:not(.tidy-member--separate) .tidy-member__toggle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0 11px 0 22px;
+  background: linear-gradient(to right, transparent, var(--bg-panel-hover) 16px);
   opacity: 0;
 }
 .tidy-member:hover .tidy-member__toggle,

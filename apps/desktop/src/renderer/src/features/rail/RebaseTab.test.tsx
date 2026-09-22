@@ -194,7 +194,7 @@ function menu(): HTMLElement {
 
 function menuItem(model: string): HTMLButtonElement {
   const found = [...menu().querySelectorAll<HTMLButtonElement>("button.agent-menu__item")].find(
-    (item) => item.querySelector(".agent-menu__model")?.textContent === model
+    (item) => item.querySelector(".agent-menu__name")?.textContent === model
   );
   if (found === undefined) throw new Error(`no model "${model}" in the menu`);
   return found;
@@ -424,6 +424,12 @@ describe("The agent chip", () => {
     await act(async () => chip().click());
     expect(calls("aiProviders:codexModels")).toEqual([{ profileId: "work" }]);
     expect(menu().textContent).not.toContain("Internal");
+    // One provider runs both jobs, so the rows are its models, the one a
+    // request runs on unless changed marked as the default.
+    expect(menu().querySelector(".agent-menu__head")?.textContent).toBe("History editing · Codex");
+    expect(menuItem("GPT-5.5").textContent).toBe("✓GPT-5.5default");
+    expect(menuItem("GPT-5.5 mini").textContent).toBe("GPT-5.5 mini");
+    expect(effortLabels()).toEqual(["Default", "Low", "Medium", "High", "Extra high"]);
     expect(menu().textContent).toContain("Only this request. The default is in");
     await act(async () => menuItem("GPT-5.5 mini").click());
     expect(chip().textContent).toContain("GPT-5.5 mini");
@@ -456,7 +462,7 @@ describe("The agent chip", () => {
     });
     await render("squash");
     await act(async () => chip().click());
-    await act(async () => button("Xhigh").click());
+    await act(async () => button("Extra high").click());
     await act(async () => menuItem("GPT-5.5 mini").click());
     await act(async () => button("Regenerate").click());
     expect(calls("agent:draftMessage").at(-1)?.["choice"]).toEqual({ model: "gpt-5.5-mini" });
@@ -530,27 +536,44 @@ describe("Tidy", () => {
     await render("tidy");
     await act(async () => button("Check in isolated copy").click());
     expect(button("Apply 2 commits").disabled).toBe(false);
+    // The ledger and the Checked button say it on screen; the sentence is
+    // for a screen reader only.
+    expect(button("Checked ✓").disabled).toBe(true);
+    const passed = container.querySelector(".rebase-check-result--clean");
+    expect(passed?.classList.contains("a11y-sr-only")).toBe(true);
+    expect(passed?.textContent).toContain("Check passed");
+    expect(container.querySelector(".rebase-check-result")).toBeNull();
+
+    await act(async () => {
+      button("Keep separate").dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      "Make it its own commit, with its original message. Resets the check."
+    );
+    expect(container.textContent).not.toContain("Keep separate turns");
 
     await act(async () => button("Keep separate").click());
     expect(button("Apply 3 commits").disabled).toBe(true);
     expect(button("Check in isolated copy").disabled).toBe(false);
   });
 
-  it("discards a plan that changes code, with no way to apply it", async () => {
+  it("blocks a plan that changes code, with no way to apply it", async () => {
     route({
       "agent:tidyPlan": (req) => ok(tidyProposal(String(req["requestId"]), first, null)),
       "rebase:check": () =>
         ok({
           status: "snag",
           code: "tree_changed",
-          message: "Tidy would change the code. It was discarded; the worktree was not changed.",
+          message:
+            "The rewrite would change the code, not just the history, so it can't be applied. The worktree was not changed.",
           detail: { kind: "tree_changed", files: [{ path: "src/export/csv.ts", added: 2, removed: 2 }] }
         })
     });
     await render("tidy");
     await act(async () => button("Check in isolated copy").click());
 
-    expect(container.textContent).toContain("Discarded");
+    expect(container.querySelector(".rebase-check-result--bad > span")?.textContent).toBe("Blocked");
+    expect(container.textContent).toContain("so it can't be applied");
     expect(container.textContent).toContain("Code changed in 1 file");
     expect(container.textContent).toContain("csv.ts +2 −2");
     expect(button("Apply 2 commits").disabled).toBe(true);
@@ -561,6 +584,8 @@ describe("Tidy", () => {
     route({ "agent:availability": () => ok(unavailable) });
     await render("tidy");
     expect(container.textContent).toContain("Tidy needs an agent. Squash and Reorder don't.");
+    // Nothing to count yet, so the header counts only what was selected.
+    expect(container.querySelector(".rebase-head__sub")?.textContent).toBe("3 commits · feat/csv-export");
     expect(calls("agent:tidyPlan")).toHaveLength(0);
     // No plan, nothing to check or apply: Discard is the only action.
     expect(container.querySelector(".rebase-apply")).toBeNull();

@@ -763,7 +763,7 @@ export async function dryRunRebase(
       code === "conflict"
         ? `${OP_LABEL[op]} would hit a conflict. The worktree was not changed.`
         : code === "tree_changed"
-          ? "The rewrite would change the code, not just the history. It was discarded; the worktree was not changed."
+          ? "The rewrite would change the code, not just the history, so it can't be applied. The worktree was not changed."
           : simulation.error.message;
     return err({ ...simulation.error, message });
   }

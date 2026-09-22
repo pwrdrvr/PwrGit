@@ -24,8 +24,11 @@ function effortsFor(model: CodexModelOption | undefined): string[] {
   return advertised.length > 0 ? advertised : [...AI_REASONING_EFFORTS];
 }
 
+/** Codex's ids, in words: "xhigh" is "Extra high". */
+const EFFORT_LABELS: Record<string, string> = { xhigh: "Extra high" };
+
 function effortLabel(effort: string): string {
-  return effort.charAt(0).toUpperCase() + effort.slice(1);
+  return EFFORT_LABELS[effort] ?? effort.charAt(0).toUpperCase() + effort.slice(1);
 }
 
 /**
@@ -77,7 +80,7 @@ export function AgentChip({
   const title = `${AI_JOBS[jobId].label} agent`;
   const configuredEffort = agent.status?.effort ?? null;
   const defaultEffortTitle =
-    configuredEffort === null ? "Each task's own" : `Settings: ${configuredEffort}`;
+    configuredEffort === null ? "Each task's own" : `Settings: ${effortLabel(configuredEffort)}`;
 
   const pickModel = (id: string): void => {
     const next: AgentChoice = {};
@@ -123,7 +126,8 @@ export function AgentChip({
       {open && (
         <div ref={menuRef} className="agent-menu" role="menu" aria-label={title}>
           <div className="agent-menu__head" aria-hidden="true">
-            {title}
+            {/* Both jobs run on one provider, so the rows below are its models. */}
+            {agent.ready ? `${AI_JOBS[jobId].label} · ${agent.name}` : title}
           </div>
           {agent.ready ? (
             models.length > 0 ? (
@@ -144,25 +148,22 @@ export function AgentChip({
                     <span className="agent-menu__check" aria-hidden="true">
                       {on ? "✓" : ""}
                     </span>
-                    <span className="agent-dot" aria-hidden="true" />
-                    <span className="agent-menu__name">{agent.name}</span>
-                    <span className="agent-menu__model">{option.displayName}</span>
+                    <span className="agent-menu__name">{option.displayName}</span>
+                    {option.id === defaultId && (
+                      <span className="agent-menu__model">default</span>
+                    )}
                   </button>
                 );
               })
             ) : (
               <div className="agent-menu__item is-on agent-menu__item--static">
                 <span className="agent-menu__check" aria-hidden="true">✓</span>
-                <span className="agent-dot" aria-hidden="true" />
                 <span className="agent-menu__name">
-                  {agent.name}
-                  <small>
-                    {agent.models.kind === "loading"
-                      ? "Loading models…"
-                      : agent.models.kind === "error"
-                        ? "The model list did not load, so this runs on the default."
-                        : (agent.status?.modelLabel ?? "Default model")}
-                  </small>
+                  {agent.status?.modelLabel ?? "Default model"}
+                  {agent.models.kind === "loading" && <small>Loading models…</small>}
+                  {agent.models.kind === "error" && (
+                    <small>The model list did not load, so this runs on the default.</small>
+                  )}
                 </span>
               </div>
             )

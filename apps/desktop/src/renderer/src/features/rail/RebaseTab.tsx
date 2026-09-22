@@ -12,6 +12,7 @@ import type {
 import { dispatch } from "../../lib/pwrgit";
 import { AgentGlyph } from "../../lib/AgentGlyph";
 import { RebaseGlyph } from "../../lib/RebaseGlyph";
+import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { AgentChip } from "../agent/AgentChip";
 import { AgentSaw } from "../agent/AgentSaw";
 import { DraftFooter } from "../agent/DraftFooter";
@@ -120,10 +121,11 @@ export function CheckResult({
     );
   }
   if (check.kind === "clean") {
+    // The ledger's ticks and the Checked button already say this on screen;
+    // a screen reader hears neither change, so it gets the sentence.
     return (
-      <div className="rebase-check-result rebase-check-result--clean" role="status">
-        <span>Clean</span>
-        Check passed: the isolated copy produced {resultCommits} commit
+      <div className="a11y-sr-only rebase-check-result--clean" role="status">
+        Clean. Check passed: the isolated copy produced {resultCommits} commit
         {resultCommits === 1 ? "" : "s"} with an identical tree.
       </div>
     );
@@ -132,9 +134,9 @@ export function CheckResult({
   if (detail?.kind === "tree_changed") {
     return (
       <div className="rebase-check-result rebase-check-result--bad" role="status">
-        <span>Discarded</span>
+        <span>Blocked</span>
         <div>
-          {check.message} A history edit can't change code.
+          {check.message}
           {detail.files.length > 0 && (
             <>
               {" "}
@@ -144,7 +146,7 @@ export function CheckResult({
                 aria-expanded={showFiles}
                 onClick={() => setShowFiles((v) => !v)}
               >
-                {showFiles ? "Hide files" : "Show what changed"}
+                {showFiles ? "Hide files" : "Show files"}
               </button>
               {showFiles && (
                 <div className="rebase-tree-diff">
@@ -251,6 +253,7 @@ export function TidyGroups({
   onToggle: (hash: string) => void;
   onEditMessage: (index: number, message: string) => void;
 }) {
+  const tip = useViewportTooltip();
   return (
     <div className="tidy-groups">
       {groups.map((group) => (
@@ -271,7 +274,20 @@ export function TidyGroups({
               <span className="tidy-member__tools">
                 {row.moved && <span className="tidy-member__moved">moved</span>}
                 {row.canToggle && !locked && (
-                  <button type="button" className="tidy-member__toggle" onClick={() => onToggle(row.hash)}>
+                  <button
+                    type="button"
+                    className="tidy-member__toggle"
+                    {...hoverTooltip(
+                      tip,
+                      row.separated
+                        ? "Fold it back into this group's commit. Resets the check."
+                        : "Make it its own commit, with its original message. Resets the check."
+                    )}
+                    onClick={() => {
+                      tip.hide();
+                      onToggle(row.hash);
+                    }}
+                  >
                     {row.separated ? "Fold back" : "Keep separate"}
                   </button>
                 )}
@@ -280,6 +296,7 @@ export function TidyGroups({
           ))}
         </div>
       ))}
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -542,10 +559,11 @@ export function RebaseTab({
         : program !== null
           ? resultCount(program)
           : null;
+  // "8 → 3" once there is a plan to count; "8 commits" until then.
   const headSub =
     op === null || commits.length === 0
       ? "Isolated check · hooks and signing disabled"
-      : `${commits.length} → ${resultCommits ?? "…"}${branch !== null && branch !== "" ? ` · ${branch}` : ""}`;
+      : `${resultCommits === null ? `${commits.length} commits` : `${commits.length} → ${resultCommits}`}${branch !== null && branch !== "" ? ` · ${branch}` : ""}`;
   const ledgerCheck: LedgerCheck =
     check.kind === "clean"
       ? { kind: "clean", proof: check.proof }
@@ -811,9 +829,6 @@ export function RebaseTab({
             </div>
           )}
           <div className="rebase-note">
-            {op === "tidy"
-              ? "Keep separate turns a fold back into its own commit with its original message, and resets the check. "
-              : ""}
             Hooks, signing, and rerere are disabled for both check and apply.
             Other repo-local Git settings can still affect Apply. Nothing is
             pushed.
