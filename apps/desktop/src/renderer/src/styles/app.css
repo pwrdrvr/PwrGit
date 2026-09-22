@@ -8659,22 +8659,51 @@ body.is-col-resizing {
   background: var(--status-closed);
   box-shadow: 0 0 0 1px var(--pr-dot-ring);
 }
+/* The lift buys the bar room under the number without growing the pill. The
+   bar's offset below takes it back, so the three move together. */
 .pr-chip--draft .pr-chip__dot {
   transform: translateY(-1px);
 }
 .pr-chip--draft .pr-chip__label {
   transform: translateY(-1px);
 }
+/* Draft affordance: a short gray bar under the number, with a gap between the
+   two. Without that gap it reads as an underline.
+
+   Anchored to the pill's CENTERLINE, not its bottom edge, because what it has
+   to clear is the label, and the label is centered. It was `bottom: 2px`,
+   calibrated on the 18px base pill. The sidebar's pill is shorter (16px at
+   "md"; `.wt-row .pr-chip` sizes it off the chip type), so a bar measured from
+   the bottom edge rose with it and sat on the digits at every notch.
+
+   `calc(0.5em - 0.75px)` is half the label's line box (1em: the chip is
+   `line-height: 1`), less the 1px lift above, plus 0.25px. The em term makes
+   the offset follow the label's size in every context. On the base pill this
+   draws exactly what `bottom: 2px` drew, pixel for pixel. Geist Mono's
+   baseline sits about 2px above the label box's bottom edge, so the ink clears
+   the bar by about 1.5px at 2x.
+
+   What a new context can run out of is the room UNDER the bar. The sidebar
+   thins its bar below; pr-chip-draft-bar.test.ts checks every pill height. */
 .pr-chip__draft-bar {
   position: absolute;
-  bottom: 2px;
+  top: 50%;
   left: 50%;
+  margin-top: calc(0.5em - 0.75px);
   width: 16px;
   height: 2px;
   border-radius: 999px;
   transform: translateX(-50%);
   background: var(--status-suspended);
   pointer-events: none;
+}
+/* The sidebar pill leaves about 3.5px between the digits and its inner edge at
+   every notch, against 5.5px on the base pill. A 2px bar there has either no
+   gap above it or no room below it. At 1px, the trade PwrAgnt makes for its
+   shortest pill, the gap to the digits matches the base pill's from 1x to 3x
+   (1.5px at 2x), with about 1px to spare below. */
+.wt-row .pr-chip__draft-bar {
+  height: 1px;
 }
 
 /* ---- WIP framing + clickable change/commit rows ---- */
