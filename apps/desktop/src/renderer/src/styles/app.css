@@ -10986,22 +10986,12 @@ body.is-col-resizing {
 }
 /* Collapse all / Expand all. Quiet by construction: they are pane furniture
    sitting beside whatever real action the pane offers, and must not compete
-   with it. */
+   with it. The buttons wear `.settings-button--quiet`, which is defined after
+   the base `.settings-button` rule, not here — see there for why. */
 .settings-head__bulk {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.settings-button--quiet {
-  border-color: transparent;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  padding: 6px 9px;
-}
-.settings-button--quiet:hover:not(:disabled) {
-  background: var(--bg-panel-hover);
-  color: var(--text-primary);
 }
 
 /* Section cards */
@@ -11750,6 +11740,33 @@ body.is-col-resizing {
 }
 .settings-button--danger:hover:not(:disabled) {
   background: var(--danger-soft);
+}
+/* The pane head's Collapse all / Expand all. This block must come after
+   `.settings-button`: at equal specificity the later rule wins, and while it
+   sat ~700 lines above the base it lost every declaration but its hover, so
+   the pane furniture drew as full buttons level with the pane's real action.
+   It keeps a subtle border, as PwrAgnt's ghost button does, so it still reads
+   as a control rather than a caption. */
+.settings-button--quiet {
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  padding: 6px 9px;
+}
+.settings-button--quiet:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+/* Expand all is unavailable while every section is open, which is the default,
+   and says so with `aria-disabled` rather than `disabled` (SettingsLayout says
+   why). So the state has to be painted here, and it has to cancel the base
+   hover fill, or the button lights up under the pointer like a live one while
+   its guarded handler drops the click. */
+.settings-button--quiet[aria-disabled="true"] {
+  background: transparent;
+  opacity: 0.45;
+  cursor: default;
 }
 .settings-pathlink {
   appearance: none;
