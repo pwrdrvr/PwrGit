@@ -225,6 +225,25 @@ describe("Git discovery", () => {
     expect(tools.probed).not.toContain("/usr/bin/git");
   });
 
+  it("reads PATH by the rules of the machine it describes, not the host's", async () => {
+    const machine = fakeMachine(
+      {
+        [bundledGitPath()]: HEALTHY,
+        "C:\\Program Files\\Git\\cmd\\git.exe": HEALTHY
+      },
+      {
+        platform: "win32",
+        home: "C:\\Users\\fixture",
+        searchPath: () => "C:\\Windows\\System32;C:\\Program Files\\Git\\cmd"
+      }
+    );
+    const status = await readGitRuntimeStatus(machine);
+    expect(status.candidates.map(({ path, source }) => [path, source])).toEqual([
+      [bundledGitPath(), "bundled"],
+      ["C:\\Program Files\\Git\\cmd\\git.exe", "path"]
+    ]);
+  });
+
   it("gives a chosen Git discovery would not find a row of its own, broken or not", async () => {
     useInstalledGit("/opt/elsewhere/bin/git");
     const status = await readGitRuntimeStatus(fakeMachine({ [bundledGitPath()]: HEALTHY }));

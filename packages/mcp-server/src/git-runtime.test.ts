@@ -111,7 +111,10 @@ describe("bundledGitEnvironment", () => {
     expect(text).not.toContain("[credential]");
     // Defaults first, the bundle's own settings after, so the bundle wins.
     expect(text.indexOf("[include]")).toBeGreaterThan(text.indexOf("[filter \"lfs\"]"));
-    expect(text).toContain(join(dugite.resolveEmbeddedGitDir(), "etc", "gitconfig"));
+    // Quoted, with backslashes escaped the way Git's config syntax reads them —
+    // which is every separator on Windows.
+    const bundleConfig = join(dugite.resolveEmbeddedGitDir(), "etc", "gitconfig");
+    expect(text).toContain(`[include]\n\tpath = "${bundleConfig.replaceAll("\\", "\\\\")}"\n`);
   });
 
   it.skipIf(!posix)("adds the installed keychain helper on macOS, and puts its directory last on PATH", () => {

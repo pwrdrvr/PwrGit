@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { access, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, isAbsolute, join } from "node:path";
+import { posix, win32, type PlatformPath } from "node:path";
 import {
   err,
   ok,
@@ -76,6 +76,12 @@ const machine: GitDiscoveryDeps = {
 
 const APPLE_GIT_SHIM = "/usr/bin/git";
 
+/** Path rules for the platform discovery is asked about, never the host's:
+ *  a Windows PATH splits on `;`, and a test can describe a Mac from any host. */
+function pathsFor(deps: GitDiscoveryDeps): PlatformPath {
+  return deps.platform === "win32" ? win32 : posix;
+}
+
 /**
  * Apple's /usr/bin/git is a shim: with no developer tools it opens their
  * installer, which is not something opening Settings should do. So it is
@@ -85,17 +91,18 @@ const APPLE_GIT_SHIM = "/usr/bin/git";
 async function appleGit(deps: GitDiscoveryDeps): Promise<string | null> {
   const developerDirectory = await deps.developerDirectory();
   if (developerDirectory === null) return null;
-  const git = join(developerDirectory, "usr", "bin", "git");
+  const git = pathsFor(deps).join(developerDirectory, "usr", "bin", "git");
   return (await deps.executable(git)) ? git : null;
 }
 
 /** The first `git` on the CLI search path, with Apple's shim swapped for the
  *  Git behind it. */
 async function pathGit(deps: GitDiscoveryDeps): Promise<{ path: string; source: GitRuntimeSource } | null> {
+  const paths = pathsFor(deps);
   const name = deps.platform === "win32" ? "git.exe" : "git";
-  for (const directory of deps.searchPath().split(delimiter)) {
-    if (!isAbsolute(directory)) continue;
-    const path = join(directory, name);
+  for (const directory of deps.searchPath().split(paths.delimiter)) {
+    if (!paths.isAbsolute(directory)) continue;
+    const path = paths.join(directory, name);
     if (!(await deps.executable(path))) continue;
     if (deps.platform === "darwin" && (await deps.realpath(path)) === APPLE_GIT_SHIM) {
       const apple = await appleGit(deps);
@@ -113,6 +120,7 @@ async function pathGit(deps: GitDiscoveryDeps): Promise<{ path: string; source: 
  * PATH keeps reading "Homebrew". A path appears once, under its first source.
  */
 async function discoveredGits(deps: GitDiscoveryDeps): Promise<Array<{ path: string; source: GitRuntimeSource }>> {
+  const { join } = pathsFor(deps);
   const fixed: Array<{ path: string; source: GitRuntimeSource }> =
     deps.platform === "win32"
       ? []
@@ -195,7 +203,7 @@ export async function selectGitRuntime(
   const path = requested?.trim() ?? "";
   const chosen = path === "" || path === bundledGitPath() ? null : path;
   if (chosen !== null) {
-    if (!isAbsolute(chosen)) {
+    if (!pathsFor(deps).isAbsolute(chosen)) {
       return err({ kind: "git", code: "git_runtime_relative", message: "Choose Git by its full path." });
     }
     const probed = await probeGitRuntime(chosen, "custom", deps);
