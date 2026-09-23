@@ -190,9 +190,11 @@ export function StashesTab({
     if (!result.ok) {
       showErrorToast({
         title:
-          command === "stash:pop"
-            ? "Pop stopped — stash kept"
-            : "Apply stopped",
+          command === "stash:apply"
+            ? "Apply stopped"
+            : result.error.code === "stash_applied_not_removed"
+              ? "Applied, but the stash was kept"
+              : "Pop stopped — stash kept",
         message: result.error.message,
         detail: entry.selector + " " + displayName(entry)
       });

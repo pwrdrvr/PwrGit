@@ -132,7 +132,7 @@ export async function readStashDetails(
 export async function readStashPatch(
   git: GitExec,
   cwd: string,
-  selector: string
+  hash: string
 ): Promise<Result<string>> {
   const args = [
     "stash",
@@ -142,7 +142,7 @@ export async function readStashPatch(
     "--no-color",
     "--no-ext-diff",
     "--no-textconv",
-    selector
+    hash
   ];
   const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
   if (!raw.ok) return raw;
@@ -205,22 +205,16 @@ function stashMutationResult(
   });
 }
 
-async function mutateStash(
+/** Takes the stash's commit hash, never `stash@{n}`, which can move. */
+export async function applyStash(
   git: GitExec,
   cwd: string,
-  verb: "apply",
-  selector: string
+  hash: string
 ): Promise<Result<void>> {
-  const args = ["stash", verb, selector];
+  const args = ["stash", "apply", hash];
   const raw = await git(args, cwd);
   return raw.ok ? stashMutationResult(raw.value, args) : raw;
 }
-
-export const applyStash = (
-  git: GitExec,
-  cwd: string,
-  selector: string
-): Promise<Result<void>> => mutateStash(git, cwd, "apply", selector);
 
 export const popStash = (
   git: GitExec,

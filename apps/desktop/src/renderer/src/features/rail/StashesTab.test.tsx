@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PWRGIT_PULL_STASH_MESSAGE,
+  err,
   ok,
   type Result,
   type StashEntry,
@@ -190,6 +191,32 @@ describe("StashesTab", () => {
       stashHash: older.hash
     });
     expect(reloadMock).toHaveBeenCalled();
+  });
+
+  it("does not call a pop stopped when it applied but the stash could not be removed", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) => {
+      if (command === "stash:details") {
+        return ok({ entry: older, files: [], additions: 0, deletions: 0 });
+      }
+      if (command === "stash:pop") {
+        return err({
+          kind: "repo",
+          code: "stash_applied_not_removed",
+          message: "The stash was applied here, but it could not be removed."
+        });
+      }
+      return ok(null);
+    });
+    const inspect = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Inspect older CLI stash"]'
+    );
+    if (inspect === null) throw new Error("inspect button missing");
+    await act(async () => inspect.click());
+    await act(async () => button("Pop").click());
+
+    expect(mocks.showErrorToast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Applied, but the stash was kept" })
+    );
   });
 
   it("creates a named stash with the explicit untracked choice", async () => {

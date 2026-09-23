@@ -1169,8 +1169,9 @@ if (!gotSingleInstanceLock) {
         (
           db
             .prepare(
+              // A missing nested checkout would run Git in its parent repo.
               `SELECT w.repo_id AS repoId, w.path AS path
-               FROM worktrees w WHERE w.id = ?`
+               FROM worktrees w WHERE w.id = ? AND w.missing = 0`
             )
             .get(worktreeId) as
             | { repoId: string; path: string }

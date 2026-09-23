@@ -4,6 +4,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { err, ok, type Result } from "@pwrgit/shared";
+import { logMain } from "../logs";
 import { requireExit0, type GitExec } from "./dugite";
 
 const refused = (code: string, message: string) =>
@@ -37,6 +38,9 @@ export async function removeStashByHash(
   const log = join(common, "logs", "refs", "stash");
   const packed = join(common, "packed-refs");
   const owned = new Set<string>();
+  // Once Pop's apply has run, a failure to remove the entry must not read as
+  // "nothing happened": the work is already in the worktree.
+  let applied = false;
   const lock = (path: string) => {
     const fd = openSync(path, "wx");
     owned.add(path);
@@ -87,8 +91,9 @@ export async function removeStashByHash(
     writeFileSync(log + ".lock", rewritten);
     writeFileSync(ref + ".lock", previous + "\n");
     if (beforeRemove) {
-      const applied = await beforeRemove();
-      if (!applied.ok) return applied;
+      const restored = await beforeRemove();
+      if (!restored.ok) return restored;
+      applied = true;
     }
     renameSync(log + ".lock", log);
     owned.delete(log + ".lock");
@@ -109,11 +114,23 @@ export async function removeStashByHash(
     }
     return ok(undefined);
   } catch (cause) {
-    return refused("stash_removal_failed",
-      "Could not safely remove the stash. It may be locked by another Git process. Refresh and inspect the worktree before retrying. " +
-      (cause instanceof Error ? cause.message : String(cause)));
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return applied
+      ? refused("stash_applied_not_removed",
+        "The stash was applied here, but it could not be removed from the stack, so it is still listed. Check the worktree, then drop it rather than popping it again. " + detail)
+      : refused("stash_removal_failed",
+        "Could not safely remove the stash. It may be locked by another Git process. Refresh and inspect the worktree before retrying. " + detail);
   } finally {
-    // Never delete a lock belonging to another process.
-    for (const path of owned) unlinkSync(path);
+    // Never delete a lock belonging to another process. Try every one we own:
+    // a lock left behind blocks every later Git stash command.
+    for (const path of owned) {
+      try {
+        unlinkSync(path);
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {
+          logMain("warn", "stash", `could not remove ${path}:`, cause);
+        }
+      }
+    }
   }
 }

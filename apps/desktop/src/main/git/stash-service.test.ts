@@ -115,6 +115,30 @@ describe("stash service (system git)", () => {
     expect(readFileSync(join(repo, "other.txt"), "utf8")).toBe("other baseline\n");
   });
 
+  it("says a pop applied when only the removal failed, and releases every lock", async () => {
+    const selected = await save("selected");
+    const gitDir = join(repo, ".git");
+    const log = join(gitDir, "logs", "refs", "stash");
+    const racingGit: GitExec = async (args, cwd, options) => {
+      const result = await systemGit(args, cwd, options);
+      if (args[0] === "stash" && args[1] === "apply") {
+        // A directory where the reflog was: committing the rewritten log fails.
+        rmSync(log);
+        mkdirSync(log);
+        writeFileSync(join(log, "blocker"), "");
+      }
+      return result;
+    };
+    expect(await popStash(racingGit, repo, selected)).toMatchObject({
+      ok: false,
+      error: { code: "stash_applied_not_removed" }
+    });
+    expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("selected\n");
+    for (const lock of ["refs/stash.lock", "packed-refs.lock", "logs/refs/stash.lock"]) {
+      expect(existsSync(join(gitDir, lock))).toBe(false);
+    }
+  });
+
   it("holds Git's shared stash lock throughout pop from another worktree", async () => {
     const selected = await save("selected");
     const linked = join(root, "linked");
