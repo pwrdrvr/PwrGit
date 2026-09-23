@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.19.0 - 2026-09-23
+
+- Stashes - Added a Stashes tab that shows the repository's Git stash stack across worktrees. Inspect patches and untracked files, create a stash, or safely apply, pop, and drop an entry; stashes left by an interrupted pull are marked for recovery.
+- AI Features - Added opt-in, per-profile agent settings with provider status, model and effort choices, and guidance. AI features stay off until enabled for a profile.
+- History editing - Codex can draft commit and squash messages and propose a Tidy plan for selected commits. PwrGit checks history changes in an isolated copy and blocks a plan that changes the final file tree; applying a verified plan remains your choice.
+- Git runtime - Bundled Git now configures Git LFS and, on macOS, uses the installed credential helper for HTTPS sign-in. Settings can also select an installed Git with LFS and shows which runtime is active.
+- Remote authentication - Failed Fetch and Push operations can now offer the same reviewed HTTPS-to-SSH remote recovery already available for Pull.
+- Accessibility - Added consistent keyboard focus rings and contained keyboard navigation across Settings, dialogs, the Refs browser, and overlays; truncated paths also retain their original punctuation.
+- Git runtime - All PwrGit repository commands, SSH trust checks, and the standalone MCP server now use PwrGit's bundled Git and Git LFS consistently. Settings shows the bundled runtime and installed versions, with clear recovery guidance when the bundled runtime cannot run.
+- Pull requests - Find open pull requests and merge requests by number or title in the Refs browser and Command Palette, see where each head lives, and open, switch to, or create a worktree for it directly.
+- Search - Command Palette searches now start within the current profile, preventing unrelated profile results from taking over. Switch to all profiles from the palette or General settings whenever you want the broader view.
+- Push - Toolbar Push can now publish a new branch by choosing its remote, then sets its upstream so later pushes work normally. Operation receipts also keep their layout stable and lead with actionable failure reasons.
+- Appearance and accessibility - PwrGit now renders sans-serif text with its bundled Geist Sans font, with consistent SVG action icons and clearer names for Command Palette result types.
+
 ## v0.18.0 - 2026-09-21
 
 - Git runtime - All PwrGit repository commands, SSH trust checks, and the standalone MCP server now use PwrGit's bundled Git and Git LFS consistently. Settings shows the bundled runtime and installed versions, with clear recovery guidance when the bundled runtime cannot run.
