@@ -96,6 +96,7 @@ first.
 | `Change Requests in Refs - UX Review.dc.html` | Why the refs browser cannot find a pull request by its number, the open-change-request cache that fixes it, and the three places PRs could live in the browser: matched on the Branches tab, a Pull requests / Merge requests sibling tab, or both with per-tab match counts. Interactive. |
 | `Git Runtime Settings - UX Review.dc.html` | Settings &rsaquo; General &rsaquo; Git runtime &mdash; the read-only card that names which Git and Git LFS PwrGit runs. The card reproduced at shipped size at both the 760&nbsp;px column and the Settings window's own 760&nbsp;px minimum, five findings against it, the redraw, and the state table it should answer. |
 | `Agent History Editing - UX Review.dc.html` | A review of open PR #149's agent-assisted rebase &mdash; six findings against its review-only agent panel &mdash; and a counter-proposal: the agent proposes a history, PwrGit proves it (every commit once, a clean isolated replay, an identical tree), you apply it. Squash messages, &#10022;&nbsp;Tidy, the failure paths, and where the agent is chosen. A proposal; nothing in it is built. Interactive. |
+| `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -217,6 +218,16 @@ It is a proposal: none of that is built. It carries no `assets/`; every frame
 is drawn from PwrGit's tokens and markup, and its commits, branches and file
 names are invented. Card **4b** is a live `DCLogic` prototype of Tidy &mdash;
 keep a fixup separate, run the check, apply.
+
+`Multi-Stash Rail - UX Review.dc.html` was written here and pushed up through the
+`claude-design` MCP during the UI review of
+[#150](https://github.com/pwrdrvr/PwrGit/pull/150); the upload was checked
+byte-for-byte against this copy. It carries no screenshots. Its specimens are
+true-size HTML drawn from the shipped stash and rail-tab CSS, and its numbers
+come from mounting the real `Rail` and `StashesTab` in headless Chromium against
+contrived fixtures (`feat/parser-rewrite`, `parser experiment`, invented
+hashes). Card **2d** is a live `DCLogic` prototype of the tab strip: pick a rail
+width and watch where the collapse button lands, before and after.
 
 The Tag Chips captures are 100% contrived: fixture repositories built by
 `apps/desktop/e2e/fixtures/git-sandbox.ts`, a seeded default profile, and a

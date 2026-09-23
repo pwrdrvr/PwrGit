@@ -1306,6 +1306,50 @@ export type PartialFileDiff = {
   counterpartChanges: boolean;
 };
 
+/** The name pull gives the stash it makes before a fast-forward. The stash
+ *  list recognizes it by this exact text; nothing else marks the entry. */
+export const PWRGIT_PULL_STASH_MESSAGE = "pwrgit: auto-stash before pull";
+
+/** One entry in Git's repository-wide `refs/stash` reflog, newest first. */
+export type StashEntry = {
+  /** Current reflog selector. This can move when another entry is added/dropped. */
+  selector: string;
+  /** Stable object identity; one reflog can contain this commit more than once. */
+  hash: string;
+  /** Number of reflog entries currently pointing at this same stash commit. */
+  occurrenceCount: number;
+  shortHash: string;
+  /** First parent: HEAD at the time the stash was created. */
+  baseHash: string;
+  /** Branch recorded by Git in the stash subject, or null when unrecognised. */
+  branch: string | null;
+  /** Full subject written by Git, including its `On` / `WIP on` prefix. */
+  subject: string;
+  /** User-supplied `git stash push -m` text; absent for Git's default WIP subject. */
+  name?: string;
+  /** PwrGit pull recovery stashes are ordinary entries with a recognizable name. */
+  kind: "ordinary" | "pwrgit-pull-recovery";
+  /** ISO-8601 stash commit time. */
+  createdAt: string;
+};
+
+/** Per-file diffstat from `git stash show --include-untracked --numstat`. */
+export type StashFileSummary = {
+  path: string;
+  /** Null for binary files, matching Git's `-` numstat marker. */
+  additions: number | null;
+  deletions: number | null;
+};
+
+/** Lazily loaded contents summary for one current stash entry. */
+export type StashDetails = {
+  entry: StashEntry;
+  files: StashFileSummary[];
+  /** Text-file totals; binary files are listed but do not contribute. */
+  additions: number;
+  deletions: number;
+};
+
 /** One file touched by a commit (rail's commit-scoped file list). */
 export type CommitFileChange = {
   path: string;
@@ -1331,10 +1375,14 @@ export type Commit = {
 };
 
 /** The file contents a history/blame view is anchored to. Working-tree
- *  history walks through HEAD while blame includes uncommitted lines. */
+ *  history walks through HEAD while blame includes uncommitted lines.
+ *  A stash is its own kind, not a commit: its merge commit's other parents are
+ *  Git bookkeeping (the index, the untracked files), so history walks from the
+ *  commit it was made on and its changes blame as uncommitted. */
 export type FileInsightContext =
   | { kind: "workingTree" }
-  | { kind: "commit"; hash: string };
+  | { kind: "commit"; hash: string }
+  | { kind: "stash"; hash: string };
 
 /** One rename-aware commit in a file's lineage. */
 export type FileHistoryEntry = Commit & {

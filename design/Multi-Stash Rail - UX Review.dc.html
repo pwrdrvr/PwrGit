@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-rail: #050505; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --elev: #101010; --hov: #14110d; --rowact: #120800;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --warn: #d99a3d; --wsoft: rgba(217, 154, 61, 0.14);
+            --ok: #5fa969; --okt: #9ce5b3;
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+
+          /* ---- review chrome (matches "Tag Chips and Locate") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 720px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 380px; }
+          .note code, .fitem code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .note b { color: var(--t2); font-weight: 600; }
+          .pair { display: flex; gap: 24px; align-items: flex-start; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .find { width: 760px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 28px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .meas { display: flex; gap: 8px; flex-wrap: wrap; }
+          .mchip { display: inline-flex; gap: 5px; align-items: center; padding: 3px 7px; border-radius: 999px; border: 1px solid var(--line); font: 500 9.5px/1.3 var(--mono); color: var(--t2); }
+          .mchip.bad { border-color: rgba(185, 66, 50, 0.5); color: var(--badt); }
+          .mchip.good { border-color: rgba(95, 169, 105, 0.5); color: var(--okt); }
+
+          /* ---- rail frame: container query mirrors .pane--rail ---- */
+          .rail { position: relative; container: rail / inline-size; background: var(--bg-rail); border-left: 1px solid var(--line); }
+          .rail.w280 { width: 280px; } .rail.w300 { width: 300px; } .rail.w330 { width: 330px; } .rail.w344 { width: 344px; } .rail.w420 { width: 420px; }
+          .edge { position: absolute; top: -6px; bottom: -6px; right: -1px; width: 1px; background: var(--bad); opacity: 0.8; pointer-events: none; }
+          .edge.ok { background: var(--ok); }
+
+          /* ---- tab bar, before (main + PR #150 as opened) ---- */
+          .rbar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+          .rtab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--t3); font: 600 12px/1 var(--sans); white-space: nowrap; flex: none; }
+          .rtab.on { border-color: var(--abord); background: var(--rowact); color: var(--accb); }
+          .rbadge { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--wsoft); color: var(--warn); font: 600 9px/1 var(--mono); }
+          .rbadge.n { background: var(--elev); color: var(--t3); }
+          .icob { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 26px; border-radius: 5px; border: 1px solid var(--line2); color: var(--t3); font: 600 13px/1 var(--sans); }
+          .spacer { flex: 1; }
+
+          /* ---- tab bar, after (shipped) ---- */
+          .rbar.a { gap: 4px; }
+          .rbar.a .rtab { flex: 0 1 auto; min-width: 0; padding: 0 10px; }
+          .rbar.a .rtab.on { flex-shrink: 0; }
+          .rbar.a .rl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .rbar.a .icob { margin-left: auto; }
+          @container rail (max-width: 330px) {
+            .rbar.a { gap: 2px; padding-inline: 6px; }
+            .rbar.a .rtab { gap: 3px; padding: 0 5px; }
+            .rbar.a .icob { width: 24px; }
+          }
+          /* option 2a: tighten only */
+          .rbar.t { gap: 8px; } .rbar.t .rtab { padding: 0 10px; }
+
+          /* ---- stash list, shared ---- */
+          .slist { padding: 12px; }
+          .eyebrow { font: 600 10px/1 var(--sans); color: var(--t3); letter-spacing: 0.08em; text-transform: uppercase; }
+          .card { margin-bottom: 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-panel); overflow: hidden; }
+          .card:last-child { margin-bottom: 0; }
+
+          /* before */
+          .bt { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 48px; padding: 7px 8px; }
+          .bt.open { background: var(--hov); }
+          .btw { color: var(--t3); font: 700 15px/1 var(--sans); text-align: center; }
+          .bid { min-width: 0; display: grid; gap: 4px; }
+          .bid strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 600 11px/1.2 var(--sans); }
+          .bid > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font: 500 9.5px/1.2 var(--mono); }
+          .brec { display: inline-flex; margin-left: 6px; padding: 2px 5px; border: 1px solid var(--warn); border-radius: 999px; color: var(--warn); background: var(--wsoft); font: 650 8px/1 var(--sans); letter-spacing: 0.03em; vertical-align: 1px; }
+          .btime { max-width: 74px; color: var(--tsub); font: 500 8.5px/1.25 var(--sans); text-align: right; }
+          .bbody { padding: 8px; border-top: 1px solid var(--line); }
+          .bact { display: flex; gap: 5px; margin-bottom: 8px; }
+          .bact span { display: inline-flex; align-items: center; min-height: 25px; padding: 0 7px; border: 1px solid var(--line2); border-radius: 5px; background: var(--elev); color: var(--t2); font: 600 9.5px/1 var(--sans); }
+          .bact .drop { margin-left: auto; color: var(--badt); }
+          .bsum { margin-bottom: 5px; color: var(--t3); font: 550 9.5px/1.3 var(--sans); }
+          .bfiles { display: grid; gap: 1px; }
+          .bfile { display: flex; align-items: baseline; gap: 8px; min-height: 24px; padding: 4px 5px; border-radius: 5px; }
+          .bfile.hov { background: var(--hov); }
+          .bfile .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); font: 500 9.5px/1.3 var(--mono); }
+          .bfile .s { flex: none; color: var(--t3); font: 600 9px/1 var(--mono); }
+          .bscope { display: grid; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--bg-panel); color: var(--t2); font: 500 10.5px/1.4 var(--sans); }
+          .bscope strong { color: var(--t1); font-weight: 650; }
+          .bscope code { color: var(--t1); font: 600 10px/1 var(--mono); }
+
+          /* after */
+          .shead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 2px 0 6px; }
+          .shead .eyebrow { flex: 1 0 auto; white-space: nowrap; }
+          .scope { color: var(--tsub); font: 500 10px/1 var(--sans); }
+          .at { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 46px; padding: 7px 10px 7px 8px; }
+          .at.open { background: var(--hov); }
+          .atw { display: flex; justify-content: center; color: var(--t3); }
+          .chev { width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: 0.82; }
+          .chev.open { transform: rotate(90deg); }
+          .aid { min-width: 0; display: grid; gap: 4px; }
+          .aname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t1); font: 600 12px/1.25 var(--sans); }
+          .ameta { min-width: 0; min-height: 15px; display: flex; align-items: center; gap: 6px; }
+          .arec { flex: none; display: inline-flex; align-items: center; height: 15px; padding: 0 5px; border-radius: 999px; background: var(--wsoft); color: var(--warn); font: 600 9px/1 var(--sans); letter-spacing: 0.02em; }
+          .awhere { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t3); font: 500 10px/1.2 var(--mono); }
+          .aage { align-self: start; padding-top: 2px; color: var(--tsub); font: 500 10px/1.25 var(--mono); white-space: nowrap; }
+          .abody { display: grid; gap: 8px; padding: 8px 10px 10px; border-top: 1px solid var(--line); }
+          .aact { display: flex; gap: 6px; }
+          .aact span { display: inline-flex; align-items: center; height: 26px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 5px; background: var(--elev); color: var(--t2); font: 600 11px/1 var(--sans); }
+          .aact .drop { margin-left: auto; color: var(--badt); }
+          .atarget { color: var(--tsub); font: 500 10.5px/1.35 var(--sans); }
+          .atarget code { color: var(--t2); font: 600 10px/1 var(--mono); }
+          .asum { color: var(--t3); font: 600 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; }
+          .add { color: var(--okt); } .del { color: var(--badt); }
+          .afiles { display: grid; grid-template-columns: minmax(0, 1fr); margin: -2px -4px 0; }
+          .afile { display: flex; align-items: center; gap: 10px; min-height: 24px; padding: 0 4px; }
+          .afile .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--t2); font: 500 11px/1.3 var(--mono); }
+          .afile .s { flex: none; color: var(--t3); font: 600 10px/1 var(--mono); }
+
+          /* ---- live prototype controls ---- */
+          .ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+          .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-input); }
+          .seg button { height: 24px; padding: 0 9px; border: 0; border-radius: 5px; background: transparent; color: var(--t3); font: 600 10.5px/1 var(--mono); cursor: pointer; }
+          .seg button.on { background: var(--rowact); color: var(--accb); box-shadow: inset 0 0 0 1px var(--abord); }
+          .readout { font: 500 10.5px/1.4 var(--mono); color: var(--okt); }
+          .readout.over { color: var(--badt); }
+          .protoframe { padding: 12px 0; }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the Stashes tab at the rail&#8217;s real widths</span>
+        </div>
+        <p class="dv-sub"><a href="https://github.com/pwrdrvr/PwrGit/pull/150">PR&nbsp;#150</a> adds a repository&#8209;wide Stashes tab to the right rail. Every number below was measured by mounting the real <code>Rail</code> and <code>StashesTab</code> in headless Chromium against contrived fixtures, in the bundled Geist Sans that <code>main</code> now loads, at the rail&#8217;s default 344&nbsp;px and its 280&nbsp;px drag minimum. Specimens are drawn at shipped size from the shipped CSS. They use the Google Fonts build of Geist, so their overflow can differ from the measurements by a few pixels. The three defects that pinned red all read fine in a unit test and only show up at a real width.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a The tab bar">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>A third tab pushed the rail&#8217;s collapse button past its edge</div>
+            <div class="pair">
+              <div class="stage">
+                <div class="stage-h"><span class="pin">1</span>Before <em>344 px, three counts</em></div>
+                <div class="rail w344">
+                  <div class="rbar"><span class="rtab">Changes<span class="rbadge">4</span></span><span class="rtab on">Stashes<span class="rbadge">4</span></span><span class="rtab">Rebase<span class="rbadge">2</span></span><span class="spacer"></span><span class="icob">&#8250;</span></div>
+                  <span class="edge"></span>
+                </div>
+                <div class="stage-h" style="margin-top:6px"><span class="pin">1</span>Before <em>280 px</em></div>
+                <div class="rail w280">
+                  <div class="rbar"><span class="rtab">Changes<span class="rbadge">4</span></span><span class="rtab on">Stashes<span class="rbadge">4</span></span><span class="rtab">Rebase<span class="rbadge">2</span></span><span class="spacer"></span><span class="icob">&#8250;</span></div>
+                  <span class="edge"></span>
+                </div>
+                <div class="meas"><span class="mchip bad">344: needs 349 of 343</span><span class="mchip bad">collapse +6 px outside</span><span class="mchip bad">280: +70 px (+48 with no rebase count)</span></div>
+                <p class="note">Nothing in the bar may shrink, so the extra tab spills out of the rail. The first thing to leave is <b>&#8250;</b>, the button that gets the rail out of the way. <code>main</code> fits in both frames because it has two tabs.</p>
+              </div>
+              <div class="stage">
+                <div class="stage-h"><span class="pin ok">1</span>After <em>344 px, three counts</em></div>
+                <div class="rail w344">
+                  <div class="rbar a"><span class="rtab"><span class="rl">Changes</span><span class="rbadge">4</span></span><span class="rtab on"><span class="rl">Stashes</span><span class="rbadge n">4</span></span><span class="rtab"><span class="rl">Rebase</span><span class="rbadge">2</span></span><span class="icob">&#8250;</span></div>
+                  <span class="edge ok"></span>
+                </div>
+                <div class="stage-h" style="margin-top:6px"><span class="pin ok">1</span>After <em>280 px</em></div>
+                <div class="rail w280">
+                  <div class="rbar a"><span class="rtab"><span class="rl">Changes</span><span class="rbadge">4</span></span><span class="rtab on"><span class="rl">Stashes</span><span class="rbadge n">4</span></span><span class="rtab"><span class="rl">Rebase</span><span class="rbadge">2</span></span><span class="icob">&#8250;</span></div>
+                  <span class="edge ok"></span>
+                </div>
+                <div class="meas"><span class="mchip good">0 px over at 280 / 300 / 330 / 344 / 420</span><span class="mchip good">no label truncated</span></div>
+                <p class="note">Tabs may now shrink and the counts and <b>&#8250;</b> may not, so if anything gives it is a label, never the button. Below 330&nbsp;px the tabs trade padding for room, which is enough for all three counts at 280 in Geist. The tab you are on never ellipsizes. The stash count is neutral: stashes are inventory that can sit for months, and a warning tint that never clears teaches the eye to skip the one on Changes.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b One stash row">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The row a pull&#8209;recovery stash exists to label, at 344 px</div>
+            <div class="pair">
+              <div class="stage">
+                <div class="stage-h"><span class="pin">2</span>Before</div>
+                <div class="rail w344"><div class="slist">
+                  <div class="card"><div class="bt"><span class="btw">&#8250;</span><span class="bid"><strong>parser experiment</strong><span>stash@{0} &#183; 4b7e21a &#183; on feat/parser&#8209;rewrite</span></span><span class="btime">Sep 21, 2026, 11:36 AM</span></div></div>
+                  <div class="card"><div class="bt"><span class="btw">&#8250;</span><span class="bid"><strong>pwrgit: auto-stash before pull<span class="brec">PwrGit pull recovery</span></strong><span>stash@{1} &#183; c93d0f5 &#183; on main</span></span><span class="btime">Sep 20, 2026, 10:00 AM</span></div></div>
+                </div></div>
+                <p class="note">The recovery chip lived <em>inside</em> the truncating name. Git&#8217;s auto&#8209;stash message is 30 characters, so on the one row the chip exists for, it was always the part ellipsized away (measured: 62&nbsp;px of name hidden, chip invisible). The date is 8.5&nbsp;px and wraps to two lines. The branch, the most useful fact on the meta line, truncates first.</p>
+              </div>
+              <div class="stage">
+                <div class="stage-h"><span class="pin ok">2</span>After</div>
+                <div class="rail w344"><div class="slist">
+                  <div class="card"><div class="at"><span class="atw"><span class="chev"></span></span><span class="aid"><span class="aname">parser experiment</span><span class="ameta"><span class="awhere">stash@{0} &#183; on feat/parser&#8209;rewrite &#183; 4b7e21a</span></span></span><span class="aage">today</span></div></div>
+                  <div class="card"><div class="at"><span class="atw"><span class="chev"></span></span><span class="aid"><span class="aname">pwrgit: auto-stash before pull</span><span class="ameta"><span class="arec">Pull recovery</span><span class="awhere">stash@{1} &#183; on main &#183; c93d0f5</span></span></span><span class="aage">1d</span></div></div>
+                </div></div>
+                <p class="note">The chip leads the meta line, outside anything that truncates. The age is the sidebar&#8217;s <code>relativeAge</code> on one line, with the full subject and timestamp in the row&#8217;s tooltip. The hash moves to the end so that it, not the branch, is what gives way. The disclosure mark is the sidebar&#8217;s <code>.ref-section__chev</code>, not a text <code>&#8250;</code>/<code>&#8964;</code> pair drawn from two different glyph baselines.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c The open entry">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>An open entry, at 344 px</div>
+            <div class="pair">
+              <div class="stage">
+                <div class="stage-h"><span class="pin">3</span>Before</div>
+                <div class="rail w344">
+                  <div class="bscope"><strong>One Git stash stack for this repository.</strong><span>Every linked worktree sees these entries. Apply and Pop restore into <code>feat/parser-rewrite</code> in this worktree.</span></div>
+                  <div class="slist"><div class="card">
+                    <div class="bt open"><span class="btw">&#8964;</span><span class="bid"><strong>parser experiment</strong><span>stash@{0} &#183; 4b7e21a &#183; on feat/parser&#8209;rewrite</span></span><span class="btime">Sep 21, 2026, 11:36 AM</span></div>
+                    <div class="bbody">
+                      <div class="bact"><span>Apply</span><span>Pop</span><span>View patch</span><span class="drop">Drop</span></div>
+                      <div class="bsum">4 files &#183; <span class="add">+133</span> <span class="del">&#8722;42</span></div>
+                      <div class="bfiles" style="grid-template-columns:auto">
+                        <div class="bfile"><span class="p">src/parser/tokenizer.ts</span><span class="s">+48 &#8722;12</span></div>
+                        <div class="bfile hov"><span class="p">src/parser/grammar/expressions.ts</span><span class="s">+21 &#8722;30</span></div>
+                        <div class="bfile"><span class="p">test/parser/fixtures/nested-template-literals.snap</span><span class="s">+64 &#8722;0</span></div>
+                        <div class="bfile"><span class="p">docs/diagrams/parser-states.png</span><span class="s">binary</span></div>
+                      </div>
+                    </div>
+                  </div></div>
+                </div>
+                <p class="note">The file grid&#8217;s implicit <code>auto</code> track sizes to the widest nowrap path, overflows the card, and the clipped casualty is the stat column (<b>+48&nbsp;&#8722;1</b>, <b>binar</b>). Paths truncate from the right, which loses the filename. Rows light up on hover but do nothing. Everything is 9.5&nbsp;px beside a Changes tab set at 11&#8211;12. A three&#8209;line banner restates the scope above the form on every visit.</p>
+              </div>
+              <div class="stage">
+                <div class="stage-h"><span class="pin ok">3</span>After</div>
+                <div class="rail w344"><div class="slist">
+                  <div class="shead"><span class="eyebrow">Repository stack &#183; 4</span><span class="scope">Shared by every worktree</span></div>
+                  <div class="card">
+                    <div class="at open"><span class="atw"><span class="chev open"></span></span><span class="aid"><span class="aname">parser experiment</span><span class="ameta"><span class="awhere">stash@{0} &#183; on feat/parser&#8209;rewrite &#183; 4b7e21a</span></span></span><span class="aage">today</span></div>
+                    <div class="abody">
+                      <div class="aact"><span>Apply</span><span>Pop</span><span>View patch</span><span class="drop">Drop</span></div>
+                      <div class="atarget">Apply and Pop restore into <code>feat/parser-rewrite</code></div>
+                      <div class="asum">4 files &#183; <span class="add">+133</span> <span class="del">&#8722;42</span></div>
+                      <div class="afiles">
+                        <div class="afile"><span class="p">src/parser/tokenizer.ts&#8206;</span><span class="s"><span class="add">+48</span> <span class="del">&#8722;12</span></span></div>
+                        <div class="afile"><span class="p">src/parser/grammar/expressions.ts&#8206;</span><span class="s"><span class="add">+21</span> <span class="del">&#8722;30</span></span></div>
+                        <div class="afile"><span class="p">test/parser/fixtures/nested-template-literals.snap&#8206;</span><span class="s"><span class="add">+64</span> <span class="del">&#8722;0</span></span></div>
+                        <div class="afile"><span class="p">docs/diagrams/parser-states.png&#8206;</span><span class="s">binary</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div></div>
+                <p class="note">One <code>minmax(0,&#8239;1fr)</code> track, and the stats stay put. Paths reuse <code>.file-path</code>, left&#8209;truncated like the Changes list, so the filename survives. The type sizes are the Changes tab&#8217;s, and inert rows no longer hover. The banner is gone: its two facts now sit where they apply. &#8220;Shared&#8221; goes on the stack heading; &#8220;restores into&#8221; goes under the actions it describes. While a command runs, that line becomes <b>Applying&#8230;</b> in the same grid cell, so the file list does not jump.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw 1c in the light theme&#8221; &#183; &#8220;what does an open entry look like with twenty files?&#8221;</p>
+      </section>
+
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The tab strip &#8212; three ways to fit, and the one taken</span>
+        </div>
+        <p class="dv-sub">The labels, three counts and <b style="color:var(--t2)">&#8250;</b> need about 214&nbsp;px before any padding, and a 280&nbsp;px rail leaves 255 inside its bar padding. So some rule has to decide what gives way at the minimum. The options below all keep today&#8217;s type size.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Tighten only">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Tighten padding only</div>
+            <div class="stage" style="width:400px">
+              <div class="rail w280">
+                <div class="rbar t"><span class="rtab">Changes<span class="rbadge">4</span></span><span class="rtab on">Stashes<span class="rbadge n">4</span></span><span class="rtab">Rebase<span class="rbadge">2</span></span><span class="spacer"></span><span class="icob">&#8250;</span></div>
+                <span class="edge"></span>
+              </div>
+              <p class="note">Twelve pixels of padding back, but the bar still has no rule for what gives way, so it only moves the width at which the button falls off. At 280 it is still 65&nbsp;px outside, as drawn. <b>Not enough.</b></p>
+            </div>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b Raise the minimum">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Raise the rail minimum to 330 px</div>
+            <div class="stage" style="width:400px">
+              <div class="rail w330">
+                <div class="rbar t"><span class="rtab">Changes<span class="rbadge">4</span></span><span class="rtab on">Stashes<span class="rbadge n">4</span></span><span class="rtab">Rebase<span class="rbadge">2</span></span><span class="spacer"></span><span class="icob">&#8250;</span></div>
+                <span class="edge"></span>
+              </div>
+              <p class="note">A one&#8209;number change in <code>useColumnResize</code>. It takes 50&nbsp;px from everyone who dragged the rail narrow on purpose, which is unrelated to stashes. At 330 with a rebase selection it is still 15&nbsp;px over, as drawn, so the minimum would have to climb further. <b>Rejected.</b></p>
+            </div>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Shrinkable tabs">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Tabs shrink, counts and &#8250; don&#8217;t &#183; compact under 330 &#8212; <span style="color:var(--okt)">shipped</span></div>
+            <div class="stage" style="width:400px">
+              <div class="rail w280">
+                <div class="rbar a"><span class="rtab"><span class="rl">Changes</span><span class="rbadge">4</span></span><span class="rtab on"><span class="rl">Stashes</span><span class="rbadge n">4</span></span><span class="rtab"><span class="rl">Rebase</span><span class="rbadge">2</span></span><span class="icob">&#8250;</span></div>
+                <span class="edge ok"></span>
+              </div>
+              <p class="note">A container query on the rail makes the bar denser as the rail narrows, and <code>min-width:&#8239;0</code> gives it a last resort. Inactive labels ellipsize, and the counts, the active tab and the collapse button never do. In Geist the last resort is not reached anywhere from 280 to 420&nbsp;px. On a platform fallback face it degrades to a shortened label, not a missing button.</p>
+            </div>
+          </div>
+          <div class="dv-opt" id="2d" data-screen-label="2d Live strip">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Live &#8212; the shipped rule at any width</div>
+            <div class="stage" style="width:470px">
+              <div class="ctl">
+                <span class="seg"><sc-for list="{{widths}}" as="w" hint-placeholder-count="5"><button class="{{w.cls}}" onClick="{{w.pick}}">{{w.label}}</button></sc-for></span>
+                <span class="seg"><button class="{{selOnCls}}" onClick="{{selOn}}">rebase 2</button><button class="{{selOffCls}}" onClick="{{selOff}}">none</button></span>
+                <span class="seg"><button class="{{afterCls}}" onClick="{{showAfter}}">after</button><button class="{{beforeCls}}" onClick="{{showBefore}}">before</button></span>
+              </div>
+              <div class="protoframe">
+                <sc-if value="{{isAfter}}" hint-placeholder-val="{{ true }}">
+                  <div class="{{railCls}}" data-proto="bar">
+                    <div class="rbar a"><span class="rtab"><span class="rl">Changes</span><span class="rbadge">4</span></span><span class="rtab on"><span class="rl">Stashes</span><span class="rbadge n">4</span></span><span class="rtab"><span class="rl">Rebase</span><sc-if value="{{showSel}}"><span class="rbadge">2</span></sc-if></span><span class="icob">&#8250;</span></div>
+                    <span class="edge ok"></span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{isBefore}}">
+                  <div class="{{railCls}}" data-proto="bar">
+                    <div class="rbar"><span class="rtab">Changes<span class="rbadge">4</span></span><span class="rtab on">Stashes<span class="rbadge">4</span></span><span class="rtab">Rebase<sc-if value="{{showSel}}"><span class="rbadge">2</span></sc-if></span><span class="spacer"></span><span class="icob">&#8250;</span></div>
+                    <span class="edge"></span>
+                  </div>
+                </sc-if>
+              </div>
+              <div class="{{readoutCls}}">{{readout}}</div>
+              <p class="note">The readout is measured from the frame above after each change: how far the collapse button&#8217;s right edge sits from the rail&#8217;s, and which labels are ellipsized.</p>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;what if Rebase had no text label when idle?&#8221; &#183; &#8220;move the counts inside a single segmented control&#8221;</p>
+      </section>
+
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Behaviour behind the pixels</span>
+        </div>
+        <p class="dv-sub">Found reading the code beside the renders. A, G and H change what a click does; the rest change what a keyboard, a screen reader or a hover gets. G and H began as open questions and were settled on the PR.</p>
+        <div class="dv-opts">
+          <div class="find">
+            <div class="fitem"><span class="pin ok">A</span><div><h4>View patch did nothing with file details open</h4><p>The branch predates File history/Blame. Every other diff opener clears <code>fileInsightTarget</code> first, and <code>DiffPane</code> stays <code>hidden</code> while one is set. Stash&#8217;s opener didn&#8217;t, so the patch loaded behind the pane you were looking at. It clears it now.</p></div></div>
+            <div class="fitem"><span class="pin ok">B</span><div><h4>In flight is <code>aria-disabled</code>, not <code>disabled</code></h4><p>Every action button went <code>disabled</code> while any command ran. Chromium blurs a control the moment it is disabled, so pressing Apply from the keyboard threw focus to <code>&lt;body&gt;</code> for the length of the Git call. That is the house rule in <code>styles/AGENTS.md</code>. Handlers now refuse a second command instead.</p></div></div>
+            <div class="fitem"><span class="pin ok">C</span><div><h4>A disabled Pop/Drop says why on hover</h4><p>For a stash object that occurs twice in the reflog, Pop and Drop are genuinely unavailable. That is the <code>.lens-chip.is-empty</code> case: <code>aria-disabled</code> plus a guarded click, so the house <code>hoverTooltip</code> can still explain. Native <code>title</code> tooltips are gone throughout. The destination line under the actions says &#8220;Apply restores into&#8221; there, not &#8220;Apply and Pop&#8221;.</p></div></div>
+            <div class="fitem"><span class="pin ok">D</span><div><h4>Focus rings on every new control</h4><p>The row toggle, the four actions and the submit button had no <code>:focus-visible</code> rule and fell back to the browser&#8217;s. They now paint <code>outline:&#8239;2px solid var(--focus-ring)</code>, inset on the toggle because the card clips its overflow.</p></div></div>
+            <div class="fitem"><span class="pin ok">E</span><div><h4>Built from the Changes tab&#8217;s parts</h4><p>The eyebrow is <code>.changes-section__label</code>, the field and submit are <code>.commit-input</code>/<code>.commit-btn</code>, the paths are <code>.file-path</code>, and the mark is <code>.ref-section__chev</code>. Two tabs side by side should not differ in type scale because two people wrote them.</p></div></div>
+            <div class="fitem"><span class="pin ok">F</span><div><h4>Contrast holds in both themes</h4><p>Measured on the open (hovered) row, the worst case: the recovery chip is 6.22:1 dark and 4.84:1 light, and the neutral count is 5.21/5.17. The meta line, age, scope note and destination line are all 5.05 or better at 10&nbsp;px.</p></div></div>
+            <div class="fitem"><span class="pin ok">G</span><div><h4>A stash&#8217;s files open as a stash</h4><p>The patch&#8217;s per&#8209;file menu sent the stash&#8217;s <code>W</code> commit as an ordinary commit. An untracked file lives only in <code>W</code>&#8217;s third parent, so View file and Blame said it did not exist, and History listed Git&#8217;s &#8220;untracked files on&#8201;&#8230;&#8221; commit. Staged changes leaked the &#8220;index on&#8201;&#8230;&#8221; commit the same way. File insights now take a <code>stash</code> context: the untracked&#8209;files parent is read, stashed lines blame as WIP, and History walks from the commit the stash was made on. The menu says <em>View file in this stash</em>.</p></div></div>
+            <div class="fitem"><span class="pin ok">H</span><div><h4>A blank name stashes by the time</h4><p>The button used to stay unavailable until you typed a name, and <code>git stash</code> never asks for one. A blank field now becomes <code>Stash 2026&#8209;09&#8209;22 07:41</code>, local time to the minute, and the success toast reports it. The placeholder is &#8220;Optional&#8221;: at the 280&nbsp;px floor the field shows 113&nbsp;px of text, too narrow for a longer hint.</p></div></div>
+          </div>
+        </div>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { width: 280, sel: true, after: true, readout: "", over: false };
+        }
+        componentDidMount() { this.measure(); }
+        componentDidUpdate() { this.measure(); }
+        measure() {
+          const frame = document.querySelector('[data-proto="bar"]');
+          if (frame === null) { return; }
+          const btn = frame.querySelector(".icob").getBoundingClientRect();
+          const edge = frame.getBoundingClientRect().right;
+          const past = Math.round(btn.right - edge);
+          const cut = Array.prototype.filter.call(frame.querySelectorAll(".rl"), (l) => l.scrollWidth > l.clientWidth).map((l) => l.textContent);
+          const line = past > 0
+            ? "collapse button " + past + " px outside the rail"
+            : "collapse button inside, " + (-past) + " px from the edge" + (cut.length > 0 ? " — ellipsized: " + cut.join(", ") : " — no label truncated");
+          if (line !== this.state.readout) { this.setState({ readout: line, over: past > 0 }); }
+        }
+        renderVals() {
+          const s = this.state;
+          const widths = [280, 300, 330, 344, 420].map((w) => ({
+            label: String(w),
+            cls: w === s.width ? "on" : "",
+            pick: () => { this.setState({ width: w }); }
+          }));
+          return {
+            widths: widths,
+            railCls: "rail w" + s.width,
+            showSel: s.sel,
+            selOnCls: s.sel ? "on" : "",
+            selOffCls: s.sel ? "" : "on",
+            selOn: () => { this.setState({ sel: true }); },
+            selOff: () => { this.setState({ sel: false }); },
+            isAfter: s.after,
+            isBefore: !s.after,
+            afterCls: s.after ? "on" : "",
+            beforeCls: s.after ? "" : "on",
+            showAfter: () => { this.setState({ after: true }); },
+            showBefore: () => { this.setState({ after: false }); },
+            readout: s.readout,
+            readoutCls: s.over ? "readout over" : "readout"
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

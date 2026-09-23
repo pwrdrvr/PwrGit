@@ -727,6 +727,41 @@ describe("DiffPane", () => {
     );
   });
 
+  it("reads a stash's files in a stash context, not a commit one", async () => {
+    mocks.dispatch.mockImplementation(respond(""));
+    const onOpenFileInsight = vi.fn();
+    await act(async () => {
+      root.render(
+        <DiffPane
+          worktreeId="wt-1"
+          target={{ kind: "stash", hash: COMMIT.hash, subject: "On main: parked" }}
+          onOpenFileInsight={onOpenFileInsight}
+          onOpenFile={vi.fn()}
+          onClose={vi.fn()}
+        />
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(".diff-file__menu")?.click()
+    );
+    const view = [...document.querySelectorAll(".pop-menu__item")].find(
+      (item) => item.textContent === "View file in this stash"
+    ) as HTMLButtonElement | undefined;
+    expect(view).toBeDefined();
+    await act(async () => view?.click());
+
+    expect(onOpenFileInsight).toHaveBeenCalledWith(
+      "docs/guide.txt",
+      { kind: "stash", hash: COMMIT.hash },
+      "contents"
+    );
+  });
+
   it("fetches one message per commit, not one per file", async () => {
     mocks.dispatch.mockImplementation(respond("Some body."));
     const render = async (path: string): Promise<void> => {

@@ -1,0 +1,503 @@
+import { useEffect, useRef, useState } from "react";
+import type { StashDetails, StashEntry, Worktree } from "@pwrgit/shared";
+import { dispatch } from "../../lib/pwrgit";
+import { relativeAge } from "../../lib/relativeAge";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
+import {
+  hoverTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
+import { confirmDialog } from "../shell/dialogs";
+
+type DetailsState =
+  | { kind: "loading" }
+  | { kind: "ready"; value: StashDetails }
+  | { kind: "error"; message: string };
+
+const dateTime = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short"
+});
+
+function displayName(entry: StashEntry): string {
+  return entry.name ?? entry.subject;
+}
+
+// A blank name still stashes. Local time to the minute tells entries apart in
+// the list and in `git stash list`, where Git's own "WIP on <branch>" would
+// repeat for every unnamed stash made on the same commit.
+function defaultStashName(now: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  const day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return `Stash ${day} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
+// Keyed by the stash commit and which copy of it this is, never by
+// `stash@{n}`: every push or drop above an entry renumbers it, and an entry
+// someone is reading must stay open when a pull or a terminal adds a stash.
+// A commit the stack holds twice still gets one key per copy.
+function entryKeys(entries: readonly StashEntry[]): string[] {
+  const copies = new Map<string, number>();
+  return entries.map((entry) => {
+    const copy = copies.get(entry.hash) ?? 0;
+    copies.set(entry.hash, copy + 1);
+    return entry.hash + ":" + copy;
+  });
+}
+
+const selectorList = new Intl.ListFormat("en", { type: "conjunction" });
+
+// What the one status line under an open entry's actions says while a command
+// runs. It replaces the destination line in place, so the file list below
+// never jumps while Git works.
+const BUSY_LABEL: Record<string, string> = {
+  "stash:apply": "Applying",
+  "stash:pop": "Popping",
+  "stash:drop": "Dropping"
+};
+
+const DUPLICATE_REASON = "Unavailable while this stash is listed more than once";
+
+export function StashesTab({
+  worktree,
+  entries,
+  loading,
+  error,
+  reload,
+  onOpenPatch
+}: {
+  worktree: Worktree | null;
+  entries: StashEntry[];
+  loading: boolean;
+  /** Why the stack could not be read; the rail shows no entries then. */
+  error: string | null;
+  reload: () => Promise<void>;
+  onOpenPatch: (hash: string, subject: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [includeUntracked, setIncludeUntracked] = useState(true);
+  const [expandedEntryKey, setExpandedEntryKey] = useState<string | null>(null);
+  const [details, setDetails] = useState<DetailsState | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const tip = useViewportTooltip();
+  const detailsGeneration = useRef(0);
+  const currentWorktreeId = useRef(worktree?.id ?? null);
+  // Update during render rather than in an effect: an old promise can settle
+  // after the selected prop changes but before effects for that render run.
+  currentWorktreeId.current = worktree?.id ?? null;
+
+  useEffect(() => {
+    detailsGeneration.current += 1;
+    setName("");
+    setExpandedEntryKey(null);
+    setDetails(null);
+    setBusy(null);
+  }, [worktree?.id]);
+
+  const keys = entryKeys(entries);
+  useEffect(() => {
+    if (expandedEntryKey !== null && !entryKeys(entries).includes(expandedEntryKey)) {
+      detailsGeneration.current += 1;
+      setExpandedEntryKey(null);
+      setDetails(null);
+    }
+  }, [entries, expandedEntryKey]);
+
+  const toggleDetails = (entry: StashEntry, selectedEntryKey: string): void => {
+    if (worktree === null) return;
+    const worktreeId = worktree.id;
+    if (expandedEntryKey === selectedEntryKey) {
+      detailsGeneration.current += 1;
+      setExpandedEntryKey(null);
+      setDetails(null);
+      return;
+    }
+    setExpandedEntryKey(selectedEntryKey);
+    setDetails({ kind: "loading" });
+    const generation = ++detailsGeneration.current;
+    void dispatch("stash:details", {
+      worktreeId,
+      stashHash: entry.hash
+    }).then((result) => {
+      if (
+        detailsGeneration.current !== generation ||
+        currentWorktreeId.current !== worktreeId
+      ) {
+        return;
+      }
+      setDetails(
+        result.ok
+          ? { kind: "ready", value: result.value }
+          : { kind: "error", message: result.error.message }
+      );
+    });
+  };
+
+  const create = async (): Promise<void> => {
+    if (worktree === null || busy !== null) return;
+    const worktreeId = worktree.id;
+    const message = name.trim() || defaultStashName(new Date());
+    setBusy("create");
+    const result = await dispatch("stash:create", {
+      worktreeId,
+      message,
+      includeUntracked
+    });
+    if (currentWorktreeId.current !== worktreeId) return;
+    setBusy(null);
+    await reload();
+    if (currentWorktreeId.current !== worktreeId) return;
+    if (!result.ok) {
+      showErrorToast({
+        title: "Could not create stash",
+        message: result.error.message,
+        detail: message
+      });
+      return;
+    }
+    if (!result.value.created) {
+      showInfoToast({
+        title: "Nothing stashed",
+        message: includeUntracked
+          ? "This worktree has no changes to save."
+          : "There are no tracked changes to save. Include untracked files if that is the work you want to stash."
+      });
+      return;
+    }
+    showInfoToast({
+      title: "Stash created",
+      message: message + " was added to the repository stack."
+    });
+    setName("");
+  };
+
+  const restore = async (
+    entry: StashEntry,
+    command: "stash:apply" | "stash:pop"
+  ): Promise<void> => {
+    if (worktree === null || busy !== null) return;
+    if (command === "stash:pop" && entry.occurrenceCount > 1) return;
+    const worktreeId = worktree.id;
+    setBusy(command + ":" + entry.hash);
+    const result = await dispatch(command, {
+      worktreeId,
+      stashHash: entry.hash
+    });
+    if (currentWorktreeId.current !== worktreeId) return;
+    setBusy(null);
+    await reload();
+    if (currentWorktreeId.current !== worktreeId) return;
+    if (!result.ok) {
+      showErrorToast({
+        title:
+          command === "stash:apply"
+            ? "Apply stopped"
+            : result.error.code === "stash_applied_not_removed"
+              ? "Applied, but the stash was kept"
+              : "Pop stopped — stash kept",
+        message: result.error.message,
+        detail: entry.selector + " " + displayName(entry)
+      });
+      return;
+    }
+    showInfoToast({
+      title: command === "stash:pop" ? "Stash popped" : "Stash applied",
+      message:
+        command === "stash:pop"
+          ? displayName(entry) +
+            " was restored here and removed from the repository stack."
+          : displayName(entry) +
+            " was restored here and kept in the repository stack."
+    });
+  };
+
+  const drop = async (entry: StashEntry): Promise<void> => {
+    if (worktree === null || busy !== null || entry.occurrenceCount > 1) {
+      return;
+    }
+    const worktreeId = worktree.id;
+    const confirmed = await confirmDialog({
+      title: "Drop repository stash?",
+      message:
+        "Permanently drop “" +
+        displayName(entry) +
+        "”? This entry is shared by every worktree and may be impossible to recover.",
+      confirmLabel: "Drop stash",
+      danger: true
+    });
+    if (!confirmed || currentWorktreeId.current !== worktreeId) return;
+    setBusy("stash:drop:" + entry.hash);
+    const result = await dispatch("stash:drop", {
+      worktreeId,
+      stashHash: entry.hash
+    });
+    if (currentWorktreeId.current !== worktreeId) return;
+    setBusy(null);
+    await reload();
+    if (currentWorktreeId.current !== worktreeId) return;
+    if (!result.ok) {
+      showErrorToast({
+        title: "Could not drop stash",
+        message: result.error.message,
+        detail: entry.selector + " " + displayName(entry)
+      });
+    }
+  };
+
+  if (worktree === null) {
+    return <div className="rail-empty">Select a worktree to manage stashes.</div>;
+  }
+
+  // In flight is aria-disabled, never `disabled`: Chromium blurs a control
+  // the moment it becomes disabled, which would throw keyboard focus to
+  // <body> for the length of every Git command. The handlers guard instead.
+  const inFlight = busy !== null ? true : undefined;
+
+  return (
+    <div className="stashes-tab">
+      <div className="stash-create">
+        <label className="changes-section__label" htmlFor="stash-name">
+          Name this stash
+        </label>
+        <div className="stash-create__row">
+          <input
+            id="stash-name"
+            className="commit-input"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void create();
+            }}
+            placeholder="Optional"
+          />
+          <button
+            className="commit-btn"
+            onClick={() => void create()}
+            aria-disabled={inFlight}
+          >
+            Stash changes
+          </button>
+        </div>
+        <label className="stash-create__option">
+          <input
+            type="checkbox"
+            checked={includeUntracked}
+            onChange={(event) => setIncludeUntracked(event.target.checked)}
+          />
+          Include untracked files
+        </label>
+      </div>
+
+      <div className="stash-list">
+        <div className="changes-section stash-list__head">
+          <span className="changes-section__label">
+            Repository stack · {entries.length}
+          </span>
+          <span className="stash-list__scope">Shared by every worktree</span>
+        </div>
+        {error !== null ? (
+          <div className="stash-empty stash-empty--error" role="alert">
+            Could not read the stash stack. {error}
+          </div>
+        ) : loading && entries.length === 0 ? (
+          <div className="stash-empty">Loading stashes…</div>
+        ) : entries.length === 0 ? (
+          <div className="stash-empty">
+            No stashes yet. Ones you create in a terminal appear here too.
+          </div>
+        ) : (
+          entries.map((entry, index) => {
+            const renderedEntryKey = keys[index] ?? entry.hash;
+            const expanded = expandedEntryKey === renderedEntryKey;
+            const busyCommand =
+              busy !== null && busy.endsWith(":" + entry.hash)
+                ? busy.slice(0, busy.length - entry.hash.length - 1)
+                : null;
+            const duplicate = entry.occurrenceCount > 1;
+            const created = dateTime.format(new Date(entry.createdAt));
+            return (
+              <article className="stash-entry" key={renderedEntryKey}>
+                <button
+                  className="stash-entry__toggle"
+                  onClick={() => toggleDetails(entry, renderedEntryKey)}
+                  aria-expanded={expanded}
+                  aria-label={
+                    (expanded ? "Hide " : "Inspect ") + displayName(entry)
+                  }
+                  {...hoverTooltip(tip, entry.subject + " · " + created)}
+                >
+                  <span className="stash-entry__twisty" aria-hidden="true">
+                    <span
+                      className={`ref-section__chev${expanded ? " is-open" : ""}`}
+                    />
+                  </span>
+                  <span className="stash-entry__identity">
+                    <span className="stash-entry__name">
+                      {displayName(entry)}
+                    </span>
+                    <span className="stash-entry__meta">
+                      {entry.kind === "pwrgit-pull-recovery" && (
+                        <span className="stash-entry__recovery">
+                          Pull recovery
+                        </span>
+                      )}
+                      {/* An unnamed stash's title is Git's own "WIP on
+                          <branch>: …", so its branch is not said twice. */}
+                      <span className="stash-entry__where">
+                        <span className="stash-entry__place">
+                          {entry.selector}
+                          {entry.name !== undefined && entry.branch !== null
+                            ? " · on " + entry.branch
+                            : ""}
+                        </span>{" "}
+                        <span className="stash-entry__hash">
+                          · {entry.shortHash}
+                        </span>
+                      </span>
+                    </span>
+                  </span>
+                  <time className="stash-entry__age" dateTime={entry.createdAt}>
+                    {relativeAge(entry.createdAt)}
+                  </time>
+                </button>
+
+                {expanded && (
+                  <div className="stash-entry__body">
+                    <div className="stash-entry__actions">
+                      <button
+                        onClick={() => void restore(entry, "stash:apply")}
+                        aria-disabled={inFlight}
+                        {...hoverTooltip(
+                          tip,
+                          "Restore into " + worktree.branch + " and keep this stash"
+                        )}
+                      >
+                        Apply
+                      </button>
+                      <button
+                        onClick={() => void restore(entry, "stash:pop")}
+                        aria-disabled={inFlight ?? (duplicate || undefined)}
+                        {...hoverTooltip(
+                          tip,
+                          duplicate
+                            ? DUPLICATE_REASON
+                            : "Restore into " +
+                                worktree.branch +
+                                "; Git drops the stash only if it applies cleanly"
+                        )}
+                      >
+                        Pop
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (busy === null) {
+                            onOpenPatch(entry.hash, displayName(entry));
+                          }
+                        }}
+                        aria-disabled={inFlight}
+                      >
+                        View patch
+                      </button>
+                      <button
+                        className="stash-entry__drop"
+                        onClick={() => void drop(entry)}
+                        aria-disabled={inFlight ?? (duplicate || undefined)}
+                        {...hoverTooltip(
+                          tip,
+                          duplicate
+                            ? DUPLICATE_REASON
+                            : "Permanently remove this repository stash"
+                        )}
+                      >
+                        Drop
+                      </button>
+                    </div>
+                    <div className="stash-entry__target" aria-live="polite">
+                      <span
+                        className={busyCommand === null ? undefined : "is-hidden"}
+                        aria-hidden={busyCommand === null ? undefined : true}
+                      >
+                        {duplicate ? "Apply restores" : "Apply and Pop restore"}{" "}
+                        into <code>{worktree.branch}</code>
+                      </span>
+                      <span
+                        className={busyCommand === null ? "is-hidden" : undefined}
+                        aria-hidden={busyCommand === null ? true : undefined}
+                      >
+                        {busyCommand === null
+                          ? ""
+                          : (BUSY_LABEL[busyCommand] ?? "Working") + "…"}
+                      </span>
+                    </div>
+
+                    {duplicate && (
+                      <div className="stash-details__duplicate" role="note">
+                        This stash is listed{" "}
+                        {entry.occurrenceCount === 2
+                          ? "twice"
+                          : entry.occurrenceCount + " times"}
+                        , as{" "}
+                        {selectorList.format(
+                          entries
+                            .filter((other) => other.hash === entry.hash)
+                            .map((other) => other.selector)
+                        )}
+                        . Apply works as usual. Pop and Drop stay off until
+                        one copy is left, because PwrGit can’t be sure which
+                        copy it would remove. Remove one with{" "}
+                        <code>git stash drop</code>.
+                      </div>
+                    )}
+
+                    {details?.kind === "loading" ? (
+                      <div className="stash-details__status">Loading files…</div>
+                    ) : details?.kind === "error" ? (
+                      <div className="stash-details__status stash-details__status--error">
+                        {details.message}
+                      </div>
+                    ) : details?.kind === "ready" ? (
+                      <>
+                        <div className="stash-details__summary">
+                          {details.value.files.length} file
+                          {details.value.files.length === 1 ? "" : "s"} ·{" "}
+                          <span className="stash-stat--add">
+                            +{details.value.additions}
+                          </span>{" "}
+                          <span className="stash-stat--del">
+                            −{details.value.deletions}
+                          </span>
+                        </div>
+                        <div className="stash-files">
+                          {details.value.files.map((file) => (
+                            <div className="stash-file" key={file.path}>
+                              <span className="file-path" title={file.path}>
+                                {file.path}
+                              </span>
+                              {file.additions === null ? (
+                                <span className="stash-file__stat">binary</span>
+                              ) : (
+                                <span className="stash-file__stat">
+                                  <span className="stash-stat--add">
+                                    +{file.additions}
+                                  </span>{" "}
+                                  <span className="stash-stat--del">
+                                    −{file.deletions ?? 0}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                )}
+              </article>
+            );
+          })
+        )}
+      </div>
+      {tip.tooltipNode}
+    </div>
+  );
+}
