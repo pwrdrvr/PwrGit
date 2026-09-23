@@ -40,7 +40,12 @@ function fakeGh(assets, { uploadErrorAfterAccept = false, existing = false, publ
   let failedOnce = false;
   function gh(args) {
     calls.push(args);
-    if (args[0] === "api") return JSON.stringify([[...(release ? [release] : [])]]);
+    if (args[0] === "api") {
+      if (!args.includes("--jq") || args.includes("--slurp")) {
+        throw new Error("Release lookup must filter each page before stdout is buffered");
+      }
+      return release ? `${JSON.stringify(release)}\n` : "";
+    }
     if (args[1] === "create") {
       release = { tag_name: tag, name: tag, body: "Fixed release publishing.\n", prerelease: true, draft: true, assets: [] };
       return "";
@@ -61,6 +66,16 @@ function fakeGh(assets, { uploadErrorAfterAccept = false, existing = false, publ
 }
 
 describe("desktop release publication", () => {
+  test("filters paginated release history before buffering the response", async () => {
+    const input = fixture();
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const remote = fakeGh(assets, { existing: true, published: true });
+    remote.getRelease().assets.push(...assets.map(({ name, digest, size }) => ({ name, digest, size, state: "uploaded" })));
+    await publishRelease({ ...input, gh: remote.gh });
+    expect(remote.calls).toEqual([["api", "--paginate", "repos/pwrdrvr/PwrGit/releases?per_page=100",
+      "--jq", '.[] | select(.tag_name == "v0.18.0")']]);
+  });
+
   test("rejects duplicate basenames before creating a release", async () => {
     const input = fixture();
     writeFileSync(join(input.windowsDir, "PwrGit.dmg"), "duplicate");

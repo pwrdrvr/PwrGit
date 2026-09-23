@@ -83,8 +83,10 @@ function realGh(args) {
 
 function getRelease(tag, gh) {
   // The by-tag endpoint does not resolve drafts; the releases list does.
-  const pages = JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${repo}/releases?per_page=100`]));
-  return pages.flat().find((release) => release.tag_name === tag);
+  // Filter each page in gh so execFileSync never buffers the full history.
+  const output = gh(["api", "--paginate", `repos/${repo}/releases?per_page=100`,
+    "--jq", `.[] | select(.tag_name == ${JSON.stringify(tag)})`]);
+  return output.trim() ? JSON.parse(output) : undefined;
 }
 
 function assertMetadata(release, tag, notes) {
