@@ -30,6 +30,7 @@ import {
   type SideState
 } from "./use-image-revisions";
 import { useZoomPan } from "./use-zoom-pan";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -188,6 +189,12 @@ export function ImageLightbox({
       if (opener instanceof HTMLElement) opener.focus({ preventScroll: true });
     };
   }, []);
+  // aria-modal alone kept nothing in: Tab walked off the zoom controls into
+  // the diff behind the scrim. Declared after the effect above, so focus is
+  // already on the frame when the trap's initial focus runs, and that focus is
+  // a no-op rather than a second, scrolling one. The copy menu portals outside
+  // the frame; Tab there closes it, and the trap lands focus back in here.
+  useFocusTrap({ open: true, containerRef: frameRef, initialFocusRef: frameRef });
 
   // `click` fires on the common ancestor of press and release, so a pan that
   // starts on the image and ends past the frame — easy at any real zoom —

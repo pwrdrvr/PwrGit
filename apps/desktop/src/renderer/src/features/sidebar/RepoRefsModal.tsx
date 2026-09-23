@@ -1,5 +1,5 @@
 import { LocateGlyph } from "../../lib/LocateGlyph";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   changeRequestMatch,
   changeRequestNoun,
@@ -20,6 +20,7 @@ import { shortWhen } from "../graph/graph-view";
 import { switchWorktreeToBranch } from "../shell/branchSwitch";
 import { confirmDialog } from "../shell/dialogs";
 import { dispatch } from "../../lib/pwrgit";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useTagSearch } from "../../lib/useTagSearch";
 import {
@@ -717,11 +718,23 @@ export function RepoRefsModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [createTagOpen, onClose, pushOpen, remoteEditor, remoteTag, renaming]);
 
+  // Escape stays with the handler above, which closes a nested dialog's state
+  // before the browser itself. The trap is what makes this a modal: without
+  // it, Tab walked off the last row into the sidebar behind the backdrop. The
+  // nested dialogs render inside, and their own traps win while they hold
+  // focus.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useFocusTrap({ open: true, containerRef: dialogRef, initialFocusRef: searchRef });
+
   return (
     <div className="overlay-backdrop" onClick={onClose}>
       <div
+        ref={dialogRef}
         className="refs-browser"
         role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
         aria-label={`${repo.name} branches, tags, and remotes`}
         onClick={(event) => event.stopPropagation()}
       >
@@ -775,7 +788,7 @@ export function RepoRefsModal({
           <label className="refs-search">
             <span aria-hidden="true">⌕</span>
             <input
-              autoFocus
+              ref={searchRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder={
