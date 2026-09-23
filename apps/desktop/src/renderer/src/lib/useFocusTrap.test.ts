@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement, useRef } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useFocusTrap } from "./useFocusTrap";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -206,5 +206,83 @@ describe("useFocusTrap, stacked", () => {
     expect(focusedLabel()).toBe("Lower last");
     tab();
     expect(focusedLabel()).toBe("Lower first");
+  });
+});
+
+/** DialogHost's choice dialog: a facts list above the buttons, which Chromium
+ *  makes a Tab stop of its own once it overflows. */
+function Scrolly({ nestButton = false }: { nestButton?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useFocusTrap({ open: true, containerRef: ref });
+  return createElement(
+    "div",
+    { ref, role: "dialog", tabIndex: -1 },
+    createElement(
+      "ul",
+      { key: "facts", className: "facts", style: { overflowY: "auto" } },
+      createElement("li", null, "src/sprocket/cache.ts"),
+      nestButton ? createElement("button", null, "Copy paths") : null
+    ),
+    createElement("button", { key: "keep" }, "Keep"),
+    createElement("button", { key: "discard" }, "Discard")
+  );
+}
+
+describe("useFocusTrap, keyboard-focusable scrollers", () => {
+  const button = (label: string): HTMLButtonElement =>
+    [...document.querySelectorAll("button")].find((b) => b.textContent === label)!;
+  /** jsdom does no layout; give the list the overflow Chromium would see. */
+  function overflow(el: HTMLElement): void {
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 240 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 118 });
+  }
+  const facts = (): HTMLElement => document.querySelector<HTMLElement>(".facts")!;
+  function pressTab(shiftKey = false): KeyboardEvent {
+    const event = new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    return event;
+  }
+
+  it("still lands initial focus on the first control, not the list", () => {
+    act(() => root.render(createElement(Scrolly)));
+    overflow(facts());
+    expect(focusedLabel()).toBe("Keep");
+  });
+
+  it("leaves Shift+Tab from the first button to the browser, which reaches the list", () => {
+    act(() => root.render(createElement(Scrolly)));
+    overflow(facts());
+    // The trap used to take "Keep" for the first stop and wrap to "Discard",
+    // so the list was never reachable.
+    expect(pressTab(true).defaultPrevented).toBe(false);
+  });
+
+  it("wraps Tab from the last button to the list", () => {
+    act(() => root.render(createElement(Scrolly)));
+    overflow(facts());
+    // jsdom will not focus a div without a tabindex; Chromium does.
+    const focus = vi.spyOn(facts(), "focus");
+    button("Discard").focus();
+    expect(pressTab().defaultPrevented).toBe(true);
+    expect(focus).toHaveBeenCalled();
+  });
+
+  it("does not count a list that does not overflow", () => {
+    act(() => root.render(createElement(Scrolly)));
+    button("Discard").focus();
+    pressTab();
+    expect(focusedLabel()).toBe("Keep");
+  });
+
+  it("does not count a list that holds a control of its own", () => {
+    act(() => root.render(createElement(Scrolly, { nestButton: true })));
+    overflow(facts());
+    const focus = vi.spyOn(facts(), "focus");
+    button("Discard").focus();
+    pressTab();
+    expect(focus).not.toHaveBeenCalled();
+    expect(focusedLabel()).toBe("Copy paths");
   });
 });

@@ -290,6 +290,17 @@ the confirm had a trap too the two fought until focus stuck on an edge.
 (deepest wins), otherwise the newest. A new trap gets this for free; don't add
 a second keydown handler for Tab.
 
+### A scroller can be a Tab stop with no tabindex
+
+Chromium puts an overflowing scroller that holds nothing focusable into the Tab
+order by itself (measured on 151: a nested pair yields only the inner one).
+Its `tabIndex` still reads -1, so no selector finds it. `useFocusTrap` checks
+layout for these when it works out where the cycle ends. Without that it wrapped
+straight past one before a dialog's first control or after its last, and a long
+facts list or Bulk Sync's results could not be scrolled from the keyboard.
+Initial focus still skips them and lands on a control. jsdom does no layout, so
+a test has to supply `scrollHeight`/`clientHeight` itself (see the trap's tests).
+
 ### `useFocusTrap` captures the opener during render
 
 Not in an effect. React applies `autoFocus` while committing, which is *before*

@@ -80,17 +80,68 @@ function tabOwner(): Trap | undefined {
   return best ?? openTraps[openTraps.length - 1];
 }
 
-function tabbable(root: HTMLElement | null): HTMLElement[] {
+function isStop(el: HTMLElement): boolean {
+  if (el.hasAttribute("disabled") || el.getAttribute("aria-hidden") === "true") {
+    return false;
+  }
+  // tabindex="-1" is focusable but not a tab stop — that is what the roving
+  // items inside a dialog's own menu use, and they must not be cycled here.
+  if (el.tabIndex < 0 || el.hidden) return false;
+  return visible(el);
+}
+
+const SCROLLS = new Set(["auto", "scroll", "overlay"]);
+
+/**
+ * A scroller Chromium puts in the Tab order by itself, so the arrow keys can
+ * scroll it: one that overflows and holds nothing else to focus. Nothing in
+ * the markup says so — it has no tabindex, and its `tabIndex` reads -1 — so
+ * the TABBABLE selector cannot see it.
+ *
+ * The trap has to, because it decides where the cycle ends. A trap blind to
+ * these wrapped straight past one sitting before a dialog's first control or
+ * after its last: DialogHost's facts list, once it grew long enough to scroll,
+ * and Bulk Sync's results, which a keyboard user then could not scroll at all.
+ *
+ * jsdom does no layout, so `scrollHeight` is always 0 there and this never
+ * matches under test unless the test supplies the geometry.
+ */
+function scrollsByKeyboard(el: HTMLElement): boolean {
+  if (el.hasAttribute("tabindex")) return false; // judged as an ordinary stop
+  const style = getComputedStyle(el);
+  const overflowsY = SCROLLS.has(style.overflowY) && el.scrollHeight > el.clientHeight;
+  const overflowsX = SCROLLS.has(style.overflowX) && el.scrollWidth > el.clientWidth;
+  return overflowsY || overflowsX;
+}
+
+/**
+ * The dialog's Tab stops, in document order.
+ *
+ * `scrollers: false` is for initial focus, which belongs on a control even
+ * when a scroller comes first — opening Bulk Sync should not park focus on
+ * its results list.
+ */
+function tabbable(
+  root: HTMLElement | null,
+  { scrollers = true }: { scrollers?: boolean } = {}
+): HTMLElement[] {
   if (root === null) return [];
-  return [...root.querySelectorAll<HTMLElement>(TABBABLE)].filter((el) => {
-    if (el.hasAttribute("disabled") || el.getAttribute("aria-hidden") === "true") {
-      return false;
-    }
-    // tabindex="-1" is focusable but not a tab stop — that is what the roving
-    // items inside a dialog's own menu use, and they must not be cycled here.
-    if (el.tabIndex < 0 || el.hidden) return false;
-    return visible(el);
-  });
+  if (!scrollers) {
+    return [...root.querySelectorAll<HTMLElement>(TABBABLE)].filter(isStop);
+  }
+  const all = [...root.querySelectorAll<HTMLElement>("*")];
+  const stops = new Set(all.filter((el) => el.matches(TABBABLE) && isStop(el)));
+  // Innermost first, as Chromium decides it: a scroller holding a stop, even
+  // another scroller, is not a stop itself.
+  const holders = [...stops];
+  for (let i = all.length - 1; i >= 0; i--) {
+    const el = all[i]!;
+    if (stops.has(el) || !scrollsByKeyboard(el) || !visible(el)) continue;
+    if (holders.some((stop) => el.contains(stop))) continue;
+    stops.add(el);
+    holders.push(el);
+  }
+  return all.filter((el) => stops.has(el));
 }
 
 /**
@@ -137,7 +188,8 @@ export function useFocusTrap({
   useEffect(() => {
     if (!open) return;
     const opener = openerRef.current;
-    const target = initialFocusRef?.current ?? tabbable(containerRef.current)[0];
+    const target =
+      initialFocusRef?.current ?? tabbable(containerRef.current, { scrollers: false })[0];
     // A dialog with nothing tabbable still needs to receive focus, or the first
     // Tab escapes it; the container carries tabindex="-1" for that case.
     (target ?? containerRef.current)?.focus();
