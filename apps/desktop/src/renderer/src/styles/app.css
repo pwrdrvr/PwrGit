@@ -3879,6 +3879,23 @@ textarea,
 .wt-row:has(:focus-visible) .wt-age {
   opacity: 0;
 }
+/* Except over the PR chip while the chip itself holds keyboard focus. The
+   strip is 77px of opaque backdrop, and with the age that normally takes its
+   slot this short the chip sits under it: measured, only 10-71% of the
+   focused chip's ring reached the screen. The strip is there to show the
+   keyboard user the pin and kebab, and those are the next two Tab stops, so it
+   comes back the moment focus moves on. Stronger than `:hover` on purpose: a
+   pointer resting on the row must not cover the control the keyboard is on. */
+.wt-row:has(.pr-chip:focus-visible) .wt-row__hoveracts,
+.wt-row:has(.pr-chip:focus-visible) .wt-row__menu {
+  opacity: 0;
+}
+.wt-row:has(.pr-chip:focus-visible) .wt-row__hoveracts .pin {
+  pointer-events: none;
+}
+.wt-row:has(.pr-chip:focus-visible) .wt-age {
+  opacity: 1;
+}
 
 /* ---- Rail: Rebase tool tab ---- */
 
