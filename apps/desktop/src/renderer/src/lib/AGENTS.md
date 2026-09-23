@@ -290,6 +290,13 @@ the confirm had a trap too the two fought until focus stuck on an edge.
 (deepest wins), otherwise the newest. A new trap gets this for free; don't add
 a second keydown handler for Tab.
 
+A menu portalled out of a trapped dialog (ImageLightbox's copy menu) is the
+one case where focus outside the trap is not stray. The trap listens in the
+capture phase, so it sees Tab first, and pulling focus in then left the menu
+open: `useMenuNavigation` closes on Tab only while focus is still inside.
+For focus inside a `[role="menu"]`, the trap claims the key but moves focus
+only after the menu's own listener has run.
+
 ### A scroller can be a Tab stop with no tabindex
 
 Chromium puts an overflowing scroller that holds nothing focusable into the Tab

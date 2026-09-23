@@ -228,7 +228,25 @@ export function useFocusTrap({
       // the browser reset it to <body>) is pulled back to the near edge.
       if (active === null || !root.contains(active)) {
         e.preventDefault();
-        (e.shiftKey ? last : first).focus();
+        const edge = e.shiftKey ? last : first;
+        if (active?.closest('[role="menu"]') != null) {
+          // A menu portalled out of the dialog (ImageLightbox's copy menu)
+          // answers Tab itself: useMenuNavigation closes it, but only while
+          // focus is still inside it, and this capture listener runs first.
+          // Pulling focus here left the menu open over a dialog whose keys it
+          // still owned. So wait until the event has been through the menu's
+          // listener, which is a bubble listener on window too, and registered
+          // earlier.
+          window.addEventListener(
+            "keydown",
+            (after) => {
+              if (after === e && !root.contains(document.activeElement)) edge.focus();
+            },
+            { once: true }
+          );
+          return;
+        }
+        edge.focus();
         return;
       }
       if (e.shiftKey && active === first) {

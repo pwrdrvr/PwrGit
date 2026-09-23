@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import { createPortal } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { createElement, useRef } from "react";
+import { createElement, Fragment, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useFocusTrap } from "./useFocusTrap";
+import { useMenuNavigation } from "./useMenuNavigation";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -284,5 +286,65 @@ describe("useFocusTrap, keyboard-focusable scrollers", () => {
     pressTab();
     expect(focus).not.toHaveBeenCalled();
     expect(focusedLabel()).toBe("Copy paths");
+  });
+});
+
+/** A menu the dialog opened, portalled to <body> the way ImageLightbox's copy
+ *  menu is: outside the trap's container, answering Tab for itself. */
+function PortalMenu({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useMenuNavigation({ open: true, menuRef: ref, onClose });
+  return createPortal(
+    createElement(
+      "div",
+      { ref, role: "menu" },
+      createElement("button", { role: "menuitem" }, "Copy"),
+      createElement("button", { role: "menuitem" }, "Copy as PNG")
+    ),
+    document.body
+  );
+}
+
+function DialogWithMenu() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState(false);
+  useFocusTrap({ open: true, containerRef: ref });
+  return createElement(
+    Fragment,
+    null,
+    createElement(
+      "div",
+      { ref, role: "dialog", tabIndex: -1 },
+      createElement("button", { onClick: () => setMenu(true) }, "First"),
+      createElement("button", null, "Last")
+    ),
+    menu ? createElement(PortalMenu, { onClose: () => setMenu(false) }) : null
+  );
+}
+
+describe("useFocusTrap, a menu portalled out of the dialog", () => {
+  const menu = (): Element | null => document.querySelector('[role="menu"]');
+
+  function openMenu(): void {
+    act(() => root.render(createElement(DialogWithMenu)));
+    act(() => (document.activeElement as HTMLElement).click());
+    expect(focusedLabel()).toBe("Copy");
+  }
+
+  // The trap listens in the capture phase, so it sees the Tab before the
+  // menu does. Pulling focus straight back left the menu open: its handler
+  // only closes while focus is inside it.
+  it("lets Tab close the menu, then lands focus back in the dialog", () => {
+    openMenu();
+    tab();
+    expect(menu()).toBeNull();
+    expect(focusedLabel()).toBe("First");
+  });
+
+  it("lands Shift+Tab from the menu on the dialog's last control", () => {
+    openMenu();
+    tab(true);
+    expect(menu()).toBeNull();
+    expect(focusedLabel()).toBe("Last");
   });
 });
