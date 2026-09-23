@@ -108,6 +108,41 @@ export async function inspectSshRemoteRecovery(
   });
 }
 
+/**
+ * The same recovery, offered for a failed push only when applying it changes
+ * the address that push used.
+ *
+ * The recovery rewrites the upstream remote's fetch URL, and a push can
+ * travel by neither: a separate `pushurl` keeps HTTPS after the change, and
+ * `branch.<name>.pushRemote` or `remote.pushDefault` send it to another
+ * remote altogether. Offering the dialog there would test and change a URL
+ * the failed push never used, and the next push would fail the same way.
+ */
+export async function inspectSshPushRecovery(
+  git: GitExec,
+  cwd: string
+): Promise<Result<SshRemoteRecovery | null>> {
+  const inspected = await inspectSshRemoteRecovery(git, cwd);
+  if (!inspected.ok || inspected.value === null) return inspected;
+  const recovery = inspected.value;
+  if (!recovery.pushUrlWillAlsoChange) return ok(null);
+
+  const branch = await output(git, cwd, ["branch", "--show-current"]);
+  if (!branch.ok) return branch;
+  // Git's own order for a push with no remote named: the branch's push
+  // remote, then the repository default, then the upstream inspected above.
+  for (const key of [`branch.${branch.value}.pushRemote`, "remote.pushDefault"]) {
+    const pushRemote = await output(git, cwd, ["config", "--get", key]);
+    if (!pushRemote.ok) {
+      if (pushRemote.error.code === "exit_1") continue;
+      return pushRemote;
+    }
+    if (pushRemote.value === "") continue;
+    return ok(pushRemote.value === recovery.remote ? recovery : null);
+  }
+  return ok(recovery);
+}
+
 function sameRecovery(
   current: SshRemoteRecovery | null,
   reviewed: SshRemoteRecovery
@@ -133,7 +168,7 @@ async function revalidateRecovery(
       kind: "remote",
       code: "remote_changed",
       message:
-        "The checked-out branch, upstream, or remote URL changed. Pull again to inspect the current authentication failure."
+        "The checked-out branch, upstream, or remote URL changed. Try the operation again to inspect the current authentication failure."
     });
   }
   return ok(reviewed);

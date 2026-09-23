@@ -17,6 +17,7 @@ import {
   planPushRefs,
   pullFastForward,
   pushPlannedRefs,
+  pushRemote,
   resetToRemote
 } from "./git-service";
 import {
@@ -30,6 +31,7 @@ import {
 } from "./pull-watchdog";
 import {
   applySshRemoteRecovery,
+  inspectSshPushRecovery,
   inspectSshRemoteRecovery,
   testSshRemoteRecovery
 } from "./ssh-remote-recovery";
@@ -48,6 +50,7 @@ vi.mock("./git-service", async (importOriginal) => {
     planPushRefs: vi.fn(),
     pullFastForward: vi.fn(),
     pushPlannedRefs: vi.fn(),
+    pushRemote: vi.fn(),
     resetToRemote: vi.fn()
   };
 });
@@ -56,6 +59,7 @@ vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 vi.mock("./ssh-remote-recovery", () => ({
   applySshRemoteRecovery: vi.fn(),
+  inspectSshPushRecovery: vi.fn(),
   inspectSshRemoteRecovery: vi.fn(),
   testSshRemoteRecovery: vi.fn()
 }));
@@ -118,7 +122,9 @@ describe("remote handlers", () => {
       })
     );
     vi.mocked(pushPlannedRefs).mockResolvedValue(ok([]));
+    vi.mocked(pushRemote).mockResolvedValue(ok(undefined));
     vi.mocked(resetToRemote).mockResolvedValue(ok(undefined));
+    vi.mocked(inspectSshPushRecovery).mockResolvedValue(ok(null));
     vi.mocked(inspectSshRemoteRecovery).mockResolvedValue(ok(null));
     vi.mocked(testSshRemoteRecovery).mockResolvedValue(ok(undefined));
     vi.mocked(applySshRemoteRecovery).mockResolvedValue(ok(undefined));
@@ -605,6 +611,134 @@ describe("remote handlers", () => {
     );
   });
 
+  describe("classifies credential failures the same way for fetch and push", () => {
+    const mount = () => {
+      const db = {
+        prepare: vi.fn(() => ({
+          get: vi.fn(() => ({ path: "/repos/project", repoId: "repo-1" }))
+        }))
+      } as unknown as DB;
+      const refresher = {
+        refreshWorktree: vi.fn(async () => undefined),
+        refreshRepoWorktrees: vi.fn()
+      } satisfies WorktreeRefresher;
+      const bus = new CommandBus();
+      registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+      return { bus, refresher };
+    };
+
+    it("reads a fetch Git could not authenticate as authentication_required, in Git's words", async () => {
+      const { bus, refresher } = mount();
+      const message =
+        "fatal: could not read Username for 'https://github.com': terminal prompts disabled";
+      vi.mocked(fetchRemote).mockResolvedValueOnce(
+        err({ kind: "git", code: "exit_128", message })
+      );
+
+      const result = await bus.dispatch("remote:fetch", {
+        worktreeId: "worktree-1"
+      });
+
+      // Pull rewrites its message through `safePullError`; fetch has no such
+      // sentence, so the card goes on quoting Git when no dialog takes over.
+      expect(result).toMatchObject({
+        ok: false,
+        error: { kind: "remote", code: "authentication_required", message }
+      });
+      expect(refresher.refreshWorktree).not.toHaveBeenCalled();
+    });
+
+    it("reads Git's stderr from a push's detail, and keeps it there", async () => {
+      const { bus } = mount();
+      const stderr = [
+        "remote: Invalid username or token.",
+        "fatal: Authentication failed for 'https://github.com/pwrdrvr/PwrGit.git/'"
+      ].join("\n");
+      vi.mocked(pushRemote).mockResolvedValueOnce(
+        err({
+          kind: "remote",
+          code: "push_failed",
+          // The headline `pushFailureHeadline` picked says nothing about
+          // credentials on its own; the evidence is only in `detail`.
+          message: "remote: Invalid username or token.",
+          detail: stderr
+        })
+      );
+
+      const result = await bus.dispatch("remote:push", {
+        worktreeId: "worktree-1"
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          kind: "remote",
+          code: "authentication_required",
+          message: "remote: Invalid username or token.",
+          detail: stderr
+        }
+      });
+    });
+
+    it.each(["canceled", "push_denied"])(
+      "never turns a push's %s into an authentication failure",
+      async (code) => {
+        const { bus } = mount();
+        const refused = {
+          kind: "remote" as const,
+          code,
+          message: "Stopped.",
+          detail:
+            "fatal: Authentication failed for 'https://github.com/pwrdrvr/PwrGit.git/'"
+        };
+        vi.mocked(pushRemote).mockResolvedValueOnce(err(refused));
+
+        await expect(
+          bus.dispatch("remote:push", { worktreeId: "worktree-1" })
+        ).resolves.toEqual(err(refused));
+      }
+    );
+
+    it("leaves a fetch that failed for another reason exactly as Git said it", async () => {
+      const { bus } = mount();
+      const offline = {
+        kind: "git" as const,
+        code: "exit_128",
+        message:
+          "fatal: unable to access 'https://github.com/pwrdrvr/PwrGit.git/': Could not resolve host: github.com"
+      };
+      vi.mocked(fetchRemote).mockResolvedValueOnce(err(offline));
+
+      await expect(
+        bus.dispatch("remote:fetch", { worktreeId: "worktree-1" })
+      ).resolves.toEqual(err(offline));
+    });
+
+    it("asks the push-aware inspect only for a push", async () => {
+      const { bus } = mount();
+
+      await bus.dispatch("remote:inspectSshRecovery", {
+        worktreeId: "worktree-1",
+        operation: "fetch"
+      });
+      expect(inspectSshRemoteRecovery).toHaveBeenCalledExactlyOnceWith(
+        expect.any(Function),
+        "/repos/project"
+      );
+      expect(inspectSshPushRecovery).not.toHaveBeenCalled();
+
+      await bus.dispatch("remote:inspectSshRecovery", {
+        worktreeId: "worktree-1",
+        operation: "push"
+      });
+      expect(inspectSshPushRecovery).toHaveBeenCalledExactlyOnceWith(
+        expect.any(Function),
+        "/repos/project"
+      );
+      expect(inspectSshRemoteRecovery).toHaveBeenCalledOnce();
+    });
+  });
+
   it("streams pull phases and waits for the finishing refresh", async () => {
     const db = {
       prepare: vi.fn(() => ({
@@ -1060,7 +1194,10 @@ describe("remote handlers", () => {
     registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
 
     await expect(
-      bus.dispatch("remote:inspectSshRecovery", { worktreeId: "worktree-1" })
+      bus.dispatch("remote:inspectSshRecovery", {
+        worktreeId: "worktree-1",
+        operation: "pull"
+      })
     ).resolves.toEqual(ok(recovery));
     await expect(
       bus.dispatch("remote:testSshRecovery", {

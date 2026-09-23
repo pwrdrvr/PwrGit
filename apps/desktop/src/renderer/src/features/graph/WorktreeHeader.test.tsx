@@ -756,7 +756,8 @@ describe("WorktreeHeader pull progress", () => {
     });
 
     expect(bridge.dispatch).toHaveBeenCalledWith("remote:inspectSshRecovery", {
-      worktreeId: worktree.id
+      worktreeId: worktree.id,
+      operation: "pull"
     });
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     expect(container.textContent).toContain("Try this remote with SSH?");
@@ -769,6 +770,206 @@ describe("WorktreeHeader pull progress", () => {
       "remote:applySshRecovery",
       expect.anything()
     );
+  });
+});
+
+/**
+ * Git refused a fetch, pull or push because it had no HTTPS credential and may
+ * not prompt for one. All three hand that failure to the same dialog, and each
+ * still ends in exactly one of: a settled card, a card dismissed for the
+ * dialog, or a toast.
+ */
+describe("WorktreeHeader offers SSH when Git had no HTTPS credential", () => {
+  const recovery: SshRemoteRecovery = {
+    remote: "origin",
+    httpsUrl: "https://github.com/pwrdrvr/PwrAgent.git",
+    sshUrl: "git@github.com:pwrdrvr/PwrAgent.git",
+    pushUrlWillAlsoChange: true
+  };
+  const noCredential = err({
+    kind: "remote",
+    code: "authentication_required",
+    message:
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+  });
+  const operations = [
+    ["Fetch", "fetch"],
+    ["Pull", "pull"],
+    ["Push", "push"]
+  ] as const;
+
+  const card = (): Element | null =>
+    document.querySelector(".remote-activity-popover");
+  const dialog = (): Element | null =>
+    container.querySelector('[role="dialog"]');
+  /** By position, not name: a busy button's label is "Fetching…" and so on. */
+  const button = (label: "Fetch" | "Pull" | "Push"): HTMLButtonElement | null =>
+    container.querySelectorAll<HTMLButtonElement>(".wt-actions > .wt-btn")[
+      ["Fetch", "Pull", "Push"].indexOf(label)
+    ] ?? null;
+
+  /** Answer the named commands; anything else never settles. */
+  const answer = (replies: Record<string, () => Promise<unknown>>): void => {
+    bridge.dispatch.mockImplementation(
+      (name: string) =>
+        replies[name]?.() ??
+        (name === "remote:activities"
+          ? Promise.resolve(ok([]))
+          : new Promise(() => undefined))
+    );
+  };
+
+  /** Let every dispatch already answered run its continuation to the end. */
+  const drain = (): Promise<void> =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+  const visit = (id: string): Promise<void> =>
+    act(async () => {
+      root.render(
+        <WorktreeHeader repo={repo} worktree={{ ...worktree, id }} state={null} />
+      );
+    });
+
+  it.each(operations)(
+    "hands a %s Git could not authenticate to the dialog, and takes the card with it",
+    async (label, operation) => {
+      answer({
+        [`remote:${operation}`]: () => Promise.resolve(noCredential),
+        "remote:inspectSshRecovery": () => Promise.resolve(ok(recovery))
+      });
+
+      await act(async () => button(label)?.click());
+      await drain();
+
+      expect(bridge.dispatch).toHaveBeenCalledWith(
+        "remote:inspectSshRecovery",
+        { worktreeId: worktree.id, operation }
+      );
+      // The dialog names the operation that failed, not always Pull.
+      expect(
+        dialog()?.querySelector(".ssh-recovery__intro")?.textContent
+      ).toMatch(new RegExp(`^${label}`));
+      expect(dialog()?.textContent).toContain(recovery.sshUrl);
+      expect(card()).toBeNull();
+      expect(showErrorToast).not.toHaveBeenCalled();
+      expect(button(label)?.getAttribute("aria-busy")).toBe("false");
+      // Offered, never acted on: testing and changing are the user's clicks.
+      for (const command of [
+        "remote:testSshRecovery",
+        "remote:applySshRecovery"
+      ]) {
+        expect(bridge.dispatch).not.toHaveBeenCalledWith(
+          command,
+          expect.anything()
+        );
+      }
+    }
+  );
+
+  it.each(operations)(
+    "leaves a %s failure on the card when there is nothing to offer",
+    async (label, operation) => {
+      answer({
+        [`remote:${operation}`]: () => Promise.resolve(noCredential),
+        // Not GitHub over HTTPS, no upstream, or a push by another URL.
+        "remote:inspectSshRecovery": () => Promise.resolve(ok(null))
+      });
+
+      await act(async () => button(label)?.click());
+      await drain();
+
+      expect(dialog()).toBeNull();
+      expect(card()?.textContent).toContain(
+        `${label} failed — fatal: could not read Username`
+      );
+      expect(showErrorToast).not.toHaveBeenCalled();
+      expect(button(label)?.getAttribute("aria-busy")).toBe("false");
+    }
+  );
+
+  it("stays busy until the offer is decided, so nothing can start under it", async () => {
+    let inspected!: () => void;
+    answer({
+      "remote:fetch": () => Promise.resolve(noCredential),
+      "remote:inspectSshRecovery": () =>
+        new Promise((resolve) => {
+          inspected = () => resolve(ok(recovery));
+        })
+    });
+
+    await act(async () => button("Fetch")?.click());
+    await drain();
+
+    // Git is done; the outcome is not. A Pull pressed here would pin a card
+    // the arriving dialog then takes away.
+    expect(button("Fetch")?.getAttribute("aria-busy")).toBe("true");
+    await act(async () => button("Pull")?.click());
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:pull",
+      expect.anything()
+    );
+
+    await act(async () => inspected());
+    await drain();
+    expect(dialog()).not.toBeNull();
+    expect(button("Fetch")?.getAttribute("aria-busy")).toBe("false");
+  });
+
+  it("drops the offer for a checkout the user has left", async () => {
+    let inspected!: () => void;
+    answer({
+      "remote:push": () => Promise.resolve(noCredential),
+      "remote:inspectSshRecovery": () =>
+        new Promise((resolve) => {
+          inspected = () => resolve(ok(recovery));
+        })
+    });
+
+    await act(async () => button("Push")?.click());
+    await drain();
+    await visit("worktree-2");
+    await act(async () => inspected());
+    await drain();
+
+    expect(dialog()).toBeNull();
+    expect(card()).toBeNull();
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
+
+  // `activeWorktreeId` reads the same again once the user is back, so only
+  // the operation count can tell this fetch's outcome from the pull's. Without
+  // it, the fetch would clear the pull's busy state and settle the pull's
+  // card as "Fetch failed".
+  it("drops a failure from an earlier visit once this checkout has started something else", async () => {
+    let failFetch!: () => void;
+    answer({
+      "remote:fetch": () =>
+        new Promise((resolve) => {
+          failFetch = () => resolve(noCredential);
+        }),
+      "remote:inspectSshRecovery": () => Promise.resolve(ok(recovery))
+    });
+
+    await act(async () => button("Fetch")?.click());
+    await visit("worktree-2");
+    await visit(worktree.id);
+    await act(async () => button("Pull")?.click());
+    expect(card()).not.toBeNull();
+
+    await act(async () => failFetch());
+    await drain();
+
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:inspectSshRecovery",
+      expect.anything()
+    );
+    expect(dialog()).toBeNull();
+    expect(card()).not.toBeNull();
+    expect(card()?.textContent).not.toContain("Fetch failed");
+    expect(button("Pull")?.getAttribute("aria-busy")).toBe("true");
+    expect(showErrorToast).not.toHaveBeenCalled();
   });
 });
 

@@ -557,6 +557,23 @@ repository" after "Permission denied (publickey)"). Keep the two apart: the card
 Git-output block, Copy and the command log read `detail`, and a sentence
 PwrGit wrote must never be quoted there as something Git printed.
 
+## A missing credential reads the same from fetch, pull and push
+
+`classifyAuthFailure` (`remote-handlers.ts`) turns "Git had no credential it
+may prompt for" into `authentication_required` for all three toolbar
+operations; the worktree header answers it with `SshRemoteRecoveryDialog`.
+Pull still rewrites the message through `safePullError`. Two things are easy
+to undo:
+
+- **It reads `detail` as well as `message`**, because a push's message is
+  `pushFailureHeadline`'s sentence and Git's stderr is in `detail`. It never
+  overrides `canceled`, `push_denied` (the forge accepted the credential, and
+  an SSH key signs in as the same account) or the pull watchdog's codes.
+- **A push is offered the change only if the push uses the URL being
+  changed.** `inspectSshPushRecovery` returns null for a separate `pushurl`
+  and for a `pushRemote` / `pushDefault` that names another remote. Offering
+  it there would test and rewrite a URL the failed push never used.
+
 ## SSH host approval
 
 `ssh-host-trust.ts` keeps scanned keys in expiring, window-bound proposals.

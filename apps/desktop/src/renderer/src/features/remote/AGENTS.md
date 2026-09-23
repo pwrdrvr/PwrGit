@@ -34,7 +34,16 @@ beside it is declared before the hook that owns `dismiss`. And `run` carries
 the same `activeWorktreeId` guard `onPull` and `onPush` already had — without
 it a fetch started on the checkout you left settles the card of the one you
 are on, under the wrong title, and reports itself carried so the toast that
-should have caught the failure never fires.
+should have caught the failure never fires. All three also check one
+`remoteOperation` count, bumped by every start and every switch:
+`activeWorktreeId` reads the same again once the user comes back, and an
+outcome from the earlier visit would otherwise land on whatever they started
+since.
+
+An operation keeps `busy` until its outcome is known, including the local
+inspects that decide whether a dialog takes over (divergence, SSH recovery). A
+button that went idle during that inspect could start an operation whose card
+the arriving dialog then dismisses.
 
 `settle` returns whether a pinned card took the outcome, and `flashError` uses
 that: a durable card anchored to the button that was pressed, carrying Git's

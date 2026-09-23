@@ -9,6 +9,7 @@ import type { GitExec, GitOutput } from "./dugite";
 import {
   applySshRemoteRecovery,
   githubHttpsToSsh,
+  inspectSshPushRecovery,
   inspectSshRemoteRecovery,
   SSH_RECOVERY_COMMAND,
   testSshRemoteRecovery
@@ -29,11 +30,28 @@ const recovery: SshRemoteRecovery = {
   pushUrlWillAlsoChange: true
 };
 
-function configuredGit(options: { explicitPushUrl?: string } = {}): GitExec {
+function configuredGit(
+  options: {
+    explicitPushUrl?: string;
+    /** `branch.main.pushRemote`. */
+    pushRemote?: string;
+    /** `remote.pushDefault`. */
+    pushDefault?: string;
+  } = {}
+): GitExec {
+  // `git config --get` of an unset key exits 1 with no output.
+  const configValue = (value: string | undefined) =>
+    value === undefined ? output("", 1) : output(`${value}\n`);
   return vi.fn((args) => {
     const command = args.join(" ");
     if (command === "branch --show-current") return output("main\n");
     if (command === "config --get branch.main.remote") return output("origin\n");
+    if (command === "config --get branch.main.pushRemote") {
+      return configValue(options.pushRemote);
+    }
+    if (command === "config --get remote.pushDefault") {
+      return configValue(options.pushDefault);
+    }
     if (command === "remote get-url origin") return output(`${recovery.httpsUrl}\n`);
     if (command === "config --get-all remote.origin.pushurl") {
       return options.explicitPushUrl === undefined
@@ -70,6 +88,42 @@ describe("GitHub SSH remote recovery", () => {
     expect(vi.mocked(git).mock.calls.flatMap(([args]) => args)).not.toContain(
       "ls-remote"
     );
+  });
+
+  it("offers a failed push the same recovery when the push travels by that URL", async () => {
+    await expect(
+      inspectSshPushRecovery(configuredGit(), "/repo")
+    ).resolves.toEqual(ok(recovery));
+    // Naming the upstream remote explicitly is the same route.
+    await expect(
+      inspectSshPushRecovery(configuredGit({ pushRemote: "origin" }), "/repo")
+    ).resolves.toEqual(ok(recovery));
+  });
+
+  it("offers a failed push nothing when the change would not reach it", async () => {
+    // A separate push URL stays HTTPS after the change.
+    await expect(
+      inspectSshPushRecovery(
+        configuredGit({
+          explicitPushUrl: "https://github.com/pwrdrvr/PwrAgent.git"
+        }),
+        "/repo"
+      )
+    ).resolves.toEqual(ok(null));
+    // A push remote other than the upstream is a different URL altogether.
+    await expect(
+      inspectSshPushRecovery(configuredGit({ pushRemote: "fork" }), "/repo")
+    ).resolves.toEqual(ok(null));
+    await expect(
+      inspectSshPushRecovery(configuredGit({ pushDefault: "fork" }), "/repo")
+    ).resolves.toEqual(ok(null));
+    // The branch's own push remote outranks the repository default.
+    await expect(
+      inspectSshPushRecovery(
+        configuredGit({ pushRemote: "origin", pushDefault: "fork" }),
+        "/repo"
+      )
+    ).resolves.toEqual(ok(recovery));
   });
 
   it("tests SSH with ignored prompts without fetching or changing refs", async () => {

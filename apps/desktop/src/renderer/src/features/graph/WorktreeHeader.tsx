@@ -126,7 +126,12 @@ export function WorktreeHeader({
   const [busy, setBusy] = useState<Busy>(null);
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
-  const [sshRecovery, setSshRecovery] = useState<SshRemoteRecovery | null>(null);
+  /** The HTTPS → SSH offer, and which operation Git refused for want of a
+   *  credential — the dialog's copy is about that operation. */
+  const [sshRecovery, setSshRecovery] = useState<{
+    operation: Exclude<Busy, null>;
+    recovery: SshRemoteRecovery;
+  } | null>(null);
   /** The fork prompt, and why it opened. `{}` is the user asking for it from
    *  the read-only chip; a `reason` is a push the forge just refused. */
   const [forkPrompt, setForkPrompt] = useState<{ reason?: string } | null>(null);
@@ -146,7 +151,12 @@ export function WorktreeHeader({
   const tip = useViewportTooltip();
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
-  const pullOperation = useRef(0);
+  /** Bumped by every Fetch, Pull and Push this header starts, and by every
+   *  change of checkout. `activeWorktreeId` alone cannot tell an outcome from
+   *  an earlier visit apart from one of the same checkout's now, and an
+   *  outcome arriving after the user has come back and started something else
+   *  would settle — or dismiss — that newer operation's card. */
+  const remoteOperation = useRef(0);
   const recoveryInFlight = useRef<string | null>(null);
   const recoveryOperation = useRef(0);
   const cardButton = useRef<HTMLButtonElement>(null);
@@ -156,7 +166,7 @@ export function WorktreeHeader({
   // started for one worktree must never surface a dialog or flash on another.
   useEffect(() => {
     activeWorktreeId.current = worktree.id;
-    pullOperation.current += 1;
+    remoteOperation.current += 1;
     recoveryOperation.current += 1;
     recoveryInFlight.current = null;
     setBusy(null);
@@ -265,6 +275,56 @@ export function WorktreeHeader({
     });
   };
 
+  /**
+   * Start counting one Fetch, Pull or Push. The returned guard answers whether
+   * its outcome still belongs on screen: the same checkout, and nothing started
+   * since (see `remoteOperation`).
+   */
+  const beginOperation = (worktreeId: string): (() => boolean) => {
+    const operation = ++remoteOperation.current;
+    return () =>
+      activeWorktreeId.current === worktreeId &&
+      remoteOperation.current === operation;
+  };
+
+  /**
+   * Offer to switch the remote from HTTPS to SSH after Git refused `kind` for
+   * want of a credential it may not prompt for.
+   *
+   * `true` means the operation needs nothing more from its caller: the dialog
+   * took over (and, being modal, took the card with it — the same rule as the
+   * divergence and fork prompts), or the operation was superseded while the
+   * remote was inspected. `false` leaves the failure to the caller's own
+   * error path — not an auth failure, or nothing to offer (not GitHub over
+   * HTTPS, no upstream, a push that does not travel by that URL).
+   *
+   * `busy` is held through the inspect, as it is through Pull's divergence
+   * inspect: the operation is not over until its outcome is known, and a
+   * button that went idle here could start another one whose card this
+   * dismisses.
+   */
+  const handOffToSshRecovery = async (
+    kind: Exclude<Busy, null>,
+    worktreeId: string,
+    error: PwrGitError,
+    current: () => boolean
+  ): Promise<boolean> => {
+    if (error.kind !== "remote" || error.code !== "authentication_required") {
+      return false;
+    }
+    const inspected = await dispatch("remote:inspectSshRecovery", {
+      worktreeId,
+      operation: kind
+    });
+    // Superseded: the reset effect has already cleared `busy` and the card.
+    if (!current()) return true;
+    if (!inspected.ok || inspected.value === null) return false;
+    setBusy(null);
+    status.dismiss();
+    setSshRecovery({ operation: kind, recovery: inspected.value });
+    return true;
+  };
+
   const run = async (
     kind: Exclude<Busy, null>,
     fn: () => Promise<Result<unknown, PwrGitError>>,
@@ -273,14 +333,21 @@ export function WorktreeHeader({
     label: string
   ): Promise<void> => {
     const worktreeId = worktree.id;
-    setBusy(kind);
-    const result = await fn();
     // The same guard `onPull` and `onPush` carry, and now load-bearing for a
     // third reason: an outcome that settles the card of a checkout it does not
     // belong to puts one worktree's error under another's title — and reports
     // it as carried, so the toast that should have caught it never fires.
     // The reset effect above clears `busy` on the switch.
-    if (activeWorktreeId.current !== worktreeId) return;
+    const current = beginOperation(worktreeId);
+    setBusy(kind);
+    const result = await fn();
+    if (!current()) return;
+    if (
+      !result.ok &&
+      (await handOffToSshRecovery(kind, worktreeId, result.error, current))
+    ) {
+      return;
+    }
     setBusy(null);
     if (result.ok) {
       showFlash(okChip, 1600);
@@ -302,7 +369,7 @@ export function WorktreeHeader({
   };
   const onPull = (): void => {
     const worktreeId = id;
-    const operation = ++pullOperation.current;
+    const current = beginOperation(worktreeId);
     setBusy("pull");
     void dispatch("remote:pull", { worktreeId }).then(async (result) => {
       if (!result.ok) {
@@ -313,12 +380,7 @@ export function WorktreeHeader({
           const inspected = await dispatch("remote:inspectDivergence", {
             worktreeId
           });
-          if (
-            activeWorktreeId.current !== worktreeId ||
-            pullOperation.current !== operation
-          ) {
-            return;
-          }
+          if (!current()) return;
           setBusy(null);
           if (inspected.ok) {
             // The dialog IS the outcome, and it is modal: a status card left
@@ -330,41 +392,15 @@ export function WorktreeHeader({
             return;
           }
         }
-        if (
-          activeWorktreeId.current !== worktreeId ||
-          pullOperation.current !== operation
-        ) {
+        if (!current()) return;
+        if (await handOffToSshRecovery("pull", worktreeId, result.error, current)) {
           return;
         }
         setBusy(null);
-        if (
-          result.error.kind === "remote" &&
-          result.error.code === "authentication_required"
-        ) {
-          const inspected = await dispatch("remote:inspectSshRecovery", {
-            worktreeId
-          });
-          if (
-            activeWorktreeId.current !== worktreeId ||
-            pullOperation.current !== operation
-          ) {
-            return;
-          }
-          if (inspected.ok && inspected.value !== null) {
-            status.dismiss();
-            setSshRecovery(inspected.value);
-            return;
-          }
-        }
         flashError("Pull", result.error);
         return;
       }
-      if (
-        activeWorktreeId.current !== worktreeId ||
-        pullOperation.current !== operation
-      ) {
-        return;
-      }
+      if (!current()) return;
       setBusy(null);
       const { stashed, reappliedWithConflicts } = result.value;
       if (reappliedWithConflicts) {
@@ -456,12 +492,19 @@ export function WorktreeHeader({
 
   const onPush = (publish?: PushPublishTarget): void => {
     const worktreeId = id;
+    const current = beginOperation(worktreeId);
     setBusy("push");
     void dispatch("remote:push", {
       worktreeId,
       ...(publish === undefined ? {} : { publish })
-    }).then((result) => {
-      if (activeWorktreeId.current !== worktreeId) return;
+    }).then(async (result) => {
+      if (!current()) return;
+      if (
+        !result.ok &&
+        (await handOffToSshRecovery("push", worktreeId, result.error, current))
+      ) {
+        return;
+      }
       setBusy(null);
       if (result.ok) {
         showFlash(
@@ -840,12 +883,16 @@ export function WorktreeHeader({
       {sshRecovery !== null && (
         <SshRemoteRecoveryDialog
           worktreeId={id}
-          recovery={sshRecovery}
+          operation={sshRecovery.operation}
+          recovery={sshRecovery.recovery}
           onClose={() => setSshRecovery(null)}
           onChanged={() => {
             setSshRecovery(null);
             showFlash(
-              { text: `${sshRecovery.remote} now uses SSH`, tone: "ok" },
+              {
+                text: `${sshRecovery.recovery.remote} now uses SSH`,
+                tone: "ok"
+              },
               2400
             );
           }}

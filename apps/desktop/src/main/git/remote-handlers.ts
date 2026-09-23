@@ -51,6 +51,7 @@ import {
 } from "./pull-watchdog";
 import {
   applySshRemoteRecovery,
+  inspectSshPushRecovery,
   inspectSshRemoteRecovery,
   testSshRemoteRecovery
 } from "./ssh-remote-recovery";
@@ -110,16 +111,44 @@ function safePullError(
   }
 }
 
-function classifyPullError(error: PwrGitError): PwrGitError {
+/**
+ * Codes that already say more than "Git had no usable credential", whatever
+ * their text mentions:
+ * - `canceled` is the user's own decision, never a failure to remedy.
+ * - `push_denied` means the forge accepted the credential and refused the
+ *   account. Its remedy is the fork prompt; an SSH key signs in as the same
+ *   account and would be refused the same way.
+ * - `pull_stalled` / `pull_timed_out` are the watchdog's sentences, which
+ *   name credentials as something to check, not as evidence.
+ */
+const NOT_AN_AUTH_FAILURE = new Set([
+  "canceled",
+  "push_denied",
+  "pull_stalled",
+  "pull_timed_out"
+]);
+
+/**
+ * Read a failed fetch, pull or push as `authentication_required` when Git
+ * could not get a credential it is not allowed to prompt for — the failure
+ * the renderer answers by offering to switch an HTTPS remote to SSH.
+ *
+ * Both halves of the error are read: a push's `message` is PwrGit's headline
+ * and Git's own stderr rides in `detail`. Both are kept, so the card still
+ * quotes only what Git wrote.
+ */
+function classifyAuthFailure(error: PwrGitError): PwrGitError {
+  if (NOT_AN_AUTH_FAILURE.has(error.code)) return error;
   if (
     /authentication failed|terminal prompts disabled|could not read (?:username|password)|username for ['"]|password for ['"]|permission denied \(publickey|credential[^\r\n]*(?:failed|unavailable)/i.test(
-      error.message
+      `${error.message}\n${error.detail ?? ""}`
     )
   ) {
     return {
       kind: "remote",
       code: "authentication_required",
       message: error.message,
+      ...(error.detail === undefined ? {} : { detail: error.detail }),
       cause: error
     };
   }
@@ -332,7 +361,7 @@ export function registerRemoteHandlers(
         return fetched;
       }
     );
-    if (!result.ok) return result;
+    if (!result.ok) return err(classifyAuthFailure(result.error));
     logMain(
       "info",
       "remote",
@@ -421,7 +450,9 @@ export function registerRemoteHandlers(
     const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
-    return inspectSshRemoteRecovery(execGit, worktree.path);
+    return req.operation === "push"
+      ? inspectSshPushRecovery(execGit, worktree.path)
+      : inspectSshRemoteRecovery(execGit, worktree.path);
   });
 
   bus.register("remote:testSshRecovery", async (req) => {
@@ -712,7 +743,7 @@ export function registerRemoteHandlers(
         });
       }
       if (!result.ok) {
-        const classified = classifyPullError(result.error);
+        const classified = classifyAuthFailure(result.error);
         const detail = sanitizeGitLogDetail(result.error.message);
         logMain(
           classified.code === "canceled" ? "info" : "error",
@@ -787,7 +818,7 @@ export function registerRemoteHandlers(
         return pushed;
       }
     );
-    if (!result.ok) return result;
+    if (!result.ok) return err(classifyAuthFailure(result.error));
     logMain("info", "remote", `pushed ${worktree.path} (${seconds(startedAt)})`);
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
