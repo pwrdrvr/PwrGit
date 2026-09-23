@@ -91,6 +91,14 @@ and these five chips are icon-only, which makes "why is this one grey" a
 question the chip itself has to answer. Reach for `disabled` on a genuinely
 unavailable control unless it owes the user an explanation on hover.
 
+**Dimming a focusable control with `opacity` dims its focus ring too.** An
+`aria-disabled` control keeps focus, and nothing exempts an outline from its
+own element's opacity. `filter: opacity()` halves it the same way, and a
+`mask` removes it. So a new dimmed `aria-disabled` rule also joins the
+focused-unavailable block in `app.css` (after every fade rule, so it wins the
+tie). While focused, that block trades the fade for a muted paint at full
+opacity: subtle border, transparent fill, `--text-subtle` text.
+
 ## No raw color literals outside `tokens.css`
 
 `tokens.css` holds the theme blocks — `:root` (dark) and

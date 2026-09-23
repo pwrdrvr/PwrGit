@@ -14443,6 +14443,35 @@ button.agent-auth-node:focus-visible,
   color: var(--text-secondary);
 }
 
+/* A control in its aria-disabled state keeps keyboard focus: busy, so pressing
+   it from the keyboard does not throw focus to <body>, or unavailable but
+   still owing the pointer a tooltip (styles/AGENTS.md). Each of these dims
+   with `opacity`, which fades everything the element paints, its focus ring
+   included: Settings' Use path and Clear drew theirs at half strength.
+   Nothing exempts an outline from its own element's opacity: measured,
+   `filter: opacity()` halves it the same way and a mask removes it. So while
+   focused these trade the fade for a muted paint. The control still reads as
+   unavailable, and the ring draws at full strength. After every fade rule, so
+   it wins the one tie of equal specificity, the rule just above. A busy
+   `.wt-btn` or `.submodule-panel__refresh` is never dimmed (it carries the busy
+   tint), so neither is listed busy here. */
+.lens-chip.is-empty:focus-visible,
+.refs-tabs button.is-empty:not(.is-active):focus-visible,
+.repo-mark--refresh[aria-disabled="true"]:focus-visible,
+.ssh-trust__button[aria-disabled="true"]:focus-visible,
+.refs-row-action[aria-disabled="true"]:focus-visible,
+.wt-btn[aria-disabled="true"]:not([aria-busy="true"]):focus-visible,
+.submodule-panel__refresh[aria-disabled="true"]:not([aria-busy="true"]):focus-visible,
+.stash-create__row .commit-btn[aria-disabled="true"]:focus-visible,
+.stash-entry__actions button[aria-disabled="true"]:focus-visible,
+.settings-inline-button[aria-disabled="true"]:focus-visible,
+.remote-activity__button[aria-disabled="true"]:focus-visible {
+  opacity: 1;
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-subtle);
+}
+
 /* The popover shell. `.viewport-tooltip` is pointer-events: none because it
    is a label; this card is a dialog you move into, so it sets its own.
 
