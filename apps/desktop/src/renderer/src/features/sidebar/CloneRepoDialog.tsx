@@ -41,6 +41,7 @@ import {
   forgeCanAnswerDialog
 } from "./fork-dialog";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
+import { useModal } from "../../lib/useModal";
 import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
 import { SshHostTrustPanel, sshTrustTone } from "./SshHostTrustPanel";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
@@ -164,8 +165,19 @@ export function CloneRepoDialog({
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const destinationInputRef = useRef<HTMLInputElement>(null);
 
+  // Escape, the focus trap, and handing focus back to whatever opened this —
+  // the contract ForkCheckoutDialog already had. It refuses while a clone is
+  // running, the same answer the backdrop gives. Without it Tab walked off the
+  // footer into the window behind the dialog (SC 2.4.3), and Escape worked only
+  // from the two search fields, each of which called onClose itself.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => {
+      if (!busy) onClose();
+    },
+    initialFocusRef: sourceInputRef
+  });
+
   useEffect(() => {
-    sourceInputRef.current?.focus();
     let active = true;
     void dispatch("repo:cloneCatalog", { profileId: profile.id }).then(
       (result) => {
@@ -502,6 +514,8 @@ export function CloneRepoDialog({
       }}
     >
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className="overlay-panel clone-dialog"
         role="dialog"
         aria-modal="true"
@@ -601,8 +615,6 @@ export function CloneRepoDialog({
                       event.preventDefault();
                       chooseRepository(repository);
                     }
-                  } else if (event.key === "Escape") {
-                    onClose();
                   }
                 }}
               />
@@ -781,8 +793,6 @@ export function CloneRepoDialog({
                       event.preventDefault();
                       void submit(destination);
                     }
-                  } else if (event.key === "Escape") {
-                    onClose();
                   }
                 }}
               />

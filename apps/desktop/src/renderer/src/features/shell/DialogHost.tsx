@@ -10,6 +10,7 @@ import {
   subscribeDialogs,
   type PendingDialog
 } from "./dialogs";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 
 /**
  * Renders the front-of-queue dialog from the imperative dialog service. Mount
@@ -25,6 +26,18 @@ export function DialogHost() {
   const primaryRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // Tab stays in the dialog, and focus goes back to whatever held it once the
+  // queue empties. Before this, Tab walked off the last button into the app
+  // behind — or, over PruneWorktreesDialog, into Prune's own trap, which pulled
+  // focus behind the question being asked. The trap's initial focus fires
+  // only when the queue opens; the effect below still focuses each queued
+  // dialog's primary button as it arrives.
+  useFocusTrap({
+    open: dialog !== null,
+    containerRef: panelRef,
+    initialFocusRef: primaryRef
+  });
+
   useEffect(() => {
     if (dialog === null) return;
     primaryRef.current?.focus();
@@ -38,10 +51,10 @@ export function DialogHost() {
         // "yes" — with two affirmative answers there is no yes to take, and
         // picking one for the reader is the guess the dialog exists to avoid.
         //
-        // Scoped to the panel: nothing here traps focus, so Shift+Tab off the
-        // first choice walks into the app behind the dialog. Clicking whatever
-        // happened to be focused would fire an unrelated control — a Delete, a
-        // Fetch — while the reader believed they were answering the question.
+        // Scoped to the panel even though focus is trapped in it: focus can
+        // still be moved out programmatically, and clicking whatever happened
+        // to be focused would fire an unrelated control — a Delete, a Fetch —
+        // while the reader believed they were answering the question.
         if (dialog.kind === "choose") {
           const active = document.activeElement;
           if (
@@ -94,8 +107,11 @@ function DialogView({
       onClick={() => closeDialog(dialog.id, false)}
     >
       <div
+        ref={panelRef}
         className="modal modal--dialog"
         role="alertdialog"
+        aria-modal="true"
+        tabIndex={-1}
         aria-label={dialog.opts.title}
         onClick={(e) => e.stopPropagation()}
       >
@@ -151,6 +167,7 @@ function ChoiceView({
         className="modal modal--dialog modal--choice"
         role="alertdialog"
         aria-modal="true"
+        tabIndex={-1}
         aria-label={dialog.opts.title}
         onClick={(e) => e.stopPropagation()}
       >

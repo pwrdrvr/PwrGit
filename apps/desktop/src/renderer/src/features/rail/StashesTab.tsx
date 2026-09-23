@@ -260,16 +260,21 @@ export function StashesTab({
           Name this stash
         </label>
         <div className="stash-create__row">
-          <input
-            id="stash-name"
-            className="commit-input"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void create();
-            }}
-            placeholder="Optional"
-          />
+          {/* The Changes tab's field box. Bare, `.commit-input` has no border
+              or fill, so this field drew only its placeholder and read as a
+              label; the box also carries its focus ring. */}
+          <div className="commit-message">
+            <input
+              id="stash-name"
+              className="commit-input"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void create();
+              }}
+              placeholder="Optional"
+            />
+          </div>
           <button
             className="commit-btn"
             onClick={() => void create()}

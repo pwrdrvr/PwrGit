@@ -16,6 +16,7 @@ import {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
+import { useModal } from "../../lib/useModal";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -127,8 +128,19 @@ export function ForkRepoDialog({
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const destinationInputRef = useRef<HTMLInputElement>(null);
 
+  // Escape, the focus trap, and handing focus back to whatever opened this —
+  // the contract ForkCheckoutDialog already had. It refuses while a fork is
+  // running, the same answer the backdrop gives. Without it Tab walked off the
+  // footer into the window behind the dialog (SC 2.4.3), and Escape worked only
+  // from the two search fields, each of which called onClose itself.
+  const modalRef = useModal<HTMLDivElement>({
+    onClose: () => {
+      if (!busy) onClose();
+    },
+    initialFocusRef: sourceInputRef
+  });
+
   useEffect(() => {
-    sourceInputRef.current?.focus();
     let active = true;
     void dispatch("repo:cloneCatalog", { profileId: profile.id }).then(
       (result) => {
@@ -504,6 +516,8 @@ export function ForkRepoDialog({
       }}
     >
       <div
+        ref={modalRef}
+        tabIndex={-1}
         className="overlay-panel clone-dialog"
         role="dialog"
         aria-modal="true"
@@ -588,8 +602,6 @@ export function ForkRepoDialog({
                       event.preventDefault();
                       chooseSource(repository);
                     }
-                  } else if (event.key === "Escape") {
-                    onClose();
                   }
                 }}
               />
@@ -943,8 +955,6 @@ export function ForkRepoDialog({
                     } else if (event.key === "Enter") {
                       event.preventDefault();
                       void submit();
-                    } else if (event.key === "Escape") {
-                      onClose();
                     }
                   }}
                 />

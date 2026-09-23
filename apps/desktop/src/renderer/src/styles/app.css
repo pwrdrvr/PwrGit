@@ -1032,6 +1032,16 @@ textarea,
 .read-error--compact .read-error__retry {
   margin-top: 8px;
 }
+/* Bordered, so 1px out. The notice's own padding keeps the ring clear of the
+   scroller it sits in (`.sidebar__list`, `.settings-content`) at rest, and
+   the scroll margin keeps it clear when Tab scrolls it into view — see
+   `.modal__cancel:focus-visible`. On the danger tint the ring is 6.95:1 in
+   dark and 3.84:1 in light, at worst. */
+.read-error__retry:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 
 .repo-block {
   /* PwrAgnt's list gap is 0: the row's own padding is the rhythm. */
@@ -1427,6 +1437,7 @@ textarea,
    weight as the rows, so one indicator vocabulary. */
 .sort-cycle:focus-visible,
 .wt-section__toggle:focus-visible,
+.wt-refresh:focus-visible,
 .wt-selbar__btn:focus-visible,
 .ref-mini-action:focus-visible,
 .ref-fetch-all:focus-visible,
@@ -1567,10 +1578,6 @@ textarea,
 .wt-refresh:hover:not([aria-disabled="true"]) {
   color: var(--text-primary);
   background: var(--bg-hover-strong);
-}
-.wt-refresh:focus-visible {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 .wt-refresh[aria-disabled="true"] {
   cursor: default;
@@ -2458,6 +2465,16 @@ textarea,
   color: var(--text-primary);
   font: 500 15px/1 var(--font-sans);
 }
+/* The palette is a combobox: this field keeps focus while the arrow keys move
+   the selection, and Tab cycles between it and a row's actions. Coming back
+   from a row action, nothing said focus had returned here; `outline: none`
+   left only the caret. Borderless, so it rings off its own box with a radius,
+   as `.settings-notes-link` does. */
+.overlay-search input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
 .overlay-results {
   max-height: 52vh;
   overflow-y: auto;
@@ -2688,6 +2705,12 @@ textarea,
   background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
+/* Its box is the hover fill and radius, so it rings 1px out like the other
+   bordered controls. The title bar sits above the dialog's scroller. */
+.clone-dialog__close:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .clone-dialog__body {
   flex: 1;
   min-height: 0;
@@ -2731,10 +2754,22 @@ textarea,
 .clone-input-wrap:focus-within {
   border-color: var(--accent-border);
   box-shadow: 0 0 0 1px var(--accent-soft);
+  /* The tint alone is too faint to be the indicator — --accent-border is
+     ~2.3:1 against the field; see `.modal__input:focus-visible`. The field
+     inside is borderless, so the wrapper is the control the ring belongs on. */
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .clone-input-wrap input {
   flex: 1;
   min-width: 0;
+  /* The house scroll margin (see `.modal__cancel:focus-visible`), measured
+     from the input because the input is what focus scrolls into view: the
+     wrapper reaches 10px past it, then the ring's 1px offset and 2px width.
+     Measured on Chromium 151, Tab centres a text field it has to scroll to,
+     so nothing is cut even without this; buttons scroll only to the nearest
+     edge, which is where the margin earns its keep. */
+  scroll-margin: 14px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -2787,6 +2822,13 @@ textarea,
 .clone-destination-row:disabled {
   cursor: default;
   opacity: 0.5;
+}
+/* Inset: these rows fill a scrolling listbox edge to edge, which is the
+   `.repo-row` case. A ring drawn outside a row was cut by the listbox. */
+.clone-source-row:focus-visible,
+.clone-destination-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .clone-source-row__mark {
   width: 8px;
@@ -2902,6 +2944,13 @@ textarea,
 .repo-mark--refresh[aria-disabled="true"] {
   cursor: progress;
   opacity: 0.5;
+}
+/* It had no focus rule. Inset, like `.pin` in the same row: the glyph button
+   has no box of its own, and 3px of padding leaves the ring clear of it. */
+.repo-mark--refresh:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
 }
 
 .repo-mark--fork {
@@ -3369,6 +3418,13 @@ textarea,
 .clone-protocol:disabled {
   opacity: 0.38;
   cursor: default;
+}
+/* Bordered cards 6px apart, in the dialog body's scroller: 1px out, with the
+   scroll margin `.modal__cancel:focus-visible` explains. */
+.clone-protocol:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .clone-destination-row {
   min-height: 32px;
@@ -3839,6 +3895,23 @@ textarea,
 .wt-row:has(:focus-visible) .wt-age {
   opacity: 0;
 }
+/* Except over the PR chip while the chip itself holds keyboard focus. The
+   strip is 77px of opaque backdrop, and with the age that normally takes its
+   slot this short the chip sits under it: measured, only 10-71% of the
+   focused chip's ring reached the screen. The strip is there to show the
+   keyboard user the pin and kebab, and those are the next two Tab stops, so it
+   comes back the moment focus moves on. Stronger than `:hover` on purpose: a
+   pointer resting on the row must not cover the control the keyboard is on. */
+.wt-row:has(.pr-chip:focus-visible) .wt-row__hoveracts,
+.wt-row:has(.pr-chip:focus-visible) .wt-row__menu {
+  opacity: 0;
+}
+.wt-row:has(.pr-chip:focus-visible) .wt-row__hoveracts .pin {
+  pointer-events: none;
+}
+.wt-row:has(.pr-chip:focus-visible) .wt-age {
+  opacity: 1;
+}
 
 /* ---- Rail: Rebase tool tab ---- */
 
@@ -4198,6 +4271,13 @@ button.agent-menu__item:hover {
 }
 .agent-link:hover {
   text-decoration: underline;
+}
+/* It had no focus rule and fell back to Chromium's ring. Borderless, so a
+   radius; 1px off keeps the ring inside the commit box, whose overflow clips. */
+.agent-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
 }
 .agent-link:disabled {
   opacity: 0.5;
@@ -4767,6 +4847,18 @@ button.agent-menu__item:hover {
 .modal__input:focus {
   border-color: var(--accent-border);
 }
+/* The border tint above was the field's only focus signal, and it is too faint
+   to be one (SC 1.4.11, 3:1): --accent-border is 2.30:1 against the field in
+   dark and 1.88:1 in light, and only 1.67:1 / 1.43:1 against the resting
+   --border-default it replaces. So the field also draws the house ring, 1px
+   out like the bordered controls, and keeps the tint. A text field matches
+   :focus-visible on a click too, as `.agent-auth-input` already does. The
+   scroll margin is the footer buttons', below. */
+.modal__input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 .modal__check {
   display: flex;
   align-items: center;
@@ -4774,6 +4866,19 @@ button.agent-menu__item:hover {
   font: 500 12px/1 var(--font-sans);
   color: var(--text-secondary);
   cursor: pointer;
+}
+/* Every dialog draws its checkboxes and radios natively, and none had a rule,
+   so each fell back to Chromium's thin blue ring. `.modal` and `.clone-dialog`
+   are the two dialog shells; no control in either is visually hidden behind a
+   custom box, so the ring lands on the box the user sees. The scroll margin is
+   the footer buttons', below. */
+.modal input[type="checkbox"]:focus-visible,
+.modal input[type="radio"]:focus-visible,
+.clone-dialog input[type="checkbox"]:focus-visible,
+.clone-dialog input[type="radio"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .modal__error {
   margin-top: 10px;
@@ -4814,6 +4919,31 @@ button.agent-menu__item:hover {
 .modal__create:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* Every dialog's footer — main window and Settings alike — so these fell back
+   to Chromium's own `outline: auto` ring beside controls that draw the house
+   one. 1px out, as the shared block above `.pin:focus-visible` rings bordered
+   buttons. Each footer sits inside at least 11px of its dialog's padding, so
+   at rest nothing clips the ring.
+
+   Tabbing can still clip it. Several of these dialogs scroll
+   (`.modal--profile`, `.refs-push`, …), and when focus moves to a control
+   below the fold the browser scrolls only until the control's border box is
+   in view, leaving the ring outside it. In a 600px-tall window — the main
+   window's minimum — the profile dialog's Cancel and Save lost the bottom 3px
+   of their rings that way. `scroll-margin` makes the browser scroll the ring
+   in too: its 3px reach, plus 1px because the scroll stops on a whole pixel
+   and the button may not start on one. The other dialog-control rings in this
+   file that sit in a scroller carry the same margin for the same reason.
+
+   The `opacity` on `:disabled` cannot fade this ring, because a disabled
+   button takes no focus. In-flight is `aria-disabled` (AddForgeHostDialog),
+   and nothing dims that. */
+.modal__cancel:focus-visible,
+.modal__create:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 
 /* ---- Profile-wide repository synchronization ---- */
@@ -4958,6 +5088,15 @@ button.agent-menu__item:hover {
   gap: 8px;
   padding: 12px 18px;
   overflow-y: auto;
+}
+/* Chromium makes a scroller that overflows and holds nothing focusable a Tab
+   stop of its own, so the arrow keys can scroll it. This list is only text, so
+   a long one is exactly that, though it was unreachable until `useFocusTrap`
+   learned to count scrollers. Inset, because the scroller fills the dialog
+   edge to edge. `.prune__rows` and `.dialog__facts` are the same case. */
+.bulk-sync__repos:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .bulk-sync__repo {
   padding: 10px 12px;
@@ -5216,6 +5355,14 @@ button.agent-menu__item:hover {
   padding: 12px 18px;
   overflow-y: auto;
 }
+/* Reclaim's rows carry no controls, so a long list is a Tab stop; see
+   `.bulk-sync__repos:focus-visible`. It drew Chromium's ring, which `.prune`
+   cut by 1px at each side. Prune's rows hold checkboxes, so the list itself
+   never takes focus there. */
+.prune__rows:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 .prune__empty {
   margin: 0;
   padding: 18px 4px;
@@ -5335,6 +5482,11 @@ button.agent-menu__item:hover {
      "scroll for more". */
   font: 500 11px/18px var(--font-mono);
   resize: vertical;
+}
+.prune__excludes-field:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .prune__excludes-foot {
   display: flex;
@@ -5533,6 +5685,14 @@ button.agent-menu__item:hover {
   font: 500 20px/1 var(--font-sans);
   cursor: pointer;
 }
+/* The refs browser's controls had no focus rule at all, so each fell back to
+   Chromium's ring. Bordered ones ring 1px out, as the shared block above
+   `.pin:focus-visible` does; the ones in `.refs-browser__body`, which scrolls,
+   add the scroll margin `.modal__cancel:focus-visible` explains. */
+.refs-icon-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .refs-browser__toolbar {
   display: flex;
   align-items: center;
@@ -5564,6 +5724,13 @@ button.agent-menu__item:hover {
   background: var(--bg-row-active);
   color: var(--accent-bright);
 }
+/* Inset: the tabs are segments of a bordered track 3px apart, as
+   `.settings-segmented__button` is, and a ring outside one would run into the
+   next. */
+.refs-tabs button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 .refs-tabs span {
   margin-left: 4px;
   color: var(--text-subtle);
@@ -5590,6 +5757,13 @@ button.agent-menu__item:hover {
   background: transparent;
   color: var(--text-primary);
   font: 500 11.5px/1 var(--font-sans);
+}
+/* The field is borderless inside the bordered `.refs-search`, as the Clone
+   search is inside `.clone-input-wrap`, so the wrapper carries the ring. It
+   had no focus style at all; the caret was the only sign. */
+.refs-search:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .refs-action,
 .refs-row-action {
@@ -5651,6 +5825,12 @@ button.agent-menu__item:hover {
 .refs-row-action[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.refs-action:focus-visible,
+.refs-row-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .refs-browser__body {
   flex: 1;
@@ -5926,6 +6106,11 @@ button.agent-menu__item:hover {
   font: 600 9.5px/1 var(--font-sans);
   cursor: pointer;
 }
+.refs-remote-card__actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 .refs-remote-card__actions button.is-danger {
   color: var(--danger-text);
 }
@@ -6020,6 +6205,13 @@ button.agent-menu__item:hover {
 }
 .refs-empty-link:hover {
   text-decoration: underline;
+}
+/* Borderless link: 2px off the text with a radius, as `.settings-notes-link`. */
+.refs-empty-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  scroll-margin: 5px;
 }
 
 /* Pull / merge requests tab. The actions column matches the branch table's
@@ -6264,6 +6456,17 @@ button.agent-menu__item:hover {
   padding-top: 9px;
   resize: vertical;
   line-height: 1.4;
+}
+/* `outline: none` above, and no focus rule anywhere: the caret was the only
+   sign of which field had focus, and a select has no caret at all. The ring is
+   `.modal__input`'s, 1px out, with its scroll margin, since several of these
+   dialogs (`.refs-push`, `.refs-tag-dialog`) scroll. */
+.refs-field select:focus-visible,
+.refs-field input:focus-visible,
+.refs-field textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .refs-field--message {
   align-items: start;
@@ -6734,6 +6937,12 @@ button.agent-menu__item:hover {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+}
+/* The worktree header's buttons had no focus rule, so Pull, Push and the rest
+   fell back to Chromium's ring. */
+.wt-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 /* Busy is spelled aria-disabled, not `disabled`: Chromium blurs an element the
    moment it becomes disabled, so pressing Fetch from the keyboard threw focus
@@ -7511,6 +7720,13 @@ button.ref-chip:focus-visible {
   background: var(--accent-soft);
   border-color: var(--accent-border);
 }
+/* Neither pill had a focus rule, so both fell back to Chromium's ring. */
+.changes-section__action:focus-visible,
+.changes-wip__discard:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 .file-row {
   display: flex;
   align-items: center;
@@ -7564,12 +7780,27 @@ button.ref-chip:focus-visible {
   direction: rtl;
   text-align: left;
 }
-/* A trailing "/" is bidi-neutral, so in an RTL paragraph it takes the
-   paragraph direction and jumps to the front: git's `? vendor/` (a nested repo
-   — even -uall won't list inside one) rendered as "/vendor". A trailing
-   left-to-right mark anchors it. It lives in a pseudo-element rather than the
-   label so a copied path carries no invisible character. */
-.file-path::after {
+/* Punctuation is bidi-neutral, so in an RTL paragraph a neutral at either end
+   of a path takes the paragraph direction and jumps to the other end. A
+   trailing mark alone fixed git's `? vendor/` (a nested repo — even -uall won't
+   list inside one), which rendered as "/vendor", but not the leading half,
+   measured in Chromium:
+
+     /Users/dana/src/acme   →  Users/dana/src/acme/
+     .github/workflows/ci.yml  →  github/workflows/ci.yml.
+     __tests__/gear.test.ts  →  tests__/gear.test.ts__
+     (draft)/notes.md  →  notes.md/)draft(   — mirrored, too
+
+   A left-to-right mark at each end anchors both, and left truncation still
+   keeps the filename. The marks live in pseudo-elements rather than the label
+   so a copied path carries no invisible character. Every `direction: rtl`
+   path in this file needs the pair: `.rootlist__path`, `.diff-file__path`. */
+.file-path::before,
+.file-path::after,
+.rootlist__path::before,
+.rootlist__path::after,
+.diff-file__path::before,
+.diff-file__path::after {
   content: "\200E";
 }
 
@@ -7606,9 +7837,12 @@ button.ref-chip:focus-visible {
   cursor: pointer;
   transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
 }
+/* 2px, as `.file-insight__row-action` (sized and coloured after this one)
+   already was; this one drew 1px. */
 .file-action:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+  scroll-margin: 4px;
 }
 /* Stage/unstage is the row's primary verb: always present, but at rest it is
    only as loud as the path it belongs to. */
@@ -7751,6 +7985,15 @@ button.ref-chip:focus-visible {
 .commit-message--agent {
   border-color: var(--accent-border);
 }
+/* That tint was the only focus signal: the same too-faint `--accent-border`
+   `.modal__input` had, and the same paint as an agent-drafted message, so
+   focus and "the agent wrote this" looked alike. The field is borderless, so
+   the box rings, as `.clone-input-wrap` does. Keyed to the field rather than
+   :focus-within, because the draft footer's links sit in the same box. */
+.commit-message:has(.commit-input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 /* A textarea that grows with its message, so a drafted body is readable in
    place; one line tall while it holds a subject or nothing. */
 .commit-input {
@@ -7887,6 +8130,12 @@ button.ref-chip:focus-visible {
   letter-spacing: 0;
   text-transform: none;
 }
+/* It had no focus rule. Its border is transparent until hover, so the box is
+   still the one the hover paints: 1px out, as the other bordered buttons. */
+.submodule-panel__refresh:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .submodule-panel__refresh:hover:not(:disabled) {
   border-color: var(--accent-border);
   background: var(--accent-soft);
@@ -7916,6 +8165,12 @@ button.ref-chip:focus-visible {
 }
 .submodule-row__summary:hover {
   background: var(--bg-panel-hover);
+}
+/* It fell back to Chromium's ring, which `.submodule-panel`'s overflow cut by
+   1px. Inset, as `.stash-entry__toggle` is: the row runs edge to edge. */
+.submodule-row__summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .submodule-row__path {
   flex: 1;
@@ -8065,11 +8320,16 @@ button.ref-chip:focus-visible {
   display: flex;
   gap: 8px;
 }
-.stash-create__row .commit-input {
+.stash-create__row .commit-message {
   flex: 1;
-  width: auto;
   min-width: 0;
   margin: 0;
+}
+/* 30px plus the box's border is the button's 32px. */
+.stash-create__row .commit-input {
+  height: 30px;
+  min-height: 0;
+  padding-block: 0;
 }
 .stash-create__row .commit-btn {
   flex: 0 0 auto;
@@ -8090,6 +8350,10 @@ button.ref-chip:focus-visible {
 .stash-create__option input {
   margin: 0;
   accent-color: var(--accent);
+}
+.stash-create__option input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .stash-list {
   flex: 1;
@@ -8591,10 +8855,14 @@ body.is-col-resizing {
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
+/* Was a 1px `--accent-border` outline, the same too-faint tint `.modal__input`
+   had. A copyable is borderless text, so it takes the link placement: 2px off
+   the text, rounded, with scroll-margin for the refs browser's lists. */
 .copyable:focus-visible {
-  outline: 1px solid var(--accent-border);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
+  scroll-margin: 5px;
 }
 
 /* ---- Kebab "⋯" actions menu ---- */
@@ -8869,6 +9137,15 @@ body.is-col-resizing {
 .profile-modal__link:hover {
   text-decoration: underline;
 }
+/* Borderless text, so it rings the way `.settings-notes-link` does: off the
+   text, with a radius of its own to follow. The ring reaches 4px here, so the
+   scroll margin (see `.modal__cancel:focus-visible`) is a pixel more. */
+.profile-modal__link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  scroll-margin: 5px;
+}
 
 .rootlist__add {
   display: inline-flex;
@@ -8882,6 +9159,16 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 500 11.5px/1 var(--font-sans);
   cursor: pointer;
+}
+/* 1px out, not inset like a flush list's rows: the folder rows stand 4px
+   apart, and the remove button sits in its row's 6px/8px padding, so its ring
+   stays inside its own row. `.modal--profile` scrolls, so these carry the
+   footer buttons' scroll margin — see `.modal__cancel:focus-visible`. */
+.rootlist__x:focus-visible,
+.rootlist__add:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 
 /* ---- Sidebar: group-by-folder ---- */
@@ -9029,6 +9316,13 @@ body.is-col-resizing {
   background: var(--bg-panel);
   list-style: none;
 }
+/* Past 120px of facts this is a Tab stop; see `.bulk-sync__repos:focus-visible`.
+   Inset over its own border, so the ring follows the radius and needs no room
+   the panel might not have. */
+.dialog__facts:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 .dialog__facts li {
   overflow: hidden;
   color: var(--text-muted);
@@ -9056,6 +9350,13 @@ body.is-col-resizing {
 .dialog__choice:focus-visible {
   border-color: var(--accent-border);
   background: var(--accent-soft);
+}
+/* The tint above cannot be the focus indicator on its own: it is also the
+   hover and the `.is-primary` paint, so on the default choice — where focus
+   lands on open — focusing it changes nothing. The ring is what moves. */
+.dialog__choice:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .dialog__choice.is-primary {
   border-color: var(--accent-border);
@@ -9114,6 +9415,14 @@ body.is-col-resizing {
 .pull-divergence__elsewhere:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* It shares `.modal__actions` with a `.modal__cancel` that draws the house
+   ring, and fell back to Chromium's own beside it. Same ring, same scroll
+   margin: this dialog scrolls. */
+.pull-divergence__elsewhere:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .pull-divergence__facts {
   display: grid;
@@ -9195,9 +9504,12 @@ body.is-col-resizing {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
+/* It was a 1px --accent-border inset, the tint `.modal__input:focus-visible`
+   measures as too faint to be the indicator. Still inset: `.commit-align`
+   clips at its rounded border, so a ring drawn outside would be cut away. */
 .commit-align__scroll:focus-visible {
-  outline: 1px solid var(--accent-border);
-  outline-offset: -1px;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .commit-align__rows {
   min-width: 700px;
@@ -9326,6 +9638,11 @@ body.is-col-resizing {
 .pull-divergence__action:disabled {
   opacity: 0.48;
   cursor: not-allowed;
+}
+.pull-divergence__action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 @media (max-width: 560px) {
   .pull-divergence__facts {
@@ -9586,6 +9903,12 @@ body.is-col-resizing {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* The Reset dialog scrolls; see `.modal__cancel:focus-visible` for the margin. */
+.reset-remote__fetch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 
 /* The counted consequence. `is-hot` is reserved for the two numbers that are
    genuinely losses -- commits with no counterpart on the target, and working
@@ -9788,10 +10111,17 @@ body.is-col-resizing {
 }
 .pr-chip:hover,
 .pr-chip:focus-visible {
-  outline: none;
   border-color: var(--accent-border);
   background: var(--bg-hover-strong);
   color: var(--text-primary);
+}
+/* Focus used to be `outline: none` plus the hover colours above, so a focused
+   chip looked exactly like one under the pointer, and the --accent-border edge
+   that told them apart from rest is the tint `.modal__input:focus-visible`
+   measures as too faint. The ring is the difference. */
+.pr-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .pr-chip__dot {
   width: 7px;
@@ -11244,6 +11574,12 @@ body.is-col-resizing {
   font: 600 10px/1 var(--font-sans);
   cursor: pointer;
 }
+/* The lightbox's other controls ring already; its one checkbox fell back to
+   Chromium's ring. */
+.image-lightbox__toggle input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .image-lightbox__stage {
   position: relative;
   flex: 1;
@@ -12305,6 +12641,14 @@ body.is-col-resizing {
 }
 .settings-input:focus {
   border-color: var(--accent-border);
+}
+/* The tint above is too faint to be the only signal; see
+   `.modal__input:focus-visible`. A text field matches :focus-visible on a click
+   too, so this rings on every focus, as the other inputs do. */
+.settings-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .settings-input::placeholder {
   color: var(--text-subtle);
@@ -14102,7 +14446,12 @@ button.agent-auth-node:focus-visible,
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-bright);
-  outline: none;
+}
+/* Focus used to be `outline: none` plus the hover paint above, so a focused
+   button looked exactly like a hovered one; see `.pr-chip:focus-visible`. */
+.remote-activity__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* Stop is the action someone comes to this card for after five silent
@@ -14130,6 +14479,35 @@ button.agent-auth-node:focus-visible,
   border-color: var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
+}
+
+/* A control in its aria-disabled state keeps keyboard focus: busy, so pressing
+   it from the keyboard does not throw focus to <body>, or unavailable but
+   still owing the pointer a tooltip (styles/AGENTS.md). Each of these dims
+   with `opacity`, which fades everything the element paints, its focus ring
+   included: Settings' Use path and Clear drew theirs at half strength.
+   Nothing exempts an outline from its own element's opacity: measured,
+   `filter: opacity()` halves it the same way and a mask removes it. So while
+   focused these trade the fade for a muted paint. The control still reads as
+   unavailable, and the ring draws at full strength. After every fade rule, so
+   it wins the one tie of equal specificity, the rule just above. A busy
+   `.wt-btn` or `.submodule-panel__refresh` is never dimmed (it carries the busy
+   tint), so neither is listed busy here. */
+.lens-chip.is-empty:focus-visible,
+.refs-tabs button.is-empty:not(.is-active):focus-visible,
+.repo-mark--refresh[aria-disabled="true"]:focus-visible,
+.ssh-trust__button[aria-disabled="true"]:focus-visible,
+.refs-row-action[aria-disabled="true"]:focus-visible,
+.wt-btn[aria-disabled="true"]:not([aria-busy="true"]):focus-visible,
+.submodule-panel__refresh[aria-disabled="true"]:not([aria-busy="true"]):focus-visible,
+.stash-create__row .commit-btn[aria-disabled="true"]:focus-visible,
+.stash-entry__actions button[aria-disabled="true"]:focus-visible,
+.settings-inline-button[aria-disabled="true"]:focus-visible,
+.remote-activity__button[aria-disabled="true"]:focus-visible {
+  opacity: 1;
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-subtle);
 }
 
 /* The popover shell. `.viewport-tooltip` is pointer-events: none because it

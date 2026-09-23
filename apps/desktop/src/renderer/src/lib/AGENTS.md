@@ -279,6 +279,35 @@ and claims nothing, so the card's handler gets an unspent key.
 `defaultPrevented` check a tick. Either is fine; what is not fine is a
 synchronous check from a bubble listener, which is a coin flip.
 
+### Tab belongs to exactly one trap, by the same rule
+
+Two traps can be open at once: `confirmDialog` from inside
+`PruneWorktreesDialog` puts DialogHost's trap over Prune's. Each trap listens
+on `window` and pulls stray focus back into itself, so with no owner rule the
+lower trap took every Tab in the confirm and dragged focus behind it, and once
+the confirm had a trap too the two fought until focus stuck on an edge.
+`useFocusTrap` now resolves one owner per keypress: the trap holding focus
+(deepest wins), otherwise the newest. A new trap gets this for free; don't add
+a second keydown handler for Tab.
+
+A menu portalled out of a trapped dialog (ImageLightbox's copy menu) is the
+one case where focus outside the trap is not stray. The trap listens in the
+capture phase, so it sees Tab first, and pulling focus in then left the menu
+open: `useMenuNavigation` closes on Tab only while focus is still inside.
+For focus inside a `[role="menu"]`, the trap claims the key but moves focus
+only after the menu's own listener has run.
+
+### A scroller can be a Tab stop with no tabindex
+
+Chromium puts an overflowing scroller that holds nothing focusable into the Tab
+order by itself (measured on 151: a nested pair yields only the inner one).
+Its `tabIndex` still reads -1, so no selector finds it. `useFocusTrap` checks
+layout for these when it works out where the cycle ends. Without that it wrapped
+straight past one before a dialog's first control or after its last, and a long
+facts list or Bulk Sync's results could not be scrolled from the keyboard.
+Initial focus still skips them and lands on a control. jsdom does no layout, so
+a test has to supply `scrollHeight`/`clientHeight` itself (see the trap's tests).
+
 ### `useFocusTrap` captures the opener during render
 
 Not in an effect. React applies `autoFocus` while committing, which is *before*
