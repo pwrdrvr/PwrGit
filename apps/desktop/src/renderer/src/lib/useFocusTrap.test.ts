@@ -99,6 +99,18 @@ describe("useFocusTrap", () => {
     expect(focusedLabel()).toBe("First");
   });
 
+  it("sends Shift+Tab from the focused container to the last control", () => {
+    // ImageLightbox opens with focus on its frame, the trap's own container.
+    render({ open: true });
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    dialog.focus();
+    tab(true);
+    expect(focusedLabel()).toBe("Last");
+    dialog.focus();
+    tab();
+    expect(focusedLabel()).toBe("First");
+  });
+
   it("skips a hidden control when cycling", () => {
     render({ open: true, hideMiddle: true });
     tab(true);

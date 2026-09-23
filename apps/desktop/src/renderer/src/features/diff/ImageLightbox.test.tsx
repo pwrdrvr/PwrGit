@@ -105,6 +105,13 @@ describe("ImageLightbox as a modal", () => {
     expect(document.activeElement).toBe(list.at(-1));
   });
 
+  it("keeps Shift+Tab inside when the frame holds focus, as it does on open", async () => {
+    await open();
+    expect(document.activeElement).toBe(dialog().querySelector(".image-lightbox__frame"));
+    press(document.activeElement!, "Tab", true);
+    expect(name(document.activeElement)).toBe("Zoom in");
+  });
+
   it("pulls focus that reached the diff behind it back inside", async () => {
     await open();
     opener.focus();

@@ -249,6 +249,15 @@ export function useFocusTrap({
         edge.focus();
         return;
       }
+      // The container itself: ImageLightbox focuses its frame on open, and a
+      // click on any dialog's blank area focuses its tabIndex=-1 container.
+      // It is inside, but on no edge, so Shift+Tab used to walk backwards out
+      // of the dialog.
+      if (active === root) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
       if (e.shiftKey && active === first) {
         e.preventDefault();
         last.focus();
