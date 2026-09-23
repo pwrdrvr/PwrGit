@@ -1437,6 +1437,7 @@ textarea,
    weight as the rows, so one indicator vocabulary. */
 .sort-cycle:focus-visible,
 .wt-section__toggle:focus-visible,
+.wt-refresh:focus-visible,
 .wt-selbar__btn:focus-visible,
 .ref-mini-action:focus-visible,
 .ref-fetch-all:focus-visible,
@@ -1577,10 +1578,6 @@ textarea,
 .wt-refresh:hover:not([aria-disabled="true"]) {
   color: var(--text-primary);
   background: var(--bg-hover-strong);
-}
-.wt-refresh:focus-visible {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 .wt-refresh[aria-disabled="true"] {
   cursor: default;
@@ -4274,6 +4271,13 @@ button.agent-menu__item:hover {
 }
 .agent-link:hover {
   text-decoration: underline;
+}
+/* It had no focus rule and fell back to Chromium's ring. Borderless, so a
+   radius; 1px off keeps the ring inside the commit box, whose overflow clips. */
+.agent-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
 }
 .agent-link:disabled {
   opacity: 0.5;
@@ -7716,6 +7720,13 @@ button.ref-chip:focus-visible {
   background: var(--accent-soft);
   border-color: var(--accent-border);
 }
+/* Neither pill had a focus rule, so both fell back to Chromium's ring. */
+.changes-section__action:focus-visible,
+.changes-wip__discard:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 .file-row {
   display: flex;
   align-items: center;
@@ -7826,9 +7837,12 @@ button.ref-chip:focus-visible {
   cursor: pointer;
   transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
 }
+/* 2px, as `.file-insight__row-action` (sized and coloured after this one)
+   already was; this one drew 1px. */
 .file-action:focus-visible {
-  outline: 1px solid var(--focus-ring);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+  scroll-margin: 4px;
 }
 /* Stage/unstage is the row's primary verb: always present, but at rest it is
    only as loud as the path it belongs to. */
@@ -7970,6 +7984,15 @@ button.ref-chip:focus-visible {
 .commit-message:focus-within,
 .commit-message--agent {
   border-color: var(--accent-border);
+}
+/* That tint was the only focus signal: the same too-faint `--accent-border`
+   `.modal__input` had, and the same paint as an agent-drafted message, so
+   focus and "the agent wrote this" looked alike. The field is borderless, so
+   the box rings, as `.clone-input-wrap` does. Keyed to the field rather than
+   :focus-within, because the draft footer's links sit in the same box. */
+.commit-message:has(.commit-input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 /* A textarea that grows with its message, so a drafted body is readable in
    place; one line tall while it holds a subject or nothing. */
@@ -8142,6 +8165,12 @@ button.ref-chip:focus-visible {
 }
 .submodule-row__summary:hover {
   background: var(--bg-panel-hover);
+}
+/* It fell back to Chromium's ring, which `.submodule-panel`'s overflow cut by
+   1px. Inset, as `.stash-entry__toggle` is: the row runs edge to edge. */
+.submodule-row__summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .submodule-row__path {
   flex: 1;
@@ -8321,6 +8350,10 @@ button.ref-chip:focus-visible {
 .stash-create__option input {
   margin: 0;
   accent-color: var(--accent);
+}
+.stash-create__option input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .stash-list {
   flex: 1;
