@@ -2468,6 +2468,16 @@ textarea,
   color: var(--text-primary);
   font: 500 15px/1 var(--font-sans);
 }
+/* The palette is a combobox: this field keeps focus while the arrow keys move
+   the selection, and Tab cycles between it and a row's actions. Coming back
+   from a row action, nothing said focus had returned here; `outline: none`
+   left only the caret. Borderless, so it rings off its own box with a radius,
+   as `.settings-notes-link` does. */
+.overlay-search input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
 .overlay-results {
   max-height: 52vh;
   overflow-y: auto;
@@ -2937,6 +2947,13 @@ textarea,
 .repo-mark--refresh[aria-disabled="true"] {
   cursor: progress;
   opacity: 0.5;
+}
+/* It had no focus rule. Inset, like `.pin` in the same row: the glyph button
+   has no box of its own, and 3px of padding leaves the ring clear of it. */
+.repo-mark--refresh:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
 }
 
 .repo-mark--fork {
@@ -5664,6 +5681,14 @@ button.agent-menu__item:hover {
   font: 500 20px/1 var(--font-sans);
   cursor: pointer;
 }
+/* The refs browser's controls had no focus rule at all, so each fell back to
+   Chromium's ring. Bordered ones ring 1px out, as the shared block above
+   `.pin:focus-visible` does; the ones in `.refs-browser__body`, which scrolls,
+   add the scroll margin `.modal__cancel:focus-visible` explains. */
+.refs-icon-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .refs-browser__toolbar {
   display: flex;
   align-items: center;
@@ -5695,6 +5720,13 @@ button.agent-menu__item:hover {
   background: var(--bg-row-active);
   color: var(--accent-bright);
 }
+/* Inset: the tabs are segments of a bordered track 3px apart, as
+   `.settings-segmented__button` is, and a ring outside one would run into the
+   next. */
+.refs-tabs button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 .refs-tabs span {
   margin-left: 4px;
   color: var(--text-subtle);
@@ -5721,6 +5753,13 @@ button.agent-menu__item:hover {
   background: transparent;
   color: var(--text-primary);
   font: 500 11.5px/1 var(--font-sans);
+}
+/* The field is borderless inside the bordered `.refs-search`, as the Clone
+   search is inside `.clone-input-wrap`, so the wrapper carries the ring. It
+   had no focus style at all; the caret was the only sign. */
+.refs-search:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .refs-action,
 .refs-row-action {
@@ -5782,6 +5821,12 @@ button.agent-menu__item:hover {
 .refs-row-action[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.refs-action:focus-visible,
+.refs-row-action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 .refs-browser__body {
   flex: 1;
@@ -6057,6 +6102,11 @@ button.agent-menu__item:hover {
   font: 600 9.5px/1 var(--font-sans);
   cursor: pointer;
 }
+.refs-remote-card__actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 .refs-remote-card__actions button.is-danger {
   color: var(--danger-text);
 }
@@ -6151,6 +6201,13 @@ button.agent-menu__item:hover {
 }
 .refs-empty-link:hover {
   text-decoration: underline;
+}
+/* Borderless link: 2px off the text with a radius, as `.settings-notes-link`. */
+.refs-empty-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  scroll-margin: 5px;
 }
 
 /* Pull / merge requests tab. The actions column matches the branch table's
@@ -6876,6 +6933,12 @@ button.agent-menu__item:hover {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+}
+/* The worktree header's buttons had no focus rule, so Pull, Push and the rest
+   fell back to Chromium's ring. */
+.wt-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 /* Busy is spelled aria-disabled, not `disabled`: Chromium blurs an element the
    moment it becomes disabled, so pressing Fetch from the keyboard threw focus
@@ -8044,6 +8107,12 @@ button.ref-chip:focus-visible {
   letter-spacing: 0;
   text-transform: none;
 }
+/* It had no focus rule. Its border is transparent until hover, so the box is
+   still the one the hover paints: 1px out, as the other bordered buttons. */
+.submodule-panel__refresh:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .submodule-panel__refresh:hover:not(:disabled) {
   border-color: var(--accent-border);
   background: var(--accent-soft);
@@ -8748,10 +8817,14 @@ body.is-col-resizing {
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
+/* Was a 1px `--accent-border` outline, the same too-faint tint `.modal__input`
+   had. A copyable is borderless text, so it takes the link placement: 2px off
+   the text, rounded, with scroll-margin for the refs browser's lists. */
 .copyable:focus-visible {
-  outline: 1px solid var(--accent-border);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
+  scroll-margin: 5px;
 }
 
 /* ---- Kebab "⋯" actions menu ---- */
@@ -11462,6 +11535,12 @@ body.is-col-resizing {
   color: var(--text-secondary);
   font: 600 10px/1 var(--font-sans);
   cursor: pointer;
+}
+/* The lightbox's other controls ring already; its one checkbox fell back to
+   Chromium's ring. */
+.image-lightbox__toggle input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .image-lightbox__stage {
   position: relative;
@@ -14329,7 +14408,12 @@ button.agent-auth-node:focus-visible,
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-bright);
-  outline: none;
+}
+/* Focus used to be `outline: none` plus the hover paint above, so a focused
+   button looked exactly like a hovered one; see `.pr-chip:focus-visible`. */
+.remote-activity__button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* Stop is the action someone comes to this card for after five silent
