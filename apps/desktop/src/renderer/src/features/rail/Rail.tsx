@@ -8,6 +8,7 @@ import {
 import type {
   OperationState,
   RebaseOperation,
+  StashEntry,
   Worktree,
   WorktreeState
 } from "@pwrgit/shared";
@@ -24,8 +25,18 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { StashesTab } from "./StashesTab";
 
-type RailTab = "changes" | "rebase";
+type RailTab = "changes" | "stashes" | "rebase";
+
+/** The last read of `refs/stash`, kept with the repository it came from. */
+type StashStack = {
+  repoId: string | null;
+  entries: StashEntry[];
+  error: string | null;
+};
+
+const NO_STASHES: StashEntry[] = [];
 
 export type CommitFocus = { hash: string; subject: string };
 
@@ -39,6 +50,7 @@ export function Rail({
   onCloseCommit,
   onOpenCommitFile,
   onOpenFullCommitDiff,
+  onOpenStashPatch,
   onClearSelection,
   onCollapse,
   onOpenDiff,
@@ -56,6 +68,7 @@ export function Rail({
   onCloseCommit: () => void;
   onOpenCommitFile: (path: string) => void;
   onOpenFullCommitDiff: () => void;
+  onOpenStashPatch: (hash: string, subject: string) => void;
   onClearSelection: () => void;
   onCollapse: () => void;
   onOpenDiff: (path: string, staged: boolean) => void;
@@ -72,8 +85,22 @@ export function Rail({
 }) {
   const tip = useViewportTooltip();
   const [tab, setTab] = useState<RailTab>("changes");
+  const [stashStack, setStashStack] = useState<StashStack | null>(null);
+  const [stashesLoading, setStashesLoading] = useState(false);
+  const stashLoadGeneration = useRef(0);
+  const selectedWorktreeId = useRef(worktree?.id ?? null);
+  selectedWorktreeId.current = worktree?.id ?? null;
   const dirty = state?.dirty ?? worktree?.dirty ?? 0;
   const worktreeId = worktree?.id ?? null;
+  const repoId = worktree?.repoId ?? null;
+  // The stack is the repository's, so another worktree of the same repository
+  // keeps showing it while it reloads. A worktree of a different repository
+  // shows none of it, not even for the length of the reload, and not at all
+  // when that repository's stack cannot be read.
+  const shownStack =
+    stashStack !== null && stashStack.repoId === repoId ? stashStack
+      : null;
+  const stashes = shownStack?.entries ?? NO_STASHES;
 
   // Operation state is advisory: the banner appears when it arrives and the
   // rest of the rail never waits on it. Blocking the file list on an extra
@@ -114,6 +141,37 @@ export function Rail({
     };
   }, [refreshOperation, worktreeId]);
 
+  const reloadStashes = useCallback(async (): Promise<void> => {
+    if (selectedWorktreeId.current !== worktreeId) return;
+    const generation = ++stashLoadGeneration.current;
+    if (worktreeId === null) {
+      setStashesLoading(false);
+      return;
+    }
+    setStashesLoading(true);
+    const result = await dispatch("stash:list", { worktreeId });
+    if (
+      generation !== stashLoadGeneration.current ||
+      selectedWorktreeId.current !== worktreeId
+    ) {
+      return;
+    }
+    setStashStack(
+      result.ok
+        ? { repoId, entries: result.value, error: null }
+        : { repoId, entries: [], error: result.error.message }
+    );
+    setStashesLoading(false);
+  }, [worktreeId, repoId]);
+
+  useEffect(() => {
+    void reloadStashes();
+    if (repoId === null) return;
+    return subscribe("stash:changed", (event) => {
+      if (event.repoId === repoId) void reloadStashes();
+    });
+  }, [reloadStashes, repoId]);
+
   useEffect(() => {
     if (rebaseAction !== null) setTab("rebase");
   }, [rebaseAction]);
@@ -148,23 +206,35 @@ export function Rail({
           className={`rail-tab${tab === "changes" ? " is-active" : ""}`}
           onClick={() => setTab("changes")}
         >
-          {commitFocus !== null ? "Commit" : "Changes"}
+          <span className="rail-tab__label">
+            {commitFocus !== null ? "Commit" : "Changes"}
+          </span>
           {commitFocus === null && dirty > 0 && (
             <span className="rail-tab__badge">{dirty}</span>
+          )}
+        </button>
+        <button
+          className={`rail-tab${tab === "stashes" ? " is-active" : ""}`}
+          onClick={() => setTab("stashes")}
+        >
+          <span className="rail-tab__label">Stashes</span>
+          {stashes.length > 0 && (
+            <span className="rail-tab__badge rail-tab__badge--count">
+              {stashes.length}
+            </span>
           )}
         </button>
         <button
           className={`rail-tab${tab === "rebase" ? " is-active" : ""}`}
           onClick={() => setTab("rebase")}
         >
-          Rebase
+          <span className="rail-tab__label">Rebase</span>
           {selectedHashes.length > 0 && (
             <span className="rail-tab__badge">{selectedHashes.length}</span>
           )}
         </button>
-        <span style={{ flex: 1 }} />
         <button
-          className="icon-btn"
+          className="icon-btn rail__collapse"
           onClick={onCollapse}
           {...hoverTooltip(tip, "Collapse panel")}
           aria-label="Collapse panel"
@@ -202,6 +272,15 @@ export function Rail({
             commitNudge={commitNudge}
           />
         )
+      ) : tab === "stashes" ? (
+        <StashesTab
+          worktree={worktree}
+          entries={stashes}
+          loading={stashesLoading}
+          error={shownStack?.error ?? null}
+          reload={reloadStashes}
+          onOpenPatch={onOpenStashPatch}
+        />
       ) : (
         <RebaseTab
           worktreeId={worktree?.id ?? null}

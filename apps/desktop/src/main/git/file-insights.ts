@@ -62,7 +62,11 @@ function lineCursorValue(cursor: string | undefined): Result<number> {
 }
 
 function historyContextKey(context: FileInsightContext): string {
-  return context.kind === "workingTree" ? "workingTree" : context.hash;
+  return context.kind === "workingTree"
+    ? "workingTree"
+    : context.kind === "stash"
+      ? `stash:${context.hash}`
+      : context.hash;
 }
 
 function encodeHistoryCursor(cursor: HistoryCursor): string {
@@ -119,9 +123,12 @@ function safeWorktreeFile(cwd: string, gitPath: string): Result<string> {
 
 function checkedContext(context: FileInsightContext): Result<FileInsightContext> {
   if (context.kind === "workingTree") return ok(context);
+  if (context.kind !== "commit" && context.kind !== "stash") {
+    return validation("invalid_context", "The file-insight context is invalid.");
+  }
   const hash = context.hash.trim();
   return FULL_HASH.test(hash)
-    ? ok({ kind: "commit", hash: hash.toLowerCase() })
+    ? ok({ kind: context.kind, hash: hash.toLowerCase() })
     : validation("invalid_revision", "A full commit hash is required.");
 }
 
@@ -313,14 +320,23 @@ export async function readFileHistory(
     const lineagePath = safeWorktreeFile(cwd, decoded.value.lineagePath);
     if (!lineagePath.ok) return lineagePath;
     cursor = decoded.value;
-  } else if (context.value.kind === "commit") {
+  } else if (context.value.kind !== "workingTree") {
+    // A stash's history is the history of the commit it was made on. Walking
+    // from the stash itself reaches its index commit, which Git lists as
+    // "index on <branch>: …" whenever the stash held staged changes.
+    let revision = context.value.hash;
+    if (context.value.kind === "stash") {
+      const stash = await readStashCommits(git, cwd, revision, signal);
+      if (!stash.ok) return stash;
+      revision = stash.value.base;
+    }
     cursor = {
       version: 1,
       offset: 0,
-      revision: context.value.hash,
+      revision,
       lineagePath: request.path,
       selectedPath: request.path,
-      context: context.value.hash
+      context: historyContextKey(context.value)
     };
   } else {
     const headPath = await resolveWorkingHeadPath(
@@ -487,6 +503,8 @@ type ContentResolution = {
   contentsPath?: string;
   synthetic: boolean;
   notice?: string;
+  /** A stash's own commits: lines blamed to them are stashed work. */
+  stashCommits?: ReadonlySet<string>;
 };
 
 async function gitObjectContent(
@@ -534,6 +552,98 @@ async function gitObjectContent(
   });
 }
 
+/**
+ * A stash is a merge commit W. Its first parent is the commit it was made on;
+ * the second holds the index as it stood, and the third, present only with
+ * --include-untracked, is a parentless commit holding the untracked files.
+ * Only the first parent is history anybody made.
+ */
+type StashCommits = {
+  base: string;
+  /** W and its bookkeeping parents. */
+  internal: ReadonlySet<string>;
+  untracked: string | null;
+};
+
+async function readStashCommits(
+  git: GitExec,
+  cwd: string,
+  hash: string,
+  signal?: AbortSignal
+): Promise<Result<StashCommits>> {
+  const args = ["rev-list", "--parents", "--max-count=1", hash];
+  const raw = await git(args, cwd, gitOptions(signal));
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  const [self, base, index, untracked, ...extra] = checked.value.stdout
+    .trim()
+    .split(" ");
+  if (
+    self !== hash ||
+    base === undefined ||
+    index === undefined ||
+    extra.length > 0 ||
+    ![base, index, untracked ?? base].every((parent) => FULL_HASH.test(parent))
+  ) {
+    return validation("not_a_stash", "This commit is not a stash.");
+  }
+  return ok({
+    base,
+    internal: new Set([hash, index, ...(untracked === undefined ? [] : [untracked])]),
+    untracked: untracked ?? null
+  });
+}
+
+async function resolveStashContent(
+  git: GitExec,
+  cwd: string,
+  path: string,
+  context: FileInsightContext & { kind: "stash" },
+  signal?: AbortSignal
+): Promise<Result<ContentResolution | null>> {
+  const stash = await readStashCommits(git, cwd, context.hash, signal);
+  if (!stash.ok) return stash;
+  const stashed = await gitObjectContent(git, cwd, context.hash, path, signal);
+  if (!stashed.ok) return stashed;
+  if (stashed.value !== null) {
+    return ok({
+      ...stashed.value,
+      effectiveContext: context,
+      stashCommits: stash.value.internal
+    });
+  }
+  // An untracked file lives only in the third parent's tree and has no
+  // history to blame: every line of it is stashed work.
+  if (stash.value.untracked !== null) {
+    const untracked = await gitObjectContent(
+      git,
+      cwd,
+      stash.value.untracked,
+      path,
+      signal
+    );
+    if (!untracked.ok) return untracked;
+    if (untracked.value !== null) {
+      return ok({
+        effectiveContext: context,
+        bytes: untracked.value.bytes,
+        content: untracked.value.content,
+        blamePath: path,
+        synthetic: true,
+        notice: "This file was untracked when stashed, so it has no commit history."
+      });
+    }
+  }
+  const base = await gitObjectContent(git, cwd, stash.value.base, path, signal);
+  if (!base.ok || base.value === null) return base;
+  return ok({
+    ...base.value,
+    notice:
+      "This file is deleted in this stash. Showing it as of the commit the stash was made on."
+  });
+}
+
 async function resolveBlameContent(
   git: GitExec,
   cwd: string,
@@ -541,6 +651,9 @@ async function resolveBlameContent(
   context: FileInsightContext,
   signal?: AbortSignal
 ): Promise<Result<ContentResolution | null>> {
+  if (context.kind === "stash") {
+    return resolveStashContent(git, cwd, path, context, signal);
+  }
   if (context.kind === "commit") {
     const atCommit = await gitObjectContent(git, cwd, context.hash, path, signal);
     if (!atCommit.ok || atCommit.value !== null) return atCommit;
@@ -657,6 +770,27 @@ function unavailablePage(
     bytes: resolution?.bytes ?? null,
     unavailableReason: reason,
     ...(resolution?.notice === undefined ? {} : { notice: resolution.notice })
+  };
+}
+
+const STASHED_SUBJECT = "Stashed changes";
+
+const wipSubject = (context: FileInsightContext): string =>
+  context.kind === "stash" ? STASHED_SUBJECT : "Working-tree changes";
+
+/** Lines Git blames on a stash's own commits are the stashed work itself.
+ *  Their hashes name bookkeeping commits no lineage view can show, so they
+ *  read the way working-tree changes do. */
+function asStashedWork(line: BlameLine): BlameLine {
+  return {
+    ...line,
+    hash: null,
+    shortHash: null,
+    authorName: "Uncommitted",
+    authorEmail: "",
+    committedAt: null,
+    subject: STASHED_SUBJECT,
+    uncommitted: true
   };
 }
 
@@ -816,7 +950,7 @@ export async function readFileBlame(
           authorName: "Uncommitted",
           authorEmail: "",
           committedAt: null,
-          subject: "Working-tree changes",
+          subject: wipSubject(context.value),
           sourcePath: request.path,
           originalStartLine: startLine,
           startLine,
@@ -864,7 +998,12 @@ export async function readFileBlame(
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, args);
   if (!checked.ok) return checked;
-  const parsed = parseBlameLines(checked.value.stdout);
+  const stashed = resolved.stashCommits;
+  const parsed = parseBlameLines(checked.value.stdout).map((line) =>
+    stashed !== undefined && line.hash !== null && stashed.has(line.hash)
+      ? asStashedWork(line)
+      : line
+  );
   return ok({
     path: request.path,
     effectiveContext: resolved.effectiveContext,

@@ -63,13 +63,18 @@ type CommitFilePreview = {
   path: string;
 };
 
+export const insightContextKey = (context: FileInsightContext): string =>
+  context.kind === "workingTree" ? "working" : `${context.kind}:${context.hash}`;
+
 const scopeKey = (scope: InsightScope): string =>
-  `${scope.context.kind === "commit" ? scope.context.hash : "working"}:${scope.path}`;
+  `${insightContextKey(scope.context)}:${scope.path}`;
 
 const contextLabel = (context: FileInsightContext): string =>
   context.kind === "workingTree"
     ? "Working tree · through HEAD"
-    : `Commit ${context.hash.slice(0, 7)}`;
+    : context.kind === "stash"
+      ? `Stash ${context.hash.slice(0, 7)}`
+      : `Commit ${context.hash.slice(0, 7)}`;
 
 let operationSequence = 0;
 const nextOperationId = (kind: FileInsightTab): string =>

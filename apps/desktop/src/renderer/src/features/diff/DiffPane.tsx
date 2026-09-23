@@ -21,7 +21,8 @@ import {
 export type DiffTarget =
   | { kind: "file"; path: string; staged: boolean }
   | { kind: "commit"; hash: string; subject: string }
-  | { kind: "commitFile"; hash: string; path: string; subject: string };
+  | { kind: "commitFile"; hash: string; path: string; subject: string }
+  | { kind: "stash"; hash: string; subject: string };
 
 /** Checked line IDs, bound to the fingerprint they were chosen against.
  *  Line IDs are positional (`h:<i>:<oldStart>:<newStart>:a|d:<n>`), so the
@@ -108,6 +109,8 @@ export function DiffPane({
       ? `f:${target.path}:${target.staged}`
       : target.kind === "commitFile"
         ? `cf:${target.hash}:${target.path}`
+        : target.kind === "stash"
+          ? `s:${target.hash}`
         : `c:${target.hash}`;
 
   // A refresh replaces the diff in place. Only pointing the pane at a new
@@ -147,7 +150,12 @@ export function DiffPane({
               hash: target.hash,
               path: target.path
             })
-          : dispatch("diff:commit", { worktreeId, hash: target.hash });
+          : target.kind === "stash"
+            ? dispatch("diff:stash", {
+                worktreeId,
+                stashHash: target.hash
+              })
+            : dispatch("diff:commit", { worktreeId, hash: target.hash });
     void req.then((r) => {
       if (!active) return;
       if (!r.ok) {
@@ -254,19 +262,21 @@ export function DiffPane({
 
   // Binary image files carry no patch text, so the viewer needs to know which
   // two revisions this diff compares in order to fetch the bytes itself.
-  const images: ImageDiffRevisions = useMemo(
+  const images: ImageDiffRevisions | undefined = useMemo(
     () =>
-      target.kind === "file"
-        ? {
-            worktreeId,
-            before: target.staged ? { kind: "head" } : { kind: "index" },
-            after: target.staged ? { kind: "index" } : { kind: "worktree" }
-          }
-        : {
-            worktreeId,
-            before: { kind: "commitParent", hash: target.hash },
-            after: { kind: "commit", hash: target.hash }
-          },
+      target.kind === "stash"
+        ? undefined
+        : target.kind === "file"
+          ? {
+              worktreeId,
+              before: target.staged ? { kind: "head" } : { kind: "index" },
+              after: target.staged ? { kind: "index" } : { kind: "worktree" }
+            }
+          : {
+              worktreeId,
+              before: { kind: "commitParent", hash: target.hash },
+              after: { kind: "commit", hash: target.hash }
+            },
     // Same target identity the patch fetch keys on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [worktreeId, key]
@@ -277,7 +287,9 @@ export function DiffPane({
   const insightContext: FileInsightContext =
     target.kind === "file"
       ? { kind: "workingTree" }
-      : { kind: "commit", hash: target.hash };
+      : target.kind === "stash"
+        ? { kind: "stash", hash: target.hash }
+        : { kind: "commit", hash: target.hash };
   // A STAGED diff numbers its new side in INDEX coordinates, and blame reads
   // the working tree — with unstaged edits above the clicked line those
   // disagree, and the aim would confidently mark the wrong line. No aim is
@@ -298,7 +310,9 @@ export function DiffPane({
         : "index → working tree"
       : target.kind === "commitFile"
         ? `in ${target.hash.slice(0, 7)}`
-        : `commit ${target.hash.slice(0, 7)}`;
+        : target.kind === "stash"
+          ? `repository stash ${target.hash.slice(0, 7)}`
+          : `commit ${target.hash.slice(0, 7)}`;
   const subject = target.kind === "file" ? null : target.subject;
   const body = message !== null && message.hash === messageHash ? message.body : "";
   // History and blame are per-file, so a whole-commit diff offers neither in
@@ -701,7 +715,7 @@ export function DiffPane({
         ) : (
           <DiffViewer
             patch={patch}
-            images={images}
+            {...(images === undefined ? {} : { images })}
             {...(selectionAvailable && selectionDiff !== null
               ? {
                   selection: {
@@ -737,7 +751,9 @@ export function DiffPane({
                 label:
                   target.kind === "file"
                     ? "View file"
-                    : "View file at this commit",
+                    : target.kind === "stash"
+                      ? "View file in this stash"
+                      : "View file at this commit",
                 onSelect: () =>
                   onOpenFileInsight(path, insightContext, "contents")
               },
@@ -751,8 +767,10 @@ export function DiffPane({
             emptyLabel={
               target.kind === "commit"
                 ? "This commit has no textual changes."
-                : settled && counterpart
-                  ? `All of this file’s changes are ${otherSideName}.`
+                : target.kind === "stash"
+                  ? "This stash has no textual changes."
+                  : settled && counterpart
+                    ? `All of this file’s changes are ${otherSideName}.`
                   : "No changes in this file."
             }
           />

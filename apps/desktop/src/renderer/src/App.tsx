@@ -16,6 +16,7 @@ import { useAgentOffered } from "./features/agent/agent-store";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import {
   FileInsightsPane,
+  insightContextKey,
   type FileInsightTab
 } from "./features/diff/FileInsightsPane";
 import { LineageGraph } from "./features/graph/LineageGraph";
@@ -838,11 +839,9 @@ export function App() {
               )}
               {fileInsightTarget !== null && (
                 <FileInsightsPane
-                  key={`${fileInsightTarget.path}:${
-                    fileInsightTarget.context.kind === "commit"
-                      ? fileInsightTarget.context.hash
-                      : "working"
-                  }:${fileInsightTarget.tab}:${fileInsightTarget.line ?? ""}`}
+                  key={`${fileInsightTarget.path}:${insightContextKey(
+                    fileInsightTarget.context
+                  )}:${fileInsightTarget.tab}:${fileInsightTarget.line ?? ""}`}
                   worktreeId={selectedWorktree.id}
                   path={fileInsightTarget.path}
                   context={fileInsightTarget.context}
@@ -914,6 +913,12 @@ export function App() {
                   subject: commitFocus.subject
                 });
               }
+            }}
+            onOpenStashPatch={(hash, subject) => {
+              // File details would otherwise keep the diff pane hidden, and
+              // View patch would do nothing visible.
+              setFileInsightTarget(null);
+              setDiffTarget({ kind: "stash", hash, subject });
             }}
             onClearSelection={clearSelection}
             onCollapse={() => setRailCollapsed(true)}
