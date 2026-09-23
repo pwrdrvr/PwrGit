@@ -8291,11 +8291,16 @@ button.ref-chip:focus-visible {
   display: flex;
   gap: 8px;
 }
-.stash-create__row .commit-input {
+.stash-create__row .commit-message {
   flex: 1;
-  width: auto;
   min-width: 0;
   margin: 0;
+}
+/* 30px plus the box's border is the button's 32px. */
+.stash-create__row .commit-input {
+  height: 30px;
+  min-height: 0;
+  padding-block: 0;
 }
 .stash-create__row .commit-btn {
   flex: 0 0 auto;
