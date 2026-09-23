@@ -40,8 +40,18 @@ function setup() {
   const dryRun = vi.fn(
     async (
       ..._args: Parameters<RebaseHandlerDependencies["dryRun"]>
-    ): Promise<Result<{ sourceHead: string; sourceRef: string | null }>> =>
-      ok({ sourceHead: "head-at-check", sourceRef: "refs/heads/feature" })
+    ): ReturnType<RebaseHandlerDependencies["dryRun"]> =>
+      ok({
+        sourceHead: "head-at-check",
+        sourceRef: "refs/heads/feature",
+        proof: {
+          commitCount: 2,
+          resultCount: 1,
+          steps: 2,
+          tree: "4c1f9e0".padEnd(40, "0"),
+          durationMs: 12
+        }
+      })
   );
   const refresher = {
     refreshWorktree: vi.fn()
@@ -164,5 +174,83 @@ describe("rebase handler approval gate", () => {
     });
     expect(applied.ok).toBe(false);
     expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("carries a conflict's structured detail into the snag", async () => {
+    const { bus, dryRun } = setup();
+    const detail = {
+      kind: "conflict" as const,
+      step: 2,
+      total: 2,
+      hash: "bbbbbbbb",
+      subject: "top",
+      files: ["a.ts"]
+    };
+    dryRun.mockResolvedValueOnce(
+      err({ kind: "rebase", code: "conflict", message: "Would conflict.", snag: detail })
+    );
+    const checked = await bus.dispatch("rebase:check", {
+      worktreeId: "wt-1",
+      commits,
+      op: "reorder"
+    });
+    expect(checked).toEqual(
+      ok({ status: "snag", code: "conflict", message: "Would conflict.", detail })
+    );
+  });
+
+  it("binds the approval to the program's shape, not its message", async () => {
+    const { bus, apply, dryRun } = setup();
+    const program = (message: string) => ({
+      commits: [{ members: ["aaaaaaaa", "bbbbbbbb"], message }]
+    });
+    const checked = await bus.dispatch("rebase:check", {
+      worktreeId: "wt-1",
+      commits,
+      op: "squash",
+      program: program("first draft")
+    });
+    expect(checked.ok && checked.value.status === "clean" && checked.value.proof.steps).toBe(2);
+    expect(dryRun.mock.calls[0]?.[5]).toEqual({ program: program("first draft") });
+
+    const applied = await bus.dispatch("rebase:apply", {
+      worktreeId: "wt-1",
+      commits,
+      op: "squash",
+      approvalToken: "approval-1",
+      program: program("edited after the check")
+    });
+    expect(applied.ok).toBe(true);
+    expect(apply.mock.calls[0]?.[6]).toEqual(program("edited after the check"));
+  });
+
+  it("refuses Apply when a Tidy program's shape changed after the check", async () => {
+    const { bus, apply } = setup();
+    const folded = {
+      commits: [{ members: ["aaaaaaaa", "bbbbbbbb"], message: "one" }]
+    };
+    const split = {
+      commits: [
+        { members: ["aaaaaaaa"], message: "one" },
+        { members: ["bbbbbbbb"], message: null }
+      ]
+    };
+    await bus.dispatch("rebase:check", { worktreeId: "wt-1", commits, op: "tidy", program: folded });
+    const applied = await bus.dispatch("rebase:apply", {
+      worktreeId: "wt-1",
+      commits,
+      op: "tidy",
+      approvalToken: "approval-1",
+      program: split
+    });
+    expect(!applied.ok && applied.error.code).toBe("dry_run_mismatch");
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("snags a Tidy check that brings no program, before any Git runs", async () => {
+    const { bus, dryRun } = setup();
+    const checked = await bus.dispatch("rebase:check", { worktreeId: "wt-1", commits, op: "tidy" });
+    expect(checked.ok && checked.value.status).toBe("snag");
+    expect(dryRun).not.toHaveBeenCalled();
   });
 });

@@ -14,7 +14,10 @@ async function openMenuItem(
   opener?: Page
 ): Promise<Page> {
   const windowPromise = app.waitForEvent("window");
-  await app.evaluate(({ Menu, BrowserWindow }, request) => {
+  await app.evaluate(async ({ Menu, BrowserWindow }, request) => {
+    // Debugger evaluation can interrupt a synchronous SQLite query. Run the
+    // menu callback on the event loop, after that native call has returned.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const openerWindow = request.openerUrl === undefined
       ? undefined
       : BrowserWindow.getAllWindows().find(

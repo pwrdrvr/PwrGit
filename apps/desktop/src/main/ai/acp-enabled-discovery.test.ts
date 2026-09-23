@@ -20,12 +20,12 @@ import {
 function settingsWith(input: {
   enabled?: BuiltInAcpAgentId[];
   agents?: Partial<Record<BuiltInAcpAgentId, AcpAgentPreference>>;
-  provider?: AiProviderSettings["jobs"]["rebaseReview"]["provider"];
+  provider?: AiProviderSettings["jobs"]["historyEditing"]["provider"];
 }): AiProviderSettings {
   const settings = structuredClone(DEFAULT_AI_PROVIDER_SETTINGS);
   if (input.enabled !== undefined) settings.acp.enabledAgentIds = input.enabled;
   if (input.agents !== undefined) settings.acp.agents = input.agents;
-  if (input.provider !== undefined) settings.jobs.rebaseReview.provider = input.provider;
+  if (input.provider !== undefined) settings.jobs.historyEditing.provider = input.provider;
   return settings;
 }
 
@@ -158,10 +158,10 @@ describe("acpDiscoveryOptionsForEnabledAgent", () => {
 });
 
 describe("enabledAcpAgentIdsInUse", () => {
-  const rebaseReview = AI_JOBS.rebaseReview;
-  const original = rebaseReview.acp;
+  const historyEditing = AI_JOBS.historyEditing;
+  const original = historyEditing.acp;
   afterEach(() => {
-    rebaseReview.acp = original;
+    historyEditing.acp = original;
   });
 
   it("is empty while every job runs on Codex", () => {
@@ -169,7 +169,7 @@ describe("enabledAcpAgentIdsInUse", () => {
   });
 
   it("does not count an agent routed to a job that refuses ACP", () => {
-    // Rebase review is Codex-only: its row says Codex, so probing Grok for it
+    // History editing is Codex-only: its row says Codex, so probing Grok for it
     // would spawn a CLI nothing uses.
     expect(
       enabledAcpAgentIdsInUse(settingsWith({ enabled: ["grok"], provider: "grok" }))
@@ -179,7 +179,7 @@ describe("enabledAcpAgentIdsInUse", () => {
   it("counts an enabled agent routed to an ACP-capable job, and never a disabled one", () => {
     // No shipped job accepts ACP yet; open the only one to stand in for the
     // next job so the ACP half of the rule is exercised.
-    rebaseReview.acp = true;
+    historyEditing.acp = true;
     expect(
       enabledAcpAgentIdsInUse(settingsWith({ enabled: ["grok"], provider: "grok" }))
     ).toEqual(["grok"]);

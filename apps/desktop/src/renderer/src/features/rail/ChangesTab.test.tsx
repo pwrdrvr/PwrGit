@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: mocks.dispatch,
-  subscribe: mocks.subscribe
+  subscribe: mocks.subscribe,
+  // No profile: the agent store never asks, so no agent footer appears.
+  windowProfileId: () => null
 }));
 vi.mock("../shell/dialogs", () => ({ confirmDialog: mocks.confirmDialog }));
 vi.mock("../../lib/toast", () => ({

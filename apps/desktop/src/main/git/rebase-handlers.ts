@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   err,
   ok,
+  type HistoryEditProgram,
   type RebaseCommitRef,
   type RebaseOperation
 } from "@pwrgit/shared";
@@ -14,6 +15,8 @@ import {
   applyRebase,
   dryRunRebase,
   planRebase,
+  resolveProgram,
+  sameProgramShape,
   validateSelection
 } from "./rebase-assistant";
 import type { WorktreeRefresher } from "./worktree-handlers";
@@ -32,6 +35,8 @@ type Approval = {
   sourceRef: string | null;
   commits: RebaseCommitRef[];
   op: RebaseOperation;
+  /** The shape the check proved; Apply must bring the same one. */
+  program: HistoryEditProgram;
 };
 
 export type RebaseHandlerDependencies = {
@@ -104,7 +109,7 @@ export function registerRebaseHandlers(
     }
     const gone = missingWorktreeError(db, req.worktreeId);
     if (gone !== null) return err(gone);
-    const plan = planRebase(req.commits, req.op);
+    const plan = planRebase(req.commits, req.op, req.program);
     if (!plan.valid) return ok(plan);
     const valid = await validateSelection(
       dependencies.git,
@@ -130,12 +135,20 @@ export function registerRebaseHandlers(
     const gone = missingWorktreeError(db, req.worktreeId);
     if (gone !== null) return err(gone);
 
-    const plan = planRebase(req.commits, req.op);
+    const plan = planRebase(req.commits, req.op, req.program);
     if (!plan.valid) {
       return ok({
         status: "snag" as const,
         code: "invalid_selection",
         message: plan.reason ?? "This commit selection cannot be rebased."
+      });
+    }
+    const program = resolveProgram(req.commits, req.op, req.program);
+    if (!program.ok) {
+      return ok({
+        status: "snag" as const,
+        code: program.error.code,
+        message: program.error.message
       });
     }
 
@@ -144,13 +157,17 @@ export function registerRebaseHandlers(
       row.path,
       req.commits,
       req.op,
-      identityFor(row)
+      identityFor(row),
+      { program: program.value }
     );
     if (!checked.ok) {
       return ok({
         status: "snag" as const,
         code: checked.error.code,
-        message: checked.error.message
+        message: checked.error.message,
+        ...(checked.error.snag !== undefined
+          ? { detail: checked.error.snag }
+          : {})
       });
     }
 
@@ -161,14 +178,16 @@ export function registerRebaseHandlers(
       sourceHead: checked.value.sourceHead,
       sourceRef: checked.value.sourceRef,
       commits: req.commits.map((commit) => ({ ...commit })),
-      op: req.op
+      op: req.op,
+      program: program.value
     });
     return ok({
       status: "clean" as const,
       approvalToken,
       sourceHead: checked.value.sourceHead,
       message:
-        "Check passed under PwrGit's no-hooks, no-signing policy. Other repo-local Git settings can still affect Apply."
+        "Check passed under PwrGit's no-hooks, no-signing policy. Other repo-local Git settings can still affect Apply.",
+      proof: checked.value.proof
     });
   });
 
@@ -194,11 +213,14 @@ export function registerRebaseHandlers(
         message: "Run the isolated check before applying this rebase."
       });
     }
+    const program = resolveProgram(req.commits, req.op, req.program);
     if (
       approval.worktreeId !== req.worktreeId ||
       approval.path !== row.path ||
       approval.op !== req.op ||
-      !sameCommits(approval.commits, req.commits)
+      !sameCommits(approval.commits, req.commits) ||
+      !program.ok ||
+      !sameProgramShape(approval.program, program.value)
     ) {
       return err({
         kind: "rebase",
@@ -215,7 +237,10 @@ export function registerRebaseHandlers(
         req.commits,
         req.op,
         identityFor(row),
-        { head: approval.sourceHead, headRef: approval.sourceRef }
+        { head: approval.sourceHead, headRef: approval.sourceRef },
+        // Messages come from this request: they are data, and may have been
+        // edited after the check without changing what it proved.
+        program.value
       )
     );
     if (!result.ok) return result;

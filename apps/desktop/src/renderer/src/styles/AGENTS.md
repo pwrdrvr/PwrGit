@@ -170,6 +170,30 @@ notation that renders in the bundled face, not latent bugs. U+21BB was the
 outlier, and it is gone. A NEW character still needs the probe before it ships
 — the answer is per-codepoint, and nothing warns when it falls through.
 
+**Reading the cmap answers the same question without a running app**, and it
+answers the *cause* rather than the symptom: `CSS.getPlatformFontsForNode`
+names the font that drew a glyph, while the face's character map says whether
+it could have. Parse the `.woff` beside the `.woff2` — it is zlib rather than
+brotli, so `zlib.decompress` on each table in the WOFF directory is the whole
+reader — and look the codepoint up in `cmap`. Probe U+21BB alongside whatever
+you are asking about: a reader that finds it present is reading the file wrong.
+
+The agent surfaces were checked that way against both faces
+(`geist-sans-latin-600-normal.woff`, 538 codepoints;
+`geist-mono-latin-400-normal.woff`, 225):
+
+| char | in either bundled face? |
+|---|---|
+| `✦` U+2726 (the agent mark) | **no** — now `lib/AgentGlyph.tsx` |
+| `▴` U+25B4, `▾` U+25BE (a caret) | **no** — now `lib/ChevronGlyph.tsx` |
+| `‥` U+2025 (two-dot leader) | **no** — the ledger's hash range uses `…` |
+| `✓` U+2713, `✕` U+2715 | **no** — still drawn as text elsewhere in the app |
+
+`▾` and the two check marks predate the agent work and are still text in
+TitleBar, ToastHost, DiffViewer and the remote activity card; converting them
+is its own pass. Until it happens, a test that sweeps the renderer for
+out-of-subset characters would fail on them, which is why there isn't one.
+
 **An SVG in a flex button needs `flex: 0 0 auto`, and the label needs its own
 element.** Both fall out of the swap and neither announces itself. A text node
 sitting on the baseline draws the mark ~2px above the label's optical centre,

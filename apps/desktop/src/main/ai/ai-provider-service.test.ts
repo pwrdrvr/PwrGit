@@ -742,7 +742,7 @@ describe("AiProviderService", () => {
         s.enabled = false;
       });
 
-      const result = await service.resolveJob({ profileId: "work", jobId: "rebaseReview" });
+      const result = await service.resolveJob({ profileId: "work", jobId: "historyEditing" });
 
       expect(result).toMatchObject({ ok: false, error: { kind: "agent", code: "disabled" } });
       if (!result.ok) expect(result.error.message).toContain("sidebar");
@@ -751,26 +751,26 @@ describe("AiProviderService", () => {
       expect(deps.checkCodexAuth).not.toHaveBeenCalled();
       // The other profile's switch is its own.
       expect(
-        await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+        await service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
       ).toMatchObject({ ok: true });
     });
 
     it("resolves a Codex job with the profile's model, effort and guidance", async () => {
       const { service, deps, configure } = harness();
       configure("work", (s) => {
-        s.jobs.rebaseReview = { model: "gpt-5-codex", reasoning: "high" };
+        s.jobs.historyEditing = { model: "gpt-5-codex", reasoning: "high" };
         s.guidance = "Explain like I'm the reviewer.";
       });
       deps.codexModelCache.findLabel.mockReturnValue("GPT-5 Codex");
 
-      const result = await service.resolveJob({ profileId: "work", jobId: "rebaseReview" });
+      const result = await service.resolveJob({ profileId: "work", jobId: "historyEditing" });
 
       const environment = fakeEnvironment("work", DEFAULT_AI_PROVIDER_SETTINGS.codex);
       expect(result).toEqual({
         ok: true,
         value: {
           profileId: "work",
-          jobId: "rebaseReview",
+          jobId: "historyEditing",
           guidance: "Explain like I'm the reviewer.",
           model: "gpt-5-codex",
           modelLabel: "GPT-5 Codex",
@@ -791,7 +791,7 @@ describe("AiProviderService", () => {
 
     it("leaves model and effort null, meaning the backend's own default, when unset", async () => {
       const { service, deps } = harness();
-      const result = await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
+      const result = await service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
       expect(result).toMatchObject({ ok: true, value: { model: null, modelLabel: null, effort: null } });
       expect(deps.codexModelCache.findLabel).not.toHaveBeenCalled();
     });
@@ -799,21 +799,21 @@ describe("AiProviderService", () => {
     it("answers unavailable when no usable Codex is found", async () => {
       const { service, deps } = harness();
       deps.discoverCodex.mockResolvedValue(codexSnapshot(false));
-      const result = await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
+      const result = await service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
       expect(result).toMatchObject({ ok: false, error: { kind: "agent", code: "unavailable" } });
-      if (!result.ok) expect(result.error.message).toContain(AI_JOBS.rebaseReview.label);
+      if (!result.ok) expect(result.error.message).toContain(AI_JOBS.historyEditing.label);
     });
 
     it("answers signed_out, naming the account, when Codex says it is signed out", async () => {
       const { service, deps } = harness();
       deps.checkCodexAuth.mockImplementation(async (params) => authAnswer(params, "unauthenticated"));
 
-      expect(await service.resolveJob({ profileId: "work", jobId: "rebaseReview" })).toMatchObject({
+      expect(await service.resolveJob({ profileId: "work", jobId: "historyEditing" })).toMatchObject({
         ok: false,
         error: { code: "signed_out", message: "Codex is not signed in for work." }
       });
       expect(
-        await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+        await service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
       ).toMatchObject({
         ok: false,
         error: { code: "signed_out", message: "Codex is not signed in for System default." }
@@ -825,19 +825,19 @@ describe("AiProviderService", () => {
       deps.checkCodexAuth.mockImplementation(async (params) =>
         authAnswer(params, "unauthenticated", "timed_out")
       );
-      const result = await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
+      const result = await service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
       expect(result.ok).toBe(true);
     });
 
-    it("runs rebase review on Codex even when an enabled agent is its stored provider", async () => {
+    it("runs history editing on Codex even when an enabled agent is its stored provider", async () => {
       const { service, deps, configure } = harness();
       configure("personal", (s) => {
         s.acp.enabledAgentIds = ["grok"];
-        s.jobs.rebaseReview = { provider: "grok", reasoning: "medium" };
+        s.jobs.historyEditing = { provider: "grok", reasoning: "medium" };
       });
       deps.discoverAcp.mockResolvedValue([acpGroup("grok", ["/a/grok"])]);
 
-      const result = await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
+      const result = await service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
 
       expect(result).toMatchObject({
         ok: true,
@@ -848,10 +848,10 @@ describe("AiProviderService", () => {
 
     it("answers from cache, and re-probes on refresh", async () => {
       const { service, deps } = harness();
-      await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
-      await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
+      await service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
+      await service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
       expect(deps.discoverCodex).toHaveBeenCalledTimes(1);
-      await service.resolveJob({ profileId: "personal", jobId: "rebaseReview", refresh: true });
+      await service.resolveJob({ profileId: "personal", jobId: "historyEditing", refresh: true });
       expect(deps.discoverCodex).toHaveBeenCalledTimes(2);
     });
 
@@ -862,7 +862,7 @@ describe("AiProviderService", () => {
       expect(
         await service.resolveJob({
           profileId: "personal",
-          jobId: "rebaseReview",
+          jobId: "historyEditing",
           signal: controller.signal
         })
       ).toMatchObject({ ok: false, error: { code: "cancelled" } });
@@ -876,10 +876,10 @@ describe("AiProviderService", () => {
 
       const cancelled = service.resolveJob({
         profileId: "personal",
-        jobId: "rebaseReview",
+        jobId: "historyEditing",
         signal: controller.signal
       });
-      const patient = service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
+      const patient = service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
       controller.abort();
       expect(await cancelled).toMatchObject({ ok: false, error: { code: "cancelled" } });
 
@@ -891,7 +891,7 @@ describe("AiProviderService", () => {
     it("answers a probe that throws as discovery_failed", async () => {
       const { service, deps } = harness();
       deps.discoverCodex.mockRejectedValue(new Error("spawn codex EACCES"));
-      expect(await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })).toMatchObject(
+      expect(await service.resolveJob({ profileId: "personal", jobId: "historyEditing" })).toMatchObject(
         { ok: false, error: { code: "discovery_failed", message: "spawn codex EACCES" } }
       );
     });
@@ -903,8 +903,8 @@ describe("AiProviderService", () => {
       // profile's job ran as the first.
       const { service, deps } = harness();
 
-      const alpha = await service.resolveJob({ profileId: "alpha", jobId: "rebaseReview" });
-      const beta = await service.resolveJob({ profileId: "beta", jobId: "rebaseReview" });
+      const alpha = await service.resolveJob({ profileId: "alpha", jobId: "historyEditing" });
+      const beta = await service.resolveJob({ profileId: "beta", jobId: "historyEditing" });
 
       expect(deps.discoverCodex).toHaveBeenCalledTimes(1);
       expect(alpha).toMatchObject({ ok: true, value: { backend: { env: { PWRGIT_PROFILE_ID: "alpha" } } } });
@@ -912,15 +912,15 @@ describe("AiProviderService", () => {
     });
 
     describe("on a job that accepts ACP", () => {
-      // No shipped job accepts ACP yet; open rebase review to stand in for
+      // No shipped job accepts ACP yet; open history editing to stand in for
       // the next one so the ACP branch runs against the real rules.
-      const rebaseReview = AI_JOBS.rebaseReview;
-      const original = rebaseReview.acp;
+      const historyEditing = AI_JOBS.historyEditing;
+      const original = historyEditing.acp;
       beforeEach(() => {
-        rebaseReview.acp = true;
+        historyEditing.acp = true;
       });
       afterEach(() => {
-        rebaseReview.acp = original;
+        historyEditing.acp = original;
       });
 
       function withGrok(reasoning?: string) {
@@ -928,7 +928,7 @@ describe("AiProviderService", () => {
         h.configure("personal", (s) => {
           s.acp.enabledAgentIds = ["grok"];
           s.acp.agents.grok = { selectedPath: "/b/grok" };
-          s.jobs.rebaseReview = {
+          s.jobs.historyEditing = {
             provider: "grok",
             model: "grok-4",
             ...(reasoning !== undefined ? { reasoning } : {})
@@ -943,7 +943,7 @@ describe("AiProviderService", () => {
       it("resolves the enabled agent's active install, ready for the kit", async () => {
         const { service, deps } = withGrok("medium");
 
-        const result = await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" });
+        const result = await service.resolveJob({ profileId: "personal", jobId: "historyEditing" });
 
         expect(result.ok).toBe(true);
         if (!result.ok) return;
@@ -970,29 +970,29 @@ describe("AiProviderService", () => {
       it("collapses the effort to the two thinking states an agent honors", async () => {
         const medium = withGrok("medium");
         expect(
-          await medium.service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+          await medium.service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
         ).toMatchObject({ ok: true, value: { effort: "high" } });
 
         const low = withGrok("low");
         expect(
-          await low.service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+          await low.service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
         ).toMatchObject({ ok: true, value: { effort: "low" } });
 
         const unset = withGrok();
         expect(
-          await unset.service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+          await unset.service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
         ).toMatchObject({ ok: true, value: { effort: null } });
       });
 
       it("names the model once the agent's list has been read", async () => {
         const { service } = withGrok();
         expect(
-          await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+          await service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
         ).toMatchObject({ ok: true, value: { model: "grok-4", modelLabel: null } });
 
         await service.acpModels("personal", "grok");
         expect(
-          await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+          await service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
         ).toMatchObject({ ok: true, value: { model: "grok-4", modelLabel: "Grok 4" } });
       });
 
@@ -1000,7 +1000,7 @@ describe("AiProviderService", () => {
         const { service, deps } = withGrok();
         deps.discoverAcp.mockResolvedValue([]);
         expect(
-          await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+          await service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
         ).toMatchObject({
           ok: false,
           error: { code: "unavailable", message: "Grok is enabled but not installed." }
@@ -1013,7 +1013,7 @@ describe("AiProviderService", () => {
           s.acp.enabledAgentIds = [];
         });
         expect(
-          await service.resolveJob({ profileId: "personal", jobId: "rebaseReview" })
+          await service.resolveJob({ profileId: "personal", jobId: "historyEditing" })
         ).toMatchObject({ ok: true, value: { backend: { kind: "codex" } } });
       });
     });

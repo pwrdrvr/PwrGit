@@ -103,6 +103,31 @@ function makeApplyOnlyConflictRepo(): string {
   return dir;
 }
 
+/**
+ * Like makeConflictingRepo, but `merge=union` resolves every conflict by
+ * keeping both sides. Reversing the top two commits then replays "cleanly"
+ * and lands on different content — the case the tree check exists for.
+ */
+function makeUnionRepo(): string {
+  const dir = join(mkdtempSync(join(tmpdir(), "pwrgit-rebase-union-")), "repo");
+  mkdirSync(dir, { recursive: true });
+  git(dir, ["init", "-b", "main"]);
+  git(dir, ["config", "core.autocrlf", "false"]);
+  git(dir, ["config", "user.email", "orig@x.com"]);
+  git(dir, ["config", "user.name", "Orig"]);
+  writeFileSync(join(dir, ".gitattributes"), "shared.txt merge=union\n");
+  for (const [subject, contents] of [
+    ["base", "alpha\n"],
+    ["middle", "bravo\n"],
+    ["top", "charlie\n"]
+  ]) {
+    writeFileSync(join(dir, "shared.txt"), contents);
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", subject]);
+  }
+  return dir;
+}
+
 function topCommits(repo: string, n: number): RebaseCommitRef[] {
   return gitOut(repo, ["log", "-n", String(n), "--format=%H%x1f%s"])
     .split("\n")
@@ -175,6 +200,75 @@ describe("applyRebase (system git)", () => {
     expect(msg).toContain("c1");
     expect(msg).toContain("c3");
     expect(gitOut(repo, ["log", "-1", "--format=%ae"])).toBe("me@acme.io");
+  });
+
+  it("squash writes the message the program carries", async () => {
+    const repo = makeRepo();
+    const commits = topCommits(repo, 3);
+    const r = await applyRebase(
+      systemGit,
+      repo,
+      commits,
+      "squash",
+      { email: "me@acme.io", name: "Me" },
+      undefined,
+      {
+        commits: [
+          {
+            members: [...commits].reverse().map((c) => c.hash),
+            message: "feat: one change\r\n\nWhy it matters.\n\n"
+          }
+        ]
+      }
+    );
+    expect(r.ok).toBe(true);
+    expect(gitOut(repo, ["log", "-1", "--format=%B"])).toBe(
+      "feat: one change\n\nWhy it matters."
+    );
+  });
+
+  it("tidy regroups, keeps a replayed commit's author, and leaves the tree alone", async () => {
+    const repo = makeRepo();
+    const tree = gitOut(repo, ["rev-parse", "HEAD^{tree}"]);
+    const [c3, c2, c1] = topCommits(repo, 3);
+    const r = await applyRebase(
+      systemGit,
+      repo,
+      [c3!, c2!, c1!],
+      "tidy",
+      { email: "me@acme.io", name: "Me" },
+      undefined,
+      {
+        commits: [
+          { members: [c1!.hash, c3!.hash], message: "feat: c1 and c3" },
+          { members: [c2!.hash], message: null }
+        ]
+      }
+    );
+    expect(r.ok).toBe(true);
+    expect(gitOut(repo, ["log", "-3", "--format=%s|%ae"]).split("\n")).toEqual([
+      "c2|orig@x.com",
+      "feat: c1 and c3|me@acme.io",
+      "c0|orig@x.com"
+    ]);
+    expect(gitOut(repo, ["rev-parse", "HEAD^{tree}"])).toBe(tree);
+  });
+
+  it("tidy refuses a program that drops a selected commit, before touching Git", async () => {
+    const repo = makeRepo();
+    const before = sourceSnapshot(repo);
+    const [c3, c2, c1] = topCommits(repo, 3);
+    const r = await applyRebase(
+      systemGit,
+      repo,
+      [c3!, c2!, c1!],
+      "tidy",
+      { email: "me@acme.io" },
+      undefined,
+      { commits: [{ members: [c1!.hash, c2!.hash], message: "lost c3" }] }
+    );
+    expect(!r.ok && r.error.code).toBe("missing_commit");
+    expect(sourceSnapshot(repo)).toEqual(before);
   });
 
   it("reorder reverses the top run without losing commits", async () => {
@@ -326,7 +420,14 @@ describe("dryRunRebase (disposable clone)", () => {
       if (result.ok) {
         expect(result.value).toEqual({
           sourceHead: before.head,
-          sourceRef: "refs/heads/main"
+          sourceRef: "refs/heads/main",
+          proof: {
+            commitCount: 3,
+            resultCount: op === "squash" ? 1 : 3,
+            steps: 3,
+            tree: gitOut(repo, ["rev-parse", "HEAD^{tree}"]),
+            durationMs: expect.any(Number)
+          }
         });
       }
       expect(sourceSnapshot(repo)).toEqual(before);
@@ -352,9 +453,68 @@ describe("dryRunRebase (disposable clone)", () => {
     if (!result.ok) {
       expect(result.error.code).toBe("conflict");
       expect(result.error.message).toContain("worktree was not changed");
+      // What a Tidy revision is told: which step, which commit, which files.
+      expect(result.error.snag).toEqual({
+        kind: "conflict",
+        step: 1,
+        total: 2,
+        hash: topCommits(repo, 1)[0]?.hash,
+        subject: "top",
+        files: ["shared.txt"]
+      });
     }
     expect(sourceSnapshot(repo)).toEqual(before);
     expect(readdirSync(tempParent)).toEqual([]);
+  });
+
+  it("discards a replay that finishes cleanly with different code", async () => {
+    const repo = makeUnionRepo();
+    const before = sourceSnapshot(repo);
+    const tempParent = mkdtempSync(join(tmpdir(), "pwrgit-rebase-test-temp-"));
+
+    const result = await dryRunRebase(
+      systemGit,
+      repo,
+      topCommits(repo, 2),
+      "reorder",
+      { email: "me@acme.io", name: "Me" },
+      { tempParent }
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("tree_changed");
+      expect(result.error.message).toContain("can't be applied");
+      expect(result.error.snag).toEqual({
+        kind: "tree_changed",
+        files: [expect.objectContaining({ path: "shared.txt" })]
+      });
+    }
+    expect(sourceSnapshot(repo)).toEqual(before);
+    expect(readdirSync(tempParent)).toEqual([]);
+  });
+
+  it("proves a Tidy program in the isolated copy", async () => {
+    const repo = makeRepo();
+    const [c3, c2, c1] = topCommits(repo, 3);
+    const result = await dryRunRebase(
+      systemGit,
+      repo,
+      [c3!, c2!, c1!],
+      "tidy",
+      { email: "me@acme.io", name: "Me" },
+      {
+        program: {
+          commits: [
+            { members: [c1!.hash, c3!.hash], message: "feat: c1 and c3" },
+            { members: [c2!.hash], message: null }
+          ]
+        }
+      }
+    );
+    expect(result.ok && result.value.proof).toEqual(
+      expect.objectContaining({ commitCount: 3, resultCount: 2, steps: 3 })
+    );
   });
 
   it("fetches only the checked ref through the selected commits and base", async () => {

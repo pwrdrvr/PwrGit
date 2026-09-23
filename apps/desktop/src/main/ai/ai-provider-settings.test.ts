@@ -52,7 +52,7 @@ describe("sanitizeAiProviderSettingsPatch", () => {
         },
         jobs: {
           nonsenseJob: { provider: "codex" },
-          rebaseReview: { provider: "gemini", model: "has spaces", reasoning: "HIGH" }
+          historyEditing: { provider: "gemini", model: "has spaces", reasoning: "HIGH" }
         }
       })
     ).toEqual({
@@ -68,7 +68,7 @@ describe("sanitizeAiProviderSettingsPatch", () => {
     const clears = {
       codex: { pinnedPath: "", authProfile: null },
       acp: { enabledAgentIds: [], agents: { grok: { overridePath: "", selectedPath: "" } } },
-      jobs: { rebaseReview: { provider: "", model: "", reasoning: "" } },
+      jobs: { historyEditing: { provider: "", model: "", reasoning: "" } },
       guidance: ""
     };
     expect(sanitizeAiProviderSettingsPatch(clears)).toEqual(clears);
@@ -147,7 +147,7 @@ describe("sanitizeAiProviderSettingsPatch", () => {
     expect(
       sanitizeAiProviderSettingsPatch({
         jobs: {
-          rebaseReview: {
+          historyEditing: {
             // Allowed here even though this job is Codex-only: which provider
             // a job may run on is effectiveJobProvider's call, at read time.
             provider: "grok",
@@ -158,13 +158,13 @@ describe("sanitizeAiProviderSettingsPatch", () => {
       })
     ).toEqual({
       jobs: {
-        rebaseReview: { provider: "grok", model: "openai/gpt-5.1-codex:latest", reasoning: "xhigh" }
+        historyEditing: { provider: "grok", model: "openai/gpt-5.1-codex:latest", reasoning: "xhigh" }
       }
     });
     expect(
       sanitizeAiProviderSettingsPatch({
         jobs: {
-          rebaseReview: { provider: "claude", model: "m".repeat(201), reasoning: "r".repeat(41) }
+          historyEditing: { provider: "claude", model: "m".repeat(201), reasoning: "r".repeat(41) }
         }
       })
     ).toEqual({});
@@ -236,7 +236,10 @@ describe("applyAiProviderSettingsPatch", () => {
         enabledAgentIds: ["grok", "qwen"],
         agents: { grok: { overridePath: abs("grok-custom") }, qwen: { selectedPath: abs("qwen") } }
       },
-      jobs: { rebaseReview: { provider: "codex", model: "gpt-5", reasoning: "high" } },
+      jobs: {
+        commitMessage: {},
+        historyEditing: { provider: "codex", model: "gpt-5", reasoning: "high" }
+      },
       guidance: "Be brief."
     };
   }
@@ -290,14 +293,14 @@ describe("applyAiProviderSettingsPatch", () => {
 
   it("merges a job's choices and turns each clear into an absence", () => {
     const next = applyAiProviderSettingsPatch(configured(), {
-      jobs: { rebaseReview: { model: "", reasoning: "low" } }
+      jobs: { historyEditing: { model: "", reasoning: "low" } }
     });
-    expect(next.jobs.rebaseReview).toEqual({ provider: "codex", reasoning: "low" });
+    expect(next.jobs.historyEditing).toEqual({ provider: "codex", reasoning: "low" });
 
     const cleared = applyAiProviderSettingsPatch(next, {
-      jobs: { rebaseReview: { provider: "", reasoning: "" } }
+      jobs: { historyEditing: { provider: "", reasoning: "" } }
     });
-    expect(cleared.jobs.rebaseReview).toEqual({});
+    expect(cleared.jobs.historyEditing).toEqual({});
   });
 
   it("is off by default, and cannot be switched on before the disclosure was accepted", () => {
@@ -350,7 +353,10 @@ describe("normalizeStoredAiProviderSettings", () => {
         enabledAgentIds: ["qwen", "kimi"],
         agents: { kimi: { overridePath: abs("kimi"), selectedPath: abs("kimi-2") } }
       },
-      jobs: { rebaseReview: { provider: "codex", model: "gpt-5", reasoning: "medium" } },
+      jobs: {
+        commitMessage: { provider: "codex", reasoning: "low" },
+        historyEditing: { provider: "codex", model: "gpt-5", reasoning: "medium" }
+      },
       guidance: "Line one.\n\tIndented."
     };
     expect(normalizeStoredAiProviderSettings(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
@@ -369,18 +375,18 @@ describe("normalizeStoredAiProviderSettings", () => {
         enabledAgentIds: ["gemini", "kimi"],
         agents: { gemini: { overridePath: abs("gemini") } }
       },
-      jobs: { rebaseReview: { provider: "gemini" } }
+      jobs: { historyEditing: { provider: "gemini" } }
     });
     expect(next.acp).toEqual({ enabledAgentIds: ["kimi"], agents: {} });
-    expect(next.jobs.rebaseReview).toEqual({});
+    expect(next.jobs.historyEditing).toEqual({});
   });
 
   it("never hands out the shared defaults object", () => {
     const next = normalizeStoredAiProviderSettings(null);
     next.acp.enabledAgentIds.push("grok");
-    next.jobs.rebaseReview.model = "mutated";
+    next.jobs.historyEditing.model = "mutated";
     expect(DEFAULT_AI_PROVIDER_SETTINGS.acp.enabledAgentIds).toEqual([]);
-    expect(DEFAULT_AI_PROVIDER_SETTINGS.jobs.rebaseReview).toEqual({});
+    expect(DEFAULT_AI_PROVIDER_SETTINGS.jobs.historyEditing).toEqual({});
   });
 });
 
@@ -426,10 +432,10 @@ describe("AiProviderSettingsStore", () => {
   it("merges successive single-field writes and reads them back", () => {
     const { store, work } = fixture();
     store.update(work.id, { acp: { enabledAgentIds: ["kimi"] } });
-    store.update(work.id, { jobs: { rebaseReview: { reasoning: "high" } } });
+    store.update(work.id, { jobs: { historyEditing: { reasoning: "high" } } });
     const read = store.read(work.id);
     expect(read.acp.enabledAgentIds).toEqual(["kimi"]);
-    expect(read.jobs.rebaseReview).toEqual({ reasoning: "high" });
+    expect(read.jobs.historyEditing).toEqual({ reasoning: "high" });
   });
 
   it("keeps each profile's settings apart", () => {

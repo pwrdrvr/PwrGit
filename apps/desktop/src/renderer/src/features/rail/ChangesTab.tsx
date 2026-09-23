@@ -14,6 +14,10 @@ import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
 import { confirmDialog } from "../shell/dialogs";
 import { SubmodulePanel } from "./SubmodulePanel";
+import { AgentSaw } from "../agent/AgentSaw";
+import { DraftFooter } from "../agent/DraftFooter";
+import { openAiSettings, useAgent } from "../agent/agent-store";
+import { useMessageDraft, type DraftSource } from "../agent/useMessageDraft";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -30,6 +34,7 @@ import {
 /** A folder of new files this big starts collapsed — an untracked tree can be
  *  hundreds of files, and unfolding all of them buries the rest of the list. */
 const FOLDER_AUTO_COLLAPSE = 10;
+const STAGED_SOURCE: DraftSource = { kind: "staged" };
 
 function PlusIcon() {
   return (
@@ -352,8 +357,8 @@ export function ChangesTab({
 }) {
   const tip = useViewportTooltip();
   const [changes, setChanges] = useState<ChangeSet | null>(null);
-  const [message, setMessage] = useState("");
-  const messageRef = useRef<HTMLInputElement>(null);
+  const agent = useAgent("commitMessage");
+  const messageRef = useRef<HTMLTextAreaElement>(null);
   /**
    * Answering "Commit on <branch> first" is a promise to put the reader where
    * they can do that.
@@ -388,6 +393,15 @@ export function ChangesTab({
   };
   const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
+  // Staged changes only: an agent draft never sees unstaged edits.
+  const draft = useMessageDraft({
+    worktreeId: wtId,
+    source: STAGED_SOURCE,
+    fallback: "",
+    autoStart: false,
+    ready: agent.ready
+  });
+  const message = draft.text;
 
   const receiveSubmoduleConcern = useCallback(
     (hasConcern: boolean) => setHasSubmoduleConcern(hasConcern),
@@ -395,7 +409,6 @@ export function ChangesTab({
   );
 
   useEffect(() => {
-    setMessage("");
     setFolderOpen({});
     setMenu(null);
     setHasSubmoduleConcern(false);
@@ -491,7 +504,7 @@ export function ChangesTab({
     if (wtId === null || message.trim() === "") return;
     void dispatch("changes:commit", { worktreeId: wtId, message, amend }).then(
       (r) => {
-        if (r.ok) setMessage("");
+        if (r.ok) draft.reset("");
       }
     );
   };
@@ -804,13 +817,50 @@ export function ChangesTab({
       )}
 
       <div className="commit-box">
-        <input
-          ref={messageRef}
-          className="commit-input"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Summary"
-        />
+        <div
+          className={`commit-message${draft.origin === "agent" || draft.pending ? " commit-message--agent" : ""}`}
+        >
+          <textarea
+            ref={messageRef}
+            className={`commit-input${draft.status.kind === "drafting" ? " msg-box__input--scan" : ""}`}
+            value={message}
+            onChange={(e) => draft.setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) {
+                e.preventDefault();
+                commit(false);
+              }
+            }}
+            placeholder="Summary"
+            aria-label="Commit message"
+            rows={1}
+          />
+          {/* With AI off the commit box is a commit box: no footer at all. */}
+          {((!agent.loading && !agent.off) ||
+            draft.status.kind !== "idle" ||
+            draft.draft !== null) && (
+            <DraftFooter
+              draft={draft}
+              agentName={agent.name}
+              // Whether the agent can run, not whether there is anything to
+              // draft from: gating on the staged count here would send
+              // someone whose agent works to AI Providers. With nothing
+              // staged, main answers with what to do about it.
+              agentReady={agent.ready}
+              fallbackLabel={null}
+              fallbackAction={null}
+              unitLabel={`${stagedTotal} staged file${stagedTotal === 1 ? "" : "s"}`}
+              onNoAgent={() => openAiSettings("ai-providers")}
+            />
+          )}
+        </div>
+        {draft.draft !== null && draft.origin === "agent" && (
+          <AgentSaw
+            manifest={draft.draft.saw}
+            providerName={draft.draft.providerName}
+            model={draft.draft.model}
+          />
+        )}
         <div className="commit-actions">
           <button
             className="commit-btn"

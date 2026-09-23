@@ -36,6 +36,7 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "@octokit/graphql": "^8.2.1",
     "@pwrdrvr/agent-acp": "^0.15.0",
+    "@pwrdrvr/agent-client": "^0.8.2",
     "@pwrdrvr/agent-core": "^0.2.0",
     "@pwrdrvr/agent-transport": "^0.1.7",
     "@pwrdrvr/codex-discovery": "^0.4.0",

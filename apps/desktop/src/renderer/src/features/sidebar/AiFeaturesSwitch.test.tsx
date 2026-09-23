@@ -153,7 +153,7 @@ describe("AiFeaturesSwitch", () => {
     await click(aiSwitch());
 
     expect(calls("aiProviders:discoverCodex")).toEqual([{ profileId: "work" }]);
-    // Rebase review refuses ACP, so the agents are not asked about.
+    // History editing refuses ACP, so the agents are not asked about.
     expect(calls("aiProviders:discoverAcp")).toEqual([]);
     expect(consentDialog()?.textContent).toContain("Turn on AI features for Work?");
     expect(calls("aiProviders:update")).toEqual([]);

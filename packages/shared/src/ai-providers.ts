@@ -70,11 +70,17 @@ export function aiProviderDisplayName(id: AiProviderId): string {
  * Work PwrGit hands to an agent. Each carries its own provider / model /
  * reasoning default, the way PwrSnap's surfaces do.
  *
- * One job today. A job is a registry entry rather than a field, so the next one
- * (a commit-message draft, a PR description) arrives the way a forge product
- * does: as a member here plus its details, with the Settings rows following.
+ * A job is a registry entry rather than a field, so the next one (a PR
+ * description) arrives the way a forge product does: as a member here plus its
+ * details, with the Settings rows following.
+ *
+ * The two jobs are split by what the operator is doing, not by prompt: a commit
+ * message for staged work wants a quick, cheap draft, while regrouping history
+ * is worth a stronger model and more reasoning. Squash messages ride with
+ * History editing because they are drafted inside the rebase tool, beside the
+ * Tidy they are an alternative to.
  */
-export const AI_JOB_IDS = ["rebaseReview"] as const;
+export const AI_JOB_IDS = ["commitMessage", "historyEditing"] as const;
 
 export type AiJobId = (typeof AI_JOB_IDS)[number];
 
@@ -96,15 +102,53 @@ export type AiJobDetails = {
   acpUnavailableReason?: string;
 };
 
+/** Both jobs run with no tools, in a scratch workspace outside every
+ *  repository; an ACP agent can't be held to that. */
+const NO_TOOLS_ACP_REASON =
+  "ACP agents can't be held to the no-tools boundary this job runs under, so it runs on Codex.";
+
 export const AI_JOBS: Readonly<Record<AiJobId, AiJobDetails>> = {
-  rebaseReview: {
-    label: "Rebase review",
+  commitMessage: {
+    label: "Commit messages",
     description:
-      "Reviews the rebase plan PwrGit computed and explains it. Proposal-only: it never edits history.",
+      "Drafts a message in the commit box from the staged changes. Unstaged edits are never sent.",
     acp: false,
-    acpUnavailableReason:
-      "ACP agents can't be held to the no-tools boundary a rebase review runs under, so this job runs on Codex."
+    acpUnavailableReason: NO_TOOLS_ACP_REASON
+  },
+  historyEditing: {
+    label: "History editing",
+    description:
+      "Squash messages, Tidy, and revising a Tidy plan whose check failed. Every plan is checked by PwrGit before Apply.",
+    acp: false,
+    acpUnavailableReason: NO_TOOLS_ACP_REASON
   }
+};
+
+/**
+ * Whether a job can run for a profile right now, as the rail shows it.
+ * `resolveJob`'s answer, flattened for the renderer: `ready` carries what will
+ * run, and every other state carries the resolver's own sentence.
+ *
+ * `disabled` is the profile's AI switch being off. It is the default, and a
+ * feature answers it by offering its non-AI path — it is not a failure.
+ */
+export type AgentJobState = "ready" | "disabled" | "unavailable" | "signed_out" | "error";
+
+export type AgentJobStatus = {
+  jobId: AiJobId;
+  state: AgentJobState;
+  /** Empty when ready. */
+  message: string;
+  providerName: string | null;
+  /** The Settings default; null is the backend's own. */
+  model: string | null;
+  modelLabel: string | null;
+  effort: AiReasoningEffort | null;
+};
+
+export type AgentAvailability = {
+  profileId: ProfileId;
+  jobs: Record<AiJobId, AgentJobStatus>;
 };
 
 // ---- Reasoning ------------------------------------------------------------
@@ -209,7 +253,7 @@ export const DEFAULT_AI_PROVIDER_SETTINGS: AiProviderSettings = {
   consentAcceptedAt: null,
   codex: { mode: "auto", pinnedPath: "" },
   acp: { enabledAgentIds: [], agents: {} },
-  jobs: { rebaseReview: {} },
+  jobs: { commitMessage: {}, historyEditing: {} },
   guidance: ""
 };
 

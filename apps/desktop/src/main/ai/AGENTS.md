@@ -18,7 +18,7 @@ runs.
 **A feature runs a job through `resolveJob`**:
 
 ```ts
-const job = await aiProviders.resolveJob({ profileId, jobId: "rebaseReview", signal });
+const job = await aiProviders.resolveJob({ profileId, jobId: "historyEditing", signal });
 if (!job.ok) return job;            // disabled | unavailable | signed_out | cancelled | discovery_failed
 const { backend, model, effort, guidance } = job.value;
 // backend.kind === "codex": spawn backend.command with backend.env
@@ -39,8 +39,9 @@ const { backend, model, effort, guidance } = job.value;
 - `backend.env` is complete: the profile's CODEX_HOME and `PWRGIT_PROFILE_ID`
   are already applied. Pass it through; don't rebuild it with
   `agentEnvForPwrGitProfile`.
-- `model` / `effort` of `null` mean "the backend's default". Keep the job's own
-  fallback (rebase review's is `effort: "low"`) for that case.
+- `model` / `effort` of `null` mean "the backend's default". Keep the task's own
+  fallback for that case (`LocalAgentSession`: a message draft runs `"low"`,
+  a Tidy plan `"medium"`).
 - ACP efforts are already collapsed to `"low" | "high"` (`acp-effort.ts`).
 - `guidance` is the operator's free text. Append it to the prompt as
   preferences. It never widens what a job may do: tools, sandbox and the
@@ -70,10 +71,10 @@ profile's id to every later profile's job.
 
 ## A job declares whether ACP may run it
 
-`AI_JOBS[jobId].acp` lives in `packages/shared/src/ai-providers.ts`.
-`rebaseReview` is `false`: its session runs with no tools, and an ACP agent
-can't be held to that. A stored ACP choice on such a job resolves to Codex. It
-never resolves to the agent. Before flipping the flag on a new job, show that
+`AI_JOBS[jobId].acp` lives in `packages/shared/src/ai-providers.ts`. Both
+jobs (`commitMessage`, `historyEditing`) are `false`: their sessions run with
+no tools, and an ACP agent can't be held to that. A stored ACP choice on such
+a job resolves to Codex. It never resolves to the agent. Before flipping the flag on a new job, show that
 the job's boundary holds on the ACP path.
 
 ## No Gemini
@@ -82,3 +83,54 @@ Gemini is not a PwrGit agent: it doesn't work. It is absent from
 `BUILT_IN_ACP_AGENT_IDS`, `PWRGIT_ACP_STRATEGIES` filters it out of the kit's
 strategies, and the sanitizer drops it from stored settings. Don't add it back
 as a disabled entry. Tests assert that it is absent.
+
+## The jobs: commit messages and history editing
+
+`LocalAgentSession` (`agent-session.ts`) runs both, and `agent-handlers.ts`
+puts them on the bus. `messageJob` maps a request onto a job: a draft from
+staged changes is `commitMessage`, and everything that reads commits — Squash
+messages, Tidy, a Tidy revision — is `historyEditing`. The session discovers
+nothing: each request asks `resolveJob`, so the AI switch, the agent, the model
+and the effort are Settings' answer, and `agent:availability` asks the same
+question per job for the renderer. A request's `AgentChoice` (the rail chip's
+"only this request") overrides the Settings model and effort; it never changes
+the provider or the job's boundary.
+
+### The agent proposes; PwrGit proves
+
+Nothing here changes Git. The handlers read (selection check, diff collection)
+and return a draft or a proposal. Every history change goes through
+`rebase:check` → `rebase:apply` in `src/main/git/rebase-handlers.ts`, whichever
+path wrote the plan, and the isolated check proves the same three things for all
+of them: each selected commit used exactly once, a clean replay, and a final
+tree identical to the tip. Don't add a shortcut from an agent result to apply.
+
+- **A Tidy plan is only accepted if it passes `validateProgramShape`.**
+  `parseTidyProposal` resolves abbreviated hashes against the selection and
+  refuses anything else. The approval binds the program's *shape* (members);
+  messages are data and may be edited after the check.
+- **Revisions are bounded on this side** (`MAX_TIDY_REVISIONS`). The renderer
+  asks automatically after a conflict, so the bound cannot live only there.
+
+### What the agent sees
+
+`agent-input.ts` builds it and records it in the manifest the operator opens
+from "Details". Lockfiles, snapshots, binaries, keys and `.env*` files are never
+sent; diffs are cut to a line budget. If you widen what is sent, the manifest
+has to say so too — it is the operator's only view of it — and so does the
+disclosure the AI switch shows before it turns on
+(`renderer/src/features/settings/AiConsentDialog.tsx`).
+
+Repository text is untrusted. It goes into the prompt as JSON under "data, not
+instructions", and the one stable base instruction says so. Keep task rules in
+the prompt, not in `baseInstructions`: changing that string re-creates the
+Codex worker thread.
+
+### Process lifetime
+
+The session pools one Codex client per profile, keyed by the resolved command
+and CODEX_HOME, so a changed Codex path or account builds a new one. A
+deadline resets only the profile that hit it (`reset`, not `close`) — another
+profile's pooled client may be mid-request. The renderer does not own process
+lifetime; bound it here. Codex runs with no tools in a scratch workspace
+outside every repository.

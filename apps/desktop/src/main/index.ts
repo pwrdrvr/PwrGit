@@ -24,6 +24,8 @@ import {
 } from "@pwrgit/shared";
 import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
+import { registerAgentHandlers } from "./ai/agent-handlers";
+import { LocalAgentSession } from "./ai/agent-session";
 import { wireAppMenuBridge } from "./app-menu-bridge";
 import {
   trackWindowFrameState,
@@ -31,6 +33,7 @@ import {
 } from "./window-controls-bridge";
 import { linuxWindowIconPath } from "./window-icon";
 import { openAppDocumentWindow } from "./app-document-window";
+import { drainBeforeQuit } from "./bounded-shutdown";
 import {
   initAutoUpdater,
   reconcileDownloadedUpdateEligibility,
@@ -92,7 +95,6 @@ import { OpenPrService } from "./github/open-pr-service";
 import { registerChangeRequestHandlers } from "./github/change-request-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
-import { delay } from "./util/timing";
 import {
   initLogFile,
   logMain,
@@ -1082,6 +1084,16 @@ if (!gotSingleInstanceLock) {
       profiles,
       onChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot)
     });
+    // History editing and commit-message drafts run on whatever the profile's
+    // AI settings resolve: the AI switch, the agent, the model and the effort
+    // are all `resolveJob`'s answer, so this session discovers nothing itself
+    // and inherits the E2E seam above.
+    const agentHandlers = registerAgentHandlers(bus, db, {
+      session: new LocalAgentSession({
+        resolveJob: (input) => aiProviders.resolveJob(input),
+        tempRoot: join(app.getPath("temp"), "pwrgit-agent")
+      })
+    });
     app.on("before-quit", () => aiProviders.dispose());
     // The loopback listener stays off until the operator turns it on: it is a
     // standing grant on their repositories, not a default.
@@ -1115,6 +1127,7 @@ if (!gotSingleInstanceLock) {
         bulkSyncHandlers.releaseWebContents(webContentsId);
         pruneHandlers.releaseWebContents(webContentsId);
         fileInsightHandlers.releaseWebContents(webContentsId);
+        agentHandlers.releaseWebContents(webContentsId);
       }
     });
     registerAppUpdateHandlers(bus);
@@ -1161,18 +1174,21 @@ if (!gotSingleInstanceLock) {
       appearance.dispose();
     });
 
-    // Drain diagnostics before quitting so final monitor-stopped events and
-    // manifest writes land on disk. Bounded and fail-safe: the drain races a
-    // timeout, and if the resumed quit is swallowed (automation teardown,
-    // re-entrant quit), app.exit() guarantees the process still dies.
-    let diagnosticsQuitState: "pending" | "draining" | "done" = "pending";
+    // Drain diagnostics and agent subprocesses before quitting. Bounded and
+    // fail-safe: cleanup races a timeout, and if the resumed quit is swallowed
+    // (automation teardown, re-entrant quit), app.exit() still guarantees the
+    // process dies.
+    let quitDrainState: "pending" | "draining" | "done" = "pending";
     app.on("will-quit", (event) => {
-      if (diagnosticsQuitState === "done") return;
+      if (quitDrainState === "done") return;
       event.preventDefault();
-      if (diagnosticsQuitState === "draining") return; // drain will re-quit
-      diagnosticsQuitState = "draining";
-      void Promise.race([diagnostics.shutdown(), delay(1_500)]).finally(() => {
-        diagnosticsQuitState = "done";
+      if (quitDrainState === "draining") return; // drain will re-quit
+      quitDrainState = "draining";
+      void drainBeforeQuit(
+        [() => diagnostics.shutdown(), () => agentHandlers.dispose()],
+        1_500
+      ).finally(() => {
+        quitDrainState = "done";
         app.quit();
         setTimeout(() => app.exit(0), 500);
       });
