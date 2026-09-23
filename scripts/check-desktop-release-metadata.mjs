@@ -268,16 +268,12 @@ for (const expected of [
   "Download macOS release artifacts",
   "Download Windows installer artifact",
   "Name Windows checksum manifest",
-  "gh release create",
-  "--verify-tag",
-  "find mac-dist -type f",
-  "find windows-dist -type f",
-  '"${mac_assets[@]}"',
-  '"${windows_assets[@]}"',
+  'node scripts/publish-desktop-release.mjs "$RELEASE_TAG" mac-dist windows-dist "$notes"',
+  "cancel-in-progress: false",
 ]) {
   assertContains(publishJob, ".github/workflows/release.yml publish-release-assets", expected);
 }
-for (const unexpected of ["mac-dist/*", "windows-dist/*", "gh release upload"]) {
+for (const unexpected of ["mac-dist/*", "windows-dist/*", "gh release upload", "gh release create"]) {
   assertExcludes(publishJob, ".github/workflows/release.yml publish-release-assets", unexpected);
 }
 

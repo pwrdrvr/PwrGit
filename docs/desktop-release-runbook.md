@@ -103,8 +103,47 @@ stable tags may be promoted.
    verifies Authenticode on both the app executable and installer, then copies
    the verified installer to the stable `PwrGit.Setup.exe` alias.
 6. The publication job waits for macOS, Windows, and the Linux build gate,
-   then creates one release with changelog-derived notes and all published
-   assets.
+   then creates a draft with changelog-derived notes. It uploads the signed
+   assets, checks their digests and the complete inventory, and publishes one
+   GitHub Pre-release. A retry resumes a matching draft without replacing
+   already verified assets.
+
+## Recover a failed publication
+
+For a run whose platform jobs succeeded but publication failed, inspect the
+run logs and artifact retention dates. Confirm the tag still points to the
+run's head commit, all guarded platform jobs succeeded, and no release exists
+or any existing release is a matching draft. Do not delete or move the tag.
+After the publication fix lands on `main`, use the already signed artifacts
+from that run before the Windows artifact's seven-day retention ends:
+
+```bash
+gh run view <run-id> --repo pwrdrvr/PwrGit --json headSha,jobs
+git ls-remote --tags origin 'vX.Y.Z*'
+gh release view vX.Y.Z --repo pwrdrvr/PwrGit
+recovery_dir="$(mktemp -d)"
+git worktree add --detach "$recovery_dir/tag" vX.Y.Z
+gh run download <run-id> --repo pwrdrvr/PwrGit \
+  --name desktop-release-macos-artifacts --dir "$recovery_dir/mac"
+gh run download <run-id> --repo pwrdrvr/PwrGit \
+  --name windows-installer --dir "$recovery_dir/windows"
+mv "$recovery_dir/windows/SHA256SUMS" \
+  "$recovery_dir/windows/PwrGit-windows-SHA256SUMS"
+node "$recovery_dir/tag/scripts/check-desktop-release-metadata.mjs" \
+  --tag vX.Y.Z --notes-file "$recovery_dir/notes.md"
+node scripts/publish-desktop-release.mjs vX.Y.Z \
+  "$recovery_dir/mac" "$recovery_dir/windows" "$recovery_dir/notes.md"
+```
+
+The `release view` command reports not found when there is no release; inspect
+any release it does find before proceeding. Run the final command only after
+checking the tag and run results. The publisher checks every local and remote
+asset digest, notes, and Pre-release flag before it exposes the release. Verify
+the completed release using the checks below. Remove the temporary worktree
+with `git worktree remove "$recovery_dir/tag"` after recovery; the downloaded
+artifacts can then be removed. Re-running the old failed job repeats its old
+publication code. A manual dispatch from `main` cannot pass the signing
+environments' `v*` tag restrictions.
 
 For an opt-in Windows signing smoke test on a same-repository PR, apply the
 `ci:windows-signing` label. That path uploads a short-lived workflow artifact
