@@ -2756,11 +2756,13 @@ textarea,
 .clone-input-wrap input {
   flex: 1;
   min-width: 0;
-  /* Focus scrolls the INPUT into view, but the ring is drawn on the wrapper,
-     which reaches past the input by half the wrapper's spare height, its
-     border and the ring. The dialog body scrolls, so the margin has to cover
-     all of that or Tab leaves the ring cut at the scrollport's edge. */
-  scroll-margin: 16px;
+  /* The house scroll margin (see `.modal__cancel:focus-visible`), measured
+     from the input because the input is what focus scrolls into view: the
+     wrapper reaches 10px past it, then the ring's 1px offset and 2px width.
+     Measured on Chromium 151, Tab centres a text field it has to scroll to,
+     so nothing is cut even without this; buttons scroll only to the nearest
+     edge, which is where the margin earns its keep. */
+  scroll-margin: 14px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -5068,9 +5070,9 @@ button.agent-menu__item:hover {
 }
 /* Chromium makes a scroller that overflows and holds nothing focusable a Tab
    stop of its own, so the arrow keys can scroll it. This list is only text, so
-   a long one is exactly that, and it fell back to Chromium's ring. Inset,
-   because the scroller fills the dialog edge to edge. `.prune__rows` and
-   `.dialog__facts` are the same case. */
+   a long one is exactly that, though it was unreachable until `useFocusTrap`
+   learned to count scrollers. Inset, because the scroller fills the dialog
+   edge to edge. `.prune__rows` and `.dialog__facts` are the same case. */
 .bulk-sync__repos:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
@@ -5333,8 +5335,9 @@ button.agent-menu__item:hover {
   overflow-y: auto;
 }
 /* Reclaim's rows carry no controls, so a long list is a Tab stop; see
-   `.bulk-sync__repos:focus-visible`. Prune's rows hold checkboxes, so the list
-   itself never takes focus there. */
+   `.bulk-sync__repos:focus-visible`. It drew Chromium's ring, which `.prune`
+   cut by 1px at each side. Prune's rows hold checkboxes, so the list itself
+   never takes focus there. */
 .prune__rows:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
