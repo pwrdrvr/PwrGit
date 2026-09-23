@@ -1029,6 +1029,16 @@ textarea,
 .read-error--compact .read-error__retry {
   margin-top: 8px;
 }
+/* Bordered, so 1px out. The notice's own padding keeps the ring clear of the
+   scroller it sits in (`.sidebar__list`, `.settings-content`) at rest, and
+   the scroll margin keeps it clear when Tab scrolls it into view — see
+   `.modal__cancel:focus-visible`. On the danger tint the ring is 6.95:1 in
+   dark and 3.84:1 in light, at worst. */
+.read-error__retry:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 
 .repo-block {
   /* PwrAgnt's list gap is 0: the row's own padding is the rhythm. */
@@ -4764,6 +4774,18 @@ button.agent-menu__item:hover {
 .modal__input:focus {
   border-color: var(--accent-border);
 }
+/* The border tint above was the field's only focus signal, and it is too faint
+   to be one (SC 1.4.11, 3:1): --accent-border is 2.30:1 against the field in
+   dark and 1.88:1 in light, and only 1.67:1 / 1.43:1 against the resting
+   --border-default it replaces. So the field also draws the house ring, 1px
+   out like the bordered controls, and keeps the tint. A text field matches
+   :focus-visible on a click too, as `.agent-auth-input` already does. The
+   scroll margin is the footer buttons', below. */
+.modal__input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
 .modal__check {
   display: flex;
   align-items: center;
@@ -4811,6 +4833,31 @@ button.agent-menu__item:hover {
 .modal__create:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* Every dialog's footer — main window and Settings alike — so these fell back
+   to Chromium's own `outline: auto` ring beside controls that draw the house
+   one. 1px out, as the shared block above `.pin:focus-visible` rings bordered
+   buttons. Each footer sits inside at least 11px of its dialog's padding, so
+   at rest nothing clips the ring.
+
+   Tabbing can still clip it. Several of these dialogs scroll
+   (`.modal--profile`, `.refs-push`, …), and when focus moves to a control
+   below the fold the browser scrolls only until the control's border box is
+   in view, leaving the ring outside it. In a 600px-tall window — the main
+   window's minimum — the profile dialog's Cancel and Save lost the bottom 3px
+   of their rings that way. `scroll-margin` makes the browser scroll the ring
+   in too: its 3px reach, plus 1px because the scroll stops on a whole pixel
+   and the button may not start on one. The other dialog-control rings in this
+   file that sit in a scroller carry the same margin for the same reason.
+
+   The `opacity` on `:disabled` cannot fade this ring, because a disabled
+   button takes no focus. In-flight is `aria-disabled` (AddForgeHostDialog),
+   and nothing dims that. */
+.modal__cancel:focus-visible,
+.modal__create:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 
 /* ---- Profile-wide repository synchronization ---- */
@@ -8524,6 +8571,15 @@ body.is-col-resizing {
 .profile-modal__link:hover {
   text-decoration: underline;
 }
+/* Borderless text, so it rings the way `.settings-notes-link` does: off the
+   text, with a radius of its own to follow. The ring reaches 4px here, so the
+   scroll margin (see `.modal__cancel:focus-visible`) is a pixel more. */
+.profile-modal__link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  scroll-margin: 5px;
+}
 
 .rootlist__add {
   display: inline-flex;
@@ -8537,6 +8593,16 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 500 11.5px/1 var(--font-sans);
   cursor: pointer;
+}
+/* 1px out, not inset like a flush list's rows: the folder rows stand 4px
+   apart, and the remove button sits in its row's 6px/8px padding, so its ring
+   stays inside its own row. `.modal--profile` scrolls, so these carry the
+   footer buttons' scroll margin — see `.modal__cancel:focus-visible`. */
+.rootlist__x:focus-visible,
+.rootlist__add:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
 }
 
 /* ---- Sidebar: group-by-folder ---- */
@@ -8711,6 +8777,13 @@ body.is-col-resizing {
 .dialog__choice:focus-visible {
   border-color: var(--accent-border);
   background: var(--accent-soft);
+}
+/* The tint above cannot be the focus indicator on its own: it is also the
+   hover and the `.is-primary` paint, so on the default choice — where focus
+   lands on open — focusing it changes nothing. The ring is what moves. */
+.dialog__choice:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 .dialog__choice.is-primary {
   border-color: var(--accent-border);
