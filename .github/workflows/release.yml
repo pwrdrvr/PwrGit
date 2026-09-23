@@ -428,7 +428,10 @@ jobs:
       - linux-build
       - sign
       - windows-sign
-    timeout-minutes: 15
+    timeout-minutes: 30
+    concurrency:
+      group: desktop-release-${{ github.event.inputs.tag || github.ref_name }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: none
@@ -479,40 +482,4 @@ jobs:
             exit 1
           fi
 
-          mapfile -t mac_assets < <(find mac-dist -type f -print | sort)
-          mapfile -t windows_assets < <(find windows-dist -type f -print | sort)
-          if [ "${#mac_assets[@]}" -eq 0 ]; then
-            echo "::error::No macOS release asset files were downloaded." >&2
-            exit 1
-          fi
-          if [ "${#windows_assets[@]}" -eq 0 ]; then
-            echo "::error::No Windows release asset files were downloaded." >&2
-            exit 1
-          fi
-
-          gh release create "$RELEASE_TAG" \
-            --repo pwrdrvr/PwrGit \
-            --verify-tag \
-            --title "$RELEASE_TAG" \
-            --notes-file "$notes" \
-            --prerelease \
-            "${mac_assets[@]}" \
-            "${windows_assets[@]}"
-
-          body_length="$(gh release view "$RELEASE_TAG" \
-            --repo pwrdrvr/PwrGit \
-            --json body \
-            --jq '.body | length')"
-          if [ "$body_length" -le 0 ]; then
-            echo "::error::Release $RELEASE_TAG has an empty body." >&2
-            exit 1
-          fi
-
-          is_prerelease="$(gh release view "$RELEASE_TAG" \
-            --repo pwrdrvr/PwrGit \
-            --json isPrerelease \
-            --jq '.isPrerelease')"
-          if [ "$is_prerelease" != "true" ]; then
-            echo "::error::Release $RELEASE_TAG was not created as a GitHub Pre-release." >&2
-            exit 1
-          fi
+          node scripts/publish-desktop-release.mjs "$RELEASE_TAG" mac-dist windows-dist "$notes"

@@ -105,6 +105,16 @@ push the `vX.Y.Z` tag. No release is created until Linux, macOS, and Windows
 jobs succeed. Releases are born as GitHub Pre-releases; promote to Latest
 manually after validation.
 
+Publication first creates a draft with changelog notes. It uploads the signed
+assets one at a time and compares each GitHub asset's SHA-256 digest and size
+with the downloaded workflow artifact. A lost upload response can report a 422
+after GitHub accepted the bytes; the publication job reconciles that asset and
+continues. A rerun resumes a matching draft, and only a complete 14-asset
+inventory becomes a visible Pre-release. A conflicting asset or partial
+published release fails without replacing assets. Recovery from a failed run
+can use its signed workflow artifacts with the updated publisher, while they
+remain available; see the runbook.
+
 `main` owns the active `N.N` train through alpha, beta, first stable, and
 follow-up `N.N.P` releases. Do not create `releases/N.N` merely to promote a
 beta to stable. Cut that maintenance branch only after the product owner
