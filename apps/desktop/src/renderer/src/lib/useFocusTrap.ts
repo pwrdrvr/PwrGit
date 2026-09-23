@@ -35,6 +35,51 @@ function visible(el: HTMLElement): boolean {
   return true;
 }
 
+type Trap = { containerRef: RefObject<HTMLElement | null> };
+
+/** Every trap currently open, in the order they opened. */
+const openTraps: Trap[] = [];
+
+function depth(el: HTMLElement): number {
+  let n = 0;
+  for (let node = el.parentElement; node !== null; node = node.parentElement) n++;
+  return n;
+}
+
+/**
+ * Which open trap answers this Tab — only ever one.
+ *
+ * Every trap listens on `window`, and each one used to act on its own: a trap
+ * that saw focus outside its container pulled it back in. So with a DialogHost
+ * confirm open over PruneWorktreesDialog, a Tab inside the confirm was taken by
+ * Prune's trap, which dragged focus behind the confirm to Prune's first stop.
+ * Give the confirm a trap too and the two fought over every keypress: focus was
+ * pulled out by one and back to an edge by the other, and never reached the
+ * confirm's second button.
+ *
+ * The rule is `useDismissable`'s: the trap holding focus wins, the deepest one
+ * when nested containers both hold it, and only focus that is in none of them
+ * falls to the newest.
+ */
+function tabOwner(): Trap | undefined {
+  const active = document.activeElement;
+  let best: Trap | undefined;
+  let bestDepth = -1;
+  if (active !== null) {
+    for (const trap of openTraps) {
+      const root = trap.containerRef.current;
+      if (root === null || !root.contains(active)) continue;
+      const d = depth(root);
+      // >= so a later-opened sibling at equal depth still wins.
+      if (d >= bestDepth) {
+        best = trap;
+        bestDepth = d;
+      }
+    }
+  }
+  return best ?? openTraps[openTraps.length - 1];
+}
+
 function tabbable(root: HTMLElement | null): HTMLElement[] {
   if (root === null) return [];
   return [...root.querySelectorAll<HTMLElement>(TABBABLE)].filter((el) => {
@@ -110,8 +155,11 @@ export function useFocusTrap({
 
   useEffect(() => {
     if (!open) return;
+    const trap: Trap = { containerRef };
+    openTraps.push(trap);
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== "Tab") return;
+      if (tabOwner() !== trap) return;
       const root = containerRef.current;
       if (root === null) return;
       const list = tabbable(root);
@@ -140,6 +188,10 @@ export function useFocusTrap({
       }
     };
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      const at = openTraps.indexOf(trap);
+      if (at !== -1) openTraps.splice(at, 1);
+    };
   }, [open, containerRef]);
 }

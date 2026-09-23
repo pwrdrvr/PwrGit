@@ -279,6 +279,17 @@ and claims nothing, so the card's handler gets an unspent key.
 `defaultPrevented` check a tick. Either is fine; what is not fine is a
 synchronous check from a bubble listener, which is a coin flip.
 
+### Tab belongs to exactly one trap, by the same rule
+
+Two traps can be open at once: `confirmDialog` from inside
+`PruneWorktreesDialog` puts DialogHost's trap over Prune's. Each trap listens
+on `window` and pulls stray focus back into itself, so with no owner rule the
+lower trap took every Tab in the confirm and dragged focus behind it, and once
+the confirm had a trap too the two fought until focus stuck on an edge.
+`useFocusTrap` now resolves one owner per keypress: the trap holding focus
+(deepest wins), otherwise the newest. A new trap gets this for free; don't add
+a second keydown handler for Tab.
+
 ### `useFocusTrap` captures the opener during render
 
 Not in an effect. React applies `autoFocus` while committing, which is *before*

@@ -128,3 +128,83 @@ describe("useFocusTrap", () => {
     expect(() => render({ open: false })).not.toThrow();
   });
 });
+
+/** A second trap in its own DOM subtree — DialogHost's confirm, opened while
+ *  PruneWorktreesDialog's trap is still active behind it. */
+function Stacked({ upper }: { upper: boolean }) {
+  const lowerRef = useRef<HTMLDivElement>(null);
+  const upperRef = useRef<HTMLDivElement>(null);
+  useFocusTrap({ open: true, containerRef: lowerRef });
+  useFocusTrap({ open: upper, containerRef: upperRef });
+  return createElement(
+    "div",
+    null,
+    createElement(
+      "div",
+      { key: "lower", ref: lowerRef, role: "dialog", tabIndex: -1 },
+      createElement("button", null, "Lower first"),
+      createElement("button", null, "Lower last")
+    ),
+    upper
+      ? createElement(
+          "div",
+          { key: "upper", ref: upperRef, role: "alertdialog", tabIndex: -1 },
+          createElement("button", null, "Upper first"),
+          createElement("button", null, "Upper last")
+        )
+      : null
+  );
+}
+
+describe("useFocusTrap, stacked", () => {
+  const button = (label: string): HTMLButtonElement =>
+    [...document.querySelectorAll("button")].find((b) => b.textContent === label)!;
+
+  it("lets only the upper dialog answer Tab while it is open", () => {
+    act(() => root.render(createElement(Stacked, { upper: false })));
+    act(() => root.render(createElement(Stacked, { upper: true })));
+    expect(focusedLabel()).toBe("Upper first");
+
+    button("Upper last").focus();
+    tab();
+    expect(focusedLabel()).toBe("Upper first");
+
+    tab(true);
+    expect(focusedLabel()).toBe("Upper last");
+  });
+
+  it("leaves a mid-cycle Tab in the upper dialog to the browser", () => {
+    act(() => root.render(createElement(Stacked, { upper: false })));
+    act(() => root.render(createElement(Stacked, { upper: true })));
+    expect(focusedLabel()).toBe("Upper first");
+
+    // Not at an edge, so no trap may intervene: the browser's own sequential
+    // navigation moves to "Upper last". The lower trap used to see focus
+    // outside ITS dialog and pull it back behind the upper one — and the
+    // upper trap then dragged it to its own first stop, so Tab never left it.
+    const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    act(() => {
+      window.dispatchEvent(event);
+    });
+    expect(event.defaultPrevented).toBe(false);
+    expect(focusedLabel()).toBe("Upper first");
+  });
+
+  it("pulls stray focus into the upper dialog, not the one beneath it", () => {
+    act(() => root.render(createElement(Stacked, { upper: false })));
+    act(() => root.render(createElement(Stacked, { upper: true })));
+    opener.focus();
+    tab();
+    expect(focusedLabel()).toBe("Upper first");
+  });
+
+  it("hands Tab back to the lower dialog once the upper one closes", () => {
+    act(() => root.render(createElement(Stacked, { upper: false })));
+    button("Lower last").focus();
+    act(() => root.render(createElement(Stacked, { upper: true })));
+    act(() => root.render(createElement(Stacked, { upper: false })));
+    expect(focusedLabel()).toBe("Lower last");
+    tab();
+    expect(focusedLabel()).toBe("Lower first");
+  });
+});
