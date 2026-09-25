@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CommandRunner, CommandResult } from "./command.js";
 import {
+  createLiveStatusLoader,
   forgeTargetIdentities,
   githubSnapshotFromJson,
   githubStatus,
@@ -419,5 +420,30 @@ describe("normalized forge status", () => {
 
     expect(pages).toBe(5);
     expect(jobs).toEqual({ available: false, value: null });
+  });
+});
+
+describe("live status loader", () => {
+  it("does not report a failed read while other git reads still run", async () => {
+    // The caller may remove the checkout next, and Windows refuses to remove
+    // a directory a process is working in.
+    let running = 0;
+    const runner: CommandRunner = async (_command, args) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
+        return { exitCode: 0, stdout: "/repo\n", stderr: "" };
+      }
+      if (args[0] === "status") {
+        return { exitCode: 128, stdout: "", stderr: "fatal: index file corrupt" };
+      }
+      running += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      running -= 1;
+      return failed();
+    };
+
+    await expect(createLiveStatusLoader(runner)("/repo")).rejects.toThrow(
+      "index file corrupt"
+    );
+    expect(running).toBe(0);
   });
 });
