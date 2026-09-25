@@ -4,6 +4,7 @@ import {
   type PullProgressPhase,
   type PwrGitError,
   type RemoteActivityPhase,
+  type ForkStatus,
   type RepoIdentity,
   type Result
 } from "@pwrgit/shared";
@@ -958,15 +959,41 @@ export function registerRemoteHandlers(
     );
   });
 
+  // The header asks on every worktree and graph event, and a burst of them
+  // (a rebase, a run of commits) must not become a burst of full reads. One
+  // read per checkout runs; everyone who asks meanwhile shares one more after
+  // it, since the running read may predate the change they were told about.
+  type ForkStatusRead = Promise<Result<ForkStatus | null>>;
+  const forkStatusReads = new Map<
+    string,
+    { running: ForkStatusRead; trailing: ForkStatusRead | null }
+  >();
+  const startForkStatusRead = (
+    worktreeId: string,
+    read: () => ForkStatusRead
+  ): ForkStatusRead => {
+    const entry = { running: read(), trailing: null as ForkStatusRead | null };
+    forkStatusReads.set(worktreeId, entry);
+    const settle = (): void => {
+      if (forkStatusReads.get(worktreeId) === entry && entry.trailing === null) {
+        forkStatusReads.delete(worktreeId);
+      }
+    };
+    void entry.running.then(settle, settle);
+    return entry.running;
+  };
+
   bus.register("remote:forkStatus", async (req) => {
     const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
-    return resolveForkStatus(
-      execGit,
-      worktree.path,
-      forkParentOf(worktree.repoId)
-    );
+    const read = (): ForkStatusRead =>
+      resolveForkStatus(execGit, worktree.path, forkParentOf(worktree.repoId));
+    const entry = forkStatusReads.get(req.worktreeId);
+    if (entry === undefined) return startForkStatusRead(req.worktreeId, read);
+    const next = (): ForkStatusRead => startForkStatusRead(req.worktreeId, read);
+    entry.trailing ??= entry.running.then(next, next);
+    return entry.trailing;
   });
 
   bus.register("remote:syncFork", async (req) => {

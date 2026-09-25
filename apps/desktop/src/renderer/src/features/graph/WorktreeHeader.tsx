@@ -297,7 +297,8 @@ function pullTitle(choice: PullChoice, fork: ForkChoice | null): string {
 
 /**
  * What a finished fork sync says on its card. `stands` keeps the card up
- * until dismissed: a push that failed and stash conflicts both leave the user
+ * until dismissed: a push that failed, a push held back because the tracked
+ * branch has commits the source lacks, and stash conflicts all leave the user
  * something to do.
  */
 function forkSyncReceipt(
@@ -308,9 +309,11 @@ function forkSyncReceipt(
   const { push } = outcome;
   let summary = moved;
   let pushFailed = false;
+  let notPushed = false;
   if (push.outcome === "pushed") {
     summary = `${moved} · pushed to ${push.remote}/${push.branch}`;
   } else if (push.outcome === "diverged") {
+    notPushed = true;
     summary = `${moved} · ${push.remote}/${push.branch} has ${commits(push.overwrites)} ${outcome.source} doesn't, so it was not pushed`;
   } else if (push.outcome === "failed") {
     pushFailed = true;
@@ -330,10 +333,12 @@ function forkSyncReceipt(
     summary,
     flash: pushFailed
       ? { text: "synced · push failed", tone: "warn" }
-      : push.outcome === "skipped"
-        ? { text: `pulled ${outcome.source}`, tone: "ok" }
-        : { text: `synced with ${outcome.source}`, tone: "ok" },
-    stands: pushFailed
+      : notPushed
+        ? { text: "pulled · not pushed", tone: "warn" }
+        : push.outcome === "skipped"
+          ? { text: `pulled ${outcome.source}`, tone: "ok" }
+          : { text: `synced with ${outcome.source}`, tone: "ok" },
+    stands: pushFailed || notPushed
   };
 }
 
@@ -723,18 +728,21 @@ export function WorktreeHeader({
    * Compare the branch with the fork's source and open the recovery dialog
    * aimed at it. The fork status is read again alongside: a sync has just
    * fetched, and the tracked tip the rebase's push is leased on has to be the
-   * one Git holds now, not the one the header last drew.
+   * one Git holds now, not the one the header last drew. `current` is the
+   * operation it belongs to: a Pull started meanwhile supersedes it, and the
+   * dialog never opens over that Pull.
    */
   const reviewForkDivergence = async (
     worktreeId: string,
     sourceRef: string,
-    push: boolean
+    push: boolean,
+    current: () => boolean
   ): Promise<Result<void, PwrGitError>> => {
     const [inspected, fresh] = await Promise.all([
       dispatch("remote:inspectDivergence", { worktreeId, ref: sourceRef }),
       dispatch("remote:forkStatus", { worktreeId })
     ]);
-    if (activeWorktreeId.current !== worktreeId) return { ok: true, value: undefined };
+    if (!current()) return { ok: true, value: undefined };
     if (!inspected.ok) return inspected;
     const pushTo =
       push && fresh.ok && fresh.value !== null ? forkPushTarget(fresh.value) : null;
@@ -769,7 +777,8 @@ export function WorktreeHeader({
           const reviewed = await reviewForkDivergence(
             worktreeId,
             fork.source.ref,
-            push
+            push,
+            current
           );
           if (!current()) return;
           setBusy(null);
@@ -779,6 +788,10 @@ export function WorktreeHeader({
             status.dismiss();
             return;
           }
+        }
+        if (!current()) return;
+        if (await handOffToSshRecovery("pull", worktreeId, result.error, current)) {
+          return;
         }
         setBusy(null);
         flashError("Pull", result.error);
@@ -1115,10 +1128,21 @@ export function WorktreeHeader({
             title: `${forkDrift.label} has ${commits(forkDrift.behind)} not in ${forkStatus?.branch ?? worktree.branch}; it is where this branch's pull request lands, not commits available to pull`
           }
         : null;
+  // Sync catches the branch up with everything it is behind. Once the source
+  // has nothing new, that is the tracked branch — the same fallback the
+  // status chip makes — and a fast-forward to the source would pull nothing
+  // while the chip counts commits waiting on `origin/main`.
+  const runs: PullChoice =
+    choice === "sync" &&
+    forkChoice !== null &&
+    forkChoice.source.behind === 0 &&
+    behind > 0
+      ? "tracked"
+      : choice;
   // The accent says pulling has something to do, so it follows what Pull
   // would pull from.
   const pullHasWork =
-    forkChoice === null || choice === "tracked"
+    forkChoice === null || runs === "tracked"
       ? behind > 0
       : forkChoice.source.behind > 0;
   const pullTrigger = statusTrigger("pull");
@@ -1143,12 +1167,16 @@ export function WorktreeHeader({
           rebase: () => {
             if (running !== null) return;
             const worktreeId = id;
+            const current = beginOperation(worktreeId);
             void reviewForkDivergence(
               worktreeId,
               forkChoice.source.ref,
-              choice !== "source"
+              choice !== "source",
+              current
             ).then((reviewed) => {
-              if (!reviewed.ok) flashError("Rebase", reviewed.error, { onCard: false });
+              if (!reviewed.ok && current()) {
+                flashError("Rebase", reviewed.error, { onCard: false });
+              }
             });
           },
           reset: () => reviewForkReset(forkChoice.source.ref)
@@ -1272,11 +1300,11 @@ export function WorktreeHeader({
                 className={`wt-btn wt-btn--pull${pullHasWork ? " is-behind" : ""}${
                   pullMenu === null ? "" : " wt-split__main"
                 }`}
-                onClick={(event) => runPull(choice, event.currentTarget)}
+                onClick={(event) => runPull(runs, event.currentTarget)}
                 aria-disabled={running !== null}
                 aria-label={running === "pull" ? busyLabel("pull") : "Pull"}
                 aria-busy={running === "pull"}
-                {...busyTitle("pull", pullTitle(choice, forkChoice))}
+                {...busyTitle("pull", pullTitle(runs, forkChoice))}
                 {...pullTrigger}
                 ref={(element) => {
                   pullButton.current = element;

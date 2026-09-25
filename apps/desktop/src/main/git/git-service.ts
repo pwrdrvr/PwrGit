@@ -2364,7 +2364,7 @@ async function forkSourceDefaultRef(
       ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`],
       cwd
     );
-    return exists.ok && exists.value.exitCode === 0 ? candidate : null;
+    if (exists.ok && exists.value.exitCode === 0) return candidate;
   }
   return null;
 }

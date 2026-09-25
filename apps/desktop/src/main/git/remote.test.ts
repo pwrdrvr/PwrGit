@@ -2492,6 +2492,20 @@ describe("reset targets on a fork", () => {
       label: "upstream/main",
       behind: 0
     });
+
+    // A home remote whose default the source lacks is passed over for the
+    // next one, not taken as the answer.
+    git(local, ["switch", "fix/label-overflow"]);
+    git(local, ["update-ref", "refs/remotes/origin/trunk", "HEAD"]);
+    git(local, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]);
+    git(local, ["remote", "add", "mirror", "https://example.invalid/mirror.git"]);
+    git(local, ["update-ref", "refs/remotes/mirror/main", "HEAD"]);
+    git(local, ["symbolic-ref", "refs/remotes/mirror/HEAD", "refs/remotes/mirror/main"]);
+    const renamed = await resolveForkStatus(systemGit, local, null);
+    expect(renamed.ok && renamed.value?.drift).toEqual({
+      label: "upstream/main",
+      behind: 2
+    });
   });
 
   it("has nothing to say without a fork source, or on a detached checkout", async () => {

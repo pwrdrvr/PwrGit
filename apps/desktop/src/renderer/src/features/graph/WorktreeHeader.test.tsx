@@ -2286,6 +2286,86 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     await remount(feature, null);
     expect(drift()).toBeNull();
   });
+
+  it("pulls the tracked branch once the source has nothing new", async () => {
+    // origin/main took two commits from another machine; upstream is level.
+    answer(
+      behindSource({
+        behind: 0,
+        pushBack: {
+          remote: "origin",
+          branch: "main",
+          ref: "refs/remotes/origin/main",
+          head: "2".repeat(40),
+          overwrites: 2,
+          adds: 0
+        }
+      })
+    );
+    await remount(worktree, { ...level, behind: 2 });
+    expect(statusChip()).toBe("↓2 behind");
+    expect(pull()?.classList.contains("is-behind")).toBe(true);
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:pull", {
+      worktreeId: "worktree-1"
+    });
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:syncFork",
+      expect.anything()
+    );
+  });
+
+  it("keeps the receipt up when the fork's branch has commits the source lacks", async () => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 1 }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(statusChip()).toBe("pulled · not pushed");
+    expect(card()?.textContent).toContain(
+      "origin/main has 1 commit upstream/main doesn't, so it was not pushed"
+    );
+  });
+
+  it("offers SSH when the sync had no HTTPS credential", async () => {
+    const recovery: SshRemoteRecovery = {
+      remote: "origin",
+      httpsUrl: "https://github.com/me/sparkline.git",
+      sshUrl: "git@github.com:me/sparkline.git",
+      pushUrlWillAlsoChange: true
+    };
+    answer(behindSource(), {
+      "remote:syncFork": err({
+        kind: "remote",
+        code: "authentication_required",
+        message:
+          "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+      }),
+      "remote:inspectSshRecovery": ok(recovery)
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:inspectSshRecovery", {
+      worktreeId: "worktree-1",
+      operation: "pull"
+    });
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain(
+      recovery.sshUrl
+    );
+    expect(showErrorToast).not.toHaveBeenCalled();
+  });
 });
 
 describe("WorktreeHeader offers a fork when this account cannot push", () => {

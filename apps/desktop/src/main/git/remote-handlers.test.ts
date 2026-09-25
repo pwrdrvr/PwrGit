@@ -1447,6 +1447,39 @@ describe("remote handlers", () => {
         expect(emitEvent).not.toHaveBeenCalledWith("graph:changed", expect.anything());
       });
 
+      it("runs one fork read per checkout, and one more for whoever asked meanwhile", async () => {
+        const reads: Array<(status: ForkStatus | null) => void> = [];
+        vi.mocked(resolveForkStatus).mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              reads.push((status) => resolve(ok(status)));
+            })
+        );
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+        const ask = () => bus.dispatch("remote:forkStatus", { worktreeId: "wt-1" });
+
+        const first = ask();
+        const second = ask();
+        const third = ask();
+        await vi.waitFor(() => expect(reads).toHaveLength(1));
+        reads[0]?.(null);
+        expect(await first).toEqual(ok(null));
+        // The two that asked during the first read share the one after it,
+        // which sees whatever changed since the first began.
+        await vi.waitFor(() => expect(reads).toHaveLength(2));
+        reads[1]?.(behindSource());
+        expect(await second).toEqual(ok(behindSource()));
+        expect(await third).toEqual(ok(behindSource()));
+        expect(resolveForkStatus).toHaveBeenCalledTimes(2);
+
+        // Idle again: the next ask starts a read of its own.
+        const fourth = ask();
+        await vi.waitFor(() => expect(reads).toHaveLength(3));
+        reads[2]?.(null);
+        expect(await fourth).toEqual(ok(null));
+      });
+
       it("fast-forwards to the source, then pushes the same tip to the fork", async () => {
         vi.mocked(resolveForkStatus)
           .mockResolvedValueOnce(ok(behindSource()))
