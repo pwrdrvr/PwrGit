@@ -4,6 +4,8 @@ import {
   type PullProgressPhase,
   type PwrGitError,
   type RemoteActivityPhase,
+  type ForkStatus,
+  type RepoIdentity,
   type Result
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
@@ -13,14 +15,19 @@ import type { DB } from "../persistence/db";
 import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import {
   addRemote,
+  commitsSince,
+  headCommit,
   controlledGit,
   fetchAllRemotes,
   fetchNamedRemote,
+  fetchNamedRemotes,
   fetchRemote,
+  forkFetchRemotes,
   inspectRemoteDivergence,
   inspectRemoteReset,
   pullFastForward,
   planPushRefs,
+  pushBranchWithLease,
   pushPlannedRefs,
   pushRefLabel,
   pushRemote,
@@ -28,8 +35,12 @@ import {
   removeRemote,
   resetToRemote,
   resetToUpstream,
+  resolveForkStatus,
   resolveResetTargets,
-  updateRemote
+  updateRemote,
+  type FastForwardTarget,
+  type ForkParentHint,
+  type PullOutcome
 } from "./git-service";
 import {
   RemoteActivityRegistry,
@@ -187,7 +198,9 @@ export function registerRemoteHandlers(
   /** Re-read this repo's forge identity. `force` skips the freshness gate —
    *  the repo's own remotes just changed, so the stored row is wrong now
    *  however recently it was written. */
-  refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void
+  refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void,
+  /** The stored forge identity, for the reset dialog's fork-source card. */
+  readIdentity?: (repoId: string) => RepoIdentity | undefined
 ): void {
   // Every long-running remote command reports through one registry: the live
   // status surfaces read it, and the cancel button acts on it.
@@ -240,6 +253,19 @@ export function registerRemoteHandlers(
       name: row.name ?? repoId,
       profileId: row.profileId ?? ""
     };
+  };
+
+  // The stored identity row, never a forge call: fork surfaces answer from
+  // what is known, and an unknown parent falls back to the `upstream` naming
+  // convention.
+  const forkParentOf = (repoId: string): ForkParentHint | null => {
+    const identity = readIdentity?.(repoId);
+    return identity?.parent === undefined
+      ? null
+      : {
+          hostname: identity.hostname,
+          nameWithOwner: identity.parent.nameWithOwner
+        };
   };
 
   /**
@@ -349,7 +375,19 @@ export function registerRemoteHandlers(
       },
       "fetch",
       async (git, activity) => {
-        const fetched = await fetchRemote(git, worktree.path, true);
+        // On a fork, a plain Fetch asks the source too: its tip is the only
+        // thing that can say the fork has fallen behind.
+        const remotes =
+          req.remotes ??
+          (await forkFetchRemotes(
+            execGit,
+            worktree.path,
+            forkParentOf(worktree.repoId)
+          )) ??
+          undefined;
+        const fetched = await (remotes === undefined
+          ? fetchRemote(git, worktree.path, true)
+          : fetchNamedRemotes(git, worktree.path, remotes, true));
         if (fetched.ok) {
           // Off the network phase before the branch index is rebuilt. Silence
           // is only evidence while `--progress` obliges Git to speak; leaving
@@ -357,6 +395,12 @@ export function registerRemoteHandlers(
           // transfer as a stalled one.
           activity.setPhase("refresh");
           await refreshRemoteBranches(worktree.repoId, "fetch");
+          // The worktree refresh below repaints the graph only when the
+          // branch's own sync state moved. A second remote's tips never move
+          // it — the fork source's new commits are exactly the ones it misses.
+          if (remotes !== undefined) {
+            emitEvent("graph:changed", { repoId: worktree.repoId });
+          }
         }
         return fetched;
       }
@@ -365,7 +409,9 @@ export function registerRemoteHandlers(
     logMain(
       "info",
       "remote",
-      `fetched ${worktree.path} (${seconds(startedAt)})`
+      req.remotes === undefined
+        ? `fetched ${worktree.path} (${seconds(startedAt)})`
+        : `fetched ${req.remotes.join(", ")} for ${worktree.path} (${seconds(startedAt)})`
     );
     refreshIdentity?.(worktree.repoId);
     refresher.refreshWorktree(req.worktreeId);
@@ -592,8 +638,57 @@ export function registerRemoteHandlers(
     return result;
   });
 
-  bus.register("remote:pull", async (req) => {
-    const live = worktreeOf(req.worktreeId);
+  /** Push one reviewed object to a remote branch, leased on its reviewed tip. */
+  const runLeasedPush = async (
+    worktreeId: string,
+    req: { remote: string; branch: string; head: string; expectedHead: string }
+  ): Promise<Result<null>> => {
+    const live = worktreeOf(worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    const repo = repoOf(worktree.repoId);
+    const startedAt = Date.now();
+    const result = await tracked(
+      {
+        kind: "push",
+        profileId: repo?.profileId ?? "",
+        repoId: worktree.repoId,
+        repoName: repo?.name ?? worktree.repoId,
+        worktreeId,
+        branch: worktree.branch
+      },
+      "push",
+      async (git, activity) => {
+        const pushed = await pushBranchWithLease(git, worktree.path, req);
+        if (pushed.ok) {
+          activity.setPhase("refresh");
+          await refreshRemoteBranches(worktree.repoId, "push");
+        }
+        return pushed;
+      }
+    );
+    if (!result.ok) return err(classifyAuthFailure(result.error));
+    logMain(
+      "info",
+      "remote",
+      `pushed ${req.head} to ${req.remote}/${req.branch} leased on ${req.expectedHead} for ${worktree.path} (${seconds(startedAt)})`
+    );
+    // The pushed branch may be the repository default, which every sibling's
+    // staleness is measured against.
+    refresher.refreshRepoWorktrees(worktree.repoId);
+    return ok(null);
+  };
+
+  /**
+   * Pull's fast-forward, with everything that makes it survivable: the
+   * repository fetch lock, the stall watchdog, rollback, and the stash
+   * reapply. A fork sync runs the same thing toward the fork's source.
+   */
+  const runPull = async (
+    worktreeId: string,
+    target: FastForwardTarget = { kind: "upstream" }
+  ): Promise<Result<PullOutcome>> => {
+    const live = worktreeOf(worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
     const path = worktree.path;
@@ -602,13 +697,17 @@ export function registerRemoteHandlers(
     let currentPhase: PullWatchdogPhase = "starting";
     let recoveryActive = false;
     let recoveryWatchdog: PullWatchdog | undefined;
-    logMain("info", "remote", `pull started ${path} (${seconds(startedAt)})`);
+    logMain(
+      "info",
+      "remote",
+      `pull started ${path}${target.kind === "ref" ? ` toward ${target.label}` : ""} (${seconds(startedAt)})`
+    );
     const activity = activities.begin({
       kind: "pull",
       profileId: repo?.profileId ?? "",
       repoId: worktree.repoId,
       repoName: repo?.name ?? worktree.repoId,
-      worktreeId: req.worktreeId,
+      worktreeId: worktreeId,
       branch: worktree.branch
     });
     try {
@@ -675,7 +774,7 @@ export function registerRemoteHandlers(
           };
           activity.setPhase("fetch");
           try {
-            const pulled = await operations.run(req.worktreeId, () =>
+            const pulled = await operations.run(worktreeId, () =>
               pullFastForward(activityGit(activity, undefined), path, reportPhase, {
                 signal,
                 onActivity: () => watchdog.noteActivity(),
@@ -713,7 +812,7 @@ export function registerRemoteHandlers(
                     }
                   };
                 }
-              })
+              }, target)
             );
             if (pulled.ok) {
               // Git has finished; branch-index maintenance remains under the
@@ -764,7 +863,7 @@ export function registerRemoteHandlers(
       reportPhase("refresh");
       try {
         const refresh = await waitForRefresh(
-          refresher.refreshWorktree(req.worktreeId)
+          refresher.refreshWorktree(worktreeId)
         );
         if (refresh === "timed_out") {
           logMain(
@@ -793,7 +892,9 @@ export function registerRemoteHandlers(
       // Pull may leave an ordinary recovery stash after a failed reapply.
       emitEvent("stash:changed", { repoId: worktree.repoId });
     }
-  });
+  };
+
+  bus.register("remote:pull", (req) => runPull(req.worktreeId));
 
   bus.register("remote:push", async (req) => {
     const live = worktreeOf(req.worktreeId);
@@ -830,7 +931,7 @@ export function registerRemoteHandlers(
     const live = pathOf(req.worktreeId);
     if (!live.ok) return live;
     const path = live.value;
-    return inspectRemoteDivergence(execGit, path);
+    return inspectRemoteDivergence(execGit, path, req.ref);
   });
 
   bus.register("remote:resetToUpstream", async (req) => {
@@ -848,10 +949,150 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:resetTargets", async (req) => {
-    const live = pathOf(req.worktreeId);
+    const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
-    const path = live.value;
-    return resolveResetTargets(execGit, path);
+    const worktree = live.value;
+    return resolveResetTargets(
+      execGit,
+      worktree.path,
+      forkParentOf(worktree.repoId)
+    );
+  });
+
+  // The header asks on every worktree and graph event, and a burst of them
+  // (a rebase, a run of commits) must not become a burst of full reads. One
+  // read per checkout runs; everyone who asks meanwhile shares one more after
+  // it, since the running read may predate the change they were told about.
+  type ForkStatusRead = Promise<Result<ForkStatus | null>>;
+  const forkStatusReads = new Map<
+    string,
+    { running: ForkStatusRead; trailing: ForkStatusRead | null }
+  >();
+  const startForkStatusRead = (
+    worktreeId: string,
+    read: () => ForkStatusRead
+  ): ForkStatusRead => {
+    const entry = { running: read(), trailing: null as ForkStatusRead | null };
+    forkStatusReads.set(worktreeId, entry);
+    const settle = (): void => {
+      if (forkStatusReads.get(worktreeId) === entry && entry.trailing === null) {
+        forkStatusReads.delete(worktreeId);
+      }
+    };
+    void entry.running.then(settle, settle);
+    return entry.running;
+  };
+
+  bus.register("remote:forkStatus", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    const read = (): ForkStatusRead =>
+      resolveForkStatus(execGit, worktree.path, forkParentOf(worktree.repoId));
+    const entry = forkStatusReads.get(req.worktreeId);
+    if (entry === undefined) return startForkStatusRead(req.worktreeId, read);
+    const next = (): ForkStatusRead => startForkStatusRead(req.worktreeId, read);
+    entry.trailing ??= entry.running.then(next, next);
+    return entry.trailing;
+  });
+
+  bus.register("remote:syncFork", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    const parent = forkParentOf(worktree.repoId);
+    const before = await resolveForkStatus(execGit, worktree.path, parent);
+    if (!before.ok) return before;
+    const status = before.value;
+    const source = status?.source ?? null;
+    if (
+      status === null ||
+      source === null ||
+      status.branch !== req.branch ||
+      source.ref !== req.sourceRef
+    ) {
+      return err({
+        kind: "remote",
+        code: "fork_sync_stale",
+        message: `${req.branch} is no longer checked out against that source. Nothing was changed.`
+      });
+    }
+    const { tracked } = status;
+    const pulled = await runPull(req.worktreeId, {
+      kind: "ref",
+      ref: source.ref,
+      label: source.label,
+      remotes: tracked === null ? [source.remote] : [tracked.remote, source.remote],
+      branch: status.branch
+    });
+    if (!pulled.ok) return pulled;
+
+    // Read again: the fetch moved both tips, and the push is judged against
+    // what the tracked branch holds now, not when the chip was drawn.
+    const [after, arrived] = await Promise.all([
+      resolveForkStatus(execGit, worktree.path, parent),
+      commitsSince(execGit, worktree.path, status.head)
+    ]);
+    const outcome = {
+      source: source.label,
+      arrived,
+      stashed: pulled.value.stashed,
+      reappliedWithConflicts: pulled.value.reappliedWithConflicts
+    };
+    const now = after.ok ? after.value : null;
+    if (now === null || now.tracked === null || now.source === null) {
+      return ok({ ...outcome, push: { outcome: "no_tracking" as const } });
+    }
+    const pushBack = now.source.pushBack;
+    if (pushBack === null) {
+      const remote = now.tracked.remote;
+      return ok({
+        ...outcome,
+        push: {
+          outcome: "up_to_date" as const,
+          remote,
+          branch: now.tracked.label.slice(remote.length + 1)
+        }
+      });
+    }
+    // Pull's "only" choice: the fast-forward was the whole request, and the
+    // tracked branch waits for the user's own Push.
+    if (!req.push) {
+      return ok({
+        ...outcome,
+        push: {
+          outcome: "skipped" as const,
+          remote: pushBack.remote,
+          branch: pushBack.branch
+        }
+      });
+    }
+    const target = { remote: pushBack.remote, branch: pushBack.branch };
+    if (pushBack.overwrites > 0) {
+      return ok({
+        ...outcome,
+        push: {
+          outcome: "diverged" as const,
+          ...target,
+          overwrites: pushBack.overwrites
+        }
+      });
+    }
+    const pushed = await runLeasedPush(req.worktreeId, {
+      ...target,
+      head: now.source.head,
+      expectedHead: pushBack.head
+    });
+    return ok({
+      ...outcome,
+      push: pushed.ok
+        ? { outcome: "pushed" as const, ...target }
+        : {
+            outcome: "failed" as const,
+            ...target,
+            message: pushed.error.message
+          }
+    });
   });
 
   bus.register("remote:inspectReset", async (req) => {
@@ -883,19 +1124,54 @@ export function registerRemoteHandlers(
     return ok(null);
   });
 
+  bus.register("remote:pushBranchWithLease", (req) =>
+    runLeasedPush(req.worktreeId, req)
+  );
+
   bus.register("remote:rebaseOntoUpstream", async (req) => {
     const live = pathOf(req.worktreeId);
     if (!live.ok) return live;
     const path = live.value;
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
-      rebaseOntoUpstream(execGit, path, req)
+      rebaseOntoUpstream(execGit, path, req, req.ref)
     );
     // A stopped rebase changes the checkout too; refresh so the Changes panel
     // and sync badges show the conflict state immediately.
     refresher.refreshWorktree(req.worktreeId);
     if (!result.ok) return result;
-    logMain("info", "remote", `rebased ${path} onto upstream (${seconds(startedAt)})`);
-    return ok(null);
+    logMain(
+      "info",
+      "remote",
+      `rebased ${path} onto ${req.ref ?? "upstream"} (${seconds(startedAt)})`
+    );
+    const { pushTo } = req;
+    if (pushTo === undefined) return ok({ push: null });
+
+    // A fork's branch rebased onto its source: the tracked branch still holds
+    // the commits the rebase rewrote, so only a forced push brings it along —
+    // leased on the tip the review showed, so work pushed there since is
+    // refused rather than replaced. The rebase stands either way.
+    const target = { remote: pushTo.remote, branch: pushTo.branch };
+    const head = await headCommit(execGit, path);
+    if (head === null) {
+      return ok({
+        push: {
+          outcome: "failed" as const,
+          ...target,
+          message: "Could not read the rebased commit to push."
+        }
+      });
+    }
+    const pushed = await runLeasedPush(req.worktreeId, {
+      ...target,
+      head,
+      expectedHead: pushTo.expectedHead
+    });
+    return ok({
+      push: pushed.ok
+        ? { outcome: "pushed" as const, ...target }
+        : { outcome: "failed" as const, ...target, message: pushed.error.message }
+    });
   });
 }

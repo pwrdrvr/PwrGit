@@ -14,6 +14,8 @@ import {
 import {
   err,
   ok,
+  type ForkStatus,
+  type ForkSyncOutcome,
   type RemoteActivity,
   type RemoteEndpoint,
   type Repo,
@@ -48,6 +50,10 @@ import {
   WHERE_THE_USER_IS
 } from "../remote/useRemoteActivityPopover";
 import { showErrorToast } from "../../lib/toast";
+import {
+  closeResetToRemote,
+  currentResetToRemote
+} from "./reset-to-remote";
 import { WorktreeHeader } from "./WorktreeHeader";
 
 const repo = {
@@ -1904,6 +1910,461 @@ describe("WorktreeHeader default-branch drift", () => {
     expect(drift()).toBeNull();
     await render({ ...feature, behindDefault: 0 });
     expect(drift()).toBeNull();
+  });
+});
+
+describe("WorktreeHeader keeps a fork up with its source", () => {
+  /** `main` level with `origin/main`, and the source ten commits on. */
+  const behindSource = (
+    over: Partial<NonNullable<ForkStatus["source"]>> = {}
+  ): ForkStatus => ({
+    branch: "main",
+    head: "1".repeat(40),
+    source: {
+      ref: "refs/remotes/upstream/main",
+      label: "upstream/main",
+      remote: "upstream",
+      head: "3".repeat(40),
+      parent: "octo-labs/sparkline",
+      ahead: 0,
+      behind: 10,
+      pushBack: {
+        remote: "origin",
+        branch: "main",
+        ref: "refs/remotes/origin/main",
+        head: "1".repeat(40),
+        overwrites: 0,
+        adds: 10
+      },
+      ...over
+    },
+    tracked: {
+      ref: "refs/remotes/origin/main",
+      label: "origin/main",
+      remote: "origin",
+      head: "1".repeat(40),
+      ahead: 0,
+      behind: 0
+    },
+    drift: null
+  });
+  const synced: ForkSyncOutcome = {
+    source: "upstream/main",
+    arrived: 10,
+    stashed: false,
+    reappliedWithConflicts: false,
+    push: { outcome: "pushed", remote: "origin", branch: "main" }
+  };
+  /** Level with `origin/main`: the chip says "up to date" from this alone. */
+  const level: WorktreeState = {
+    worktreeId: "worktree-1",
+    branch: "main",
+    head: "1".repeat(40),
+    hasUpstream: true,
+    ahead: 0,
+    behind: 0,
+    dirty: 0,
+    behindDefault: 0,
+    defaultBranch: "main",
+    mergedIntoDefault: false,
+    divergedFromDefault: false,
+    isDefaultBranch: true,
+    updatedAt: "2026-09-25T00:00:00.000Z"
+  };
+
+  /** Answer the fork read, and whichever commands a test cares about. */
+  const answer = (
+    fork: ForkStatus | null,
+    replies: Record<string, unknown> = {}
+  ): void => {
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "remote:forkStatus") return Promise.resolve(ok(fork));
+      if (name === "remote:activities") return Promise.resolve(ok([]));
+      if (name in replies) return Promise.resolve(replies[name]);
+      return new Promise(() => undefined);
+    });
+  };
+  const remount = async (
+    w: Worktree = worktree,
+    state: WorktreeState | null = level
+  ): Promise<void> => {
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<WorktreeHeader repo={repo} worktree={w} state={state} />);
+    });
+  };
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 4; i += 1) await Promise.resolve();
+  };
+  const statusChip = (): string | null | undefined =>
+    container.querySelector(".sync-chip:not(.sync-chip--drift)")?.textContent;
+  const pull = (): HTMLButtonElement | null =>
+    container.querySelector<HTMLButtonElement>(".wt-btn--pull");
+  const caret = (): HTMLButtonElement | null =>
+    container.querySelector<HTMLButtonElement>(".wt-split__caret");
+  const card = (): Element | null =>
+    document.querySelector(".remote-activity-popover");
+  const menuRows = (): HTMLElement[] => [
+    ...document.querySelectorAll<HTMLElement>(
+      '.pull-menu [role="menuitem"], .pull-menu [role="menuitemradio"]'
+    )
+  ];
+  const row = (title: string): HTMLElement | undefined =>
+    menuRows().find(
+      (el) => el.querySelector(".pull-menu__title")?.textContent === title
+    );
+  const openMenu = async (): Promise<void> => {
+    await act(async () => caret()?.click());
+  };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("reads the chip against the source, where the tracked branch says nothing", async () => {
+    answer(behindSource());
+    await remount();
+    // origin/main is level, which is the "up to date" this replaced.
+    expect(statusChip()).toBe("↓10 behind upstream");
+    expect(pull()?.classList.contains("is-behind")).toBe(true);
+    expect(caret()?.getAttribute("aria-label")).toBe("More pull options");
+    expect(container.querySelector(".wt-split.is-behind")).not.toBeNull();
+    expect(container.querySelector(".sync-chip--fork")).toBeNull();
+  });
+
+  it("keeps the plain Pull wherever there is one place to pull from", async () => {
+    answer(null);
+    await remount();
+    expect(caret()).toBeNull();
+    expect(statusChip()).toBe("up to date");
+    // A feature branch on a fork: the source has no branch of that name.
+    answer({ ...behindSource(), source: null });
+    await remount();
+    expect(caret()).toBeNull();
+    // Nothing tracked to fall back on, so nothing to choose between.
+    answer({ ...behindSource(), tracked: null });
+    await remount();
+    expect(caret()).toBeNull();
+  });
+
+  it("syncs from Pull by default, and the receipt names the push", async () => {
+    answer(behindSource(), { "remote:syncFork": ok(synced) });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:syncFork", {
+      worktreeId: "worktree-1",
+      branch: "main",
+      sourceRef: "refs/remotes/upstream/main",
+      push: true
+    });
+    expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
+    expect(card()?.textContent).toContain(
+      "Fast-forwarded main to upstream/main · 10 commits · pushed to origin/main"
+    );
+  });
+
+  it("keeps the receipt up when the fork could not be pushed", async () => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        push: {
+          outcome: "failed",
+          remote: "origin",
+          branch: "main",
+          message: "Permission to me/sparkline.git denied.\nmore detail"
+        }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(card()?.textContent).toContain(
+      "Fast-forwarded main to upstream/main · 10 commits, but pushing origin/main failed — Permission to me/sparkline.git denied."
+    );
+  });
+
+  it("runs a row from the arrow once, and keeps it for this repository", async () => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        push: { outcome: "skipped", remote: "origin", branch: "main" }
+      })
+    });
+    await remount();
+    await openMenu();
+    expect(caret()?.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      menuRows().map((el) => [
+        el.querySelector(".pull-menu__title")?.textContent,
+        el.getAttribute("aria-checked")
+      ])
+    ).toEqual([
+      ["Sync with upstream/main", "true"],
+      ["Pull upstream/main only", "false"],
+      ["Pull origin/main only", "false"]
+    ]);
+    expect(row("Sync with upstream/main")?.textContent).toContain(
+      "Fast-forward main 10 commits, then push them to origin/main."
+    );
+
+    await act(async () => {
+      row("Pull upstream/main only")?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith(
+      "remote:syncFork",
+      expect.objectContaining({ push: false })
+    );
+    expect(card()?.textContent).toContain(
+      "Fast-forwarded main to upstream/main · 10 commits · origin/main not pushed"
+    );
+
+    // Kept: a fresh header on the same repository runs it from the button.
+    bridge.dispatch.mockClear();
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith(
+      "remote:syncFork",
+      expect.objectContaining({ push: false })
+    );
+    await openMenu();
+    expect(row("Pull upstream/main only")?.getAttribute("aria-checked")).toBe("true");
+
+    // The escape hatch: Pull as it is everywhere else.
+    await act(async () => {
+      row("Pull origin/main only")?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:pull", {
+      worktreeId: "worktree-1"
+    });
+    expect(window.localStorage.getItem("pwrgit.pullChoice.repo-1")).toBe("tracked");
+  });
+
+  it("leads with the reviews while the branch has commits of its own", async () => {
+    onTestFinished(() => closeResetToRemote());
+    answer(behindSource({ ahead: 2, behind: 12 }));
+    await remount();
+    expect(statusChip()).toBe("↓12 upstream · ↑2");
+    await openMenu();
+    expect(document.querySelector(".pull-menu__note")?.textContent).toBe(
+      "main has 2 commits upstream/main doesn't"
+    );
+    expect(
+      menuRows().map((el) => el.querySelector(".pull-menu__title")?.textContent)
+    ).toEqual([
+      "Rebase onto upstream/main…",
+      "Reset to upstream/main…",
+      "Sync with upstream/main",
+      "Pull upstream/main only",
+      "Pull origin/main only"
+    ]);
+    // The reviews are one-off actions, not something Pull remembers.
+    expect(row("Rebase onto upstream/main…")?.getAttribute("role")).toBe("menuitem");
+    await act(async () => row("Reset to upstream/main…")?.click());
+    expect(currentResetToRemote()).toMatchObject({
+      worktree: { id: "worktree-1" },
+      preselectRef: "refs/remotes/upstream/main"
+    });
+  });
+
+  it("compares a sync the branch outgrew with the source, and rebases then pushes", async () => {
+    const divergence = {
+      branch: "main",
+      head: "1".repeat(40),
+      upstream: "upstream/main",
+      upstreamHead: "3".repeat(40),
+      workingTreeClean: true,
+      localCommits: [
+        { hash: "a".repeat(40), shortHash: "aaaaaaa", subject: "ci: fork builds", additions: 1, deletions: 0 }
+      ],
+      upstreamCommits: [],
+      alignedCommits: [],
+      matchingCommitSubjects: false
+    };
+    answer(behindSource(), {
+      "remote:syncFork": err({
+        kind: "remote",
+        code: "not_fast_forward",
+        message: "This branch has commits upstream/main doesn't, so it can't fast-forward to it."
+      }),
+      "remote:inspectDivergence": ok(divergence),
+      "remote:rebaseOntoUpstream": ok({
+        push: { outcome: "pushed", remote: "origin", branch: "main" }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:inspectDivergence", {
+      worktreeId: "worktree-1",
+      ref: "refs/remotes/upstream/main"
+    });
+    const dialog = document.querySelector(".pull-divergence");
+    expect(dialog?.textContent).toContain(
+      "Then push the result to origin/main, replacing what it holds — only if it is still at 1111111."
+    );
+    // The dialog is the outcome, and it is modal: no card left behind it.
+    expect(card()).toBeNull();
+
+    const rebase = [...(dialog?.querySelectorAll("button") ?? [])].find(
+      (button) => button.textContent === "Rebase and push"
+    );
+    await act(async () => {
+      rebase?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:rebaseOntoUpstream", {
+      worktreeId: "worktree-1",
+      branch: "main",
+      head: "1".repeat(40),
+      upstreamHead: "3".repeat(40),
+      ref: "refs/remotes/upstream/main",
+      pushTo: { remote: "origin", branch: "main", expectedHead: "1".repeat(40) }
+    });
+    expect(document.querySelector(".pull-divergence")).toBeNull();
+    expect(statusChip()).toBe("rebased · pushed to origin/main");
+  });
+
+  it("re-reads when a fetch moves only the source's tip", async () => {
+    answer(behindSource());
+    await remount();
+    expect(statusChip()).toBe("↓10 behind upstream");
+    answer(behindSource({ behind: 0 }));
+    await act(async () => {
+      bridge.handlers.get("graph:changed")?.({ repoId: "repo-1" });
+    });
+    expect(statusChip()).toBe("up to date");
+    expect(pull()?.classList.contains("is-behind")).toBe(false);
+  });
+
+  it("counts a feature branch's drift against the source's default branch", async () => {
+    const feature: Worktree = {
+      ...worktree,
+      branch: "fix/label-overflow",
+      isDefaultBranch: false,
+      isPrimary: false,
+      behind: 0,
+      behindDefault: 4
+    };
+    const drift = (): HTMLElement | null =>
+      container.querySelector(".sync-chip--drift");
+    answer({
+      ...behindSource(),
+      branch: "fix/label-overflow",
+      source: null,
+      drift: { label: "upstream/main", behind: 7 }
+    });
+    await remount(feature, null);
+    expect(drift()?.textContent).toBe("upstream/main +7");
+    await act(async () => {
+      drift()?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      "upstream/main has 7 commits not in fix/label-overflow; it is where this branch's pull request lands, not commits available to pull"
+    );
+
+    // Its work is already in the source's default: nothing to say, even
+    // though the fork's own main still reads four ahead of it.
+    answer({
+      ...behindSource(),
+      branch: "fix/label-overflow",
+      source: null,
+      drift: { label: "upstream/main", behind: 0 }
+    });
+    await remount(feature, null);
+    expect(drift()).toBeNull();
+  });
+
+  it("pulls the tracked branch once the source has nothing new", async () => {
+    // origin/main took two commits from another machine; upstream is level.
+    answer(
+      behindSource({
+        behind: 0,
+        pushBack: {
+          remote: "origin",
+          branch: "main",
+          ref: "refs/remotes/origin/main",
+          head: "2".repeat(40),
+          overwrites: 2,
+          adds: 0
+        }
+      })
+    );
+    await remount(worktree, { ...level, behind: 2 });
+    expect(statusChip()).toBe("↓2 behind");
+    expect(pull()?.classList.contains("is-behind")).toBe(true);
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:pull", {
+      worktreeId: "worktree-1"
+    });
+    expect(bridge.dispatch).not.toHaveBeenCalledWith(
+      "remote:syncFork",
+      expect.anything()
+    );
+  });
+
+  it("keeps the receipt up when the fork's branch has commits the source lacks", async () => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 1 }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(statusChip()).toBe("pulled · not pushed");
+    expect(card()?.textContent).toContain(
+      "origin/main has 1 commit upstream/main doesn't, so it was not pushed"
+    );
+  });
+
+  it("offers SSH when the sync had no HTTPS credential", async () => {
+    const recovery: SshRemoteRecovery = {
+      remote: "origin",
+      httpsUrl: "https://github.com/me/sparkline.git",
+      sshUrl: "git@github.com:me/sparkline.git",
+      pushUrlWillAlsoChange: true
+    };
+    answer(behindSource(), {
+      "remote:syncFork": err({
+        kind: "remote",
+        code: "authentication_required",
+        message:
+          "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+      }),
+      "remote:inspectSshRecovery": ok(recovery)
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:inspectSshRecovery", {
+      worktreeId: "worktree-1",
+      operation: "pull"
+    });
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain(
+      recovery.sshUrl
+    );
+    expect(showErrorToast).not.toHaveBeenCalled();
   });
 });
 

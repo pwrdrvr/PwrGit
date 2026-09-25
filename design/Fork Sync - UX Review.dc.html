@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, LIGHT block (the theme the report came from). */
+          :root {
+            --app: #ffffff; --panel: #fdfcfa; --elev: #ffffff; --hov: #f4f0e8; --rowact: #fff5e9;
+            --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12); --line3: rgba(0,0,0,.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64;
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: rgba(183,76,0,.12); --abord: rgba(183,76,0,.42);
+            --warn: #805200; --warnsoft: rgba(128,82,0,.12);
+            --okt: #1a5c2e; --oksoft: rgba(46,110,64,.14); --okbord: rgba(26,92,46,.3); --okbar: #2e7d3c;
+            --dt: #8a1f12; --dsoft: rgba(138,31,18,.1); --dbord: rgba(138,31,18,.28);
+            --shadow: 0 18px 48px rgba(40,26,10,.14), 0 2px 6px rgba(40,26,10,.06);
+            --sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #efe9df; }
+          body { margin: 0; background: #efe9df; font-family: var(--sans); color: var(--t1); -webkit-font-smoothing: antialiased; }
+          a { color: var(--acc); text-decoration: none; } a:hover { color: var(--accb); }
+
+          /* ---- review chrome (house: "Fork From Here", "Reset to Remote - Forks") ---- */
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #fff; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 14px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: var(--t2); max-width: 900px; text-wrap: pretty; }
+          .dv-sub code, .note code, .pc code, .dv-next code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 32px 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.35 var(--sans); color: var(--t2); max-width: 696px; }
+          .dv-olabel strong { font-weight: 650; color: var(--t1); }
+          .dv-next { margin: 24px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); max-width: 980px; text-wrap: pretty; }
+          .note { margin: 0; max-width: 696px; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .rec { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--acc); color: var(--accon); font: 700 9px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; }
+          .prop { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border: 1px solid var(--abord); border-radius: 999px; color: var(--accb); font: 700 9px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; }
+
+          /* ---- gap diagram (turn 1 lede) ---- */
+          .gap { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 696px; }
+          .gap > div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+          .gap h4 { margin: 0 0 4px; font: 650 12px/1.3 var(--mono); color: var(--t1); }
+          .gap p { margin: 0; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .gap .hot { border-color: var(--abord); background: var(--rowact); }
+
+          /* ---- pros / costs ---- */
+          .pc { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 4px 6px; margin: 0; max-width: 696px; font: 400 11px/1.5 var(--sans); color: var(--t2); }
+          .pc .y { color: var(--okt); font: 700 11px/1.5 var(--mono); }
+          .pc .n { color: var(--dt); font: 700 11px/1.5 var(--mono); }
+
+          /* ---- the app pane: header row at true size (.wt-header, app.css) ----
+             .wt-header: padding 8px 20px, border-bottom --border-subtle.
+             .sync-chip: 24px, padding 0 10px, pill, 600 11px/1 mono.
+             .wt-btn: 32px, padding 0 12px, radius 7px, 1px --border-default,
+             --bg-panel-elevated, 600 12px/1 sans, gap 6px. Pull is 700.
+             .wt-actions: gap 8px, margin-left 12px. Kebab: 32x32 in the toolbar.
+             Stock window: the pane is 696px wide. */
+          .win { position: relative; width: 696px; background: var(--app); border: 1px solid var(--line2); border-radius: 10px; overflow: visible; }
+          .hdr { display: flex; align-items: center; gap: 8px; height: 49px; padding: 8px 20px; border-bottom: 1px solid var(--line); }
+          .spacer { flex: 1; }
+          .cap { margin: 0 0 -3px; font: 600 10px/1.3 var(--mono); color: var(--t3); }
+          .wins { display: flex; flex-direction: column; gap: 10px; }
+          .graph { height: 64px; margin: 0; border-radius: 0 0 10px 10px; background: repeating-linear-gradient(135deg, rgba(0,0,0,.028) 0 6px, transparent 6px 12px); display: flex; align-items: center; justify-content: center; font: 500 10.5px/1 var(--mono); color: var(--t3); }
+          .graph.tall { height: 250px; align-items: flex-end; padding-bottom: 14px; }
+          .chip { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font: 600 11px/1 var(--mono); flex: none; white-space: nowrap; }
+          .chip.mut { background: var(--panel); color: var(--t3); }
+          .chip.warn { background: var(--warnsoft); color: var(--warn); }
+          .chip.ok { background: var(--oksoft); color: var(--okt); }
+          .chip.drift { border: 1px solid var(--line); color: var(--t3); font-weight: 500; padding: 0 9px; }
+          .chip.fork { border: 1px solid var(--abord); color: var(--acc); padding: 0 9px; cursor: pointer; }
+          .chip.fork.hov { background: var(--rowact); color: var(--accb); }
+          .acts { display: flex; gap: 8px; flex: none; margin-left: 12px; }
+          .wtb { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--line2); background: var(--elev); color: var(--t1); font: 600 12px/1 var(--sans); cursor: pointer; white-space: nowrap; }
+          .wtb.pull { font-weight: 700; }
+          .wtb.lit { border-color: var(--abord); background: var(--rowact); color: var(--accb); }
+          .wtb.busy { border-color: var(--abord); background: var(--asoft); color: var(--accb); cursor: wait; }
+          .wtb.icon { width: 32px; padding: 0; justify-content: center; }
+          .ring { width: 13px; height: 13px; border-radius: 999px; border: 2px solid rgba(183,76,0,.25); border-top-color: var(--acc); }
+          /* Toolbar glyphs, copied from RefreshGlyph, PullGlyph and WorktreeHeader's
+             Push icon. Drawn once each as a mask, so every header can reuse them. */
+          .gi { flex: none; display: inline-block; width: 13px; height: 13px; background: currentColor; -webkit-mask: var(--gm) center / contain no-repeat; mask: var(--gm) center / contain no-repeat; }
+          .gi-car { width: 10px; height: 10px; }
+          .gi-fetch { --gm: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M3%2012a9%209%200%200%201%209-9%209.75%209.75%200%200%201%206.74%202.74L21%208%27%2F%3E%3Cpath%20d%3D%27M21%203v5h-5%27%2F%3E%3Cpath%20d%3D%27M21%2012a9%209%200%200%201-9%209%209.75%209.75%200%200%201-6.74-2.74L3%2016%27%2F%3E%3Cpath%20d%3D%27M8%2016H3v5%27%2F%3E%3C%2Fsvg%3E"); }
+          .gi-pull { --gm: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M12%204v11%27%2F%3E%3Cpath%20d%3D%27m7%2010%205%205%205-5%27%2F%3E%3Cpath%20d%3D%27M5%2020h14%27%2F%3E%3C%2Fsvg%3E"); }
+          .gi-push { --gm: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M12%2020V9%27%2F%3E%3Cpath%20d%3D%27m7%2014%205-5%205%205%27%2F%3E%3Cpath%20d%3D%27M5%204h14%27%2F%3E%3C%2Fsvg%3E"); }
+          .gi-car { --gm: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272.4%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27m6%209%206%206%206-6%27%2F%3E%3C%2Fsvg%3E"); }
+          .keb { display: inline-flex; align-items: center; justify-content: center; gap: 2px; flex-direction: column; width: 32px; height: 32px; border: 1px solid var(--line2); border-radius: 7px; background: var(--elev); }
+          .keb i { display: block; width: 3px; height: 3px; border-radius: 999px; background: var(--t1); }
+
+          /* ---- split Pull: one control, two targets. Lifted from PwrAgent's
+             .composer__run-split: the pair shares one outline, the inner edge is
+             squared, and a 1px divider separates the halves. ---- */
+          .sb { display: inline-flex; flex: none; }
+          .sb .wtb:first-child { border-radius: 7px 0 0 7px; }
+          .sb .car { width: 22px; padding: 0; justify-content: center; border-left: 0; border-radius: 0 7px 7px 0; box-shadow: inset 1px 0 0 var(--line2); }
+          .sb .wtb.lit.car { box-shadow: inset 1px 0 0 var(--abord); }
+          .sb .car.open { background: var(--asoft); }
+
+          /* ---- overlays: tooltip (.viewport-tooltip), menu, status card ---- */
+          .ov { position: absolute; z-index: 2; }
+          .tip { width: max-content; max-width: 380px; padding: 7px 10px; border: 1px solid var(--line3); border-radius: 8px; background: var(--elev); box-shadow: var(--shadow); font: 500 12px/1.45 var(--sans); color: var(--t1); text-wrap: pretty; }
+          .tip code { font: 600 11px/1.4 var(--mono); }
+          .menu { width: 330px; padding: 4px; border: 1px solid var(--line3); border-radius: 10px; background: var(--elev); box-shadow: var(--shadow); }
+          .mi { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px 6px; padding: 7px 8px; border-radius: 7px; cursor: pointer; }
+          .mi.hl { background: var(--hov); }
+          .mi .ck { grid-row: 1 / span 2; font: 700 11px/1.35 var(--sans); color: var(--acc); }
+          .mi .mt { font: 600 12px/1.35 var(--sans); color: var(--t1); }
+          .mi .mt code { font: 650 11.5px/1.35 var(--mono); }
+          .mi .md { font: 500 10.5px/1.45 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .mi .md code { font: 600 10px/1.4 var(--mono); color: var(--t2); }
+          .msep { height: 1px; margin: 4px 6px; background: var(--line); }
+          .mhead { padding: 6px 8px 3px; font: 600 9.5px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--t3); }
+          .card { overflow: hidden; width: 344px; padding: 11px 12px; border: 1px solid var(--line3); border-radius: 10px; background: var(--elev); box-shadow: var(--shadow); }
+          .card.err { border-color: var(--dbord); }
+          .ra-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+          .ra-title { font: 650 12px/1.3 var(--sans); color: var(--t1); }
+          .ra-right { display: inline-flex; align-items: center; gap: 8px; font: 500 10.5px/1 var(--mono); color: var(--t3); }
+          .steps { display: grid; gap: 3px; margin-top: 8px; }
+          .st { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 6px; font: 500 11.5px/1.45 var(--sans); color: var(--t2); }
+          .st .mk { font: 700 11px/1.45 var(--mono); color: var(--okt); }
+          .st.now { color: var(--t1); font-weight: 600; }
+          .st.now .mk { color: var(--acc); }
+          .st.bad .mk, .st.bad { color: var(--dt); }
+          .sum { margin: 8px 0 0; font: 600 12px/1.45 var(--sans); text-wrap: pretty; }
+          .sum.ok { color: var(--okt); }
+          .sum.err { color: var(--dt); }
+          .ra-acts { display: flex; gap: 6px; margin-top: 10px; }
+          .bsm { height: 24px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 6px; background: var(--elev); color: var(--t1); font: 600 10.5px/1 var(--sans); cursor: pointer; }
+          .bsm.go { border-color: transparent; background: var(--acc); color: var(--accon); }
+          .rail { position: absolute; left: 0; bottom: 0; height: 3px; width: 64%; background: var(--okbar); }
+
+          /* ---- live prototype controls ---- */
+          .seg { display: inline-flex; padding: 2px; border: 1px solid var(--line2); border-radius: 8px; background: var(--panel); }
+          .seg-b { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--t2); font: 600 11px/1 var(--sans); cursor: pointer; }
+          .seg-b.on { background: var(--elev); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+          .proto-bar { display: flex; align-items: center; gap: 12px; width: 696px; }
+          .again { height: 26px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--elev); color: var(--t1); font: 600 11px/1 var(--sans); cursor: pointer; }
+          .stage { position: relative; width: 696px; min-height: 330px; }
+          .hint { margin: 0; font: 500 11px/1.5 var(--sans); color: var(--t3); }
+        </style>
+      </helmet>
+
+      <!-- ================= TURN 2 ================= -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 - 1b through its states">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname"><a class="dv-oid" href="#1b">1b</a> through its states</span>
+        </div>
+        <p class="dv-sub">Everything below is a fork checkout: <code>origin</code> is <code>demo-dev/sparkline</code>, <code>upstream</code> is <code>octo-labs/sparkline</code>, and <code>main</code> tracks <code>origin/main</code>. The arrow on Pull appears only where there is a choice to make, which means a branch whose counterpart exists on the fork's source. The status chip on that branch reads against the source, and names the tracked branch only when it lags behind.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Behind upstream">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span><strong>Behind upstream.</strong> The chip says how far. Pull takes the accent, as it does for <code>&#8595;behind</code> today, and its tooltip names both moves.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip warn">&#8595;10 behind upstream</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov tip" style="top:46px; right:96px;">Pull &#183; fast-forward <code>main</code> to <code>upstream/main</code> (10 commits), then push them to <code>origin/main</code>. Nothing leaves either branch.</div>
+            </div>
+            <p class="note">The chip used to read <code>up to date</code> here, because it measured against <code>origin/main</code>, the user's own fork. Fetch has no arrow: on a fork it asks <code>origin</code> and <code>upstream</code>, and asking both is harmless.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b The arrow">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span><strong>The arrow.</strong> The first row is what a click on Pull does, and it says so. The last row is the escape hatch: your fork only.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip warn">&#8595;10 behind upstream</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car open"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov menu" style="top:46px; right:96px;">
+                <div class="mi hl"><span class="ck">&#10003;</span><span class="mt">Sync with <code>upstream/main</code></span><span class="md">Fast-forward <code>main</code> 10 commits, then push them to <code>origin/main</code>. The default for this branch.</span></div>
+                <div class="mi"><span class="ck"></span><span class="mt">Pull <code>upstream/main</code> only</span><span class="md">Fast-forward <code>main</code>. <code>origin/main</code> stays where it is until you push.</span></div>
+                <div class="msep"></div>
+                <div class="mi"><span class="ck"></span><span class="mt">Pull <code>origin/main</code> only</span><span class="md">Your fork's own tip. Already up to date.</span></div>
+              </div>
+            </div>
+            <p class="note">The check marks what the button does, not a setting that persists. Picking a row runs it once. Whether the choice should stick per repository is an open question, and it's in the follow-ups below.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Syncing">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><span><strong>Syncing.</strong> The click pins the card, as Fetch and Pull already do. The phases accumulate, and the push step names its lease.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip mut">Pushing origin/main&#8230;</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull busy"><span class="ring"></span>Syncing&#8230;</button><button class="wtb busy car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov card" style="top:46px; right:60px;">
+                <div class="ra-h"><span class="ra-title">Sync &#183; sparkline &#183; main</span><span class="ra-right">0:03 &#10005;</span></div>
+                <div class="steps">
+                  <div class="st"><span class="mk">&#10003;</span><span>Fetched origin + upstream</span></div>
+                  <div class="st"><span class="mk">&#10003;</span><span>Fast-forwarded main &#183; 10 commits</span></div>
+                  <div class="st now"><span class="mk">&#9676;</span><span>Pushing origin/main, leased on 8f3c2a9</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Synced">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a><span><strong>Synced.</strong> The receipt names both branches, then drains and leaves. The arrow stays, because the choice still exists.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip ok">synced with upstream/main</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull"><span class="gi gi-pull"></span>Pull</button><button class="wtb car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph, no dashed lanes above main</div>
+              <div class="ov card" style="top:46px; right:60px;">
+                <div class="ra-h"><span class="ra-title">Sync &#183; sparkline &#183; main</span><span class="ra-right">0:05 &#10005;</span></div>
+                <p class="sum ok">Fast-forwarded main to upstream/main &#183; 10 commits &#183; pushed to origin/main</p>
+                <div class="rail"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2e" data-screen-label="2e Push refused">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a><span><strong>Push refused.</strong> The fast-forward stands, and the card stays until dismissed. The chip moves on to the tracked branch, and Push takes the accent.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip ok">&#8593;10 to push</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull"><span class="gi gi-pull"></span>Pull</button><button class="wtb car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb lit"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov card err" style="top:46px; right:60px;">
+                <div class="ra-h"><span class="ra-title">Sync &#183; sparkline &#183; main</span><span class="ra-right">0:06 &#10005;</span></div>
+                <div class="steps">
+                  <div class="st"><span class="mk">&#10003;</span><span>Fetched origin + upstream</span></div>
+                  <div class="st"><span class="mk">&#10003;</span><span>Fast-forwarded main &#183; 10 commits</span></div>
+                  <div class="st bad"><span class="mk">&#10005;</span><span>origin/main was not pushed: Permission to demo-dev/sparkline.git denied.</span></div>
+                </div>
+                <div class="ra-acts"><button class="bsm">Logs</button><button class="bsm">Copy</button></div>
+              </div>
+            </div>
+            <p class="note">Push takes the accent here, which is new: today only Pull lights up. The alternative is to leave Push plain and let the chip carry the state alone.</p>
+          </div>
+
+          <div class="dv-opt" id="2f" data-screen-label="2f Main has its own commits">
+            <div class="dv-olabel"><a class="dv-oid" href="#2f">2f</a><span><strong>Main has commits of its own.</strong> The chip gives both counts. Pull can't fast-forward, so its default becomes the choice Pull already offers when <code>main</code> and <code>origin/main</code> diverge, now aimed at the source.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip warn">&#8595;12 upstream &#183; &#8593;2</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car open"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov menu" style="top:46px; right:96px;">
+                <div class="mhead">main has 2 commits upstream/main doesn't</div>
+                <div class="mi hl"><span class="ck">&#10003;</span><span class="mt">Rebase onto <code>upstream/main</code>&#8230;</span><span class="md">Keeps your 2 commits on top. <code>origin/main</code> then needs a leased force-push, which the review offers.</span></div>
+                <div class="mi"><span class="ck"></span><span class="mt">Reset to <code>upstream/main</code>&#8230;</span><span class="md">Your 2 commits leave <code>main</code>. Opens the reset review with the source selected.</span></div>
+                <div class="msep"></div>
+                <div class="mi"><span class="ck"></span><span class="mt">Pull <code>origin/main</code> only</span><span class="md">Your fork's own tip. Already up to date.</span></div>
+              </div>
+            </div>
+            <p class="note">A fork that keeps its own commits on <code>main</code> (a CI file, a release channel) wants a rebase far more often than a reset. Both end in a review. Nothing here runs without one.</p>
+          </div>
+
+          <div class="dv-opt" id="2g" data-screen-label="2g Where the arrow does not appear">
+            <div class="dv-olabel"><a class="dv-oid" href="#2g">2g</a><span><strong>Where the arrow does not appear.</strong> A plain repository, and a feature branch on a fork: there is one place to pull from, so there is no menu.</span></div>
+            <div class="wins">
+            <p class="cap">Not a fork &#183; main</p>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip mut">up to date</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <button class="wtb pull"><span class="gi gi-pull"></span>Pull</button>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+            </div>
+            <p class="cap">Fork &#183; fix/label-overflow</p>
+            <div class="win">
+              <div class="hdr" style="border-bottom:0;">
+                <span class="spacer"></span>
+                <span class="chip drift">upstream/main +4</span>
+                <span class="chip ok">&#8593;2 ahead</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <button class="wtb pull"><span class="gi gi-pull"></span>Pull</button>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+            </div>
+            </div>
+            <p class="note"><span class="prop">Proposal</span> The drift chip on a fork's feature branch should count against <code>upstream/main</code>, which is where the pull request lands, not against the fork's own <code>main</code>. Today it reads <code>main +4</code> and can be stale by exactly as much as the fork is.</p>
+          </div>
+
+          <div class="dv-opt" id="2h" data-screen-label="2h Narrow header">
+            <div class="dv-olabel"><a class="dv-oid" href="#2h">2h</a><span><strong>Narrow header.</strong> Below 720px the buttons drop their labels, and the arrow stays with the icon. Below 680px the status chip goes, and Pull's accent is what's left of <code>&#8595;10</code>, as it is today.</span></div>
+            <div class="win" style="width:520px;">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="acts">
+                  <button class="wtb icon"><span class="gi gi-fetch"></span></button>
+                  <span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb icon"><span class="gi gi-push"></span></button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2i" data-screen-label="2i Live prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#2i">2i</a><span><strong>Live.</strong> Pick a scenario, then press Pull or open the arrow. The timings are staged, and the git steps are what <code>remote:syncFork</code> runs.</span></div>
+            <div class="proto-bar">
+              <div class="seg">
+                <button class="{{ segBehind }}" onClick="{{ pickBehind }}">Fork behind</button>
+                <button class="{{ segOwn }}" onClick="{{ pickOwn }}">Own commits</button>
+                <button class="{{ segRefused }}" onClick="{{ pickRefused }}">Push refused</button>
+                <button class="{{ segPlain }}" onClick="{{ pickPlain }}">Not a fork</button>
+              </div>
+              <span class="spacer"></span>
+              <button class="again" onClick="{{ onAgain }}">Start over</button>
+            </div>
+            <div class="stage">
+              <div class="win">
+                <div class="hdr">
+                  <span class="spacer"></span>
+                  <span class="{{ chipCls }}">{{ chipText }}</span>
+                  <span class="acts">
+                    <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                    <sc-if value="{{ split }}" hint-placeholder-val="{{ true }}">
+                      <span class="sb"><button class="{{ pullCls }}" onClick="{{ onPull }}"><sc-if value="{{ busy }}"><span class="ring"></span></sc-if><sc-if value="{{ idle }}"><span class="gi gi-pull"></span></sc-if>{{ pullLabel }}</button><button class="{{ carCls }}" onClick="{{ onCaret }}"><span class="gi gi-car"></span></button></span>
+                    </sc-if>
+                    <sc-if value="{{ plain }}">
+                      <button class="{{ pullCls }}" onClick="{{ onPull }}"><sc-if value="{{ busy }}"><span class="ring"></span></sc-if><sc-if value="{{ idle }}"><span class="gi gi-pull"></span></sc-if>{{ pullLabel }}</button>
+                    </sc-if>
+                    <button class="{{ pushCls }}"><span class="gi gi-push"></span>Push</button>
+                    <span class="keb"><i></i><i></i><i></i></span>
+                  </span>
+                </div>
+                <div class="graph tall">{{ graphText }}</div>
+                <sc-if value="{{ menuOpen }}">
+                  <div class="ov menu" style="top:46px; right:96px;">
+                    <sc-if value="{{ ownMenu }}"><div class="mhead">main has 2 commits upstream/main doesn't</div></sc-if>
+                    <sc-for list="{{ menuItems }}" as="m" hint-placeholder-count="3">
+                      <div class="{{ m.cls }}" onClick="{{ m.onPick }}"><span class="ck">{{ m.mark }}</span><span class="mt">{{ m.title }}</span><span class="md">{{ m.detail }}</span></div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ cardOpen }}">
+                  <div class="{{ cardCls }}" style="top:46px; right:60px;">
+                    <div class="ra-h"><span class="ra-title">{{ cardTitle }}</span><span class="ra-right">{{ cardTime }} &#10005;</span></div>
+                    <sc-if value="{{ hasSteps }}">
+                      <div class="steps">
+                        <sc-for list="{{ steps }}" as="s" hint-placeholder-count="3">
+                          <div class="{{ s.cls }}"><span class="mk">{{ s.mark }}</span><span>{{ s.text }}</span></div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ hasSum }}"><p class="{{ sumCls }}">{{ sumText }}</p></sc-if>
+                    <sc-if value="{{ hasRail }}"><div class="rail"></div></sc-if>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+            <p class="hint">{{ hintText }}</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;make the arrow's choice stick per repository&#8221; &#183; &#8220;carry <code>&#8595;N upstream</code> into the sidebar row for a fork's default branch&#8221; &#183; &#8220;let bulk sync fast-forward forks from their source&#8221; &#183; &#8220;<a class="dv-oid" href="#2e">2e</a> without the Push accent&#8221;</p>
+      </section>
+
+      <!-- ================= TURN 1 ================= -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 - Where catch-up lives">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Where &#8220;catch up with upstream&#8221; lives</span>
+        </div>
+        <p class="dv-sub">On a fork, <code>main</code> tracks <code>origin/main</code>, which is the user's own copy. Every sync signal in the header measured against it, so the header read <code>up to date</code> while <code>upstream/main</code> was 10 commits ahead. Fetch never asked <code>upstream</code> either, so nothing in the app could notice. The only sign was a run of dashed lanes in the graph, and nothing there acted on them.</p>
+
+        <div class="dv-opts">
+          <div class="dv-opt" id="1-gap" data-screen-label="The gap">
+            <div class="dv-olabel"><strong>The three tips, in the reported case</strong></div>
+            <div class="gap">
+              <div><h4>main</h4><p>Checked out. Tracks <code>origin/main</code>.</p></div>
+              <div><h4>origin/main</h4><p>The user's fork. Identical to <code>main</code>, so the header said <code>up to date</code>.</p></div>
+              <div class="hot"><h4>upstream/main</h4><p>The source. 10 commits ahead of both, and the only tip that mattered.</p></div>
+            </div>
+            <p class="note">When <code>main</code> holds nothing the source lacks, catching up takes two fast-forwards: <code>main</code> to <code>upstream/main</code>, then <code>origin/main</code> to the same tip. Nothing leaves either branch, so no review is needed. That's what makes a one-click answer safe.</p>
+          </div>
+        </div>
+
+        <div class="dv-opts" style="margin-top:30px;">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a As built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><span><strong>As built on this branch.</strong> A separate chip, <code>upstream &#8595;10</code>, that syncs on click. Pull and Push are unchanged.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip fork hov">upstream &#8595;10</span>
+                <span class="chip mut">up to date</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <button class="wtb pull"><span class="gi gi-pull"></span>Pull</button>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov tip" style="top:46px; left:150px;">upstream/main (octo-labs/sparkline) has 10 commits main doesn't. Sync: fast-forward main, then push them to origin/main.</div>
+            </div>
+            <div class="pc">
+              <span class="y">+</span><span>One click, and visible.</span>
+              <span class="n">&#8722;</span><span>A second control that brings commits in, next to Pull, which already does that.</span>
+              <span class="n">&#8722;</span><span>The verb only appears in a tooltip. At rest the chip reads like status.</span>
+              <span class="n">&#8722;</span><span>The status chip beside it still says <code>up to date</code>, which is wrong for this branch.</span>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Pull with an arrow, default syncs">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><span class="rec">Recommended</span><span><strong>Pull grows an arrow on a fork, and its default syncs.</strong> The chip reads against the source.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip warn">&#8595;10 behind upstream</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car open"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov menu" style="top:46px; right:96px;">
+                <div class="mi hl"><span class="ck">&#10003;</span><span class="mt">Sync with <code>upstream/main</code></span><span class="md">Fast-forward <code>main</code> 10 commits, then push them to <code>origin/main</code>.</span></div>
+                <div class="mi"><span class="ck"></span><span class="mt">Pull <code>upstream/main</code> only</span><span class="md">Fast-forward <code>main</code>. <code>origin/main</code> waits for Push.</span></div>
+                <div class="msep"></div>
+                <div class="mi"><span class="ck"></span><span class="mt">Pull <code>origin/main</code> only</span><span class="md">Your fork's own tip.</span></div>
+              </div>
+            </div>
+            <div class="pc">
+              <span class="y">+</span><span>One control, and it's Pull, the button that already means &#8220;bring commits in.&#8221;</span>
+              <span class="y">+</span><span>The chip is finally right: on a fork's default branch, the number that matters is how far behind the source it is.</span>
+              <span class="y">+</span><span>Pulling from the fork alone is one click away. A plain repository never sees the arrow.</span>
+              <span class="n">&#8722;</span><span>A Pull that also pushes to a remote. The default row, the tooltip and the receipt must all say so, and the push only ever fast-forwards, with a lease.</span>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Pull with an arrow, default pulls only">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><span><strong>Same arrow, but the default only pulls.</strong> Push finishes the job, with its own accent.</span></div>
+            <div class="wins">
+            <p class="cap">Behind upstream</p>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip warn">&#8595;10 behind upstream</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+            </div>
+            <p class="cap">After Pull</p>
+            <div class="win">
+              <div class="hdr" style="border-bottom:0;">
+                <span class="spacer"></span>
+                <span class="chip ok">&#8593;10 to push</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull"><span class="gi gi-pull"></span>Pull</button><button class="wtb car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb lit"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+            </div>
+            </div>
+            <div class="pc">
+              <span class="y">+</span><span>Each button does exactly what its name says.</span>
+              <span class="n">&#8722;</span><span>Two clicks to catch the fork up. Between them, the fork's page on the forge still shows it behind.</span>
+              <span class="n">&#8722;</span><span>It misses the ask: one click that catches the default branch up, fork included.</span>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1d" data-screen-label="1d Sync replaces Pull">
+            <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a><span><strong>The button reads Sync on a fork's default branch.</strong> This is the forge's own word for the same act.</span></div>
+            <div class="win">
+              <div class="hdr">
+                <span class="spacer"></span>
+                <span class="chip warn">&#8595;10 behind upstream</span>
+                <span class="acts">
+                  <button class="wtb"><span class="gi gi-fetch"></span>Fetch</button>
+                  <span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Sync</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span>
+                  <button class="wtb"><span class="gi gi-push"></span>Push</button>
+                  <span class="keb"><i></i><i></i><i></i></span>
+                </span>
+              </div>
+              <div class="graph tall">lineage graph</div>
+              <div class="ov tip" style="top:46px; right:96px;">Sync &#183; fast-forward <code>main</code> to <code>upstream/main</code>, then push to <code>origin/main</code></div>
+            </div>
+            <div class="pc">
+              <span class="y">+</span><span>The label says it pushes too.</span>
+              <span class="n">&#8722;</span><span>The toolbar reads differently per branch: Pull on a feature branch, Sync on <code>main</code>. Anyone reaching for Pull on <code>main</code> won't find it.</span>
+              <span class="n">&#8722;</span><span>A button that renames itself moves the buttons beside it, and this is a row that's pressed from memory.</span>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Recommended: <a class="dv-oid" href="#1b">1b</a>, taking the verb from <a class="dv-oid" href="#1d">1d</a> for the default row (&#8220;Sync with <code>upstream/main</code>&#8221;) and leaving the button labelled Pull. <a class="dv-oid" href="#t2">Turn 2</a> takes it through its states. Try next: &#8220;<a class="dv-oid" href="#1b">1b</a> but the default only pulls&#8221; &#183; &#8220;show <a class="dv-oid" href="#1b">1b</a> in the dark theme&#8221;</p>
+      </section>
+    </x-dc>
+
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { scenario: "behind", phase: "idle", menu: false, action: "sync" };
+          this.run = 0;
+        }
+
+        pickScenario(name) {
+          this.run += 1;
+          this.setState({ scenario: name, phase: "idle", menu: false });
+        }
+
+        stage(steps) {
+          var self = this;
+          var run = ++this.run;
+          steps.forEach(function (step) {
+            setTimeout(function () {
+              if (self.run === run) self.setState({ phase: step[1] });
+            }, step[0]);
+          });
+        }
+
+        sync() {
+          var end = this.state.scenario === "refused" ? "refused" : "done";
+          this.setState({ phase: "fetch", menu: false, action: "sync" });
+          this.stage([[800, "ff"], [1600, "push"], [2500, end]]);
+        }
+
+        pullOnly() {
+          this.setState({ phase: "fetch", menu: false, action: "pull" });
+          this.stage([[800, "ff"], [1600, "pulled"]]);
+        }
+
+        originOnly() {
+          this.setState({ phase: "fetchOrigin", menu: false });
+          this.stage([[800, "originDone"]]);
+        }
+
+        pullPlain() {
+          this.setState({ phase: "fetchOrigin", menu: false });
+          this.stage([[800, "plainDone"]]);
+        }
+
+        steps(phase) {
+          var done = function (t) { return { cls: "st", mark: "✓", text: t }; };
+          var now = function (t) { return { cls: "st now", mark: "◌", text: t }; };
+          if (phase === "fetch") return [now("Fetching origin + upstream")];
+          if (phase === "fetchOrigin") return [now("Fetching origin")];
+          if (phase === "ff") return [done("Fetched origin + upstream"), now("Fast-forwarding main · 10 commits")];
+          if (phase === "push") return [done("Fetched origin + upstream"), done("Fast-forwarded main · 10 commits"), now("Pushing origin/main, leased on 8f3c2a9")];
+          if (phase === "refused") return [done("Fetched origin + upstream"), done("Fast-forwarded main · 10 commits"), { cls: "st bad", mark: "✕", text: "origin/main was not pushed: Permission to demo-dev/sparkline.git denied." }];
+          return [];
+        }
+
+        renderVals() {
+          var self = this;
+          var st = this.state;
+          var sc = st.scenario;
+          var ph = st.phase;
+          var plain = sc === "plain";
+          var own = sc === "own";
+          var running = ph === "fetch" || ph === "ff" || ph === "push" || ph === "fetchOrigin";
+          var synced = ph === "done";
+          var ahead = ph === "refused" || ph === "pulled";
+
+          var chipText = "↓10 behind upstream";
+          var chipCls = "chip warn";
+          if (plain) { chipText = "up to date"; chipCls = "chip mut"; }
+          if (own) chipText = "↓12 upstream · ↑2";
+          if (ph === "fetch" || ph === "fetchOrigin") { chipText = "Fetching updates…"; chipCls = "chip mut"; }
+          if (ph === "ff") { chipText = "Fast-forwarding…"; chipCls = "chip mut"; }
+          if (ph === "push") { chipText = "Pushing origin/main…"; chipCls = "chip mut"; }
+          if (synced) { chipText = "synced with upstream/main"; chipCls = "chip ok"; }
+          if (ahead) { chipText = "↑10 to push"; chipCls = "chip ok"; }
+          if (ph === "plainDone") { chipText = "fast-forwarded"; chipCls = "chip ok"; }
+
+          var lit = !running && !synced && !ahead && !plain && ph !== "originDone" ? " lit" : "";
+          if (ph === "originDone") lit = " lit";
+          var pullCls = running ? "wtb pull busy" : "wtb pull" + lit;
+          var carCls = (running ? "wtb busy car" : "wtb car" + lit) + (st.menu ? " open" : "");
+
+          var menuItems = own
+            ? [
+                { cls: "mi hl", mark: "✓", title: "Rebase onto upstream/main…", detail: "Keeps your 2 commits on top. origin/main then needs a leased force-push, which the review offers.", onPick: function () { self.setState({ phase: "review", menu: false }); } },
+                { cls: "mi", mark: "", title: "Reset to upstream/main…", detail: "Your 2 commits leave main. Opens the reset review with the source selected.", onPick: function () { self.setState({ phase: "resetReview", menu: false }); } },
+                { cls: "mi", mark: "", title: "Pull origin/main only", detail: "Your fork's own tip. Already up to date.", onPick: function () { self.originOnly(); } }
+              ]
+            : [
+                { cls: "mi hl", mark: "✓", title: "Sync with upstream/main", detail: "Fast-forward main 10 commits, then push them to origin/main.", onPick: function () { self.sync(); } },
+                { cls: "mi", mark: "", title: "Pull upstream/main only", detail: "Fast-forward main. origin/main stays where it is until you push.", onPick: function () { self.pullOnly(); } },
+                { cls: "mi", mark: "", title: "Pull origin/main only", detail: "Your fork's own tip. Already up to date.", onPick: function () { self.originOnly(); } }
+              ];
+
+          var cardOpen = ph !== "idle" && ph !== "review" && ph !== "resetReview";
+          var steps = this.steps(ph);
+          var sumText = "";
+          var sumCls = "sum ok";
+          if (synced) sumText = "Fast-forwarded main to upstream/main · 10 commits · pushed to origin/main";
+          if (ph === "pulled") sumText = "Fast-forwarded main to upstream/main · 10 commits · origin/main not pushed";
+          if (ph === "originDone") sumText = "origin/main: already up to date. upstream/main is still 10 ahead.";
+          if (ph === "plainDone") sumText = "Fast-forwarded";
+
+          var hint = "Press Pull, or open the arrow.";
+          if (plain) hint = "A plain repository has one place to pull from, so Pull has no arrow.";
+          if (own && ph === "idle") hint = "Pull can't fast-forward here, so pressing it opens the choice below the arrow.";
+          if (ph === "review") hint = "Opens the rebase review aimed at upstream/main (PullDivergenceDialog). A leased force-push of origin/main is offered at the end.";
+          if (ph === "resetReview") hint = "Opens Reset to remote with upstream/main selected (see Reset to Remote - Forks, 2a).";
+          if (ph === "refused") hint = "The fast-forward stands. The card stays until dismissed, and Push takes over.";
+          if (synced) hint = "The receipt drains and leaves. The dashed lanes above main are gone.";
+
+          return {
+            segBehind: sc === "behind" ? "seg-b on" : "seg-b",
+            segOwn: own ? "seg-b on" : "seg-b",
+            segRefused: sc === "refused" ? "seg-b on" : "seg-b",
+            segPlain: plain ? "seg-b on" : "seg-b",
+            pickBehind: function () { self.pickScenario("behind"); },
+            pickOwn: function () { self.pickScenario("own"); },
+            pickRefused: function () { self.pickScenario("refused"); },
+            pickPlain: function () { self.pickScenario("plain"); },
+            onAgain: function () { self.pickScenario(sc); },
+            chipCls: chipCls,
+            chipText: chipText,
+            split: !plain,
+            plain: plain,
+            busy: running,
+            idle: !running,
+            pullLabel: running ? (ph === "fetchOrigin" ? "Pulling…" : "Syncing…") : "Pull",
+            pullCls: pullCls,
+            carCls: carCls,
+            onPull: function () {
+              if (running) return;
+              if (plain) { self.pullPlain(); return; }
+              if (own) { self.setState({ menu: true }); return; }
+              self.sync();
+            },
+            onCaret: function () { if (!running) self.setState({ menu: !st.menu }); },
+            pushCls: ahead ? "wtb lit" : "wtb",
+            graphText: synced ? "lineage graph, no dashed lanes above main" : "lineage graph",
+            menuOpen: st.menu,
+            ownMenu: own,
+            menuItems: menuItems,
+            cardOpen: cardOpen,
+            cardCls: ph === "refused" ? "ov card err" : "ov card",
+            cardTitle: (st.action === "sync" && ph !== "fetchOrigin" && ph !== "originDone" && ph !== "plainDone" ? "Sync" : "Pull") + " · sparkline · main",
+            cardTime: running ? "0:0" + (ph === "fetch" || ph === "fetchOrigin" ? "1" : ph === "ff" ? "2" : "3") : "0:05",
+            hasSteps: steps.length > 0,
+            steps: steps,
+            hasSum: sumText !== "",
+            sumCls: sumCls,
+            sumText: sumText,
+            hasRail: synced || ph === "pulled" || ph === "originDone" || ph === "plainDone",
+            hintText: hint
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

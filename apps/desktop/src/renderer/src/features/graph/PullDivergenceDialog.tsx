@@ -22,16 +22,26 @@ export function PullDivergenceDialog({
   onClose,
   onRebase,
   onReset,
-  onResetElsewhere
+  onResetElsewhere,
+  fork
 }: {
   divergence: RemoteDivergence;
   busy: RecoveryAction;
   onClose: () => void;
   onRebase: () => void;
+  /** In fork mode, opens the full reset review rather than confirming here. */
   onReset: () => void;
   /** Open the full reset dialog — a different tip, or a hard reset over a
    *  dirty tree, neither of which the two options here can do. */
   onResetElsewhere: () => void;
+  /**
+   * Set when the comparison is against the fork's source rather than the
+   * branch the checkout tracks. `pushTo` is the tracked branch the rebase
+   * carries its result on to, leased on `head`; null when it will not push.
+   * A reset goes to the full review, which can push too — this dialog's
+   * one-step reset cannot.
+   */
+  fork?: { pushTo: { label: string; head: string } | null };
 }) {
   const [confirmingReset, setConfirmingReset] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -41,6 +51,7 @@ export function PullDivergenceDialog({
   }, [confirmingReset]);
 
   const canRecover = divergence.workingTreeClean && busy === null;
+  const pushTo = fork?.pushTo ?? null;
   const localCount = divergence.localCommits.length;
   const pairedCount = rewrittenCommitCount(divergence.alignedCommits);
   const localUnpairedCount = strandedCommitCount(divergence.alignedCommits);
@@ -172,6 +183,13 @@ export function PullDivergenceDialog({
                   <p>
                     Replay the local-only commits on <code>{divergence.upstream}</code>.
                     This keeps their changes when possible, but may stop for conflicts.
+                    {pushTo !== null && (
+                      <>
+                        {" "}Then push the result to <code>{pushTo.label}</code>,
+                        replacing what it holds — only if it is still at{" "}
+                        <code>{pushTo.head.slice(0, 7)}</code>.
+                      </>
+                    )}
                   </p>
                 </div>
                 <button
@@ -179,7 +197,11 @@ export function PullDivergenceDialog({
                   disabled={!canRecover}
                   onClick={onRebase}
                 >
-                  {busy === "rebase" ? "Rebasing…" : "Rebase local commits"}
+                  {busy === "rebase"
+                    ? "Rebasing…"
+                    : pushTo !== null
+                      ? "Rebase and push"
+                      : "Rebase local commits"}
                 </button>
               </section>
               <section className="pull-divergence__option--danger">
@@ -188,14 +210,18 @@ export function PullDivergenceDialog({
                   <p>
                     Make this checkout match <code>{divergence.upstream}</code> and
                     discard the local-only commits.
+                    {fork !== undefined &&
+                      " The review shows what leaves, and can bring the fork's branch along."}
                   </p>
                 </div>
                 <button
                   className="pull-divergence__action pull-divergence__action--danger"
                   disabled={!canRecover}
-                  onClick={() => setConfirmingReset(true)}
+                  onClick={() =>
+                    fork !== undefined ? onReset() : setConfirmingReset(true)
+                  }
                 >
-                  Reset to remote…
+                  {fork !== undefined ? "Review reset…" : "Reset to remote…"}
                 </button>
               </section>
             </div>

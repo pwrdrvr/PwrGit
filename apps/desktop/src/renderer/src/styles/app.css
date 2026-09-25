@@ -7144,6 +7144,41 @@ button.agent-menu__item:hover {
   background: var(--bg-row-active);
   color: var(--accent-bright);
 }
+/* Pull, split — only on a fork branch the source also carries, where Pull has
+   more than one place to pull from. PwrAgent's .composer__run-split at the
+   toolbar's size: the halves share one outline and the inner edges are
+   squared. Pull's own right border is the divider, so the caret drops its
+   left one rather than doubling it. The caret keeps its 22px through the
+   narrow header, where .wt-btn goes square — two classes outrank it without
+   depending on source order. */
+.wt-split {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.wt-split .wt-split__main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.wt-split .wt-split__caret {
+  width: 22px;
+  padding: 0;
+  justify-content: center;
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  color: var(--text-secondary);
+}
+.wt-split .wt-split__caret[aria-expanded="true"] {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+/* The arrow joins Pull's accent: they are one control, and the menu is where
+   the rest of what Pull could do lives. */
+.wt-split.is-behind .wt-split__caret {
+  border-color: var(--accent-border);
+  background: var(--bg-row-active);
+  color: var(--accent-bright);
+}
 
 /* Collapse button labels + every chip when the main pane is tight. Below this
    the buttons are bare icons, so the row has nothing left to give. The LFS
@@ -9193,6 +9228,55 @@ body.is-col-resizing {
   background: var(--border-subtle);
   margin: 4px;
 }
+/* Pull's menu. Each row says what it does to which branch, so it is two
+   lines where the kebab's rows are one, and the width is set for the
+   sentence rather than grown from it. */
+.pull-menu {
+  width: 312px;
+}
+.pull-menu .pull-menu__item {
+  align-items: flex-start;
+  gap: 6px;
+}
+.pull-menu__check {
+  flex: 0 0 14px;
+  display: inline-flex;
+  justify-content: center;
+  padding-top: 1px;
+  color: var(--accent);
+}
+.pull-menu__text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.pull-menu__title {
+  font: 600 12px/1.35 var(--font-sans);
+  color: var(--text-primary);
+}
+.pull-menu__detail {
+  font: 500 11px/1.45 var(--font-sans);
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+.pull-menu__title code,
+.pull-menu__detail code {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+}
+/* Sentence case, not the menu-label caps: it names branches, and `MAIN` is
+   not a branch anyone has. */
+.pull-menu__note {
+  padding: 7px 9px 5px 29px;
+  font: 500 11px/1.4 var(--font-sans);
+  color: var(--text-muted);
+}
+.pull-menu__note code {
+  font-family: var(--font-mono);
+  font-size: 0.94em;
+  color: var(--text-secondary);
+}
 
 /* ---- Profile menu actions (New / Edit) ---- */
 
@@ -10053,6 +10137,99 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 500 10.5px/1.45 var(--font-sans);
 }
+/* The fork's source names its repository beside the ref: `upstream/main` alone
+   does not say whose main it is. */
+.reset-target__repo {
+  flex: none;
+  color: var(--text-secondary);
+  font: 600 10.5px/1.3 var(--font-mono);
+}
+/* A target identical to the checkout: still a valid radio, drawn as one quiet
+   line, because resetting to it changes nothing. */
+.reset-target.is-identical {
+  padding: 8px 10px;
+  border-color: var(--border-subtle);
+  background: var(--bg-panel);
+}
+.reset-target.is-identical .reset-target__name {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.reset-target.is-identical.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.reset-target__inline {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10.5px/1.3 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reset-target__tag--ok {
+  border-color: color-mix(in srgb, var(--success-text) 32%, transparent);
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+.reset-target__tag--danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+/* Bringing the fork along. A fast-forward is the accent card the targets use;
+   a forced push is drawn like Hard — danger-bordered at rest, danger-filled
+   once ticked. */
+.reset-remote__follow {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0 0;
+  padding: 0;
+  border: 0;
+}
+.reset-remote__follow legend {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font: 600 9.5px/1 var(--font-sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.reset-remote__push {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-panel-elevated);
+  cursor: pointer;
+}
+.reset-remote__push input {
+  margin: 2px 0 0;
+}
+.reset-remote__push.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.reset-remote__push.is-force {
+  border-color: var(--danger-border);
+}
+.reset-remote__push.is-force.is-selected {
+  border-color: color-mix(in srgb, var(--danger-base) 60%, var(--border-default));
+  background: var(--danger-soft);
+}
+.reset-remote__push-title {
+  min-width: 0;
+  color: var(--text-primary);
+  font: 700 11.5px/1.25 var(--font-sans);
+}
+.reset-remote__push-title code {
+  font: 650 11.5px/1.25 var(--font-mono);
+}
+.reset-remote__push.is-force.is-selected .reset-remote__push-title {
+  color: var(--danger-text);
+}
 .reset-remote__browse {
   margin-top: 8px;
   padding: 10px;
@@ -10279,6 +10456,61 @@ body.is-col-resizing {
   border-color: color-mix(in srgb, var(--danger-text) 48%, var(--border-default));
   background: var(--danger-soft);
   color: var(--danger-text);
+}
+
+/* The push that follows the reset, stated as exactly as the reset is. */
+.reset-remote__then {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+.reset-remote__then.is-force {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.reset-remote__then-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-muted);
+  font: 600 9.5px/1.2 var(--font-sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.reset-remote__then-refs {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 7px;
+  color: var(--text-muted);
+  font: 500 11.5px/1.35 var(--font-mono);
+}
+.reset-remote__then-refs code {
+  color: var(--text-primary);
+  font: 650 11.5px/1.35 var(--font-mono);
+}
+.reset-remote__then p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.45 var(--font-sans);
+}
+.reset-remote__then.is-force p {
+  color: var(--danger-text);
+}
+.reset-remote__cmd {
+  display: block;
+  margin-top: 7px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 500 10px/1.45 var(--font-mono);
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 @media (max-width: 560px) {

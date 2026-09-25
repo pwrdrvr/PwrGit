@@ -36,15 +36,19 @@ const divergence: RemoteDivergence = {
   matchingCommitSubjects: false
 };
 
-function markup(): string {
+function markup(
+  fork?: { pushTo: { label: string; head: string } | null },
+  over: Partial<RemoteDivergence> = {}
+): string {
   return renderToStaticMarkup(
     <PullDivergenceDialog
-      divergence={divergence}
+      divergence={{ ...divergence, ...over }}
       busy={null}
       onClose={() => undefined}
       onRebase={() => undefined}
       onReset={() => undefined}
       onResetElsewhere={() => undefined}
+      {...(fork === undefined ? {} : { fork })}
     />
   );
 }
@@ -71,5 +75,23 @@ describe("diverged-pull recovery dialog", () => {
     expect(html).toContain("Rebase local commits");
     expect(html).toContain("Reset to remote…");
     expect(html).toContain("Reset to a different branch…");
+  });
+
+  it("says where a rebase onto a fork's source pushes, and sends a reset to review", () => {
+    const html = markup(
+      { pushTo: { label: "origin/main", head: "1".repeat(40) } },
+      { upstream: "upstream/main" }
+    );
+
+    expect(html).toContain("Rebase and push");
+    // The lease, in the words the push will be judged by.
+    expect(html).toContain("only if it is still at <code>1111111</code>");
+    expect(html).toContain("Review reset…");
+    expect(html).not.toContain("Reset to remote…");
+
+    // The choice was not to push: the rebase says nothing about a push.
+    const quiet = markup({ pushTo: null }, { upstream: "upstream/main" });
+    expect(quiet).toContain("Rebase local commits");
+    expect(quiet).not.toContain("Then push");
   });
 });

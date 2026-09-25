@@ -15,8 +15,12 @@ import type { GitExec } from "./dugite";
 import {
   addRemote,
   fetchAllRemotes,
+  fetchHeadRemotes,
   fetchNamedRemote,
+  fetchNamedRemotes,
   fetchRemote,
+  forkFetchRemotes,
+  forkSourceRemote,
   inspectRemoteReset,
   inspectRemoteDivergence,
   listRemoteBranchPage,
@@ -26,12 +30,14 @@ import {
   previewRemoteBranches,
   planPushRefs,
   pullFastForward,
+  pushBranchWithLease,
   pushPlannedRefs,
   pushRemote,
   rebaseOntoUpstream,
   removeRemote,
   resetToUpstream,
   resetToRemote,
+  resolveForkStatus,
   resolveResetTargets,
   updateRemote
 } from "./git-service";
@@ -2165,6 +2171,569 @@ describe("reset target ranking", () => {
     if (!targets.ok) return;
     expect(targets.value.upstream?.label).toBe("origin/main");
     expect(targets.value.defaultBranch).toBeNull();
+  });
+});
+
+describe("reset targets on a fork", () => {
+  /**
+   * A fork checkout the way PwrGit's Fork leaves one: `origin` is the fork,
+   * `upstream` the repository it was forked from, and `main` tracks
+   * `origin/main`. `source` is a working clone of the original, for the
+   * commits that land there after the fork was made.
+   */
+  function makeForkFixture(): { local: string; source: string; fork: string } {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-fork-"));
+    git(root, ["init", "--bare", "-b", "main", "source.git"]);
+    const source = join(root, "source");
+    git(root, ["clone", "source.git", "source"]);
+    configure(source, "source");
+    commit(source, "base.txt", "base");
+    git(source, ["push", "-u", "origin", "main"]);
+    git(root, ["clone", "--bare", "source.git", "fork.git"]);
+    const local = join(root, "local");
+    // Set at clone time, before the checkout: Windows defaults autocrlf on,
+    // and a test here reads a stashed edit back byte for byte.
+    git(root, ["clone", "-c", "core.autocrlf=false", "fork.git", "local"]);
+    configure(local, "local");
+    git(local, ["remote", "add", "upstream", join(root, "source.git")]);
+    git(local, ["fetch", "upstream"]);
+    return { local, source, fork: join(root, "fork.git") };
+  }
+
+  /** Two merges land on the original after the fork was made. */
+  function sourceMovesOn(source: string, local: string): void {
+    commit(source, "upstream-1.txt", "upstream fix");
+    commit(source, "upstream-2.txt", "another upstream fix");
+    git(source, ["push", "origin", "main"]);
+    git(local, ["fetch", "upstream"]);
+  }
+
+  // The reported case: `origin/main` identical to `main`, the source two
+  // merges ahead, and the dialog opening on the no-op.
+  it("offers the source's same branch, with a fast-forward back to the fork", async () => {
+    const { local, source } = makeForkFixture();
+    sourceMovesOn(source, local);
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+
+    expect(targets.value.upstream).toMatchObject({
+      label: "origin/main",
+      remote: "origin",
+      ahead: 0,
+      behind: 0
+    });
+    expect(targets.value.forkSource).toMatchObject({
+      ref: "refs/remotes/upstream/main",
+      label: "upstream/main",
+      remote: "upstream",
+      ahead: 0,
+      behind: 2,
+      pushBack: {
+        remote: "origin",
+        branch: "main",
+        ref: "refs/remotes/origin/main",
+        head: gitOut(local, ["rev-parse", "origin/main"]),
+        overwrites: 0,
+        adds: 2
+      }
+    });
+    // Chosen by its name alone, so nothing claims a forge relationship.
+    expect(targets.value.forkSource?.parent).toBeUndefined();
+  });
+
+  it("names the parent when forge identity matched the remote to it", async () => {
+    const { local, source } = makeForkFixture();
+    sourceMovesOn(source, local);
+    // A path is not a forge URL, so point a second remote somewhere that is,
+    // and prove the match is by URL rather than by the name `upstream`.
+    git(local, ["remote", "rename", "upstream", "original"]);
+    git(local, [
+      "remote",
+      "set-url",
+      "original",
+      "git@github.com:Acme/Widget.git"
+    ]);
+    git(local, ["config", "remote.original.fetch", "+refs/heads/*:refs/remotes/original/*"]);
+    git(local, [
+      "update-ref",
+      "refs/remotes/original/main",
+      gitOut(source, ["rev-parse", "main"])
+    ]);
+
+    const targets = await resolveResetTargets(systemGit, local, {
+      hostname: "github.com",
+      nameWithOwner: "acme/widget"
+    });
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.forkSource).toMatchObject({
+      label: "original/main",
+      parent: "acme/widget",
+      behind: 2
+    });
+  });
+
+  it("counts what a forced push would remove from a fork with commits of its own", async () => {
+    const { local, source } = makeForkFixture();
+    commit(local, "fork-only.txt", "ci: publish fork builds");
+    git(local, ["push", "origin", "main"]);
+    sourceMovesOn(source, local);
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.forkSource).toMatchObject({
+      ahead: 1,
+      behind: 2,
+      pushBack: { overwrites: 1, adds: 2 }
+    });
+  });
+
+  it("offers nothing to push when the fork already matches the source", async () => {
+    const { local, source } = makeForkFixture();
+    sourceMovesOn(source, local);
+    // GitHub's "Sync fork" button, say: the fork moved, this checkout did not.
+    git(local, ["push", "origin", "refs/remotes/upstream/main:refs/heads/main"]);
+    git(local, ["fetch", "origin"]);
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.upstream).toMatchObject({ behind: 2 });
+    expect(targets.value.forkSource).toMatchObject({
+      behind: 2,
+      pushBack: null
+    });
+  });
+
+  it("finds the source's default branch under the name the source uses", async () => {
+    const { local, source } = makeForkFixture();
+    // The original renamed its trunk after the fork was made.
+    git(source, ["branch", "-m", "main", "trunk"]);
+    commit(source, "renamed.txt", "first commit on trunk");
+    git(source, ["push", "origin", "trunk"]);
+    // A bare repository refuses to delete the branch its HEAD names.
+    git(join(source, ".."), [
+      "--git-dir=source.git",
+      "symbolic-ref",
+      "HEAD",
+      "refs/heads/trunk"
+    ]);
+    git(source, ["push", "origin", "--delete", "main"]);
+    git(local, ["fetch", "--prune", "upstream"]);
+    git(local, ["remote", "set-head", "upstream", "trunk"]);
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    expect(targets.value.forkSource).toMatchObject({
+      ref: "refs/remotes/upstream/trunk",
+      behind: 1
+    });
+  });
+
+  it("leaves a feature branch alone when the source has no branch of that name", async () => {
+    const { local, source } = makeForkFixture();
+    sourceMovesOn(source, local);
+    git(local, ["switch", "-c", "fix/drive-label"]);
+    commit(local, "label.txt", "fix the label");
+    git(local, ["push", "-u", "origin", "fix/drive-label"]);
+
+    const targets = await resolveResetTargets(systemGit, local);
+    expect(targets.ok).toBe(true);
+    if (!targets.ok) return;
+    // Not `upstream/main`: resetting a feature branch onto the trunk is never
+    // a guess this dialog makes.
+    expect(targets.value.forkSource).toBeNull();
+  });
+
+  // The other half of the report: "Last fetched moments ago" was true of
+  // `origin` only, while the tip being reset to was nineteen minutes old.
+  it("reports which remotes the last fetch asked, and fetches both on request", async () => {
+    const { local } = makeForkFixture();
+    git(local, ["fetch"]);
+
+    const originOnly = await resolveResetTargets(systemGit, local);
+    expect(originOnly.ok).toBe(true);
+    if (!originOnly.ok) return;
+    expect(originOnly.value.lastFetchedRemotes).toEqual(["origin"]);
+
+    expect(
+      (await fetchNamedRemotes(systemGit, local, ["upstream", "origin"])).ok
+    ).toBe(true);
+    const both = await resolveResetTargets(systemGit, local);
+    expect(both.ok).toBe(true);
+    if (!both.ok) return;
+    expect(both.value.lastFetchedRemotes).toEqual(["origin", "upstream"]);
+  });
+
+  it("refuses to fetch a remote that is not configured", async () => {
+    const { local } = makeForkFixture();
+    const fetched = await fetchNamedRemotes(systemGit, local, ["--upload-pack=x"]);
+    expect(fetched.ok).toBe(false);
+    if (fetched.ok) return;
+    expect(fetched.error.code).toBe("remote_missing");
+  });
+
+  it("pushes the reset result to the fork, leased on the tip that was reviewed", async () => {
+    const { local, source, fork } = makeForkFixture();
+    sourceMovesOn(source, local);
+    const reviewed = gitOut(local, ["rev-parse", "origin/main"]);
+    const target = gitOut(local, ["rev-parse", "upstream/main"]);
+    git(local, ["reset", "--soft", target]);
+
+    const pushed = await pushBranchWithLease(systemGit, local, {
+      remote: "origin",
+      branch: "main",
+      head: target,
+      expectedHead: reviewed
+    });
+    expect(pushed.ok).toBe(true);
+    expect(gitOut(fork, ["rev-parse", "main"])).toBe(target);
+    // Pushed by remote name, so the tracking ref followed without a fetch.
+    expect(gitOut(local, ["rev-parse", "origin/main"])).toBe(target);
+  });
+
+  it("replaces a diverged fork only while the lease still holds", async () => {
+    const { local, source, fork } = makeForkFixture();
+    commit(local, "fork-only.txt", "ci: publish fork builds");
+    git(local, ["push", "origin", "main"]);
+    sourceMovesOn(source, local);
+    const reviewed = gitOut(local, ["rev-parse", "origin/main"]);
+    const target = gitOut(local, ["rev-parse", "upstream/main"]);
+
+    // Someone pushes to the fork after the review.
+    const other = join(fork, "..", "other");
+    git(join(fork, ".."), ["clone", "fork.git", "other"]);
+    configure(other, "other");
+    commit(other, "late.txt", "pushed after the review");
+    git(other, ["push", "origin", "main"]);
+    const moved = gitOut(fork, ["rev-parse", "main"]);
+
+    const refused = await pushBranchWithLease(systemGit, local, {
+      remote: "origin",
+      branch: "main",
+      head: target,
+      expectedHead: reviewed
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe("push_lease_stale");
+    expect(gitOut(fork, ["rev-parse", "main"])).toBe(moved);
+
+    // Leased on what is really there, the same push forces through.
+    const forced = await pushBranchWithLease(systemGit, local, {
+      remote: "origin",
+      branch: "main",
+      head: target,
+      expectedHead: moved
+    });
+    expect(forced.ok).toBe(true);
+    expect(gitOut(fork, ["rev-parse", "main"])).toBe(target);
+  });
+
+  it("reads a fork that has fallen behind its source, for the header chip", async () => {
+    const { local, source } = makeForkFixture();
+    sourceMovesOn(source, local);
+
+    const status = await resolveForkStatus(systemGit, local, null);
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.value).toMatchObject({
+      branch: "main",
+      head: gitOut(local, ["rev-parse", "HEAD"]),
+      source: {
+        label: "upstream/main",
+        remote: "upstream",
+        ahead: 0,
+        behind: 2,
+        pushBack: { remote: "origin", branch: "main", overwrites: 0, adds: 2 }
+      },
+      // What the sync chip beside it reads, and why it says "up to date".
+      tracked: { label: "origin/main", ahead: 0, behind: 0 },
+      // The source's default IS this branch's counterpart: the chip reads
+      // against it, so there is no drift to state as well.
+      drift: null
+    });
+  });
+
+  it("counts a fork's feature branch against the source's default branch", async () => {
+    const { local, source } = makeForkFixture();
+    git(local, ["switch", "-c", "fix/label-overflow"]);
+    commit(local, "label.txt", "fix the label");
+    git(local, ["push", "-u", "origin", "fix/label-overflow"]);
+    sourceMovesOn(source, local);
+    // A remote added after the clone has no HEAD until something sets it —
+    // Fork in place adds `upstream` that way — so the source's default is
+    // found under the name the fork's own remote uses for its default.
+    // Git 2.48+ may have created one on fetch, so set it and then delete it.
+    git(local, ["remote", "set-head", "upstream", "main"]);
+    git(local, ["remote", "set-head", "upstream", "--delete"]);
+
+    const status = await resolveForkStatus(systemGit, local, null);
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.value).toMatchObject({
+      branch: "fix/label-overflow",
+      // The source has no branch of that name: nothing to sync, no menu.
+      source: null,
+      tracked: { label: "origin/fix/label-overflow" },
+      // Where the pull request lands, and the fork's own main cannot say it:
+      // origin/main has not moved.
+      drift: { label: "upstream/main", behind: 2 }
+    });
+
+    // A branch with no work of its own has nothing to say.
+    git(local, ["switch", "-c", "empty", "main"]);
+    const empty = await resolveForkStatus(systemGit, local, null);
+    expect(empty.ok && empty.value?.drift).toEqual({
+      label: "upstream/main",
+      behind: 0
+    });
+
+    // A home remote whose default the source lacks is passed over for the
+    // next one, not taken as the answer.
+    git(local, ["switch", "fix/label-overflow"]);
+    git(local, ["update-ref", "refs/remotes/origin/trunk", "HEAD"]);
+    git(local, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"]);
+    git(local, ["remote", "add", "mirror", "https://example.invalid/mirror.git"]);
+    git(local, ["update-ref", "refs/remotes/mirror/main", "HEAD"]);
+    git(local, ["symbolic-ref", "refs/remotes/mirror/HEAD", "refs/remotes/mirror/main"]);
+    const renamed = await resolveForkStatus(systemGit, local, null);
+    expect(renamed.ok && renamed.value?.drift).toEqual({
+      label: "upstream/main",
+      behind: 2
+    });
+  });
+
+  it("has nothing to say without a fork source, or on a detached checkout", async () => {
+    const { local, source } = makeForkFixture();
+    sourceMovesOn(source, local);
+    git(local, ["checkout", "--detach"]);
+    const detached = await resolveForkStatus(systemGit, local, null);
+    expect(detached).toEqual({ ok: true, value: null });
+
+    git(local, ["checkout", "main"]);
+    git(local, ["remote", "remove", "upstream"]);
+    const plain = await resolveForkStatus(systemGit, local, null);
+    expect(plain).toEqual({ ok: true, value: null });
+  });
+
+  it("fetches the fork's source alongside the branch's own remote", async () => {
+    const { local } = makeForkFixture();
+    expect(await forkFetchRemotes(systemGit, local, null)).toEqual([
+      "origin",
+      "upstream"
+    ]);
+
+    // A branch that tracks nothing keeps the plain fetch.
+    git(local, ["switch", "-c", "draft"]);
+    expect(await forkFetchRemotes(systemGit, local, null)).toBeNull();
+
+    git(local, ["switch", "main"]);
+    git(local, ["remote", "remove", "upstream"]);
+    expect(await forkFetchRemotes(systemGit, local, null)).toBeNull();
+  });
+
+  it("fast-forwards to the fork's source the way Pull does, fetching it first", async () => {
+    const { local, source } = makeForkFixture();
+    // The source moves on and this checkout has not fetched it: the sync's
+    // own fetch is what has to find the new commits.
+    commit(source, "upstream-1.txt", "upstream fix");
+    git(source, ["push", "origin", "main"]);
+    writeFileSync(join(local, "base.txt"), "edited locally\n");
+
+    const pulled = await pullFastForward(systemGit, local, undefined, {}, {
+      kind: "ref",
+      ref: "refs/remotes/upstream/main",
+      label: "upstream/main",
+      remotes: ["origin", "upstream"],
+      branch: "main"
+    });
+    expect(pulled).toEqual({
+      ok: true,
+      value: { fastForwarded: true, stashed: true, reappliedWithConflicts: false }
+    });
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(
+      gitOut(source, ["rev-parse", "main"])
+    );
+    expect(readFileSync(join(local, "base.txt"), "utf8")).toBe("edited locally\n");
+  });
+
+  it("leaves a branch with commits of its own where it was", async () => {
+    const { local, source } = makeForkFixture();
+    commit(local, "mine.txt", "local work");
+    sourceMovesOn(source, local);
+    const before = gitOut(local, ["rev-parse", "HEAD"]);
+
+    const pulled = await pullFastForward(systemGit, local, undefined, {}, {
+      kind: "ref",
+      ref: "refs/remotes/upstream/main",
+      label: "upstream/main",
+      remotes: ["upstream"],
+      branch: "main"
+    });
+    expect(pulled.ok).toBe(false);
+    if (pulled.ok) return;
+    expect(pulled.error.code).toBe("not_fast_forward");
+    expect(pulled.error.message).toContain("upstream/main");
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(before);
+  });
+
+  it("compares a branch with commits of its own against the source, and rebases onto it", async () => {
+    const { local, source } = makeForkFixture();
+    commit(local, "mine.txt", "local work");
+    sourceMovesOn(source, local);
+    const sourceRef = "refs/remotes/upstream/main";
+
+    const divergence = await inspectRemoteDivergence(systemGit, local, sourceRef);
+    expect(divergence.ok).toBe(true);
+    if (!divergence.ok) return;
+    // Not the tracked branch: origin/main never moved, and has none of it.
+    expect(divergence.value).toMatchObject({
+      branch: "main",
+      upstream: "upstream/main",
+      upstreamHead: gitOut(local, ["rev-parse", sourceRef]),
+      localCommits: [{ subject: "local work" }],
+      upstreamCommits: [
+        { subject: "another upstream fix" },
+        { subject: "upstream fix" }
+      ]
+    });
+
+    // The source moved after the review: refused, nothing rewritten.
+    const before = gitOut(local, ["rev-parse", "HEAD"]);
+    const stale = await rebaseOntoUpstream(
+      systemGit,
+      local,
+      { ...divergence.value, upstreamHead: before },
+      sourceRef
+    );
+    expect(stale.ok).toBe(false);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(before);
+
+    const rebased = await rebaseOntoUpstream(
+      systemGit,
+      local,
+      divergence.value,
+      sourceRef
+    );
+    expect(rebased).toEqual({ ok: true, value: undefined });
+    expect(gitOut(local, ["rev-parse", "HEAD~1"])).toBe(
+      divergence.value.upstreamHead
+    );
+    expect(gitOut(local, ["log", "-1", "--format=%s"])).toBe("local work");
+  });
+
+  it("refuses to fast-forward a branch other than the one it was offered for", async () => {
+    const { local, source } = makeForkFixture();
+    sourceMovesOn(source, local);
+    const before = gitOut(local, ["rev-parse", "HEAD"]);
+
+    const pulled = await pullFastForward(systemGit, local, undefined, {}, {
+      kind: "ref",
+      ref: "refs/remotes/upstream/main",
+      label: "upstream/main",
+      remotes: ["upstream"],
+      branch: "release"
+    });
+    expect(pulled.ok).toBe(false);
+    if (pulled.ok) return;
+    expect(pulled.error.code).toBe("fork_sync_stale");
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(before);
+  });
+
+  it("refuses a push that names no resolved commit, without running git push", async () => {
+    const calls: string[][] = [];
+    const recording: GitExec = async (args) => {
+      calls.push(args);
+      return ok({ stdout: "origin\n", stderr: "", exitCode: 0 });
+    };
+    const pushed = await pushBranchWithLease(recording, "/repo", {
+      remote: "origin",
+      branch: "main",
+      head: "main",
+      expectedHead: "1".repeat(40)
+    });
+    expect(pushed.ok).toBe(false);
+    if (pushed.ok) return;
+    expect(pushed.error.code).toBe("invalid_push_plan");
+    expect(calls.some((args) => args[0] === "push")).toBe(false);
+  });
+});
+
+describe("fork source and fetch coverage, from remote URLs", () => {
+  const endpoints = [
+    {
+      name: "origin",
+      fetchUrl: "git@github.com:me/widget.git",
+      pushUrl: "git@github.com:me/widget.git"
+    },
+    {
+      name: "source",
+      fetchUrl: "https://github.com/Acme/widget.git",
+      pushUrl: "https://github.com/Acme/widget.git"
+    },
+    {
+      name: "upstream",
+      fetchUrl: "https://gitlab.example.com/mirror/widget.git",
+      pushUrl: "https://gitlab.example.com/mirror/widget.git"
+    }
+  ];
+  const parent = { hostname: "github.com", nameWithOwner: "acme/widget" };
+
+  it("prefers the remote whose URL names the parent over one merely named upstream", () => {
+    expect(forkSourceRemote(endpoints, "origin", parent)).toEqual({
+      remote: "source",
+      confirmed: true
+    });
+  });
+
+  it("accepts an SSH host alias that still names the parent", () => {
+    const aliased = [
+      endpoints[0]!,
+      {
+        name: "theirs",
+        fetchUrl: "git@github-work:acme/widget.git",
+        pushUrl: "git@github-work:acme/widget.git"
+      }
+    ];
+    expect(forkSourceRemote(aliased, "origin", parent)).toEqual({
+      remote: "theirs",
+      confirmed: true
+    });
+  });
+
+  it("falls back to the `upstream` name, unconfirmed, when identity says nothing", () => {
+    expect(forkSourceRemote(endpoints, "origin", null)).toEqual({
+      remote: "upstream",
+      confirmed: false
+    });
+  });
+
+  it("never offers the branch's own remote as its fork source", () => {
+    expect(forkSourceRemote(endpoints, "upstream", null)).toBeNull();
+    expect(forkSourceRemote(endpoints, "source", parent)).toEqual({
+      remote: "upstream",
+      confirmed: false
+    });
+  });
+
+  it("matches FETCH_HEAD's anonymized URLs back to remote names", () => {
+    const fetchHead = [
+      `${"a".repeat(40)}\t\tbranch 'main' of github.com:me/widget`,
+      `${"b".repeat(40)}\tnot-for-merge\tbranch 'fix/x' of github.com:me/widget`,
+      `${"c".repeat(40)}\tnot-for-merge\tbranch 'main' of https://github.com/Acme/widget`
+    ].join("\n");
+    const withToken = endpoints.map((endpoint) =>
+      endpoint.name === "source"
+        ? { ...endpoint, fetchUrl: "https://x-token:secret@github.com/Acme/widget.git/" }
+        : endpoint
+    );
+    expect(fetchHeadRemotes(fetchHead, withToken)).toEqual(["origin", "source"]);
+    expect(fetchHeadRemotes("", withToken)).toEqual([]);
   });
 });
 

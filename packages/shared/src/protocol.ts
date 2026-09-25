@@ -32,6 +32,9 @@ import type {
   ForkCheckoutPreflight,
   ForkPreflight,
   ForkProgress,
+  ForkStatus,
+  ForkSyncOutcome,
+  ForkSyncPush,
   RepoIdentity,
   RepoIdentityRefreshOutcome,
   PushRefPlan,
@@ -1415,7 +1418,12 @@ export interface Commands {
     req: { operationId: string };
     res: { canceled: boolean };
   };
-  "remote:fetch": { req: { worktreeId: string }; res: null };
+  /**
+   * Fetch the checked-out branch's remote — or, with `remotes`, exactly those.
+   * The reset dialog passes every remote a target card came from, since a bare
+   * fetch leaves a fork's source untouched.
+   */
+  "remote:fetch": { req: { worktreeId: string; remotes?: string[] }; res: null };
   /** Fetch one named remote, or every non-skipped remote when omitted. */
   "remote:fetchRepo": {
     req: { repoId: string; remote?: string };
@@ -1564,9 +1572,14 @@ export interface Commands {
     req: { worktreeId: string; publish?: PushPublishTarget };
     res: null;
   };
-  /** Fresh branch/upstream comparison after a non-fast-forward pull. */
+  /**
+   * Fresh branch/upstream comparison after a non-fast-forward pull. `ref`
+   * compares against another fetched remote-tracking branch instead of the
+   * one the branch tracks: the fork's source, when a sync could not
+   * fast-forward.
+   */
   "remote:inspectDivergence": {
-    req: { worktreeId: string };
+    req: { worktreeId: string; ref?: string };
     res: RemoteDivergence;
   };
   /** Move the inspected clean local branch to the exact upstream tip shown. */
@@ -1598,6 +1611,47 @@ export interface Commands {
     req: { worktreeId: string; remoteRef: string };
     res: RemoteResetPreview;
   };
+  /**
+   * The checked-out branch against its counterpart on the fork's source, or
+   * null when the checkout is not a fork branch with one fetched. Local reads
+   * only — Fetch is what refreshes the source.
+   */
+  "remote:forkStatus": {
+    req: { worktreeId: string };
+    res: ForkStatus | null;
+  };
+  /**
+   * Bring a fork branch up to its source in one step: fetch the tracked
+   * remote and the source, fast-forward the checkout to the source's tip the
+   * way Pull does (stash, `merge --ff-only`, reapply), then — with `push` —
+   * push that tip to the tracked branch when doing so is a fast-forward too.
+   * Refuses when the branch has commits the source lacks, and never forces
+   * the push. `branch` and `sourceRef` are what the header showed; a checkout
+   * that has moved to another branch or source since is refused rather than
+   * synced.
+   */
+  "remote:syncFork": {
+    req: { worktreeId: string; branch: string; sourceRef: string; push: boolean };
+    res: ForkSyncOutcome;
+  };
+  /**
+   * Push one exact object to one branch on one remote, leased on the tip the
+   * user reviewed — the reset dialog bringing a fork's `origin/main` along.
+   * Forces when the lease holds, so a diverged fork is replaced; refuses when
+   * the remote moved since.
+   */
+  "remote:pushBranchWithLease": {
+    req: {
+      worktreeId: string;
+      remote: string;
+      branch: string;
+      /** Full object name to push. */
+      head: string;
+      /** Full object name the remote branch must still point at. */
+      expectedHead: string;
+    };
+    res: null;
+  };
   /** Reset only the still-current checkout/ref pair from the reviewed snapshot. */
   "remote:resetToRemote": {
     req: RemoteResetSnapshot & {
@@ -1606,15 +1660,24 @@ export interface Commands {
     };
     res: null;
   };
-  /** Replay the inspected clean local commits on the exact upstream tip shown. */
+  /**
+   * Replay the inspected clean local commits on the exact upstream tip shown.
+   * `ref` names the tip's remote-tracking branch when it is not the tracked
+   * one (the fork's source). `pushTo` then carries the rebased branch on to
+   * the branch the checkout tracks, forced and leased on `expectedHead`: the
+   * rebase rewrote commits that branch already holds. `push` is null when no
+   * push was asked for.
+   */
   "remote:rebaseOntoUpstream": {
     req: {
       worktreeId: string;
       branch: string;
       head: string;
       upstreamHead: string;
+      ref?: string;
+      pushTo?: { remote: string; branch: string; expectedHead: string };
     };
-    res: null;
+    res: { push: ForkSyncPush | null };
   };
 
   // Lineage graph (U10)

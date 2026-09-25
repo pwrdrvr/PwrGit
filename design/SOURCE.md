@@ -84,6 +84,8 @@ first.
 | `Hunk Lane Staging.dc.html` | Two-lane hunk/line staging gutter. |
 | `Image Diff Lightbox.dc.html` | Binary image diff — inline layout rule, lightbox, pixel compare. |
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
+| `Reset to Remote - Forks - UX Review.dc.html` | The same dialog on a fork: why it opened on `origin/main` when that was identical to `main`, why "Last fetched moments ago" was true only of `origin` while `upstream/main` was 19 minutes stale, and the fork-source card, per-remote fetch coverage and leased push back to the fork that fix it. Interactive. |
+| `Fork Sync - UX Review.dc.html` | Why a fork's `main` read "up to date" while its source was 10 commits ahead &mdash; the header measured it against the fork itself, and Fetch never asked `upstream` &mdash; and where a one-click catch-up belongs: a separate chip, a split Pull whose default syncs, a Pull that only pulls, or a button that reads Sync. Then the recommended split Pull through its states: the arrow menu, syncing, the receipt, a refused push, a `main` with commits of its own, where no arrow appears, and the narrow header. Interactive. |
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
@@ -316,6 +318,19 @@ from the artboard. Its version strings are invented; the Git LFS build tail is t
 real shape of `git lfs version` output. Turn **1** is the card as #296 builds it;
 turns **2&ndash;3**, the redraw and the state table, are a proposal.
 
+`Reset to Remote - Forks - UX Review.dc.html` was written here and pushed up
+through the `claude-design` MCP, in the same change that builds what it draws;
+the project copy was verified at the same 51,219 bytes. It answers a report
+from a fork checkout, where `origin` is the fork, `upstream` the source, and
+`main` tracks `origin/main`. Turn **1** is the diagnosis, including the
+reflog timeline that showed the reset landing on a tip 19 minutes old. Turns
+**2&ndash;4** are the target step, the review step and the outcome, and **2d**
+is a live `DCLogic` prototype. It is drawn in the light theme the report came
+from. The repository names are the reported ones (`huntharo/diskhound`, a fork
+of `tzarebczan/diskhound`), and so are the SHAs and counts in turns 1 and 2b.
+The diverged fork in **2c** and **3b** is invented: `3c1a9e0` and its two
+commits exist only in the artboard.
+
 `Fork From Here - UX Review.dc.html` was written here and pushed up through the
 `claude-design` MCP, in the same change that builds what it draws; the project
 copy was verified at the same 47,661 bytes. It answers a report that the
@@ -349,6 +364,23 @@ moment of the report that started it: 44 of 80, three in flight. Turn **2**
 draws three placements with **2b** recommended, turn **3** is 2b through one
 run, **4a** is a live `DCLogic` prototype of it, and turn **5** is the build
 list, which shipped with the artboard.
+
+`Fork Sync - UX Review.dc.html` was written here and pushed up through the
+`claude-design` MCP; the project copy was verified at the same 53,797 bytes.
+It follows on from `Reset to Remote - Forks`. After that reset the fork's
+source moved on 10 commits and nothing in the app noticed, because the header
+measured `main` against `origin/main`, the fork, and Fetch never asked
+`upstream`. Turn **1** weighs four homes for a one-click catch-up: **1a** is
+the standalone chip this change first built, and **1b**, a split Pull whose
+default fast-forwards from the source and then pushes to the fork, is the
+recommendation. Turn **2** takes 1b through its states, and **2i** is a live
+`DCLogic` prototype. The toolbar glyphs are the app's own `RefreshGlyph`,
+`PullGlyph` and Push icon, drawn as CSS masks from fully percent-encoded SVG,
+because a partly encoded data URI rendered only part of each glyph. Its
+names are contrived (`sparkline`, `octo-labs`, `demo-dev`), and so are the
+counts and the SHA `8f3c2a9`. The design thread that produced it is in the
+project's chat panel as "Fork behind its source — detect and sync". It carries
+no `assets/`.
 
 ## Deliberately NOT copied in
 

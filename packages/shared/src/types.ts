@@ -177,6 +177,8 @@ export type ResetTargetSuggestion = {
   ref: string;
   /** Display-qualified name, e.g. `origin/main`. */
   label: string;
+  /** The remote the ref was fetched from — what Fetch has to ask to refresh it. */
+  remote: string;
   head: string;
   lastCommitAt?: string;
   subject?: string;
@@ -184,6 +186,101 @@ export type ResetTargetSuggestion = {
   ahead: number;
   /** Commits on this tip that the checkout does not contain. */
   behind: number;
+};
+
+/**
+ * What pushing the reset result to the branch the checkout tracks would do —
+ * on a fork, bringing `origin/main` along after `main` moves to the source.
+ */
+export type ForkPushBack = {
+  /** The tracked remote and the branch on it, e.g. `origin` and `main`. */
+  remote: string;
+  branch: string;
+  /** Its fetched remote-tracking ref, e.g. `refs/remotes/origin/main`. */
+  ref: string;
+  /** That ref's tip: what the push's lease expects to find on the remote. */
+  head: string;
+  /** Commits on the tracked tip the source lacks. Above 0, the push forces
+   *  and removes them from the remote. */
+  overwrites: number;
+  /** Commits on the source the tracked tip lacks. */
+  adds: number;
+};
+
+/**
+ * The checked-out branch's counterpart on the repository this fork came from:
+ * `upstream/main` for a `main` that tracks `origin/main`.
+ */
+export type ForkSourceTarget = ResetTargetSuggestion & {
+  /** `owner/name` of the fork's parent when forge identity matched the
+   *  remote's URL to it. Absent means the remote was chosen only because it
+   *  is named `upstream`, and the dialog must not claim a fork relationship. */
+  parent?: string;
+  /** Null when the branch tracks nothing, or its tracked tip already equals
+   *  this one. */
+  pushBack: ForkPushBack | null;
+};
+
+/**
+ * How far the fork source's default branch has moved on without a branch it
+ * does not carry — the drift chip on a fork's feature branch, which counts
+ * against `upstream/main` because that is where its pull request lands.
+ */
+export type ForkDrift = {
+  /** Display-qualified name, e.g. `upstream/main`. */
+  label: string;
+  /** Commits there that the branch lacks. 0 when there is nothing to say:
+   *  the branch's work is already in it, or the two share no history. */
+  behind: number;
+};
+
+/**
+ * Where the checked-out branch stands against the fork's source. On a branch
+ * the source also carries, the header's status chip reads against it and Pull
+ * gains its menu; the tracked branch reads 0/0 on a fork whose source has
+ * moved on, so nothing else in the header can say it.
+ */
+export type ForkStatus = {
+  branch: string;
+  head: string;
+  /** The branch's counterpart on the source; null for a branch the source
+   *  does not carry, like a feature branch. `ahead` is the branch's own
+   *  commits the source lacks; `behind` is what a sync would bring in.
+   *  `pushBack` is the tracked branch after it. */
+  source: ForkSourceTarget | null;
+  /** The branch the checkout tracks, e.g. `origin/main`; null when none. */
+  tracked: ResetTargetSuggestion | null;
+  /** The source's default branch against a branch that is not it; null on
+   *  the counterpart of that default, or when it is not fetched. */
+  drift: ForkDrift | null;
+};
+
+/** How a fork sync ended for the branch the checkout tracks. */
+export type ForkSyncPush =
+  /** The tracked branch now matches the source. */
+  | { outcome: "pushed"; remote: string; branch: string }
+  /** It already did; there was nothing to push. */
+  | { outcome: "up_to_date"; remote: string; branch: string }
+  /** It has commits the source lacks, so only a forced push could match it.
+   *  The sync never forces; the reset dialog's leased push is the way. */
+  | { outcome: "diverged"; remote: string; branch: string; overwrites: number }
+  /** The push itself failed; the local fast-forward stands. */
+  | { outcome: "failed"; remote: string; branch: string; message: string }
+  /** Pull's "only" choice: the tracked branch was left where it is. */
+  | { outcome: "skipped"; remote: string; branch: string }
+  /** The branch tracks nothing to push to. */
+  | { outcome: "no_tracking" };
+
+export type ForkSyncOutcome = {
+  /** The fork source's ref the branch moved to, e.g. `upstream/main`. */
+  source: string;
+  /** Commits that arrived on the branch. */
+  arrived: number;
+  /** Local work was stashed to let the fast-forward through. */
+  stashed: boolean;
+  /** Reapplying the stashed work after the fast-forward hit conflicts. */
+  reappliedWithConflicts: boolean;
+  push: ForkSyncPush;
 };
 
 /**
@@ -201,10 +298,19 @@ export type ResetTargets = {
   upstream: ResetTargetSuggestion | null;
   /** The remote's default branch. Null when it is already `upstream`. */
   defaultBranch: ResetTargetSuggestion | null;
+  /** The same branch on the fork's source remote, when one is fetched. */
+  forkSource: ForkSourceTarget | null;
   /** Fetched remote-tracking branches across every remote. */
   branchCount: number;
   /** ISO-8601 time this checkout last fetched; null if it never has. */
   lastFetchedAt: string | null;
+  /**
+   * The remotes that last fetch actually asked, from `FETCH_HEAD`'s own
+   * lines. A bare `git fetch` asks only the branch's remote, so on a checkout
+   * with two remotes `lastFetchedAt` can be minutes old for one of them and
+   * hours old for the other.
+   */
+  lastFetchedRemotes: string[];
 };
 
 /**
