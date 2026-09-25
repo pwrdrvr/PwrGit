@@ -136,8 +136,11 @@ export function registerForkHandlers(
     return ok(null);
   });
   bus.register("repo:refreshIdentities", async (req) => {
+    const only = new Set(req.repoIds ?? []);
     const repos = indexer.listRepos(req.profileId).filter(
-      (repo) => req.repoId === undefined || repo.id === req.repoId
+      (repo) =>
+        (req.repoId === undefined || repo.id === req.repoId) &&
+        (req.repoIds === undefined || only.has(repo.id))
     );
     const { changes: changed, outcomes } = await identities.refreshWithOutcomes(repos, {
       ...(req.force === undefined ? {} : { force: req.force })

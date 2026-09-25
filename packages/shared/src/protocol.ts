@@ -989,9 +989,18 @@ export interface Commands {
     res: Repo;
   };
   /** Re-read forge identity (visibility, fork lineage) for a profile's repos.
-   *  Answers the changed rows; the rest of the tree is left alone. */
+   *  Answers the changed rows; the rest of the tree is left alone.
+   *
+   *  `repoId` narrows it to one repository, and `repoIds` to several — the
+   *  rows a `repo:list` reload brought in since the window last asked. Both
+   *  absent is the whole profile. */
   "repo:refreshIdentities": {
-    req: { profileId: ProfileId; repoId?: RepoId; force?: boolean };
+    req: {
+      profileId: ProfileId;
+      repoId?: RepoId;
+      repoIds?: RepoId[];
+      force?: boolean;
+    };
     res: { changed: number; outcomes: RepoIdentityRefreshOutcome[] };
   };
   /**

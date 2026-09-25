@@ -32,6 +32,23 @@ describe("fork handlers", () => {
     });
   });
 
+  it("asks about exactly the listed repositories, unforced, and stays quiet when nothing moved", async () => {
+    const added = [{ id: "repo-2" }, { id: "repo-3" }];
+    const refreshWithOutcomes = vi.fn(async () => ({ changes: [], outcomes: [] }));
+    const listRepos = vi.fn(() => [{ id: "repo-1" }, ...added]);
+    const bus = new CommandBus();
+    registerForkHandlers(bus, {} as ForkService,
+      { refreshWithOutcomes } as unknown as IdentityService,
+      { listRepos } as unknown as RepoIndexer);
+    expect(await bus.dispatch("repo:refreshIdentities", {
+      profileId: "profile-1", repoIds: ["repo-3", "repo-2", "gone"]
+    })).toEqual(ok({ changed: 0, outcomes: [] }));
+    // The profile's own order, and an id that no longer lists is dropped
+    // rather than looked up.
+    expect(refreshWithOutcomes).toHaveBeenCalledExactlyOnceWith(added, {});
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
+
   it("cancels the matching fork without publishing a repo change", async () => {
     const fork = vi.fn(
       async (

@@ -75,6 +75,22 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   const [refreshingRepoIds, setRefreshingRepoIds] = useState<Set<string>>(
     new Set()
   );
+  /**
+   * The repositories this window has already asked the forge about, or null
+   * until the first `repo:list` of this profile lands.
+   *
+   * The mount-time `repo:refreshIdentities` covers every repository that
+   * existed then, and nothing else ever asked about one that arrived later —
+   * Add folders…, a rescan, a clone into a watched root. Such a row stayed
+   * without an identity until a relaunch or a fetch of that repo, so every
+   * surface that waits on the forge's answer stayed blank. That included the
+   * read-only mark, the fork button on `origin`, and Fork…'s seed. So each
+   * reload asks, once, about the rows it has not seen before. Main's TTL,
+   * backoff and in-flight de-dupe bound the cost as they do for the mount
+   * call. Seeded from the first load rather than asked about, because the
+   * mount call already is.
+   */
+  const identityAskedRef = useRef<Set<string> | null>(null);
 
   // Always scope to THIS window's profile — with one window per profile, the
   // global "active" profile changes whenever any window opens.
@@ -87,6 +103,22 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     if (r.ok) {
       setRepos(r.value);
       setLoadState(READY_READ_STATE);
+      const asked = identityAskedRef.current;
+      if (asked === null) {
+        identityAskedRef.current = new Set(r.value.map((repo) => repo.id));
+      } else {
+        const arrived = r.value.filter((repo) => !asked.has(repo.id));
+        for (const repo of arrived) asked.add(repo.id);
+        const unread = arrived
+          .filter((repo) => repo.identity === undefined)
+          .map((repo) => repo.id);
+        if (unread.length > 0) {
+          void dispatch("repo:refreshIdentities", {
+            profileId: activeProfileId,
+            repoIds: unread
+          });
+        }
+      }
     } else {
       // Keep the last good tree. Pinning, ordering, PR refreshes, and removals
       // update that copy optimistically and a transient read must not erase it.
@@ -107,10 +139,12 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
         requestRef.current += 1;
       };
     }
+    identityAskedRef.current = null;
     void reload(true);
     // Identity refresh is fire-and-forget and TTL-throttled in the main
     // process: stored marks paint with the first repo:list, and anything
-    // stale arrives as a repo:identityChanged delta a moment later.
+    // stale arrives as a repo:identityChanged delta a moment later. Rows that
+    // arrive after this are asked about by `reload` — see `identityAskedRef`.
     void dispatch("repo:refreshIdentities", { profileId: activeProfileId });
     const off = subscribe("repo:changed", (p) => {
       if (p.profileId === activeProfileId) void reload();

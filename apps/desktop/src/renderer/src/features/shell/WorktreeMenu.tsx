@@ -17,18 +17,23 @@ import {
 
 /**
  * A "⋯" actions menu for a worktree: copy branch/path, reveal in the OS file
- * manager, and caller-provided reset/removal actions. The dropdown is portalled
- * to <body> so the sidebar's scroll container can't clip it.
+ * manager, and caller-provided fork/reset/removal actions. The dropdown is
+ * portalled to <body> so the sidebar's scroll container can't clip it.
  */
 export function WorktreeMenu({
   worktree,
   className,
+  fork,
   onResetToRemote,
   onRemove,
   platform
 }: {
   worktree: Worktree;
   className?: string;
+  /** Fork the repository this worktree belongs to. The header's menu is where
+   *  people look when they are "on main" and want a copy of their own, and
+   *  the read-only chip beside it only appears once the forge has answered. */
+  fork?: { label: string; onSelect: () => void };
   onResetToRemote?: () => void;
   onRemove?: () => void;
   /** Explicit only in deterministic platform component tests. */
@@ -128,6 +133,18 @@ export function WorktreeMenu({
             >
               {revealLabel(platform)}
             </button>
+            {fork !== undefined && (
+              <>
+                <div className="pop-menu__sep" />
+                <button
+                  className="pop-menu__item"
+                  role="menuitem"
+                  onClick={(e) => pick(e, fork.onSelect)}
+                >
+                  {fork.label}
+                </button>
+              </>
+            )}
             {onResetToRemote !== undefined && (
               <>
                 <div className="pop-menu__sep" />

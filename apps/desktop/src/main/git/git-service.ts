@@ -3278,6 +3278,7 @@ export async function listRemoteEndpoints(
   return ok(
     [...urls].map(([name, entry]) => ({
       name,
+      fetchUrl: entry.fetch ?? entry.push ?? "",
       pushUrl: entry.push ?? entry.fetch ?? ""
     }))
   );

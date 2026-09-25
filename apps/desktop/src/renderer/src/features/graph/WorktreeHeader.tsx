@@ -865,6 +865,12 @@ export function WorktreeHeader({
         <WorktreeMenu
           className="kebab--toolbar"
           worktree={worktree}
+          // Not gated on the read-only answer, unlike the chip: the forge may
+          // not have been asked yet, and the fork dialog reads `origin` itself.
+          fork={{
+            label: `Fork ${repo.identity?.nameWithOwner ?? repo.name}…`,
+            onSelect: () => setForkPrompt({})
+          }}
           onResetToRemote={() =>
             openResetToRemote({
               worktree,

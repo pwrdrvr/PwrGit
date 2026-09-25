@@ -504,8 +504,16 @@ describe("remote ops (bare-remote fixture)", () => {
     expect(endpoints).toEqual(
       ok([
         // Git's own order. A remote with no push URL pushes where it fetches.
-        { name: "fork", pushUrl: "git@example.test:f.git" },
-        { name: "origin", pushUrl: "https://example.test/o.git" }
+        {
+          name: "fork",
+          fetchUrl: "https://example.test/f.git",
+          pushUrl: "git@example.test:f.git"
+        },
+        {
+          name: "origin",
+          fetchUrl: "https://example.test/o.git",
+          pushUrl: "https://example.test/o.git"
+        }
       ])
     );
     expect(calls).toHaveLength(1);

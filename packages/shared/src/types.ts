@@ -242,9 +242,12 @@ export type PushPublishTarget = {
   remote: string;
 };
 
-/** A remote as a question about where to push draws it: its name, and the URL
- *  a push to it goes to. */
-export type RemoteEndpoint = Pick<RemoteSummary, "name" | "pushUrl">;
+/** A remote as one `git remote -v` names it: its name, the URL a push to it
+ *  goes to, and the URL it fetches from. The publish question reads the push
+ *  side; the fork seed reads the fetch side, because that is the one the
+ *  identity service reads — a push URL pointed elsewhere is a mirror, and
+ *  seeding a fork from the mirror would fork the wrong project. */
+export type RemoteEndpoint = Pick<RemoteSummary, "name" | "fetchUrl" | "pushUrl">;
 
 export type RemoteSummary = {
   name: string;

@@ -8,6 +8,10 @@ import {
 } from "react";
 import type { TagSummary, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
+import { copyText } from "../../lib/copyText";
+import { dispatch } from "../../lib/pwrgit";
+import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { revealLabel, revealPath } from "../shell/reveal";
 import {
   currentPlatform,
   hasPrimaryModifier,
@@ -163,7 +167,7 @@ export function RepoRow({
     startPoint?: string
   ) => void;
   /** Open the fork prompt for this repository — raised by the read-only mark,
-   *  which is the row that knows the account cannot push here. */
+   *  the `origin` row under REMOTES, and the row's own actions menu. */
   onForkRepo: () => void;
   /** The current lens is one the user can arrange by hand (Pinned only). */
   arrangeable: boolean;
@@ -194,6 +198,64 @@ export function RepoRow({
    *  name, the two lens markers, the pin, the refresh button and the sort
    *  cycle. They are never open at once. */
   const tip = useViewportTooltip();
+  /**
+   * The row's actions menu, open at a point: under the kebab, at the pointer
+   * for a right-click, or under the row for the keyboard's menu key.
+   *
+   * A repository had no menu at all, which left "Fork…" with nowhere to live
+   * whenever the read-only mark was not drawn — and it is not drawn until the
+   * forge has answered, so a checkout added mid-session had no fork verb
+   * anywhere on its row. See design/Fork From Here - UX Review.dc.html.
+   */
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    align: "start" | "end";
+  } | null>(null);
+  const kebabRef = useRef<HTMLButtonElement>(null);
+  /** "Manage remotes…" asks `RepoRefsSections` to open its browser, which
+   *  needs refs only that component loads — so the ask is held here until it
+   *  mounts and has them. */
+  const [refsBrowserRequest, setRefsBrowserRequest] = useState<
+    "remotes" | null
+  >(null);
+  const menuItems: MenuItem[] = [
+    {
+      type: "item",
+      // The slug once the forge has named it; the folder name until then,
+      // rather than a URL guessed from it.
+      label: `Fork ${repo.identity?.nameWithOwner ?? repo.name}…`,
+      onSelect: onForkRepo
+    },
+    {
+      type: "item",
+      label: "Manage remotes…",
+      onSelect: () => {
+        if (!expanded) onToggleExpand();
+        setRefsBrowserRequest("remotes");
+      }
+    },
+    { type: "sep" },
+    { type: "item", label: "Copy path", onSelect: () => void copyText(repo.path) },
+    {
+      type: "item",
+      label: revealLabel(platform),
+      onSelect: () => revealPath(repo.path)
+    },
+    { type: "sep" },
+    {
+      type: "item",
+      label: "Refresh forge info",
+      // Forced: this is the manual trigger for a row whose identity never
+      // landed, which is exactly the row the TTL and backoff would skip.
+      onSelect: () =>
+        void dispatch("repo:refreshIdentities", {
+          profileId: repo.profileId,
+          repoId: repo.id,
+          force: true
+        })
+    }
+  ];
   const navigation = groupWorktreesForNavigation(
     repo.worktrees,
     sort,
@@ -511,8 +573,28 @@ export function RepoRow({
           if (isPostDragClick()) return;
           onToggleExpand();
         }}
-        onKeyDown={onRowKeyDown}
+        onKeyDown={(event) => {
+          // The platform's own "open the context menu" keys, so the menu a
+          // right-click opens is reachable from the row that holds focus.
+          if (
+            event.target === event.currentTarget &&
+            (event.key === "ContextMenu" ||
+              (event.shiftKey && event.key === "F10"))
+          ) {
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setMenu({ x: rect.left + 24, y: rect.bottom + 2, align: "start" });
+            return;
+          }
+          onRowKeyDown(event);
+        }}
         onFocus={onRowFocus}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          tip.hide();
+          setMenu({ x: event.clientX, y: event.clientY, align: "start" });
+        }}
       >
         {/* Only the arrangeable lens gets a handle: everywhere else the list
             order is computed, so a grip would promise a gesture that has
@@ -626,7 +708,48 @@ export function RepoRow({
         >
           <PinIcon filled={repo.pinned} size={12} />
         </button>
+        {/* After the star and in flow, with its room always held, so nothing
+            to its left moves when it fades in on hover. Same kebab as a
+            worktree row's, drawn at 18px and targeted at 24. */}
+        <span className="kebab repo-row__menu">
+          <button
+            ref={kebabRef}
+            type="button"
+            className="kebab__btn"
+            aria-label={`${repo.name} actions`}
+            aria-haspopup="menu"
+            aria-expanded={menu !== null}
+            {...hoverTooltip(tip, "More actions")}
+            onClick={(event) => {
+              event.stopPropagation();
+              tip.hide();
+              if (menu !== null) {
+                setMenu(null);
+                return;
+              }
+              const rect = event.currentTarget.getBoundingClientRect();
+              setMenu({ x: rect.right, y: rect.bottom + 4, align: "end" });
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <circle cx="12" cy="5" r="2.3" />
+              <circle cx="12" cy="12" r="2.3" />
+              <circle cx="12" cy="19" r="2.3" />
+            </svg>
+          </button>
+        </span>
       </div>
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={`${repo.name} actions`}
+          align={menu.align}
+          items={menuItems}
+          triggerRef={kebabRef}
+          onClose={() => setMenu(null)}
+        />
+      )}
 
       {expanded && (
         <div
@@ -776,6 +899,8 @@ export function RepoRow({
           <RepoRefsSections
             onLocateTag={onLocateTag}
             onFork={onForkRepo}
+            browserRequest={refsBrowserRequest}
+            onBrowserRequestHandled={() => setRefsBrowserRequest(null)}
             repo={repo}
             now={now}
             // Only when the working target lives in THIS repo. That is what

@@ -4,12 +4,16 @@ import {
   forgeCanAnswerSaas,
   forgeProductOrAssumed,
   forgeSaasBlock,
+  isForgeKind,
+  parseForgeRemote,
   type CloneRepository,
   type ForgeHost,
+  type ForgeHostMap,
   type ForgeOwner,
   type ForgeStatus,
   type ForkPreflight,
   type ForkProgress,
+  type RemoteEndpoint,
   type Repo
 } from "@pwrgit/shared";
 
@@ -294,5 +298,42 @@ export function forkSeedFromRepo(repo: Repo | undefined): CloneRepository | null
       : { viewerCanPush: identity.viewerCanPush }),
     ...(identity.parent === undefined ? {} : { parent: identity.parent }),
     ...(identity.root === undefined ? {} : { root: identity.root })
+  };
+}
+
+/**
+ * The same seed, read off `origin`'s URL, for a repository whose identity has
+ * not been read yet.
+ *
+ * `forkSeedFromRepo` refuses without an identity, and so the dialog opened on
+ * an empty search for a checkout added since the window mounted. The slug is
+ * a local fact all the same. `origin` names its host and path, so what is
+ * missing is only what the forge says ABOUT the repository, and the dialog's
+ * preflight asks for exactly that as soon as it opens. The seed therefore says
+ * `unknown` rather than guessing a visibility or a push answer.
+ *
+ * The FETCH url, like `readRemotes` in main: a push url pointed elsewhere is a
+ * mirror, and forking the mirror forks the wrong project. Null for a host no
+ * product claims. A NAS remote parses perfectly well and is not a forge, and a
+ * fork aimed at it would be aimed at whatever SaaS host shares the path.
+ */
+export function forkSeedFromOrigin(
+  remotes: readonly RemoteEndpoint[],
+  hosts: ForgeHostMap
+): CloneRepository | null {
+  const origin = remotes.find((remote) => remote.name === "origin");
+  if (origin === undefined) return null;
+  const parsed = parseForgeRemote(origin.fetchUrl, hosts);
+  if (parsed === null || !isForgeKind(parsed.host)) return null;
+  return {
+    name: parsed.repo,
+    owner: parsed.owner,
+    nameWithOwner: parsed.nameWithOwner,
+    visibility: "unknown",
+    host: parsed.host,
+    hostname: parsed.hostname,
+    sshUrl: "",
+    httpsUrl: "",
+    localPaths: []
   };
 }

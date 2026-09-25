@@ -64,9 +64,11 @@ export function App() {
   const [cloneOpen, setCloneOpen] = useState(false);
   /** null = closed. Open carries a `seed`: a CloneRepository opens the dialog
    *  on the repository the sidebar had selected, and `seed: null` opens it
-   *  empty — which is what a selection with no read identity yields. */
+   *  empty — nothing selected, or nothing about it names a forge. `checkout`
+   *  is the row the seed came from, which is what lets the dialog offer to
+   *  fork that checkout in place rather than clone a second copy. */
   const [forkOpen, setForkOpen] = useState<
-    { seed: CloneRepository | null } | null
+    { seed: CloneRepository | null; checkout: Repo | null } | null
   >(null);
   /** The repository whose checkout is being re-pointed at a fork, raised from
    *  the sidebar's read-only mark. Held here rather than in the row so the
@@ -74,6 +76,12 @@ export function App() {
   const [forkCheckout, setForkCheckout] = useState<
     { profileId: string; repoId: string; repoName: string } | null
   >(null);
+  const openForkCheckout = (repo: Repo): void =>
+    setForkCheckout({
+      profileId: repo.profileId,
+      repoId: repo.id,
+      repoName: repo.identity?.nameWithOwner ?? repo.name
+    });
   // A ⌘F pick on a branch with no worktree — the New worktree modal, primed to
   // branch from a fetched ref (remote-only) or to check the branch out (local).
   const [searchNewWorktree, setSearchNewWorktree] = useState<{
@@ -719,14 +727,8 @@ export function App() {
             refreshPullRequest(repoId, branch, "user")
           }
           onCloneRepo={() => setCloneOpen(true)}
-          onForkRepo={(seed) => setForkOpen({ seed })}
-          onForkCheckout={(repo) =>
-            setForkCheckout({
-              profileId: repo.profileId,
-              repoId: repo.id,
-              repoName: repo.identity?.nameWithOwner ?? repo.name
-            })
-          }
+          onForkRepo={(seed, checkout) => setForkOpen({ seed, checkout })}
+          onForkCheckout={openForkCheckout}
           onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
@@ -1006,6 +1008,18 @@ export function App() {
         <ForkRepoDialog
           profile={activeProfile}
           {...(forkOpen.seed === null ? {} : { initialSource: forkOpen.seed })}
+          {...(forkOpen.checkout === null
+            ? {}
+            : {
+                inPlace: {
+                  repoName: forkOpen.checkout.name,
+                  onChoose: () => {
+                    const checkout = forkOpen.checkout;
+                    setForkOpen(null);
+                    if (checkout !== null) openForkCheckout(checkout);
+                  }
+                }
+              })}
           onForked={(repo) => {
             setForkOpen(null);
             setPendingReveal({

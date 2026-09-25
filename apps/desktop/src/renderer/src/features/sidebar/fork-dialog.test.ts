@@ -8,6 +8,7 @@ import type {
 } from "@pwrgit/shared";
 import {
   cliProtocolLabel,
+  forkSeedFromOrigin,
   forkSeedFromRepo,
   forgeCanAnswerAnywhere,
   forgeCanAnswerDialog,
@@ -626,5 +627,61 @@ describe("forkSeedFromRepo", () => {
     );
     expect(seed?.parent?.nameWithOwner).toBe("acme/widget-core");
     expect(seed?.root).toBeUndefined();
+  });
+});
+
+describe("forkSeedFromOrigin", () => {
+  const remotes = (fetchUrl: string, pushUrl = fetchUrl) => [
+    { name: "upstream", fetchUrl: "git@github.com:someone-else/diskhound.git", pushUrl: "" },
+    { name: "origin", fetchUrl, pushUrl }
+  ];
+
+  it("names the repository origin points at, and says nothing it has not read", () => {
+    // diskhound's case: added mid-session, no identity yet, and `origin`
+    // naming the project all along. Visibility and push access are the
+    // forge's to answer, and the dialog's preflight asks at once.
+    expect(
+      forkSeedFromOrigin(remotes("git@github.com:tzarebczan/diskhound.git"), {})
+    ).toEqual({
+      name: "diskhound",
+      owner: "tzarebczan",
+      nameWithOwner: "tzarebczan/diskhound",
+      visibility: "unknown",
+      host: "github",
+      hostname: "github.com",
+      sshUrl: "",
+      httpsUrl: "",
+      localPaths: []
+    });
+  });
+
+  it("reads the fetch URL, not a push URL pointed at a mirror", () => {
+    const seed = forkSeedFromOrigin(
+      remotes(
+        "https://github.com/tzarebczan/diskhound.git",
+        "git@gitlab.com:mirror/diskhound.git"
+      ),
+      {}
+    );
+    expect(seed?.nameWithOwner).toBe("tzarebczan/diskhound");
+    expect(seed?.hostname).toBe("github.com");
+  });
+
+  it("resolves a self-managed host only through the host map", () => {
+    const url = "git@git.corp.example:team/app.git";
+    expect(forkSeedFromOrigin(remotes(url), {})).toBeNull();
+    expect(
+      forkSeedFromOrigin(remotes(url), { "git.corp.example": "gitlab" })
+    ).toMatchObject({ host: "gitlab", hostname: "git.corp.example", nameWithOwner: "team/app" });
+  });
+
+  it("seeds nothing without an origin, or for an origin that is a path", () => {
+    expect(
+      forkSeedFromOrigin(
+        [{ name: "upstream", fetchUrl: "git@github.com:a/b.git", pushUrl: "" }],
+        {}
+      )
+    ).toBeNull();
+    expect(forkSeedFromOrigin(remotes("/Volumes/nas/diskhound.git"), {})).toBeNull();
   });
 });

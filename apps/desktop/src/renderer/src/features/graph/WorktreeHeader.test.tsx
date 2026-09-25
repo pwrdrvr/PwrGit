@@ -2025,6 +2025,7 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
   };
   const remote = (name: string): RemoteEndpoint => ({
     name,
+    fetchUrl: `https://example.test/${name}/project.git`,
     pushUrl: `https://example.test/${name}/project.git`
   });
   const snapshot = (overrides: Partial<WorktreeState>): WorktreeState => ({

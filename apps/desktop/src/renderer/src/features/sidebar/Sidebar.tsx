@@ -43,7 +43,8 @@ import {
   recordFocusVisit,
   type FocusVisits
 } from "./focus-visits";
-import { forkSeedFromRepo } from "./fork-dialog";
+import { forkSeedFromOrigin, forkSeedFromRepo } from "./fork-dialog";
+import { useForgeNaming } from "../../state/useForgeNaming";
 import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
@@ -230,8 +231,11 @@ export function Sidebar({
   onCloneRepo: () => void;
   /** Open the fork-and-clone dialog. Carries the repository the sidebar had
    *  selected, so the dialog opens on it rather than on an empty search box —
-   *  null when nothing is selected or its identity has not been read. */
-  onForkRepo: (seed: CloneRepository | null) => void;
+   *  null when nothing is selected, or when neither its identity nor its
+   *  `origin` names a forge. `checkout` is the row the seed was read from, so
+   *  the dialog can offer to fork that checkout in place instead of cloning a
+   *  second copy; null whenever `seed` is. */
+  onForkRepo: (seed: CloneRepository | null, checkout: Repo | null) => void;
   /** Fork the repository a row is about and re-point that checkout at the
    *  fork. Distinct from `onForkRepo`, which starts from a search and ends in
    *  a new clone: this one starts from a repo already on disk. */
@@ -543,15 +547,55 @@ export function Sidebar({
   /** What "Fork…" should open on: the repository holding the current
    *  selection. Computed here rather than in App because the sidebar is what
    *  owns the notion of a selected row. */
-  const selectedForkSeed = useMemo(
+  const selectedRepo = useMemo(
     () =>
-      forkSeedFromRepo(
-        repos.find((repo) =>
-          repo.worktrees.some((worktree) => worktree.id === selectedWorktreeId)
-        )
+      repos.find((repo) =>
+        repo.worktrees.some((worktree) => worktree.id === selectedWorktreeId)
       ),
     [repos, selectedWorktreeId]
   );
+  const forgeNaming = useForgeNaming();
+  /** One open at a time: the origin fallback awaits a `git remote -v`, and a
+   *  double click inside that window would otherwise open the dialog twice. */
+  const openingFork = useRef(false);
+  /**
+   * Seed from the identity when there is one, and from `origin` when there is
+   * not.
+   *
+   * Identity-only was the bug: a repository added since the window mounted
+   * has no identity until something asks the forge, so pressing Fork… with it
+   * selected opened on an empty search — while `origin` named the repository
+   * the whole time. The identity refresh fired alongside is what makes the
+   * sidebar's own marks catch up; the dialog does not wait on it, because its
+   * preflight asks the same forge the same question the moment it opens.
+   */
+  const openFork = async (): Promise<void> => {
+    if (openingFork.current) return;
+    const repo = selectedRepo;
+    if (repo === undefined) {
+      onForkRepo(null, null);
+      return;
+    }
+    const known = forkSeedFromRepo(repo);
+    if (known !== null) {
+      onForkRepo(known, repo);
+      return;
+    }
+    openingFork.current = true;
+    try {
+      void dispatch("repo:refreshIdentities", {
+        profileId: repo.profileId,
+        repoIds: [repo.id]
+      });
+      const remotes = await dispatch("repo:remotes", { repoId: repo.id });
+      const seed = remotes.ok
+        ? forkSeedFromOrigin(remotes.value, forgeNaming.overrides)
+        : null;
+      onForkRepo(seed, seed === null ? null : repo);
+    } finally {
+      openingFork.current = false;
+    }
+  };
   const filteredIds = filtered.map((repo) => repo.id);
 
   const roots = activeProfile?.roots ?? [];
@@ -1020,7 +1064,7 @@ export function Sidebar({
             </button>
             <button
               className="fork-repo"
-              onClick={() => onForkRepo(selectedForkSeed)}
+              onClick={() => void openFork()}
               disabled={
                 activeProfile === null || activeProfile.roots.length === 0
               }
