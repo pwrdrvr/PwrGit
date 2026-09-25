@@ -151,7 +151,8 @@ export function StashesTab({
       showErrorToast({
         title: "Could not create stash",
         message: result.error.message,
-        detail: message
+        detail: message,
+        subject: { worktreeId }
       });
       return;
     }
@@ -160,13 +161,15 @@ export function StashesTab({
         title: "Nothing stashed",
         message: includeUntracked
           ? "This worktree has no changes to save."
-          : "There are no tracked changes to save. Include untracked files if that is the work you want to stash."
+          : "There are no tracked changes to save. Include untracked files if that is the work you want to stash.",
+        subject: { worktreeId }
       });
       return;
     }
     showInfoToast({
       title: "Stash created",
-      message: message + " was added to the repository stack."
+      message: message + " was added to the repository stack.",
+      subject: { worktreeId }
     });
     setName("");
   };
@@ -196,7 +199,8 @@ export function StashesTab({
               ? "Applied, but the stash was kept"
               : "Pop stopped — stash kept",
         message: result.error.message,
-        detail: entry.selector + " " + displayName(entry)
+        detail: entry.selector + " " + displayName(entry),
+        subject: { worktreeId }
       });
       return;
     }
@@ -207,7 +211,8 @@ export function StashesTab({
           ? displayName(entry) +
             " was restored here and removed from the repository stack."
           : displayName(entry) +
-            " was restored here and kept in the repository stack."
+            " was restored here and kept in the repository stack.",
+      subject: { worktreeId }
     });
   };
 
@@ -239,7 +244,8 @@ export function StashesTab({
       showErrorToast({
         title: "Could not drop stash",
         message: result.error.message,
-        detail: entry.selector + " " + displayName(entry)
+        detail: entry.selector + " " + displayName(entry),
+        subject: { worktreeId }
       });
     }
   };

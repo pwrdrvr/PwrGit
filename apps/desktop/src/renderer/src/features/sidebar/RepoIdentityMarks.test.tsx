@@ -49,7 +49,8 @@ it("retries only this repo, blocks duplicate clicks, and explains an unresolved 
     expect(button.getAttribute("aria-disabled")).toBe("false");
     expect(showErrorToast).toHaveBeenCalledWith({
       title: "Repository visibility",
-      message: "Visibility is still unknown. Check Settings → Forges or Logs."
+      message: "Visibility is still unknown. Check Settings → Forges or Logs.",
+      subject: { repoId: "repo-1" }
     });
   } finally {
     await act(async () => root.unmount());

@@ -346,15 +346,20 @@ export function RepoIdentityGlyphs({
               ? "Visibility is still unknown. Check Settings → Forges or Logs."
               : "Repository visibility refreshed.";
       setFeedback(message);
+      const subject = { repoId };
       if (!result.ok || unresolved) {
-        showErrorToast({ title: "Repository visibility", message });
+        showErrorToast({ title: "Repository visibility", message, subject });
       } else {
-        showInfoToast({ title: "Repository visibility", message });
+        showInfoToast({ title: "Repository visibility", message, subject });
       }
     } catch {
       const message = "Could not refresh visibility. Check Settings → Forges or Logs.";
       setFeedback(message);
-      showErrorToast({ title: "Repository visibility", message });
+      showErrorToast({
+        title: "Repository visibility",
+        message,
+        subject: { repoId }
+      });
     } finally {
       pending.current = false;
       setBusy(false);

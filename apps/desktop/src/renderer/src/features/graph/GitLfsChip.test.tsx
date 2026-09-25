@@ -109,7 +109,8 @@ describe("GitLfsChip", () => {
       title: "Git LFS ready",
       message:
         "proj stores large files with Git LFS. git-lfs/3.7.1 is available " +
-        "to PwrGit and the Git LFS filters are configured."
+        "to PwrGit and the Git LFS filters are configured.",
+      subject: { repoId: "repo-1" }
     });
     expect(toast.showErrorToast).not.toHaveBeenCalled();
   });
@@ -145,7 +146,8 @@ describe("GitLfsChip", () => {
       ),
       detail: setupCommands("darwin"),
       copyText: setupCommands("darwin"),
-      copyLabel: "Copy commands"
+      copyLabel: "Copy commands",
+      subject: { repoId: "repo-1" }
     });
     expect(toast.showInfoToast).not.toHaveBeenCalled();
   });

@@ -95,6 +95,7 @@ export function setupCommands(platform: string): string {
  *  so acting on a superseded response still reports that repo truthfully. */
 function raiseToasts(
   report: GitLfsReport,
+  repoId: string,
   repoName: string,
   key: string,
   platform: string
@@ -114,7 +115,8 @@ function raiseToasts(
       message: `${storyLine(repoName, status)} ${POINTER_WARNING}`,
       detail: setupCommands(platform),
       copyText: setupCommands(platform),
-      copyLabel: "Copy commands"
+      copyLabel: "Copy commands",
+      subject: { repoId }
     });
   } else if (announceReady) {
     // Same key: a repair that follows a standing complaint replaces it in
@@ -122,7 +124,8 @@ function raiseToasts(
     showInfoToast({
       key,
       title: "Git LFS ready",
-      message: storyLine(repoName, status)
+      message: storyLine(repoName, status),
+      subject: { repoId }
     });
   } else {
     // Ready and already announced: nothing to celebrate, but a working setup
@@ -174,6 +177,7 @@ export function GitLfsChip({
     if (result.ok) {
       raiseToasts(
         result.value,
+        repoId,
         repoName,
         toastKey(repoPath),
         platform ?? currentPlatform()

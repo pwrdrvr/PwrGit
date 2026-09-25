@@ -14,7 +14,11 @@ import type { TagSummary, LocalBranchSummary, Repo, RepoRefs, Worktree } from "@
 import { dispatch } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { SwitchGlyph } from "../../lib/SwitchGlyph";
-import { showErrorToast, showInfoToast } from "../../lib/toast";
+import {
+  showErrorToast,
+  showInfoToast,
+  type ToastSubject
+} from "../../lib/toast";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useForgeNaming } from "../../state/useForgeNaming";
 import { CopyTarget } from "../shell/CopyTarget";
@@ -31,6 +35,7 @@ import {
 import { remoteForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
 import { remoteUrlLines, remoteWebUrl, remoteWhere } from "./remote-info";
+import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 import {
   localBranchForRemote,
@@ -178,6 +183,65 @@ export function RepoRefsSections({
     void load();
   }, [load, repo]);
 
+  /**
+   * A toast's remote chip, landing here: open Remotes, open that remote, and
+   * bring its row into view (`sidebar-reveal.ts`).
+   *
+   * Waits for two things. The remote rows exist only once `repo:refs` has
+   * answered. And the selection must already be in this repo — App moves it
+   * when it was elsewhere, and the sidebar answers that move by scrolling to
+   * the newly selected worktree. Going first would have that scroll carry the
+   * remote row straight back out of view.
+   */
+  const reveal = useSidebarReveal();
+  const remotesRef = useRef<HTMLDivElement>(null);
+  const [remoteScroll, setRemoteScroll] = useState<{
+    name: string;
+    seq: number;
+  } | null>(null);
+  const selectionHere = focusedWorktree !== null;
+  useEffect(() => {
+    if (reveal === null || reveal.repoId !== repo.id) return;
+    const name = reveal.remote;
+    if (name === null || !selectionHere) return;
+    if (refs === null) {
+      // Nothing is coming to scroll to; don't leave a reveal armed for a
+      // later load to act on out of the blue.
+      if (error !== null) settleSidebarReveal(reveal.seq);
+      return;
+    }
+    setOpenSections((previous) =>
+      previous.has("remotes") ? previous : new Set(previous).add("remotes")
+    );
+    // A remote removed since the toast was raised still lands on the section
+    // it would have been in.
+    if (refs.remotes.some((remote) => remote.name === name)) {
+      setOpenRemotes((previous) =>
+        previous.has(name) ? previous : new Set(previous).add(name)
+      );
+    }
+    setRemoteScroll({ name, seq: reveal.seq });
+  }, [reveal, repo.id, selectionHere, refs, error]);
+  useEffect(() => {
+    if (remoteScroll === null) return;
+    setRemoteScroll(null);
+    settleSidebarReveal(remoteScroll.seq);
+    const section = remotesRef.current;
+    if (section === null) return;
+    const row = [...section.querySelectorAll<HTMLElement>(".ref-remote")].find(
+      (element) => element.dataset.remote === remoteScroll.name
+    );
+    const head = (row ?? section).querySelector<HTMLElement>(
+      ".ref-remote__main, .ref-section__head"
+    );
+    // The whole remote first — what was opened is its URL and its refs, not
+    // just its name — then its name, which wins when the two cannot both fit.
+    row?.scrollIntoView({ block: "nearest" });
+    head?.scrollIntoView({ block: "nearest" });
+    // Focus follows the jump — see the repo half in `Sidebar`.
+    head?.focus({ preventScroll: true });
+  }, [remoteScroll]);
+
   const toggleSection = (section: RefSection): void => {
     setOpenSections((previous) => {
       const next = new Set(previous);
@@ -189,6 +253,20 @@ export function RepoRefsSections({
 
   const fetchRemote = async (remote?: string): Promise<void> => {
     setFetching(remote ?? "*");
+    // Read at the click, not after the fetch: the toast names what was asked
+    // for, and a remote list reloaded in between is not what was fetched.
+    const fetchUrl = refs?.remotes.find((r) => r.name === remote)?.fetchUrl;
+    const subject: ToastSubject = {
+      repoId: repo.id,
+      ...(remote === undefined
+        ? {}
+        : {
+            remote: {
+              name: remote,
+              ...(fetchUrl === undefined ? {} : { url: fetchUrl })
+            }
+          })
+    };
     const result = await dispatch("remote:fetchRepo", {
       repoId: repo.id,
       ...(remote === undefined ? {} : { remote })
@@ -198,13 +276,15 @@ export function RepoRefsSections({
       showErrorToast({
         title: "Fetch failed",
         message: result.error.message.split("\n")[0],
-        detail: result.error.message
+        detail: result.error.message,
+        subject
       });
       return;
     }
     showInfoToast({
       title: remote === undefined ? "Fetched all remotes" : `Fetched ${remote}`,
-      message: "Remote-tracking branches are up to date."
+      message: "Remote-tracking branches are up to date.",
+      subject
     });
     await load();
   };
@@ -698,7 +778,7 @@ export function RepoRefsSections({
         )}
       </div>
 
-      <div className="ref-section">
+      <div className="ref-section" ref={remotesRef}>
         <div className="ref-section__head-wrap">
           <button
             className="ref-section__head"
@@ -756,7 +836,11 @@ export function RepoRefsSections({
                     )
                   : null;
               return (
-                <div className="ref-remote" key={remote.name}>
+                <div
+                  className="ref-remote"
+                  key={remote.name}
+                  data-remote={remote.name}
+                >
                   <div className="ref-remote__row">
                     <button
                       className="ref-remote__main"

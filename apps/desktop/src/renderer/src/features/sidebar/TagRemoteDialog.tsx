@@ -8,7 +8,11 @@ import type {
   TagSummary
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
-import { showErrorToast, showInfoToast } from "../../lib/toast";
+import {
+  showErrorToast,
+  showInfoToast,
+  type ToastSubject
+} from "../../lib/toast";
 import { CopyTarget } from "../shell/CopyTarget";
 import { useModal } from "../../lib/useModal";
 
@@ -71,6 +75,15 @@ export function TagRemoteDialog({
     setPlan(reviewed.value);
   };
 
+  /** The toast's chips: this repo, and the remote the tag went to. */
+  const remoteSubject = (name: string): ToastSubject => {
+    const url = remotes.find((candidate) => candidate.name === name)?.fetchUrl;
+    return {
+      repoId: repo.id,
+      remote: { name, ...(url === undefined ? {} : { url }) }
+    };
+  };
+
   const apply = async (): Promise<void> => {
     if (plan === null || plan.status === "equal" || busy !== null) return;
     setBusy("apply");
@@ -86,14 +99,16 @@ export function TagRemoteDialog({
       showErrorToast({
         title: "Remote tag action failed",
         message: summary,
-        detail: applied.error.message
+        detail: applied.error.message,
+        subject: remoteSubject(plan.remote)
       });
       return;
     }
     setResult(applied.value);
     showInfoToast({
       title: applied.value.outcome === "deleted" ? "Remote tag deleted" : "Tag pushed",
-      message: `${applied.value.remote}/${applied.value.tagName}`
+      message: `${applied.value.remote}/${applied.value.tagName}`,
+      subject: remoteSubject(applied.value.remote)
     });
     onCompleted(applied.value);
   };

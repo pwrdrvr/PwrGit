@@ -58,15 +58,16 @@ export function OperationBanner({
     if (!result.ok) {
       showErrorToast({
         title: `Could not continue ${verb}`,
-        message: result.error.message
+        message: result.error.message,
+        subject: { worktreeId }
       });
       return;
     }
     // A sequencer that applies a step and stops on the next conflict has made
     // progress, even though Git exits non-zero. Say so, rather than crying
     // failure at the most common point of a multi-commit rebase.
-    showInfoToast(
-      result.value.kind === "completed"
+    showInfoToast({
+      ...(result.value.kind === "completed"
         ? {
             title: `${operation.label} completed`,
             message: `Git finished the ${verb}.`
@@ -74,8 +75,9 @@ export function OperationBanner({
         : {
             title: `${operation.label} advanced`,
             message: result.value.detail
-          }
-    );
+          }),
+      subject: { worktreeId }
+    });
   };
 
   const runAbort = async (): Promise<void> => {
@@ -98,13 +100,15 @@ export function OperationBanner({
     if (!result.ok) {
       showErrorToast({
         title: `Could not abort ${verb}`,
-        message: result.error.message
+        message: result.error.message,
+        subject: { worktreeId }
       });
       return;
     }
     showInfoToast({
       title: `${operation.label} aborted`,
-      message: `Git restored the state from before the ${verb}.`
+      message: `Git restored the state from before the ${verb}.`,
+      subject: { worktreeId }
     });
   };
 

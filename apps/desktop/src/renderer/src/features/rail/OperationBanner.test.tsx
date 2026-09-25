@@ -176,7 +176,8 @@ describe("OperationBanner", () => {
     expect(mocks.showErrorToast).not.toHaveBeenCalled();
     expect(mocks.showInfoToast).toHaveBeenCalledWith({
       title: "Rebase advanced",
-      message: "Git stopped at step 3 of 5 on 1 conflicted path."
+      message: "Git stopped at step 3 of 5 on 1 conflicted path.",
+      subject: { worktreeId: "worktree-1" }
     });
   });
 
@@ -201,7 +202,8 @@ describe("OperationBanner", () => {
     expect(mocks.showInfoToast).not.toHaveBeenCalled();
     expect(mocks.showErrorToast).toHaveBeenCalledWith({
       title: "Could not continue rebase",
-      message: "hook refused"
+      message: "hook refused",
+      subject: { worktreeId: "worktree-1" }
     });
   });
 

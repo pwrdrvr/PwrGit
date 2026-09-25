@@ -224,7 +224,8 @@ async function reachableLocation(
   showErrorToast({
     title: `Could not fetch #${entry.pr.number}`,
     message: result.error.message.split("\n")[0] ?? result.error.message,
-    detail: result.error.message
+    detail: result.error.message,
+    subject: { repoId }
   });
   return null;
 }

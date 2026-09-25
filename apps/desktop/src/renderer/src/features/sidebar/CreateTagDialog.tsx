@@ -105,13 +105,15 @@ export function CreateTagDialog({
       showErrorToast({
         title: "Create tag failed",
         message: summary,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { repoId }
       });
       return;
     }
     showInfoToast({
       title: "Tag created",
-      message: `${result.value.name} points to ${result.value.targetId.slice(0, 12)}.`
+      message: `${result.value.name} points to ${result.value.targetId.slice(0, 12)}.`,
+      subject: { repoId }
     });
     onCreated(result.value);
     onClose();

@@ -266,7 +266,8 @@ export function ResetToRemoteDialog({
       showErrorToast({
         title: "Review reset failed",
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { worktreeId: worktree.id }
       });
       return;
     }
@@ -291,13 +292,15 @@ export function ResetToRemoteDialog({
       showErrorToast({
         title: `${mode === "hard" ? "Hard" : "Soft"} reset failed`,
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { worktreeId: worktree.id }
       });
       return;
     }
     showInfoToast({
       title: `${mode === "hard" ? "Hard" : "Soft"} reset complete`,
-      message: `${preview.snapshot.branch} now points to ${selected.label} at ${shortHead(preview.snapshot.remoteHead)}.`
+      message: `${preview.snapshot.branch} now points to ${selected.label} at ${shortHead(preview.snapshot.remoteHead)}.`,
+      subject: { worktreeId: worktree.id }
     });
     onComplete(mode, selected.label);
     onClose();

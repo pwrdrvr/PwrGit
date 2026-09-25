@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
+import type { Repo } from "@pwrgit/shared";
 import { AppUpdateToast } from "../update/AppUpdateToast";
 import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import { RemoteActivityToast } from "../remote/RemoteActivityToast";
 import { dispatch } from "../../lib/pwrgit";
-import { dismissToast, subscribeToasts, type Toast } from "../../lib/toast";
+import {
+  dismissToast,
+  subscribeToasts,
+  type Toast,
+  type ToastSubject
+} from "../../lib/toast";
 import {
   hoverTooltip,
-  useViewportTooltip
+  useViewportTooltip,
+  type ViewportTooltip
 } from "../../lib/useViewportTooltip";
 
 const AUTO_DISMISS_MS = 9_000;
@@ -20,11 +27,19 @@ const AUTO_DISMISS_MS = 9_000;
  *  around as errors come and go. The container is rendered even when empty —
  *  a childless flex column at a fixed corner has no size and paints nothing. */
 export function ToastHost({
-  selectedWorktreeId = null
+  selectedWorktreeId = null,
+  repos,
+  onReveal
 }: {
   /** The checkout on screen — its own toolbar reports its operations, so the
    *  activity cards below skip it. */
   selectedWorktreeId?: string | null;
+  /** This window's repositories, for naming a toast's subject — see
+   *  `ToastSubject` for why a toast carries an id and not a name. */
+  repos: readonly Repo[];
+  /** Where a subject chip goes: the repository in the sidebar, and with
+   *  `remote`, that remote's row inside it. */
+  onReveal: (repoId: string, remote: string | null) => void;
 }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -44,7 +59,16 @@ export function ToastHost({
       {[...toasts]
         .sort((a, b) => Number(a.sticky === true) - Number(b.sticky === true))
         .map((toast) => (
-          <ToastCard key={toast.key ?? toast.id} toast={toast} />
+          <ToastCard
+            key={toast.key ?? toast.id}
+            toast={toast}
+            subject={
+              toast.subject === undefined
+                ? null
+                : resolveSubject(toast.subject, repos)
+            }
+            onReveal={onReveal}
+          />
         ))}
       {/* Live operations sit below the transient notices and above the update
           card, for the reason the sort above gives: they outlive the come-and-go
@@ -55,7 +79,50 @@ export function ToastHost({
   );
 }
 
-function ToastCard({ toast }: { toast: Toast }) {
+/** A subject with its repository found: what the chips draw. */
+type NamedSubject = {
+  repoId: string;
+  repoName: string;
+  remote?: { name: string; url?: string };
+};
+
+/**
+ * Looks a subject up by repo or worktree id; null for a repository that is
+ * no longer in this window's list.
+ *
+ * A scan per card rather than an index over the list: `repos` changes on every
+ * `repo:changed`, the stack is usually empty, and a handful of cards is all it
+ * ever holds.
+ */
+function resolveSubject(
+  subject: ToastSubject,
+  repos: readonly Repo[]
+): NamedSubject | null {
+  const repo =
+    "repoId" in subject
+      ? repos.find((candidate) => candidate.id === subject.repoId)
+      : repos.find((candidate) =>
+          candidate.worktrees.some(
+            (worktree) => worktree.id === subject.worktreeId
+          )
+        );
+  if (repo === undefined) return null;
+  return {
+    repoId: repo.id,
+    repoName: repo.name,
+    ...(subject.remote === undefined ? {} : { remote: subject.remote })
+  };
+}
+
+function ToastCard({
+  toast,
+  subject,
+  onReveal
+}: {
+  toast: Toast;
+  subject: NamedSubject | null;
+  onReveal: (repoId: string, remote: string | null) => void;
+}) {
   const tip = useViewportTooltip();
   const [paused, setPaused] = useState(false);
 
@@ -83,6 +150,9 @@ function ToastCard({ toast }: { toast: Toast }) {
         >
           {toast.title}
         </p>
+        {subject !== null && (
+          <SubjectChips subject={subject} tip={tip} onReveal={onReveal} />
+        )}
         <p className="app-toast__message">{toast.message}</p>
         {toast.detail !== undefined && toast.detail !== toast.message && (
           <p className="app-toast__detail">{toast.detail}</p>
@@ -116,9 +186,15 @@ function ToastCard({ toast }: { toast: Toast }) {
             {...hoverTooltip(tip, toast.copyLabel ?? "Copy error")}
             onClick={() => {
               void navigator.clipboard.writeText(
-                toast.copyText ?? [toast.title, toast.message, toast.detail]
-                  .filter(Boolean)
-                  .join("\n")
+                toast.copyText ??
+                  [
+                    toast.title,
+                    subject && subjectLine(subject),
+                    toast.message,
+                    toast.detail
+                  ]
+                    .filter(Boolean)
+                    .join("\n")
               );
             }}
           >
@@ -148,5 +224,83 @@ function ToastCard({ toast }: { toast: Toast }) {
       )}
       {tip.tooltipNode}
     </aside>
+  );
+}
+
+/** The subject as plain text, for a copied report: pasted into an issue, the
+ *  chips are gone and "Fetch failed" alone does not say where. */
+function subjectLine(subject: NamedSubject): string {
+  return subject.remote === undefined
+    ? `Repository: ${subject.repoName}`
+    : `Repository: ${subject.repoName} · Remote: ${subject.remote.name}`;
+}
+
+/**
+ * Where the toast happened, as a way back there: `diskhound › upstream`.
+ *
+ * Between the eyebrow and the message, because it is what tells two cards
+ * apart — a stack of "Fetched origin" from three repositories reads as one
+ * repeated notice until each says whose origin. Chips rather than prose since
+ * each one goes somewhere, and a repo name set in a sentence gives no hint
+ * that it can be clicked.
+ *
+ * The remote chip keeps its URL in the tooltip, where the caller had one to
+ * give: `upstream` is a name every fork has, and the URL is what says which
+ * one this is.
+ */
+function SubjectChips({
+  subject,
+  tip,
+  onReveal
+}: {
+  subject: NamedSubject;
+  tip: ViewportTooltip;
+  onReveal: (repoId: string, remote: string | null) => void;
+}) {
+  const { remote } = subject;
+  return (
+    <p className="app-toast__subject">
+      <button
+        type="button"
+        className="app-toast__chip"
+        aria-label={`Show ${subject.repoName} in the sidebar`}
+        {...hoverTooltip(tip, "Show in the sidebar")}
+        onClick={() => {
+          tip.hide();
+          onReveal(subject.repoId, null);
+        }}
+      >
+        <span className="app-toast__chip-name">{subject.repoName}</span>
+      </button>
+      {remote !== undefined && (
+        <>
+          <span className="app-toast__subject-sep" aria-hidden="true">
+            ›
+          </span>
+          <button
+            type="button"
+            className="app-toast__chip"
+            aria-label={`Show remote ${remote.name} of ${subject.repoName} in the sidebar`}
+            {...hoverTooltip(
+              tip,
+              remote.url === undefined ? (
+                "Show in the sidebar"
+              ) : (
+                <span className="app-toast__chip-tip">
+                  <strong>Show in the sidebar</strong>
+                  <span>{remote.url}</span>
+                </span>
+              )
+            )}
+            onClick={() => {
+              tip.hide();
+              onReveal(subject.repoId, remote.name);
+            }}
+          >
+            <span className="app-toast__chip-name">{remote.name}</span>
+          </button>
+        </>
+      )}
+    </p>
   );
 }
