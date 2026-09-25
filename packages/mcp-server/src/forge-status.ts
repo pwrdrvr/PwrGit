@@ -634,11 +634,16 @@ export function createLiveStatusLoader(
   return async (repositoryPath) => {
     const root = await repositoryRootFor(repositoryPath, runner);
     if (root === null) throw new Error(`not a git worktree: ${repositoryPath}`);
-    const [local, remotes, headOid] = await Promise.all([
+    const reads = [
       readSafeStatus(root, runner),
       readConfiguredRemotes(root, runner),
       readHeadOid(root, runner)
-    ]);
+    ] as const;
+    // A failed load must not return while git still works in the checkout:
+    // its caller may remove it next, and Windows refuses to remove a
+    // directory a process is working in. Settle every read first.
+    await Promise.allSettled(reads);
+    const [local, remotes, headOid] = await Promise.all(reads);
     const canonical = remotes.find((remote) => remote.role === "canonical") ?? null;
     const identity: RemoteIdentity | null =
       canonical === null
