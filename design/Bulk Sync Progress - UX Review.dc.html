@@ -625,7 +625,7 @@
           <a class="dv-tid" href="#t5">5</a>
           <span class="dv-tname">What gets built &#8212; <a class="dv-oid" href="#2b">2b</a>, and the rules behind it</span>
         </div>
-        <p class="dv-sub">The build replaces the activity strip and the summary box with one component. It adds no IPC and changes nothing in main: every number already arrives on <code>remote:bulkSyncProgress</code>.</p>
+        <p class="dv-sub">The build replaces the activity strip and the summary box with one component. It adds no IPC and changes nothing in main: every number already arrives on <code>remote:bulkSyncProgress</code>. Built alongside this artboard, in <a href="https://github.com/pwrdrvr/PwrGit/pull/318">PwrGit#318</a>.</p>
         <div class="tbl">
           <div class="tr head"><span>Rule</span><span>Why</span></div>
           <div class="tr"><b>One card, two moments</b><span>The <code>.bulk-sync__status</code> card is mounted for the whole run. At the end it trades the spinner for a mark, the clock for <i>took</i>, and the title for <i>Finished</i> or <i>Cancelled</i>, and the path line becomes the existing summary sentence, set as wrapping prose rather than as a path. The bar is never swapped out, so the receipt is the picture you just watched fill.</span></div>

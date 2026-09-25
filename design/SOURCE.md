@@ -340,7 +340,7 @@ drawing is identical; keep the repo's copy.
 
 `Bulk Sync Progress - UX Review.dc.html` was written here and pushed up
 through the `claude-design` MCP, in the same change that builds what it draws,
-[#PRNUM](https://github.com/pwrdrvr/PwrGit/pull/PRNUM); the project copy was
+[#318](https://github.com/pwrdrvr/PwrGit/pull/318); the project copy was
 verified at the same byte count as this one. It carries no `assets/`: every
 specimen is the shipped dialog rebuilt from the real `app.css` rules, in both
 theme blocks, and its repository names and paths (`atlas-api`, `ledger-web`,
