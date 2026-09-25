@@ -257,6 +257,10 @@ async function resolveDefaultBranch(
   return null;
 }
 
+/** At most `limit` reads in flight. After a failure no new read starts, and
+ * the rejection waits for the reads already running: a failed call must not
+ * return while git still works in a checkout its caller may remove next —
+ * Windows refuses to remove a directory a process is working in. */
 async function mapLimit<T, R>(
   values: readonly T[],
   limit: number,
@@ -264,15 +268,24 @@ async function mapLimit<T, R>(
 ): Promise<R[]> {
   const output = new Array<R>(values.length);
   let next = 0;
+  let failed = false;
   const worker = async (): Promise<void> => {
-    while (next < values.length) {
+    while (!failed && next < values.length) {
       const index = next;
       next += 1;
       const value = values[index];
-      if (value !== undefined) output[index] = await mapper(value, index);
+      if (value === undefined) continue;
+      try {
+        output[index] = await mapper(value, index);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, worker));
+  const workers = Array.from({ length: Math.min(limit, values.length) }, worker);
+  await Promise.allSettled(workers);
+  await Promise.all(workers);
   return output;
 }
 
@@ -346,11 +359,14 @@ export async function readRepositoryInfo(
   const topLevel = requireSuccess(topLevelResult, "locating repository").trim();
   if (topLevel === "") throw new Error("git returned an empty repository path");
 
-  const [worktreeResult, remotes, status] = await Promise.all([
+  const reads = [
     git(topLevel, ["worktree", "list", "--porcelain", "-z"], runner),
     readConfiguredRemotes(topLevel, runner),
     readSafeStatus(requested, runner)
-  ]);
+  ] as const;
+  // Settle every read before surfacing a failure, as `mapLimit` does.
+  await Promise.allSettled(reads);
+  const [worktreeResult, remotes, status] = await Promise.all(reads);
   const parsedWorktrees = parseWorktreeList(
     requireSuccess(worktreeResult, "listing git worktrees")
   );

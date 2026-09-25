@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 800px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 740px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .find { width: 400px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .callout { position: absolute; display: flex; align-items: center; gap: 6px; }
+
+          /* ---- theme scopes: the app's own token names, both blocks ---- */
+          .th-dark {
+            --bg-stage: #000000; --bg-panel: #0a0a0a; --bg-menu: #101010; --bg-panel-elevated: #101010;
+            --border-faint: rgba(247, 243, 235, 0.06); --border-subtle: rgba(247, 243, 235, 0.1); --border-strong: rgba(247, 243, 235, 0.2);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c; --accent-on: #160a00;
+            --success-text: #9ce5b3; --danger-text: #ffb0a1; --danger-base: #b94232;
+            --status-ok: #5fa969; --status-warning: #d99a3d; --status-error: #c45a3a; --status-suspended: #6b6660;
+            --shadow-overlay: 0 32px 80px rgba(0, 0, 0, 0.6);
+          }
+          .th-light {
+            --bg-stage: #ebe5da; --bg-panel: #fdfcfa; --bg-menu: #ffffff; --bg-panel-elevated: #ffffff;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --success-text: #1a5c2e; --danger-text: #8a1f12; --danger-base: #8a1f12;
+            --status-ok: #2e7d3c; --status-warning: #805200; --status-error: #a8472a; --status-suspended: #6b6660;
+            --shadow-overlay: 0 32px 80px rgba(0, 0, 0, 0.24);
+          }
+          .th-dark, .th-light {
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --danger-border: color-mix(in srgb, var(--danger-base) 28%, transparent);
+            --bar-track: color-mix(in srgb, var(--text-primary) 9%, transparent);
+            --bar-skip: color-mix(in srgb, var(--status-warning) 50%, var(--bg-panel));
+          }
+          .stage { position: relative; padding: 22px; border-radius: 10px; background: var(--bg-stage); }
+          .stage.tight { padding: 14px; }
+
+          /* ============================================================
+             The dialog, reproduced at shipped size from app.css
+             (.bulk-sync, .bulk-sync__head, __activity, __repo …)
+             ============================================================ */
+          .bs { width: 720px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .bs-head { display: flex; align-items: flex-start; gap: 18px; padding: 18px; border-bottom: 1px solid var(--border-subtle); }
+          .bs-head.bare { border-bottom: 0; }
+          .bs-head > div { flex: 1; min-width: 0; }
+          .bs-head h2 { margin: 0; color: var(--text-primary); font: 700 14px/1.2 var(--font-sans); }
+          .bs-head p { margin: 7px 0 0; color: var(--text-muted); font: 500 11px/1.45 var(--font-sans); }
+          .bs-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); }
+          .bs-act { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--accent-soft); }
+          .bs-spin { width: 15px; height: 15px; flex: 0 0 auto; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; animation: bs-spin 700ms linear infinite; }
+          @keyframes bs-spin { to { transform: rotate(360deg); } }
+          .bs-copy { flex: 1; min-width: 0; }
+          .bs-copy > strong, .bs-copy > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .bs-copy > strong { color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .bs-copy > span { margin-top: 3px; color: var(--text-muted); font: 500 9.5px/1.2 var(--font-mono); }
+          .bs-copy > span.sum { overflow: visible; white-space: normal; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); }
+          .bs-chips { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; color: var(--text-subtle); font: 600 9px/1 var(--font-sans); }
+          .bs-chips span { display: inline-flex; align-items: baseline; gap: 3px; padding: 5px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); white-space: nowrap; }
+          .bs-chips strong { color: var(--text-secondary); font: 700 9.5px/1 var(--font-mono); }
+          .bs-chips .t strong { color: var(--success-text); }
+          .bs-chips .r { border-color: var(--accent-border); }
+          .bs-chips .r strong { color: var(--accent); }
+          .bs-repos { display: flex; flex-direction: column; gap: 8px; padding: 12px 18px; overflow: hidden; }
+          .bs-repos.scroll { overflow-y: auto; }
+          .bs-repo { flex: none; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .bs-repo.is-running { border-color: var(--accent-border); background: var(--accent-tint); }
+          .bs-repo.is-success { border-color: color-mix(in srgb, var(--success-text) 42%, transparent); }
+          .bs-repo.is-partial, .bs-repo.is-skipped { border-color: color-mix(in srgb, var(--status-warning) 44%, transparent); }
+          .bs-repo.is-failed { border-color: var(--danger-border); }
+          .bs-rh { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+          .bs-rh > div { flex: 1; min-width: 0; }
+          .bs-rh strong, .bs-rh small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .bs-rh strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+          .bs-rh small { margin-top: 3px; color: var(--text-subtle); font: 500 9px/1.2 var(--font-mono); }
+          .bs-st { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--text-subtle); font: 600 9.5px/1 var(--font-mono); text-transform: capitalize; }
+          .bs-st::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; }
+          .bs-st.is-running { border-color: var(--accent-border); color: var(--accent); }
+          .bs-st.is-success { color: var(--success-text); }
+          .bs-st.is-partial, .bs-st.is-skipped { color: var(--status-warning); }
+          .bs-st.is-failed, .bs-st.is-cancelled { border-color: var(--danger-border); color: var(--danger-text); }
+          .bs-repo > p { margin: 5px 0 0; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .bs-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--border-subtle); }
+          .bs-btn { height: 28px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-panel-elevated); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); cursor: pointer; }
+          .bs-btn:disabled { opacity: 0.55; cursor: default; }
+          .bs-btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-on); }
+
+          /* ============================================================
+             Proposed: .bulk-sync__status — the run status card
+             ============================================================ */
+          .rs { display: flex; flex-direction: column; gap: 9px; margin: 12px 18px 0; padding: 11px 12px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rs.is-running { border-color: var(--accent-border); }
+          .rs-top { display: flex; align-items: center; gap: 11px; }
+          .rs-time { flex: 0 0 auto; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+          .rs-time b { color: var(--text-secondary); font-weight: 600; }
+          .rs-mark { width: 15px; height: 15px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+          .rs-mark svg { width: 9px; height: 9px; }
+          .rs-mark.ok { background: color-mix(in srgb, var(--status-ok) 22%, transparent); color: var(--success-text); }
+          .rs-mark.bad { background: color-mix(in srgb, var(--danger-base) 24%, transparent); color: var(--danger-text); }
+          .rs-mark.cxl { background: color-mix(in srgb, var(--status-suspended) 30%, transparent); color: var(--text-secondary); }
+
+          .rs-bar { display: flex; height: 6px; overflow: hidden; border-radius: 999px; background: var(--bar-track); }
+          .rs-bar i { display: block; flex: 0 1 0; min-width: 3px; box-shadow: inset -1px 0 0 var(--bg-panel); transition: flex-grow 320ms ease; }
+          .rs-bar i.z { min-width: 0; box-shadow: none; }
+          .rs-bar i.rest { min-width: 0; box-shadow: none; background: transparent; }
+          .rs-bar .ok { background: var(--status-ok); }
+          .rs-bar .part { background: var(--status-warning); }
+          .rs-bar .skip { background: var(--bar-skip); }
+          .rs-bar .fail { background: var(--danger-base); }
+          .rs-bar .cxl { background: var(--status-suspended); }
+          .rs-bar .run { background: repeating-linear-gradient(-45deg, var(--accent) 0 3px, color-mix(in srgb, var(--accent) 38%, transparent) 3px 6px); animation: rs-stripes 900ms linear infinite; }
+          .rs-bar .run.halt { background: repeating-linear-gradient(-45deg, var(--status-suspended) 0 3px, color-mix(in srgb, var(--status-suspended) 38%, transparent) 3px 6px); animation: none; }
+          @keyframes rs-stripes { to { background-position: 8.485px 0; } }
+
+          .rs-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; color: var(--text-muted); font: 500 10px/1.2 var(--font-sans); font-variant-numeric: tabular-nums; }
+          .rs-meta b { color: var(--text-primary); font-weight: 650; }
+          .rs-grow { flex: 1; }
+          .lg { display: inline-flex; align-items: center; color: var(--text-secondary); white-space: nowrap; }
+          .lg::before { width: 7px; height: 7px; margin-right: 5px; border-radius: 2px; content: ""; }
+          .lg b { margin-right: 0.3em; }
+          .lg.ok::before { background: var(--status-ok); }
+          .lg.part::before { background: var(--status-warning); }
+          .lg.skip::before { background: var(--bar-skip); }
+          .lg.fail::before { background: var(--danger-base); }
+          .lg.fail b { color: var(--danger-text); }
+          .lg.cxl::before { background: var(--status-suspended); }
+          .rs-tail { color: var(--text-muted); white-space: nowrap; }
+          .rs-tail em { font-style: normal; color: var(--accent); font-weight: 600; }
+
+          /* 2a — hairline */
+          .hl { height: 3px; background: var(--border-subtle); }
+          .hl i { display: block; height: 100%; width: 55%; background: var(--accent); }
+          .hl-copy { margin: 12px 18px 0; padding: 11px 12px; display: flex; align-items: center; gap: 11px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--accent-soft); }
+
+          /* 2c — one cell per repository */
+          .cells { display: grid; grid-template-columns: repeat(80, minmax(0, 1fr)); gap: 1px; height: 12px; }
+          .cells i { display: block; border-radius: 1.5px; background: var(--bar-track); }
+          .cells i.ok { background: var(--status-ok); }
+          .cells i.part { background: var(--status-warning); }
+          .cells i.skip { background: var(--bar-skip); }
+          .cells i.fail { background: var(--danger-base); outline: 1.5px solid var(--danger-base); outline-offset: 1px; }
+          .cells i.run { background: var(--accent); animation: cell-pulse 1s ease-in-out infinite alternate; }
+          @keyframes cell-pulse { from { opacity: 1; } to { opacity: 0.35; } }
+
+          /* ---- verdict chips ---- */
+          .verdict { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--rv-line); border-radius: 8px; background: #0a0a0a; width: 748px; }
+          .verdict p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .verdict p b { color: var(--rv-t2); font-weight: 600; }
+          .verdict .pro { color: #9ce5b3; font-weight: 600; }
+          .verdict .con { color: #ffb0a1; font-weight: 600; }
+          .rec { display: inline-flex; padding: 2px 7px; border-radius: 999px; background: rgba(255, 138, 31, 0.14); border: 1px solid rgba(255, 138, 31, 0.42); color: var(--rv-accb); font: 700 9px/1.4 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; }
+
+          /* ---- prototype controls ---- */
+          .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; font: 500 10.5px/1 var(--font-sans); color: var(--rv-t3); }
+          .seg { display: inline-flex; border: 1px solid var(--rv-line); border-radius: 7px; overflow: hidden; }
+          .seg button { height: 26px; padding: 0 11px; border: 0; background: transparent; color: var(--rv-t2); font: 600 10.5px/1 var(--font-sans); cursor: pointer; }
+          .seg button + button { border-left: 1px solid var(--rv-line); }
+          .seg button.on { background: rgba(255, 138, 31, 0.16); color: var(--rv-accb); }
+          .go { height: 26px; padding: 0 12px; border: 1px solid rgba(255, 138, 31, 0.42); border-radius: 7px; background: rgba(255, 138, 31, 0.14); color: var(--rv-accb); font: 650 10.5px/1 var(--font-sans); cursor: pointer; }
+
+          /* ---- build table ---- */
+          .tbl { width: 1080px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; padding: 10px 14px; border-bottom: 1px solid var(--rv-line); font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .tr:last-child { border-bottom: 0; }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Findings">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the run knows its size and never draws it</span>
+        </div>
+        <p class="dv-sub">Sidebar &#8250; <b>Try pull all</b> and <b>Fetch all repos</b> open one dialog, <code>BulkSyncDialog</code>. It is told the repository count before the first Git command runs, and every <code>remote:bulkSyncProgress</code> event carries <code>completedRepos</code> and <code>totalRepos</code>. So progress is fully known at every moment &#8212; it just reaches the screen as a fraction and three chips. The specimen is the report's own state, 44 of 80 with three repositories in flight, reproduced at shipped size from <code>app.css</code> in the light theme it was reported in. Repository names are invented.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a The dialog as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Try to pull all safely, as built &#8212; 44 of 80, three in flight</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Try to pull all safely</h2>
+                    <p>Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here.</p>
+                  </div>
+                  <span class="bs-count">44 / 80</span>
+                </div>
+                <div class="bs-act">
+                  <span class="bs-spin"></span>
+                  <div class="bs-copy">
+                    <strong>Checking ledger-web, northwind-labs, orbit-deploy</strong>
+                    <span>The current repository remains visible while results scroll below.</span>
+                  </div>
+                  <div class="bs-chips">
+                    <span class="t"><strong>44</strong> terminal</span>
+                    <span class="r"><strong>3</strong> in progress</span>
+                    <span><strong>33</strong> queued</span>
+                  </div>
+                </div>
+                <div class="bs-repos" style="height:292px">
+                  <article class="bs-repo is-success">
+                    <div class="bs-rh"><div><strong>atlas-api</strong><small>/Users/dana/src/atlas-api</small></div><span class="bs-st is-success">success</span></div>
+                    <p>1 updated &#183; 0 already current</p>
+                  </article>
+                  <article class="bs-repo is-running">
+                    <div class="bs-rh"><div><strong>ledger-web</strong><small>/Users/dana/src/ledger-web</small></div><span class="bs-st is-running">Checking&#8230;</span></div>
+                    <p>Git is working&#8230;</p>
+                  </article>
+                  <article class="bs-repo is-running">
+                    <div class="bs-rh"><div><strong>northwind-labs</strong><small>/Users/dana/src/northwind-labs</small></div><span class="bs-st is-running">Checking&#8230;</span></div>
+                    <p>Git is working&#8230;</p>
+                  </article>
+                  <article class="bs-repo is-success">
+                    <div class="bs-rh"><div><strong>billing-core</strong><small>/Users/dana/src/billing-core</small></div><span class="bs-st is-success">success</span></div>
+                    <p>0 updated &#183; 1 already current</p>
+                  </article>
+                </div>
+                <div class="bs-actions"><button class="bs-btn">Cancel</button></div>
+              </section>
+              <div class="callout" style="right:14px; top:30px"><span class="pin">1</span></div>
+              <div class="callout" style="right:14px; top:112px"><span class="pin">2</span></div>
+              <div class="callout" style="left:6px; top:112px"><span class="pin">4</span></div>
+              <div class="callout" style="left:6px; top:260px"><span class="pin">3</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Four findings</div>
+            <div class="find">
+              <div class="fitem">
+                <span class="pin">1</span>
+                <div>
+                  <h4>The whole run is a fraction in a corner</h4>
+                  <p><code>44 / 80</code> is the only whole-run measure, set at <b>10&nbsp;px mono in a pill</b>. "More than half done" takes division, and nothing on screen grows as the run advances, so the dialog looks the same at 4 of 80 as at 76.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">2</span>
+                <div>
+                  <h4>Three chips restate it in scheduler words</h4>
+                  <p><code>44 terminal &#183; 3 in progress &#183; 33 queued</code> add up to 80, the same number again. <b>"Terminal"</b> is the engine's word for "finished, whatever happened"; every card below says <i>success</i>, <i>partial</i> or <i>failed</i>, and the chips never do.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">3</span>
+                <div>
+                  <h4>A failure is only a red border somewhere below</h4>
+                  <p>Outcomes live in the list alone. When repository 12 fails, the strip above keeps saying <i>Checking&#8230;</i> in accent while a red card scrolls away. Whether the run is going well is a question the fold cannot answer.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">4</span>
+                <div>
+                  <h4>No sense of time, and a line of filler</h4>
+                  <p>36 repositories left could take thirty seconds or five minutes; nothing says which. The second line of the strip is a sentence about the layout ("remains visible while results scroll below"). It shows up whenever more than one repository is in flight, and with a pool of three that is nearly always.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "compare placements" &#8594; turn&nbsp;2 &#183; "show the recommended one through a whole run" &#8594; turn&nbsp;3</p>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Placements">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Three places a determinate bar can live</span>
+        </div>
+        <p class="dv-sub">Same moment as <a class="dv-oid" href="#1a">1a</a>, dark theme. All three are determinate, because the total is known before the first repository starts, so there is never a reason to fake one with an indeterminate sweep. They differ in how much the bar is asked to say: <b>only how far</b> (<a class="dv-oid" href="#2a">2a</a>), <b>how far and how it's going</b> (<a class="dv-oid" href="#2b">2b</a>), or <b>how far, how it's going, and where</b> (<a class="dv-oid" href="#2c">2c</a>).</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Hairline">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Hairline &#8212; the head's bottom rule becomes a 3&nbsp;px bar</div>
+            <div class="stage th-dark tight">
+              <section class="bs">
+                <div class="bs-head bare">
+                  <div>
+                    <h2>Try to pull all safely</h2>
+                    <p>Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here.</p>
+                  </div>
+                  <span class="bs-count">44 / 80</span>
+                </div>
+                <div class="hl"><i></i></div>
+                <div class="hl-copy">
+                  <span class="bs-spin"></span>
+                  <div class="bs-copy"><strong>Checking ledger-web, northwind-labs, orbit-deploy</strong><span>44 finished &#183; 3 in flight &#183; 33 queued</span></div>
+                </div>
+                <div class="bs-repos" style="height:96px">
+                  <article class="bs-repo is-success"><div class="bs-rh"><div><strong>atlas-api</strong><small>/Users/dana/src/atlas-api</small></div><span class="bs-st is-success">success</span></div><p>1 updated &#183; 0 already current</p></article>
+                </div>
+              </section>
+            </div>
+            <div class="verdict">
+              <p><span class="pro">For</span> &#8212; smallest change; no new vocabulary; the chips collapse into one quiet line.</p>
+              <p><span class="con">Against</span> &#8212; answers finding 1 only. A single accent fill says nothing about a failure (3), and at 3&nbsp;px under a 14&nbsp;px title it reads as a border that happens to be orange.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Outcome bar">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Outcome-stacked bar in a run status card <b>&#8212; recommended</b></div>
+            <div class="stage th-dark tight">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Try to pull all safely</h2>
+                    <p>Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here.</p>
+                  </div>
+                  <span class="bs-count">44 / 80</span>
+                </div>
+                <div class="rs is-running">
+                  <div class="rs-top">
+                    <span class="bs-spin"></span>
+                    <div class="bs-copy"><strong>Checking ledger-web, northwind-labs, orbit-deploy</strong></div>
+                    <span class="rs-time"><b>42s</b> elapsed &#183; about 35s left</span>
+                  </div>
+                  <div class="rs-bar">
+                    <i class="ok" style="flex-grow:31"></i><i class="part" style="flex-grow:7"></i><i class="skip" style="flex-grow:5"></i><i class="fail" style="flex-grow:1"></i><i class="run" style="flex-grow:3"></i><i class="rest" style="flex-grow:33"></i>
+                  </div>
+                  <div class="rs-meta">
+                    <span><b>44</b> of 80 repositories</span>
+                    <span class="lg ok"><b>31</b> success</span>
+                    <span class="lg part"><b>7</b> partial</span>
+                    <span class="lg skip"><b>5</b> skipped</span>
+                    <span class="lg fail"><b>1</b> failed</span>
+                    <span class="rs-grow"></span>
+                    <span class="rs-tail"><em>3</em> in flight &#183; 33 queued</span>
+                  </div>
+                </div>
+                <div class="bs-repos" style="height:96px">
+                  <article class="bs-repo is-success"><div class="bs-rh"><div><strong>atlas-api</strong><small>/Users/dana/src/atlas-api</small></div><span class="bs-st is-success">success</span></div><p>1 updated &#183; 0 already current</p></article>
+                </div>
+              </section>
+            </div>
+            <div class="verdict">
+              <p><span class="pro">For</span> &#8212; one glance answers <b>how far</b> (the fill), <b>how it's going</b> (the colors, in the same words as the cards), and <b>how long</b> (the clock). The in-flight segment is the accent, striped, so "working" stays tangerine while outcomes use status colors. The same card becomes the receipt when the run ends (<a class="dv-oid" href="#3d">3d</a>).</p>
+              <p><span class="con">Against</span> &#8212; the bar is grouped by outcome rather than list order, so it can say one failed but not which one. The legend's <i>failed</i> count and the card's red border carry that.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c One cell per repository">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>One cell per repository, in list order</div>
+            <div class="stage th-dark tight">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Try to pull all safely</h2>
+                    <p>Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here.</p>
+                  </div>
+                  <span class="bs-count">44 / 80</span>
+                </div>
+                <div class="rs is-running">
+                  <div class="rs-top">
+                    <span class="bs-spin"></span>
+                    <div class="bs-copy"><strong>Checking ledger-web, northwind-labs, orbit-deploy</strong></div>
+                    <span class="rs-time"><b>42s</b> elapsed &#183; about 35s left</span>
+                  </div>
+                  <div class="cells">
+                    <sc-for list="{{ cells }}" as="c" hint-placeholder-count="80"><i class="{{ c.cls }}"></i></sc-for>
+                  </div>
+                  <div class="rs-meta">
+                    <span><b>44</b> of 80 repositories</span>
+                    <span class="lg fail"><b>1</b> failed &#8212; click its cell to jump to it</span>
+                  </div>
+                </div>
+                <div class="bs-repos" style="height:96px">
+                  <article class="bs-repo is-success"><div class="bs-rh"><div><strong>atlas-api</strong><small>/Users/dana/src/atlas-api</small></div><span class="bs-st is-success">success</span></div><p>1 updated &#183; 0 already current</p></article>
+                </div>
+              </section>
+            </div>
+            <div class="verdict">
+              <p><span class="pro">For</span> &#8212; says <i>where</i>: the pool of three takes repositories in list order, so the cells fill roughly left to right and a failure is a red cell you can click to reach its card.</p>
+              <p><span class="con">Against</span> &#8212; the cell width is set by the profile. 80 repositories get 7.5&nbsp;px each; 300 get under 2&nbsp;px, and a lone failed cell is lost. The clickable cells also make the bar a control, with the keyboard and screen-reader work that brings. Worth keeping as a later addition to <a class="dv-oid" href="#2b">2b</a>, not as the bar itself.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "<a class="dv-oid" href="#2b">2b</a> through a whole run" &#8594; turn&nbsp;3 &#183; "let me drive it" &#8594; <a class="dv-oid" href="#4a">4a</a></p>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 States">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname"><a class="dv-oid" href="#2b">2b</a> through one run &#8212; one card from the first repository to the receipt</span>
+        </div>
+        <p class="dv-sub">The status card is drawn only, in the light theme. The rule that matters is in <a class="dv-oid" href="#3d">3d</a>: <b>the card does not unmount when the run ends</b>. Today the activity strip is replaced by a separate summary box, so the one moment where you want to check "did it all go?" loses the picture you watched fill. Here the bar stays, loses its in-flight stripes, and the clock stops.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Starting">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Starting &#8212; three in flight, no estimate yet</div>
+            <div class="stage th-light tight" style="width:712px">
+              <div class="rs is-running" style="margin:0">
+                <div class="rs-top">
+                  <span class="bs-spin"></span>
+                  <div class="bs-copy"><strong>Checking atlas-api, atlas-web, billing-core</strong></div>
+                  <span class="rs-time"><b>3s</b> elapsed</span>
+                </div>
+                <div class="rs-bar"><i class="ok z" style="flex-grow:0"></i><i class="run" style="flex-grow:3"></i><i class="rest" style="flex-grow:77"></i></div>
+                <div class="rs-meta">
+                  <span><b>0</b> of 80 repositories</span>
+                  <span class="rs-grow"></span>
+                  <span class="rs-tail"><em>3</em> in flight &#183; 77 queued</span>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:712px">No estimate until <b>3 repositories have finished and 5&nbsp;s have passed</b>. Earlier than that, the first fast repository makes the estimate wildly optimistic.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Mid-run">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Mid-run, one failure &#8212; the report's moment</div>
+            <div class="stage th-light tight" style="width:712px">
+              <div class="rs is-running" style="margin:0">
+                <div class="rs-top">
+                  <span class="bs-spin"></span>
+                  <div class="bs-copy"><strong>Checking ledger-web, northwind-labs, orbit-deploy</strong></div>
+                  <span class="rs-time"><b>42s</b> elapsed &#183; about 35s left</span>
+                </div>
+                <div class="rs-bar"><i class="ok" style="flex-grow:31"></i><i class="part" style="flex-grow:7"></i><i class="skip" style="flex-grow:5"></i><i class="fail" style="flex-grow:1"></i><i class="run" style="flex-grow:3"></i><i class="rest" style="flex-grow:33"></i></div>
+                <div class="rs-meta">
+                  <span><b>44</b> of 80 repositories</span>
+                  <span class="lg ok"><b>31</b> success</span>
+                  <span class="lg part"><b>7</b> partial</span>
+                  <span class="lg skip"><b>5</b> skipped</span>
+                  <span class="lg fail"><b>1</b> failed</span>
+                  <span class="rs-grow"></span>
+                  <span class="rs-tail"><em>3</em> in flight &#183; 33 queued</span>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:712px">1 of 80 is 8.5&nbsp;px here, but <b>any non-empty outcome gets a 3&nbsp;px floor</b>, so one failure in 500 still shows. The legend lists only outcomes that have happened, in the cards' own words.</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Cancelling">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Cancelling &#8212; in-flight work finishes, nothing new starts</div>
+            <div class="stage th-light tight" style="width:712px">
+              <div class="rs is-running" style="margin:0">
+                <div class="rs-top">
+                  <span class="bs-spin"></span>
+                  <div class="bs-copy"><strong>Cancelling after the current Git command&#8230;</strong></div>
+                  <span class="rs-time"><b>51s</b> elapsed</span>
+                </div>
+                <div class="rs-bar"><i class="ok" style="flex-grow:36"></i><i class="part" style="flex-grow:8"></i><i class="skip" style="flex-grow:6"></i><i class="fail" style="flex-grow:1"></i><i class="run halt" style="flex-grow:3"></i><i class="rest" style="flex-grow:26"></i></div>
+                <div class="rs-meta">
+                  <span><b>51</b> of 80 repositories</span>
+                  <span class="lg ok"><b>36</b> success</span>
+                  <span class="lg part"><b>8</b> partial</span>
+                  <span class="lg skip"><b>6</b> skipped</span>
+                  <span class="lg fail"><b>1</b> failed</span>
+                  <span class="rs-grow"></span>
+                  <span class="rs-tail">3 stopping &#183; 26 won't start</span>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:712px">The in-flight segment goes grey and stops moving, and the estimate is dropped: nothing is left to estimate.</p>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Finished">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Finished &#8212; the same card, now the receipt</div>
+            <div class="stage th-light tight" style="width:712px">
+              <div class="rs" style="margin:0">
+                <div class="rs-top">
+                  <span class="rs-mark bad"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 2.2v3.4"></path><path d="M5 7.8v0.01"></path></svg></span>
+                  <div class="bs-copy"><strong>Finished</strong><span class="sum">57 worktrees updated &#183; 41 already current &#183; 12 safely skipped &#183; 1 failed</span></div>
+                  <span class="rs-time">took <b>1m 18s</b></span>
+                </div>
+                <div class="rs-bar"><i class="ok" style="flex-grow:58"></i><i class="part" style="flex-grow:11"></i><i class="skip" style="flex-grow:10"></i><i class="fail" style="flex-grow:1"></i></div>
+                <div class="rs-meta">
+                  <span><b>80</b> repositories</span>
+                  <span class="lg ok"><b>58</b> success</span>
+                  <span class="lg part"><b>11</b> partial</span>
+                  <span class="lg skip"><b>10</b> skipped</span>
+                  <span class="lg fail"><b>1</b> failed</span>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:712px">The sentence is the existing <code>overallSummary</code>, worktree-level and unchanged. The bar and legend stay repository-level. The mark takes the worst outcome at the level the sentence counts: red for any failure, including a fetch's broken remote, which leaves its repository only <i>partial</i>; green otherwise. <i>Partial</i> and <i>skipped</i> are the conservative pull doing its job, not problems.</p>
+          </div>
+
+          <div class="dv-opt" id="3e" data-screen-label="3e Cancelled">
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>Cancelled &#8212; what did and didn't run</div>
+            <div class="stage th-light tight" style="width:712px">
+              <div class="rs" style="margin:0">
+                <div class="rs-top">
+                  <span class="rs-mark cxl"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.6 5h4.8"></path></svg></span>
+                  <div class="bs-copy"><strong>Cancelled</strong><span class="sum">49 worktrees updated &#183; 30 already current &#183; 8 safely skipped &#183; 1 failed &#183; 29 cancelled</span></div>
+                  <span class="rs-time">took <b>54s</b></span>
+                </div>
+                <div class="rs-bar"><i class="ok" style="flex-grow:36"></i><i class="part" style="flex-grow:8"></i><i class="skip" style="flex-grow:6"></i><i class="fail" style="flex-grow:1"></i><i class="cxl" style="flex-grow:29"></i></div>
+                <div class="rs-meta">
+                  <span><b>80</b> repositories</span>
+                  <span class="lg ok"><b>36</b> success</span>
+                  <span class="lg part"><b>8</b> partial</span>
+                  <span class="lg skip"><b>6</b> skipped</span>
+                  <span class="lg fail"><b>1</b> failed</span>
+                  <span class="lg cxl"><b>29</b> cancelled</span>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:712px">Cancelled repositories fill the rest of the bar in suspended grey, so the bar is still 100&nbsp;% of the profile. What was left undone is part of the picture.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "run it" &#8594; <a class="dv-oid" href="#4a">4a</a> &#183; "what gets built" &#8594; turn&nbsp;5</p>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 Live prototype">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Live &#8212; <a class="dv-oid" href="#2b">2b</a> driving a simulated run</span>
+        </div>
+        <p class="dv-sub">24 invented repositories, a pool of three like <code>BULK_SYNC_CONCURRENCY</code>, randomized durations with the occasional slow repository, and roughly one failure per run. <b>Cancel</b> inside the dialog behaves like the real one: in-flight repositories finish, and queued ones are reported as cancelled.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Run status card, live</div>
+            <div class="ctl">
+              <button class="go" onClick="{{ restart }}">Run again</button>
+              <span>Speed</span>
+              <span class="seg"><button class="{{ sp1Cls }}" onClick="{{ setSp1 }}">1&#215;</button><button class="{{ sp4Cls }}" onClick="{{ setSp4 }}">4&#215;</button></span>
+              <span>Theme</span>
+              <span class="seg"><button class="{{ thLCls }}" onClick="{{ setLight }}">Light</button><button class="{{ thDCls }}" onClick="{{ setDark }}">Dark</button></span>
+            </div>
+            <div class="{{ stageCls }}">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Try to pull all safely</h2>
+                    <p>Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here.</p>
+                  </div>
+                  <span class="bs-count">{{ doneCount }} / {{ total }}</span>
+                </div>
+                <div class="{{ cardCls }}">
+                  <div class="rs-top">
+                    <sc-if value="{{ isRunning }}" hint-placeholder-val="{{ true }}"><span class="bs-spin"></span></sc-if>
+                    <sc-if value="{{ markOk }}"><span class="rs-mark ok"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 5.3l1.8 1.8 3.5-3.9"></path></svg></span></sc-if>
+                    <sc-if value="{{ markBad }}"><span class="rs-mark bad"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 2.2v3.4"></path><path d="M5 7.8v0.01"></path></svg></span></sc-if>
+                    <sc-if value="{{ markCxl }}"><span class="rs-mark cxl"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.6 5h4.8"></path></svg></span></sc-if>
+                    <div class="bs-copy">
+                      <strong>{{ title }}</strong>
+                      <sc-if value="{{ hasSub }}"><span class="{{ subCls }}">{{ sub }}</span></sc-if>
+                    </div>
+                    <span class="rs-time">{{ timeLabel }}</span>
+                  </div>
+                  <div class="rs-bar">
+                    <sc-for list="{{ segs }}" as="s" hint-placeholder-count="7"><i class="{{ s.cls }}" style="{{ s.style }}"></i></sc-for>
+                  </div>
+                  <div class="rs-meta">
+                    <span><b>{{ metaCount }}</b> {{ metaWord }}</span>
+                    <sc-for list="{{ legend }}" as="l" hint-placeholder-count="3"><span class="{{ l.cls }}"><b>{{ l.n }}</b> {{ l.label }}</span></sc-for>
+                    <span class="rs-grow"></span>
+                    <span class="rs-tail">{{ tail }}</span>
+                  </div>
+                </div>
+                <div class="bs-repos scroll" style="height:300px">
+                  <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+                    <article class="{{ r.cardCls }}">
+                      <div class="bs-rh"><div><strong>{{ r.name }}</strong><small>{{ r.path }}</small></div><span class="{{ r.stCls }}">{{ r.status }}</span></div>
+                      <p>{{ r.line }}</p>
+                    </article>
+                  </sc-for>
+                </div>
+                <div class="bs-actions">
+                  <button class="bs-btn" onClick="{{ onDialogButton }}" disabled="{{ cancelDisabled }}">{{ buttonLabel }}</button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "slow it down and cancel at half" &#183; "make a failure early and watch the legend" &#183; "light theme" &#8594; the toggle above</p>
+      </section>
+
+      <!-- ============================ TURN 5 ============================ -->
+      <section class="dv-turn" id="t5" data-screen-label="Turn 5 Build">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">What gets built &#8212; <a class="dv-oid" href="#2b">2b</a>, and the rules behind it</span>
+        </div>
+        <p class="dv-sub">The build replaces the activity strip and the summary box with one component. It adds no IPC and changes nothing in main: every number already arrives on <code>remote:bulkSyncProgress</code>. Built alongside this artboard, in <a href="https://github.com/pwrdrvr/PwrGit/pull/318">PwrGit#318</a>.</p>
+        <div class="tbl">
+          <div class="tr head"><span>Rule</span><span>Why</span></div>
+          <div class="tr"><b>One card, two moments</b><span>The <code>.bulk-sync__status</code> card is mounted for the whole run. At the end it trades the spinner for a mark, the clock for <i>took</i>, and the title for <i>Finished</i> or <i>Cancelled</i>, and the path line becomes the existing summary sentence, set as wrapping prose rather than as a path. The bar is never swapped out, so the receipt is the picture you just watched fill.</span></div>
+          <div class="tr"><b>Segments are flex-grow = count</b><span><code>flex-basis: 0</code> and <code>flex-grow</code> equal to the count, which is proportional by construction and animates. A non-empty outcome gets <code>min-width: 3px</code>, and flexbox takes that space from the others, so a single failure is never sub-pixel. Every segment is always mounted, so a count going from 0 to 1 animates instead of popping in.</span></div>
+          <div class="tr"><b>Colors are tokens</b><span>success <code>--status-ok</code>, partial <code>--status-warning</code>, skipped the same warning mixed toward the panel, failed <code>--danger-base</code> (the base of the failed card's own border; <code>--status-error</code> sat too close to the light theme's warning brown), cancelled <code>--status-suspended</code>, in flight <code>--accent</code> striped. All exist in both theme blocks, so <code>lint:colors</code> and the theme contract need nothing new.</span></div>
+          <div class="tr"><b>role="progressbar"</b><span><code>aria-valuemax</code> is the total, <code>aria-valuenow</code> the finished count, and <code>aria-valuetext</code> is "44 of 80 repositories finished, 1 failed". The legend is text, so no outcome depends on color alone.</span></div>
+          <div class="tr"><b>The clock stays out of the live region</b><span>Today the whole strip is <code>role="status" aria-atomic="true"</code>. A seconds counter inside it would be read out again every second. The live region shrinks to the title and path; the clock and legend sit outside it and can still be read on demand.</span></div>
+          <div class="tr"><b>The clock ticks alone</b><span>The one-second interval lives in its own small component that takes the finished count and total as props. The 80 repository cards do not re-render every second; they re-render only when a progress event lands, as they do today.</span></div>
+          <div class="tr"><b>Estimate: 3 finished and 5&nbsp;s</b><span>Remaining is <code>(total &#8722; finished) &#215; elapsed &#247; finished</code>. That is throughput, and it already accounts for the pool of three. It is rounded to 5&nbsp;s under a minute and to whole minutes above, and always prefixed "about". There is no estimate while cancelling.</span></div>
+          <div class="tr"><b>Reduced motion</b><span>The global <code>prefers-reduced-motion</code> rule stops the stripes and the width transitions. The in-flight segment is still an accent stripe, just static, so the state survives without the motion.</span></div>
+          <div class="tr"><b>Removed</b><span>The three <code>terminal / in progress / queued</code> chips (the legend and <i>in flight &#183; queued</i> tail replace them) and the filler second line. The path line stays when exactly one repository is in flight.</span></div>
+        </div>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.NAMES = [
+            "atlas-api", "atlas-web", "billing-core", "demo-dev", "ledger-api", "ledger-web",
+            "northwind-labs", "octo-contrib", "orbit-deploy", "orbit-ui", "parser-kit", "quartz-docs",
+            "relay-edge", "sparkline", "tern-cli", "umbra-auth", "vesper-mail", "wren-queue",
+            "xylo-assets", "yarrow-etl", "zephyr-sdk", "harbor-infra", "kestrel-bot", "lumen-site"
+          ];
+          this.POOL = 3;
+          this.TICK = 100;
+          this.state = this.fresh();
+          this.state.speed = 1;
+          this.state.theme = "light";
+          this.timer = null;
+        }
+        componentDidMount() { this.start(); }
+        componentWillUnmount() { this.stop(); }
+        stop() { if (this.timer !== null) { clearInterval(this.timer); this.timer = null; } }
+        roll() {
+          const r = Math.random();
+          if (r < 0.66) return "success";
+          if (r < 0.8) return "partial";
+          if (r < 0.93) return "skipped";
+          return "failed";
+        }
+        fresh() {
+          const repos = this.NAMES.map((name) => {
+            const slow = Math.random() < 0.12;
+            return {
+              name: name,
+              dur: slow ? 7000 + Math.random() * 4000 : 900 + Math.random() * 3800,
+              outcome: this.roll(),
+              phase: "queued",
+              startedAt: 0
+            };
+          });
+          return { repos: repos, now: 0, cancelling: false, finished: false, cancelled: false };
+        }
+        start() {
+          this.stop();
+          const keep = { speed: this.state.speed || 1, theme: this.state.theme || "light" };
+          this.setState(Object.assign(this.fresh(), keep), () => {
+            this.fill();
+            this.timer = setInterval(() => { this.tick(); }, this.TICK);
+          });
+        }
+        fill() {
+          const s = this.state;
+          if (s.cancelling || s.finished) return;
+          const repos = s.repos.slice();
+          let running = repos.filter((r) => r.phase === "running").length;
+          for (let i = 0; i < repos.length && running < this.POOL; i++) {
+            if (repos[i].phase === "queued") {
+              repos[i] = Object.assign({}, repos[i], { phase: "running", startedAt: s.now });
+              running++;
+            }
+          }
+          this.setState({ repos: repos });
+        }
+        tick() {
+          const s = this.state;
+          if (s.finished) { this.stop(); return; }
+          const now = s.now + this.TICK * s.speed;
+          const repos = s.repos.map((r) => {
+            if (r.phase !== "running" || now < r.startedAt + r.dur) return r;
+            return Object.assign({}, r, { phase: s.cancelling ? "cancelled" : r.outcome });
+          });
+          const running = repos.filter((r) => r.phase === "running").length;
+          const queued = repos.filter((r) => r.phase === "queued").length;
+          if (running === 0 && (queued === 0 || s.cancelling)) {
+            const closed = repos.map((r) => (r.phase === "queued" ? Object.assign({}, r, { phase: "cancelled" }) : r));
+            this.setState({ repos: closed, now: now, finished: true, cancelled: s.cancelling });
+            this.stop();
+            return;
+          }
+          this.setState({ repos: repos, now: now }, () => { this.fill(); });
+        }
+        cancel() { if (!this.state.finished) this.setState({ cancelling: true }); }
+        fmt(ms) {
+          const t = Math.max(0, Math.round(ms / 1000));
+          if (t < 60) return t + "s";
+          return Math.floor(t / 60) + "m " + String(t % 60).padStart(2, "0") + "s";
+        }
+        eta(ms) {
+          if (ms < 5000) return "a few seconds left";
+          const t = Math.round(ms / 1000);
+          if (t < 60) return "about " + Math.ceil(t / 5) * 5 + "s left";
+          return "about " + Math.round(t / 60) + "m left";
+        }
+        count(repos, phase) { return repos.filter((r) => r.phase === phase).length; }
+        renderVals() {
+          const s = this.state;
+          const total = s.repos.length;
+          const c = {
+            success: this.count(s.repos, "success"),
+            partial: this.count(s.repos, "partial"),
+            skipped: this.count(s.repos, "skipped"),
+            failed: this.count(s.repos, "failed"),
+            cancelled: this.count(s.repos, "cancelled"),
+            running: this.count(s.repos, "running"),
+            queued: this.count(s.repos, "queued")
+          };
+          const done = c.success + c.partial + c.skipped + c.failed + c.cancelled;
+          const seg = (cls, n) => ({ cls: n > 0 ? cls : cls + " z", style: "flex-grow:" + n });
+          const segs = [
+            seg("ok", c.success), seg("part", c.partial), seg("skip", c.skipped), seg("fail", c.failed),
+            seg("cxl", c.cancelled),
+            { cls: (c.running > 0 ? "run" : "run z") + (s.cancelling ? " halt" : ""), style: "flex-grow:" + (s.finished ? 0 : c.running) },
+            { cls: "rest", style: "flex-grow:" + (s.finished ? 0 : c.queued) }
+          ];
+          const legend = [];
+          if (c.success) legend.push({ cls: "lg ok", n: c.success, label: "success" });
+          if (c.partial) legend.push({ cls: "lg part", n: c.partial, label: "partial" });
+          if (c.skipped) legend.push({ cls: "lg skip", n: c.skipped, label: "skipped" });
+          if (c.failed) legend.push({ cls: "lg fail", n: c.failed, label: "failed" });
+          if (c.cancelled) legend.push({ cls: "lg cxl", n: c.cancelled, label: "cancelled" });
+
+          const runningNames = s.repos.filter((r) => r.phase === "running").map((r) => r.name);
+          let title;
+          let sub = "";
+          if (s.finished) {
+            title = s.cancelled ? "Cancelled" : "Finished";
+            const updated = c.success * 1 + c.partial;
+            const current = c.success;
+            const skipped = c.partial + c.skipped;
+            sub = [
+              updated + " worktree" + (updated === 1 ? "" : "s") + " updated",
+              current + " already current",
+              skipped ? skipped + " safely skipped" : null,
+              c.failed ? c.failed + " failed" : null,
+              c.cancelled ? c.cancelled + " cancelled" : null
+            ].filter(Boolean).join(" · ");
+          } else if (s.cancelling) {
+            title = "Cancelling after the current Git command…";
+          } else if (runningNames.length === 0) {
+            title = "Preparing the next repository…";
+          } else {
+            title = "Checking " + runningNames.join(", ");
+            if (runningNames.length === 1) sub = "/Users/dana/src/" + runningNames[0];
+          }
+          let timeLabel;
+          if (s.finished) timeLabel = "took " + this.fmt(s.now);
+          else if (!s.cancelling && done >= 3 && s.now >= 5000) {
+            timeLabel = this.fmt(s.now) + " elapsed · " + this.eta(((total - done) * s.now) / done);
+          } else timeLabel = this.fmt(s.now) + " elapsed";
+
+          let tail = "";
+          if (!s.finished) {
+            tail = s.cancelling
+              ? c.running + " stopping · " + c.queued + " won't start"
+              : c.running + " in flight · " + c.queued + " queued";
+          }
+          const LINE = {
+            success: "1 updated · 1 already current",
+            partial: "1 updated · 1 skipped",
+            skipped: "0 updated · 0 already current · 1 skipped",
+            failed: "Git could not fetch this repository.",
+            cancelled: "Cancelled before it started."
+          };
+          const rows = s.repos.map((r) => {
+            const running = r.phase === "running";
+            const queued = r.phase === "queued";
+            const key = running ? "running" : queued ? "queued" : r.phase;
+            return {
+              name: r.name,
+              path: "/Users/dana/src/" + r.name,
+              cardCls: "bs-repo is-" + key,
+              stCls: "bs-st is-" + key,
+              status: running ? "Checking…" : queued ? "Queued" : r.phase,
+              line: running ? "Git is working…" : queued ? "Queued" : LINE[r.phase]
+            };
+          });
+          const theme = s.theme === "dark" ? "th-dark" : "th-light";
+          return {
+            cells: this.cells2c(),
+            restart: () => this.start(),
+            setSp1: () => this.setState({ speed: 1 }),
+            setSp4: () => this.setState({ speed: 4 }),
+            sp1Cls: s.speed === 1 ? "on" : "",
+            sp4Cls: s.speed === 4 ? "on" : "",
+            setLight: () => this.setState({ theme: "light" }),
+            setDark: () => this.setState({ theme: "dark" }),
+            thLCls: s.theme === "light" ? "on" : "",
+            thDCls: s.theme === "dark" ? "on" : "",
+            stageCls: "stage tight " + theme,
+            doneCount: done,
+            total: total,
+            cardCls: s.finished ? "rs" : "rs is-running",
+            isRunning: !s.finished,
+            markOk: s.finished && !s.cancelled && c.failed === 0,
+            markBad: s.finished && !s.cancelled && c.failed > 0,
+            markCxl: s.finished && s.cancelled,
+            title: title,
+            hasSub: sub !== "",
+            subCls: s.finished ? "sum" : "",
+            sub: sub,
+            timeLabel: timeLabel,
+            segs: segs,
+            metaCount: s.finished ? total : done,
+            metaWord: s.finished ? "repositories" : "of " + total + " repositories",
+            legend: legend,
+            tail: tail,
+            rows: rows,
+            buttonLabel: s.finished ? "Close" : s.cancelling ? "Cancelling…" : "Cancel",
+            cancelDisabled: s.cancelling && !s.finished,
+            onDialogButton: () => (s.finished ? this.start() : this.cancel())
+          };
+        }
+        cells2c() {
+          // 2c's static moment: 44 finished in roughly list order, 3 in flight.
+          if (this._cells) return this._cells;
+          const out = [];
+          const pattern = "ooooopoooosoooofoooopooosooooopooosooooopoos";
+          for (let i = 0; i < 80; i++) {
+            let cls = "";
+            if (i < pattern.length) {
+              const ch = pattern[i];
+              cls = ch === "o" ? "ok" : ch === "p" ? "part" : ch === "s" ? "skip" : "fail";
+            } else if (i < pattern.length + 3) cls = "run";
+            out.push({ cls: cls });
+          }
+          this._cells = out;
+          return out;
+        }
+      }
+    </script>
+  </body>
+</html>
