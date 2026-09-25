@@ -32,6 +32,8 @@ import type {
   ForkCheckoutPreflight,
   ForkPreflight,
   ForkProgress,
+  ForkStatus,
+  ForkSyncOutcome,
   RepoIdentity,
   RepoIdentityRefreshOutcome,
   PushRefPlan,
@@ -1602,6 +1604,28 @@ export interface Commands {
   "remote:inspectReset": {
     req: { worktreeId: string; remoteRef: string };
     res: RemoteResetPreview;
+  };
+  /**
+   * The checked-out branch against its counterpart on the fork's source, or
+   * null when the checkout is not a fork branch with one fetched. Local reads
+   * only — Fetch is what refreshes the source.
+   */
+  "remote:forkStatus": {
+    req: { worktreeId: string };
+    res: ForkStatus | null;
+  };
+  /**
+   * Bring a fork branch up to its source in one step: fetch the tracked
+   * remote and the source, fast-forward the checkout to the source's tip the
+   * way Pull does (stash, `merge --ff-only`, reapply), then push that tip to
+   * the tracked branch when doing so is a fast-forward too. Refuses when the
+   * branch has commits the source lacks, and never forces the push.
+   * `branch` and `sourceRef` are what the chip showed; a checkout that has
+   * moved to another branch or source since is refused rather than synced.
+   */
+  "remote:syncFork": {
+    req: { worktreeId: string; branch: string; sourceRef: string };
+    res: ForkSyncOutcome;
   };
   /**
    * Push one exact object to one branch on one remote, leased on the tip the

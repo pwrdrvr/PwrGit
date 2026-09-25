@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type {
+  ForkStatus,
+  ForkSyncOutcome,
   PushPublishTarget,
   PwrGitError,
   RemoteDivergence,
@@ -20,6 +22,7 @@ import {
 } from "../remote/remote-activity";
 import { useRemoteActivityPopover } from "../remote/useRemoteActivityPopover";
 import { useRemoteActivityFor } from "../../state/useRemoteActivity";
+import { useForkStatus } from "../../state/useForkStatus";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
@@ -81,6 +84,96 @@ function defaultBranchDrift(
   return {
     text: `${defaultBranch} +${s.behindDefault}`,
     title: `${defaultBranch} has ${s.behindDefault} commits not in ${s.branch}; this is not commits available to pull`
+  };
+}
+
+function commits(count: number): string {
+  return `${count} commit${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * How far the fork's source has moved on without this branch — the
+ * `upstream ↓10` chip. The sync chip beside it compares the branch with the
+ * one it tracks, and on a fork both are the user's own: `origin/main` reads
+ * "up to date" while the source is ten commits ahead of either.
+ *
+ * `sync` when the branch has nothing the source lacks: a fast-forward, then
+ * the same commits pushed on to the tracked branch, and nothing is lost
+ * anywhere. `review` when it has commits of its own — reaching the source is
+ * then a reset, with commits leaving, and the reset dialog is where that is
+ * reviewed.
+ */
+function forkChip(fork: ForkStatus | null): {
+  text: string;
+  label: string;
+  title: string;
+  action: "sync" | "review";
+} | null {
+  if (fork === null || fork.source.behind <= 0) return null;
+  const { branch, source, tracked } = fork;
+  const from =
+    source.parent === undefined
+      ? source.label
+      : `${source.label} (${source.parent})`;
+  const behind = `${from} has ${commits(source.behind)} ${branch} doesn't`;
+  if (source.ahead > 0) {
+    return {
+      text: `${source.remote} ↓${source.behind} · ↑${source.ahead}`,
+      label: `Review a reset of ${branch} to ${source.label}`,
+      title: `${behind}, and ${branch} has ${commits(source.ahead)} it doesn't. Review a reset to ${source.label}…`,
+      action: "review"
+    };
+  }
+  const push = source.pushBack;
+  const then =
+    tracked === null || push === null
+      ? ""
+      : push.overwrites > 0
+        ? `. ${tracked.label} has ${commits(push.overwrites)} ${source.label} doesn't, so it is not pushed`
+        : `, then push them to ${tracked.label}`;
+  return {
+    text: `${source.remote} ↓${source.behind}`,
+    label: `Sync ${branch} with ${source.label}`,
+    title: `${behind}. Sync: fast-forward ${branch}${then}.`,
+    action: "sync"
+  };
+}
+
+/**
+ * What a finished fork sync says on its card. `stands` keeps the card up
+ * until dismissed: a push that failed and stash conflicts both leave the user
+ * something to do.
+ */
+function forkSyncReceipt(
+  outcome: ForkSyncOutcome,
+  branch: string
+): { summary: string; flash: Chip; stands: boolean } {
+  const moved = `Fast-forwarded ${branch} to ${outcome.source} · ${commits(outcome.arrived)}`;
+  const { push } = outcome;
+  let summary = moved;
+  let pushFailed = false;
+  if (push.outcome === "pushed") {
+    summary = `${moved} · pushed to ${push.remote}/${push.branch}`;
+  } else if (push.outcome === "diverged") {
+    summary = `${moved} · ${push.remote}/${push.branch} has ${commits(push.overwrites)} ${outcome.source} doesn't, so it was not pushed`;
+  } else if (push.outcome === "failed") {
+    pushFailed = true;
+    summary = `${moved}, but pushing ${push.remote}/${push.branch} failed — ${push.message.split("\n")[0]}`;
+  }
+  if (outcome.reappliedWithConflicts) {
+    return {
+      summary: `${summary} · your stashed changes came back with conflicts`,
+      flash: { text: "synced · resolve stash conflicts", tone: "warn" },
+      stands: true
+    };
+  }
+  if (outcome.stashed) summary = `${summary} · local changes stashed and reapplied`;
+  return {
+    summary,
+    flash: pushFailed
+      ? { text: "synced · push failed", tone: "warn" }
+      : { text: `synced with ${outcome.source}`, tone: "ok" },
+    stands: pushFailed
   };
 }
 
@@ -161,6 +254,19 @@ export function WorktreeHeader({
   const recoveryOperation = useRef(0);
   const cardButton = useRef<HTMLButtonElement>(null);
   const cardChip = useRef<HTMLSpanElement>(null);
+  /** Where a fork sync's card hangs. Not the chip that started it: the chip
+   *  goes the moment the sync succeeds, and the receipt needs somewhere to
+   *  stay. Pull is the operation's own button — it spins for the sync. */
+  const pullButton = useRef<HTMLButtonElement | null>(null);
+  const forkStatus = useForkStatus(worktree.id, repo.id);
+  /** Keeps the fork chip on screen while its own sync runs; every other
+   *  operation hides it with the drift chip, for the progress label's width. */
+  const [syncingFork, setSyncingFork] = useState(false);
+  /** The header's one tooltip is showing the fork chip's sentence. The chip
+   *  leaves under a still pointer — its sync succeeded, or a fetch elsewhere
+   *  caught the fork up — and a card whose trigger is gone never hears the
+   *  `mouseleave` that would close it. */
+  const forkTipShown = useRef(false);
 
   // Header instances stay mounted while selection changes, so an operation
   // started for one worktree must never surface a dialog or flash on another.
@@ -175,6 +281,7 @@ export function WorktreeHeader({
     setSshRecovery(null);
     setForkPrompt(null);
     setPublishing(null);
+    setSyncingFork(false);
     askingWhere.current = null;
   }, [worktree.id]);
 
@@ -426,6 +533,59 @@ export function WorktreeHeader({
         showFlash({ text: "fast-forwarded", tone: "ok" }, 1600);
         status.settle({ status: "ok", summary: "Fast-forwarded" });
       }
+    });
+  };
+
+  const reviewForkReset = (fork: ForkStatus): void => {
+    openResetToRemote({
+      worktree,
+      preselectRef: fork.source.ref,
+      onComplete: (mode, remoteBranch) =>
+        showFlash(
+          {
+            text: `${mode} reset to ${remoteBranch}`,
+            tone: mode === "hard" ? "warn" : "ok"
+          },
+          2600
+        )
+    });
+  };
+
+  const onSyncFork = (fork: ForkStatus): void => {
+    const worktreeId = id;
+    const current = beginOperation(worktreeId);
+    setBusy("pull");
+    setSyncingFork(true);
+    if (pullButton.current !== null) pinStatus("pull", pullButton.current);
+    void dispatch("remote:syncFork", {
+      worktreeId,
+      branch: fork.branch,
+      sourceRef: fork.source.ref
+    }).then((result) => {
+      if (!current()) return;
+      setBusy(null);
+      setSyncingFork(false);
+      if (!result.ok) {
+        // The branch gained commits of its own after the chip was drawn, so
+        // reaching the source is a reset now — and a reset is reviewed. The
+        // dialog is modal and takes the card, as the divergence dialog does.
+        if (
+          result.error.kind === "remote" &&
+          result.error.code === "not_fast_forward"
+        ) {
+          status.dismiss();
+          reviewForkReset(fork);
+          return;
+        }
+        flashError("Sync", result.error);
+        return;
+      }
+      const receipt = forkSyncReceipt(result.value, fork.branch);
+      showFlash(receipt.flash, receipt.stands ? 4000 : 2400);
+      status.settle({
+        status: receipt.stands ? "error" : "ok",
+        summary: receipt.summary
+      });
     });
   };
 
@@ -690,6 +850,18 @@ export function WorktreeHeader({
     (live !== null ? !live.hasUpstream : worktree.tracking === "unpublished");
   const behind = state?.behind ?? worktree.behind;
   const drift = defaultBranchDrift(state, worktree);
+  // The live read is keyed to this checkout already (useForkStatus resets on
+  // a change of worktree), so there is no stale-selection case to guard.
+  const fork = forkChip(forkStatus);
+  const forkChipShown = fork !== null && (running === null || syncingFork);
+  const forkTip = hoverTooltip(tip, fork?.title);
+  const hideTip = tip.hide;
+  useEffect(() => {
+    if (forkChipShown || !forkTipShown.current) return;
+    forkTipShown.current = false;
+    hideTip();
+  }, [forkChipShown, hideTip]);
+  const pullTrigger = statusTrigger("pull");
 
   return (
     <div className="wt-header">
@@ -736,6 +908,46 @@ export function WorktreeHeader({
           >
             {drift.text}
           </span>
+        )}
+        {/* Beside the sync chip, because this is the other thing Pull could
+            mean on a fork. A button, like read-only, because it acts: a sync
+            when nothing of the branch's own is in the way, the reset review
+            when something is. */}
+        {forkChipShown && fork !== null && forkStatus !== null && (
+          <button
+            type="button"
+            className="sync-chip sync-chip--fork"
+            aria-label={fork.label}
+            aria-busy={syncingFork}
+            aria-disabled={running !== null}
+            onMouseEnter={(event) => {
+              forkTipShown.current = true;
+              forkTip.onMouseEnter(event);
+            }}
+            onMouseLeave={(event) => {
+              forkTipShown.current = false;
+              forkTip.onMouseLeave(event);
+            }}
+            onFocus={(event) => {
+              forkTipShown.current = true;
+              forkTip.onFocus(event);
+            }}
+            onBlur={() => {
+              forkTipShown.current = false;
+              forkTip.onBlur();
+            }}
+            onClick={() => {
+              if (running !== null) return;
+              // The sentence said what the click would do; now it is doing
+              // it, and the card or dialog that answers takes the space.
+              forkTipShown.current = false;
+              tip.hide();
+              if (fork.action === "review") reviewForkReset(forkStatus);
+              else onSyncFork(forkStatus);
+            }}
+          >
+            {fork.text}
+          </button>
         )}
         <span
           ref={cardChip}
@@ -810,7 +1022,11 @@ export function WorktreeHeader({
             aria-label={running === "pull" ? busyLabel("pull") : "Pull"}
             aria-busy={running === "pull"}
             {...busyTitle("pull", "Pull · fetch + fast-forward")}
-            {...statusTrigger("pull")}
+            {...pullTrigger}
+            ref={(element) => {
+              pullButton.current = element;
+              if (pullTrigger.ref !== undefined) pullTrigger.ref.current = element;
+            }}
           >
             {running === "pull" ? (
               <span className="wt-btn__spinner" />

@@ -14,6 +14,7 @@ import {
   type DivergenceCommit,
   type ForkPushBack,
   type ForkSourceTarget,
+  type ForkStatus,
   type LocalBranchSummary,
   type OpenChangeRequest,
   type PushPublishTarget,
@@ -1396,6 +1397,22 @@ export type PullOutcome = {
 };
 
 /**
+ * Where a fast-forward takes the branch: its own upstream, which is Pull, or a
+ * fetched ref on another remote — a fork's source — with the remotes to fetch
+ * before reading it.
+ */
+export type FastForwardTarget =
+  | { kind: "upstream" }
+  | {
+      kind: "ref";
+      ref: string;
+      label: string;
+      remotes: readonly string[];
+      /** The branch that must still be checked out once the fetch is done. */
+      branch: string;
+    };
+
+/**
  * Per-operation hooks a network command threads through: how it is stopped,
  * how liveness is observed, and where its raw stderr goes.
  *
@@ -1628,6 +1645,28 @@ async function resolveUpstream(
     });
   }
   return ok({ name, head });
+}
+
+/** A fetched ref's tip, for a fast-forward to something other than @{u}. */
+async function resolveFetchedRef(
+  git: GitExec,
+  cwd: string,
+  target: { ref: string; label: string }
+): Promise<Result<UpstreamRef>> {
+  const raw = await git(
+    ["rev-parse", "--verify", "--quiet", `${target.ref}^{commit}`],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  const head = raw.value.exitCode === 0 ? raw.value.stdout.trim() : "";
+  if (head === "") {
+    return err({
+      kind: "remote",
+      code: "fork_source_missing",
+      message: `${target.label} is no longer fetched.`
+    });
+  }
+  return ok({ name: target.label, head });
 }
 
 async function resolveCheckedOutRef(
@@ -2275,6 +2314,131 @@ async function forkPushBack(
 }
 
 /**
+ * The checked-out branch against its counterpart on the fork's source, for the
+ * header chip. The same resolution as the reset dialog's fork card, without
+ * the dialog's branch count and fetch history. Null for a detached checkout,
+ * a repository with no fork source, and a branch with no counterpart there.
+ */
+export async function resolveForkStatus(
+  git: GitExec,
+  cwd: string,
+  forkParent: ForkParentHint | null
+): Promise<Result<ForkStatus | null>> {
+  const checkout = await resolveCheckedOutRef(git, cwd);
+  if (!checkout.ok) {
+    return checkout.error.code === "detached_head" ||
+      checkout.error.code === "no_head"
+      ? ok(null)
+      : checkout;
+  }
+  const [upstreamRaw, endpoints] = await Promise.all([
+    git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd),
+    listRemoteEndpoints(git, cwd)
+  ]);
+  if (!upstreamRaw.ok) return upstreamRaw;
+  if (!endpoints.ok) return endpoints;
+  const upstreamRef =
+    upstreamRaw.value.exitCode === 0 &&
+    upstreamRaw.value.stdout.trim().startsWith("refs/remotes/")
+      ? upstreamRaw.value.stdout.trim()
+      : null;
+  const longestFirst = endpoints.value
+    .map((endpoint) => endpoint.name)
+    .sort((a, b) => b.length - a.length);
+  const tracked =
+    upstreamRef === null ? null : splitRemoteRef(upstreamRef, longestFirst);
+  const source = forkSourceRemote(
+    endpoints.value,
+    tracked?.remote ?? null,
+    forkParent
+  );
+  if (source === null) return ok(null);
+
+  const defaultRaw =
+    tracked === null
+      ? null
+      : await git(
+          ["symbolic-ref", "--quiet", `refs/remotes/${tracked.remote}/HEAD`],
+          cwd
+        );
+  const tracksDefault =
+    defaultRaw !== null &&
+    defaultRaw.ok &&
+    defaultRaw.value.exitCode === 0 &&
+    defaultRaw.value.stdout.trim() === upstreamRef;
+  const [target, trackedTarget] = await Promise.all([
+    forkSourceTarget(
+      git,
+      cwd,
+      source,
+      forkParent,
+      tracked?.name ?? checkout.value.branch,
+      tracksDefault,
+      new Set(upstreamRef === null ? [] : [upstreamRef])
+    ),
+    upstreamRef === null || tracked === null
+      ? Promise.resolve(null)
+      : resetTargetOf(git, cwd, upstreamRef, tracked.remote)
+  ]);
+  if (target === null) return ok(null);
+  const pushBack =
+    trackedTarget === null
+      ? null
+      : await forkPushBack(
+          git,
+          cwd,
+          checkout.value.branch,
+          trackedTarget,
+          target.ref
+        );
+  return ok({
+    branch: checkout.value.branch,
+    head: checkout.value.head,
+    source: { ...target, pushBack },
+    tracked: trackedTarget
+  });
+}
+
+/** Commits on HEAD that `base` lacks — what a fast-forward from it brought. */
+export async function commitsSince(
+  git: GitExec,
+  cwd: string,
+  base: string
+): Promise<number> {
+  const raw = await git(["rev-list", "--count", `${base}..HEAD`], cwd);
+  if (!raw.ok || raw.value.exitCode !== 0) return 0;
+  return Number.parseInt(raw.value.stdout.trim(), 10) || 0;
+}
+
+/**
+ * What a plain Fetch should ask on a fork: the branch's own remote and the
+ * fork's source. A bare `git fetch` asks only the first, so the source's tip —
+ * the only thing that can say the fork is behind — never moves. Null when the
+ * checkout has no fork source or its branch tracks nothing, and a plain fetch
+ * is already the whole answer.
+ */
+export async function forkFetchRemotes(
+  git: GitExec,
+  cwd: string,
+  forkParent: ForkParentHint | null
+): Promise<string[] | null> {
+  const [upstreamRaw, endpoints] = await Promise.all([
+    git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd),
+    listRemoteEndpoints(git, cwd)
+  ]);
+  if (!upstreamRaw.ok || upstreamRaw.value.exitCode !== 0 || !endpoints.ok) {
+    return null;
+  }
+  const tracked = splitRemoteRef(
+    upstreamRaw.value.stdout.trim(),
+    endpoints.value.map((endpoint) => endpoint.name).sort((a, b) => b.length - a.length)
+  );
+  if (tracked === null) return null;
+  const source = forkSourceRemote(endpoints.value, tracked.remote, forkParent);
+  return source === null ? null : [tracked.remote, source.remote];
+}
+
+/**
  * Rank the reset targets worth naming before the full branch list.
  *
  * Everything here is best-effort: a branch with no upstream, a remote with no
@@ -2487,7 +2651,8 @@ export async function pullFastForward(
   git: GitExec,
   cwd: string,
   onProgress: (phase: PullProgressPhase) => void = () => undefined,
-  control: PullExecutionControl = {}
+  control: PullExecutionControl = {},
+  target: FastForwardTarget = { kind: "upstream" }
 ): Promise<Result<PullOutcome>> {
   const pullGit = controlledGit(git, control);
   const originalHeadArgs = ["rev-parse", "--verify", "HEAD"];
@@ -2516,11 +2681,28 @@ export async function pullFastForward(
   onProgress("fetch");
   // Force progress even though PwrGit captures stderr instead of attaching a
   // terminal. The watchdog treats those records as proof the transfer is alive.
-  const fetched = await fetchRemote(pullGit, cwd, true);
+  const fetched = await (target.kind === "upstream"
+    ? fetchRemote(pullGit, cwd, true)
+    : fetchNamedRemotes(pullGit, cwd, target.remotes, true));
   if (!fetched.ok) return fetched;
 
-  const upstream = await resolveUpstream(pullGit, cwd);
+  const upstream = await (target.kind === "upstream"
+    ? resolveUpstream(pullGit, cwd)
+    : resolveFetchedRef(pullGit, cwd, target));
   if (!upstream.ok) return upstream;
+  if (target.kind === "ref") {
+    // A fork sync names the branch it was offered for. One switched away
+    // while the fetch ran would otherwise be fast-forwarded in its place.
+    const current = await resolveCheckedOutRef(pullGit, cwd);
+    if (!current.ok) return current;
+    if (current.value.branch !== target.branch) {
+      return err({
+        kind: "remote",
+        code: "fork_sync_stale",
+        message: `${target.branch} is no longer checked out here.`
+      });
+    }
+  }
 
   // A filter can fail after checkout has written paths that only exist in the
   // incoming commit. Record that bounded pathset before any mutation so
@@ -2689,7 +2871,9 @@ export async function pullFastForward(
       code,
       message:
         code === "not_fast_forward"
-          ? "Your local branch and its upstream have diverged."
+          ? target.kind === "upstream"
+            ? "Your local branch and its upstream have diverged."
+            : `This branch has commits ${target.label} doesn't, so it can't fast-forward to it.`
           : message !== ""
             ? message
             : "pull could not fast-forward"

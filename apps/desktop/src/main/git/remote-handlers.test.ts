@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   err,
   ok,
+  type ForkStatus,
   type PwrGitError,
   type SshRemoteRecovery
 } from "@pwrgit/shared";
@@ -10,10 +11,12 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import {
+  commitsSince,
   fetchAllRemotes,
   fetchNamedRemote,
   fetchNamedRemotes,
   fetchRemote,
+  forkFetchRemotes,
   inspectRemoteReset,
   planPushRefs,
   pullFastForward,
@@ -21,6 +24,7 @@ import {
   pushPlannedRefs,
   pushRemote,
   resetToRemote,
+  resolveForkStatus,
   resolveResetTargets
 } from "./git-service";
 import {
@@ -46,6 +50,9 @@ vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
   return {
     ...actual,
+    commitsSince: vi.fn(),
+    forkFetchRemotes: vi.fn(),
+    resolveForkStatus: vi.fn(),
     fetchAllRemotes: vi.fn(),
     fetchNamedRemote: vi.fn(),
     fetchNamedRemotes: vi.fn(),
@@ -106,6 +113,9 @@ describe("remote handlers", () => {
     vi.mocked(fetchNamedRemote).mockResolvedValue(ok(undefined));
     vi.mocked(fetchNamedRemotes).mockResolvedValue(ok(undefined));
     vi.mocked(fetchRemote).mockResolvedValue(ok(undefined));
+    vi.mocked(forkFetchRemotes).mockResolvedValue(null);
+    vi.mocked(resolveForkStatus).mockResolvedValue(ok(null));
+    vi.mocked(commitsSince).mockResolvedValue(0);
     vi.mocked(pushBranchWithLease).mockResolvedValue(ok(undefined));
     vi.mocked(inspectRemoteReset).mockResolvedValue(
       ok({
@@ -991,9 +1001,16 @@ describe("remote handlers", () => {
     const worktreeFetch = new Promise<void>((resolve) => {
       finishWorktreeFetch = resolve;
     });
+    // Started, not dispatched: a plain fetch first asks whether the checkout
+    // is a fork, so the worktree fetch begins a few ticks after its dispatch.
+    let signalWorktreeStarted!: () => void;
+    const worktreeStarted = new Promise<void>((resolve) => {
+      signalWorktreeStarted = resolve;
+    });
     const started: string[] = [];
     vi.mocked(fetchRemote).mockImplementationOnce(async () => {
       started.push("worktree");
+      signalWorktreeStarted();
       await worktreeFetch;
       return ok(undefined);
     });
@@ -1021,7 +1038,7 @@ describe("remote handlers", () => {
       remote: "origin"
     });
 
-    await Promise.resolve();
+    await worktreeStarted;
     expect(started).toEqual(["worktree"]);
 
     finishWorktreeFetch();
@@ -1349,6 +1366,202 @@ describe("remote handlers", () => {
       // The renderer words its toast on this code; it must survive the
       // auth-failure classifier untouched.
       expect(refused.error.code).toBe("push_lease_stale");
+    });
+
+    describe("fork sync", () => {
+      const reviewedFork = "1".repeat(40);
+      const sourceTip = "3".repeat(40);
+      /** `main` tracks `origin/main`, identical to it, and upstream is two ahead. */
+      const behindSource = (
+        pushBack: { overwrites: number; adds: number } | null = {
+          overwrites: 0,
+          adds: 2
+        }
+      ): ForkStatus => ({
+        branch: "main",
+        head: reviewedFork,
+        source: {
+          ref: "refs/remotes/upstream/main",
+          label: "upstream/main",
+          remote: "upstream",
+          head: sourceTip,
+          ahead: 0,
+          behind: 2,
+          pushBack:
+            pushBack === null
+              ? null
+              : {
+                  remote: "origin",
+                  branch: "main",
+                  ref: "refs/remotes/origin/main",
+                  head: reviewedFork,
+                  ...pushBack
+                }
+        },
+        tracked: {
+          ref: "refs/remotes/origin/main",
+          label: "origin/main",
+          remote: "origin",
+          head: reviewedFork,
+          ahead: 0,
+          behind: 0
+        }
+      });
+      const request = {
+        worktreeId: "wt-1",
+        branch: "main",
+        sourceRef: "refs/remotes/upstream/main"
+      };
+
+      it("asks the fork's source too on a plain Fetch, and repaints the graph", async () => {
+        vi.mocked(forkFetchRemotes).mockResolvedValueOnce(["origin", "upstream"]);
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        expect((await bus.dispatch("remote:fetch", { worktreeId: "wt-1" })).ok).toBe(
+          true
+        );
+        expect(fetchNamedRemotes).toHaveBeenCalledWith(
+          expect.any(Function),
+          "/repos/project",
+          ["origin", "upstream"],
+          true
+        );
+        expect(fetchRemote).not.toHaveBeenCalled();
+        // Only the source's tips moved, which no worktree refresh repaints.
+        expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-1" });
+
+        vi.mocked(emitEvent).mockClear();
+        await bus.dispatch("remote:fetch", { worktreeId: "wt-1" });
+        expect(fetchRemote).toHaveBeenCalled();
+        expect(emitEvent).not.toHaveBeenCalledWith("graph:changed", expect.anything());
+      });
+
+      it("fast-forwards to the source, then pushes the same tip to the fork", async () => {
+        vi.mocked(resolveForkStatus)
+          .mockResolvedValueOnce(ok(behindSource()))
+          .mockResolvedValueOnce(ok(behindSource()));
+        vi.mocked(commitsSince).mockResolvedValueOnce(2);
+        const bus = new CommandBus();
+        const refreshes = refresher();
+        registerRemoteHandlers(bus, db, refreshes, new WorktreeOperationQueue());
+
+        const synced = await bus.dispatch("remote:syncFork", request);
+        expect(synced).toEqual({
+          ok: true,
+          value: {
+            source: "upstream/main",
+            arrived: 2,
+            stashed: false,
+            reappliedWithConflicts: false,
+            push: { outcome: "pushed", remote: "origin", branch: "main" }
+          }
+        });
+        expect(pullFastForward).toHaveBeenCalledWith(
+          expect.any(Function),
+          "/repos/project",
+          expect.any(Function),
+          expect.any(Object),
+          {
+            kind: "ref",
+            ref: "refs/remotes/upstream/main",
+            label: "upstream/main",
+            remotes: ["origin", "upstream"],
+            branch: "main"
+          }
+        );
+        expect(commitsSince).toHaveBeenCalledWith(
+          expect.any(Function),
+          "/repos/project",
+          reviewedFork
+        );
+        expect(pushBranchWithLease).toHaveBeenCalledWith(
+          expect.any(Function),
+          "/repos/project",
+          {
+            remote: "origin",
+            branch: "main",
+            head: sourceTip,
+            expectedHead: reviewedFork
+          }
+        );
+        expect(refreshes.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
+      });
+
+      it("refuses a checkout that has moved since the chip was drawn", async () => {
+        vi.mocked(resolveForkStatus).mockResolvedValueOnce(ok(behindSource()));
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        const refused = await bus.dispatch("remote:syncFork", {
+          ...request,
+          branch: "release"
+        });
+        expect(refused.ok).toBe(false);
+        if (refused.ok) return;
+        expect(refused.error.code).toBe("fork_sync_stale");
+        expect(pullFastForward).not.toHaveBeenCalled();
+      });
+
+      it("never forces the fork: a diverged one is reported, not pushed", async () => {
+        vi.mocked(resolveForkStatus)
+          .mockResolvedValueOnce(ok(behindSource()))
+          .mockResolvedValueOnce(ok(behindSource({ overwrites: 1, adds: 2 })));
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        const synced = await bus.dispatch("remote:syncFork", request);
+        expect(synced.ok && synced.value.push).toEqual({
+          outcome: "diverged",
+          remote: "origin",
+          branch: "main",
+          overwrites: 1
+        });
+        expect(pushBranchWithLease).not.toHaveBeenCalled();
+      });
+
+      it("keeps the fast-forward when the push after it fails", async () => {
+        vi.mocked(resolveForkStatus)
+          .mockResolvedValueOnce(ok(behindSource()))
+          .mockResolvedValueOnce(ok(behindSource()));
+        vi.mocked(pushBranchWithLease).mockResolvedValueOnce(
+          err({
+            kind: "remote",
+            code: "push_denied",
+            message: "Permission to me/widget.git denied."
+          })
+        );
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        const synced = await bus.dispatch("remote:syncFork", request);
+        expect(synced.ok && synced.value.push).toEqual({
+          outcome: "failed",
+          remote: "origin",
+          branch: "main",
+          message: "Permission to me/widget.git denied."
+        });
+      });
+
+      it("hands back a branch with commits of its own as Pull's refusal", async () => {
+        vi.mocked(resolveForkStatus).mockResolvedValueOnce(ok(behindSource()));
+        vi.mocked(pullFastForward).mockResolvedValueOnce(
+          err({
+            kind: "remote",
+            code: "not_fast_forward",
+            message: "This branch has commits upstream/main doesn't, so it can't fast-forward to it."
+          })
+        );
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        const refused = await bus.dispatch("remote:syncFork", request);
+        expect(refused.ok).toBe(false);
+        if (refused.ok) return;
+        // The header opens the reset review on exactly this code.
+        expect(refused.error.code).toBe("not_fast_forward");
+        expect(pushBranchWithLease).not.toHaveBeenCalled();
+      });
     });
   });
 

@@ -6692,7 +6692,7 @@ button.agent-menu__item:hover {
   .wt-header__state
     .sync-chip:not(.sync-chip--progress):not(.sync-chip--drift):not(
       .sync-chip--readonly
-    ) {
+    ):not(.sync-chip--fork) {
     display: none;
   }
 }
@@ -6950,6 +6950,31 @@ button.agent-menu__item:hover {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+/* "upstream ↓10": the fork's source has moved on without this branch. A
+   button like read-only, and on the degrade ladder beside it for the same
+   reason — nothing else in the header carries the signal, since the sync chip
+   compares the branch with the one it tracks, and on a fork that is the
+   user's own. The Pull accent, not warn: it is something to pull, and the
+   click does the pulling. Flat at rest, so --accent; the hover tint takes the
+   bright rung, as Pull's own `.is-behind` does. */
+.sync-chip--fork {
+  border: 1px solid var(--accent-border);
+  background: transparent;
+  color: var(--accent);
+  padding: 0 9px;
+  cursor: pointer;
+}
+.sync-chip--fork:hover {
+  background: var(--bg-row-active);
+  color: var(--accent-bright);
+}
+.sync-chip--fork:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.sync-chip--fork[aria-disabled="true"] {
+  cursor: wait;
+}
 /* Default-branch drift ("main +4"). Context, not a sync state — no button acts
    on it — so it sits a rung below its neighbour: outline instead of a fill,
    subtle instead of warn. Warn stays reserved for ↓behind, which Pull clears. */
@@ -7025,6 +7050,7 @@ button.agent-menu__item:hover {
 @container (max-width: 540px) {
   .wt-header__state .sync-chip--drift,
   .wt-header__state .sync-chip--readonly,
+  .wt-header__state .sync-chip--fork,
   .wt-header__state .lfs-chip {
     display: none;
   }

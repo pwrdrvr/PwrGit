@@ -222,6 +222,47 @@ export type ForkSourceTarget = ResetTargetSuggestion & {
 };
 
 /**
+ * Where the checked-out branch stands against its counterpart on the fork's
+ * source — the header's `upstream ↓N` chip. The tracked branch reads 0/0 on a
+ * fork whose source has moved on, so nothing else in the header can say it.
+ */
+export type ForkStatus = {
+  branch: string;
+  head: string;
+  /** `ahead` is the branch's own commits the source lacks; `behind` is what
+   *  a sync would bring in. `pushBack` is the tracked branch after it. */
+  source: ForkSourceTarget;
+  /** The branch the checkout tracks, e.g. `origin/main`; null when none. */
+  tracked: ResetTargetSuggestion | null;
+};
+
+/** How a fork sync ended for the branch the checkout tracks. */
+export type ForkSyncPush =
+  /** The tracked branch now matches the source. */
+  | { outcome: "pushed"; remote: string; branch: string }
+  /** It already did; there was nothing to push. */
+  | { outcome: "up_to_date"; remote: string; branch: string }
+  /** It has commits the source lacks, so only a forced push could match it.
+   *  The sync never forces; the reset dialog's leased push is the way. */
+  | { outcome: "diverged"; remote: string; branch: string; overwrites: number }
+  /** The push itself failed; the local fast-forward stands. */
+  | { outcome: "failed"; remote: string; branch: string; message: string }
+  /** The branch tracks nothing to push to. */
+  | { outcome: "no_tracking" };
+
+export type ForkSyncOutcome = {
+  /** The fork source's ref the branch moved to, e.g. `upstream/main`. */
+  source: string;
+  /** Commits that arrived on the branch. */
+  arrived: number;
+  /** Local work was stashed to let the fast-forward through. */
+  stashed: boolean;
+  /** Reapplying the stashed work after the fast-forward hit conflicts. */
+  reappliedWithConflicts: boolean;
+  push: ForkSyncPush;
+};
+
+/**
  * What the reset dialog knows before the user picks anything.
  *
  * The ranking is computed in main because only Git knows which ref a branch
