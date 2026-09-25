@@ -20,6 +20,11 @@ export type Toast = {
    *  `undefined` both for a toast about no particular version and for a
    *  version this repo never tagged. */
   notesUrl?: string;
+  /** What the toast is about, when that is a repository — drawn as chips
+   *  that take you there. A stack of cards each reading "Fetched origin" does
+   *  not say WHICH origin, and the card is the one surface that outlives the
+   *  user moving on to another repo. */
+  subject?: ToastSubject;
   /** Errors head the card in the danger color; anything else is not a
    *  failure and must not be dressed as one. */
   tone: "error" | "info";
@@ -31,6 +36,28 @@ export type Toast = {
   showLogsAction?: boolean;
   /** Offer a copy action (default true for errors). */
   showCopyAction?: boolean;
+};
+
+/**
+ * The repository a toast reports on, named by id rather than by name.
+ *
+ * ToastHost reads the name out of the live repo list when it draws the card.
+ * Most surfaces that raise these know only an id — the rail, the diff and the
+ * graph know only the worktree they act on — and a name snapshotted at raise
+ * time would be one more thing for each of them to carry. It also settles the
+ * repo that leaves the list while its toast stands: no chip, because there is
+ * nowhere left for one to go.
+ */
+export type ToastSubject = (
+  | { repoId: string }
+  /** For a surface that knows only its checkout. ToastHost finds the
+   *  repository holding it. */
+  | { worktreeId: string }
+) & {
+  /** The remote inside that repository, for a toast about one. `url` is the
+   *  fetch URL, where the caller has it: the chip names the remote, and the
+   *  URL is what says which `upstream` it is. */
+  remote?: { name: string; url?: string };
 };
 
 type ToastListener = (toasts: Toast[]) => void;
@@ -77,6 +104,7 @@ export function showInfoToast(input: {
   title: string;
   message: string;
   notesUrl?: string;
+  subject?: ToastSubject;
 }): void {
   pushToast({
     ...input,

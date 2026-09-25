@@ -396,9 +396,12 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
         repoId: repo.id
       });
       if (!result.ok) {
+        // The repo is named by its chip now, so the title says only what
+        // happened — the name in both read as a stutter.
         showErrorToast({
-          title: `Couldn't refresh ${repo.name}`,
-          message: result.error.message
+          title: "Couldn't refresh worktrees",
+          message: result.error.message,
+          subject: { repoId: repo.id }
         });
         return;
       }
@@ -406,6 +409,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
       // The row's path turned out to be a linked worktree, so it's gone from
       // the sidebar. Name the repo that owns it rather than claiming that repo
       // is already listed — it only gets indexed if a scan root reaches it.
+      // No chip: the repo it would go to is the one just removed.
       if (result.value.outcome === "deindexed") {
         showInfoToast({
           title: `Removed ${repo.name} from the list`,
@@ -421,7 +425,8 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
         removed > 0 ? `${removed} removed` : null
       ].filter((part): part is string => part !== null);
       showInfoToast({
-        title: `${repo.name} worktrees refreshed`,
+        title: "Worktrees refreshed",
+        subject: { repoId: repo.id },
         message:
           changes.length > 0
             ? changes.join(" · ")

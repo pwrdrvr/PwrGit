@@ -361,7 +361,8 @@ export function ResetToRemoteDialog({
       showErrorToast({
         title: "Review reset failed",
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { worktreeId: worktree.id }
       });
       return;
     }
@@ -387,19 +388,25 @@ export function ResetToRemoteDialog({
       showErrorToast({
         title: `${mode === "hard" ? "Hard" : "Soft"} reset failed`,
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { worktreeId: worktree.id }
       });
       return;
     }
     const moved = `${preview.snapshot.branch} now points to ${selected.label} at ${shortHead(preview.snapshot.remoteHead)}`;
     if (push === null) {
-      showInfoToast({ title: done, message: `${moved}.` });
+      showInfoToast({
+        title: done,
+        message: `${moved}.`,
+        subject: { worktreeId: worktree.id }
+      });
     } else {
       // Only after the reset has landed, and it pushes the object that was
       // reviewed. A failure here is reported as what it is — the reset stands
       // — never as though the whole operation failed.
       setBusy("push");
       const tracked = `${push.remote}/${push.branch}`;
+      const subject = { worktreeId: worktree.id, remote: { name: push.remote } };
       const pushed = await dispatch("remote:pushBranchWithLease", {
         worktreeId: worktree.id,
         remote: push.remote,
@@ -410,7 +417,8 @@ export function ResetToRemoteDialog({
       if (pushed.ok) {
         showInfoToast({
           title: done,
-          message: `${moved}, and ${tracked} was pushed to match.`
+          message: `${moved}, and ${tracked} was pushed to match.`,
+          subject
         });
       } else {
         showErrorToast({
@@ -418,7 +426,8 @@ export function ResetToRemoteDialog({
             pushed.error.code === "push_lease_stale" ? "refused" : "failed"
           }`,
           message: `${moved}. ${firstLine(pushed.error.message)} ${tracked} is unchanged.`,
-          detail: pushed.error.detail ?? pushed.error.message
+          detail: pushed.error.detail ?? pushed.error.message,
+          subject
         });
       }
     }

@@ -423,3 +423,23 @@ cannot use the answer — these marks sit on every repo row, and a subscriber
 that ignores the value still holds the document-wide MutationObserver open.
 
 `sidebar/ForgeMark.tsx` is the worked example.
+
+## A toast about a repository says which one — pass `subject`
+
+`showErrorToast` / `showInfoToast` take `subject`, and every toast raised about
+a repository or one of its checkouts passes one. `ToastHost` draws it as chips
+under the title — `diskhound › upstream` — that select the repo and open it
+(and that remote's row) in the sidebar. Without it, a stack reading "Fetched
+origin" three times does not say whose origin, and the card outlives the user
+moving to another repo.
+
+- **Name it by id, never by name:** `{ repoId }`, or `{ worktreeId }` from a
+  surface that knows only its checkout (rail, diff, graph). The host reads the
+  name from the live repo list, and a repo that has since left it draws no chip.
+- **Add `remote: { name, url? }` for a toast about one remote.** Pass the fetch
+  URL when you have it; the tooltip is the only thing telling one `upstream`
+  from another.
+- **Don't repeat the repo name in the title.** The chip says it.
+- **Omit it only when nothing is left to go to** — `useRepoTree`'s "Removed …
+  from the list" — or when the toast is not about a repository at all (app
+  updates).

@@ -55,7 +55,8 @@ export function BranchRenameDialog({
       showErrorToast({
         title: "Rename branch failed",
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { repoId }
       });
       if (result.error.code === "stale_branch") {
         await onRenamed();
@@ -65,7 +66,8 @@ export function BranchRenameDialog({
     }
     showInfoToast({
       title: "Branch renamed",
-      message: `${branch.name} is now ${trimmed}. Its remote branch, if any, was not renamed.`
+      message: `${branch.name} is now ${trimmed}. Its remote branch, if any, was not renamed.`,
+      subject: { repoId }
     });
     await onRenamed();
     onClose();

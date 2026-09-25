@@ -102,7 +102,12 @@ describe("SshRemoteRecoveryDialog", () => {
       });
       expect(mocks.showInfoToast).toHaveBeenCalledWith({
         title: "Remote changed to SSH",
-        message: `origin now uses SSH. ${label} again when you are ready.`
+        message: `origin now uses SSH. ${label} again when you are ready.`,
+        // The chip's URL is the one the remote has now — the SSH one.
+        subject: {
+          worktreeId: "worktree-1",
+          remote: { name: "origin", url: recovery.sshUrl }
+        }
       });
       expect(
         mocks.dispatch.mock.calls.some(([name]) =>
@@ -159,7 +164,11 @@ describe("SshRemoteRecoveryDialog", () => {
     ).toBe(false);
     expect(mocks.showInfoToast).toHaveBeenCalledWith({
       title: "Remote changed to SSH",
-      message: "origin now uses SSH. Pull again when you are ready."
+      message: "origin now uses SSH. Pull again when you are ready.",
+      subject: {
+        worktreeId: "worktree-1",
+        remote: { name: "origin", url: recovery.sshUrl }
+      }
     });
     expect(onChanged).toHaveBeenCalledOnce();
   });
