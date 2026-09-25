@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { createReadStream, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
 const repo = "pwrdrvr/PwrGit";
@@ -89,6 +90,19 @@ function getRelease(tag, gh) {
   return output.trim() ? JSON.parse(output) : undefined;
 }
 
+const releaseVisibilityDelaysMs = [500, 1000, 2000, 4000, 8000, 8000, 8000, 8000, 8000, 8000];
+const releaseVisibilityWaitSeconds = releaseVisibilityDelaysMs.reduce((sum, ms) => sum + ms, 0) / 1000;
+
+async function waitForRelease(tag, gh, delay) {
+  let release = getRelease(tag, gh);
+  for (const milliseconds of releaseVisibilityDelaysMs) {
+    if (release) return release;
+    await delay(milliseconds);
+    release = getRelease(tag, gh);
+  }
+  return release;
+}
+
 function assertMetadata(release, tag, notes) {
   if (release.tag_name !== tag || release.name !== tag || release.body.trim() !== notes.trim() || !release.prerelease) {
     throw new Error(`Release ${tag} metadata differs from the checked changelog notes or Pre-release flag`);
@@ -112,23 +126,26 @@ function checkRemoteAssets(release, assets, allowMissing) {
   return seen;
 }
 
-export async function publishRelease({ tag, macDir, windowsDir, notesFile, gh = realGh }) {
+export async function publishRelease({ tag, macDir, windowsDir, notesFile, gh = realGh, delay = sleep }) {
   // Finish all local checks before the first remote mutation.
   const assets = await collectAssets(tag, macDir, windowsDir);
   const notes = readFileSync(notesFile, "utf8");
   if (!notes.trim()) throw new Error("Release notes are empty");
   let release = getRelease(tag, gh);
   if (!release) {
+    let createError;
     try {
       gh(["release", "create", tag, "--repo", repo, "--verify-tag", "--title", tag,
         "--notes-file", notesFile, "--prerelease", "--latest=false", "--draft"]);
     } catch (error) {
-      // A lost create response or another queued run can still leave a draft.
-      release = getRelease(tag, gh);
-      if (!release) throw error;
+      // A lost response or concurrent run can leave a draft before it appears in the list.
+      createError = error;
     }
-    release = getRelease(tag, gh);
-    if (!release) throw new Error(`Created release ${tag} is not visible`);
+    release = await waitForRelease(tag, gh, delay);
+    if (!release) {
+      throw new Error(`Release ${tag} is not visible after waiting ${releaseVisibilityWaitSeconds} seconds; no assets were uploaded`,
+        { cause: createError });
+    }
   }
   assertMetadata(release, tag, notes);
   let present = checkRemoteAssets(release, assets, release.draft);

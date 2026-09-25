@@ -31,23 +31,33 @@ afterEach(() => {
   for (const directory of tempDirs.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-function fakeGh(assets, { uploadErrorAfterAccept = false, existing = false, published = false } = {}) {
+function fakeGh(assets, {
+  uploadErrorAfterAccept = false, createErrorAfterAccept = false,
+  hiddenReadsAfterCreate = 0, existing = false, published = false,
+} = {}) {
   let release = existing ? {
     tag_name: tag, name: tag, body: "Fixed release publishing.\n",
     prerelease: true, draft: !published, assets: [],
   } : undefined;
   const calls = [];
   let failedOnce = false;
+  let hiddenReadsRemaining = 0;
   function gh(args) {
     calls.push(args);
     if (args[0] === "api") {
       if (!args.includes("--jq") || args.includes("--slurp")) {
         throw new Error("Release lookup must filter each page before stdout is buffered");
       }
+      if (hiddenReadsRemaining > 0) {
+        hiddenReadsRemaining--;
+        return "";
+      }
       return release ? `${JSON.stringify(release)}\n` : "";
     }
     if (args[1] === "create") {
       release = { tag_name: tag, name: tag, body: "Fixed release publishing.\n", prerelease: true, draft: true, assets: [] };
+      hiddenReadsRemaining = hiddenReadsAfterCreate;
+      if (createErrorAfterAccept) throw new Error("create response was lost");
       return "";
     }
     if (args[1] === "upload") {
@@ -99,6 +109,42 @@ describe("desktop release publication", () => {
     expect(remote.getRelease().assets).toHaveLength(14);
     expect(remote.calls.filter((args) => args[1] === "upload")).toHaveLength(14);
     expect(remote.calls.filter((args) => args[1] === "edit")).toHaveLength(1);
+  });
+
+  test("waits for a created draft to appear before uploading signed assets", async () => {
+    const input = fixture();
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const remote = fakeGh(assets, { hiddenReadsAfterCreate: 3 });
+    const delays = [];
+    await publishRelease({ ...input, gh: remote.gh, delay: async (ms) => { delays.push(ms); } });
+    expect(delays).toEqual([500, 1000, 2000]);
+    expect(remote.calls.filter((args) => args[1] === "create")).toHaveLength(1);
+    expect(remote.getRelease().assets).toHaveLength(14);
+    expect(remote.getRelease().draft).toBe(false);
+  });
+
+  test("reconciles a lost create response after the draft becomes visible", async () => {
+    const input = fixture();
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const remote = fakeGh(assets, { createErrorAfterAccept: true, hiddenReadsAfterCreate: 2 });
+    const delays = [];
+    await publishRelease({ ...input, gh: remote.gh, delay: async (ms) => { delays.push(ms); } });
+    expect(delays).toEqual([500, 1000]);
+    expect(remote.calls.filter((args) => args[1] === "create")).toHaveLength(1);
+    expect(remote.getRelease().draft).toBe(false);
+  });
+
+  test("stops after a bounded wait without uploading or publishing an invisible draft", async () => {
+    const input = fixture();
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const remote = fakeGh(assets, { hiddenReadsAfterCreate: 99 });
+    const delays = [];
+    await expect(publishRelease({ ...input, gh: remote.gh, delay: async (ms) => { delays.push(ms); } }))
+      .rejects.toThrow("Release v0.18.0 is not visible after waiting 55.5 seconds");
+    expect(delays).toEqual([500, 1000, 2000, 4000, 8000, 8000, 8000, 8000, 8000, 8000]);
+    expect(remote.calls.filter((args) => args[1] === "create")).toHaveLength(1);
+    expect(remote.calls.some((args) => args[1] === "upload" || args[1] === "edit")).toBe(false);
+    expect(remote.getRelease().draft).toBe(true);
   });
 
   test("resumes a draft and refuses an asset whose digest differs", async () => {
