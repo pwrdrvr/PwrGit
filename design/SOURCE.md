@@ -97,6 +97,7 @@ first.
 | `Git Runtime Settings - UX Review.dc.html` | Settings &rsaquo; General &rsaquo; Git runtime &mdash; the read-only card that names which Git and Git LFS PwrGit runs. The card reproduced at shipped size at both the 760&nbsp;px column and the Settings window's own 760&nbsp;px minimum, five findings against it, the redraw, and the state table it should answer. |
 | `Agent History Editing - UX Review.dc.html` | A review of open PR #149's agent-assisted rebase &mdash; six findings against its review-only agent panel &mdash; and a counter-proposal: the agent proposes a history, PwrGit proves it (every commit once, a clean isolated replay, an identical tree), you apply it. Squash messages, &#10022;&nbsp;Tidy, the failure paths, and where the agent is chosen. A proposal; nothing in it is built. Interactive. |
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
+| `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -314,6 +315,27 @@ from the artboard. Its version strings are invented; the Git LFS build tail is t
 real shape of `git lfs version` output. Turn **1** is the card as #296 builds it;
 turns **2&ndash;3**, the redraw and the state table, are a proposal.
 
+`Fork From Here - UX Review.dc.html` was written here and pushed up through the
+`claude-design` MCP, in the same change that builds what it draws; the project
+copy was verified at the same 47,596 bytes. It answers a report that the
+sidebar's Fork&hellip; opened on an empty search while the selected checkout
+was one its owner could not push to, and that no other place offered to fork
+it. Turn **1** is the diagnosis: the repository was added after the window
+mounted, so its forge identity was never read, and every fork affordance
+waited on that identity. Turn **2** draws the entry points that no longer wait,
+turn **3** seeds the top button from `origin`'s URL, and **4a** is a live
+`DCLogic` prototype of both. Turn **5** is the build list, and unlike most
+reviews here it shipped with the artboard. Its names are contrived
+(`sparkline`, `octo-labs`, `demo-dev`); `sparkline` stands in for the reported
+checkout.
+
+It carries one asset, `assets/github-invertocat-black.svg`: a copy of the app's
+own `apps/desktop/src/renderer/src/assets/github/invertocat-black.svg`, drawn as
+the forge mark on the origin row. The project lists it at 1,570 bytes against
+1,559 here, because Claude Design re-serializes an SVG on write and expands its
+one `<path/>` and one `<rect/>` into open/close pairs (6 + 5 bytes). The
+drawing is identical; keep the repo's copy.
+
 ## Deliberately NOT copied in
 
 **`apps/desktop/**`.** The Claude Design project carries a working copy of
@@ -401,6 +423,11 @@ reviewable choice.
    (5,945 here against 5,990 there), `github.md` (1,211 against 1,210), and
    `README Header.dc.html` (17,833 against 17,773). Do not "correct" those
    three toward the project.
+
+   One more differs for a different reason:
+   `assets/github-invertocat-black.svg` (1,559 here against 1,570 there),
+   because the project re-serializes an SVG on write. The paragraph on
+   `Fork From Here` above has the byte count. Keep the repo's copy.
 
    **A downloaded PNG never matches by size, and that is not drift.** Claude
    Design stores a PNG as pushed: `list_files` reports the pushed size, and on
