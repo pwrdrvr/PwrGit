@@ -17,7 +17,7 @@ vi.mock("../../lib/pwrgit", () => ({
 vi.mock("../../lib/toast", () => toastMocks);
 
 import { RepoRefsSections } from "./RepoRefsSections";
-import { requestSidebarReveal } from "./sidebar-reveal";
+import { requestSidebarReveal, settleSidebarReveal } from "./sidebar-reveal";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -205,7 +205,9 @@ describe("RepoRefsSections remote reveal", () => {
 
   it("leaves another repository's request alone", async () => {
     await render(primary);
-    await act(async () => requestSidebarReveal("repo-2", "upstream"));
+    const seq = await act(async () => requestSidebarReveal("repo-2", "upstream"));
     expect(remotesHead()?.getAttribute("aria-expanded")).toBe("false");
+    // The store is module-wide; leave nothing armed for whatever runs next.
+    await act(async () => settleSidebarReveal(seq));
   });
 });

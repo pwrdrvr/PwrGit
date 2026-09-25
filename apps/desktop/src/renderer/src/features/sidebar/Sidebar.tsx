@@ -397,19 +397,17 @@ export function Sidebar({
   // reload that keeps App's selection) is not a fresh pick, and treating it as
   // one would widen the lens below and overwrite the persisted choice.
   const lastRevealedRef = useRef<string | null>(selectedWorktreeId);
-  useEffect(() => {
-    if (selectedWorktreeId === null) return;
-    if (lastRevealedRef.current === selectedWorktreeId) return;
-    lastRevealedRef.current = selectedWorktreeId;
-    const repo = repos.find((r) =>
-      r.worktrees.some((w) => w.id === selectedWorktreeId)
-    );
-    if (repo === undefined) return;
-    pendingRevealRef.current = selectedWorktreeId;
-    // A lens the repo doesn't pass would hide the row we're about to scroll to,
-    // leaving the selection real but invisible — a ⌘K pick or a freshly created
-    // worktree lands nowhere. Widen to Focused, whose first rule is the current
-    // selection, rather than dropping the user into the exhaustive index.
+  /**
+   * Make a repo's row findable: widen a lens that hides it, and expand it.
+   * Shared by the selection reveal below and a toast chip's reveal further
+   * down, so the two cannot drift on what "show this repo" does.
+   *
+   * A lens the repo doesn't pass would hide the row about to be scrolled to,
+   * leaving it real but invisible — a ⌘K pick or a freshly created worktree
+   * lands nowhere. Widen to Focused, whose first rule is the current
+   * selection, rather than dropping the user into the exhaustive index.
+   */
+  const showRepoRow = (repo: Repo): void => {
     if (
       filterReposByLens([repo], lens, now, {
         selectedWorktreeId,
@@ -422,6 +420,17 @@ export function Sidebar({
       setExpanded((prev) => new Set(prev).add(repo.id));
       onExpandRepo(repo.id); // lazy badge/state compute, like a manual expand
     }
+  };
+  useEffect(() => {
+    if (selectedWorktreeId === null) return;
+    if (lastRevealedRef.current === selectedWorktreeId) return;
+    lastRevealedRef.current = selectedWorktreeId;
+    const repo = repos.find((r) =>
+      r.worktrees.some((w) => w.id === selectedWorktreeId)
+    );
+    if (repo === undefined) return;
+    pendingRevealRef.current = selectedWorktreeId;
+    showRepoRow(repo);
   }, [
     selectedWorktreeId,
     repos,
@@ -616,19 +625,7 @@ export function Sidebar({
       settleSidebarReveal(reveal.seq);
       return;
     }
-    // The same widening the selection reveal above does, for the same reason.
-    if (
-      filterReposByLens([repo], lens, now, {
-        selectedWorktreeId,
-        visits: focusVisits
-      }).length === 0
-    ) {
-      setLens("Focused");
-    }
-    if (!expanded.has(repo.id)) {
-      setExpanded((prev) => new Set(prev).add(repo.id));
-      onExpandRepo(repo.id);
-    }
+    showRepoRow(repo);
     // A remote is scrolled to by the refs sections inside the row, which are
     // the only ones that know when its row exists.
     if (reveal.remote === null) {
@@ -647,6 +644,12 @@ export function Sidebar({
   useEffect(() => {
     const pending = pendingRepoScrollRef.current;
     if (pending === null) return;
+    // Expired or replaced: the row that never rendered in time must not take
+    // the scroll and focus whenever it finally does.
+    if (reveal?.seq !== pending.seq) {
+      pendingRepoScrollRef.current = null;
+      return;
+    }
     const el = document.querySelector<HTMLElement>(
       `[data-repo-id="${pending.repoId}"]`
     );

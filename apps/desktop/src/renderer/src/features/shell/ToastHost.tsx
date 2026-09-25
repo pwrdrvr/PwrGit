@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Repo } from "@pwrgit/shared";
 import { AppUpdateToast } from "../update/AppUpdateToast";
 import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
@@ -45,8 +45,6 @@ export function ToastHost({
 
   useEffect(() => subscribeToasts(setToasts), []);
 
-  const resolve = useMemo(() => subjectResolver(repos), [repos]);
-
   return (
     <div className="toast-host">
       {/* Keyed by `key` where there is one, so a replacement updates the card
@@ -65,7 +63,9 @@ export function ToastHost({
             key={toast.key ?? toast.id}
             toast={toast}
             subject={
-              toast.subject === undefined ? null : resolve(toast.subject)
+              toast.subject === undefined
+                ? null
+                : resolveSubject(toast.subject, repos)
             }
             onReveal={onReveal}
           />
@@ -86,28 +86,31 @@ type NamedSubject = {
   remote?: { name: string; url?: string };
 };
 
-/** Looks a subject up by repo or worktree id; null for a repository that is
- *  no longer in this window's list. */
-function subjectResolver(
+/**
+ * Looks a subject up by repo or worktree id; null for a repository that is
+ * no longer in this window's list.
+ *
+ * A scan per card rather than an index over the list: `repos` changes on every
+ * `repo:changed`, the stack is usually empty, and a handful of cards is all it
+ * ever holds.
+ */
+function resolveSubject(
+  subject: ToastSubject,
   repos: readonly Repo[]
-): (subject: ToastSubject) => NamedSubject | null {
-  const byRepo = new Map(repos.map((repo) => [repo.id, repo]));
-  const byWorktree = new Map(
-    repos.flatMap((repo) =>
-      repo.worktrees.map((worktree) => [worktree.id, repo] as const)
-    )
-  );
-  return (subject) => {
-    const repo =
-      "repoId" in subject
-        ? byRepo.get(subject.repoId)
-        : byWorktree.get(subject.worktreeId);
-    if (repo === undefined) return null;
-    return {
-      repoId: repo.id,
-      repoName: repo.name,
-      ...(subject.remote === undefined ? {} : { remote: subject.remote })
-    };
+): NamedSubject | null {
+  const repo =
+    "repoId" in subject
+      ? repos.find((candidate) => candidate.id === subject.repoId)
+      : repos.find((candidate) =>
+          candidate.worktrees.some(
+            (worktree) => worktree.id === subject.worktreeId
+          )
+        );
+  if (repo === undefined) return null;
+  return {
+    repoId: repo.id,
+    repoName: repo.name,
+    ...(subject.remote === undefined ? {} : { remote: subject.remote })
   };
 }
 

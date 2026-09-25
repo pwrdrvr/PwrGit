@@ -2,8 +2,9 @@
 
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  REVEAL_TTL_MS,
   requestSidebarReveal,
   settleSidebarReveal,
   useSidebarReveal,
@@ -64,5 +65,36 @@ describe("sidebar-reveal", () => {
     expect(probe.current()).toMatchObject({ repoId: "repo-2", remote: null });
     await act(async () => settleSidebarReveal(probe.current()!.seq));
     await probe.unmount();
+  });
+
+  it("expires a request nobody finished, so it cannot go off later", async () => {
+    vi.useFakeTimers();
+    try {
+      const probe = await watch();
+      await act(async () => requestSidebarReveal("repo-1", "upstream"));
+      await act(async () => vi.advanceTimersByTime(REVEAL_TTL_MS - 1));
+      expect(probe.current()).not.toBeNull();
+      await act(async () => vi.advanceTimersByTime(1));
+      expect(probe.current()).toBeNull();
+      await probe.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not let an old request's expiry clear a newer one", async () => {
+    vi.useFakeTimers();
+    try {
+      const probe = await watch();
+      await act(async () => requestSidebarReveal("repo-1"));
+      await act(async () => vi.advanceTimersByTime(REVEAL_TTL_MS / 2));
+      const newer = await act(async () => requestSidebarReveal("repo-2"));
+      await act(async () => vi.advanceTimersByTime(REVEAL_TTL_MS / 2));
+      expect(probe.current()?.seq).toBe(newer);
+      await act(async () => settleSidebarReveal(newer));
+      await probe.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -16,6 +16,12 @@ import { useSyncExternalStore } from "react";
  * still be there for them to pick up. Whoever finishes it calls
  * `settleSidebarReveal`, and a newer request replaces an unfinished one — a
  * reveal the user has moved on from must never go off later on its own.
+ *
+ * Nor may one nobody finished. A row can fail to appear for good — the user
+ * collapses the repo before `repo:refs` answers, or the row sits past the
+ * Focused page — and without an end the request would stay armed until that
+ * row next rendered, then scroll and take focus out of the blue. So every
+ * request expires on its own after `REVEAL_TTL_MS`.
  */
 export type SidebarReveal = {
   /** Distinguishes two requests for the same target: clicking the same chip
@@ -27,6 +33,10 @@ export type SidebarReveal = {
   remote: string | null;
 };
 
+/** Long enough for a large repository's `repo:refs` to answer; short enough
+ *  that nothing arrives after the user has plainly moved on. */
+export const REVEAL_TTL_MS = 10_000;
+
 let current: SidebarReveal | null = null;
 let seq = 0;
 const listeners = new Set<() => void>();
@@ -35,13 +45,17 @@ function notify(): void {
   for (const listener of [...listeners]) listener();
 }
 
+/** Returns the request's `seq`, which is what settles it. */
 export function requestSidebarReveal(
   repoId: string,
   remote: string | null = null
-): void {
+): number {
   seq += 1;
-  current = { seq, repoId, remote };
+  const requestSeq = seq;
+  current = { seq: requestSeq, repoId, remote };
   notify();
+  window.setTimeout(() => settleSidebarReveal(requestSeq), REVEAL_TTL_MS);
+  return requestSeq;
 }
 
 /** Done, or cannot be done — either way nothing should act on it again. A
