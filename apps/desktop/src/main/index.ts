@@ -940,7 +940,6 @@ if (!gotSingleInstanceLock) {
         settingsSnapshot(settings, diagnosticsOutputRoot, appVersion).general
           .searchAllProfiles
     );
-    registerCloneHandlers(bus, cloneService);
     registerGitRuntimeHandlers(bus, settings);
     registerSshHostTrustHandlers(bus, new SshHostTrustService({
       allowed: (kind, hostname) => forgeHosts.kindFor(hostname).kind === kind && forgeHosts.isEnabled(hostname).enabled
@@ -984,6 +983,7 @@ if (!gotSingleInstanceLock) {
           logMain("debug", "forge", "post-fetch identity refresh failed:", cause);
         });
     };
+    registerCloneHandlers(bus, cloneService, refreshIdentity);
     registerRemoteHandlers(
       bus,
       db,

@@ -31,7 +31,8 @@ describe("clone handlers", () => {
     );
     const service = { clone } as unknown as CloneService;
     const bus = new CommandBus();
-    registerCloneHandlers(bus, service);
+    const refreshIdentity = vi.fn();
+    registerCloneHandlers(bus, service, refreshIdentity);
 
     const result = await bus.dispatch("repo:clone", {
       operationId: "clone-operation",
@@ -51,6 +52,9 @@ describe("clone handlers", () => {
       profileId: "profile-id"
     });
     expect(emitEvent).toHaveBeenCalledTimes(2);
+    // The new checkout is asked about here, not left to whichever window
+    // happens to reload the tree.
+    expect(refreshIdentity).toHaveBeenCalledWith("repo-id");
   });
 
   it("cancels the matching operation without refreshing the tree", async () => {

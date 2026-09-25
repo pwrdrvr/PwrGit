@@ -5,7 +5,10 @@ import type { CloneService } from "./clone-service";
 
 export function registerCloneHandlers(
   bus: CommandBus,
-  clones: CloneService
+  clones: CloneService,
+  /** Ask the forge about the new checkout, as a fetch does. The sidebar's
+   *  reload would only ask from a window that is open on this profile. */
+  refreshIdentity?: (repoId: string) => void
 ): void {
   const active = new Map<string, AbortController>();
   bus.register("repo:cloneCatalog", (req) => clones.catalog(req.profileId));
@@ -43,7 +46,10 @@ export function registerCloneHandlers(
         },
         controller.signal
       );
-      if (result.ok) emitEvent("repo:changed", { profileId: req.profileId });
+      if (result.ok) {
+        emitEvent("repo:changed", { profileId: req.profileId });
+        refreshIdentity?.(result.value.id);
+      }
       return result;
     } finally {
       active.delete(req.operationId);

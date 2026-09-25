@@ -81,9 +81,9 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
    *
    * The mount-time `repo:refreshIdentities` covers every repository that
    * existed then, and nothing else ever asked about one that arrived later.
-   * PwrGit's own Clone… is one of those: `repo:clone` ends by emitting
-   * `repo:changed` and nothing more, the same as Add folders… or a rescan
-   * does. Only a fetch or a remote edit asks from main. Such a row stayed
+   * Add folders… and a rescan end with `repo:changed` and nothing more, and
+   * until `repo:clone` learned to ask from main, PwrGit's own Clone… did too.
+   * This is the net under all of them. Such a row stayed
    * without an identity until a relaunch or a fetch of that repo, so every
    * surface that waits on the forge's answer stayed blank. That included the
    * read-only mark, the fork button on `origin`, and Fork…'s seed. So each

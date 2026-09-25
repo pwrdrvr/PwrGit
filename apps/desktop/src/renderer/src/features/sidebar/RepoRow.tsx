@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -211,15 +212,30 @@ export function RepoRow({
     x: number;
     y: number;
     align: "start" | "end";
+    /** What focus returns to on dismissal: the kebab that opened it, the row
+     *  whose menu key did, or nothing for a pointer's right-click. */
+    from: "kebab" | "row" | "pointer";
   } | null>(null);
   const kebabRef = useRef<HTMLButtonElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
   /** "Manage remotes…" asks `RepoRefsSections` to open its browser, which
    *  needs refs only that component loads — so the ask is held here until it
    *  mounts and has them. */
   const [refsBrowserRequest, setRefsBrowserRequest] = useState<
     "remotes" | null
   >(null);
-  const menuItems: MenuItem[] = [
+  const clearRefsBrowserRequest = useCallback(
+    () => setRefsBrowserRequest(null),
+    []
+  );
+  // Collapsed before the refs landed: the ask goes with it, or it would fire
+  // on some later expand the user meant only as an expand.
+  useEffect(() => {
+    if (!expanded) setRefsBrowserRequest(null);
+  }, [expanded]);
+  /** Built only while the menu is open: every row renders on every sidebar
+   *  update, and a closed menu has no use for its items. */
+  const menuItems = (): MenuItem[] => [
     {
       type: "item",
       // The slug once the forge has named it; the folder name until then,
@@ -553,6 +569,7 @@ export function RepoRow({
   return (
     <div className="repo-block" role="presentation">
       <div
+        ref={rowRef}
         className={`repo-row${activeCollapsed ? " is-active" : ""}${
           arrangeable ? " is-arrangeable" : ""
         }${dragging ? " is-dragging" : ""}${
@@ -583,7 +600,12 @@ export function RepoRow({
           ) {
             event.preventDefault();
             const rect = event.currentTarget.getBoundingClientRect();
-            setMenu({ x: rect.left + 24, y: rect.bottom + 2, align: "start" });
+            setMenu({
+              x: rect.left + 24,
+              y: rect.bottom + 2,
+              align: "start",
+              from: "row"
+            });
             return;
           }
           onRowKeyDown(event);
@@ -593,7 +615,12 @@ export function RepoRow({
           event.preventDefault();
           event.stopPropagation();
           tip.hide();
-          setMenu({ x: event.clientX, y: event.clientY, align: "start" });
+          setMenu({
+            x: event.clientX,
+            y: event.clientY,
+            align: "start",
+            from: "pointer"
+          });
         }}
       >
         {/* Only the arrangeable lens gets a handle: everywhere else the list
@@ -728,7 +755,12 @@ export function RepoRow({
                 return;
               }
               const rect = event.currentTarget.getBoundingClientRect();
-              setMenu({ x: rect.right, y: rect.bottom + 4, align: "end" });
+              setMenu({
+                x: rect.right,
+                y: rect.bottom + 4,
+                align: "end",
+                from: "kebab"
+              });
             }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -745,8 +777,10 @@ export function RepoRow({
           y={menu.y}
           label={`${repo.name} actions`}
           align={menu.align}
-          items={menuItems}
-          triggerRef={kebabRef}
+          items={menuItems()}
+          {...(menu.from === "pointer"
+            ? {}
+            : { triggerRef: menu.from === "kebab" ? kebabRef : rowRef })}
           onClose={() => setMenu(null)}
         />
       )}
@@ -900,7 +934,7 @@ export function RepoRow({
             onLocateTag={onLocateTag}
             onFork={onForkRepo}
             browserRequest={refsBrowserRequest}
-            onBrowserRequestHandled={() => setRefsBrowserRequest(null)}
+            onBrowserRequestHandled={clearRefsBrowserRequest}
             repo={repo}
             now={now}
             // Only when the working target lives in THIS repo. That is what
