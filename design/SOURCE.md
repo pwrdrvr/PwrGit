@@ -98,6 +98,7 @@ first.
 | `Agent History Editing - UX Review.dc.html` | A review of open PR #149's agent-assisted rebase &mdash; six findings against its review-only agent panel &mdash; and a counter-proposal: the agent proposes a history, PwrGit proves it (every commit once, a clean isolated replay, an identical tree), you apply it. Squash messages, &#10022;&nbsp;Tidy, the failure paths, and where the agent is chosen. A proposal; nothing in it is built. Interactive. |
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
+| `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -336,6 +337,18 @@ the forge mark on the origin row. The project lists it at 1,570 bytes against
 1,559 here, because Claude Design re-serializes an SVG on write and expands its
 one `<path/>` and one `<rect/>` into open/close pairs (6 + 5 bytes). The
 drawing is identical; keep the repo's copy.
+
+`Bulk Sync Progress - UX Review.dc.html` was written here and pushed up
+through the `claude-design` MCP, in the same change that builds what it draws,
+[#318](https://github.com/pwrdrvr/PwrGit/pull/318); the project copy was
+verified at the same byte count as this one. It carries no `assets/`: every
+specimen is the shipped dialog rebuilt from the real `app.css` rules, in both
+theme blocks, and its repository names and paths (`atlas-api`, `ledger-web`,
+`/Users/dana/src/…`) are invented. Turn **1** is the dialog as built, at the
+moment of the report that started it: 44 of 80, three in flight. Turn **2**
+draws three placements with **2b** recommended, turn **3** is 2b through one
+run, **4a** is a live `DCLogic` prototype of it, and turn **5** is the build
+list, which shipped with the artboard.
 
 ## Deliberately NOT copied in
 
