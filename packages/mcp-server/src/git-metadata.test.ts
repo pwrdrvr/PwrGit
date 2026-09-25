@@ -270,10 +270,22 @@ describe("safe repository metadata", () => {
     expect(info.worktrees.find((worktree) => worktree.branch === "topic/vanishing"))
       .toMatchObject({ missing: true, status: null });
 
-    const failing: CommandRunner = async (command, args, options) =>
-      args[0] === "status" && options.cwd === live
-        ? { exitCode: 128, stdout: "", stderr: "fatal: index file corrupt" }
-        : runCommand(command, args, options);
+    // The failure must not be reported while git still runs in a checkout:
+    // the caller may remove it next, and Windows refuses to remove a
+    // directory a process is working in.
+    let running = 0;
+    const failing: CommandRunner = async (command, args, options) => {
+      if (args[0] === "status" && options.cwd === live) {
+        return { exitCode: 128, stdout: "", stderr: "fatal: index file corrupt" };
+      }
+      running += 1;
+      try {
+        return await runCommand(command, args, options);
+      } finally {
+        running -= 1;
+      }
+    };
     await expect(readRepositoryInfo(primary, failing)).rejects.toThrow("index file corrupt");
+    expect(running).toBe(0);
   });
 });
