@@ -303,8 +303,8 @@ describe("fork-aware ranking and fetch coverage", () => {
     ).toEqual({
       text: "The last fetch, moments ago, covered origin only. upstream/main may be behind acme/widget.",
       stale: true,
-      fetchLabel: "Fetch upstream + origin",
-      remotes: ["upstream", "origin"]
+      fetchLabel: "Fetch origin + upstream",
+      remotes: ["origin", "upstream"]
     });
   });
 
@@ -319,10 +319,10 @@ describe("fork-aware ranking and fetch coverage", () => {
         NOW
       )
     ).toEqual({
-      text: "Last fetched 4m ago from upstream and origin — the reset uses that snapshot, not the live remotes.",
+      text: "Last fetched 4m ago from origin and upstream — the reset uses that snapshot, not the live remotes.",
       stale: false,
       fetchLabel: "Fetch now",
-      remotes: ["upstream", "origin"]
+      remotes: ["origin", "upstream"]
     });
   });
 
@@ -333,7 +333,7 @@ describe("fork-aware ranking and fetch coverage", () => {
       NOW
     );
     expect(coverage.text).toBe(
-      "The last fetch, moments ago, did not include upstream and origin. upstream/main and origin/main may be out of date."
+      "The last fetch, moments ago, did not include origin and upstream. origin/main and upstream/main may be out of date."
     );
     expect(coverage.stale).toBe(true);
   });

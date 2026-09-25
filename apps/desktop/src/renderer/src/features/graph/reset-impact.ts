@@ -152,9 +152,9 @@ export function rankedTarget(
   return targets.upstream ?? targets.forkSource ?? targets.defaultBranch;
 }
 
-/** Every remote a ranked card was fetched from, the fork's source first. */
+/** Every remote a ranked card was fetched from, the tracked one first. */
 export function targetRemotes(targets: ResetTargets): string[] {
-  const remotes = [targets.forkSource, targets.upstream, targets.defaultBranch]
+  const remotes = [targets.upstream, targets.forkSource, targets.defaultBranch]
     .filter((target): target is ResetTargetSuggestion => target !== null)
     .map((target) => target.remote);
   return [...new Set(remotes)];
@@ -222,7 +222,7 @@ export function fetchCoverage(
       remotes
     };
   }
-  const outdated = [fork, targets.upstream, targets.defaultBranch]
+  const outdated = [targets.upstream, fork, targets.defaultBranch]
     .filter(
       (target): target is ResetTargetSuggestion =>
         target !== null && missing.includes(target.remote)

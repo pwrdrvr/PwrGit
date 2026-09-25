@@ -619,12 +619,12 @@ describe("reset to remote — a fork and its source", () => {
       "The last fetch, 2m ago, covered origin only. upstream/main may be behind acme/widget."
     );
     const fetch = container.querySelector<HTMLButtonElement>(".reset-remote__fetch");
-    expect(fetch?.textContent).toBe("Fetch upstream + origin");
+    expect(fetch?.textContent).toBe("Fetch origin + upstream");
 
     await click(fetch);
     expect(dispatchMock).toHaveBeenCalledWith("remote:fetch", {
       worktreeId: "worktree-1",
-      remotes: ["upstream", "origin"]
+      remotes: ["origin", "upstream"]
     });
   });
 
