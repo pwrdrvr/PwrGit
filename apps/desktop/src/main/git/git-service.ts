@@ -12,6 +12,7 @@ import {
   type CommitStats,
   type DivergenceCommitAlignment,
   type DivergenceCommit,
+  type ForkDrift,
   type ForkPushBack,
   type ForkSourceTarget,
   type ForkStatus,
@@ -1796,18 +1797,35 @@ async function compareCommitRanges(
   });
 }
 
+/**
+ * The tip a recovery compares against: the branch's own upstream, or — for a
+ * fork sync that could not fast-forward — a named fetched remote-tracking
+ * branch, the fork's source.
+ */
+async function resolveComparedRef(
+  git: GitExec,
+  cwd: string,
+  ref: string | undefined
+): Promise<Result<UpstreamRef>> {
+  if (ref === undefined) return resolveUpstream(git, cwd);
+  const head = await resolveFetchedRemoteBranch(git, cwd, ref);
+  if (!head.ok) return head;
+  return ok({ name: ref.slice("refs/remotes/".length), head: head.value });
+}
+
 export async function inspectRemoteDivergence(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  ref?: string
 ): Promise<Result<RemoteDivergence>> {
   const checkout = await resolveCheckedOutRef(git, cwd);
   if (!checkout.ok) return checkout;
-  const upstream = await resolveUpstream(git, cwd);
+  const upstream = await resolveComparedRef(git, cwd, ref);
   if (!upstream.ok) return upstream;
 
   const [statusRaw, comparison] = await Promise.all([
     git(["status", "--porcelain"], cwd),
-    compareCommitRanges(git, cwd, "@{u}")
+    compareCommitRanges(git, cwd, ref ?? "@{u}")
   ]);
   if (!statusRaw.ok) return statusRaw;
   if (!comparison.ok) return comparison;
@@ -1839,7 +1857,8 @@ export async function inspectRemoteDivergence(
 async function checkedRecoveryUpstream(
   git: GitExec,
   cwd: string,
-  expected: RecoverySnapshot
+  expected: RecoverySnapshot,
+  ref?: string
 ): Promise<Result<UpstreamRef>> {
   const checkout = await resolveCheckedOutRef(git, cwd);
   if (!checkout.ok) return checkout;
@@ -1856,7 +1875,7 @@ async function checkedRecoveryUpstream(
   }
   const clean = await requireCleanWorktree(git, cwd);
   if (!clean.ok) return clean;
-  const upstream = await resolveUpstream(git, cwd);
+  const upstream = await resolveComparedRef(git, cwd, ref);
   if (!upstream.ok) return upstream;
   if (upstream.value.head !== expected.upstreamHead) {
     return err({
@@ -2314,10 +2333,70 @@ async function forkPushBack(
 }
 
 /**
- * The checked-out branch against its counterpart on the fork's source, for the
- * header chip. The same resolution as the reset dialog's fork card, without
- * the dialog's branch count and fetch history. Null for a detached checkout,
- * a repository with no fork source, and a branch with no counterpart there.
+ * The fork source's default branch: its own `HEAD` when a fetch recorded one,
+ * else the branch named like a home remote's default. A remote added after
+ * the clone has no `HEAD` until something sets it, and PwrGit's Fork in place
+ * adds `upstream` exactly that way. `homeRemotes` is every other remote, the
+ * tracked one first.
+ */
+async function forkSourceDefaultRef(
+  git: GitExec,
+  cwd: string,
+  sourceRemote: string,
+  homeRemotes: readonly string[]
+): Promise<string | null> {
+  const symbolic = async (remote: string): Promise<string | null> => {
+    const raw = await git(
+      ["symbolic-ref", "--quiet", `refs/remotes/${remote}/HEAD`],
+      cwd
+    );
+    const target = raw.ok && raw.value.exitCode === 0 ? raw.value.stdout.trim() : "";
+    const prefix = `refs/remotes/${remote}/`;
+    return target.startsWith(prefix) ? target.slice(prefix.length) : null;
+  };
+  const own = await symbolic(sourceRemote);
+  if (own !== null) return `refs/remotes/${sourceRemote}/${own}`;
+  for (const remote of homeRemotes) {
+    const name = await symbolic(remote);
+    if (name === null) continue;
+    const candidate = `refs/remotes/${sourceRemote}/${name}`;
+    const exists = await git(
+      ["rev-parse", "--verify", "--quiet", `${candidate}^{commit}`],
+      cwd
+    );
+    return exists.ok && exists.value.exitCode === 0 ? candidate : null;
+  }
+  return null;
+}
+
+/**
+ * How far the source's default branch has moved on without HEAD — the same
+ * question the `main +4` chip asks of the tracked remote's default, asked of
+ * the branch a fork's pull request lands on.
+ */
+async function forkDrift(
+  git: GitExec,
+  cwd: string,
+  defaultRef: string
+): Promise<ForkDrift> {
+  const [baseRaw, countRaw] = await Promise.all([
+    git(["merge-base", "HEAD", defaultRef], cwd),
+    git(["rev-list", "--left-right", "--count", `${defaultRef}...HEAD`], cwd)
+  ]);
+  const counts = leftRightCounts(countRaw);
+  const shared = baseRaw.ok && baseRaw.value.exitCode === 0;
+  // Nothing to say once the branch's work is in it, or with no shared
+  // history — the tracked-remote chip stays quiet in both cases too.
+  const behind =
+    !shared || counts === null || counts.right === 0 ? 0 : counts.left;
+  return { label: defaultRef.slice("refs/remotes/".length), behind };
+}
+
+/**
+ * The checked-out branch against the fork's source, for the header. The same
+ * resolution as the reset dialog's fork card, without the dialog's branch
+ * count and fetch history. Null for a detached checkout and a repository with
+ * no fork source; `source` is null for a branch the source does not carry.
  */
 export async function resolveForkStatus(
   git: GitExec,
@@ -2366,7 +2445,11 @@ export async function resolveForkStatus(
     defaultRaw.ok &&
     defaultRaw.value.exitCode === 0 &&
     defaultRaw.value.stdout.trim() === upstreamRef;
-  const [target, trackedTarget] = await Promise.all([
+  const homeRemotes = endpoints.value
+    .map((endpoint) => endpoint.name)
+    .filter((name) => name !== source.remote)
+    .sort((a, b) => Number(b === tracked?.remote) - Number(a === tracked?.remote));
+  const [target, trackedTarget, defaultRef] = await Promise.all([
     forkSourceTarget(
       git,
       cwd,
@@ -2378,25 +2461,40 @@ export async function resolveForkStatus(
     ),
     upstreamRef === null || tracked === null
       ? Promise.resolve(null)
-      : resetTargetOf(git, cwd, upstreamRef, tracked.remote)
+      : resetTargetOf(git, cwd, upstreamRef, tracked.remote),
+    forkSourceDefaultRef(git, cwd, source.remote, homeRemotes)
   ]);
-  if (target === null) return ok(null);
-  const pushBack =
-    trackedTarget === null
-      ? null
-      : await forkPushBack(
+  const [pushBack, drift] = await Promise.all([
+    target === null || trackedTarget === null
+      ? Promise.resolve(null)
+      : forkPushBack(
           git,
           cwd,
           checkout.value.branch,
           trackedTarget,
           target.ref
-        );
+        ),
+    // On the default's own counterpart the status chip reads against the
+    // source instead, so there is no drift to state.
+    defaultRef === null || defaultRef === target?.ref
+      ? Promise.resolve(null)
+      : forkDrift(git, cwd, defaultRef)
+  ]);
   return ok({
     branch: checkout.value.branch,
     head: checkout.value.head,
-    source: { ...target, pushBack },
-    tracked: trackedTarget
+    source: target === null ? null : { ...target, pushBack },
+    tracked: trackedTarget,
+    drift
   });
+}
+
+/** The checkout's commit, or null when it cannot be read. */
+export async function headCommit(git: GitExec, cwd: string): Promise<string | null> {
+  const raw = await git(["rev-parse", "--verify", "HEAD"], cwd);
+  if (!raw.ok || raw.value.exitCode !== 0) return null;
+  const head = raw.value.stdout.trim();
+  return head === "" ? null : head;
 }
 
 /** Commits on HEAD that `base` lacks — what a fast-forward from it brought. */
@@ -2619,13 +2717,18 @@ export async function resetToRemote(
   });
 }
 
-/** Replay clean local-only commits on the exact upstream commit reviewed. */
+/**
+ * Replay clean local-only commits on the exact upstream commit reviewed —
+ * the branch's own upstream, or `ref` when the review compared against
+ * another fetched branch.
+ */
 export async function rebaseOntoUpstream(
   git: GitExec,
   cwd: string,
-  expected: RecoverySnapshot
+  expected: RecoverySnapshot,
+  ref?: string
 ): Promise<Result<void>> {
-  const upstream = await checkedRecoveryUpstream(git, cwd, expected);
+  const upstream = await checkedRecoveryUpstream(git, cwd, expected, ref);
   if (!upstream.ok) return upstream;
   const raw = await git(["rebase", upstream.value.head], cwd);
   if (!raw.ok) return raw;

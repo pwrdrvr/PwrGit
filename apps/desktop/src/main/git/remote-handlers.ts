@@ -15,6 +15,7 @@ import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import {
   addRemote,
   commitsSince,
+  headCommit,
   controlledGit,
   fetchAllRemotes,
   fetchNamedRemote,
@@ -929,7 +930,7 @@ export function registerRemoteHandlers(
     const live = pathOf(req.worktreeId);
     if (!live.ok) return live;
     const path = live.value;
-    return inspectRemoteDivergence(execGit, path);
+    return inspectRemoteDivergence(execGit, path, req.ref);
   });
 
   bus.register("remote:resetToUpstream", async (req) => {
@@ -976,10 +977,12 @@ export function registerRemoteHandlers(
     const before = await resolveForkStatus(execGit, worktree.path, parent);
     if (!before.ok) return before;
     const status = before.value;
+    const source = status?.source ?? null;
     if (
       status === null ||
+      source === null ||
       status.branch !== req.branch ||
-      status.source.ref !== req.sourceRef
+      source.ref !== req.sourceRef
     ) {
       return err({
         kind: "remote",
@@ -987,7 +990,7 @@ export function registerRemoteHandlers(
         message: `${req.branch} is no longer checked out against that source. Nothing was changed.`
       });
     }
-    const { source, tracked } = status;
+    const { tracked } = status;
     const pulled = await runPull(req.worktreeId, {
       kind: "ref",
       ref: source.ref,
@@ -1010,7 +1013,7 @@ export function registerRemoteHandlers(
       reappliedWithConflicts: pulled.value.reappliedWithConflicts
     };
     const now = after.ok ? after.value : null;
-    if (now === null || now.tracked === null) {
+    if (now === null || now.tracked === null || now.source === null) {
       return ok({ ...outcome, push: { outcome: "no_tracking" as const } });
     }
     const pushBack = now.source.pushBack;
@@ -1022,6 +1025,18 @@ export function registerRemoteHandlers(
           outcome: "up_to_date" as const,
           remote,
           branch: now.tracked.label.slice(remote.length + 1)
+        }
+      });
+    }
+    // Pull's "only" choice: the fast-forward was the whole request, and the
+    // tracked branch waits for the user's own Push.
+    if (!req.push) {
+      return ok({
+        ...outcome,
+        push: {
+          outcome: "skipped" as const,
+          remote: pushBack.remote,
+          branch: pushBack.branch
         }
       });
     }
@@ -1092,13 +1107,44 @@ export function registerRemoteHandlers(
     const path = live.value;
     const startedAt = Date.now();
     const result = await operations.run(req.worktreeId, () =>
-      rebaseOntoUpstream(execGit, path, req)
+      rebaseOntoUpstream(execGit, path, req, req.ref)
     );
     // A stopped rebase changes the checkout too; refresh so the Changes panel
     // and sync badges show the conflict state immediately.
     refresher.refreshWorktree(req.worktreeId);
     if (!result.ok) return result;
-    logMain("info", "remote", `rebased ${path} onto upstream (${seconds(startedAt)})`);
-    return ok(null);
+    logMain(
+      "info",
+      "remote",
+      `rebased ${path} onto ${req.ref ?? "upstream"} (${seconds(startedAt)})`
+    );
+    const { pushTo } = req;
+    if (pushTo === undefined) return ok({ push: null });
+
+    // A fork's branch rebased onto its source: the tracked branch still holds
+    // the commits the rebase rewrote, so only a forced push brings it along —
+    // leased on the tip the review showed, so work pushed there since is
+    // refused rather than replaced. The rebase stands either way.
+    const target = { remote: pushTo.remote, branch: pushTo.branch };
+    const head = await headCommit(execGit, path);
+    if (head === null) {
+      return ok({
+        push: {
+          outcome: "failed" as const,
+          ...target,
+          message: "Could not read the rebased commit to push."
+        }
+      });
+    }
+    const pushed = await runLeasedPush(req.worktreeId, {
+      ...target,
+      head,
+      expectedHead: pushTo.expectedHead
+    });
+    return ok({
+      push: pushed.ok
+        ? { outcome: "pushed" as const, ...target }
+        : { outcome: "failed" as const, ...target, message: pushed.error.message }
+    });
   });
 }

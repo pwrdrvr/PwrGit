@@ -222,18 +222,37 @@ export type ForkSourceTarget = ResetTargetSuggestion & {
 };
 
 /**
- * Where the checked-out branch stands against its counterpart on the fork's
- * source — the header's `upstream ↓N` chip. The tracked branch reads 0/0 on a
- * fork whose source has moved on, so nothing else in the header can say it.
+ * How far the fork source's default branch has moved on without a branch it
+ * does not carry — the drift chip on a fork's feature branch, which counts
+ * against `upstream/main` because that is where its pull request lands.
+ */
+export type ForkDrift = {
+  /** Display-qualified name, e.g. `upstream/main`. */
+  label: string;
+  /** Commits there that the branch lacks. 0 when there is nothing to say:
+   *  the branch's work is already in it, or the two share no history. */
+  behind: number;
+};
+
+/**
+ * Where the checked-out branch stands against the fork's source. On a branch
+ * the source also carries, the header's status chip reads against it and Pull
+ * gains its menu; the tracked branch reads 0/0 on a fork whose source has
+ * moved on, so nothing else in the header can say it.
  */
 export type ForkStatus = {
   branch: string;
   head: string;
-  /** `ahead` is the branch's own commits the source lacks; `behind` is what
-   *  a sync would bring in. `pushBack` is the tracked branch after it. */
-  source: ForkSourceTarget;
+  /** The branch's counterpart on the source; null for a branch the source
+   *  does not carry, like a feature branch. `ahead` is the branch's own
+   *  commits the source lacks; `behind` is what a sync would bring in.
+   *  `pushBack` is the tracked branch after it. */
+  source: ForkSourceTarget | null;
   /** The branch the checkout tracks, e.g. `origin/main`; null when none. */
   tracked: ResetTargetSuggestion | null;
+  /** The source's default branch against a branch that is not it; null on
+   *  the counterpart of that default, or when it is not fetched. */
+  drift: ForkDrift | null;
 };
 
 /** How a fork sync ended for the branch the checkout tracks. */
@@ -247,6 +266,8 @@ export type ForkSyncPush =
   | { outcome: "diverged"; remote: string; branch: string; overwrites: number }
   /** The push itself failed; the local fast-forward stands. */
   | { outcome: "failed"; remote: string; branch: string; message: string }
+  /** Pull's "only" choice: the tracked branch was left where it is. */
+  | { outcome: "skipped"; remote: string; branch: string }
   /** The branch tracks nothing to push to. */
   | { outcome: "no_tracking" };
 

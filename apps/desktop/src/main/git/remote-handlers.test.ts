@@ -17,12 +17,15 @@ import {
   fetchNamedRemotes,
   fetchRemote,
   forkFetchRemotes,
+  headCommit,
+  inspectRemoteDivergence,
   inspectRemoteReset,
   planPushRefs,
   pullFastForward,
   pushBranchWithLease,
   pushPlannedRefs,
   pushRemote,
+  rebaseOntoUpstream,
   resetToRemote,
   resolveForkStatus,
   resolveResetTargets
@@ -52,6 +55,9 @@ vi.mock("./git-service", async (importOriginal) => {
     ...actual,
     commitsSince: vi.fn(),
     forkFetchRemotes: vi.fn(),
+    headCommit: vi.fn(),
+    inspectRemoteDivergence: vi.fn(),
+    rebaseOntoUpstream: vi.fn(),
     resolveForkStatus: vi.fn(),
     fetchAllRemotes: vi.fn(),
     fetchNamedRemote: vi.fn(),
@@ -116,6 +122,8 @@ describe("remote handlers", () => {
     vi.mocked(forkFetchRemotes).mockResolvedValue(null);
     vi.mocked(resolveForkStatus).mockResolvedValue(ok(null));
     vi.mocked(commitsSince).mockResolvedValue(0);
+    vi.mocked(headCommit).mockResolvedValue(null);
+    vi.mocked(rebaseOntoUpstream).mockResolvedValue(ok(undefined));
     vi.mocked(pushBranchWithLease).mockResolvedValue(ok(undefined));
     vi.mocked(inspectRemoteReset).mockResolvedValue(
       ok({
@@ -1405,12 +1413,14 @@ describe("remote handlers", () => {
           head: reviewedFork,
           ahead: 0,
           behind: 0
-        }
+        },
+        drift: null
       });
       const request = {
         worktreeId: "wt-1",
         branch: "main",
-        sourceRef: "refs/remotes/upstream/main"
+        sourceRef: "refs/remotes/upstream/main",
+        push: true
       };
 
       it("asks the fork's source too on a plain Fetch, and repaints the graph", async () => {
@@ -1558,9 +1568,140 @@ describe("remote handlers", () => {
         const refused = await bus.dispatch("remote:syncFork", request);
         expect(refused.ok).toBe(false);
         if (refused.ok) return;
-        // The header opens the reset review on exactly this code.
+        // The header opens the divergence dialog, aimed at the source, on
+        // exactly this code.
         expect(refused.error.code).toBe("not_fast_forward");
         expect(pushBranchWithLease).not.toHaveBeenCalled();
+      });
+
+      it("leaves the fork where it is when Pull's choice is the source alone", async () => {
+        vi.mocked(resolveForkStatus)
+          .mockResolvedValueOnce(ok(behindSource()))
+          .mockResolvedValueOnce(ok(behindSource()));
+        vi.mocked(commitsSince).mockResolvedValueOnce(2);
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        const pulled = await bus.dispatch("remote:syncFork", {
+          ...request,
+          push: false
+        });
+        expect(pulled.ok && pulled.value).toMatchObject({
+          arrived: 2,
+          push: { outcome: "skipped", remote: "origin", branch: "main" }
+        });
+        expect(pullFastForward).toHaveBeenCalled();
+        expect(pushBranchWithLease).not.toHaveBeenCalled();
+      });
+
+      it("refuses a branch the source does not carry", async () => {
+        vi.mocked(resolveForkStatus).mockResolvedValueOnce(
+          ok({ ...behindSource(), source: null })
+        );
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        const refused = await bus.dispatch("remote:syncFork", request);
+        expect(refused.ok).toBe(false);
+        if (refused.ok) return;
+        expect(refused.error.code).toBe("fork_sync_stale");
+        expect(pullFastForward).not.toHaveBeenCalled();
+      });
+
+      it("compares against the source when asked, not the tracked branch", async () => {
+        vi.mocked(inspectRemoteDivergence).mockResolvedValueOnce(
+          err({ kind: "remote", code: "no_upstream", message: "unused" })
+        );
+        const bus = new CommandBus();
+        registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+        await bus.dispatch("remote:inspectDivergence", {
+          worktreeId: "wt-1",
+          ref: "refs/remotes/upstream/main"
+        });
+        expect(inspectRemoteDivergence).toHaveBeenCalledWith(
+          expect.any(Function),
+          "/repos/project",
+          "refs/remotes/upstream/main"
+        );
+      });
+
+      describe("rebasing onto the source", () => {
+        const rebasedTip = "4".repeat(40);
+        const rebase = {
+          worktreeId: "wt-1",
+          branch: "main",
+          head: reviewedFork,
+          upstreamHead: sourceTip,
+          ref: "refs/remotes/upstream/main",
+          pushTo: { remote: "origin", branch: "main", expectedHead: reviewedFork }
+        };
+
+        it("pushes the rebased branch to the fork, leased on the reviewed tip", async () => {
+          vi.mocked(headCommit).mockResolvedValueOnce(rebasedTip);
+          const bus = new CommandBus();
+          registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+          const rebased = await bus.dispatch("remote:rebaseOntoUpstream", rebase);
+          expect(rebased).toEqual({
+            ok: true,
+            value: { push: { outcome: "pushed", remote: "origin", branch: "main" } }
+          });
+          expect(rebaseOntoUpstream).toHaveBeenCalledWith(
+            expect.any(Function),
+            "/repos/project",
+            rebase,
+            "refs/remotes/upstream/main"
+          );
+          expect(pushBranchWithLease).toHaveBeenCalledWith(
+            expect.any(Function),
+            "/repos/project",
+            {
+              remote: "origin",
+              branch: "main",
+              head: rebasedTip,
+              expectedHead: reviewedFork
+            }
+          );
+        });
+
+        it("keeps the rebase when the fork refuses the push", async () => {
+          vi.mocked(headCommit).mockResolvedValueOnce(rebasedTip);
+          vi.mocked(pushBranchWithLease).mockResolvedValueOnce(
+            err({
+              kind: "remote",
+              code: "push_lease_stale",
+              message: "origin/main moved after the review, so the lease stopped the push."
+            })
+          );
+          const bus = new CommandBus();
+          registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+
+          const rebased = await bus.dispatch("remote:rebaseOntoUpstream", rebase);
+          expect(rebased.ok && rebased.value.push).toEqual({
+            outcome: "failed",
+            remote: "origin",
+            branch: "main",
+            message: "origin/main moved after the review, so the lease stopped the push."
+          });
+        });
+
+        it("pushes nothing when none was asked for, or the rebase stopped", async () => {
+          const bus = new CommandBus();
+          registerRemoteHandlers(bus, db, refresher(), new WorktreeOperationQueue());
+          const { pushTo: _pushTo, ...plain } = rebase;
+          expect(await bus.dispatch("remote:rebaseOntoUpstream", plain)).toEqual({
+            ok: true,
+            value: { push: null }
+          });
+
+          vi.mocked(rebaseOntoUpstream).mockResolvedValueOnce(
+            err({ kind: "remote", code: "rebase_conflict", message: "stopped" })
+          );
+          const stopped = await bus.dispatch("remote:rebaseOntoUpstream", rebase);
+          expect(stopped.ok).toBe(false);
+          expect(pushBranchWithLease).not.toHaveBeenCalled();
+        });
       });
     });
   });

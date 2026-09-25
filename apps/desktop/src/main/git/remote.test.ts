@@ -2452,7 +2452,45 @@ describe("reset targets on a fork", () => {
         pushBack: { remote: "origin", branch: "main", overwrites: 0, adds: 2 }
       },
       // What the sync chip beside it reads, and why it says "up to date".
-      tracked: { label: "origin/main", ahead: 0, behind: 0 }
+      tracked: { label: "origin/main", ahead: 0, behind: 0 },
+      // The source's default IS this branch's counterpart: the chip reads
+      // against it, so there is no drift to state as well.
+      drift: null
+    });
+  });
+
+  it("counts a fork's feature branch against the source's default branch", async () => {
+    const { local, source } = makeForkFixture();
+    git(local, ["switch", "-c", "fix/label-overflow"]);
+    commit(local, "label.txt", "fix the label");
+    git(local, ["push", "-u", "origin", "fix/label-overflow"]);
+    sourceMovesOn(source, local);
+    // A remote added after the clone has no HEAD until something sets it —
+    // Fork in place adds `upstream` that way — so the source's default is
+    // found under the name the fork's own remote uses for its default.
+    // Git 2.48+ may have created one on fetch, so set it and then delete it.
+    git(local, ["remote", "set-head", "upstream", "main"]);
+    git(local, ["remote", "set-head", "upstream", "--delete"]);
+
+    const status = await resolveForkStatus(systemGit, local, null);
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.value).toMatchObject({
+      branch: "fix/label-overflow",
+      // The source has no branch of that name: nothing to sync, no menu.
+      source: null,
+      tracked: { label: "origin/fix/label-overflow" },
+      // Where the pull request lands, and the fork's own main cannot say it:
+      // origin/main has not moved.
+      drift: { label: "upstream/main", behind: 2 }
+    });
+
+    // A branch with no work of its own has nothing to say.
+    git(local, ["switch", "-c", "empty", "main"]);
+    const empty = await resolveForkStatus(systemGit, local, null);
+    expect(empty.ok && empty.value?.drift).toEqual({
+      label: "upstream/main",
+      behind: 0
     });
   });
 
@@ -2528,6 +2566,51 @@ describe("reset targets on a fork", () => {
     expect(pulled.error.code).toBe("not_fast_forward");
     expect(pulled.error.message).toContain("upstream/main");
     expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(before);
+  });
+
+  it("compares a branch with commits of its own against the source, and rebases onto it", async () => {
+    const { local, source } = makeForkFixture();
+    commit(local, "mine.txt", "local work");
+    sourceMovesOn(source, local);
+    const sourceRef = "refs/remotes/upstream/main";
+
+    const divergence = await inspectRemoteDivergence(systemGit, local, sourceRef);
+    expect(divergence.ok).toBe(true);
+    if (!divergence.ok) return;
+    // Not the tracked branch: origin/main never moved, and has none of it.
+    expect(divergence.value).toMatchObject({
+      branch: "main",
+      upstream: "upstream/main",
+      upstreamHead: gitOut(local, ["rev-parse", sourceRef]),
+      localCommits: [{ subject: "local work" }],
+      upstreamCommits: [
+        { subject: "another upstream fix" },
+        { subject: "upstream fix" }
+      ]
+    });
+
+    // The source moved after the review: refused, nothing rewritten.
+    const before = gitOut(local, ["rev-parse", "HEAD"]);
+    const stale = await rebaseOntoUpstream(
+      systemGit,
+      local,
+      { ...divergence.value, upstreamHead: before },
+      sourceRef
+    );
+    expect(stale.ok).toBe(false);
+    expect(gitOut(local, ["rev-parse", "HEAD"])).toBe(before);
+
+    const rebased = await rebaseOntoUpstream(
+      systemGit,
+      local,
+      divergence.value,
+      sourceRef
+    );
+    expect(rebased).toEqual({ ok: true, value: undefined });
+    expect(gitOut(local, ["rev-parse", "HEAD~1"])).toBe(
+      divergence.value.upstreamHead
+    );
+    expect(gitOut(local, ["log", "-1", "--format=%s"])).toBe("local work");
   });
 
   it("refuses to fast-forward a branch other than the one it was offered for", async () => {

@@ -34,6 +34,7 @@ import type {
   ForkProgress,
   ForkStatus,
   ForkSyncOutcome,
+  ForkSyncPush,
   RepoIdentity,
   RepoIdentityRefreshOutcome,
   PushRefPlan,
@@ -1571,9 +1572,14 @@ export interface Commands {
     req: { worktreeId: string; publish?: PushPublishTarget };
     res: null;
   };
-  /** Fresh branch/upstream comparison after a non-fast-forward pull. */
+  /**
+   * Fresh branch/upstream comparison after a non-fast-forward pull. `ref`
+   * compares against another fetched remote-tracking branch instead of the
+   * one the branch tracks: the fork's source, when a sync could not
+   * fast-forward.
+   */
   "remote:inspectDivergence": {
-    req: { worktreeId: string };
+    req: { worktreeId: string; ref?: string };
     res: RemoteDivergence;
   };
   /** Move the inspected clean local branch to the exact upstream tip shown. */
@@ -1617,14 +1623,15 @@ export interface Commands {
   /**
    * Bring a fork branch up to its source in one step: fetch the tracked
    * remote and the source, fast-forward the checkout to the source's tip the
-   * way Pull does (stash, `merge --ff-only`, reapply), then push that tip to
-   * the tracked branch when doing so is a fast-forward too. Refuses when the
-   * branch has commits the source lacks, and never forces the push.
-   * `branch` and `sourceRef` are what the chip showed; a checkout that has
-   * moved to another branch or source since is refused rather than synced.
+   * way Pull does (stash, `merge --ff-only`, reapply), then — with `push` —
+   * push that tip to the tracked branch when doing so is a fast-forward too.
+   * Refuses when the branch has commits the source lacks, and never forces
+   * the push. `branch` and `sourceRef` are what the header showed; a checkout
+   * that has moved to another branch or source since is refused rather than
+   * synced.
    */
   "remote:syncFork": {
-    req: { worktreeId: string; branch: string; sourceRef: string };
+    req: { worktreeId: string; branch: string; sourceRef: string; push: boolean };
     res: ForkSyncOutcome;
   };
   /**
@@ -1653,15 +1660,24 @@ export interface Commands {
     };
     res: null;
   };
-  /** Replay the inspected clean local commits on the exact upstream tip shown. */
+  /**
+   * Replay the inspected clean local commits on the exact upstream tip shown.
+   * `ref` names the tip's remote-tracking branch when it is not the tracked
+   * one (the fork's source). `pushTo` then carries the rebased branch on to
+   * the branch the checkout tracks, forced and leased on `expectedHead`: the
+   * rebase rewrote commits that branch already holds. `push` is null when no
+   * push was asked for.
+   */
   "remote:rebaseOntoUpstream": {
     req: {
       worktreeId: string;
       branch: string;
       head: string;
       upstreamHead: string;
+      ref?: string;
+      pushTo?: { remote: string; branch: string; expectedHead: string };
     };
-    res: null;
+    res: { push: ForkSyncPush | null };
   };
 
   // Lineage graph (U10)

@@ -1,5 +1,12 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject
+} from "react";
 import type {
+  ForkSourceTarget,
   ForkStatus,
   ForkSyncOutcome,
   PushPublishTarget,
@@ -26,6 +33,8 @@ import { useForkStatus } from "../../state/useForkStatus";
 import { WorktreeMenu } from "../shell/WorktreeMenu";
 import { GitLfsChip } from "./GitLfsChip";
 import { PullDivergenceDialog } from "./PullDivergenceDialog";
+import { PullMenu, type PullMenuRow } from "./PullMenu";
+import { readPullChoice, writePullChoice, type PullChoice } from "./pull-choice";
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
@@ -38,7 +47,11 @@ import {
 
 type Chip = { text: string; tone: "muted" | "ok" | "warn" };
 
-function baseChip(state: WorktreeState | null, worktree: Worktree): Chip {
+function baseChip(
+  state: WorktreeState | null,
+  worktree: Worktree,
+  source: ForkSourceTarget | null
+): Chip {
   // A gone checkout outranks every sync reading: nothing below is true of a
   // directory that does not exist. Read it from this worktree's own row when
   // the live snapshot still belongs to the previous selection.
@@ -46,6 +59,8 @@ function baseChip(state: WorktreeState | null, worktree: Worktree): Chip {
     state?.worktreeId === worktree.id ? state.missing : worktree.missing;
   if (missing === true) return { text: "directory missing", tone: "warn" };
   if (state === null) return { text: "…", tone: "muted" };
+  const fromSource = source === null ? null : forkSourceChip(source);
+  if (fromSource !== null) return fromSource;
   if (state.behind > 0) {
     const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
     return { text: `↓${state.behind} behind${ahead}`, tone: "warn" };
@@ -92,51 +107,192 @@ function commits(count: number): string {
 }
 
 /**
- * How far the fork's source has moved on without this branch — the
- * `upstream ↓10` chip. The sync chip beside it compares the branch with the
- * one it tracks, and on a fork both are the user's own: `origin/main` reads
- * "up to date" while the source is ten commits ahead of either.
- *
- * `sync` when the branch has nothing the source lacks: a fast-forward, then
- * the same commits pushed on to the tracked branch, and nothing is lost
- * anywhere. `review` when it has commits of its own — reaching the source is
- * then a reset, with commits leaving, and the reset dialog is where that is
- * reviewed.
+ * The status chip on a branch the fork's source also carries, once the source
+ * has moved on. The chip otherwise compares the branch with the one it tracks,
+ * and on a fork that is the user's own copy: `origin/main` reads "up to date"
+ * while the source is ten commits ahead of both. So here the source is the
+ * number that matters, and the tracked branch only comes up once the source
+ * has nothing new — as `↑N ahead`, the commits a push would carry.
  */
-function forkChip(fork: ForkStatus | null): {
-  text: string;
+function forkSourceChip(source: ForkSourceTarget): Chip | null {
+  if (source.behind <= 0) return null;
+  return source.ahead > 0
+    ? { text: `↓${source.behind} ${source.remote} · ↑${source.ahead}`, tone: "warn" }
+    : { text: `↓${source.behind} behind ${source.remote}`, tone: "warn" };
+}
+
+/** A fork branch with somewhere on the source to pull from, and a branch of
+ *  its own to fall back on — the only place Pull has a choice to offer. */
+type ForkChoice = ForkStatus & {
+  source: ForkSourceTarget;
+  tracked: NonNullable<ForkStatus["tracked"]>;
+};
+
+function forkChoiceOf(fork: ForkStatus | null): ForkChoice | null {
+  if (fork === null || fork.source === null || fork.tracked === null) return null;
+  return fork as ForkChoice;
+}
+
+/** The branch has commits the source lacks and the source has moved on: no
+ *  fast-forward reaches it, so a sync stops for a review. */
+function hasOwnCommits(fork: ForkChoice): boolean {
+  return fork.source.ahead > 0 && fork.source.behind > 0;
+}
+
+/** Where a rebase onto the source carries its result: the tracked branch,
+ *  leased on the tip Git last fetched for it. */
+function forkPushTarget(fork: ForkStatus): {
+  remote: string;
+  branch: string;
   label: string;
-  title: string;
-  action: "sync" | "review";
+  head: string;
 } | null {
-  if (fork === null || fork.source.behind <= 0) return null;
-  const { branch, source, tracked } = fork;
-  const from =
-    source.parent === undefined
-      ? source.label
-      : `${source.label} (${source.parent})`;
-  const behind = `${from} has ${commits(source.behind)} ${branch} doesn't`;
-  if (source.ahead > 0) {
-    return {
-      text: `${source.remote} ↓${source.behind} · ↑${source.ahead}`,
-      label: `Review a reset of ${branch} to ${source.label}`,
-      title: `${behind}, and ${branch} has ${commits(source.ahead)} it doesn't. Review a reset to ${source.label}…`,
-      action: "review"
-    };
-  }
-  const push = source.pushBack;
-  const then =
-    tracked === null || push === null
-      ? ""
-      : push.overwrites > 0
-        ? `. ${tracked.label} has ${commits(push.overwrites)} ${source.label} doesn't, so it is not pushed`
-        : `, then push them to ${tracked.label}`;
+  const { tracked, source } = fork;
+  if (tracked === null) return null;
   return {
-    text: `${source.remote} ↓${source.behind}`,
-    label: `Sync ${branch} with ${source.label}`,
-    title: `${behind}. Sync: fast-forward ${branch}${then}.`,
-    action: "sync"
+    remote: tracked.remote,
+    branch:
+      source?.pushBack?.branch ?? tracked.label.slice(tracked.remote.length + 1),
+    label: tracked.label,
+    head: tracked.head
   };
+}
+
+/**
+ * The rows under Pull's arrow. The three choices are always there, so the
+ * one Pull runs can always be changed. While the branch has commits the
+ * source lacks, the two reviews that can reach the source anyway come first,
+ * because they are what that state is asking for.
+ */
+function pullMenuRows(
+  fork: ForkChoice,
+  trackedBehind: number,
+  choice: PullChoice,
+  on: {
+    pick: (choice: PullChoice) => void;
+    rebase: () => void;
+    reset: () => void;
+  }
+): { note?: ReactNode; actions: PullMenuRow[]; choices: PullMenuRow[] } {
+  const { branch, source, tracked } = fork;
+  const own = hasOwnCommits(fork);
+  const stops = (
+    <>
+      <code>{branch}</code> has commits of its own, so this stops for the
+      rebase review.
+    </>
+  );
+  const choices: PullMenuRow[] = [
+    {
+      key: "sync",
+      title: (
+        <>
+          Sync with <code>{source.label}</code>
+        </>
+      ),
+      detail: own ? (
+        stops
+      ) : (
+        <>
+          Fast-forward <code>{branch}</code>
+          {source.behind > 0 ? ` ${commits(source.behind)}` : ""}, then push{" "}
+          {source.behind > 0 ? "them " : ""}to <code>{tracked.label}</code>.
+        </>
+      ),
+      onSelect: () => on.pick("sync")
+    },
+    {
+      key: "source",
+      title: (
+        <>
+          Pull <code>{source.label}</code> only
+        </>
+      ),
+      detail: own ? (
+        stops
+      ) : (
+        <>
+          Fast-forward <code>{branch}</code>. <code>{tracked.label}</code> stays
+          where it is until you push.
+        </>
+      ),
+      onSelect: () => on.pick("source")
+    },
+    {
+      key: "tracked",
+      title: (
+        <>
+          Pull <code>{tracked.label}</code> only
+        </>
+      ),
+      detail:
+        trackedBehind > 0
+          ? `The branch this checkout tracks, as Pull is everywhere else. ${commits(trackedBehind)} to bring in.`
+          : "The branch this checkout tracks, as Pull is everywhere else.",
+      onSelect: () => on.pick("tracked")
+    }
+  ];
+  if (!own) return { actions: [], choices };
+  const pushes = choice !== "source";
+  return {
+    note: (
+      <>
+        <code>{branch}</code> has {commits(source.ahead)}{" "}
+        <code>{source.label}</code> doesn't
+      </>
+    ),
+    actions: [
+      {
+        key: "rebase",
+        title: (
+          <>
+            Rebase onto <code>{source.label}</code>…
+          </>
+        ),
+        detail: pushes ? (
+          <>
+            Keeps your {commits(source.ahead)} on top, then pushes the result
+            to <code>{tracked.label}</code>, replacing what it holds.
+          </>
+        ) : (
+          <>Keeps your {commits(source.ahead)} on top.</>
+        ),
+        onSelect: on.rebase
+      },
+      {
+        key: "reset",
+        title: (
+          <>
+            Reset to <code>{source.label}</code>…
+          </>
+        ),
+        detail: (
+          <>
+            Your {commits(source.ahead)} leave <code>{branch}</code>. Opens the
+            reset review with the source selected.
+          </>
+        ),
+        onSelect: on.reset
+      }
+    ],
+    choices
+  };
+}
+
+/** What Pull says it will do, in its tooltip — the button keeps its label. */
+function pullTitle(choice: PullChoice, fork: ForkChoice | null): string {
+  if (fork === null || choice === "tracked") {
+    return fork === null
+      ? "Pull · fetch + fast-forward"
+      : `Pull ${fork.tracked.label} · fetch + fast-forward`;
+  }
+  const { branch, source, tracked } = fork;
+  if (hasOwnCommits(fork)) {
+    return `Pull · ${branch} has ${commits(source.ahead)} ${source.label} doesn't, so this stops for a rebase review`;
+  }
+  return choice === "sync"
+    ? `Pull · fast-forward ${branch} to ${source.label}, then push to ${tracked.label}`
+    : `Pull · fast-forward ${branch} to ${source.label}; ${tracked.label} waits for Push`;
 }
 
 /**
@@ -159,6 +315,8 @@ function forkSyncReceipt(
   } else if (push.outcome === "failed") {
     pushFailed = true;
     summary = `${moved}, but pushing ${push.remote}/${push.branch} failed — ${push.message.split("\n")[0]}`;
+  } else if (push.outcome === "skipped") {
+    summary = `${moved} · ${push.remote}/${push.branch} not pushed`;
   }
   if (outcome.reappliedWithConflicts) {
     return {
@@ -172,7 +330,9 @@ function forkSyncReceipt(
     summary,
     flash: pushFailed
       ? { text: "synced · push failed", tone: "warn" }
-      : { text: `synced with ${outcome.source}`, tone: "ok" },
+      : push.outcome === "skipped"
+        ? { text: `pulled ${outcome.source}`, tone: "ok" }
+        : { text: `synced with ${outcome.source}`, tone: "ok" },
     stands: pushFailed
   };
 }
@@ -218,6 +378,13 @@ export function WorktreeHeader({
 }) {
   const [busy, setBusy] = useState<Busy>(null);
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
+  /** Set while the divergence on screen is against the fork's source rather
+   *  than the tracked branch: which ref it compared, and where a rebase then
+   *  pushes (null when the choice was not to push). */
+  const [divergenceFork, setDivergenceFork] = useState<{
+    ref: string;
+    pushTo: ReturnType<typeof forkPushTarget>;
+  } | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState<RecoveryBusy>(null);
   /** The HTTPS → SSH offer, and which operation Git refused for want of a
    *  credential — the dialog's copy is about that operation. */
@@ -254,19 +421,20 @@ export function WorktreeHeader({
   const recoveryOperation = useRef(0);
   const cardButton = useRef<HTMLButtonElement>(null);
   const cardChip = useRef<HTMLSpanElement>(null);
-  /** Where a fork sync's card hangs. Not the chip that started it: the chip
-   *  goes the moment the sync succeeds, and the receipt needs somewhere to
-   *  stay. Pull is the operation's own button — it spins for the sync. */
+  /** Where a card hangs when Pull runs from its menu rather than from a click
+   *  on the button itself. */
   const pullButton = useRef<HTMLButtonElement | null>(null);
+  /** The split Pull, so its menu opens under the whole control. */
+  const pullSplit = useRef<HTMLDivElement>(null);
   const forkStatus = useForkStatus(worktree.id, repo.id);
-  /** Keeps the fork chip on screen while its own sync runs; every other
-   *  operation hides it with the drift chip, for the progress label's width. */
-  const [syncingFork, setSyncingFork] = useState(false);
-  /** The header's one tooltip is showing the fork chip's sentence. The chip
-   *  leaves under a still pointer — its sync succeeded, or a fetch elsewhere
-   *  caught the fork up — and a card whose trigger is gone never hears the
-   *  `mouseleave` that would close it. */
-  const forkTipShown = useRef(false);
+  /** What Pull does on a fork branch the source carries. Per repository, and
+   *  re-read when the header moves to another one — it stays mounted. */
+  const [pullChoice, setPullChoice] = useState<PullChoice>(() =>
+    readPullChoice(repo.id)
+  );
+  useEffect(() => {
+    setPullChoice(readPullChoice(repo.id));
+  }, [repo.id]);
 
   // Header instances stay mounted while selection changes, so an operation
   // started for one worktree must never surface a dialog or flash on another.
@@ -281,7 +449,7 @@ export function WorktreeHeader({
     setSshRecovery(null);
     setForkPrompt(null);
     setPublishing(null);
-    setSyncingFork(false);
+    setDivergenceFork(null);
     askingWhere.current = null;
   }, [worktree.id]);
 
@@ -536,10 +704,10 @@ export function WorktreeHeader({
     });
   };
 
-  const reviewForkReset = (fork: ForkStatus): void => {
+  const reviewForkReset = (sourceRef: string): void => {
     openResetToRemote({
       worktree,
-      preselectRef: fork.source.ref,
+      preselectRef: sourceRef,
       onComplete: (mode, remoteBranch) =>
         showFlash(
           {
@@ -551,35 +719,72 @@ export function WorktreeHeader({
     });
   };
 
-  const onSyncFork = (fork: ForkStatus): void => {
+  /**
+   * Compare the branch with the fork's source and open the recovery dialog
+   * aimed at it. The fork status is read again alongside: a sync has just
+   * fetched, and the tracked tip the rebase's push is leased on has to be the
+   * one Git holds now, not the one the header last drew.
+   */
+  const reviewForkDivergence = async (
+    worktreeId: string,
+    sourceRef: string,
+    push: boolean
+  ): Promise<Result<void, PwrGitError>> => {
+    const [inspected, fresh] = await Promise.all([
+      dispatch("remote:inspectDivergence", { worktreeId, ref: sourceRef }),
+      dispatch("remote:forkStatus", { worktreeId })
+    ]);
+    if (activeWorktreeId.current !== worktreeId) return { ok: true, value: undefined };
+    if (!inspected.ok) return inspected;
+    const pushTo =
+      push && fresh.ok && fresh.value !== null ? forkPushTarget(fresh.value) : null;
+    setDivergence(inspected.value);
+    setDivergenceFork({ ref: sourceRef, pushTo });
+    return { ok: true, value: undefined };
+  };
+
+  /**
+   * Pull on a fork branch the source carries: fast-forward from the source,
+   * then — for `sync` — the same commits on to the tracked branch. A branch
+   * with commits of its own cannot fast-forward, and gets what a plain Pull
+   * gets there: the dialog that compares the two histories, aimed at the
+   * source.
+   */
+  const onSyncFork = (fork: ForkChoice, push: boolean): void => {
     const worktreeId = id;
     const current = beginOperation(worktreeId);
     setBusy("pull");
-    setSyncingFork(true);
-    if (pullButton.current !== null) pinStatus("pull", pullButton.current);
     void dispatch("remote:syncFork", {
       worktreeId,
       branch: fork.branch,
-      sourceRef: fork.source.ref
-    }).then((result) => {
+      sourceRef: fork.source.ref,
+      push
+    }).then(async (result) => {
       if (!current()) return;
-      setBusy(null);
-      setSyncingFork(false);
       if (!result.ok) {
-        // The branch gained commits of its own after the chip was drawn, so
-        // reaching the source is a reset now — and a reset is reviewed. The
-        // dialog is modal and takes the card, as the divergence dialog does.
         if (
           result.error.kind === "remote" &&
           result.error.code === "not_fast_forward"
         ) {
-          status.dismiss();
-          reviewForkReset(fork);
-          return;
+          const reviewed = await reviewForkDivergence(
+            worktreeId,
+            fork.source.ref,
+            push
+          );
+          if (!current()) return;
+          setBusy(null);
+          if (reviewed.ok) {
+            // Modal, and it IS the outcome — the same rule as Pull's own
+            // divergence dialog.
+            status.dismiss();
+            return;
+          }
         }
-        flashError("Sync", result.error);
+        setBusy(null);
+        flashError("Pull", result.error);
         return;
       }
+      setBusy(null);
       const receipt = forkSyncReceipt(result.value, fork.branch);
       showFlash(receipt.flash, receipt.stands ? 4000 : 2400);
       status.settle({
@@ -591,19 +796,41 @@ export function WorktreeHeader({
 
   const recover = async (action: Exclude<RecoveryBusy, null>): Promise<void> => {
     if (divergence === null || recoveryInFlight.current !== null) return;
+    // Against the source, a reset is the full review's: it shows what leaves
+    // and can bring the fork's branch along, which the one-step reset cannot.
+    if (divergenceFork !== null && action === "reset") {
+      setDivergence(null);
+      setDivergenceFork(null);
+      reviewForkReset(divergenceFork.ref);
+      return;
+    }
     const worktreeId = id;
     const operation = ++recoveryOperation.current;
     recoveryInFlight.current = worktreeId;
     setRecoveryBusy(action);
-    const result = await dispatch(
-      action === "rebase" ? "remote:rebaseOntoUpstream" : "remote:resetToUpstream",
-      {
-        worktreeId,
-        branch: divergence.branch,
-        head: divergence.head,
-        upstreamHead: divergence.upstreamHead
-      }
-    );
+    const snapshot = {
+      worktreeId,
+      branch: divergence.branch,
+      head: divergence.head,
+      upstreamHead: divergence.upstreamHead
+    };
+    const pushTo = divergenceFork?.pushTo ?? null;
+    const result =
+      action === "reset"
+        ? await dispatch("remote:resetToUpstream", snapshot)
+        : await dispatch("remote:rebaseOntoUpstream", {
+            ...snapshot,
+            ...(divergenceFork === null ? {} : { ref: divergenceFork.ref }),
+            ...(pushTo === null
+              ? {}
+              : {
+                  pushTo: {
+                    remote: pushTo.remote,
+                    branch: pushTo.branch,
+                    expectedHead: pushTo.head
+                  }
+                })
+          });
     if (
       recoveryOperation.current !== operation ||
       activeWorktreeId.current !== worktreeId
@@ -612,15 +839,35 @@ export function WorktreeHeader({
     }
     recoveryInFlight.current = null;
     setRecoveryBusy(null);
+    setDivergence(null);
+    setDivergenceFork(null);
     if (!result.ok) {
-      setDivergence(null);
       flashError(action === "rebase" ? "Rebase" : "Reset", result.error);
       return;
     }
-    setDivergence(null);
+    const push = result.value?.push ?? null;
+    if (push?.outcome === "failed") {
+      // The rebase stands; only the fork's branch was left behind, and it is
+      // the user's to push once they know why.
+      showFlash({ text: "rebased · push failed", tone: "warn" }, 4000);
+      showErrorToast({
+        title: "Push failed",
+        message: `Rebased ${divergence.branch} onto ${divergence.upstream}, but pushing ${push.remote}/${push.branch} failed — ${push.message.split("\n")[0]}`,
+        detail: push.message,
+        subject: { repoId: repo.id }
+      });
+      return;
+    }
     showFlash(
       {
-        text: action === "rebase" ? "rebased onto remote" : "reset to remote",
+        text:
+          action === "reset"
+            ? "reset to remote"
+            : push?.outcome === "pushed"
+              ? `rebased · pushed to ${push.remote}/${push.branch}`
+              : divergenceFork !== null
+                ? `rebased onto ${divergence.upstream}`
+                : "rebased onto remote",
         tone: "ok"
       },
       2400
@@ -733,10 +980,14 @@ export function WorktreeHeader({
     activity !== null && activity.kind === kind
       ? `${remoteActivityPhaseLabel(activity.phase)}…`
       : IDLE_LABEL[kind];
+  // The live read is keyed to this checkout already (useForkStatus resets on
+  // a change of worktree), so there is no stale-selection case to guard.
+  const forkChoice = forkChoiceOf(forkStatus);
+  const choice: PullChoice = forkChoice === null ? "tracked" : pullChoice;
   const chip =
     running !== null
       ? { text: busyLabel(running), tone: "muted" as const }
-      : (flash ?? baseChip(state, worktree));
+      : (flash ?? baseChip(state, worktree, forkStatus?.source ?? null));
   // Hovering the working control is how the status card is summoned, so the
   // handlers ride on whichever button this operation belongs to — and on the
   // progress chip beside them, which is the wider target and the thing a user
@@ -849,19 +1100,59 @@ export function WorktreeHeader({
     (live?.missing ?? worktree.missing) !== true &&
     (live !== null ? !live.hasUpstream : worktree.tracking === "unpublished");
   const behind = state?.behind ?? worktree.behind;
-  const drift = defaultBranchDrift(state, worktree);
-  // The live read is keyed to this checkout already (useForkStatus resets on
-  // a change of worktree), so there is no stale-selection case to guard.
-  const fork = forkChip(forkStatus);
-  const forkChipShown = fork !== null && (running === null || syncingFork);
-  const forkTip = hoverTooltip(tip, fork?.title);
-  const hideTip = tip.hide;
-  useEffect(() => {
-    if (forkChipShown || !forkTipShown.current) return;
-    forkTipShown.current = false;
-    hideTip();
-  }, [forkChipShown, hideTip]);
+  // On a fork's feature branch the default that matters is the source's —
+  // where the pull request lands — and the fork's own `main` can be stale by
+  // exactly as much as the fork is. Falls back to the tracked remote's
+  // default until the fork read lands, and on every repository that is not a
+  // fork.
+  const forkDrift = forkStatus?.drift ?? null;
+  const drift =
+    forkDrift === null
+      ? defaultBranchDrift(state, worktree)
+      : forkDrift.behind > 0
+        ? {
+            text: `${forkDrift.label} +${forkDrift.behind}`,
+            title: `${forkDrift.label} has ${commits(forkDrift.behind)} not in ${forkStatus?.branch ?? worktree.branch}; it is where this branch's pull request lands, not commits available to pull`
+          }
+        : null;
+  // The accent says pulling has something to do, so it follows what Pull
+  // would pull from.
+  const pullHasWork =
+    forkChoice === null || choice === "tracked"
+      ? behind > 0
+      : forkChoice.source.behind > 0;
   const pullTrigger = statusTrigger("pull");
+
+  /** Run what Pull does, from the button or from a row of its menu. */
+  const runPull = (run: PullChoice, from: HTMLElement | null): void => {
+    if (running !== null) return;
+    if (from !== null) pinStatus("pull", from);
+    if (forkChoice === null || run === "tracked") onPull();
+    else onSyncFork(forkChoice, run === "sync");
+  };
+  const pickPullChoice = (next: PullChoice): void => {
+    setPullChoice(next);
+    writePullChoice(repo.id, next);
+    runPull(next, pullButton.current);
+  };
+  const pullMenu =
+    forkChoice === null
+      ? null
+      : pullMenuRows(forkChoice, behind, choice, {
+          pick: pickPullChoice,
+          rebase: () => {
+            if (running !== null) return;
+            const worktreeId = id;
+            void reviewForkDivergence(
+              worktreeId,
+              forkChoice.source.ref,
+              choice !== "source"
+            ).then((reviewed) => {
+              if (!reviewed.ok) flashError("Rebase", reviewed.error, { onCard: false });
+            });
+          },
+          reset: () => reviewForkReset(forkChoice.source.ref)
+        });
 
   return (
     <div className="wt-header">
@@ -908,46 +1199,6 @@ export function WorktreeHeader({
           >
             {drift.text}
           </span>
-        )}
-        {/* Beside the sync chip, because this is the other thing Pull could
-            mean on a fork. A button, like read-only, because it acts: a sync
-            when nothing of the branch's own is in the way, the reset review
-            when something is. */}
-        {forkChipShown && fork !== null && forkStatus !== null && (
-          <button
-            type="button"
-            className="sync-chip sync-chip--fork"
-            aria-label={fork.label}
-            aria-busy={syncingFork}
-            aria-disabled={running !== null}
-            onMouseEnter={(event) => {
-              forkTipShown.current = true;
-              forkTip.onMouseEnter(event);
-            }}
-            onMouseLeave={(event) => {
-              forkTipShown.current = false;
-              forkTip.onMouseLeave(event);
-            }}
-            onFocus={(event) => {
-              forkTipShown.current = true;
-              forkTip.onFocus(event);
-            }}
-            onBlur={() => {
-              forkTipShown.current = false;
-              forkTip.onBlur();
-            }}
-            onClick={() => {
-              if (running !== null) return;
-              // The sentence said what the click would do; now it is doing
-              // it, and the card or dialog that answers takes the space.
-              forkTipShown.current = false;
-              tip.hide();
-              if (fork.action === "review") reviewForkReset(forkStatus);
-              else onSyncFork(forkStatus);
-            }}
-          >
-            {fork.text}
-          </button>
         )}
         <span
           ref={cardChip}
@@ -1011,32 +1262,53 @@ export function WorktreeHeader({
             </span>
           </button>
 
-          <button
-            className={`wt-btn wt-btn--pull${behind > 0 ? " is-behind" : ""}`}
-            onClick={(event) => {
-              if (running !== null) return;
-              pinStatus("pull", event.currentTarget);
-              onPull();
-            }}
-            aria-disabled={running !== null}
-            aria-label={running === "pull" ? busyLabel("pull") : "Pull"}
-            aria-busy={running === "pull"}
-            {...busyTitle("pull", "Pull · fetch + fast-forward")}
-            {...pullTrigger}
-            ref={(element) => {
-              pullButton.current = element;
-              if (pullTrigger.ref !== undefined) pullTrigger.ref.current = element;
-            }}
-          >
-            {running === "pull" ? (
-              <span className="wt-btn__spinner" />
-            ) : (
-              <PullGlyph />
-            )}
-            <span className="wt-btn__label">
-              {running === "pull" ? busyLabel("pull") : "Pull"}
-            </span>
-          </button>
+          {/* On a fork branch the source also carries, Pull is split: the
+              button runs the remembered choice, and the arrow offers the
+              others. Everywhere else there is one place to pull from, so there
+              is nothing to choose and no arrow. */}
+          {(() => {
+            const pullButtonNode = (
+              <button
+                className={`wt-btn wt-btn--pull${pullHasWork ? " is-behind" : ""}${
+                  pullMenu === null ? "" : " wt-split__main"
+                }`}
+                onClick={(event) => runPull(choice, event.currentTarget)}
+                aria-disabled={running !== null}
+                aria-label={running === "pull" ? busyLabel("pull") : "Pull"}
+                aria-busy={running === "pull"}
+                {...busyTitle("pull", pullTitle(choice, forkChoice))}
+                {...pullTrigger}
+                ref={(element) => {
+                  pullButton.current = element;
+                  if (pullTrigger.ref !== undefined) pullTrigger.ref.current = element;
+                }}
+              >
+                {running === "pull" ? (
+                  <span className="wt-btn__spinner" />
+                ) : (
+                  <PullGlyph />
+                )}
+                <span className="wt-btn__label">
+                  {running === "pull" ? busyLabel("pull") : "Pull"}
+                </span>
+              </button>
+            );
+            if (pullMenu === null) return pullButtonNode;
+            return (
+              <div
+                ref={pullSplit}
+                className={`wt-split${pullHasWork ? " is-behind" : ""}`}
+              >
+                {pullButtonNode}
+                <PullMenu
+                  anchorRef={pullSplit}
+                  disabled={running !== null}
+                  checked={choice}
+                  {...pullMenu}
+                />
+              </div>
+            );
+          })()}
 
           <button
             className="wt-btn"
@@ -1158,13 +1430,30 @@ export function WorktreeHeader({
         <PullDivergenceDialog
           divergence={divergence}
           busy={recoveryBusy}
-          onClose={() => setDivergence(null)}
+          onClose={() => {
+            setDivergence(null);
+            setDivergenceFork(null);
+          }}
           onRebase={() => void recover("rebase")}
           onReset={() => void recover("reset")}
           onResetElsewhere={() => {
             setDivergence(null);
+            setDivergenceFork(null);
             openResetToRemote({ worktree });
           }}
+          {...(divergenceFork === null
+            ? {}
+            : {
+                fork: {
+                  pushTo:
+                    divergenceFork.pushTo === null
+                      ? null
+                      : {
+                          label: divergenceFork.pushTo.label,
+                          head: divergenceFork.pushTo.head
+                        }
+                }
+              })}
         />
       )}
       {tip.tooltipNode}
