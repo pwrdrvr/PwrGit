@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { RemoteActivityKind, SshRemoteRecovery } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
-import { showErrorToast, showInfoToast } from "../../lib/toast";
+import {
+  showErrorToast,
+  showInfoToast,
+  type ToastSubject
+} from "../../lib/toast";
 import { useModal } from "../../lib/useModal";
 
 type Busy = "test" | "apply" | null;
@@ -69,6 +73,14 @@ export function SshRemoteRecoveryDialog({
 
   useEffect(() => primaryRef.current?.focus(), [tested]);
 
+  /** The toast's chips: this checkout's repo and the remote being repaired,
+   *  with the URL it is configured with at that moment — still HTTPS until
+   *  the change lands. */
+  const remoteSubject = (url: string): ToastSubject => ({
+    worktreeId,
+    remote: { name: recovery.remote, url }
+  });
+
   const test = async (): Promise<void> => {
     setBusy("test");
     setError(null);
@@ -85,7 +97,8 @@ export function SshRemoteRecoveryDialog({
       showErrorToast({
         title: "SSH test failed",
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: remoteSubject(recovery.httpsUrl)
       });
       return;
     }
@@ -107,13 +120,15 @@ export function SshRemoteRecoveryDialog({
       showErrorToast({
         title: "Change remote failed",
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: remoteSubject(recovery.httpsUrl)
       });
       return;
     }
     showInfoToast({
       title: "Remote changed to SSH",
-      message: `${recovery.remote} now uses SSH. ${copy.label} again when you are ready.`
+      message: `${recovery.remote} now uses SSH. ${copy.label} again when you are ready.`,
+      subject: remoteSubject(recovery.sshUrl)
     });
     onChanged();
   };

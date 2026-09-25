@@ -283,7 +283,8 @@ export async function switchWorktreeToBranch({
     }
     showErrorToast({
       title: "Switch failed",
-      message: `${branch} is checked out in another worktree.`
+      message: `${branch} is checked out in another worktree.`,
+      subject: { repoId }
     });
     return "failed";
   }
@@ -297,7 +298,8 @@ export async function switchWorktreeToBranch({
       outcome.code === "dirty"
         ? `${branch} could not be checked out without overwriting local changes. Commit or stash them first.`
         : outcome.message.split("\n")[0],
-    detail: outcome.message
+    detail: outcome.message,
+    subject: { repoId }
   });
   return "failed";
 }

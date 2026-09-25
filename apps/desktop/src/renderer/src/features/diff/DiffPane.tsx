@@ -386,7 +386,8 @@ export function DiffPane({
                 ? "Unstage selection failed"
                 : "Stage selection failed",
           message: result.error.message,
-          detail: target.path
+          detail: target.path,
+          subject: { worktreeId }
         });
       }
     });
@@ -457,7 +458,8 @@ export function DiffPane({
         showErrorToast({
           title: target.staged ? "Unstage failed" : "Stage failed",
           message: result.error.message,
-          detail: target.path
+          detail: target.path,
+          subject: { worktreeId }
         });
       }
     });

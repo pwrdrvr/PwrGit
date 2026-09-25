@@ -271,7 +271,8 @@ export function WorktreeHeader({
     showErrorToast({
       title: `${kind} failed`,
       message: firstLine,
-      detail
+      detail,
+      subject: { repoId: repo.id }
     });
   };
 

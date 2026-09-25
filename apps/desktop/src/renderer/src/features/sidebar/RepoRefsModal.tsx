@@ -601,7 +601,8 @@ export function RepoRefsModal({
       showErrorToast({
         title: "Delete tag failed",
         message: result.error.message.split("\n")[0],
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { repoId: repo.id }
       });
       return;
     }
@@ -625,7 +626,12 @@ export function RepoRefsModal({
       showErrorToast({
         title: "Remove remote failed",
         message: result.error.message.split("\n")[0],
-        detail: result.error.message
+        detail: result.error.message,
+        // Still there — the removal is what failed — so it can be gone to.
+        subject: {
+          repoId: repo.id,
+          remote: { name: remote.name, url: remote.fetchUrl }
+        }
       });
       return;
     }
@@ -636,7 +642,8 @@ export function RepoRefsModal({
     showErrorToast({
       title: "Delete branch failed",
       message: message.split("\n")[0] ?? message,
-      detail: message
+      detail: message,
+      subject: { repoId: repo.id }
     });
     // Occupancy and expected-tip failures mean the browser snapshot is stale.
     // Refresh on every failure: it is cheap for locals and avoids special-case
@@ -665,7 +672,8 @@ export function RepoRefsModal({
     if (result.ok) {
       showInfoToast({
         title: "Branch deleted",
-        message: `${branch.name} was deleted locally. No remote branch was changed.`
+        message: `${branch.name} was deleted locally. No remote branch was changed.`,
+        subject: { repoId: repo.id }
       });
       await onRefresh();
       return;
@@ -698,7 +706,8 @@ export function RepoRefsModal({
     }
     showInfoToast({
       title: "Branch force-deleted",
-      message: `${branch.name} was deleted locally. No remote branch was changed.`
+      message: `${branch.name} was deleted locally. No remote branch was changed.`,
+      subject: { repoId: repo.id }
     });
     await onRefresh();
   };

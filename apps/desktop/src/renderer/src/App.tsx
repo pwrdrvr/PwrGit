@@ -43,6 +43,7 @@ import {
   type PendingRepoReveal
 } from "./features/sidebar/search-reveal";
 import { Sidebar } from "./features/sidebar/Sidebar";
+import { requestSidebarReveal } from "./features/sidebar/sidebar-reveal";
 import {
   readStoredWorktreeSelection,
   resolveWorktreeSelection,
@@ -410,6 +411,22 @@ export function App() {
     setSelection({ repoId: repo.id, worktreeId: worktree.id });
   }, []);
 
+  // A toast's repo / remote chip. The repository becomes the working target
+  // unless the selection is already in it — sending someone who is working in
+  // a linked worktree back to the primary would be a move they did not ask
+  // for. The sidebar request is posted either way: it is what expands and
+  // scrolls the row when the selection does not change.
+  const selectedRepoId = selection?.repoId ?? null;
+  const revealInSidebar = useCallback(
+    (repoId: string, remote: string | null) => {
+      if (selectedRepoId !== repoId) {
+        setPendingReveal({ repoId, worktreeId: null, branch: null });
+      }
+      requestSidebarReveal(repoId, remote);
+    },
+    [selectedRepoId]
+  );
+
   const onPickSearch = useCallback(
     (hit: RepoSearchHit) => {
       setOverlayOpen(false);
@@ -665,7 +682,10 @@ export function App() {
           if (selectedRepo === null || holder === undefined) {
             showErrorToast({
               title: "Switch failed",
-              message: `${branch} is checked out in another worktree.`
+              message: `${branch} is checked out in another worktree.`,
+              ...(selectedRepo === null
+                ? {}
+                : { subject: { repoId: selectedRepo.id } })
             });
             return;
           }
@@ -688,7 +708,8 @@ export function App() {
             if (worktree === undefined) {
               showErrorToast({
                 title: "Cannot locate tag",
-                message: "No available worktree for this repository."
+                message: "No available worktree for this repository.",
+                subject: { repoId }
               });
               return;
             }
@@ -1068,7 +1089,11 @@ export function App() {
         />
       )}
 
-      <ToastHost selectedWorktreeId={selection?.worktreeId ?? null} />
+      <ToastHost
+        selectedWorktreeId={selection?.worktreeId ?? null}
+        repos={repos}
+        onReveal={revealInSidebar}
+      />
       <DialogHost />
       <ResetToRemoteHost />
     </div>

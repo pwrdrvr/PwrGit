@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok } from "@pwrgit/shared";
+import { ok, type Repo } from "@pwrgit/shared";
 
 const dispatchMock = vi.hoisted(() => vi.fn());
 const subscribeMock = vi.hoisted(() => vi.fn());
@@ -24,6 +24,32 @@ import {
 
 let container: HTMLDivElement;
 let root: Root;
+const revealMock = vi.fn();
+const diskhound: Repo = {
+  id: "repo-1",
+  name: "diskhound",
+  path: "/repos/diskhound",
+  profileId: "profile-1",
+  pinned: false,
+  worktrees: [
+    {
+      id: "wt-linked",
+      repoId: "repo-1",
+      branch: "feat/scan",
+      path: "/worktrees/diskhound/scan",
+      dirty: 0,
+      ahead: 0,
+      behind: 0,
+      behindDefault: 0,
+      defaultBranch: "main",
+      mergedIntoDefault: false,
+      divergedFromDefault: false,
+      isDefaultBranch: false,
+      pinned: false,
+      isPrimary: false
+    }
+  ]
+};
 
 function eyebrows(): string[] {
   return [...container.querySelectorAll(".app-toast__eyebrow")].map((node) =>
@@ -48,7 +74,7 @@ beforeEach(async () => {
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root.render(<ToastHost />);
+    root.render(<ToastHost repos={[diskhound]} onReveal={revealMock} />);
   });
 });
 
@@ -84,6 +110,107 @@ describe("ToastHost", () => {
     expect(writeText).toHaveBeenCalledExactlyOnceWith(commandsOnly
       ? "git lfs install && git lfs pull"
       : "Git LFS setup needed\nExplanation\ngit lfs install && git lfs pull");
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("names the repository and remote a toast is about, as chips that go there", async () => {
+    await act(async () => {
+      showInfoToast({
+        title: "Fetched upstream",
+        message: "Remote-tracking branches are up to date.",
+        subject: {
+          repoId: "repo-1",
+          remote: { name: "upstream", url: "git@example.test:someone/diskhound.git" }
+        }
+      });
+      showInfoToast({ title: "Tag created", message: "v1.2.3" });
+    });
+
+    const cards = [...container.querySelectorAll(".app-toast")];
+    const chips = (card: Element | undefined) =>
+      [...(card?.querySelectorAll<HTMLButtonElement>(".app-toast__chip") ?? [])];
+    // Only the card with a subject grows the row — a notice about no
+    // repository in particular stays as it was.
+    expect(chips(cards[0]).map((chip) => chip.textContent)).toEqual([
+      "diskhound",
+      "upstream"
+    ]);
+    expect(cards[1]?.querySelector(".app-toast__subject")).toBeNull();
+    // The visible word is inside each accessible name (SC 2.5.3).
+    expect(chips(cards[0]).map((chip) => chip.getAttribute("aria-label"))).toEqual([
+      "Show diskhound in the sidebar",
+      "Show remote upstream of diskhound in the sidebar"
+    ]);
+
+    await act(async () => chips(cards[0])[0]?.click());
+    expect(revealMock).toHaveBeenLastCalledWith("repo-1", null);
+    await act(async () => chips(cards[0])[1]?.click());
+    expect(revealMock).toHaveBeenLastCalledWith("repo-1", "upstream");
+  });
+
+  it("draws a repo chip alone for a toast about the whole repository", async () => {
+    await act(async () => {
+      showInfoToast({
+        title: "Fetched all remotes",
+        message: "Remote-tracking branches are up to date.",
+        subject: { repoId: "repo-1" }
+      });
+    });
+
+    expect(
+      [...container.querySelectorAll(".app-toast__chip")].map((chip) => chip.textContent)
+    ).toEqual(["diskhound"]);
+    expect(container.querySelector(".app-toast__subject-sep")).toBeNull();
+  });
+
+  it("finds the repository of a toast that names only a worktree", async () => {
+    await act(async () => {
+      showErrorToast({
+        title: "Could not create stash",
+        message: "…",
+        subject: { worktreeId: "wt-linked" }
+      });
+    });
+    const chip = container.querySelector<HTMLButtonElement>(".app-toast__chip");
+    expect(chip?.textContent).toBe("diskhound");
+    await act(async () => chip?.click());
+    expect(revealMock).toHaveBeenLastCalledWith("repo-1", null);
+  });
+
+  it("draws no chip for a repository no longer in the list", async () => {
+    // Nowhere left to go — and the card still says what happened.
+    await act(async () => {
+      showInfoToast({
+        title: "Branch deleted",
+        message: "feat/scan was deleted locally.",
+        subject: { repoId: "repo-gone" }
+      });
+    });
+    expect(eyebrows()).toEqual(["info:Branch deleted"]);
+    expect(container.querySelector(".app-toast__subject")).toBeNull();
+  });
+
+  it("puts the subject in a copied error, where the chips cannot go", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+    await act(async () => {
+      showErrorToast({
+        title: "Fetch failed",
+        message: "Could not resolve host",
+        subject: {
+          repoId: "repo-1",
+          remote: { name: "upstream", url: "git@example.test:someone/diskhound.git" }
+        }
+      });
+    });
+    const copy = container.querySelector<HTMLButtonElement>('[aria-label="Copy error"]');
+    await act(async () => copy?.click());
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(
+      "Fetch failed\nRepository: diskhound · Remote: upstream\nCould not resolve host"
+    );
     Reflect.deleteProperty(navigator, "clipboard");
   });
 

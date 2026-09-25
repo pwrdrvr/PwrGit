@@ -147,7 +147,8 @@ export function BranchFromCommitDialog({
     if (busy) {
       showInfoToast({
         title: "Still creating",
-        message: `${trimmed} is being created in the background.`
+        message: `${trimmed} is being created in the background.`,
+        subject: { repoId }
       });
     }
     onClose();
@@ -176,7 +177,8 @@ export function BranchFromCommitDialog({
       showErrorToast({
         title: "Create branch failed",
         message,
-        detail: result.error.message
+        detail: result.error.message,
+        subject: { repoId }
       });
       return;
     }
@@ -191,7 +193,8 @@ export function BranchFromCommitDialog({
           ? `${trimmed} points at ${commit.shortHash}.`
           : target === "here"
             ? `${trimmed} is checked out here at ${commit.shortHash}.`
-            : `${trimmed} is checked out in a new worktree at ${commit.shortHash}.`
+            : `${trimmed} is checked out in a new worktree at ${commit.shortHash}.`,
+      subject: { repoId }
     });
     if (!active.current) return;
     onCreated(result.value.checkedOutWorktreeId);

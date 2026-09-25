@@ -385,7 +385,8 @@ export function LineageGraph({
             key: `history:${worktreeId}`,
             title: "History unavailable",
             message,
-            detail: r.error.message
+            detail: r.error.message,
+            subject: { worktreeId }
           });
           return;
         }
@@ -848,7 +849,8 @@ export function LineageGraph({
       }
       showErrorToast({
         title: "Switch failed",
-        message: `${target.branch} is already checked out in another worktree.`
+        message: `${target.branch} is already checked out in another worktree.`,
+        subject: { repoId }
       });
       return;
     }
@@ -859,13 +861,15 @@ export function LineageGraph({
           { kind: "repo", code: outcome.code, message: outcome.message },
           target.branch
         ),
-        detail: outcome.message
+        detail: outcome.message,
+        subject: { repoId }
       });
       return;
     }
     showInfoToast({
       title: "Branch switched",
-      message: `${target.branch} is checked out here.`
+      message: `${target.branch} is checked out here.`,
+      subject: { repoId }
     });
   };
 

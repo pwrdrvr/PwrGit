@@ -2003,12 +2003,14 @@ textarea,
 }
 /* The card the remote row itself opens: a heading and one or two URLs, which
    are mono and must not wrap mid-path in a narrow card. */
-.ref-remote__tip {
+.ref-remote__tip,
+.app-toast__chip-tip {
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
-.ref-remote__tip span {
+.ref-remote__tip span,
+.app-toast__chip-tip span {
   font-family: var(--font-mono);
   font-size: 10.5px;
   opacity: 0.85;
@@ -13949,6 +13951,58 @@ button.agent-auth-node:focus-visible,
   color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* `diskhound › upstream` — where the toast happened, as chips that go there.
+   The house clickable pill (.pr-chip) at the toast's scale: the message under
+   it is 12.5px, and a 9.5px sidebar chip would read as a footnote here.
+   Mono because these are identifiers, set the way the sidebar sets them. */
+.app-toast__subject {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 2px 0 6px;
+}
+.app-toast__chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-mono);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.app-toast__chip:hover,
+.app-toast__chip:focus-visible {
+  border-color: var(--accent-border);
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+/* The ring is what tells focus from hover (see .pr-chip:focus-visible).
+   .toast-host scrolls, so the outset ring needs its reach kept in view. */
+.app-toast__chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
+/* Ellipsis on the span, not the pill — see .ref-chip__name. */
+.app-toast__chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-toast__subject-sep {
+  color: var(--text-muted);
+  font: 500 12px/1 var(--font-sans);
 }
 
 .app-toast__detail {

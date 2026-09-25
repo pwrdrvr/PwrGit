@@ -48,6 +48,7 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
+import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import { PruneWorktreesDialog } from "./PruneWorktreesDialog";
 import {
@@ -596,6 +597,69 @@ export function Sidebar({
     setFocusedRepoId(id);
     document.querySelector<HTMLElement>(`[data-repo-id="${id}"]`)?.focus();
   };
+
+  // A reveal asked from outside the sidebar — a toast's repo or remote chip
+  // (`sidebar-reveal.ts`). App has already moved the selection if it needed
+  // to; this is the half a selection cannot do when it does not change:
+  // expand the row, and bring it into view. Once per request, so a repo the
+  // user collapses while a remote reveal waits on `repo:refs` stays collapsed.
+  const reveal = useSidebarReveal();
+  const handledRevealSeq = useRef<number | null>(null);
+  const pendingRepoScrollRef = useRef<{ repoId: string; seq: number } | null>(
+    null
+  );
+  useEffect(() => {
+    if (reveal === null || handledRevealSeq.current === reveal.seq) return;
+    handledRevealSeq.current = reveal.seq;
+    const repo = repos.find((r) => r.id === reveal.repoId);
+    if (repo === undefined) {
+      settleSidebarReveal(reveal.seq);
+      return;
+    }
+    // The same widening the selection reveal above does, for the same reason.
+    if (
+      filterReposByLens([repo], lens, now, {
+        selectedWorktreeId,
+        visits: focusVisits
+      }).length === 0
+    ) {
+      setLens("Focused");
+    }
+    if (!expanded.has(repo.id)) {
+      setExpanded((prev) => new Set(prev).add(repo.id));
+      onExpandRepo(repo.id);
+    }
+    // A remote is scrolled to by the refs sections inside the row, which are
+    // the only ones that know when its row exists.
+    if (reveal.remote === null) {
+      pendingRepoScrollRef.current = { repoId: repo.id, seq: reveal.seq };
+    }
+  }, [
+    reveal,
+    repos,
+    expanded,
+    lens,
+    now,
+    onExpandRepo,
+    focusVisits,
+    selectedWorktreeId
+  ]);
+  useEffect(() => {
+    const pending = pendingRepoScrollRef.current;
+    if (pending === null) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-repo-id="${pending.repoId}"]`
+    );
+    if (el === null) return; // not rendered yet — retry after the next render
+    pendingRepoScrollRef.current = null;
+    el.scrollIntoView({ block: "nearest" });
+    // Focus follows the jump, as it does for a link: the chip that was
+    // pressed lives on a card that is about to time out, and focus left on it
+    // would fall to <body> when it goes.
+    setFocusedRepoId(pending.repoId);
+    el.focus({ preventScroll: true });
+    settleSidebarReveal(pending.seq);
+  });
 
   const handleRepoKeyDown = (repo: Repo, event: ReactKeyboardEvent): void => {
     // Keydown from the pin button (or anything else focusable inside the row)

@@ -495,7 +495,8 @@ export function ChangesTab({
       showErrorToast({
         title: command === "changes:stage" ? "Stage failed" : "Unstage failed",
         message: r.error.message,
-        detail: `${command} ${paths.join(", ")}`
+        detail: `${command} ${paths.join(", ")}`,
+        subject: { worktreeId: wtId }
       });
     })();
   };
@@ -529,7 +530,8 @@ export function ChangesTab({
       showErrorToast({
         title: "Discard failed",
         message: r.error.message,
-        detail: paths.join(", ")
+        detail: paths.join(", "),
+        subject: { worktreeId: wtId }
       });
     });
   };
@@ -546,12 +548,13 @@ export function ChangesTab({
         showErrorToast({
           title: "Could not update .gitignore",
           message: r.error.message,
-          detail: path
+          detail: path,
+          subject: { worktreeId: wtId }
         });
         return;
       }
-      showInfoToast(
-        r.value.added.length === 0
+      showInfoToast({
+        ...(r.value.added.length === 0
           ? {
               title: "Already ignored",
               message: `${path} was already covered by .gitignore.`
@@ -559,8 +562,9 @@ export function ChangesTab({
           : {
               title: "Added to .gitignore",
               message: r.value.added.join(", ")
-            }
-      );
+            }),
+        subject: { worktreeId: wtId }
+      });
     });
   };
 
