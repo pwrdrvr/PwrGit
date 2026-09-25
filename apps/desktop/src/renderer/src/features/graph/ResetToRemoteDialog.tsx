@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  ForkPushBack,
   RemoteResetMode,
   RemoteResetPreview,
   RemoteResetSnapshot,
@@ -17,8 +18,11 @@ import {
 import { CommitAlignment, commitCountLabel } from "./CommitAlignment";
 import { useModal } from "../../lib/useModal";
 import {
-  fetchAgeLabel,
-  isStaleFetch,
+  fetchCoverage,
+  forkPushPlan,
+  pushForces,
+  pushNote,
+  rankedTarget,
   remoteRefLabel,
   resetImpact,
   targetNote
@@ -27,7 +31,7 @@ import {
 /* The dialog no longer blocks on a repo-wide ref load — the picker pages its
    own results — so the only load it waits on is the ranked-target lookup, and
    even that only gates the cards, not the list. */
-type Busy = "targets" | "fetch" | "review" | "reset" | null;
+type Busy = "targets" | "fetch" | "review" | "reset" | "push" | null;
 
 /**
  * Everything the reset needs to know about the checkout it acts on. Narrower
@@ -81,22 +85,62 @@ export function resetExecutionRequest(
   return { worktreeId, mode, ...snapshot };
 }
 
-/** One ranked target, rendered as a radio card above the full branch list. */
+/**
+ * One ranked target, rendered as a radio card above the full branch list.
+ *
+ * A target identical to the checkout draws as one quiet line: it is still a
+ * valid choice, but resetting to it changes nothing, and a full card with its
+ * arrows reading ↑0 ↓0 looked like the answer.
+ */
 function TargetCard({
   choice,
   tag,
+  repo,
   note,
+  identicalTo,
   selected,
   disabled,
   onSelect
 }: {
   choice: ResetChoice;
   tag: string;
+  /** The forge repository the ref belongs to, e.g. a fork's parent. */
+  repo?: string | undefined;
   note?: string;
+  /** The checked-out branch, when this target is identical to it. */
+  identicalTo?: string | undefined;
   selected: boolean;
   disabled: boolean;
   onSelect: () => void;
 }) {
+  if (identicalTo !== undefined) {
+    return (
+      <label
+        className={`reset-target is-identical${selected ? " is-selected" : ""}`}
+      >
+        <input
+          type="radio"
+          name="reset-target"
+          checked={selected}
+          disabled={disabled}
+          onChange={onSelect}
+        />
+        <span className="reset-target__body">
+          <span className="reset-target__head">
+            <span className="reset-target__name">{choice.label}</span>
+            <span className="reset-target__inline">
+              {choice.head === undefined ? "" : `${shortHead(choice.head)} · `}
+              already identical to {identicalTo}
+            </span>
+            <span className="reset-target__tag reset-target__tag--quiet">
+              {tag}
+            </span>
+          </span>
+        </span>
+      </label>
+    );
+  }
+
   const meta = [
     choice.head === undefined ? null : shortHead(choice.head),
     choice.lastCommitAt === undefined
@@ -116,6 +160,9 @@ function TargetCard({
       <span className="reset-target__body">
         <span className="reset-target__head">
           <span className="reset-target__name">{choice.label}</span>
+          {repo !== undefined && (
+            <span className="reset-target__repo">{repo}</span>
+          )}
           <span className="reset-target__tag">{tag}</span>
         </span>
         <span className="reset-target__meta">
@@ -134,6 +181,31 @@ function TargetCard({
       </span>
     </label>
   );
+}
+
+/** "Review soft reset + push" on the first step, "Hard reset branch" on the last. */
+function actionLabel(
+  mode: RemoteResetMode,
+  push: ForkPushBack | null,
+  step: "review" | "confirm"
+): string {
+  const tail =
+    push === null
+      ? step === "review"
+        ? ""
+        : " branch"
+      : pushForces(push)
+        ? " + force-push"
+        : " + push";
+  return step === "review"
+    ? `Review ${mode} reset${tail}`
+    : `${mode === "hard" ? "Hard" : "Soft"} reset${tail}`;
+}
+
+/** The push as Git is asked to run it, for the review step to show verbatim. */
+function pushCommand(push: ForkPushBack, head: string): string {
+  const destination = `refs/heads/${push.branch}`;
+  return `git push --force-with-lease=${destination}:${push.head} ${push.remote} ${head}:${destination}`;
 }
 
 export function ResetToRemoteDialog({
@@ -160,6 +232,14 @@ export function ResetToRemoteDialog({
   );
   const [browsing, setBrowsing] = useState(false);
   const [mode, setMode] = useState<RemoteResetMode>("soft");
+  /**
+   * The user's answer to "also update the fork", or null for the default: on
+   * for a fast-forward, which loses nothing, and off for a forced push, which
+   * removes commits from the remote. Cleared whenever the target or the
+   * fetched tips change, so a yes given to a fast-forward never carries over
+   * into a force.
+   */
+  const [pushChoice, setPushChoice] = useState<boolean | null>(null);
   const [preview, setPreview] = useState<RemoteResetPreview | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [busy, setBusy] = useState<Busy>("targets");
@@ -179,6 +259,7 @@ export function ResetToRemoteDialog({
     });
     if (!activeRef.current) return;
     setBusy(null);
+    setPushChoice(null);
     if (!result.ok) {
       // A branch with no upstream, or a repo with no remote HEAD, is ordinary
       // — the list below still works, so this never blocks the dialog.
@@ -189,7 +270,7 @@ export function ResetToRemoteDialog({
     setTargets(result.value);
     setSelected((current) => {
       if (current !== null) return current;
-      const ranked = result.value.upstream ?? result.value.defaultBranch;
+      const ranked = rankedTarget(result.value);
       if (ranked === null) {
         setBrowsing(true);
         return null;
@@ -212,6 +293,7 @@ export function ResetToRemoteDialog({
   const choose = (next: ResetChoice, fromList: boolean): void => {
     setSelected(next);
     setBrowsing(fromList);
+    setPushChoice(null);
     setPreview(null);
     setAcknowledged(false);
     setError(null);
@@ -226,15 +308,21 @@ export function ResetToRemoteDialog({
   const browse = (): void => {
     setSelected(null);
     setBrowsing(true);
+    setPushChoice(null);
     setPreview(null);
     setAcknowledged(false);
     setError(null);
   };
 
+  const coverage = fetchCoverage(targets);
+
   const fetchNow = async (): Promise<void> => {
     setBusy("fetch");
     setError(null);
-    const result = await dispatch("remote:fetch", { worktreeId: worktree.id });
+    const result = await dispatch("remote:fetch", {
+      worktreeId: worktree.id,
+      ...(coverage.remotes === undefined ? {} : { remotes: coverage.remotes })
+    });
     if (!activeRef.current) return;
     if (!result.ok) {
       setBusy(null);
@@ -249,6 +337,13 @@ export function ResetToRemoteDialog({
     setBusy("targets");
     await loadTargets();
   };
+
+  const fork = targets?.forkSource ?? null;
+  const pushPlan = forkPushPlan(fork, selected?.ref);
+  const forcePush = pushPlan !== null && pushForces(pushPlan);
+  const pushing =
+    pushPlan !== null && (pushChoice ?? !pushForces(pushPlan));
+  const push = pushing ? pushPlan : null;
 
   const inspect = async (): Promise<void> => {
     if (selected === null) return;
@@ -283,8 +378,9 @@ export function ResetToRemoteDialog({
       resetExecutionRequest(worktree.id, mode, preview.snapshot)
     );
     if (!activeRef.current) return;
-    setBusy(null);
+    const done = `${mode === "hard" ? "Hard" : "Soft"} reset complete`;
     if (!result.ok) {
+      setBusy(null);
       const message = firstLine(result.error.message);
       setError(message);
       setPreview(null);
@@ -295,10 +391,39 @@ export function ResetToRemoteDialog({
       });
       return;
     }
-    showInfoToast({
-      title: `${mode === "hard" ? "Hard" : "Soft"} reset complete`,
-      message: `${preview.snapshot.branch} now points to ${selected.label} at ${shortHead(preview.snapshot.remoteHead)}.`
-    });
+    const moved = `${preview.snapshot.branch} now points to ${selected.label} at ${shortHead(preview.snapshot.remoteHead)}`;
+    if (push === null) {
+      showInfoToast({ title: done, message: `${moved}.` });
+    } else {
+      // Only after the reset has landed, and it pushes the object that was
+      // reviewed. A failure here is reported as what it is — the reset stands
+      // — never as though the whole operation failed.
+      setBusy("push");
+      const tracked = `${push.remote}/${push.branch}`;
+      const pushed = await dispatch("remote:pushBranchWithLease", {
+        worktreeId: worktree.id,
+        remote: push.remote,
+        branch: push.branch,
+        head: preview.snapshot.remoteHead,
+        expectedHead: push.head
+      });
+      if (pushed.ok) {
+        showInfoToast({
+          title: done,
+          message: `${moved}, and ${tracked} was pushed to match.`
+        });
+      } else {
+        showErrorToast({
+          title: `${done} — push ${
+            pushed.error.code === "push_lease_stale" ? "refused" : "failed"
+          }`,
+          message: `${moved}. ${firstLine(pushed.error.message)} ${tracked} is unchanged.`,
+          detail: pushed.error.detail ?? pushed.error.message
+        });
+      }
+    }
+    if (!activeRef.current) return;
+    setBusy(null);
     onComplete(mode, selected.label);
     onClose();
   };
@@ -308,15 +433,28 @@ export function ResetToRemoteDialog({
   const impact = preview === null ? null : resetImpact(preview, mode);
   const upstreamRef = targets?.upstream?.ref;
   const defaultRef = targets?.defaultBranch?.ref;
+  const forkRef = fork?.ref;
   // With a card to fall back on, the picker must not seed itself — its first
   // row is whatever committed most recently, which is the wrong default for
   // the one action that discards history, and is what this dialog set out to
   // stop doing. With no card at all, that row is the only default there is.
-  const hasRankedTarget = upstreamRef !== undefined || defaultRef !== undefined;
+  const hasRankedTarget =
+    upstreamRef !== undefined ||
+    defaultRef !== undefined ||
+    forkRef !== undefined;
   const listSelected =
     selected !== null &&
     selected.ref !== upstreamRef &&
-    selected.ref !== defaultRef;
+    selected.ref !== defaultRef &&
+    selected.ref !== forkRef;
+  // A soft reset keeps a leaving commit's changes locally; a forced push still
+  // deletes the commits from the remote. So the push asks on its own account.
+  const needsAcknowledgement =
+    impact !== null && (impact.needsAcknowledgement || (push !== null && forcePush));
+  const danger = mode === "hard" || (push !== null && forcePush);
+
+  const identicalTo = (target: ResetTargetSuggestion): string | undefined =>
+    target.ahead === 0 && target.behind === 0 ? worktree.branch : undefined;
 
   // Escape unwinds one step at a time: it leaves the review screen first and
   // only closes the dialog from the top, and is refused entirely while a reset
@@ -356,14 +494,31 @@ export function ResetToRemoteDialog({
 
             <fieldset className="reset-remote__targets">
               <legend>Target</legend>
+              {fork !== null && (
+                <TargetCard
+                  choice={choiceOf(fork)}
+                  // "Upstream remote" when only the remote's name said so: a
+                  // fork relationship is the forge's to confirm, not ours.
+                  tag={fork.parent === undefined ? "Upstream remote" : "Fork source"}
+                  repo={fork.parent}
+                  note={targetNote(fork.ahead, fork.behind)}
+                  identicalTo={identicalTo(fork)}
+                  selected={selected?.ref === fork.ref}
+                  disabled={busy !== null}
+                  onSelect={() => choose(choiceOf(fork), false)}
+                />
+              )}
               {targets?.upstream != null && (
                 <TargetCard
                   choice={choiceOf(targets.upstream)}
-                  tag="Upstream"
+                  // Git's sense of "upstream". Named for what it does, because
+                  // on a fork a remote called `upstream` is a different thing.
+                  tag="Tracking"
                   note={targetNote(
                     targets.upstream.ahead,
                     targets.upstream.behind
                   )}
+                  identicalTo={identicalTo(targets.upstream)}
                   selected={selected?.ref === targets.upstream.ref}
                   disabled={busy !== null}
                   onSelect={() =>
@@ -444,24 +599,65 @@ export function ResetToRemoteDialog({
             )}
 
             <div
-              className={`reset-remote__fetched${
-                isStaleFetch(targets?.lastFetchedAt ?? null) ? " is-stale" : ""
-              }`}
+              className={`reset-remote__fetched${coverage.stale ? " is-stale" : ""}`}
             >
-              <span>
-                {targets?.lastFetchedAt == null
-                  ? "This repository has not fetched in this session — the refs below may be old."
-                  : `Last fetched ${fetchAgeLabel(targets.lastFetchedAt)} — the reset uses that snapshot, not the live remote.`}
-              </span>
+              <span>{coverage.text}</span>
               <button
                 type="button"
                 className="reset-remote__fetch"
                 disabled={busy !== null}
                 onClick={() => void fetchNow()}
               >
-                {busy === "fetch" ? "Fetching…" : "Fetch now"}
+                {busy === "fetch" ? "Fetching…" : coverage.fetchLabel}
               </button>
             </div>
+
+            {pushPlan !== null && fork !== null && (
+              <fieldset className="reset-remote__follow">
+                <legend>
+                  {fork.parent === undefined ? "After the reset" : "Your fork"}
+                </legend>
+                <label
+                  className={`reset-remote__push${forcePush ? " is-force" : ""}${
+                    pushing ? " is-selected" : ""
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={pushing}
+                    disabled={busy !== null}
+                    onChange={(event) => {
+                      setPushChoice(event.target.checked);
+                      setPreview(null);
+                      setAcknowledged(false);
+                    }}
+                  />
+                  <span className="reset-target__body">
+                    <span className="reset-target__head">
+                      <span className="reset-remote__push-title">
+                        {forcePush ? "Force-push " : "Update "}
+                        <code>
+                          {pushPlan.remote}/{pushPlan.branch}
+                        </code>{" "}
+                        to match
+                      </span>
+                      <span
+                        className={`reset-target__tag ${
+                          forcePush
+                            ? "reset-target__tag--danger"
+                            : "reset-target__tag--ok"
+                        }`}
+                      >
+                        {forcePush ? "Force · lease" : "Fast-forward"}
+                      </span>
+                    </span>
+                    <span className="reset-target__note">
+                      {pushNote(pushPlan, fork, worktree.branch)}
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+            )}
 
             <fieldset className="reset-remote__modes">
               <legend>Reset mode</legend>
@@ -586,6 +782,43 @@ export function ResetToRemoteDialog({
               />
             )}
 
+            {push !== null && (
+              <div
+                className={`reset-remote__then${forcePush ? " is-force" : ""}`}
+              >
+                <div className="reset-remote__then-head">
+                  <span>
+                    Then {forcePush ? "force-push" : "push"} to{" "}
+                    {fork?.parent === undefined ? push.remote : "your fork"}
+                  </span>
+                  <span
+                    className={`reset-target__tag ${
+                      forcePush
+                        ? "reset-target__tag--danger"
+                        : "reset-target__tag--ok"
+                    }`}
+                  >
+                    {forcePush ? "Force · lease" : "Fast-forward"}
+                  </span>
+                </div>
+                <div className="reset-remote__then-refs">
+                  <code>{preview.snapshot.branch}</code>
+                  <span aria-hidden="true">→</span>
+                  <code>
+                    {push.remote}/{push.branch}
+                  </code>
+                </div>
+                <p>
+                  {forcePush
+                    ? `Removes ${commitCountLabel(push.overwrites)} from ${push.remote}/${push.branch}. The lease refuses the push if ${push.remote}/${push.branch} is no longer at ${shortHead(push.head)}.`
+                    : `${push.remote}/${push.branch} moves from ${shortHead(push.head)} to ${shortHead(preview.snapshot.remoteHead)}. If it has moved since the fetch, the push stops and the reset stands.`}
+                </p>
+                <code className="reset-remote__cmd">
+                  {pushCommand(push, preview.snapshot.remoteHead)}
+                </code>
+              </div>
+            )}
+
             <div
               className={`reset-remote__final-warning${
                 mode === "hard" ? " is-hard" : ""
@@ -602,7 +835,7 @@ export function ResetToRemoteDialog({
                   }`}
             </div>
 
-            {impact.needsAcknowledgement && (
+            {needsAcknowledgement && (
               <label className="reset-remote__ack">
                 <input
                   type="checkbox"
@@ -611,11 +844,23 @@ export function ResetToRemoteDialog({
                   onChange={(event) => setAcknowledged(event.target.checked)}
                 />
                 <span>
-                  I understand {commitCountLabel(impact.stranded)} will leave{" "}
-                  {preview.snapshot.branch} and{" "}
-                  {impact.discarding === 0
-                    ? "cannot be recovered outside the reflog"
-                    : `${impact.discarding} working-tree ${impact.discarding === 1 ? "change" : "changes"} will be discarded`}
+                  I understand{" "}
+                  {[
+                    ...(impact.needsAcknowledgement
+                      ? [
+                          `${commitCountLabel(impact.stranded)} will leave ${preview.snapshot.branch} and ${
+                            impact.discarding === 0
+                              ? "cannot be recovered outside the reflog"
+                              : `${impact.discarding} working-tree ${impact.discarding === 1 ? "change" : "changes"} will be discarded`
+                          }`
+                        ]
+                      : []),
+                    ...(push !== null && forcePush
+                      ? [
+                          `${commitCountLabel(push.overwrites)} will be removed from ${push.remote}/${push.branch}`
+                        ]
+                      : [])
+                  ].join(", and ")}
                   .
                 </span>
               </label>
@@ -639,30 +884,25 @@ export function ResetToRemoteDialog({
           </button>
           {preview === null ? (
             <button
-              className={`modal__create${
-                mode === "hard" ? " modal__create--danger" : ""
-              }`}
+              className={`modal__create${danger ? " modal__create--danger" : ""}`}
               disabled={busy !== null || selected === null}
               onClick={() => void inspect()}
             >
-              {busy === "review" ? "Inspecting…" : `Review ${mode} reset`}
+              {busy === "review"
+                ? "Inspecting…"
+                : actionLabel(mode, push, "review")}
             </button>
           ) : (
             <button
-              className={`modal__create${
-                mode === "hard" ? " modal__create--danger" : ""
-              }`}
-              disabled={
-                busy !== null ||
-                (impact !== null &&
-                  impact.needsAcknowledgement &&
-                  !acknowledged)
-              }
+              className={`modal__create${danger ? " modal__create--danger" : ""}`}
+              disabled={busy !== null || (needsAcknowledgement && !acknowledged)}
               onClick={() => void reset()}
             >
               {busy === "reset"
                 ? "Resetting…"
-                : `${mode === "hard" ? "Hard" : "Soft"} reset branch`}
+                : busy === "push"
+                  ? "Pushing…"
+                  : actionLabel(mode, push, "confirm")}
             </button>
           )}
         </div>

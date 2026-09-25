@@ -990,7 +990,8 @@ if (!gotSingleInstanceLock) {
       refresher,
       worktreeOperations,
       indexer,
-      refreshIdentity
+      refreshIdentity,
+      (repoId) => identityService.read([repoId]).get(repoId)
     );
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,

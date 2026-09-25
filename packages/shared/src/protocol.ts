@@ -1415,7 +1415,12 @@ export interface Commands {
     req: { operationId: string };
     res: { canceled: boolean };
   };
-  "remote:fetch": { req: { worktreeId: string }; res: null };
+  /**
+   * Fetch the checked-out branch's remote — or, with `remotes`, exactly those.
+   * The reset dialog passes every remote a target card came from, since a bare
+   * fetch leaves a fork's source untouched.
+   */
+  "remote:fetch": { req: { worktreeId: string; remotes?: string[] }; res: null };
   /** Fetch one named remote, or every non-skipped remote when omitted. */
   "remote:fetchRepo": {
     req: { repoId: string; remote?: string };
@@ -1597,6 +1602,24 @@ export interface Commands {
   "remote:inspectReset": {
     req: { worktreeId: string; remoteRef: string };
     res: RemoteResetPreview;
+  };
+  /**
+   * Push one exact object to one branch on one remote, leased on the tip the
+   * user reviewed — the reset dialog bringing a fork's `origin/main` along.
+   * Forces when the lease holds, so a diverged fork is replaced; refuses when
+   * the remote moved since.
+   */
+  "remote:pushBranchWithLease": {
+    req: {
+      worktreeId: string;
+      remote: string;
+      branch: string;
+      /** Full object name to push. */
+      head: string;
+      /** Full object name the remote branch must still point at. */
+      expectedHead: string;
+    };
+    res: null;
   };
   /** Reset only the still-current checkout/ref pair from the reviewed snapshot. */
   "remote:resetToRemote": {

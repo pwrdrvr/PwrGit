@@ -84,6 +84,7 @@ first.
 | `Hunk Lane Staging.dc.html` | Two-lane hunk/line staging gutter. |
 | `Image Diff Lightbox.dc.html` | Binary image diff — inline layout rule, lightbox, pixel compare. |
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
+| `Reset to Remote - Forks - UX Review.dc.html` | The same dialog on a fork: why it opened on `origin/main` when that was identical to `main`, why "Last fetched moments ago" was true only of `origin` while `upstream/main` was 19 minutes stale, and the fork-source card, per-remote fetch coverage and leased push back to the fork that fix it. Interactive. |
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
@@ -314,6 +315,19 @@ columns &mdash; were measured in headless Chromium against the real
 from the artboard. Its version strings are invented; the Git LFS build tail is the
 real shape of `git lfs version` output. Turn **1** is the card as #296 builds it;
 turns **2&ndash;3**, the redraw and the state table, are a proposal.
+
+`Reset to Remote - Forks - UX Review.dc.html` was written here and pushed up
+through the `claude-design` MCP, in the same change that builds what it draws;
+the project copy was verified at the same 51,219 bytes. It answers a report
+from a fork checkout, where `origin` is the fork, `upstream` the source, and
+`main` tracks `origin/main`. Turn **1** is the diagnosis, including the
+reflog timeline that showed the reset landing on a tip 19 minutes old. Turns
+**2&ndash;4** are the target step, the review step and the outcome, and **2d**
+is a live `DCLogic` prototype. It is drawn in the light theme the report came
+from. The repository names are the reported ones (`huntharo/diskhound`, a fork
+of `tzarebczan/diskhound`), and so are the SHAs and counts in turns 1 and 2b.
+The diverged fork in **2c** and **3b** is invented: `3c1a9e0` and its two
+commits exist only in the artboard.
 
 `Fork From Here - UX Review.dc.html` was written here and pushed up through the
 `claude-design` MCP, in the same change that builds what it draws; the project

@@ -1,4 +1,4 @@
-import { existsSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   type BranchRef,
@@ -12,6 +12,8 @@ import {
   type CommitStats,
   type DivergenceCommitAlignment,
   type DivergenceCommit,
+  type ForkPushBack,
+  type ForkSourceTarget,
   type LocalBranchSummary,
   type OpenChangeRequest,
   type PushPublishTarget,
@@ -48,6 +50,7 @@ import {
   ok,
   type Result
 } from "@pwrgit/shared";
+import { parseRemoteUrl } from "../forge/resolve";
 import { delay } from "../util/timing";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 
@@ -1234,6 +1237,42 @@ export async function fetchNamedRemote(
   ]);
 }
 
+/**
+ * Fetch exactly these remotes, in one `FETCH_HEAD`. What the reset dialog
+ * asks for: a bare fetch refreshes only the branch's own remote, and on a fork
+ * that leaves the source's tip — the one being reset to — as old as ever.
+ */
+export async function fetchNamedRemotes(
+  git: GitExec,
+  cwd: string,
+  remotes: readonly string[],
+  forceProgress = false
+): Promise<Result<void>> {
+  // Checked against the configured names rather than left to Git: after
+  // `--multiple` every argument is a remote, and one that begins with `-`
+  // would be read as an option instead.
+  const names = await listRemoteNames(git, cwd);
+  if (!names.ok) return names;
+  const unknown = remotes.find((remote) => !names.value.includes(remote));
+  if (unknown !== undefined || remotes.length === 0) {
+    return err({
+      kind: "remote",
+      code: "remote_missing",
+      message:
+        unknown === undefined
+          ? "Name at least one remote to fetch."
+          : `Remote "${unknown}" no longer exists.`
+    });
+  }
+  return fetchWithRefRaceRetry(git, cwd, [
+    "fetch",
+    "--prune",
+    ...(forceProgress ? ["--progress"] : []),
+    "--multiple",
+    ...remotes
+  ]);
+}
+
 /** Fetch every configured remote except those opted out with skipFetchAll. */
 export async function fetchAllRemotes(
   git: GitExec,
@@ -1950,7 +1989,8 @@ export async function inspectRemoteReset(
 async function resetTargetOf(
   git: GitExec,
   cwd: string,
-  ref: string
+  ref: string,
+  remote: string
 ): Promise<ResetTargetSuggestion | null> {
   // --left-right counts each side of the symmetric difference: left is HEAD.
   // It does not depend on the ref read, so both go out together.
@@ -1966,21 +2006,31 @@ async function resetTargetOf(
   if (fullName !== ref || shortName === "" || head === "") return null;
   const subject = fields.slice(4).join("\t");
 
-  if (!countRaw.ok || countRaw.value.exitCode !== 0) return null;
-  const [aheadText = "", behindText = ""] = countRaw.value.stdout.trim().split(/\s+/);
-  const ahead = Number.parseInt(aheadText, 10);
-  const behind = Number.parseInt(behindText, 10);
-  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) return null;
+  const counts = leftRightCounts(countRaw);
+  if (counts === null) return null;
 
   return {
     ref: fullName,
     label: shortName,
+    remote,
     head,
     ...(lastCommitAt === "" ? {} : { lastCommitAt }),
     ...(subject === "" ? {} : { subject }),
-    ahead,
-    behind
+    ahead: counts.left,
+    behind: counts.right
   };
+}
+
+/** Both sides of a `rev-list --left-right --count`, or null on any failure. */
+function leftRightCounts(
+  raw: Result<{ stdout: string; exitCode: number }>
+): { left: number; right: number } | null {
+  if (!raw.ok || raw.value.exitCode !== 0) return null;
+  const [leftText = "", rightText = ""] = raw.value.stdout.trim().split(/\s+/);
+  const left = Number.parseInt(leftText, 10);
+  const right = Number.parseInt(rightText, 10);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+  return { left, right };
 }
 
 /** The remote whose default branch is worth offering, or null when none is. */
@@ -2001,8 +2051,91 @@ function defaultBranchRemote(
   return remotes[0] ?? null;
 }
 
+/** Who a fork was made from, as the stored forge identity names it. */
+export type ForkParentHint = { hostname: string; nameWithOwner: string };
+
 /**
- * When this checkout last fetched, from `FETCH_HEAD`'s mtime.
+ * The remote that points at the repository this checkout's fork came from.
+ *
+ * Forge identity decides when it has answered: a remote whose fetch URL names
+ * the parent is the fork's source, whatever it is called. A host alias
+ * (`git@github-work:owner/repo`) still names the project, so the host is only
+ * a tie-break. Otherwise Git's convention stands in — GitHub's fork docs,
+ * `gh repo fork` and PwrGit's own Fork all keep the original as `upstream` —
+ * and `confirmed: false` stops the card claiming a relationship nobody
+ * checked. The branch's own remote is never its fork source: that card
+ * already exists as the tracked branch.
+ */
+export function forkSourceRemote(
+  endpoints: readonly RemoteEndpoint[],
+  trackedRemote: string | null,
+  parent: ForkParentHint | null
+): { remote: string; confirmed: boolean } | null {
+  const others = endpoints.filter((endpoint) => endpoint.name !== trackedRemote);
+  if (parent !== null) {
+    const slug = parent.nameWithOwner.toLowerCase();
+    const host = parent.hostname.toLowerCase();
+    const named = others.filter(
+      (endpoint) => parseRemoteUrl(endpoint.fetchUrl)?.path.toLowerCase() === slug
+    );
+    const match =
+      named.find((endpoint) => parseRemoteUrl(endpoint.fetchUrl)?.host === host) ??
+      named[0];
+    if (match !== undefined) return { remote: match.name, confirmed: true };
+  }
+  return others.some((endpoint) => endpoint.name === "upstream")
+    ? { remote: "upstream", confirmed: false }
+    : null;
+}
+
+/**
+ * A remote URL as Git writes it into `FETCH_HEAD`: credentials dropped
+ * (`transport_anonymize_url`), then trailing slashes, then one `.git`.
+ * Applied to both sides so a configured URL and its `FETCH_HEAD` note compare
+ * equal.
+ */
+function fetchHeadUrl(url: string): string {
+  let text = url.trim();
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(text);
+  if (scheme !== null) {
+    const rest = text.slice(scheme[0].length);
+    const at = rest.indexOf("@");
+    const slash = rest.indexOf("/");
+    if (at !== -1 && (slash === -1 || at < slash)) {
+      text = scheme[0] + rest.slice(at + 1);
+    }
+  } else if (!text.startsWith("/") && !text.startsWith(".")) {
+    // scp syntax, `user@host:path`. A local path is copied literally by Git.
+    const at = text.indexOf("@");
+    if (at !== -1 && text.indexOf(":", at) !== -1) text = text.slice(at + 1);
+  }
+  text = text.replace(/\/+$/, "");
+  return text.endsWith(".git") ? text.slice(0, -4) : text;
+}
+
+/**
+ * The remotes a `FETCH_HEAD` names. Each line ends `… of <url>`, and a
+ * multi-remote fetch appends one block per remote, so this is exactly what
+ * the last fetch asked — not what it changed.
+ */
+export function fetchHeadRemotes(
+  fetchHead: string,
+  endpoints: readonly RemoteEndpoint[]
+): string[] {
+  const urls = new Set<string>();
+  for (const line of fetchHead.split("\n")) {
+    const at = line.lastIndexOf(" of ");
+    if (at === -1) continue;
+    urls.add(fetchHeadUrl(line.slice(at + " of ".length)));
+  }
+  return endpoints
+    .filter((endpoint) => urls.has(fetchHeadUrl(endpoint.fetchUrl)))
+    .map((endpoint) => endpoint.name);
+}
+
+/**
+ * When this checkout last fetched, from `FETCH_HEAD`'s mtime, and what that
+ * fetch asked.
  *
  * Not per-remote on purpose: Git writes one `FETCH_HEAD` per fetch whichever
  * remote it names, and the per-remote alternative (a loose ref's mtime)
@@ -2010,18 +2143,26 @@ function defaultBranchRemote(
  * since `FETCH_HEAD` lives in `$GIT_DIR` — a sibling worktree's fetch updates
  * the shared refs without touching this one's, so the answer can be older than
  * the truth. Both approximations err toward "more stale than you think", which
- * is the safe direction for a warning on a destructive screen.
+ * is the safe direction for a warning on a destructive screen. Its contents
+ * say which remotes that time is true for: a bare `git fetch` names only the
+ * branch's own.
  */
-async function lastFetchTime(git: GitExec, cwd: string): Promise<string | null> {
+async function lastFetch(
+  git: GitExec,
+  cwd: string
+): Promise<{ at: string | null; fetchHead: string }> {
+  const none = { at: null, fetchHead: "" };
   const dirRaw = await git(["rev-parse", "--absolute-git-dir"], cwd);
-  if (!dirRaw.ok || dirRaw.value.exitCode !== 0) return null;
+  if (!dirRaw.ok || dirRaw.value.exitCode !== 0) return none;
   const gitDir = dirRaw.value.stdout.trim();
-  if (gitDir === "") return null;
+  if (gitDir === "") return none;
+  const path = join(gitDir, "FETCH_HEAD");
   try {
-    return statSync(join(gitDir, "FETCH_HEAD")).mtime.toISOString();
+    const at = statSync(path).mtime.toISOString();
+    return { at, fetchHead: readFileSync(path, "utf8") };
   } catch {
     // No FETCH_HEAD at all — a clone that has never fetched since.
-    return null;
+    return none;
   }
 }
 
@@ -2057,23 +2198,105 @@ async function countRemoteBranches(
 }
 
 /**
+ * The checked-out branch's counterpart on the fork's source: the same branch
+ * name there, or — when this branch is its remote's default — the source's
+ * default under whatever name the source uses for it.
+ */
+async function forkSourceTarget(
+  git: GitExec,
+  cwd: string,
+  source: { remote: string; confirmed: boolean },
+  parent: ForkParentHint | null,
+  branchName: string,
+  tracksDefault: boolean,
+  taken: ReadonlySet<string>
+): Promise<ForkSourceTarget | null> {
+  const candidates = [`refs/remotes/${source.remote}/${branchName}`];
+  if (tracksDefault) {
+    const headRaw = await git(
+      ["symbolic-ref", "--quiet", `refs/remotes/${source.remote}/HEAD`],
+      cwd
+    );
+    const head = headRaw.ok && headRaw.value.exitCode === 0
+      ? headRaw.value.stdout.trim()
+      : "";
+    if (head.startsWith(`refs/remotes/${source.remote}/`)) candidates.push(head);
+  }
+  for (const ref of candidates) {
+    if (taken.has(ref)) return null;
+    const target = await resetTargetOf(git, cwd, ref, source.remote);
+    if (target === null) continue;
+    return {
+      ...target,
+      ...(source.confirmed && parent !== null
+        ? { parent: parent.nameWithOwner }
+        : {}),
+      pushBack: null
+    };
+  }
+  return null;
+}
+
+/**
+ * What pushing the fork source's tip to the tracked branch would do. Null
+ * when they already agree — the reset alone leaves nothing to push.
+ */
+async function forkPushBack(
+  git: GitExec,
+  cwd: string,
+  localBranch: string,
+  tracked: ResetTargetSuggestion,
+  sourceRef: string
+): Promise<ForkPushBack | null> {
+  // The branch on the remote is `branch.<name>.merge`, not the tracking ref's
+  // tail: a custom fetch refspec can file `main` under any local name.
+  const [mergeRaw, countRaw] = await Promise.all([
+    git(["config", "--get", `branch.${localBranch}.merge`], cwd),
+    git(
+      ["rev-list", "--left-right", "--count", `${tracked.ref}...${sourceRef}`],
+      cwd
+    )
+  ]);
+  const merge =
+    mergeRaw.ok && mergeRaw.value.exitCode === 0
+      ? mergeRaw.value.stdout.trim()
+      : "";
+  if (!merge.startsWith("refs/heads/")) return null;
+  const counts = leftRightCounts(countRaw);
+  if (counts === null || counts.left + counts.right === 0) return null;
+  return {
+    remote: tracked.remote,
+    branch: merge.slice("refs/heads/".length),
+    ref: tracked.ref,
+    head: tracked.head,
+    overwrites: counts.left,
+    adds: counts.right
+  };
+}
+
+/**
  * Rank the reset targets worth naming before the full branch list.
  *
  * Everything here is best-effort: a branch with no upstream, a remote with no
  * symbolic HEAD, and a repository that has never fetched are all ordinary
  * states, and none of them should stop the dialog from opening.
+ *
+ * `forkParent` is the stored forge identity's parent, when the repository is
+ * a known fork; it decides which remote the fork-source card comes from.
  */
 export async function resolveResetTargets(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  forkParent: ForkParentHint | null = null
 ): Promise<Result<ResetTargets>> {
   const checkout = await resolveCheckedOutRef(git, cwd);
   if (!checkout.ok) return checkout;
 
-  // Neither of these reads the other's answer, and the dialog waits on both.
-  const [upstreamRaw, remotes] = await Promise.all([
+  // None of these reads another's answer, and the dialog waits on all three.
+  const [upstreamRaw, remotes, endpoints] = await Promise.all([
     git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd),
-    listRemoteNames(git, cwd)
+    listRemoteNames(git, cwd),
+    listRemoteEndpoints(git, cwd)
   ]);
   if (!upstreamRaw.ok) return upstreamRaw;
   const upstreamRef =
@@ -2096,27 +2319,63 @@ export async function resolveResetTargets(
       ? headRaw.value.stdout.trim()
       : null;
 
-  const [upstream, defaultBranch, branchCount, lastFetchedAt] =
+  const longestFirst = [...remotes.value].sort((a, b) => b.length - a.length);
+  const tracked =
+    upstreamRef === null ? null : splitRemoteRef(upstreamRef, longestFirst);
+  // A remote listing that failed costs the fork card, never the dialog.
+  const source = forkSourceRemote(
+    endpoints.ok ? endpoints.value : [],
+    tracked?.remote ?? null,
+    forkParent
+  );
+
+  const [upstream, defaultBranch, forkSource, branchCount, fetched] =
     await Promise.all([
-      upstreamRef === null
+      upstreamRef === null || tracked === null
         ? Promise.resolve(null)
-        : resetTargetOf(git, cwd, upstreamRef),
+        : resetTargetOf(git, cwd, upstreamRef, tracked.remote),
       // The upstream card already names it; a second identical card is noise.
-      defaultRef === null || defaultRef === upstreamRef
+      defaultRef === null || defaultRef === upstreamRef || owner === null
         ? Promise.resolve(null)
-        : resetTargetOf(git, cwd, defaultRef),
+        : resetTargetOf(git, cwd, defaultRef, owner),
+      source === null
+        ? Promise.resolve(null)
+        : forkSourceTarget(
+            git,
+            cwd,
+            source,
+            forkParent,
+            tracked?.name ?? checkout.value.branch,
+            upstreamRef !== null && upstreamRef === defaultRef,
+            new Set([upstreamRef, defaultRef].filter((ref) => ref !== null))
+          ),
       countRemoteBranches(git, cwd, remotes.value),
-      lastFetchTime(git, cwd)
+      lastFetch(git, cwd)
     ]);
   if (!branchCount.ok) return branchCount;
+
+  const pushBack =
+    forkSource === null || upstream === null
+      ? null
+      : await forkPushBack(
+          git,
+          cwd,
+          checkout.value.branch,
+          upstream,
+          forkSource.ref
+        );
 
   return ok({
     branch: checkout.value.branch,
     head: checkout.value.head,
     upstream,
     defaultBranch,
+    forkSource: forkSource === null ? null : { ...forkSource, pushBack },
     branchCount: branchCount.value,
-    lastFetchedAt
+    lastFetchedAt: fetched.at,
+    lastFetchedRemotes: endpoints.ok
+      ? fetchHeadRemotes(fetched.fetchHead, endpoints.value)
+      : []
   });
 }
 
@@ -4622,6 +4881,79 @@ function pushFailureHeadline(code: string, stderr: string): string {
 /** Lines of push stderr that say where or how far, never why. */
 const PUSH_NOISE =
   /^(To |hint:|remote:$|(remote: )?(Enumerating|Counting|Delta compression|Compressing|Writing|Resolving|Total)\b)/;
+
+const FULL_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+/**
+ * Push one exact object to one remote branch, leased on the tip the caller
+ * reviewed — the reset dialog bringing a fork's `origin/main` along to the
+ * commit `main` was just reset to.
+ *
+ * The object, not the local branch: what was reviewed is what goes, even if
+ * `main` has moved in the moment since. The lease is explicit rather than
+ * Git's default, which trusts the remote-tracking ref — a background fetch
+ * between review and push would otherwise quietly re-arm it against a tip
+ * nobody looked at. Pushing to the remote by name also updates its
+ * remote-tracking ref, so no fetch is needed afterwards.
+ */
+export async function pushBranchWithLease(
+  git: GitExec,
+  cwd: string,
+  request: { remote: string; branch: string; head: string; expectedHead: string }
+): Promise<Result<void>> {
+  if (
+    !FULL_OBJECT_ID.test(request.head) ||
+    !FULL_OBJECT_ID.test(request.expectedHead)
+  ) {
+    return err({
+      kind: "remote",
+      code: "invalid_push_plan",
+      message: "The push names a commit PwrGit did not resolve."
+    });
+  }
+  const remote = await checkedRemoteName(git, cwd, request.remote);
+  if (!remote.ok) return remote;
+  const destination = `refs/heads/${request.branch}`;
+  const format = await git(["check-ref-format", destination], cwd);
+  if (!format.ok) return format;
+  if (format.value.exitCode !== 0) {
+    return err({
+      kind: "remote",
+      code: "invalid_push_plan",
+      message: `Not a branch name: ${request.branch}`
+    });
+  }
+  const raw = await git(
+    [
+      "push",
+      "--progress",
+      `--force-with-lease=${destination}:${request.expectedHead}`,
+      "--",
+      request.remote,
+      `${request.head}:${destination}`
+    ],
+    cwd
+  );
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode === 0) return ok(undefined);
+  const stderr = collapseProgress(raw.value.stderr);
+  if (/\bstale info\b/i.test(stderr)) {
+    return err({
+      kind: "remote",
+      code: "push_lease_stale",
+      message: `${request.remote}/${request.branch} moved after the review, so the lease stopped the push.`,
+      ...(stderr === "" ? {} : { detail: stderr })
+    });
+  }
+  const code = pushWasDenied(stderr) ? "push_denied" : "push_failed";
+  return err({
+    kind: "remote",
+    code,
+    ...(stderr === ""
+      ? { message: "Push failed." }
+      : { message: pushFailureHeadline(code, stderr), detail: stderr })
+  });
+}
 
 /**
  * Push the current branch to its upstream — or, with `publish`, create it on a

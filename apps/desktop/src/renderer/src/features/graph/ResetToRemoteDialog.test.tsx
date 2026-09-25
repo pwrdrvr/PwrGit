@@ -22,6 +22,7 @@ import {
   resetInspectionRequest,
   ResetToRemoteDialog
 } from "./ResetToRemoteDialog";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
 
 const worktree: Worktree = {
   id: "worktree-1",
@@ -46,6 +47,7 @@ const targets: ResetTargets = {
   upstream: {
     ref: "refs/remotes/origin/feature/local",
     label: "origin/feature/local",
+    remote: "origin",
     head: "2".repeat(40),
     lastCommitAt: new Date().toISOString(),
     ahead: 9,
@@ -54,13 +56,16 @@ const targets: ResetTargets = {
   defaultBranch: {
     ref: "refs/remotes/origin/main",
     label: "origin/main",
+    remote: "origin",
     head: "3".repeat(40),
     lastCommitAt: new Date().toISOString(),
     ahead: 0,
     behind: 24
   },
+  forkSource: null,
   branchCount: 39,
-  lastFetchedAt: new Date(Date.now() - 2 * 3_600_000).toISOString()
+  lastFetchedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+  lastFetchedRemotes: ["origin"]
 };
 
 let container: HTMLDivElement;
@@ -84,11 +89,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function open(preselectRef?: string): Promise<void> {
+async function open(
+  preselectRef?: string,
+  on: Worktree = worktree
+): Promise<void> {
   await act(async () => {
     root.render(
       <ResetToRemoteDialog
-        worktree={worktree}
+        worktree={on}
         {...(preselectRef === undefined ? {} : { preselectRef })}
         onClose={() => undefined}
         onComplete={() => undefined}
@@ -424,5 +432,271 @@ describe("reset to remote — request shapes", () => {
       mode: "hard",
       ...snapshot
     });
+  });
+});
+
+describe("reset to remote — a fork and its source", () => {
+  const main: Worktree = { ...worktree, branch: "main", isDefaultBranch: true };
+  const tracked = "1".repeat(40);
+  const sourceTip = "4".repeat(40);
+
+  /** `main` tracks `origin/main`, identical to it; the source is 10 ahead. */
+  function forkTargets(
+    overrides: {
+      overwrites?: number;
+      upstreamBehind?: number;
+      lastFetchedRemotes?: string[];
+    } = {}
+  ): ResetTargets {
+    const overwrites = overrides.overwrites ?? 0;
+    return {
+      branch: "main",
+      head: tracked,
+      upstream: {
+        ref: "refs/remotes/origin/main",
+        label: "origin/main",
+        remote: "origin",
+        head: tracked,
+        ahead: 0,
+        behind: overrides.upstreamBehind ?? 0
+      },
+      defaultBranch: null,
+      forkSource: {
+        ref: "refs/remotes/upstream/main",
+        label: "upstream/main",
+        remote: "upstream",
+        head: sourceTip,
+        ahead: overwrites,
+        behind: 10,
+        parent: "acme/widget",
+        pushBack: {
+          remote: "origin",
+          branch: "main",
+          ref: "refs/remotes/origin/main",
+          head: tracked,
+          overwrites,
+          adds: 10
+        }
+      },
+      branchCount: 19,
+      lastFetchedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+      lastFetchedRemotes: overrides.lastFetchedRemotes ?? ["origin", "upstream"]
+    };
+  }
+
+  function answer(
+    value: ResetTargets,
+    push: { ok: true; value: null } | { ok: false; error: object } = {
+      ok: true,
+      value: null
+    }
+  ): void {
+    dispatchMock.mockImplementation((command: string) => {
+      if (command === "remote:resetTargets") {
+        return Promise.resolve({ ok: true, value });
+      }
+      if (command === "remote:inspectReset") {
+        return Promise.resolve({
+          ok: true,
+          value: {
+            snapshot: {
+              branch: "main",
+              head: tracked,
+              remoteRef: "refs/remotes/upstream/main",
+              remoteHead: sourceTip
+            },
+            leaving: [],
+            arriving: [],
+            alignedCommits: [],
+            dirty: 0
+          } satisfies RemoteResetPreview
+        });
+      }
+      if (command === "remote:pushBranchWithLease") {
+        return Promise.resolve(push);
+      }
+      return Promise.resolve({ ok: true, value: null });
+    });
+  }
+
+  const button = (): HTMLButtonElement | null =>
+    container.querySelector<HTMLButtonElement>(".modal__create");
+  const pushBox = (): HTMLInputElement | null =>
+    container.querySelector<HTMLInputElement>(".reset-remote__push input");
+
+  async function click(element: HTMLElement | null | undefined): Promise<void> {
+    await act(async () => {
+      element?.click();
+    });
+  }
+
+  it("opens on the fork's source when the tracked branch would change nothing", async () => {
+    answer(forkTargets());
+    await open(undefined, main);
+
+    expect(cards()).toEqual([
+      { name: "upstream/main", checked: true },
+      { name: "origin/main", checked: false },
+      { name: "Another fetched branch…", checked: false }
+    ]);
+    const [fork, same] = container.querySelectorAll(".reset-target");
+    expect(fork?.textContent).toContain("acme/widget");
+    expect(fork?.textContent).toContain("Fork source");
+    expect(fork?.textContent).toContain("↓10");
+    // Still choosable, but drawn as the no-op it is — and never called
+    // "Upstream" beside a remote that is literally named upstream.
+    expect(same?.className).toContain("is-identical");
+    expect(same?.textContent).toContain("already identical to main");
+    expect(same?.textContent).toContain("Tracking");
+    expect(text()).not.toContain("Upstream");
+  });
+
+  it("still opens on the tracked branch when resetting to it would move something", async () => {
+    answer(forkTargets({ upstreamBehind: 3 }));
+    await open(undefined, main);
+
+    expect(cards()[1]).toEqual({ name: "origin/main", checked: true });
+    expect(container.querySelector(".reset-remote__push")).toBeNull();
+  });
+
+  it("says Upstream remote, not Fork source, when only the remote's name said so", async () => {
+    const unconfirmed = forkTargets();
+    const { parent: _parent, ...rest } = unconfirmed.forkSource!;
+    answer({ ...unconfirmed, forkSource: rest });
+    await open(undefined, main);
+
+    expect(text()).toContain("Upstream remote");
+    expect(text()).not.toContain("Fork source");
+    expect(text()).toContain("After the reset");
+  });
+
+  it("offers the fast-forward to the fork, ticked, and names it on the button", async () => {
+    answer(forkTargets());
+    await open(undefined, main);
+
+    expect(pushBox()?.checked).toBe(true);
+    expect(text()).toContain("Update origin/main to match");
+    expect(text()).toContain("Fast-forward");
+    expect(button()?.textContent).toBe("Review soft reset + push");
+    expect(button()?.className).not.toContain("modal__create--danger");
+
+    await click(pushBox());
+    expect(button()?.textContent).toBe("Review soft reset");
+  });
+
+  it("makes a forced push opt-in, and destructive once chosen", async () => {
+    answer(forkTargets({ overwrites: 2 }));
+    await open(undefined, main);
+
+    expect(pushBox()?.checked).toBe(false);
+    expect(text()).toContain("Force-push origin/main to match");
+    expect(text()).toContain("origin/main has 2 commits that upstream/main doesn't");
+    expect(button()?.textContent).toBe("Review soft reset");
+
+    await click(pushBox());
+    expect(button()?.textContent).toBe("Review soft reset + force-push");
+    expect(button()?.className).toContain("modal__create--danger");
+  });
+
+  it("offers the push only with the fork's source selected", async () => {
+    answer(forkTargets());
+    await open(undefined, main);
+
+    await click(
+      container.querySelectorAll<HTMLInputElement>(".reset-target input")[1]
+    );
+    expect(container.querySelector(".reset-remote__push")).toBeNull();
+    expect(button()?.textContent).toBe("Review soft reset");
+  });
+
+  it("warns when the last fetch skipped the fork's source, and fetches both", async () => {
+    answer(forkTargets({ lastFetchedRemotes: ["origin"] }));
+    await open(undefined, main);
+
+    const strip = container.querySelector(".reset-remote__fetched");
+    expect(strip?.className).toContain("is-stale");
+    expect(strip?.textContent).toContain(
+      "The last fetch, 2m ago, covered origin only. upstream/main may be behind acme/widget."
+    );
+    const fetch = container.querySelector<HTMLButtonElement>(".reset-remote__fetch");
+    expect(fetch?.textContent).toBe("Fetch upstream + origin");
+
+    await click(fetch);
+    expect(dispatchMock).toHaveBeenCalledWith("remote:fetch", {
+      worktreeId: "worktree-1",
+      remotes: ["upstream", "origin"]
+    });
+  });
+
+  it("resets, then pushes the reviewed object leased on the reviewed tip", async () => {
+    answer(forkTargets());
+    await open(undefined, main);
+    await click(button());
+
+    const then = container.querySelector(".reset-remote__then");
+    expect(then?.textContent).toContain("Then push to your fork");
+    expect(then?.textContent).toContain(
+      `git push --force-with-lease=refs/heads/main:${tracked} origin ${sourceTip}:refs/heads/main`
+    );
+    expect(button()?.textContent).toBe("Soft reset + push");
+
+    await click(button());
+    const commands = dispatchMock.mock.calls.map(([command]) => command);
+    expect(commands.indexOf("remote:pushBranchWithLease")).toBeGreaterThan(
+      commands.indexOf("remote:resetToRemote")
+    );
+    expect(dispatchMock).toHaveBeenCalledWith("remote:pushBranchWithLease", {
+      worktreeId: "worktree-1",
+      remote: "origin",
+      branch: "main",
+      head: sourceTip,
+      expectedHead: tracked
+    });
+    expect(showInfoToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Soft reset complete",
+        message: expect.stringContaining("origin/main was pushed to match")
+      })
+    );
+  });
+
+  it("reports a refused push as a reset that landed, not a reset that failed", async () => {
+    answer(forkTargets(), {
+      ok: false,
+      error: {
+        kind: "remote",
+        code: "push_lease_stale",
+        message: "origin/main moved after the review, so the lease stopped the push."
+      }
+    });
+    await open(undefined, main);
+    await click(button());
+    await click(button());
+
+    expect(showErrorToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Soft reset complete — push refused",
+        message: expect.stringContaining("origin/main is unchanged")
+      })
+    );
+    expect(showInfoToast).not.toHaveBeenCalled();
+  });
+
+  // A soft reset keeps a leaving commit's changes locally, but the forced
+  // push still deletes the commits from the fork.
+  it("asks for acknowledgement before a forced push, even on a soft reset", async () => {
+    answer(forkTargets({ overwrites: 2 }));
+    await open(undefined, main);
+    await click(pushBox());
+    await click(button());
+
+    expect(button()?.textContent).toBe("Soft reset + force-push");
+    expect(button()?.disabled).toBe(true);
+    const ack = container.querySelector(".reset-remote__ack");
+    expect(ack?.textContent).toContain(
+      "2 commits will be removed from origin/main"
+    );
+    await click(ack?.querySelector("input"));
+    expect(button()?.disabled).toBe(false);
   });
 });

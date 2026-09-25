@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, LIGHT block — the theme the report came from. */
+          :root {
+            --app: #ffffff; --side: #f7f4ef; --panel: #fdfcfa; --elev: #ffffff;
+            --hov: #f4f0e8; --hov2: #ebe5da;
+            --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12); --line3: rgba(0,0,0,.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64; --tsub: rgba(26,22,18,.68);
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: rgba(183,76,0,.12); --abord: rgba(183,76,0,.42);
+            --dt: #8a1f12; --dsoft: rgba(138,31,18,.12); --dbord: rgba(138,31,18,.28); --dhard: #b3685c;
+            --okt: #1a5c2e; --oksoft: rgba(26,92,46,.1); --okbord: rgba(26,92,46,.3);
+            --warn: #805200; --bad: #a8472a;
+            --native: #1f6fff;
+            --sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #efe9df; }
+          body { margin: 0; background: #efe9df; font-family: var(--sans); color: var(--t1); -webkit-font-smoothing: antialiased; }
+          a { color: var(--acc); text-decoration: none; } a:hover { color: var(--accb); }
+
+          /* ---- review chrome (house: "Fork From Here") ---- */
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #fff; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 14px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: var(--t2); max-width: 860px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.35 var(--sans); color: var(--t2); max-width: 640px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); max-width: 980px; text-wrap: pretty; }
+          .dv-next code, .fitem code, .note code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+          .note { margin: 0; max-width: 620px; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+
+          /* ---- findings ---- */
+          .pair { display: flex; gap: 28px; align-items: flex-start; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.gap { background: var(--warn); }
+          .pin.ok { background: #2e7d3c; }
+          .find { width: 430px; display: flex; flex-direction: column; gap: 13px; }
+          .fitem { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 10px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 12px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .tl { display: grid; grid-template-columns: 64px minmax(0,1fr); gap: 2px 10px; margin-top: 7px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: 500 10.5px/1.5 var(--mono); color: var(--t2); }
+          .tl .at { color: var(--t3); }
+          .tl .hot { color: var(--dt); font-weight: 650; }
+
+          /* ---- modal shell (app.css .modal + .reset-remote, light) ---- */
+          .m { position: relative; width: 620px; padding: 18px; background: var(--elev); border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 18px 48px rgba(40,26,10,.16), 0 2px 6px rgba(40,26,10,.06); }
+          .m-title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; font: 700 13px/1.35 var(--sans); color: var(--t1); }
+          .m-p { margin: 0; font: 500 12px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .m-note { margin: 12px 0 0; font: 500 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .m-note code { font: 600 10px/1.4 var(--mono); color: var(--t2); }
+          .m-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+          .b { height: 32px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--line2); background: var(--elev); color: var(--t1); font: 600 12px/1 var(--sans); cursor: pointer; }
+          .b-go { border-color: transparent; background: var(--acc); color: var(--accon); font-weight: 700; }
+          .b-bad { border-color: transparent; background: var(--dt); color: #fff; font-weight: 700; }
+          .b-off { opacity: .45; cursor: not-allowed; }
+          .b-sm { height: 24px; padding: 0 9px; border-radius: 6px; font: 600 10.5px/1 var(--sans); }
+          .eyeb { display: flex; align-items: center; gap: 8px; margin: 15px 0 8px; font: 600 9.5px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--t3); }
+
+          /* ---- native controls (macOS draws these blue) ---- */
+          .rad { flex: none; width: 14px; height: 14px; margin-top: 1px; border-radius: 999px; border: 1px solid rgba(0,0,0,.3); background: #fff; }
+          .rad.on { border-color: var(--native); background: var(--native); box-shadow: inset 0 0 0 3.5px #fff; }
+          .box { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; margin-top: 1px; border-radius: 4px; border: 1px solid rgba(0,0,0,.3); background: #fff; color: #fff; font: 800 10px/1 var(--sans); }
+          .box.on { border-color: var(--native); background: var(--native); }
+
+          /* ---- target cards (.reset-target) ---- */
+          .tgts { display: grid; gap: 8px; }
+          .tgt { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--elev); cursor: pointer; }
+          .tgt.on { border-color: var(--abord); background: var(--asoft); }
+          .tgt.noop { padding: 8px 10px; background: var(--panel); border-color: var(--line); }
+          .tgt.noop .tgt-n { color: var(--t2); font-weight: 600; }
+          .tgt-b { display: block; min-width: 0; flex: 1; }
+          .tgt-h { display: flex; align-items: baseline; gap: 8px; }
+          .tgt-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 12px/1.3 var(--mono); color: var(--t1); }
+          .tgt-s { font: 600 12px/1.3 var(--mono); color: var(--t1); }
+          .tgt-m { display: block; margin-top: 4px; font: 500 10.5px/1.45 var(--mono); color: var(--t3); }
+          .tgt-d { display: block; margin-top: 4px; font: 500 10.5px/1.45 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .tgt-inl { font: 500 10.5px/1.3 var(--sans); color: var(--t3); }
+          .up { color: var(--okt); } .dn { color: var(--dt); }
+          .tag { flex: none; margin-left: auto; padding: 2px 6px; border: 1px solid var(--abord); border-radius: 999px; background: var(--asoft); color: var(--accb); font: 700 8.5px/1.35 var(--sans); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+          .tag.q { border-color: var(--line); background: var(--panel); color: var(--t3); }
+          .tag.ok { border-color: var(--okbord); background: var(--oksoft); color: var(--okt); }
+          .tag.bad { border-color: var(--dbord); background: var(--dsoft); color: var(--dt); }
+          .repo { font: 600 10.5px/1 var(--mono); color: var(--t2); }
+
+          /* ---- listbox (BranchRefPicker, stacked) ---- */
+          .browse { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+          .inp { display: flex; align-items: center; height: 32px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 7px; background: #fff; font: 500 11px/1 var(--mono); color: var(--tsub); }
+          .lst { margin-top: 8px; border: 1px solid var(--line2); border-radius: 7px; background: #fff; overflow: hidden; }
+          .lgrp { padding: 4px 8px 2px; font: 700 11px/1.4 var(--mono); color: var(--t1); }
+          .lrow { padding: 2px 8px 2px 22px; font: 500 11px/1.55 var(--mono); color: var(--t2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .lrow.sel { background: #b8d4ff; color: var(--t1); }
+          .ph { display: flex; align-items: center; justify-content: center; height: 56px; margin-top: 8px; border-radius: 7px; background: repeating-linear-gradient(135deg, rgba(0,0,0,.035) 0 6px, transparent 6px 12px); font: 500 10.5px/1 var(--mono); color: var(--t3); }
+
+          /* ---- freshness strip (.reset-remote__fetched) ---- */
+          .fresh { display: flex; align-items: center; gap: 9px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: 500 10.5px/1.45 var(--sans); color: var(--t3); }
+          .fresh.stale { border-color: var(--abord); background: var(--asoft); color: var(--t2); }
+          .fresh .grow { flex: 1; min-width: 0; text-wrap: pretty; }
+          .fresh strong { font-weight: 650; color: var(--t1); }
+          .fresh code { font: 600 10px/1.4 var(--mono); color: var(--t1); }
+
+          /* ---- new: the fork push-back option ---- */
+          .push { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--elev); cursor: pointer; }
+          .push.on { border-color: var(--abord); background: var(--asoft); }
+          .push.force { border-color: var(--dbord); }
+          .push.force.on { border-color: color-mix(in srgb, var(--dt) 60%, var(--line2)); background: var(--dsoft); }
+          .push.force.on .push-t { color: var(--dt); }
+          .push-t { font: 700 11.5px/1.25 var(--sans); color: var(--t1); }
+          .push-t code { font: 650 11.5px/1.25 var(--mono); }
+
+          /* ---- mode cards (.reset-remote__modes) ---- */
+          .mode { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--elev); cursor: pointer; }
+          .mode + .mode { margin-top: 8px; }
+          .mode.on { border-color: var(--abord); background: var(--asoft); }
+          .mode.hard { border-color: var(--dbord); }
+          .mode.hard.on { border-color: color-mix(in srgb, var(--dt) 60%, var(--line2)); background: var(--dsoft); }
+          .mode.hard.on .mode-t { color: var(--dt); }
+          .mode-t { display: block; font: 700 11.5px/1.2 var(--sans); color: var(--t1); }
+          .mode-d { display: block; margin-top: 4px; font: 500 10.5px/1.45 var(--sans); color: var(--t3); text-wrap: pretty; }
+
+          /* ---- review step ---- */
+          .rv { display: grid; gap: 8px; margin-top: 14px; }
+          .rv > div { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+          .rv dt { margin-bottom: 6px; font: 600 9.5px/1 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--t3); }
+          .rv dd { margin: 0; font: 600 11px/1.35 var(--mono); color: var(--t1); }
+          .rv .sha { margin-top: 3px; font-size: 10px; color: var(--t3); }
+          .ledger { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 12px; }
+          .cell { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+          .cell.hot { border-color: var(--dbord); background: var(--dsoft); }
+          .cell strong { display: block; font: 700 19px/1.1 var(--mono); color: var(--t1); }
+          .cell.hot strong, .cell.hot span { color: var(--dt); }
+          .cell span { display: block; margin-top: 4px; font: 500 10px/1.35 var(--sans); color: var(--t3); }
+          .then { margin-top: 12px; padding: 10px; border: 1px solid var(--abord); border-radius: 8px; background: var(--asoft); }
+          .then.force { border-color: var(--dbord); background: var(--dsoft); }
+          .then-h { display: flex; align-items: baseline; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--t3); }
+          .then-r { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; font: 650 11.5px/1.35 var(--mono); color: var(--t1); }
+          .then-r .arr { color: var(--t3); font-weight: 500; }
+          .then-d { margin-top: 5px; font: 500 10.5px/1.45 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .then.force .then-d { color: var(--dt); }
+          .cmd { margin-top: 7px; padding: 5px 7px; border-radius: 6px; background: rgba(0,0,0,.045); font: 500 10px/1.45 var(--mono); color: var(--t2); overflow-wrap: anywhere; }
+          .warnbox { margin-top: 12px; padding: 10px; border: 1px solid var(--abord); border-radius: 8px; background: var(--asoft); font: 500 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .ack { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; padding: 10px; border: 1px solid var(--dbord); border-radius: 8px; background: var(--dsoft); font: 500 11px/1.45 var(--sans); color: var(--dt); }
+          .drops { margin-top: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
+          .drops-h { padding: 7px 10px; border-bottom: 1px solid var(--line); font: 600 9.5px/1.3 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--t3); }
+          .drop { display: grid; grid-template-columns: 62px minmax(0,1fr) auto; gap: 10px; align-items: baseline; padding: 3px 10px; font: 500 11px/1.6 var(--mono); }
+          .drop .sha { color: var(--dt); } .drop .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t2); } .drop .age { color: var(--t3); font-size: 10px; }
+
+          /* ---- toasts ---- */
+          .toast { width: 380px; padding: 11px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--elev); box-shadow: 0 12px 32px rgba(40,26,10,.14); }
+          .toast.err { border-color: var(--dbord); }
+          .toast-t { display: flex; align-items: center; gap: 7px; font: 700 12px/1.3 var(--sans); color: var(--t1); }
+          .toast.err .toast-t { color: var(--dt); }
+          .dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: #2e7d3c; }
+          .toast.err .dot { background: var(--dt); }
+          .toast-m { margin-top: 5px; font: 500 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .toast-m code { font: 600 10.5px/1.4 var(--mono); color: var(--t1); }
+
+          /* ---- live prototype chrome ---- */
+          .seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--line2); border-radius: 8px; background: var(--side); }
+          .seg-b { height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; font: 600 11px/1 var(--sans); color: var(--t2); cursor: pointer; }
+          .seg-b.on { background: var(--elev); color: var(--t1); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+          .proto-h { display: flex; align-items: center; gap: 10px; width: 620px; }
+          .proto-h .lbl { font: 500 11px/1 var(--sans); color: var(--t3); }
+        </style>
+      </helmet>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Findings">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings — resetting a fork's main, as it ships today</span>
+        </div>
+        <p class="dv-sub">Recreated from the report: <code>huntharo/diskhound</code> is a fork of <code>tzarebczan/diskhound</code>. The checkout has <code>origin</code> (the fork) and <code>upstream</code> (the source), and <code>main</code> tracks <code>origin/main</code>. PwrGit already knows all of that: the forge identity stores the fork's parent, and the sidebar draws the fork mark from it. The reset dialog uses none of it.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Current, annotated">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Current — opens on the one target that changes nothing</div>
+            <div class="pair">
+              <div class="m">
+                <div class="m-title">Reset main to a fetched remote branch</div>
+                <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+                <div class="eyeb">Target</div>
+                <div class="tgts">
+                  <div class="tgt on"><span class="rad on"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-n">origin/main</span><span class="pin">1</span><span class="tag">Upstream</span><span class="pin">3</span></span><span class="tgt-m">d393fe2d458d · 1d · <span class="up">↑0</span> <span class="dn">↓0</span></span><span class="tgt-d">Already identical to this branch.</span></span></div>
+                  <div class="tgt"><span class="rad"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-s">Another fetched branch…</span><span class="pin">2</span><span class="tag q">19 fetched</span></span></span></div>
+                </div>
+                <div class="fresh"><span class="grow">Last fetched moments ago — the reset uses that snapshot, not the live remote.</span><span class="pin">4</span><button class="b b-sm">Fetch now</button></div>
+                <div class="eyeb">Reset mode</div>
+                <div class="mode on"><span class="rad on"></span><span><span class="mode-t">Soft</span><span class="mode-d">Move the branch and HEAD to the selected commit without changing the index or working tree.</span></span></div>
+                <div class="mode hard"><span class="rad"></span><span><span class="mode-t">Hard · destructive</span><span class="mode-d">Move the branch and HEAD, reset the index, and overwrite tracked files.</span></span></div>
+                <div class="m-acts"><span class="pin" style="align-self:center;margin-right:auto;">5</span><button class="b">Cancel</button><button class="b b-go">Review soft reset</button></div>
+              </div>
+
+              <div class="find">
+                <div class="fitem"><span class="pin">1</span><div><h4>The default is a no-op</h4><p><code>origin/main</code> is preselected because it is the branch's upstream, and it is identical to <code>main</code>. Review then leads to a screen where nothing leaves and nothing arrives.</p></div></div>
+                <div class="fitem"><span class="pin">2</span><div><h4>The fork's source is known but buried</h4><p>The target you wanted, <code>upstream/main</code>, is behind "Another fetched branch…" and a filter box. It is row 3 of 19, below two <code>origin/fix/*</code> branches that happened to commit later.</p></div></div>
+                <div class="fitem"><span class="pin">3</span><div><h4>"Upstream" means two different things</h4><p>The tag on <code>origin/main</code> uses Git's meaning: the branch this one tracks. On a fork, the remote named <code>upstream</code> is the source. The card labelled UPSTREAM is the one that is not.</p></div></div>
+                <div class="fitem"><span class="pin">4</span><div><h4>"Moments ago" described origin only</h4><p><code>Fetch now</code> runs a bare <code>git fetch</code>, which fetches the branch's own remote. The freshness line reads <code>FETCH_HEAD</code>, which at 09:20 listed 14 refs, all from <code>huntharo/diskhound</code>. From the reflog:</p>
+                  <div class="tl">
+                    <span class="at">09:01:09</span><span>upstream/main fetched at 8ef4155</span>
+                    <span class="at">09:10:14</span><span>PR #9 merged upstream — b9bba68</span>
+                    <span class="at">09:20:16</span><span class="hot">main reset to 8ef4155 (19 minutes stale)</span>
+                    <span class="at">09:20:19</span><span>main pushed to origin</span>
+                    <span class="at">09:20:27</span><span>upstream fetched, b9bba68 arrives</span>
+                  </div>
+                </div></div>
+                <div class="fitem"><span class="pin">5</span><div><h4>The fork is left behind</h4><p>Resetting <code>main</code> to the source leaves <code>origin/main</code> where it was. Updating the fork is a second, separate operation, and a forced one when the fork has commits of its own.</p></div></div>
+                <div class="fitem"><span class="pin gap">6</span><div><h4>Why the graph showed dashes above main afterwards</h4><p>Correct, and a symptom of 4. A dashed trunk lane means "fetched, not on local main". Those are the 10 commits between 8ef4155 and b9bba68 that the stale snapshot missed. <code>main</code> and <code>origin/main</code> both sit at 8ef4155; <code>upstream/main</code> is 10 ahead.</p></div></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Turn <a class="dv-oid" href="#t2">2</a> makes the target step fork-aware, turn <a class="dv-oid" href="#t3">3</a> adds the push to the confirm step, and turn <a class="dv-oid" href="#t4">4</a> shows how it ends.</p>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Fork-aware target">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Target — name the fork's source, and say what each remote's snapshot is</span>
+        </div>
+        <p class="dv-sub">Main already has what it needs. The repo's identity names the parent, <code>tzarebczan/diskhound</code>, and <code>git remote -v</code> says <code>upstream</code> points at it. The same branch name on that remote gets its own card, listed first. It is preselected whenever the tracked branch would change nothing. The Upstream tag becomes Tracking, so the word "upstream" only ever means the remote. The freshness line reads which remotes <code>FETCH_HEAD</code> actually covers, and Fetch fetches every remote a card comes from.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Fork behind its source">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>The fork is behind its source — the common case, one click from done</div>
+            <div class="m">
+              <div class="m-title">Reset main to a fetched remote branch</div>
+              <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+              <div class="eyeb">Target</div>
+              <div class="tgts">
+                <div class="tgt on"><span class="rad on"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-n">upstream/main</span><span class="repo">tzarebczan/diskhound</span><span class="tag">Fork source</span></span><span class="tgt-m">b9bba683d1e2 · 13m · <span class="up">↑0</span> <span class="dn">↓10</span></span><span class="tgt-d">Fast-forward: 10 commits arrive, none of yours leave.</span></span></div>
+                <div class="tgt noop"><span class="rad"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-n">origin/main</span><span class="tgt-inl">8ef415503fa4 · already identical to main</span><span class="tag q">Tracking</span></span></span></div>
+                <div class="tgt"><span class="rad"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-s">Another fetched branch…</span><span class="tag q">19 fetched</span></span></span></div>
+              </div>
+              <div class="fresh"><span class="grow">Last fetched 2m ago from <strong>origin</strong> and <strong>upstream</strong>. The reset uses that snapshot, not the live remotes.</span><button class="b b-sm">Fetch now</button></div>
+              <div class="eyeb">Your fork</div>
+              <div class="push on"><span class="box on">✓</span><span class="tgt-b"><span class="tgt-h"><span class="push-t">Update <code>origin/main</code> to match</span><span class="tag ok">Fast-forward</span></span><span class="tgt-d">After the reset, push main to huntharo/diskhound. That adds the same 10 commits; no force needed.</span></span></div>
+              <div class="eyeb">Reset mode</div>
+              <div class="mode on"><span class="rad on"></span><span><span class="mode-t">Soft</span><span class="mode-d">Move the branch and HEAD to the selected commit without changing the index or working tree.</span></span></div>
+              <div class="mode hard"><span class="rad"></span><span><span class="mode-t">Hard · destructive</span><span class="mode-d">Move the branch and HEAD, reset the index, and overwrite tracked files.</span></span></div>
+              <div class="m-acts"><button class="b">Cancel</button><button class="b b-go">Review soft reset + push</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Source not in the last fetch">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>The moment in the report — the last fetch never asked upstream</div>
+            <div class="m">
+              <div class="m-title">Reset main to a fetched remote branch</div>
+              <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+              <div class="eyeb">Target</div>
+              <div class="tgts">
+                <div class="tgt on"><span class="rad on"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-n">upstream/main</span><span class="repo">tzarebczan/diskhound</span><span class="tag">Fork source</span></span><span class="tgt-m">8ef415503fa4 · 19m · <span class="up">↑0</span> <span class="dn">↓2</span></span><span class="tgt-d">Fast-forward: 2 commits arrive, none of yours leave.</span></span></div>
+                <div class="tgt noop"><span class="rad"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-n">origin/main</span><span class="tgt-inl">d393fe2d458d · already identical to main</span><span class="tag q">Tracking</span></span></span></div>
+                <div class="tgt"><span class="rad"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-s">Another fetched branch…</span><span class="tag q">19 fetched</span></span></span></div>
+              </div>
+              <div class="fresh stale"><span class="grow">The last fetch, moments ago, covered <strong>origin</strong> only. <code>upstream/main</code> may be behind tzarebczan/diskhound.</span><button class="b b-sm">Fetch origin + upstream</button></div>
+              <div class="eyeb">Your fork</div>
+              <div class="push on"><span class="box on">✓</span><span class="tgt-b"><span class="tgt-h"><span class="push-t">Update <code>origin/main</code> to match</span><span class="tag ok">Fast-forward</span></span><span class="tgt-d">After the reset, push main to huntharo/diskhound. That adds the same 2 commits; no force needed.</span></span></div>
+              <div class="m-acts"><button class="b">Cancel</button><button class="b b-go">Review soft reset + push</button></div>
+            </div>
+            <p class="note">Review stays enabled, because the user may be offline, but the strip changes from a caption to a warning. After Fetch the fork card reads <code>b9bba683d1e2 · ↓12</code> and the strip names both remotes, as in <a href="#2a">2a</a>.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Fork has its own commits">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>The fork has commits of its own — the push has to force, so it is opt-in</div>
+            <div class="m">
+              <div class="m-title">Reset main to a fetched remote branch</div>
+              <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+              <div class="eyeb">Target</div>
+              <div class="tgts">
+                <div class="tgt on"><span class="rad on"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-n">upstream/main</span><span class="repo">tzarebczan/diskhound</span><span class="tag">Fork source</span></span><span class="tgt-m">b9bba683d1e2 · 13m · <span class="up">↑2</span> <span class="dn">↓10</span></span><span class="tgt-d">Diverged: 2 commits of yours leave, 10 arrive.</span></span></div>
+                <div class="tgt noop"><span class="rad"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-n">origin/main</span><span class="tgt-inl">3c1a9e04b7d2 · already identical to main</span><span class="tag q">Tracking</span></span></span></div>
+                <div class="tgt"><span class="rad"></span><span class="tgt-b"><span class="tgt-h"><span class="tgt-s">Another fetched branch…</span><span class="tag q">19 fetched</span></span></span></div>
+              </div>
+              <div class="fresh"><span class="grow">Last fetched 2m ago from <strong>origin</strong> and <strong>upstream</strong>. The reset uses that snapshot, not the live remotes.</span><button class="b b-sm">Fetch now</button></div>
+              <div class="eyeb">Your fork</div>
+              <div class="push force"><span class="box"></span><span class="tgt-b"><span class="tgt-h"><span class="push-t">Force-push <code>origin/main</code> to match</span><span class="tag bad">Force · lease</span></span><span class="tgt-d">origin/main has 2 commits that upstream/main doesn't, and pushing removes them from huntharo/diskhound. The lease refuses the push if origin/main has moved off 3c1a9e04b7d2.</span></span></div>
+              <div class="m-acts"><button class="b">Cancel</button><button class="b b-go">Review soft reset</button></div>
+            </div>
+            <p class="note">Unchecked by default, and drawn in the danger colour only once it is ticked, like Hard. A fast-forward push is ticked by default in <a href="#2a">2a</a> because it cannot lose anything.</p>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Live prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Live — switch scenarios, pick targets, tick the push, try Fetch in "Stale fetch"</div>
+            <div class="proto-h">
+              <span class="lbl">Scenario</span>
+              <span class="seg">
+                <button class="{{ segBehind }}" onClick="{{ pickBehind }}">Fork behind</button>
+                <button class="{{ segStale }}" onClick="{{ pickStale }}">Stale fetch</button>
+                <button class="{{ segDiverged }}" onClick="{{ pickDiverged }}">Fork has own commits</button>
+              </span>
+            </div>
+            <div class="m">
+              <div class="m-title">Reset main to a fetched remote branch</div>
+              <p class="m-p">Pick the fetched tip this branch should point to. PwrGit re-reads both tips before the final confirmation.</p>
+              <div class="eyeb">Target</div>
+              <div class="tgts">
+                <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+                  <div class="{{ c.cls }}" onClick="{{ c.onPick }}">
+                    <span class="{{ c.radCls }}"></span>
+                    <span class="tgt-b">
+                      <span class="tgt-h">
+                        <span class="{{ c.nameCls }}">{{ c.name }}</span>
+                        <sc-if value="{{ c.hasRepo }}"><span class="repo">{{ c.repo }}</span></sc-if>
+                        <sc-if value="{{ c.hasInline }}"><span class="tgt-inl">{{ c.inline }}</span></sc-if>
+                        <span class="{{ c.tagCls }}">{{ c.tag }}</span>
+                      </span>
+                      <sc-if value="{{ c.hasMeta }}"><span class="tgt-m">{{ c.meta }} · <span class="up">↑{{ c.up }}</span> <span class="dn">↓{{ c.dn }}</span></span></sc-if>
+                      <sc-if value="{{ c.hasNote }}"><span class="tgt-d">{{ c.note }}</span></sc-if>
+                    </span>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{ browsing }}"><div class="browse"><div class="inp">Filter by name or commit subject</div><div class="ph">remote branch list (BranchRefPicker)</div></div></sc-if>
+              <div class="{{ freshCls }}"><span class="grow">{{ freshText }}</span><button class="b b-sm" onClick="{{ onFetch }}">{{ fetchLabel }}</button></div>
+              <sc-if value="{{ showPush }}">
+                <div class="eyeb">Your fork</div>
+                <div class="{{ pushCls }}" onClick="{{ onTogglePush }}">
+                  <span class="{{ boxCls }}">{{ boxMark }}</span>
+                  <span class="tgt-b">
+                    <span class="tgt-h"><span class="push-t">{{ pushTitle }}</span><span class="{{ pushTagCls }}">{{ pushTag }}</span></span>
+                    <span class="tgt-d">{{ pushDetail }}</span>
+                  </span>
+                </div>
+              </sc-if>
+              <div class="eyeb">Reset mode</div>
+              <div class="{{ softCls }}" onClick="{{ pickSoft }}"><span class="{{ softRad }}"></span><span><span class="mode-t">Soft</span><span class="mode-d">Move the branch and HEAD to the selected commit without changing the index or working tree.</span></span></div>
+              <div class="{{ hardCls }}" onClick="{{ pickHard }}"><span class="{{ hardRad }}"></span><span><span class="mode-t">Hard · destructive</span><span class="mode-d">Move the branch and HEAD, reset the index, and overwrite tracked files.</span></span></div>
+              <p class="m-note">Both modes move the local branch pointer to <code>{{ targetLabel }}</code>. Any local commits that are not reachable from that target leave the branch.</p>
+              <div class="m-acts"><button class="b">Cancel</button><button class="{{ ctaCls }}">{{ ctaLabel }}</button></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Ranking, in order: a target the caller named (a chip right-click); the tracked branch when resetting to it would move something; the fork's source; then the tracked branch anyway. The fork card only appears when <code>upstream</code> has the same branch name, so a feature branch on a fork looks exactly as it does today. When forge identity is unknown, a remote literally named <code>upstream</code> stands in and the tag reads "Upstream remote" instead of "Fork source".</p>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Confirm with push">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Confirm — the push is part of the plan, not an afterthought</span>
+        </div>
+        <p class="dv-sub">The review step keeps its ledger and adds one block: exactly what will be pushed, where, and what the lease expects to find there. The push runs only after the reset succeeds. It pushes the object the review showed, not whatever <code>main</code> points at by then, and its lease is the <code>origin/main</code> tip this dialog read.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Review, fast-forward push">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Fork behind — nothing lost on either side</div>
+            <div class="m">
+              <div class="m-title">Reset main to a fetched remote branch</div>
+              <p class="m-p">Review the exact refs and object IDs. The reset stops if either the checkout or fetched remote-tracking ref changes.</p>
+              <dl class="rv">
+                <div><dt>Checked-out branch</dt><dd>main</dd><dd class="sha">8ef415503fa4ccf3c4f78ecdeec01409accd1966</dd></div>
+                <div><dt>Fetched target</dt><dd>upstream/main</dd><dd class="sha">b9bba683d1e2…</dd></div>
+              </dl>
+              <div class="ledger">
+                <div class="cell"><strong>0</strong><span>commits exist only on this branch</span></div>
+                <div class="cell"><strong>10</strong><span>commits arrive on the branch</span></div>
+              </div>
+              <div class="then">
+                <div class="then-h">Then push to your fork<span class="tag ok" style="margin-left:auto;">Fast-forward</span></div>
+                <div class="then-r"><span>main</span><span class="arr">→</span><span>origin/main</span><span class="arr" style="margin-left:auto;font-size:10.5px;">huntharo/diskhound</span></div>
+                <div class="then-d">origin/main moves from 8ef4155 to b9bba68, the same 10 commits. If it has moved since the fetch, the push stops and the reset stands.</div>
+                <div class="cmd">git push --force-with-lease=refs/heads/main:8ef415503fa4 origin b9bba683d1e2:refs/heads/main</div>
+              </div>
+              <div class="warnbox">Soft reset will move the branch pointer to this target and leave the index and working tree untouched. No commits leave the branch.</div>
+              <div class="m-acts"><button class="b">Back</button><button class="b">Cancel</button><button class="b b-go">Soft reset + push</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Review, force push">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Fork has its own commits — hard reset with the forced push ticked</div>
+            <div class="m">
+              <div class="m-title">Reset main to a fetched remote branch</div>
+              <p class="m-p">Review the exact refs and object IDs. The reset stops if either the checkout or fetched remote-tracking ref changes.</p>
+              <dl class="rv">
+                <div><dt>Checked-out branch</dt><dd>main</dd><dd class="sha">3c1a9e04b7d2…</dd></div>
+                <div><dt>Fetched target</dt><dd>upstream/main</dd><dd class="sha">b9bba683d1e2…</dd></div>
+              </dl>
+              <div class="ledger">
+                <div class="cell hot"><strong>2</strong><span>commits exist only on this branch</span></div>
+                <div class="cell"><strong>10</strong><span>commits arrive on the branch</span></div>
+                <div class="cell"><strong>0</strong><span>working-tree changes discarded</span></div>
+              </div>
+              <div class="drops">
+                <div class="drops-h">Leaving main, and origin/main</div>
+                <div class="drop"><span class="sha">3c1a9e0</span><span class="sub">ci: publish fork builds to my own release bucket</span><span class="age">2h</span></div>
+                <div class="drop"><span class="sha">7d20b41</span><span class="sub">docs: note this fork's release channel</span><span class="age">2h</span></div>
+              </div>
+              <div class="then force">
+                <div class="then-h">Then force-push to your fork<span class="tag bad" style="margin-left:auto;">Force · lease</span></div>
+                <div class="then-r"><span>main</span><span class="arr">→</span><span>origin/main</span><span class="arr" style="margin-left:auto;font-size:10.5px;">huntharo/diskhound</span></div>
+                <div class="then-d">Removes the 2 commits above from huntharo/diskhound. The lease refuses the push if origin/main is no longer at 3c1a9e04b7d2.</div>
+                <div class="cmd">git push --force-with-lease=refs/heads/main:3c1a9e04b7d2 origin b9bba683d1e2:refs/heads/main</div>
+              </div>
+              <div class="ack"><span class="box"></span><span>I understand 2 commits will leave main and be removed from origin/main, and cannot be recovered outside the reflog.</span></div>
+              <div class="m-acts"><button class="b">Back</button><button class="b">Cancel</button><button class="b b-bad b-off">Hard reset + force-push</button></div>
+            </div>
+            <p class="note">The acknowledgement already exists for a hard reset that strands commits. A ticked force-push now requires it too, in either mode: a soft reset keeps the changes locally, but the push still deletes the commits from the fork.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Soft reset with a fast-forward push, the everyday fork sync, stays exactly two clicks from opening the dialog: Review, then Soft reset + push.</p>
+      </section>
+
+      <!-- ================================================================ -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 Outcome">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Outcome — one receipt, and a push failure never undoes the reset</span>
+        </div>
+        <p class="dv-sub">The reset and the push are two Git operations, so the dialog reports them as two facts. If the push fails after the reset has landed, the toast says so and names what to do next. It never reads as though the whole thing failed.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Success">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Both landed</div>
+            <div class="toast">
+              <div class="toast-t"><span class="dot"></span>Soft reset complete</div>
+              <div class="toast-m"><code>main</code> now points to <code>upstream/main</code> at b9bba683d1e2, and <code>origin/main</code> was pushed to match.</div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Push refused">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Reset landed, lease refused the push</div>
+            <div class="toast err">
+              <div class="toast-t"><span class="dot"></span>Reset complete — push refused</div>
+              <div class="toast-m"><code>main</code> is at <code>upstream/main</code>. <code>origin/main</code> moved after the review, so the lease stopped the push and your fork is unchanged. Fetch, then open Reset again to review the new tip.</div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Graph after">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>What the lineage graph shows afterwards</div>
+            <p class="note" style="max-width:380px;">No dashed lane above <code>main</code>: <code>main</code>, <code>origin/main</code> and <code>upstream/main</code> sit on one commit, and the sidebar's sync badge reads 0/0. That combination is what "fork is in sync" looks like, and it is what the reported session should have ended with.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "fetch the fork's source on open instead of asking" · "offer this from the sidebar's fork mark as Sync fork…" · "what if origin/main is ahead of upstream/main and main is behind both?"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { scenario: "behind", target: "fork", push: true, mode: "soft", fetched: false };
+        }
+
+        scenario() {
+          var s = this.state.scenario;
+          if (s === "stale") {
+            var fresh = this.state.fetched;
+            return {
+              head: "d393fe2d458d",
+              trackSha: "d393fe2d458d",
+              forkSha: fresh ? "b9bba683d1e2" : "8ef415503fa4",
+              forkAge: fresh ? "13m" : "19m",
+              up: 0,
+              dn: fresh ? 12 : 2,
+              stale: !fresh,
+              freshText: fresh
+                ? "Fetched just now from origin and upstream. The reset uses that snapshot, not the live remotes."
+                : "The last fetch, moments ago, covered origin only. upstream/main may be behind tzarebczan/diskhound.",
+              fetchLabel: fresh ? "Fetch now" : "Fetch origin + upstream",
+              force: false,
+              overwrites: 0
+            };
+          }
+          if (s === "diverged") {
+            return {
+              head: "3c1a9e04b7d2", trackSha: "3c1a9e04b7d2", forkSha: "b9bba683d1e2", forkAge: "13m",
+              up: 2, dn: 10, stale: false,
+              freshText: "Last fetched 2m ago from origin and upstream. The reset uses that snapshot, not the live remotes.",
+              fetchLabel: "Fetch now", force: true, overwrites: 2
+            };
+          }
+          return {
+            head: "8ef415503fa4", trackSha: "8ef415503fa4", forkSha: "b9bba683d1e2", forkAge: "13m",
+            up: 0, dn: 10, stale: false,
+            freshText: "Last fetched 2m ago from origin and upstream. The reset uses that snapshot, not the live remotes.",
+            fetchLabel: "Fetch now", force: false, overwrites: 0
+          };
+        }
+
+        pickScenario(name) {
+          this.setState({ scenario: name, target: "fork", push: name !== "diverged", mode: "soft", fetched: false });
+        }
+
+        note(up, dn) {
+          if (up === 0 && dn === 0) return "Already identical to this branch.";
+          if (up === 0) return "Fast-forward: " + dn + " commit" + (dn === 1 ? "" : "s") + " arrive, none of yours leave.";
+          if (dn === 0) return up + " commits of yours leave the branch; nothing arrives.";
+          return "Diverged: " + up + " commits of yours leave, " + dn + " arrive.";
+        }
+
+        renderVals() {
+          var self = this;
+          var st = this.state;
+          var sc = this.scenario();
+          var pick = function (t) { return function () { self.setState({ target: t }); }; };
+          var cards = [
+            {
+              cls: st.target === "fork" ? "tgt on" : "tgt",
+              radCls: st.target === "fork" ? "rad on" : "rad",
+              nameCls: "tgt-n", name: "upstream/main",
+              hasRepo: true, repo: "tzarebczan/diskhound",
+              hasInline: false, inline: "",
+              tagCls: "tag", tag: "Fork source",
+              hasMeta: true, meta: sc.forkSha + " · " + sc.forkAge, up: sc.up, dn: sc.dn,
+              hasNote: true, note: this.note(sc.up, sc.dn),
+              onPick: pick("fork")
+            },
+            {
+              cls: st.target === "tracking" ? "tgt noop on" : "tgt noop",
+              radCls: st.target === "tracking" ? "rad on" : "rad",
+              nameCls: "tgt-n", name: "origin/main",
+              hasRepo: false, repo: "",
+              hasInline: true, inline: sc.trackSha + " · already identical to main",
+              tagCls: "tag q", tag: "Tracking",
+              hasMeta: false, meta: "", up: 0, dn: 0,
+              hasNote: false, note: "",
+              onPick: pick("tracking")
+            },
+            {
+              cls: st.target === "other" ? "tgt on" : "tgt",
+              radCls: st.target === "other" ? "rad on" : "rad",
+              nameCls: "tgt-s", name: "Another fetched branch…",
+              hasRepo: false, repo: "",
+              hasInline: false, inline: "",
+              tagCls: "tag q", tag: "19 fetched",
+              hasMeta: false, meta: "", up: 0, dn: 0,
+              hasNote: false, note: "",
+              onPick: pick("other")
+            }
+          ];
+          var showPush = st.target === "fork";
+          var pushing = showPush && st.push;
+          var hard = st.mode === "hard";
+          var danger = hard || (pushing && sc.force);
+          var cta = "Review " + st.mode + " reset" + (pushing ? (sc.force ? " + force-push" : " + push") : "");
+          var targetLabel = st.target === "fork" ? "upstream/main" : st.target === "tracking" ? "origin/main" : "remote branch";
+          return {
+            segBehind: st.scenario === "behind" ? "seg-b on" : "seg-b",
+            segStale: st.scenario === "stale" ? "seg-b on" : "seg-b",
+            segDiverged: st.scenario === "diverged" ? "seg-b on" : "seg-b",
+            pickBehind: function () { self.pickScenario("behind"); },
+            pickStale: function () { self.pickScenario("stale"); },
+            pickDiverged: function () { self.pickScenario("diverged"); },
+            cards: cards,
+            browsing: st.target === "other",
+            freshCls: sc.stale ? "fresh stale" : "fresh",
+            freshText: sc.freshText,
+            fetchLabel: sc.fetchLabel,
+            onFetch: function () { if (st.scenario === "stale") self.setState({ fetched: true }); },
+            showPush: showPush,
+            pushCls: "push" + (sc.force ? " force" : "") + (st.push ? " on" : ""),
+            boxCls: st.push ? "box on" : "box",
+            boxMark: st.push ? "✓" : "",
+            pushTitle: sc.force ? "Force-push origin/main to match" : "Update origin/main to match",
+            pushTagCls: sc.force ? "tag bad" : "tag ok",
+            pushTag: sc.force ? "Force · lease" : "Fast-forward",
+            pushDetail: sc.force
+              ? "origin/main has " + sc.overwrites + " commits that upstream/main doesn't, and pushing removes them from huntharo/diskhound. The lease refuses the push if origin/main has moved off " + sc.trackSha + "."
+              : "After the reset, push main to huntharo/diskhound. That adds the same " + sc.dn + " commits; no force needed.",
+            onTogglePush: function () { self.setState({ push: !st.push }); },
+            softCls: st.mode === "soft" ? "mode on" : "mode",
+            softRad: st.mode === "soft" ? "rad on" : "rad",
+            hardCls: hard ? "mode hard on" : "mode hard",
+            hardRad: hard ? "rad on" : "rad",
+            pickSoft: function () { self.setState({ mode: "soft" }); },
+            pickHard: function () { self.setState({ mode: "hard" }); },
+            targetLabel: targetLabel,
+            ctaCls: danger ? "b b-bad" : "b b-go",
+            ctaLabel: cta
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

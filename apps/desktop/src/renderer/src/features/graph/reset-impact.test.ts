@@ -2,11 +2,19 @@ import { describe, expect, it } from "vitest";
 import type {
   DivergenceCommit,
   DivergenceCommitAlignment,
-  RemoteResetPreview
+  ForkSourceTarget,
+  RemoteResetPreview,
+  ResetTargets,
+  ResetTargetSuggestion
 } from "@pwrgit/shared";
 import {
+  andList,
   fetchAgeLabel,
+  fetchCoverage,
+  forkPushPlan,
   isStaleFetch,
+  pushNote,
+  rankedTarget,
   remoteRefLabel,
   resetImpact,
   STALE_FETCH_MS,
@@ -198,5 +206,155 @@ describe("remoteRefLabel", () => {
       "origin/fix/media-copy"
     );
     expect(remoteRefLabel("origin/main")).toBe("origin/main");
+  });
+});
+
+describe("fork-aware ranking and fetch coverage", () => {
+  const NOW = Date.parse("2026-09-25T09:20:00Z");
+  const ago = (minutes: number): string =>
+    new Date(NOW - minutes * 60_000).toISOString();
+
+  function target(
+    remote: string,
+    name: string,
+    ahead: number,
+    behind: number
+  ): ResetTargetSuggestion {
+    return {
+      ref: `refs/remotes/${remote}/${name}`,
+      label: `${remote}/${name}`,
+      remote,
+      head: "1".repeat(40),
+      ahead,
+      behind
+    };
+  }
+
+  function fork(
+    ahead: number,
+    behind: number,
+    extra: Partial<ForkSourceTarget> = {}
+  ): ForkSourceTarget {
+    return {
+      ...target("upstream", "main", ahead, behind),
+      parent: "acme/widget",
+      pushBack: null,
+      ...extra
+    };
+  }
+
+  function targets(overrides: Partial<ResetTargets>): ResetTargets {
+    return {
+      branch: "main",
+      head: "1".repeat(40),
+      upstream: target("origin", "main", 0, 0),
+      defaultBranch: null,
+      forkSource: null,
+      branchCount: 19,
+      lastFetchedAt: ago(0.5),
+      lastFetchedRemotes: ["origin"],
+      ...overrides
+    };
+  }
+
+  it("skips a tracked branch that would change nothing, for the fork's source", () => {
+    const source = fork(0, 2);
+    expect(rankedTarget(targets({ forkSource: source }))).toBe(source);
+  });
+
+  it("keeps the tracked branch first while resetting to it moves something", () => {
+    const behind = target("origin", "main", 0, 3);
+    expect(
+      rankedTarget(targets({ upstream: behind, forkSource: fork(0, 2) }))
+    ).toBe(behind);
+  });
+
+  it("falls back to the tracked branch, then the source, never the trunk first", () => {
+    const same = target("origin", "main", 0, 0);
+    expect(rankedTarget(targets({ upstream: same, forkSource: fork(0, 0) }))).toBe(
+      same
+    );
+    const trunk = target("origin", "main", 0, 5);
+    expect(
+      rankedTarget(targets({ upstream: null, forkSource: null, defaultBranch: trunk }))
+    ).toBe(trunk);
+  });
+
+  it("joins names the way a sentence does", () => {
+    expect(andList([])).toBe("");
+    expect(andList(["origin"])).toBe("origin");
+    expect(andList(["origin", "upstream"])).toBe("origin and upstream");
+    expect(andList(["a", "b", "c"])).toBe("a, b and c");
+  });
+
+  it("keeps the one-remote sentence and the bare fetch when there is no fork", () => {
+    expect(fetchCoverage(targets({}), NOW)).toEqual({
+      text: "Last fetched moments ago — the reset uses that snapshot, not the live remote.",
+      stale: false,
+      fetchLabel: "Fetch now",
+      remotes: undefined
+    });
+  });
+
+  // The reported moment: FETCH_HEAD named origin only, "moments ago".
+  it("warns, names the parent, and fetches both when the source was skipped", () => {
+    expect(
+      fetchCoverage(targets({ forkSource: fork(0, 2) }), NOW)
+    ).toEqual({
+      text: "The last fetch, moments ago, covered origin only. upstream/main may be behind acme/widget.",
+      stale: true,
+      fetchLabel: "Fetch upstream + origin",
+      remotes: ["upstream", "origin"]
+    });
+  });
+
+  it("says both remotes are covered, and still fetches both", () => {
+    expect(
+      fetchCoverage(
+        targets({
+          forkSource: fork(0, 2),
+          lastFetchedRemotes: ["origin", "upstream"],
+          lastFetchedAt: ago(4)
+        }),
+        NOW
+      )
+    ).toEqual({
+      text: "Last fetched 4m ago from upstream and origin — the reset uses that snapshot, not the live remotes.",
+      stale: false,
+      fetchLabel: "Fetch now",
+      remotes: ["upstream", "origin"]
+    });
+  });
+
+  it("does not name a parent it was never told, and handles a fetch of neither", () => {
+    const { parent: _parent, ...unconfirmed } = fork(0, 2);
+    const coverage = fetchCoverage(
+      targets({ forkSource: unconfirmed, lastFetchedRemotes: ["mirror"] }),
+      NOW
+    );
+    expect(coverage.text).toBe(
+      "The last fetch, moments ago, did not include upstream and origin. upstream/main and origin/main may be out of date."
+    );
+    expect(coverage.stale).toBe(true);
+  });
+
+  it("offers the push only for the fork card, and words it by what it removes", () => {
+    const pushBack = {
+      remote: "origin",
+      branch: "main",
+      ref: "refs/remotes/origin/main",
+      head: "9".repeat(40),
+      overwrites: 0,
+      adds: 10
+    };
+    const source = fork(0, 10, { pushBack });
+    expect(forkPushPlan(source, "refs/remotes/origin/main")).toBeNull();
+    expect(forkPushPlan(source, source.ref)).toBe(pushBack);
+    expect(pushNote(pushBack, source, "main")).toBe(
+      "After the reset, push main to origin/main: the same 10 commits, no force needed."
+    );
+    expect(pushNote({ ...pushBack, overwrites: 1 }, source, "main")).toBe(
+      "origin/main has 1 commit that upstream/main doesn't, and pushing removes it from origin. The lease refuses the push if origin/main has moved off 999999999999."
+    );
   });
 });

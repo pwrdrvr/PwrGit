@@ -4,6 +4,7 @@ import {
   type PullProgressPhase,
   type PwrGitError,
   type RemoteActivityPhase,
+  type RepoIdentity,
   type Result
 } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
@@ -16,11 +17,13 @@ import {
   controlledGit,
   fetchAllRemotes,
   fetchNamedRemote,
+  fetchNamedRemotes,
   fetchRemote,
   inspectRemoteDivergence,
   inspectRemoteReset,
   pullFastForward,
   planPushRefs,
+  pushBranchWithLease,
   pushPlannedRefs,
   pushRefLabel,
   pushRemote,
@@ -187,7 +190,9 @@ export function registerRemoteHandlers(
   /** Re-read this repo's forge identity. `force` skips the freshness gate —
    *  the repo's own remotes just changed, so the stored row is wrong now
    *  however recently it was written. */
-  refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void
+  refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void,
+  /** The stored forge identity, for the reset dialog's fork-source card. */
+  readIdentity?: (repoId: string) => RepoIdentity | undefined
 ): void {
   // Every long-running remote command reports through one registry: the live
   // status surfaces read it, and the cancel button acts on it.
@@ -349,7 +354,9 @@ export function registerRemoteHandlers(
       },
       "fetch",
       async (git, activity) => {
-        const fetched = await fetchRemote(git, worktree.path, true);
+        const fetched = await (req.remotes === undefined
+          ? fetchRemote(git, worktree.path, true)
+          : fetchNamedRemotes(git, worktree.path, req.remotes, true));
         if (fetched.ok) {
           // Off the network phase before the branch index is rebuilt. Silence
           // is only evidence while `--progress` obliges Git to speak; leaving
@@ -365,7 +372,9 @@ export function registerRemoteHandlers(
     logMain(
       "info",
       "remote",
-      `fetched ${worktree.path} (${seconds(startedAt)})`
+      req.remotes === undefined
+        ? `fetched ${worktree.path} (${seconds(startedAt)})`
+        : `fetched ${req.remotes.join(", ")} for ${worktree.path} (${seconds(startedAt)})`
     );
     refreshIdentity?.(worktree.repoId);
     refresher.refreshWorktree(req.worktreeId);
@@ -848,10 +857,20 @@ export function registerRemoteHandlers(
   });
 
   bus.register("remote:resetTargets", async (req) => {
-    const live = pathOf(req.worktreeId);
+    const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
-    const path = live.value;
-    return resolveResetTargets(execGit, path);
+    const worktree = live.value;
+    // The stored row, never a forge call: the dialog opens on what is known,
+    // and an unknown parent falls back to the `upstream` naming convention.
+    const identity = readIdentity?.(worktree.repoId);
+    const parent =
+      identity?.parent === undefined
+        ? null
+        : {
+            hostname: identity.hostname,
+            nameWithOwner: identity.parent.nameWithOwner
+          };
+    return resolveResetTargets(execGit, worktree.path, parent);
   });
 
   bus.register("remote:inspectReset", async (req) => {
@@ -880,6 +899,43 @@ export function registerRemoteHandlers(
       "remote",
       `${req.mode}-reset ${worktree.path} (${req.branch}) to ${req.remoteRef} at ${req.remoteHead} (${seconds(startedAt)})`
     );
+    return ok(null);
+  });
+
+  bus.register("remote:pushBranchWithLease", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    const repo = repoOf(worktree.repoId);
+    const startedAt = Date.now();
+    const result = await tracked(
+      {
+        kind: "push",
+        profileId: repo?.profileId ?? "",
+        repoId: worktree.repoId,
+        repoName: repo?.name ?? worktree.repoId,
+        worktreeId: req.worktreeId,
+        branch: worktree.branch
+      },
+      "push",
+      async (git, activity) => {
+        const pushed = await pushBranchWithLease(git, worktree.path, req);
+        if (pushed.ok) {
+          activity.setPhase("refresh");
+          await refreshRemoteBranches(worktree.repoId, "push");
+        }
+        return pushed;
+      }
+    );
+    if (!result.ok) return err(classifyAuthFailure(result.error));
+    logMain(
+      "info",
+      "remote",
+      `pushed ${req.head} to ${req.remote}/${req.branch} leased on ${req.expectedHead} for ${worktree.path} (${seconds(startedAt)})`
+    );
+    // The pushed branch may be the repository default, which every sibling's
+    // staleness is measured against.
+    refresher.refreshRepoWorktrees(worktree.repoId);
     return ok(null);
   });
 

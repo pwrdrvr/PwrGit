@@ -177,6 +177,8 @@ export type ResetTargetSuggestion = {
   ref: string;
   /** Display-qualified name, e.g. `origin/main`. */
   label: string;
+  /** The remote the ref was fetched from — what Fetch has to ask to refresh it. */
+  remote: string;
   head: string;
   lastCommitAt?: string;
   subject?: string;
@@ -184,6 +186,39 @@ export type ResetTargetSuggestion = {
   ahead: number;
   /** Commits on this tip that the checkout does not contain. */
   behind: number;
+};
+
+/**
+ * What pushing the reset result to the branch the checkout tracks would do —
+ * on a fork, bringing `origin/main` along after `main` moves to the source.
+ */
+export type ForkPushBack = {
+  /** The tracked remote and the branch on it, e.g. `origin` and `main`. */
+  remote: string;
+  branch: string;
+  /** Its fetched remote-tracking ref, e.g. `refs/remotes/origin/main`. */
+  ref: string;
+  /** That ref's tip: what the push's lease expects to find on the remote. */
+  head: string;
+  /** Commits on the tracked tip the source lacks. Above 0, the push forces
+   *  and removes them from the remote. */
+  overwrites: number;
+  /** Commits on the source the tracked tip lacks. */
+  adds: number;
+};
+
+/**
+ * The checked-out branch's counterpart on the repository this fork came from:
+ * `upstream/main` for a `main` that tracks `origin/main`.
+ */
+export type ForkSourceTarget = ResetTargetSuggestion & {
+  /** `owner/name` of the fork's parent when forge identity matched the
+   *  remote's URL to it. Absent means the remote was chosen only because it
+   *  is named `upstream`, and the dialog must not claim a fork relationship. */
+  parent?: string;
+  /** Null when the branch tracks nothing, or its tracked tip already equals
+   *  this one. */
+  pushBack: ForkPushBack | null;
 };
 
 /**
@@ -201,10 +236,19 @@ export type ResetTargets = {
   upstream: ResetTargetSuggestion | null;
   /** The remote's default branch. Null when it is already `upstream`. */
   defaultBranch: ResetTargetSuggestion | null;
+  /** The same branch on the fork's source remote, when one is fetched. */
+  forkSource: ForkSourceTarget | null;
   /** Fetched remote-tracking branches across every remote. */
   branchCount: number;
   /** ISO-8601 time this checkout last fetched; null if it never has. */
   lastFetchedAt: string | null;
+  /**
+   * The remotes that last fetch actually asked, from `FETCH_HEAD`'s own
+   * lines. A bare `git fetch` asks only the branch's remote, so on a checkout
+   * with two remotes `lastFetchedAt` can be minutes old for one of them and
+   * hours old for the other.
+   */
+  lastFetchedRemotes: string[];
 };
 
 /**

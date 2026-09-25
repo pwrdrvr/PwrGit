@@ -12,13 +12,16 @@ import type { DB } from "../persistence/db";
 import {
   fetchAllRemotes,
   fetchNamedRemote,
+  fetchNamedRemotes,
   fetchRemote,
   inspectRemoteReset,
   planPushRefs,
   pullFastForward,
+  pushBranchWithLease,
   pushPlannedRefs,
   pushRemote,
-  resetToRemote
+  resetToRemote,
+  resolveResetTargets
 } from "./git-service";
 import {
   PULL_REFRESH_WAIT_LIMIT_MS,
@@ -45,13 +48,16 @@ vi.mock("./git-service", async (importOriginal) => {
     ...actual,
     fetchAllRemotes: vi.fn(),
     fetchNamedRemote: vi.fn(),
+    fetchNamedRemotes: vi.fn(),
     fetchRemote: vi.fn(),
     inspectRemoteReset: vi.fn(),
     planPushRefs: vi.fn(),
     pullFastForward: vi.fn(),
+    pushBranchWithLease: vi.fn(),
     pushPlannedRefs: vi.fn(),
     pushRemote: vi.fn(),
-    resetToRemote: vi.fn()
+    resetToRemote: vi.fn(),
+    resolveResetTargets: vi.fn()
   };
 });
 
@@ -98,7 +104,9 @@ describe("remote handlers", () => {
     vi.clearAllMocks();
     vi.mocked(fetchAllRemotes).mockResolvedValue(ok(undefined));
     vi.mocked(fetchNamedRemote).mockResolvedValue(ok(undefined));
+    vi.mocked(fetchNamedRemotes).mockResolvedValue(ok(undefined));
     vi.mocked(fetchRemote).mockResolvedValue(ok(undefined));
+    vi.mocked(pushBranchWithLease).mockResolvedValue(ok(undefined));
     vi.mocked(inspectRemoteReset).mockResolvedValue(
       ok({
         snapshot: {
@@ -1202,6 +1210,146 @@ describe("remote handlers", () => {
     expect(refresher.refreshWorktree).not.toHaveBeenCalled();
     expect(refresher.refreshRepoWorktrees).toHaveBeenCalledOnce();
     expect(refresher.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
+  });
+
+  describe("fork-aware reset", () => {
+    const db = {
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({
+          path: "/repos/project",
+          repoId: "repo-1",
+          branch: "main"
+        }))
+      }))
+    } as unknown as DB;
+    const refresher = () =>
+      ({
+        refreshWorktree: vi.fn(async () => undefined),
+        refreshRepoWorktrees: vi.fn()
+      }) satisfies WorktreeRefresher;
+
+    beforeEach(() => {
+      vi.mocked(resolveResetTargets).mockResolvedValue(
+        ok({
+          branch: "main",
+          head: "1".repeat(40),
+          upstream: null,
+          defaultBranch: null,
+          forkSource: null,
+          branchCount: 0,
+          lastFetchedAt: null,
+          lastFetchedRemotes: []
+        })
+      );
+    });
+
+    // The stored row, never a forge call: the dialog opens on what is known.
+    it("ranks targets with the stored fork parent, and without one when unknown", async () => {
+      const readIdentity = vi.fn((repoId: string) =>
+        repoId === "repo-1"
+          ? {
+              host: "github" as const,
+              hostname: "github.com",
+              owner: "me",
+              name: "widget",
+              nameWithOwner: "me/widget",
+              visibility: "public" as const,
+              parent: {
+                nameWithOwner: "acme/widget",
+                url: "https://github.com/acme/widget"
+              }
+            }
+          : undefined
+      );
+      const bus = new CommandBus();
+      registerRemoteHandlers(
+        bus,
+        db,
+        refresher(),
+        new WorktreeOperationQueue(),
+        undefined,
+        undefined,
+        readIdentity
+      );
+
+      expect(
+        (await bus.dispatch("remote:resetTargets", { worktreeId: "wt-1" })).ok
+      ).toBe(true);
+      expect(readIdentity).toHaveBeenCalledWith("repo-1");
+      expect(resolveResetTargets).toHaveBeenCalledWith(
+        expect.any(Function),
+        "/repos/project",
+        { hostname: "github.com", nameWithOwner: "acme/widget" }
+      );
+
+      const plain = new CommandBus();
+      registerRemoteHandlers(plain, db, refresher(), new WorktreeOperationQueue());
+      await plain.dispatch("remote:resetTargets", { worktreeId: "wt-1" });
+      expect(resolveResetTargets).toHaveBeenLastCalledWith(
+        expect.any(Function),
+        "/repos/project",
+        null
+      );
+    });
+
+    // A bare fetch asks only the branch's own remote, which is how a reset
+    // landed on a fork source nineteen minutes out of date.
+    it("fetches exactly the remotes the dialog names", async () => {
+      const bus = new CommandBus();
+      const refreshes = refresher();
+      registerRemoteHandlers(bus, db, refreshes, new WorktreeOperationQueue());
+
+      const fetched = await bus.dispatch("remote:fetch", {
+        worktreeId: "wt-1",
+        remotes: ["upstream", "origin"]
+      });
+      expect(fetched.ok).toBe(true);
+      expect(fetchNamedRemotes).toHaveBeenCalledWith(
+        expect.any(Function),
+        "/repos/project",
+        ["upstream", "origin"],
+        true
+      );
+      expect(fetchRemote).not.toHaveBeenCalled();
+      expect(refreshes.refreshWorktree).toHaveBeenCalledWith("wt-1");
+    });
+
+    it("pushes the reviewed object with its lease, and refreshes the repository", async () => {
+      const bus = new CommandBus();
+      const refreshes = refresher();
+      registerRemoteHandlers(bus, db, refreshes, new WorktreeOperationQueue());
+      const request = {
+        worktreeId: "wt-1",
+        remote: "origin",
+        branch: "main",
+        head: "2".repeat(40),
+        expectedHead: "1".repeat(40)
+      };
+
+      expect((await bus.dispatch("remote:pushBranchWithLease", request)).ok).toBe(
+        true
+      );
+      expect(pushBranchWithLease).toHaveBeenCalledWith(
+        expect.any(Function),
+        "/repos/project",
+        request
+      );
+      expect(refreshes.refreshRepoWorktrees).toHaveBeenCalledWith("repo-1");
+
+      vi.mocked(pushBranchWithLease).mockResolvedValueOnce(
+        err({
+          kind: "remote",
+          code: "push_lease_stale",
+          message: "origin/main moved after the review, so the lease stopped the push."
+        })
+      );
+      const refused = await bus.dispatch("remote:pushBranchWithLease", request);
+      expect(refused.ok).toBe(false);
+      if (refused.ok) return;
+      // The renderer words its toast on this code; it must survive the
+      // auth-failure classifier untouched.
+      expect(refused.error.code).toBe("push_lease_stale");
+    });
   });
 
   it("inspects, tests, and explicitly applies an SSH remote recovery", async () => {

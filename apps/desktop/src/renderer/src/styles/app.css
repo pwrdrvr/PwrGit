@@ -9924,6 +9924,99 @@ body.is-col-resizing {
   color: var(--text-muted);
   font: 500 10.5px/1.45 var(--font-sans);
 }
+/* The fork's source names its repository beside the ref: `upstream/main` alone
+   does not say whose main it is. */
+.reset-target__repo {
+  flex: none;
+  color: var(--text-secondary);
+  font: 600 10.5px/1.3 var(--font-mono);
+}
+/* A target identical to the checkout: still a valid radio, drawn as one quiet
+   line, because resetting to it changes nothing. */
+.reset-target.is-identical {
+  padding: 8px 10px;
+  border-color: var(--border-subtle);
+  background: var(--bg-panel);
+}
+.reset-target.is-identical .reset-target__name {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.reset-target.is-identical.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.reset-target__inline {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10.5px/1.3 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reset-target__tag--ok {
+  border-color: color-mix(in srgb, var(--success-text) 32%, transparent);
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+.reset-target__tag--danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+/* Bringing the fork along. A fast-forward is the accent card the targets use;
+   a forced push is drawn like Hard — danger-bordered at rest, danger-filled
+   once ticked. */
+.reset-remote__follow {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0 0;
+  padding: 0;
+  border: 0;
+}
+.reset-remote__follow legend {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font: 600 9.5px/1 var(--font-sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.reset-remote__push {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-panel-elevated);
+  cursor: pointer;
+}
+.reset-remote__push input {
+  margin: 2px 0 0;
+}
+.reset-remote__push.is-selected {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.reset-remote__push.is-force {
+  border-color: var(--danger-border);
+}
+.reset-remote__push.is-force.is-selected {
+  border-color: color-mix(in srgb, var(--danger-base) 60%, var(--border-default));
+  background: var(--danger-soft);
+}
+.reset-remote__push-title {
+  min-width: 0;
+  color: var(--text-primary);
+  font: 700 11.5px/1.25 var(--font-sans);
+}
+.reset-remote__push-title code {
+  font: 650 11.5px/1.25 var(--font-mono);
+}
+.reset-remote__push.is-force.is-selected .reset-remote__push-title {
+  color: var(--danger-text);
+}
 .reset-remote__browse {
   margin-top: 8px;
   padding: 10px;
@@ -10150,6 +10243,61 @@ body.is-col-resizing {
   border-color: color-mix(in srgb, var(--danger-text) 48%, var(--border-default));
   background: var(--danger-soft);
   color: var(--danger-text);
+}
+
+/* The push that follows the reset, stated as exactly as the reset is. */
+.reset-remote__then {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+.reset-remote__then.is-force {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.reset-remote__then-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text-muted);
+  font: 600 9.5px/1.2 var(--font-sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.reset-remote__then-refs {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 7px;
+  color: var(--text-muted);
+  font: 500 11.5px/1.35 var(--font-mono);
+}
+.reset-remote__then-refs code {
+  color: var(--text-primary);
+  font: 650 11.5px/1.35 var(--font-mono);
+}
+.reset-remote__then p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.45 var(--font-sans);
+}
+.reset-remote__then.is-force p {
+  color: var(--danger-text);
+}
+.reset-remote__cmd {
+  display: block;
+  margin-top: 7px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 500 10px/1.45 var(--font-mono);
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 @media (max-width: 560px) {
