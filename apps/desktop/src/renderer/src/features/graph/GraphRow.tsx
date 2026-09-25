@@ -153,8 +153,9 @@ export function GraphRow({
     pullRequest
   } = vm;
   /** The row's plain tooltips — the rebase checkbox, the tag chip, the
-   *  overflow pill, the worktree button. Not the gated SHA/PR cards below,
-   *  which repeat down a column the pointer crosses (see lib/AGENTS.md). */
+   *  overflow pill, the worktree button, the author. Not the gated SHA/PR
+   *  cards below, which repeat down a column the pointer crosses (see
+   *  lib/AGENTS.md). */
   const tip = useViewportTooltip();
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
@@ -517,7 +518,11 @@ export function GraphRow({
               )}
             </span>
           )}
-          <span className={`commit-author${isMine ? "" : " is-other"}`}>
+          {/* Ellipsized under pressure, so the full name is on hover too. */}
+          <span
+            className={`commit-author${isMine ? "" : " is-other"}`}
+            {...(isMine ? {} : hoverTooltip(tip, commit.authorName))}
+          >
             {isMine ? "you" : commit.authorName}
           </span>
           {commit.isMerge && <span className="commit-tag">merge</span>}
