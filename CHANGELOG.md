@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.20.0 - 2026-09-25
+
+- Forks - Added Fork actions to repository rows, worktree menus, and forge remotes. Fork opens with the current checkout selected even when forge details are still loading, and Fork in place keeps the original repository as upstream.
+- Forge discovery - Newly cloned or added repositories now refresh their forge details during the session, so Fork options become available without restarting PwrGit.
+- Releases - Fixed a timing gap that could leave a fully signed build as an unpublished draft. Publishing now waits for GitHub to recognize the draft before attaching and verifying the macOS and Windows downloads.
+
 ## v0.19.0 - 2026-09-23
 
 - Stashes - Added a Stashes tab that shows the repository's Git stash stack across worktrees. Inspect patches and untracked files, create a stash, or safely apply, pop, and drop an entry; stashes left by an interrupted pull are marked for recovery.
