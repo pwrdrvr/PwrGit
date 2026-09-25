@@ -2191,7 +2191,9 @@ describe("reset targets on a fork", () => {
     git(source, ["push", "-u", "origin", "main"]);
     git(root, ["clone", "--bare", "source.git", "fork.git"]);
     const local = join(root, "local");
-    git(root, ["clone", "fork.git", "local"]);
+    // Set at clone time, before the checkout: Windows defaults autocrlf on,
+    // and a test here reads a stashed edit back byte for byte.
+    git(root, ["clone", "-c", "core.autocrlf=false", "fork.git", "local"]);
     configure(local, "local");
     git(local, ["remote", "add", "upstream", join(root, "source.git")]);
     git(local, ["fetch", "upstream"]);
