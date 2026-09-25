@@ -85,6 +85,7 @@ first.
 | `Image Diff Lightbox.dc.html` | Binary image diff — inline layout rule, lightbox, pixel compare. |
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
 | `Reset to Remote - Forks - UX Review.dc.html` | The same dialog on a fork: why it opened on `origin/main` when that was identical to `main`, why "Last fetched moments ago" was true only of `origin` while `upstream/main` was 19 minutes stale, and the fork-source card, per-remote fetch coverage and leased push back to the fork that fix it. Interactive. |
+| `Fork Sync - UX Review.dc.html` | Why a fork's `main` read "up to date" while its source was 10 commits ahead &mdash; the header measured it against the fork itself, and Fetch never asked `upstream` &mdash; and where a one-click catch-up belongs: a separate chip, a split Pull whose default syncs, a Pull that only pulls, or a button that reads Sync. Then the recommended split Pull through its states: the arrow menu, syncing, the receipt, a refused push, a `main` with commits of its own, where no arrow appears, and the narrow header. Interactive. |
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
@@ -350,6 +351,23 @@ the forge mark on the origin row. The project lists it at 1,570 bytes against
 1,559 here, because Claude Design re-serializes an SVG on write and expands its
 one `<path/>` and one `<rect/>` into open/close pairs (6 + 5 bytes). The
 drawing is identical; keep the repo's copy.
+
+`Fork Sync - UX Review.dc.html` was written here and pushed up through the
+`claude-design` MCP; the project copy was verified at the same 53,797 bytes.
+It follows on from `Reset to Remote - Forks`. After that reset the fork's
+source moved on 10 commits and nothing in the app noticed, because the header
+measured `main` against `origin/main`, the fork, and Fetch never asked
+`upstream`. Turn **1** weighs four homes for a one-click catch-up: **1a** is
+the standalone chip this change first built, and **1b**, a split Pull whose
+default fast-forwards from the source and then pushes to the fork, is the
+recommendation. Turn **2** takes 1b through its states, and **2i** is a live
+`DCLogic` prototype. The toolbar glyphs are the app's own `RefreshGlyph`,
+`PullGlyph` and Push icon, drawn as CSS masks from fully percent-encoded SVG,
+because a partly encoded data URI rendered only part of each glyph. Its
+names are contrived (`sparkline`, `octo-labs`, `demo-dev`), and so are the
+counts and the SHA `8f3c2a9`. The design thread that produced it is in the
+project's chat panel as "Fork behind its source — detect and sync". It carries
+no `assets/`.
 
 ## Deliberately NOT copied in
 
