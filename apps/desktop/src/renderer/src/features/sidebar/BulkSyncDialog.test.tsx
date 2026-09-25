@@ -347,6 +347,81 @@ describe("BulkSyncDialog", () => {
     );
   });
 
+  it("offers an estimate once three repositories and five seconds are in", async () => {
+    vi.useFakeTimers({
+      toFake: ["Date", "setInterval", "clearInterval"],
+      now: new Date("2026-09-25T12:00:00.000Z")
+    });
+    try {
+      const four: Repo[] = ["a", "b", "c", "d"].map((name) => ({
+        ...repos[0]!,
+        id: `repo-${name}`,
+        name,
+        path: `/repos/${name}`
+      }));
+      dispatch.mockImplementation((command: string) =>
+        command === "remote:bulkSync"
+          ? new Promise(() => {})
+          : Promise.resolve({ ok: true, value: { cancelled: true } })
+      );
+      await act(async () => {
+        root.render(
+          <BulkSyncDialog
+            profileId="profile-1"
+            repos={four}
+            mode="soft-pull"
+            onClose={vi.fn()}
+          />
+        );
+      });
+      const operationId = dispatch.mock.calls[0]?.[1].operationId as string;
+      const time = () =>
+        container.querySelector(".bulk-sync__time")?.textContent ?? "";
+
+      await act(async () => {
+        for (const [index, repo] of four.slice(0, 2).entries()) {
+          progressHandler?.({
+            operationId,
+            mode: "soft-pull",
+            phase: "repo_completed",
+            totalRepos: 4,
+            completedRepos: index + 1,
+            repoId: repo.id,
+            repoName: repo.name,
+            result: { ...safeResult, repoId: repo.id, name: repo.name }
+          });
+        }
+        vi.advanceTimersByTime(6_000);
+      });
+      // Two finished is not enough evidence, however long it has taken.
+      expect(time()).toBe("6s elapsed");
+
+      await act(async () => {
+        progressHandler?.({
+          operationId,
+          mode: "soft-pull",
+          phase: "repo_completed",
+          totalRepos: 4,
+          completedRepos: 3,
+          repoId: "repo-c",
+          repoName: "c",
+          result: { ...safeResult, repoId: "repo-c", name: "c" }
+        });
+        vi.advanceTimersByTime(1_000);
+      });
+      // 3 finished in 7s leaves one more at the same rate: ~2.3s.
+      expect(time()).toBe("7s elapsed · a few seconds left");
+
+      const cancel = [...container.querySelectorAll("button")].find(
+        (button) => button.textContent === "Cancel"
+      );
+      await act(async () => cancel!.click());
+      expect(time()).toBe("7s elapsed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("closes a cancelled run with the undone repositories in the bar", async () => {
     const cancelledResult: BulkSyncRepoResult = {
       ...partialResult,

@@ -5148,6 +5148,7 @@ button.agent-menu__item:hover {
   flex: 0 1 0;
   min-width: 3px;
   box-shadow: inset -1px 0 0 var(--bg-panel);
+  background: var(--bulk-sync-outcome, transparent);
   transition: flex-grow 320ms ease;
 }
 .bulk-sync__bar > i.is-empty,
@@ -5155,22 +5156,28 @@ button.agent-menu__item:hover {
   min-width: 0;
   box-shadow: none;
 }
-.bulk-sync__bar > .is-success {
-  background: var(--status-ok);
+/* One color per outcome, read by both the bar segment and its legend swatch
+   so the two cannot drift apart. --danger-base is the failed card border's own
+   base: --status-error sat too close to the light theme's warning brown to
+   read as a different outcome. */
+.bulk-sync__status .is-success {
+  --bulk-sync-outcome: var(--status-ok);
 }
-.bulk-sync__bar > .is-partial {
-  background: var(--status-warning);
+.bulk-sync__status .is-partial {
+  --bulk-sync-outcome: var(--status-warning);
 }
-.bulk-sync__bar > .is-skipped {
-  background: color-mix(in srgb, var(--status-warning) 50%, var(--bg-panel));
+.bulk-sync__status .is-skipped {
+  --bulk-sync-outcome: color-mix(
+    in srgb,
+    var(--status-warning) 50%,
+    var(--bg-panel)
+  );
 }
-/* --danger-base, the failed card border's own base. --status-error sat too
-   close to the light theme's warning brown to read as a different outcome. */
-.bulk-sync__bar > .is-failed {
-  background: var(--danger-base);
+.bulk-sync__status .is-failed {
+  --bulk-sync-outcome: var(--danger-base);
 }
-.bulk-sync__bar > .is-cancelled {
-  background: var(--status-suspended);
+.bulk-sync__status .is-cancelled {
+  --bulk-sync-outcome: var(--status-suspended);
 }
 /* In flight is the one accent in the bar, and the one moving part. The global
    reduced-motion rule stops the travel; the stripes stay, so the state does. */
@@ -5188,6 +5195,12 @@ button.agent-menu__item:hover {
     var(--status-suspended) 0 3px,
     color-mix(in srgb, var(--status-suspended) 38%, transparent) 3px 6px
   );
+  animation: none;
+}
+/* An empty in-flight segment has nothing to show, and the receipt keeps the
+   bar on screen indefinitely: a background-position animation is not
+   compositable, so left running it would repaint every frame for nothing. */
+.bulk-sync__bar > .is-in-flight.is-empty {
   animation: none;
 }
 /* One stripe period along x: 6px across the stripes is 6 / sin 45deg. */
@@ -5220,25 +5233,11 @@ button.agent-menu__item:hover {
   width: 7px;
   height: 7px;
   border-radius: 2px;
+  background: var(--bulk-sync-outcome);
   content: "";
-}
-.bulk-sync__legend-item.is-success::before {
-  background: var(--status-ok);
-}
-.bulk-sync__legend-item.is-partial::before {
-  background: var(--status-warning);
-}
-.bulk-sync__legend-item.is-skipped::before {
-  background: color-mix(in srgb, var(--status-warning) 50%, var(--bg-panel));
-}
-.bulk-sync__legend-item.is-failed::before {
-  background: var(--danger-base);
 }
 .bulk-sync__legend-item.is-failed strong {
   color: var(--danger-text);
-}
-.bulk-sync__legend-item.is-cancelled::before {
-  background: var(--status-suspended);
 }
 .bulk-sync__legend-tail {
   margin-left: auto;

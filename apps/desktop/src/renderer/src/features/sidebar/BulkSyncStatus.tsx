@@ -17,7 +17,7 @@ export type BulkSyncStatusPhase =
   | "finished"
   | "cancelled";
 
-export type BulkSyncStatusMark = "ok" | "failed" | "cancelled";
+type StatusMarkKind = "ok" | "failed" | "cancelled";
 
 /**
  * The run status card: one element from the first repository to the receipt.
@@ -29,7 +29,7 @@ export type BulkSyncStatusMark = "ok" | "failed" | "cancelled";
  */
 export function BulkSyncStatus({
   phase,
-  mark,
+  hasFailures,
   title,
   detail,
   counts,
@@ -39,8 +39,8 @@ export function BulkSyncStatus({
   durationMs
 }: {
   phase: BulkSyncStatusPhase;
-  /** Shown in place of the spinner once the run has ended. */
-  mark: BulkSyncStatusMark | null;
+  /** Whether the ended run failed anywhere; picks the mark that replaces the spinner. */
+  hasFailures: boolean;
   title: string;
   /** The lone in-flight repository's path, or the finished summary. */
   detail: { kind: "path" | "summary"; text: string } | null;
@@ -62,7 +62,15 @@ export function BulkSyncStatus({
         {live ? (
           <span className="bulk-sync__spinner" aria-hidden="true" />
         ) : (
-          mark !== null && <StatusMark mark={mark} />
+          <StatusMark
+            mark={
+              phase === "cancelled"
+                ? "cancelled"
+                : hasFailures
+                  ? "failed"
+                  : "ok"
+            }
+          />
         )}
         {/* The live region is the words alone. The clock sits outside it:
             inside an atomic region, every tick would be read out again. */}
@@ -199,7 +207,7 @@ function LiveClock({
   );
 }
 
-function StatusMark({ mark }: { mark: BulkSyncStatusMark }): ReactElement {
+function StatusMark({ mark }: { mark: StatusMarkKind }): ReactElement {
   return (
     <span className={`bulk-sync__mark is-${mark}`} aria-hidden="true">
       <svg

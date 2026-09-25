@@ -12,11 +12,7 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
-import {
-  BulkSyncStatus,
-  type BulkSyncStatusMark,
-  type BulkSyncStatusPhase
-} from "./BulkSyncStatus";
+import { BulkSyncStatus, type BulkSyncStatusPhase } from "./BulkSyncStatus";
 import { countOutcomes, finishedCount } from "./bulk-sync-progress";
 
 type RepoProgress =
@@ -114,17 +110,16 @@ function overallSummary(summary: BulkSyncSummary): string {
 }
 
 /**
- * The finished card's mark, judged at the level its summary sentence counts.
- * A fetch reports a broken remote inside a `partial` repository, so repository
- * outcomes alone would draw a green mark beside "1 failed".
+ * Whether a finished run failed anywhere, at the level its summary sentence
+ * counts. A fetch reports a broken remote inside a `partial` repository, so
+ * repository outcomes alone would draw a green mark beside "1 failed".
  */
-function summaryMark(summary: BulkSyncSummary): BulkSyncStatusMark {
-  if (summary.cancelled) return "cancelled";
+function summaryHasFailures(summary: BulkSyncSummary): boolean {
   const nested =
     summary.mode === "fetch"
       ? summary.counts.remotes.failed
       : summary.counts.worktrees.failed;
-  return summary.counts.repos.failed + nested > 0 ? "failed" : "ok";
+  return summary.counts.repos.failed + nested > 0;
 }
 
 /** Main's own start and finish, so "took" is the run and not the dialog. */
@@ -341,7 +336,7 @@ export function BulkSyncDialog({
         {(running || summary !== null) && (
           <BulkSyncStatus
             phase={statusPhase}
-            mark={summary === null ? null : summaryMark(summary)}
+            hasFailures={summary !== null && summaryHasFailures(summary)}
             title={
               summary === null
                 ? activityTitle
