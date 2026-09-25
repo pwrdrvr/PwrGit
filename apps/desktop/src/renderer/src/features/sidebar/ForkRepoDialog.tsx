@@ -62,6 +62,7 @@ function destinationMeta(destination: CloneDestination): string {
 export function ForkRepoDialog({
   profile,
   initialSource,
+  inPlace,
   onForked,
   onReveal,
   onClose
@@ -73,6 +74,11 @@ export function ForkRepoDialog({
    *  upgrades it the same way it upgrades a pasted slug, so an identity-shaped
    *  placeholder is enough. */
   initialSource?: CloneRepository;
+  /** The checkout `initialSource` was read from. Forking that repository
+   *  does not need a second clone: `ForkCheckoutDialog` forks it and points
+   *  the existing checkout at the fork. This dialog cannot do that itself, so
+   *  it offers the way there while the source is still that repository. */
+  inPlace?: { repoName: string; onChoose: () => void };
   onForked: (repo: Repo) => void;
   onReveal: (path: string) => void;
   onClose: () => void;
@@ -664,6 +670,35 @@ export function ForkRepoDialog({
             {action.kind === "blocked" && (
               <div className="clone-submit-error">{action.message}</div>
             )}
+            {/* Only while the source is still the seed. Search for something
+                else and the checkout this names is no longer the one being
+                forked. `nameWithOwner` and `hostname` because a same-named
+                project on another instance is a different repository. */}
+            {inPlace !== undefined &&
+              initialSource !== undefined &&
+              selectedSource !== null &&
+              selectedSource.hostname === initialSource.hostname &&
+              selectedSource.nameWithOwner.toLowerCase() ===
+                initialSource.nameWithOwner.toLowerCase() && (
+                <div className="fork-in-place">
+                  <span>
+                    <strong>Already checked out here, as {inPlace.repoName}</strong>
+                    <small>
+                      Forking in place keeps this checkout: origin moves to your
+                      fork and the original stays as upstream. Nothing new is
+                      cloned.
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    className="modal__cancel fork-in-place__action"
+                    disabled={busy}
+                    onClick={inPlace.onChoose}
+                  >
+                    Fork in place…
+                  </button>
+                </div>
+              )}
             {preflight?.existing !== undefined &&
               action.kind !== "blocked" && (
                 <div className="fork-existing">
@@ -762,7 +797,7 @@ export function ForkRepoDialog({
                       )}
                     </strong>
                     <small>
-                      Fetch and rebase on the original without leaving PwrGit.
+                      Fetch and rebase on the original without leaving PwrGit.{" "}
                       <code>origin</code> stays your fork.
                     </small>
                   </span>

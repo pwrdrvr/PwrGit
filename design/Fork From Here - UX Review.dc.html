@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, LIGHT block — the theme the report came from. */
+          :root {
+            --app: #ffffff; --side: #f7f4ef; --panel: #fdfcfa; --elev: #ffffff;
+            --hov: #f4f0e8; --hov2: #ebe5da; --rowact: #fff5e9; --actstrong: #ffe8cf;
+            --line0: rgba(0,0,0,.05); --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12); --line3: rgba(0,0,0,.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64; --tsub: rgba(26,22,18,.68);
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: rgba(183,76,0,.12); --atint: rgba(183,76,0,.08); --abord: rgba(183,76,0,.42);
+            --warn: #805200; --ok: #2e7d3c; --bad: #a8472a;
+            --sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #efe9df; }
+          body { margin: 0; background: #efe9df; font-family: var(--sans); color: var(--t1); -webkit-font-smoothing: antialiased; }
+          a { color: var(--acc); text-decoration: none; } a:hover { color: var(--accb); }
+
+          /* ---- review chrome (house: "Refresh Affordances - Normalization") ---- */
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #fff; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 14px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: var(--t2); max-width: 820px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.35 var(--sans); color: var(--t2); max-width: 720px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .note { margin: 0; max-width: 340px; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .note code, .fitem code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+
+          /* ---- findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.gap { background: var(--warn); }
+          .pin.ok { background: var(--ok); }
+          .find { width: 420px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 10px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 12px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .tag { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; margin-left: 6px; border-radius: 999px; font: 600 9px/1 var(--mono); letter-spacing: .03em; vertical-align: 1px; }
+          .tag.bug { background: rgba(168,71,42,.12); color: var(--bad); }
+          .tag.gap { background: rgba(128,82,0,.12); color: var(--warn); }
+
+          /* ---- sidebar specimen (true size, from app.css) ---- */
+          .sb { position: relative; width: 320px; padding: 8px; background: var(--side); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; gap: 2px; }
+          .rr { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 8px 4px 12px; border: 1px solid transparent; border-radius: 8px; }
+          .rr.hov { background: var(--hov); }
+          .chev { width: 0; height: 0; flex: none; margin-right: -2px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--t3); }
+          .chev.open { transform: rotate(90deg); }
+          .rname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.25 var(--sans); color: var(--acc); }
+          .cur { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--line2); border-radius: 5px; font: 500 10.5px/1 var(--mono); color: var(--t2); background: var(--elev); }
+          .gh { flex: none; display: inline-block; width: 13px; height: 13px; background: url("./assets/github-invertocat-black.svg") center / contain no-repeat; }
+          .gh.sm { width: 12px; height: 12px; }
+          .glyph { flex: none; display: inline-flex; color: var(--t3); }
+          .glyph.warn { color: var(--warn); }
+          .star { flex: none; display: inline-flex; width: 16px; height: 16px; align-items: center; justify-content: center; color: var(--tsub); font-size: 14px; }
+          .keb { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--line); color: var(--t2); background: transparent; }
+          .keb.on { background: var(--hov2); border-color: var(--line2); color: var(--t1); }
+          .keb.ghost { opacity: 0; }
+          .keb.tb { width: 32px; height: 32px; border-radius: 8px; border-color: var(--line2); background: var(--elev); color: var(--t1); }
+          .wt { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 2px 4px 2px 18px; padding: 0 10px; border: 1px solid var(--acc); border-radius: 7px; background: var(--rowact); font: 500 12.5px/1 var(--mono); color: var(--acc); }
+          .wt .grow { flex: 1; }
+          .prim { font: 600 11px/1 var(--mono); letter-spacing: .04em; padding: 3px 6px; border-radius: 4px; background: var(--asoft); color: var(--accb); }
+          .age { font: 500 11px/1 var(--mono); color: var(--t2); }
+          .sec { display: flex; align-items: center; gap: 8px; min-height: 30px; margin: 0 4px 0 18px; padding: 0 6px; border-top: 1px solid var(--line); font: 600 11px/1 var(--mono); letter-spacing: .1em; color: var(--t2); }
+          .sec .n { letter-spacing: 0; color: var(--t3); }
+          .sec .on-main { letter-spacing: 0; color: var(--acc); font-weight: 500; }
+          .sec .grow { flex: 1; }
+          .mini { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -2px; border: 1px solid transparent; border-radius: 6px; color: var(--t3); }
+          .mini.box { border-color: var(--line2); background: var(--elev); }
+          .mini.acc { color: var(--acc); }
+          .mini.soft { color: var(--t3); }
+          .mini.hot { background: var(--atint); color: var(--acc); border-color: var(--abord); }
+          .remote { display: flex; align-items: center; gap: 7px; min-height: 30px; margin: 0 4px 0 24px; padding: 0 6px; font: 600 12.5px/1 var(--mono); color: var(--t1); }
+          .remote .grow { flex: 1; }
+          .remote small { font: 600 9.5px/1 var(--mono); letter-spacing: .06em; color: var(--t2); text-transform: uppercase; }
+          .manage { margin: 4px 4px 4px 30px; font: 500 12px/1.3 var(--sans); color: var(--acc); }
+          .ghostrow { height: 22px; margin: 0 8px 0 18px; border-radius: 6px; background: repeating-linear-gradient(135deg, rgba(0,0,0,.035) 0 6px, transparent 6px 12px); }
+
+          /* ---- pop-menu (the kebab + right-click surface) ---- */
+          .menu { position: absolute; z-index: 5; min-width: 216px; padding: 5px; background: var(--elev); border: 1px solid var(--line2); border-radius: 9px; box-shadow: 0 12px 32px rgba(40,26,10,.16), 0 2px 6px rgba(40,26,10,.08); display: flex; flex-direction: column; }
+          .mi { display: flex; align-items: center; gap: 9px; min-height: 28px; padding: 0 9px; border-radius: 6px; font: 500 12.5px/1.2 var(--sans); color: var(--t1); white-space: nowrap; }
+          .mi .ico { flex: none; display: inline-flex; width: 14px; color: var(--t3); }
+          .mi.hl { background: var(--asoft); color: var(--accb); }
+          .mi.hl .ico { color: var(--acc); }
+          .mi .kbd { margin-left: auto; font: 500 10.5px/1 var(--mono); color: var(--t3); }
+          .mi .sub { margin-left: auto; padding-left: 14px; font: 500 10.5px/1 var(--mono); color: var(--t3); }
+          .msep { height: 1px; margin: 4px 6px; background: var(--line); }
+          .mhead { padding: 6px 9px 4px; font: 600 9.5px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+
+          /* ---- tooltip (useViewportTooltip card) ---- */
+          .tip { position: absolute; z-index: 6; max-width: 260px; padding: 7px 9px; border-radius: 7px; background: #1a1612; color: #f7f3eb; font: 500 11px/1.4 var(--sans); box-shadow: 0 6px 18px rgba(0,0,0,.18); text-wrap: pretty; }
+
+          /* ---- push-state matrix ---- */
+          .mx { display: flex; flex-direction: column; gap: 10px; width: 520px; }
+          .mxr { display: grid; grid-template-columns: 120px 200px minmax(0,1fr); gap: 14px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+          .mxl { font: 600 10.5px/1.35 var(--mono); color: var(--t2); }
+          .mxc { font: 400 11px/1.45 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .mxr .remote { margin: 0; padding: 0; }
+
+          /* ---- worktree header toolbar ---- */
+          .tb { position: relative; width: 560px; height: 250px; padding: 12px 14px; background: var(--app); border: 1px solid var(--line); border-radius: 10px; }
+          .tbrow { display: flex; align-items: center; gap: 8px; }
+          .tbrow .grow { flex: 1; }
+          .br { font: 600 14px/1 var(--mono); color: var(--t1); }
+          .chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line2); font: 600 10.5px/1 var(--mono); color: var(--t2); }
+          .chip.ro { color: var(--warn); border-color: rgba(128,82,0,.35); background: rgba(128,82,0,.06); }
+          .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line2); background: var(--elev); font: 500 12.5px/1 var(--sans); color: var(--t1); }
+
+          /* ---- fork dialog ---- */
+          .dlg { position: relative; width: 640px; border: 1px solid var(--line2); border-radius: 14px; background: var(--elev); box-shadow: 0 18px 50px rgba(40,26,10,.14); overflow: hidden; }
+          .dh { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+          .dh .ic { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; background: var(--asoft); color: var(--acc); }
+          .dh h3 { margin: 0; font: 650 15px/1.2 var(--sans); }
+          .dh p { margin: 3px 0 0; font: 400 12px/1.3 var(--sans); color: var(--t2); }
+          .db { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+          .lbl { display: flex; align-items: center; gap: 8px; font: 600 10.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; color: var(--t1); }
+          .lbl .grow { flex: 1; }
+          .seg { display: inline-flex; gap: 4px; }
+          .seg span { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line2); font: 600 9.5px/1 var(--mono); letter-spacing: .05em; color: var(--t2); }
+          .seg span.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .field { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--elev); font: 500 13.5px/1 var(--sans); color: var(--t1); }
+          .field .ph { color: var(--t3); }
+          .srcrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--rowact); }
+          .srcrow .nm { font: 600 13px/1.2 var(--mono); color: var(--t1); }
+          .srcrow .meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font: 500 11px/1.2 var(--mono); color: var(--t2); }
+          .srcrow .grow { flex: 1; }
+          .pill { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line2); font: 600 10px/1 var(--mono); color: var(--t2); background: var(--elev); }
+          .pill.warn { color: var(--warn); border-color: rgba(128,82,0,.35); }
+          .pill.wait { color: var(--t3); border-style: dashed; }
+          .bridge { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 9px; background: var(--panel); }
+          .bridge .ic { color: var(--acc); display: inline-flex; }
+          .bridge b { font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+          .bridge p { margin: 2px 0 0; font: 400 11.5px/1.45 var(--sans); color: var(--t2); }
+          .bridge p code { font: 500 11px/1 var(--mono); color: var(--t1); }
+          .cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+          .card { padding: 9px 11px; border: 1px solid var(--line2); border-radius: 8px; font: 600 12.5px/1.2 var(--sans); color: var(--t1); }
+          .card small { display: block; margin-top: 3px; font: 500 10.5px/1 var(--mono); color: var(--t2); }
+          .card.on { border-color: var(--abord); background: var(--rowact); color: var(--accb); }
+          .fade { opacity: .45; }
+          .df { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+          .df .grow { flex: 1; }
+          .df .hint { font: 500 11px/1 var(--mono); color: var(--t2); }
+          .pbtn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; background: var(--acc); color: #fff; font: 600 13px/1 var(--sans); }
+          .sbtn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; border: 1px solid var(--line2); background: var(--elev); color: var(--t1); font: 500 13px/1 var(--sans); }
+          .slink { font: 600 12px/1 var(--sans); color: var(--acc); padding: 7px 10px; border-radius: 7px; border: 1px solid var(--abord); background: var(--elev); white-space: nowrap; }
+
+          /* ---- plan table ---- */
+          .plan { width: 900px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+          .pr { display: grid; grid-template-columns: 36px 250px minmax(0,1fr) 110px; gap: 14px; align-items: start; padding: 10px 14px; border-bottom: 1px solid var(--line); font: 400 11.5px/1.5 var(--sans); color: var(--t2); }
+          .pr.last { border-bottom: 0; }
+          .pr.head { font: 600 9.5px/1.3 var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--t3); background: rgba(0,0,0,.025); }
+          .pr b { font: 600 12px/1.4 var(--sans); color: var(--t1); }
+          .pr code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); }
+          .pr .k { font: 700 11px/1.4 var(--mono); color: var(--acc); }
+
+          /* ---- live prototype ---- */
+          .proto { display: flex; gap: 22px; align-items: flex-start; }
+          .ctl { display: flex; flex-direction: column; gap: 12px; width: 300px; }
+          .ctlg { display: flex; flex-direction: column; gap: 6px; }
+          .ctlh { font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+          .opts { display: flex; flex-wrap: wrap; gap: 5px; }
+          .opt { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line2); background: var(--elev); font: 500 11.5px/1 var(--sans); color: var(--t2); cursor: pointer; }
+          .opt.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); font-weight: 600; }
+          .readout { padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line2); background: var(--panel); font: 400 11.5px/1.5 var(--sans); color: var(--t2); }
+          .readout b { color: var(--t1); font-weight: 650; }
+          .click { cursor: pointer; }
+        </style>
+      </helmet>
+
+      <div style="background:#efe9df;min-width:1180px">
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">What happened on sparkline: a missed lookup and a missing verb</span></div>
+        <p class="dv-sub">The report: a checkout of someone else's repository, cloned with PwrGit's own Clone&#8230; two days after the window opened. Forge identity is read when the window mounts and after a fetch. A clone does neither: it only reloads the sidebar's list. So PwrGit never learned what <code>origin</code> is. Every fork affordance waits on that answer, so none of them appeared. In the reporting profile, every repository without an identity row had been added after the window mounted. Names here are contrived: <code>sparkline</code> stands in for the reported checkout.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a As built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>As built &#8212; sparkline, REMOTES open</div>
+            <div class="sb">
+              <div class="rr hov"><span class="chev open"></span><span class="rname">sparkline</span><span class="cur">Current</span><span class="star">&#9734;</span></div>
+              <div class="wt"><span>&#8962;</span><span class="grow">main</span><span class="prim">PRIMARY</span><span class="age">1d</span></div>
+              <div class="sec"><span class="chev"></span><span>WORKTREES <span class="n">0</span></span></div>
+              <div class="sec"><span class="chev"></span><span>BRANCHES <span class="n">2</span> <span class="on-main">&#183; on main</span></span></div>
+              <div class="sec"><span class="chev"></span><span>TAGS <span class="n">87</span></span></div>
+              <div class="sec"><span class="chev open"></span><span class="grow">REMOTES <span class="n">1</span></span><span class="mini box"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div>
+              <div class="remote"><span class="chev"></span><span>origin</span><span class="gh"></span><span class="grow"></span><small>default</small><span class="mini"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div>
+              <div class="manage">Manage remotes and remote branches&#8230;</div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Why each place came up empty</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>No identity for a repo added mid-session<span class="tag bug">BUG</span></h4><p><code>useRepoTree</code> asks <code>repo:refreshIdentities</code> once, on mount. A <code>repo:changed</code> reload that brings in new rows never asks about them, and that reload is all <code>repo:clone</code> ends with. Relaunching or fetching the repo would have fixed it, and nothing on screen says so.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>Top Fork&#8230; seeds only from identity<span class="tag bug">BUG</span></h4><p><code>forkSeedFromRepo</code> returns null without an identity, so the dialog opens on an empty search. The slug was already known locally: <code>origin</code>'s URL parses to <code>github.com/octo-labs/sparkline</code>, and the dialog's own preflight fills in the rest.</p></div></div>
+              <div class="fitem"><span class="pin gap">3</span><div><h4>The origin row's fork button waits for "can't push"<span class="tag gap">GAP</span></h4><p>The button only draws when <code>viewerCanPush === false</code>. "Not looked up" and "you can push" both hide it. So the one remote row that is about forking offers only Fetch.</p></div></div>
+              <div class="fitem"><span class="pin gap">4</span><div><h4>A repo has no menu of its own<span class="tag gap">GAP</span></h4><p>Worktree rows have a kebab and a right-click menu; repo rows have neither. When the read-only mark isn't drawn, there is no row-level verb left to hold Fork. <code>design/fork-flow</code> never drew one either: its only entry was the Clone/Fork pair at the top of the sidebar.</p></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "what if the lookup is signed out rather than missing?" &#183; "show the read-only mark on sparkline once identity lands"</p>
+      </section>
+
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Put Fork wherever you'd look for it, and don't gate it on the forge</span></div>
+        <p class="dv-sub">Three places, all built from existing house parts: the <code>.kebab</code> and <code>.pop-menu</code> that worktree rows already use, the <code>.ref-mini-action</code> beside Fetch, and the toolbar kebab in the worktree header. Each opens the in-place fork dialog, <code>ForkCheckoutDialog</code>. It reads <code>origin</code> itself, so it works before the forge has answered. When you can push, it words itself "Fork X and point this checkout at your own copy".</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Repo row kebab">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Repo row: kebab on hover or focus, and right-click opens the same menu</div>
+            <div class="sb" style="height:292px">
+              <div class="rr hov"><span class="chev open"></span><span class="rname">sparkline</span><span class="glyph warn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path></svg></span><span class="cur">Current</span><span class="star">&#9734;</span><span class="keb on"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2.3"></circle><circle cx="12" cy="12" r="2.3"></circle><circle cx="12" cy="19" r="2.3"></circle></svg></span></div>
+              <div class="wt"><span>&#8962;</span><span class="grow">main</span><span class="prim">PRIMARY</span><span class="age">1d</span></div>
+              <div class="ghostrow"></div>
+              <div class="ghostrow"></div>
+              <div class="menu" style="left:118px;top:40px">
+                <div class="mi hl"><span class="ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span>Fork octo-labs/sparkline&#8230;</div>
+                <div class="mi"><span class="ico"></span>Manage remotes&#8230;</div>
+                <div class="msep"></div>
+                <div class="mi"><span class="ico"></span>Copy path</div>
+                <div class="mi"><span class="ico"></span>Reveal in Finder</div>
+                <div class="msep"></div>
+                <div class="mi"><span class="ico"></span>Refresh forge info</div>
+              </div>
+            </div>
+            <p class="note">Same 18px drawn / 24px targeted kebab as <code>.wt-row</code>, parked after the star so nothing to its left moves when it fades in. It stays visible while its menu is open. <b>Fork</b> comes first because it is the verb this menu was added for. The label uses the slug when it's known and the folder name when it isn't.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Origin row">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>REMOTES &#8594; origin: the fork button is always there, and the push answer sets its colour</div>
+            <div class="mx">
+              <div class="mxr"><span class="mxl">can't push</span><div class="remote"><span class="chev"></span><span>origin</span><span class="gh sm"></span><span class="glyph warn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path></svg></span><span class="grow"></span><small>default</small><span class="mini acc"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span><span class="mini"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div><span class="mxc">As shipped. Accent colour, and "Fork it and point origin at your fork".</span></div>
+              <div class="mxr"><span class="mxl">not looked up / forge silent</span><div class="remote"><span class="chev"></span><span>origin</span><span class="gh sm"></span><span class="grow"></span><small>default</small><span class="mini soft"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span><span class="mini"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div><span class="mxc"><b>New.</b> Muted, like Fetch. This is the reported case: <code>origin</code>'s URL parses to a forge, so the verb is offered, and the dialog's preflight works out the rest.</span></div>
+              <div class="mxr"><span class="mxl">you can push</span><div class="remote"><span class="chev"></span><span>origin</span><span class="gh sm"></span><span class="grow"></span><small>default</small><span class="mini soft"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span><span class="mini"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div><span class="mxc"><b>New.</b> Muted, for forking an org repo into your own account. Tooltip: "Fork X into another account — origin moves to the copy".</span></div>
+              <div class="mxr"><span class="mxl">origin is your fork</span><div class="remote"><span class="chev"></span><span>origin</span><span class="gh sm"></span><span class="glyph"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span><span class="grow"></span><small>default</small><span class="mini"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div><span class="mxc">No button. Forking your own fork is not a next step anyone is looking for. The repo menu still has the verb if you want it.</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Header kebab">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Worktree header &#8942;: the "on main" place gets the same item</div>
+            <div class="tb">
+              <div class="tbrow"><span class="br">main</span><span class="chip">&#8593;0 &#8595;0</span><span class="grow"></span><span class="btn">Fetch</span><span class="btn">Pull</span><span class="btn">Push</span><span class="keb tb on"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2.3"></circle><circle cx="12" cy="12" r="2.3"></circle><circle cx="12" cy="19" r="2.3"></circle></svg></span></div>
+              <div class="menu" style="right:14px;top:52px">
+                <div class="mi"><span class="ico"></span>Copy branch name</div>
+                <div class="mi"><span class="ico"></span>Copy path</div>
+                <div class="mi"><span class="ico"></span>Reveal in Finder</div>
+                <div class="msep"></div>
+                <div class="mi hl"><span class="ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span>Fork octo-labs/sparkline&#8230;</div>
+                <div class="msep"></div>
+                <div class="mi"><span class="ico"></span>Reset to remote branch&#8230;</div>
+              </div>
+            </div>
+            <p class="note">The <code>read-only</code> chip stays exactly as it is, and still appears only once the forge says you can't push. The menu item doesn't wait for that answer. It sits between the copy/reveal group and the destructive items, so it can't be mistaken for either.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "should the repo kebab be visible at rest on the Current repo?" &#183; "add Open on GitHub to the repo menu"</p>
+      </section>
+
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Fork&#8230; at the top starts from the repo you're on</span></div>
+        <p class="dv-sub">The global button stays a Fork &amp; clone launcher next to Clone&#8230;. With a repo selected, it now opens on that repo every time: seeded from identity when there is one, and otherwise from <code>origin</code>'s URL, which the preflight upgrades the same way it upgrades a pasted slug. The new row between the source and the options points to the other half of the operation. You already have this checked out, so you may want to fork in place rather than clone a second copy.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Seeded dialog">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Seeded on open. The forge answer is still in flight.</div>
+            <div class="dlg">
+              <div class="dh"><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span><div><h3>Fork a repository</h3><p>Create your own copy, then check it out in Demo</p></div></div>
+              <div class="db">
+                <div class="lbl"><span class="grow">Repository to fork</span><span class="seg"><span class="on">GITHUB</span><span>GITCAFE</span></span></div>
+                <div class="field"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg><span>octo-labs/sparkline</span></div>
+                <div class="srcrow"><span class="gh"></span><div class="grow"><div class="nm">octo-labs/sparkline</div><div class="meta"><span class="pill wait">checking&#8230;</span><span>github.com</span></div></div></div>
+                <div class="bridge"><div><b>Already checked out here, as sparkline</b><p>Forking in place keeps this checkout: <code>origin</code> moves to your fork and the original stays as <code>upstream</code>. Nothing new is cloned.</p></div><span class="slink">Fork in place&#8230;</span></div>
+                <div class="lbl" style="margin-top:4px">Fork into</div>
+                <div class="cards"><div class="card on">demo-dev<small>personal account</small></div><div class="card">pixel-works<small>organization</small></div><div class="card">sprocket-co<small>organization</small></div></div>
+                <div class="lbl fade" style="margin-top:4px">After forking &#183; Clone with &#183; Check out to</div>
+                <div class="ghostrow fade" style="margin:0;height:28px"></div>
+              </div>
+              <div class="df"><span class="hint">&#8645; navigate &#8629; select / fork</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Fork &amp; clone</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="3b" data-screen-label="3b Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>What the top button opens on</div>
+            <div class="find" style="width:360px">
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Repo selected, identity known</h4><p>Seeded from identity, as shipped. Visibility, lineage and push access read correctly from the first frame.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Repo selected, identity missing</h4><p><b>New.</b> One <code>git remote -v</code>, and <code>origin</code>'s fetch URL parsed with the forge host map. Visibility reads "checking&#8230;" until the preflight lands. This also queues an identity refresh for the repo, so the sidebar marks catch up.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>origin isn't on a forge, or there's no origin</h4><p>Empty search, as today. A NAS remote is not a forge, and inventing a host is how a fork lands on the wrong instance.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Nothing selected</h4><p>Empty search, as today.</p></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "should the top button open the in-place dialog directly for a read-only repo?" &#183; "hide the bridge row once the user edits the source"</p>
+      </section>
+
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Live: click through the entry points</span></div>
+        <p class="dv-sub">Pick a push state and click the kebab (&#8942;) on the repo row, or the fork button on origin. The readout names the dialog each one opens and how that dialog is seeded.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Prototype</div>
+            <div class="proto">
+              <div class="ctl">
+                <div class="ctlg"><span class="ctlh">Forge says</span>
+                  <div class="opts">
+                    <sc-for list="{{ states }}" as="s" hint-placeholder-count="4"><span class="{{ s.cls }}" onClick="{{ s.pick }}">{{ s.label }}</span></sc-for>
+                  </div>
+                </div>
+                <div class="readout"><b>{{ readTitle }}</b><br />{{ readBody }}</div>
+              </div>
+              <div class="sb" style="height:300px">
+                <div class="rr hov"><span class="chev open"></span><span class="rname">sparkline</span><sc-if value="{{ showMark }}" hint-placeholder-val="{{ true }}"><span class="glyph warn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m4.9 4.9 14.2 14.2"></path></svg></span></sc-if><sc-if value="{{ showForkGlyph }}" hint-placeholder-val="{{ false }}"><span class="glyph"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span></sc-if><span class="cur">Current</span><span class="star">&#9734;</span><span class="{{ kebCls }}" onClick="{{ toggleMenu }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2.3"></circle><circle cx="12" cy="12" r="2.3"></circle><circle cx="12" cy="19" r="2.3"></circle></svg></span></div>
+                <div class="wt"><span>&#8962;</span><span class="grow">main</span><span class="prim">PRIMARY</span><span class="age">1d</span></div>
+                <div class="sec"><span class="chev open"></span><span class="grow">REMOTES <span class="n">1</span></span></div>
+                <div class="remote"><span class="chev"></span><span>origin</span><span class="gh sm"></span><span class="grow"></span><small>default</small><sc-if value="{{ showOriginFork }}" hint-placeholder-val="{{ true }}"><span class="{{ originForkCls }}" onClick="{{ pickOrigin }}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span></sc-if><span class="mini"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></span></div>
+                <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+                  <div class="menu" style="right:8px;top:40px">
+                    <div class="mi hl click" onClick="{{ pickMenuFork }}"><span class="ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span>{{ forkLabel }}</div>
+                    <div class="mi"><span class="ico"></span>Manage remotes&#8230;</div>
+                    <div class="msep"></div>
+                    <div class="mi"><span class="ico"></span>Copy path</div>
+                    <div class="mi"><span class="ico"></span>Reveal in Finder</div>
+                    <div class="msep"></div>
+                    <div class="mi"><span class="ico"></span>Refresh forge info</div>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Build list</span></div>
+        <p class="dv-sub">Everything reuses what exists: <code>ForkCheckoutDialog</code>, <code>ForkRepoDialog</code>, <code>ContextMenu</code>, <code>.kebab</code> and <code>.ref-mini-action--fork</code>. No new main-process commands.</p>
+        <div class="plan">
+          <div class="pr head"><span>#</span><span>Change</span><span>Where</span><span>Fixes</span></div>
+          <div class="pr"><span class="k">A</span><b>Ask about repos that arrive mid-session</b><span>Each <code>repo:list</code> reload asks <code>repo:refreshIdentities</code> once for any row without an identity that this window hasn't asked about yet. Main's TTL, backoff and in-flight de-dupe already bound the cost. <code>useRepoTree.ts</code></span><span>finding 1</span></div>
+          <div class="pr"><span class="k">B</span><b>Seed Fork&#8230; from origin when identity is missing</b><span><code>repo:remotes</code> also returns <code>fetchUrl</code>; a new <code>forkSeedFromOrigin</code> sits beside <code>forkSeedFromRepo</code>. <code>Sidebar.tsx</code>, <code>fork-dialog.ts</code></span><span>finding 2</span></div>
+          <div class="pr"><span class="k">C</span><b>"Fork in place" bridge in the seeded dialog</b><span>Shown when the seed came from a local checkout. It closes this dialog and opens <code>ForkCheckoutDialog</code> for that repo. <code>ForkRepoDialog.tsx</code>, <code>App.tsx</code></span><span>&#8212;</span></div>
+          <div class="pr"><span class="k">D</span><b>origin fork button whenever origin is on a forge</b><span>Accent only for can't-push; muted otherwise; hidden when origin is already your fork. <code>RepoRefsSections.tsx</code></span><span>finding 3</span></div>
+          <div class="pr"><span class="k">E</span><b>Repo row kebab and right-click menu</b><span>Fork&#8230;, Manage remotes&#8230;, Copy path, Reveal, Refresh forge info. <code>RepoRow.tsx</code>, <code>app.css</code></span><span>finding 4</span></div>
+          <div class="pr last"><span class="k">F</span><b>Fork item in the worktree header &#8942;</b><span><code>WorktreeMenu</code> gains an optional <code>onFork</code>. <code>WorktreeHeader.tsx</code></span><span>finding 4</span></div>
+        </div>
+        <p class="dv-next">Try next: "cut F if the header menu feels crowded" &#183; "let right-click on the origin row open a remote menu too"</p>
+      </section>
+
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { push: "unknown", menu: false, picked: "" };
+        }
+        renderVals() {
+          const s = this.state;
+          const defs = [
+            { key: "unknown", label: "not looked up" },
+            { key: "cannot", label: "can't push" },
+            { key: "can", label: "can push" },
+            { key: "mine", label: "origin is my fork" }
+          ];
+          const states = defs.map((d) => ({
+            label: d.label,
+            cls: d.key === s.push ? "opt on" : "opt",
+            pick: () => { this.setState({ push: d.key, picked: "", menu: false }); }
+          }));
+          const slugKnown = s.push !== "unknown";
+          const forkLabel = slugKnown ? "Fork octo-labs/sparkline…" : "Fork sparkline…";
+          let readTitle = "Nothing picked yet";
+          let readBody = "Open the repo kebab, or press the fork button on origin.";
+          if (s.picked !== "") {
+            readTitle = "Opens: Fork & switch origin (in place)";
+            const lead = s.push === "cannot"
+              ? "Lead: You can't push to octo-labs/sparkline. Fork it and this checkout keeps working — against your own copy."
+              : "Lead: Fork octo-labs/sparkline and point this checkout at your own copy.";
+            const how = s.push === "unknown"
+              ? " The dialog reads origin itself, so it works before the forge has answered."
+              : "";
+            readBody = (s.picked === "menu" ? "From the repo menu. " : "From the origin row. ") + lead + how;
+          }
+          return {
+            states: states,
+            showMark: s.push === "cannot",
+            showForkGlyph: s.push === "mine",
+            kebCls: s.menu ? "keb on click" : "keb click",
+            toggleMenu: () => { this.setState({ menu: !s.menu }); },
+            menuOpen: s.menu,
+            forkLabel: forkLabel,
+            pickMenuFork: () => { this.setState({ menu: false, picked: "menu" }); },
+            showOriginFork: s.push !== "mine",
+            originForkCls: s.push === "cannot" ? "mini acc click" : "mini soft click",
+            pickOrigin: () => { this.setState({ menu: false, picked: "origin" }); },
+            readTitle: readTitle,
+            readBody: readBody
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

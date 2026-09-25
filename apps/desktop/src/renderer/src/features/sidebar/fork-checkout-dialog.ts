@@ -1,7 +1,11 @@
 import {
   forgeCloneUrls,
   forgeRemoteUrlLike,
-  type ForkCheckoutPreflight
+  isForgeKind,
+  parseForgeRemote,
+  type ForgeHostMap,
+  type ForkCheckoutPreflight,
+  type RepoIdentity
 } from "@pwrgit/shared";
 
 /**
@@ -135,4 +139,35 @@ export function forkCheckoutLead(preflight: ForkCheckoutPreflight): string {
   return preflight.fork.source.viewerCanPush === false
     ? `You can't push to ${preflight.origin.nameWithOwner}. Fork it and this checkout keeps working — against your own copy.`
     : `Fork ${preflight.origin.nameWithOwner} and point this checkout at your own copy.`;
+}
+
+/**
+ * Whether the `origin` row under REMOTES offers to fork, and how loudly.
+ *
+ * It used to offer only once the forge had said "you can't push". That left
+ * the one remote row that is about forking showing nothing but Fetch in two
+ * common cases: a checkout whose identity nobody had read yet, and one you
+ * can push to but want a copy of elsewhere. The verb belongs wherever
+ * `origin` is on a forge. What the forge said only decides whether the button
+ * is urgent (`cannot_push`, the accent colour) or merely available.
+ *
+ * Silent in two cases. One is an `origin` no product claims (a NAS remote
+ * parses fine and is not a forge). The other is an `origin` that already IS
+ * your fork. Forking your own fork is not a next step anyone looks for there,
+ * and the repo menu still offers it for the rare case.
+ */
+export function originForkOffer(
+  fetchUrl: string,
+  identity: Pick<RepoIdentity, "viewerCanPush" | "parent" | "nameWithOwner"> | undefined,
+  hosts: ForgeHostMap
+): { nameWithOwner: string; urgent: boolean } | null {
+  const parsed = parseForgeRemote(fetchUrl, hosts);
+  if (parsed === null || !isForgeKind(parsed.host)) return null;
+  if (identity?.viewerCanPush === true && identity.parent !== undefined) {
+    return null;
+  }
+  return {
+    nameWithOwner: identity?.nameWithOwner ?? parsed.nameWithOwner,
+    urgent: identity?.viewerCanPush === false
+  };
 }

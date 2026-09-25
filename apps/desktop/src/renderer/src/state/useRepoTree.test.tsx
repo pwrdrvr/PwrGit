@@ -73,6 +73,48 @@ afterEach(() => {
 });
 
 describe("useRepoTree", () => {
+  it("asks the forge once about a repository that arrives after mount", async () => {
+    const identityCalls = (): unknown[] =>
+      mocks.dispatch.mock.calls
+        .filter(([name]) => name === "repo:refreshIdentities")
+        .map(([, req]) => req);
+    const read: Repo = {
+      ...repo,
+      id: "repo-read",
+      identity: {
+        host: "github",
+        hostname: "github.com",
+        owner: "someone",
+        name: "known",
+        nameWithOwner: "someone/known",
+        visibility: "public"
+      }
+    };
+    const added: Repo = { ...repo, id: "repo-added", name: "diskhound" };
+
+    nextRead(ok([repo]));
+    await act(async () => root.render(<Harness />));
+    // Mount asks about the whole profile, and the first load is covered by it.
+    expect(identityCalls()).toEqual([{ profileId: "personal" }]);
+
+    // Add folders… (and, before main asked for it, Clone…) ends in exactly
+    // this repo:changed, and here
+    // it lands two rows: one whose identity is already stored, and one
+    // nothing has looked up. Only the second is worth a forge call.
+    nextRead(ok([repo, read, added]));
+    await act(async () => repoChanged?.({ profileId: "personal" }));
+    expect(identityCalls()).toEqual([
+      { profileId: "personal" },
+      { profileId: "personal", repoIds: ["repo-added"] }
+    ]);
+
+    // Once per window: a later reload that still has no identity for it (the
+    // CLI is signed out, say) must not turn every repo:changed into a spawn.
+    nextRead(ok([repo, read, added]));
+    await act(async () => repoChanged?.({ profileId: "personal" }));
+    expect(identityCalls()).toHaveLength(2);
+  });
+
   it("keeps optimistic data on a failed refresh and retries to a valid empty list", async () => {
     nextRead(ok([repo]));
     await act(async () => root.render(<Harness />));

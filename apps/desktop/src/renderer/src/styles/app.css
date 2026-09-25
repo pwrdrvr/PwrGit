@@ -1417,7 +1417,8 @@ textarea,
 }
 .wt-section__toggle::after,
 .wt-selbar__btn::after,
-.wt-row .kebab__btn::after {
+.wt-row .kebab__btn::after,
+.repo-row .kebab__btn::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -2973,9 +2974,11 @@ textarea,
   color: var(--status-warning);
   opacity: 0.72;
 }
-/* The fork verb on the `origin` row, beside its Fetch. Takes the accent
-   rather than the warning colour the mark next to it wears: the mark reports a
-   constraint, this offers the way past it. Rest state only — hover and
+/* The fork verb on the `origin` row, beside its Fetch, once the forge has said
+   you can't push. Before that answer, or when you can push, the button is
+   there in Fetch's muted rest colour; only this case is urgent. Takes the
+   accent rather than the warning colour the mark next to it wears: the mark
+   reports a constraint, this offers the way past it. Rest state only — hover and
    focus-visible are `.ref-mini-action`'s, whose selector carries two `:not()`s
    and so outranks anything a single modifier class can say here. */
 .ref-mini-action--fork {
@@ -3158,6 +3161,46 @@ textarea,
 .fork-existing small {
   color: var(--text-muted);
   font: 500 10px/1.35 var(--font-sans);
+}
+
+/* "Already checked out here" — the seeded fork dialog pointing at the other
+   half of the operation. Neutral rather than accent: `.fork-existing` above is
+   a fact about the fork this dialog will act on, where this is an alternative
+   to acting at all, and two accent boxes stacked read as one warning. The
+   button is the house secondary (`.modal__cancel`), not a link, so it looks
+   like the thing it does. */
+.fork-in-place {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.fork-in-place > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fork-in-place strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 11.5px/1.2 var(--font-sans);
+}
+.fork-in-place small {
+  color: var(--text-muted);
+  font: 500 10px/1.35 var(--font-sans);
+}
+.fork-in-place__action {
+  flex: none;
+  color: var(--accent);
+  border-color: var(--accent-border);
 }
 
 .fork-options {
@@ -8938,6 +8981,30 @@ body.is-col-resizing {
   height: 18px;
   padding: 0;
   border-radius: 5px;
+}
+/* The repo row's actions menu: the same kebab, the same 18px drawn / 24px
+   targeted box, for the same reason. Unlike the worktree row's it stays in
+   flow, after the star. The repo row is a flex line with nothing to float
+   over, and holding its room means the name and chips to its left never
+   move when it fades in. The −1px block margin holds its footprint to the
+   star's 16px, so the row's height still comes from its type. */
+.repo-row .kebab__btn {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  margin: -1px 0;
+  padding: 0;
+  border-radius: 5px;
+}
+.repo-row__menu {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.repo-row:hover .repo-row__menu,
+.repo-row:focus-visible .repo-row__menu,
+.repo-row:has(:focus-visible) .repo-row__menu,
+.repo-row__menu:has(.kebab__btn[aria-expanded="true"]) {
+  opacity: 1;
 }
 .kebab__btn:hover,
 .kebab__btn[aria-expanded="true"] {

@@ -19,6 +19,7 @@ import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { useForgeNaming } from "../../state/useForgeNaming";
 import { CopyTarget } from "../shell/CopyTarget";
 import { GitForkIcon, NoPushMark } from "./RepoIdentityMarks";
+import { originForkOffer } from "./fork-checkout-dialog";
 import { switchWorktreeToBranch } from "../shell/branchSwitch";
 import {
   branchActivation,
@@ -85,7 +86,9 @@ export function RepoRefsSections({
   onLocateTag,
   onRevealWorktree,
   onCreateWorktree,
-  onFork
+  onFork,
+  browserRequest = null,
+  onBrowserRequestHandled
 }: {
   repo: Repo;
   now: number;
@@ -102,15 +105,18 @@ export function RepoRefsSections({
   ) => void;
   /** Fork what `origin` points at and re-point this checkout at the fork. */
   onFork: () => void;
+  /** A tab the repo row's menu asked to open the refs browser on ("Manage
+   *  remotes…"). The browser needs `refs`, which only this component loads, so
+   *  the row asks and this honours it once they are in, then says so through
+   *  `onBrowserRequestHandled` so a later remount does not open it again. */
+  browserRequest?: RefSection | null;
+  onBrowserRequestHandled?: () => void;
 }) {
   const forgeNaming = useForgeNaming();
   /** One card for every hover surface in this tree. Native `title` is what the
    *  marks beside these rows moved off (`lib/AGENTS.md`), and two tooltip
    *  styles in one 320px column is the part a user actually notices. */
   const tip = useViewportTooltip();
-  /** Asked once. The mark and the fork verb below are two renderings of this
-   *  single fact, and spelling it twice is how they drift apart. */
-  const cannotPush = repo.identity?.viewerCanPush === false;
   /**
    * Null whenever a chip would say nothing — one forge host on, or a remote
    * no product claims. Same gate the repo row uses, so the two surfaces cannot
@@ -144,6 +150,11 @@ export function RepoRefsSections({
   const [openSections, setOpenSections] = useState<Set<RefSection>>(new Set());
   const [openRemotes, setOpenRemotes] = useState<Set<string>>(new Set());
   const [browser, setBrowser] = useState<RefSection | null>(null);
+  useEffect(() => {
+    if (browserRequest === null || refs === null) return;
+    setBrowser(browserRequest);
+    onBrowserRequestHandled?.();
+  }, [browserRequest, refs, onBrowserRequestHandled]);
   const [fetching, setFetching] = useState<string | null>(null);
   // Which branch row holds the group's single tab stop. A cursor, not a
   // selection: it carries no git meaning and no accent.
@@ -736,6 +747,14 @@ export function RepoRefsSections({
               const where = remoteWhere(remote.fetchUrl);
               const webUrl = remoteWebUrl(remote.fetchUrl, forgeNaming.overrides);
               const urlLines = remoteUrlLines(remote);
+              const forkOffer =
+                remote.name === "origin"
+                  ? originForkOffer(
+                      remote.fetchUrl,
+                      repo.identity,
+                      forgeNaming.overrides
+                    )
+                  : null;
               return (
                 <div className="ref-remote" key={remote.name}>
                   <div className="ref-remote__row">
@@ -796,22 +815,30 @@ export function RepoRefsSections({
                       </small>
                     </button>
                     {/* A direct action rather than a menu holding one item.
-                        Offered whenever this checkout cannot push, without
-                        first asking the forge whether a fork already exists:
-                        that answer costs a round trip per row, and the dialog
+                        Offered whenever `origin` is on a forge, without first
+                        asking the forge whether a fork already exists: that
+                        answer costs a round trip per row, and the dialog
                         resolves it anyway — it says "Switch origin to my fork"
-                        instead of "Fork" when the fork is already there. */}
-                    {remote.name === "origin" && cannotPush && (
+                        instead of "Fork" when the fork is already there. The
+                        forge's push answer only sets how loud it is; see
+                        `originForkOffer`. */}
+                    {forkOffer !== null && (
                       <button
                         type="button"
-                        className="ref-mini-action ref-mini-action--fork"
+                        className={`ref-mini-action${
+                          forkOffer.urgent ? " ref-mini-action--fork" : ""
+                        }`}
                         // The constraint and the verb in one name: the mark
                         // beside it is `aria-hidden` inside the disclosure
                         // button, so this is where the fact is said out loud.
-                        aria-label={`You can't push to ${repo.identity?.nameWithOwner ?? remote.name}. Fork it and point origin at your fork`}
+                        aria-label={
+                          forkOffer.urgent
+                            ? `You can't push to ${forkOffer.nameWithOwner}. Fork it and point origin at your fork`
+                            : `Fork ${forkOffer.nameWithOwner} and point origin at your fork`
+                        }
                         {...hoverTooltip(
                           tip,
-                          `Fork ${repo.identity?.nameWithOwner ?? remote.name} — origin moves to your copy, the original is kept as upstream`
+                          `Fork ${forkOffer.nameWithOwner} — origin moves to your copy, the original is kept as upstream`
                         )}
                         onClick={(event) => {
                           event.stopPropagation();

@@ -3,6 +3,7 @@ import type { CloneRepository, ForkCheckoutPreflight } from "@pwrgit/shared";
 import {
   forkCheckoutAction,
   forkCheckoutLead,
+  originForkOffer,
   remoteChanges,
   upstreamAnswerIsCurrent
 } from "./fork-checkout-dialog";
@@ -200,5 +201,51 @@ describe("forkCheckoutLead", () => {
     expect(forkCheckoutLead(unknown)).toBe(
       "Fork desktop/dugite and point this checkout at your own copy."
     );
+  });
+});
+
+describe("originForkOffer", () => {
+  const url = "git@github.com:tzarebczan/diskhound.git";
+  const identity = {
+    nameWithOwner: "tzarebczan/diskhound"
+  };
+
+  it("offers the fork before the forge has answered, from origin's own URL", () => {
+    // The diskhound report: no identity row, and the origin row showed Fetch
+    // and nothing else.
+    expect(originForkOffer(url, undefined, {})).toEqual({
+      nameWithOwner: "tzarebczan/diskhound",
+      urgent: false
+    });
+  });
+
+  it("is urgent only once the forge says you cannot push", () => {
+    expect(
+      originForkOffer(url, { ...identity, viewerCanPush: false }, {})
+    ).toEqual({ nameWithOwner: "tzarebczan/diskhound", urgent: true });
+    expect(
+      originForkOffer(url, { ...identity, viewerCanPush: true }, {})
+    ).toEqual({ nameWithOwner: "tzarebczan/diskhound", urgent: false });
+  });
+
+  it("stays quiet on an origin that is already your fork", () => {
+    expect(
+      originForkOffer(
+        url,
+        {
+          ...identity,
+          viewerCanPush: true,
+          parent: { nameWithOwner: "upstream/diskhound", url: "" }
+        },
+        {}
+      )
+    ).toBeNull();
+  });
+
+  it("stays quiet on an origin no forge claims", () => {
+    expect(originForkOffer("/Volumes/nas/diskhound.git", undefined, {})).toBeNull();
+    expect(
+      originForkOffer("git@git.corp.example:team/app.git", undefined, {})
+    ).toBeNull();
   });
 });

@@ -64,3 +64,68 @@ it("preserves a search typed before the catalog chooses the usable forge", async
     vi.resetAllMocks();
   }
 });
+
+it("offers to fork the seeded checkout in place, and only while it is the source", async () => {
+  dispatchMock.mockImplementation((channel: string) => {
+    if (channel === "repo:cloneCatalog") {
+      return Promise.resolve(ok({ owners: [], forges: [{
+        kind: "github", cli: "gh", installed: true, loggedIn: true,
+        capabilities: {
+          batchedBranchLookup: true, batchedCommitAssociation: true,
+          changeSizeAndTimeline: true, commitAuthorIdentity: true,
+          forkDefaultBranchOnly: true
+        },
+        hosts: [{ host: "github.com", enabled: true, loggedIn: true }]
+      }] }));
+    }
+    if (channel === "forge:hosts") return Promise.resolve(ok({ overrides: {} }));
+    // The forge's answer stays in flight: the row is about the seed, and must
+    // not wait on it.
+    if (channel === "repo:forkPreflight") return new Promise(() => undefined);
+    return Promise.resolve(ok([]));
+  });
+  const onChoose = vi.fn();
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(
+      <ForkRepoDialog
+        profile={{
+          id: "p", name: "Test", email: "test@example.com", mono: "T",
+          roots: [], onboardingCompleted: true
+        }}
+        initialSource={{
+          name: "diskhound", owner: "tzarebczan",
+          nameWithOwner: "tzarebczan/diskhound", visibility: "unknown",
+          host: "github", hostname: "github.com",
+          sshUrl: "", httpsUrl: "", localPaths: []
+        }}
+        inPlace={{ repoName: "diskhound", onChoose }}
+        onForked={() => undefined}
+        onReveal={() => undefined}
+        onClose={() => undefined}
+      />
+    ));
+    const row = container.querySelector(".fork-in-place");
+    expect(row?.textContent).toContain("Already checked out here, as diskhound");
+    const button = [...container.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent === "Fork in place…"
+    );
+    await act(async () => button?.click());
+    expect(onChoose).toHaveBeenCalledOnce();
+
+    // Searching for something else leaves that checkout out of it.
+    const input = container.querySelector<HTMLInputElement>("#fork-source")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
+        .set!.call(input, "someone/else");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.querySelector(".fork-in-place")).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.resetAllMocks();
+  }
+});
