@@ -219,19 +219,35 @@ describe("BulkSyncDialog", () => {
         repoName: "safe"
       });
     });
-    const activity = container.querySelector(".bulk-sync__activity");
-    expect(activity?.textContent).toContain("Checking safe");
-    expect(activity?.textContent).toContain("/repos/safe");
-    expect(activity?.textContent).toContain("0 terminal");
-    expect(activity?.textContent).toContain("1 in progress");
-    expect(activity?.textContent).toContain("1 queued");
-    expect(activity?.hasAttribute("aria-busy")).toBe(false);
+    const status = container.querySelector(".bulk-sync__status");
+    expect(status?.classList).toContain("is-live");
+    expect(status?.textContent).toContain("Checking safe");
+    expect(status?.textContent).toContain("/repos/safe");
+    expect(status?.textContent).toContain("0 of 2 repositories");
+    expect(status?.textContent).toContain("1 in flight · 1 queued");
+    expect(status?.hasAttribute("aria-busy")).toBe(false);
     expect(
-      activity?.querySelector(".bulk-sync__activity-copy > span")?.classList
+      status?.querySelector(".bulk-sync__status-copy > span")?.classList
     ).toContain("selectable");
-    expect(container.querySelector(".bulk-sync__repos")?.contains(activity)).toBe(
+    expect(container.querySelector(".bulk-sync__repos")?.contains(status)).toBe(
       false
     );
+    // The live region is the words; a clock inside an atomic region would be
+    // re-announced every second.
+    const live = status?.querySelector('[role="status"]');
+    expect(live?.getAttribute("aria-atomic")).toBe("true");
+    expect(live?.textContent).toContain("Checking safe");
+    expect(live?.querySelector(".bulk-sync__time")).toBeNull();
+    expect(status?.querySelector(".bulk-sync__time")?.textContent).toContain(
+      "elapsed"
+    );
+    const bar = status?.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute("aria-valuemax")).toBe("2");
+    expect(bar?.getAttribute("aria-valuenow")).toBe("0");
+    expect(bar?.querySelector(".is-in-flight")?.classList).not.toContain(
+      "is-empty"
+    );
+    expect(bar?.querySelector(".is-success")?.classList).toContain("is-empty");
     expect(
       container.querySelector(".bulk-sync__repo-status.is-running")?.textContent
     ).toBe("Checking…");
@@ -250,8 +266,16 @@ describe("BulkSyncDialog", () => {
     });
     expect(container.textContent).toContain("1 / 2");
     expect(container.textContent).toContain("1 updated");
-    expect(container.textContent).toContain("1 terminal");
-    expect(container.textContent).toContain("0 in progress");
+    expect(container.textContent).toContain("1 of 2 repositories");
+    expect(container.textContent).toContain("0 in flight · 1 queued");
+    expect(
+      container.querySelector(".bulk-sync__legend-item.is-success")?.textContent
+    ).toBe("1 success");
+    expect(
+      container
+        .querySelector('.bulk-sync__bar[role="progressbar"]')
+        ?.getAttribute("aria-valuetext")
+    ).toBe("1 of 2 repositories finished");
     expect(
       container.querySelector(".bulk-sync__repo-status.is-success")?.textContent
     ).toBe("success");
@@ -264,7 +288,20 @@ describe("BulkSyncDialog", () => {
     expect(container.textContent).toContain("feature/local-work");
     expect(container.textContent).toContain("uncommitted changes");
     expect(container.querySelector(".bulk-sync__repo.is-partial")).not.toBeNull();
-    expect(container.querySelector(".bulk-sync__activity")).toBeNull();
+    // The same card is now the receipt: the bar stays, the live parts go.
+    const receipt = container.querySelector(".bulk-sync__status");
+    expect(receipt?.classList).not.toContain("is-live");
+    expect(receipt?.querySelector("strong")?.textContent).toBe("Finished");
+    expect(receipt?.querySelector(".bulk-sync__spinner")).toBeNull();
+    expect(receipt?.querySelector(".bulk-sync__mark.is-ok")).not.toBeNull();
+    expect(receipt?.querySelector(".bulk-sync__time")?.textContent).toBe(
+      "took 1s"
+    );
+    expect(
+      receipt?.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")
+    ).toBe("2");
+    expect(receipt?.textContent).toContain("2 repositories");
+    expect(receipt?.textContent).not.toContain("in flight");
     expect(
       container.querySelector(".bulk-sync__repo-status.is-partial")?.textContent
     ).toBe("partial");
@@ -299,6 +336,98 @@ describe("BulkSyncDialog", () => {
       expect.objectContaining({ operationId: expect.any(String) })
     );
     expect(container.textContent).toContain("Cancelling…");
+    const status = container.querySelector(".bulk-sync__status");
+    expect(status?.textContent).toContain(
+      "Cancelling after the current Git command…"
+    );
+    expect(status?.textContent).toContain("0 stopping · 2 won't start");
+    // Nothing is left to estimate once the run is winding down.
+    expect(status?.querySelector(".bulk-sync__time")?.textContent).not.toContain(
+      "left"
+    );
+  });
+
+  it("closes a cancelled run with the undone repositories in the bar", async () => {
+    const cancelledResult: BulkSyncRepoResult = {
+      ...partialResult,
+      outcome: "cancelled",
+      remotes: [],
+      worktrees: []
+    };
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: {
+        ...summary([safeResult, cancelledResult]),
+        cancelled: true
+      }
+    });
+    await act(async () => {
+      root.render(
+        <BulkSyncDialog
+          profileId="profile-1"
+          repos={repos}
+          mode="soft-pull"
+          onClose={vi.fn()}
+        />
+      );
+    });
+
+    const status = container.querySelector(".bulk-sync__status");
+    expect(status?.querySelector("strong")?.textContent).toBe("Cancelled");
+    expect(status?.querySelector(".bulk-sync__mark.is-cancelled")).not.toBeNull();
+    expect(
+      status?.querySelector(".bulk-sync__legend-item.is-cancelled")?.textContent
+    ).toBe("1 cancelled");
+    const bar = status?.querySelector('[role="progressbar"]');
+    expect(bar?.getAttribute("aria-valuenow")).toBe("2");
+    expect(bar?.getAttribute("aria-valuetext")).toBe(
+      "2 of 2 repositories finished, 1 cancelled"
+    );
+    expect(
+      (bar?.querySelector(".is-cancelled") as HTMLElement | null)?.style.flexGrow
+    ).toBe("1");
+  });
+
+  it("marks a finished fetch with a broken remote as failed", async () => {
+    // Fetch reports a broken remote inside a `partial` repository, so the
+    // repository outcomes alone would draw a green mark beside "1 failed".
+    const brokenRemote: BulkSyncRepoResult = {
+      ...partialResult,
+      remotes: [
+        { remote: "origin", outcome: "fetched" },
+        { remote: "broken", outcome: "failed", message: "No such remote." }
+      ],
+      worktrees: []
+    };
+    const fetchSummary = summary([brokenRemote]);
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: {
+        ...fetchSummary,
+        mode: "fetch",
+        counts: {
+          ...fetchSummary.counts,
+          remotes: { fetched: 1, skipped: 0, failed: 1, cancelled: 0 }
+        }
+      }
+    });
+    await act(async () => {
+      root.render(
+        <BulkSyncDialog
+          profileId="profile-1"
+          repos={[repos[1]!]}
+          mode="fetch"
+          onClose={vi.fn()}
+        />
+      );
+    });
+
+    const status = container.querySelector(".bulk-sync__status");
+    expect(status?.textContent).toContain("1 remote fetched · 1 failed");
+    expect(status?.querySelector(".bulk-sync__mark.is-failed")).not.toBeNull();
+    expect(
+      status?.querySelector(".bulk-sync__legend-item.is-partial")?.textContent
+    ).toBe("1 partial");
   });
 
   it("keeps terminal failures distinct while another repository is active", async () => {
@@ -342,11 +471,19 @@ describe("BulkSyncDialog", () => {
       });
     });
 
-    expect(container.querySelector(".bulk-sync__activity")?.textContent).toContain(
+    expect(container.querySelector(".bulk-sync__status")?.textContent).toContain(
       "Fetching partial"
     );
-    expect(container.textContent).toContain("1 terminal");
-    expect(container.textContent).toContain("1 in progress");
+    expect(container.textContent).toContain("1 of 2 repositories");
+    expect(container.textContent).toContain("1 in flight · 0 queued");
+    expect(
+      container.querySelector(".bulk-sync__legend-item.is-failed")?.textContent
+    ).toBe("1 failed");
+    expect(
+      container
+        .querySelector('.bulk-sync__bar[role="progressbar"]')
+        ?.getAttribute("aria-valuetext")
+    ).toBe("1 of 2 repositories finished, 1 failed");
     expect(
       container.querySelector(".bulk-sync__repo-status.is-failed")?.textContent
     ).toBe("failed");

@@ -12,6 +12,12 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import {
+  BulkSyncStatus,
+  type BulkSyncStatusMark,
+  type BulkSyncStatusPhase
+} from "./BulkSyncStatus";
+import { countOutcomes, finishedCount } from "./bulk-sync-progress";
 
 type RepoProgress =
   | { phase: "waiting" | "running" }
@@ -107,6 +113,26 @@ function overallSummary(summary: BulkSyncSummary): string {
     .join(" · ");
 }
 
+/**
+ * The finished card's mark, judged at the level its summary sentence counts.
+ * A fetch reports a broken remote inside a `partial` repository, so repository
+ * outcomes alone would draw a green mark beside "1 failed".
+ */
+function summaryMark(summary: BulkSyncSummary): BulkSyncStatusMark {
+  if (summary.cancelled) return "cancelled";
+  const nested =
+    summary.mode === "fetch"
+      ? summary.counts.remotes.failed
+      : summary.counts.worktrees.failed;
+  return summary.counts.repos.failed + nested > 0 ? "failed" : "ok";
+}
+
+/** Main's own start and finish, so "took" is the run and not the dialog. */
+function runDurationMs(summary: BulkSyncSummary): number | null {
+  const ms = Date.parse(summary.finishedAt) - Date.parse(summary.startedAt);
+  return Number.isFinite(ms) ? Math.max(0, ms) : null;
+}
+
 function repoStatus(
   state: RepoProgress | undefined,
   mode: BulkSyncMode
@@ -169,6 +195,9 @@ export function BulkSyncDialog({
   const [progress, setProgress] = useState<Map<string, RepoProgress>>(
     () => new Map(repoSnapshot.map((repo) => [repo.id, { phase: "waiting" }]))
   );
+  // The live clock's origin. The operation launches one microtask after
+  // mount, so this is its start to well inside the clock's one-second grain.
+  const [startedAt] = useState(() => Date.now());
 
   useEffect(() => {
     let live = true;
@@ -247,16 +276,29 @@ export function BulkSyncDialog({
   const runningRepos = ordered.filter(
     ({ progress: state }) => state?.phase === "running"
   );
-  const terminalCount = ordered.filter(
-    ({ progress: state }) => state?.phase === "complete"
-  ).length;
+  const outcomeCounts = countOutcomes(
+    ordered.flatMap(({ progress: state }) =>
+      state?.phase === "complete" ? [state.result.outcome] : []
+    )
+  );
+  const terminalCount = finishedCount(outcomeCounts);
   const queuedCount = ordered.length - terminalCount - runningRepos.length;
   const operationVerb = mode === "fetch" ? "Fetching" : "Checking";
   const activityTitle = cancelling
     ? "Cancelling after the current Git command…"
-    : runningRepos.length === 0
-      ? "Preparing the next repository…"
-      : `${operationVerb} ${runningRepos.map(({ repo }) => repo.name).join(", ")}`;
+    : runningRepos.length > 0
+      ? `${operationVerb} ${runningRepos.map(({ repo }) => repo.name).join(", ")}`
+      : queuedCount === 0
+        ? "Finishing…"
+        : "Preparing the next repository…";
+  const statusPhase: BulkSyncStatusPhase =
+    summary !== null
+      ? summary.cancelled
+        ? "cancelled"
+        : "finished"
+      : cancelling
+        ? "cancelling"
+        : "running";
 
   const cancel = async (): Promise<void> => {
     setCancelling(true);
@@ -296,46 +338,30 @@ export function BulkSyncDialog({
           </span>
         </div>
 
-        {running && (
-          <div
-            className="bulk-sync__activity"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <span className="bulk-sync__spinner" aria-hidden="true" />
-            <div className="bulk-sync__activity-copy">
-              <strong>{activityTitle}</strong>
-              <span
-                className={runningRepos.length === 1 ? "selectable" : undefined}
-              >
-                {runningRepos.length === 1
-                  ? runningRepos[0]?.repo.path
-                  : "The current repository remains visible while results scroll below."}
-              </span>
-            </div>
-            <div
-              className="bulk-sync__state-counts"
-              aria-label={`${terminalCount} terminal, ${runningRepos.length} in progress, ${queuedCount} queued`}
-            >
-              <span className="is-terminal">
-                <strong>{terminalCount}</strong> terminal
-              </span>
-              <span className="is-running">
-                <strong>{runningRepos.length}</strong> in progress
-              </span>
-              <span>
-                <strong>{queuedCount}</strong> queued
-              </span>
-            </div>
-          </div>
-        )}
-
-        {summary !== null && (
-          <div className="bulk-sync__summary" role="status">
-            <strong>{summary.cancelled ? "Cancelled" : "Finished"}</strong>
-            <span>{overallSummary(summary)}</span>
-          </div>
+        {(running || summary !== null) && (
+          <BulkSyncStatus
+            phase={statusPhase}
+            mark={summary === null ? null : summaryMark(summary)}
+            title={
+              summary === null
+                ? activityTitle
+                : summary.cancelled
+                  ? "Cancelled"
+                  : "Finished"
+            }
+            detail={
+              summary !== null
+                ? { kind: "summary", text: overallSummary(summary) }
+                : runningRepos.length === 1 && runningRepos[0] !== undefined
+                  ? { kind: "path", text: runningRepos[0].repo.path }
+                  : null
+            }
+            counts={outcomeCounts}
+            inFlight={runningRepos.length}
+            queued={queuedCount}
+            startedAt={startedAt}
+            durationMs={summary === null ? null : runDurationMs(summary)}
+          />
         )}
         {error !== null && <div className="modal__error">{error}</div>}
 
