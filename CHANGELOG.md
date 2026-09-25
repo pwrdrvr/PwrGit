@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.21.0 - 2026-09-25
+
+- Forks - Pull now compares a fork with its source, can fetch and fast-forward from upstream, and safely updates the fork with a leased push. The header shows upstream drift and offers separate source-only and fork-only pull choices.
+- Reset to remote - Improved fork-aware target selection and fetch freshness: the source branch is easier to find, stale remote tips are called out, and updating a fork after reset requires an explicit review before any force-push.
+- Bulk sync - Added an outcome-colored progress bar, elapsed and estimated time, and a persistent result summary to Try pull all and Fetch all repos.
+- Notifications - Repository operation toasts now identify the repository and remote, with shortcuts that reveal them in the sidebar and include that context when copying an error.
+- Agent access - Missing worktrees are reported as missing instead of failing repository info, and Git reads finish before an MCP request returns an error.
+
 ## v0.20.0 - 2026-09-25
 
 - Forks - Added Fork actions to repository rows, worktree menus, and forge remotes. Fork opens with the current checkout selected even when forge details are still loading, and Fork in place keeps the original repository as upstream.
