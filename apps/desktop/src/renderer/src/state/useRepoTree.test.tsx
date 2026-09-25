@@ -97,8 +97,9 @@ describe("useRepoTree", () => {
     // Mount asks about the whole profile, and the first load is covered by it.
     expect(identityCalls()).toEqual([{ profileId: "personal" }]);
 
-    // Add folders… lands two rows: one whose identity is already stored, and
-    // one nothing has looked up. Only the second is worth a forge call.
+    // A Clone… (or Add folders…) ends in exactly this repo:changed, and here
+    // it lands two rows: one whose identity is already stored, and one
+    // nothing has looked up. Only the second is worth a forge call.
     nextRead(ok([repo, read, added]));
     await act(async () => repoChanged?.({ profileId: "personal" }));
     expect(identityCalls()).toEqual([

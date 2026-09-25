@@ -317,13 +317,14 @@ turns **2&ndash;3**, the redraw and the state table, are a proposal.
 
 `Fork From Here - UX Review.dc.html` was written here and pushed up through the
 `claude-design` MCP, in the same change that builds what it draws; the project
-copy was verified at the same 47,596 bytes. It answers a report that the
+copy was verified at the same 47,661 bytes. It answers a report that the
 sidebar's Fork&hellip; opened on an empty search while the selected checkout
 was one its owner could not push to, and that no other place offered to fork
-it. Turn **1** is the diagnosis: the repository was added after the window
-mounted, so its forge identity was never read, and every fork affordance
-waited on that identity. Turn **2** draws the entry points that no longer wait,
-turn **3** seeds the top button from `origin`'s URL, and **4a** is a live
+it. Turn **1** is the diagnosis. The repository was cloned through PwrGit after
+the window mounted, and a clone only reloads the list, so its forge identity
+was never read; every fork affordance waited on that identity. Turn **2**
+draws the entry points that no longer wait, turn **3** seeds the top button
+from `origin`'s URL, and **4a** is a live
 `DCLogic` prototype of both. Turn **5** is the build list, and unlike most
 reviews here it shipped with the artboard. Its names are contrived
 (`sparkline`, `octo-labs`, `demo-dev`); `sparkline` stands in for the reported
