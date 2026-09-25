@@ -5,7 +5,7 @@ copyright: "Copyright © 2026 PwrDrvr LLC."
 # Pinned so `pnpm deploy --prod` works — electron lives in devDependencies
 # and is therefore not present in the deploy stage's node_modules.
 # Keep this in sync with apps/desktop/package.json devDependencies.electron.
-electronVersion: 41.10.7
+electronVersion: 44.4.3
 
 # dugite's embedded git is downloaded per-arch at install time; this hook
 # re-downloads the right slice for each macOS arch pass of the universal
@@ -169,7 +169,8 @@ mac:
   helperPluginBundleId: com.pwrdrvr.pwrgit.helper.Plugin
   extendInfo:
     NSHumanReadableCopyright: "Copyright © 2026 PwrDrvr LLC."
-    LSMinimumSystemVersion: "12.0"
+    # Electron 44 requires macOS 13 (Ventura); it no longer runs on 12.
+    LSMinimumSystemVersion: "13.0"
     LSApplicationCategoryType: public.app-category.developer-tools
   target:
     - target: dmg

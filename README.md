@@ -18,7 +18,7 @@
   <a href="https://pwrdrvr.com/about"><img src="docs/assets/buttons/link-about.png" alt="About PwrDrvr" width="180"></a>
 </p>
 
-<sub>macOS 12 or newer · Windows 10 or newer · MIT · Developer ID-signed and Apple-notarized
+<sub>macOS 13 or newer · Windows 10 or newer · MIT · Developer ID-signed and Apple-notarized
 No account, no telemetry, no PwrGit server. Git ships inside the app.</sub>
 
 <br>
@@ -88,7 +88,7 @@ features, and troubleshooting live at
    Apple Silicon Mac moves itself to the Apple Silicon build on its next
    update; nothing to reinstall by hand.
 2. **Install it.** On macOS, open the DMG and drag PwrGit to Applications
-   (macOS 12 or newer). On Windows, run the per-user installer and keep the
+   (macOS 13 or newer). On Windows, run the per-user installer and keep the
    default destination or choose your own.
 3. **Optionally connect a forge.** Install and authenticate the GitHub CLI
    (`gh`) or GitLab CLI (`glab`) for hosted repository, fork, PR, and MR
