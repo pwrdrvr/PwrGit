@@ -286,7 +286,7 @@ export async function createPwrGitMcpServer(
           .max(64)
           .optional()
           .describe(
-            "Worktree rows to return (default 10, hard maximum 64). Rows are ordered by attention — primary, conflicted, mid-operation, prunable, dirty — and worktreeSummary always aggregates every inspected worktree."
+            "Worktree rows to return (default 10, hard maximum 64). Rows are ordered by attention — primary, conflicted, mid-operation, prunable or missing, dirty — and worktreeSummary always aggregates every inspected worktree."
           )
       },
       annotations: readOnlyAnnotations

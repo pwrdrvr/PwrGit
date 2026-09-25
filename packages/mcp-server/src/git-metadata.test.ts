@@ -9,6 +9,7 @@ import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { runCommand, type CommandRunner } from "./command.js";
 import {
   parsePorcelainStatus,
   readRepositoryInfo
@@ -185,5 +186,94 @@ describe("safe repository metadata", () => {
     expect(info.worktreesReturned).toBe(1);
     expect(info.worktreesTruncated).toBe(false);
     expect(info.worktreeSummary.inspected).toBe(1);
+  });
+
+  it("reports a gone checkout as missing instead of failing the whole call", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-mcp-missing-"));
+    cleanup.push(root);
+    const primary = join(root, "primary");
+    execFileSync("git", ["init", "-b", "main", primary], { stdio: "ignore" });
+    git(primary, ["config", "user.name", "PwrGit Test"]);
+    git(primary, ["config", "user.email", "pwrgit@example.test"]);
+    writeFileSync(join(primary, "tracked.txt"), "one\n");
+    git(primary, ["add", "tracked.txt"]);
+    git(primary, ["commit", "-m", "initial"]);
+    const paths = {
+      live: join(root, "live"),
+      deleted: join(root, "deleted"),
+      unlinked: join(root, "unlinked"),
+      nested: join(primary, "nested"),
+      locked: join(root, "locked")
+    };
+    for (const [name, path] of Object.entries(paths)) {
+      git(primary, ["worktree", "add", "-b", `topic/${name}`, path]);
+    }
+    // The folder is gone: git answers "cannot change to '<path>'".
+    rmSync(paths.deleted, { recursive: true, force: true });
+    // An interrupted removal took the `.git` link and left the folder: git
+    // answers "not a git repository".
+    rmSync(join(paths.unlinked, ".git"));
+    // The same inside another checkout, where git would quietly answer for
+    // that checkout instead of failing.
+    rmSync(join(paths.nested, ".git"));
+    // Git never reports a locked worktree prunable, even with its folder gone.
+    git(primary, ["worktree", "lock", paths.locked]);
+    rmSync(paths.locked, { recursive: true, force: true });
+
+    const info = await readRepositoryInfo(primary, undefined, { maxWorktrees: 64 });
+
+    const byBranch = new Map(info.worktrees.map((worktree) => [worktree.branch, worktree]));
+    for (const name of ["deleted", "unlinked", "nested", "locked"]) {
+      expect(byBranch.get(`topic/${name}`), name).toMatchObject({ missing: true, status: null });
+    }
+    expect(byBranch.get("topic/locked")).toMatchObject({ locked: true, prunable: false });
+    expect(byBranch.get("topic/live")).toMatchObject({
+      missing: false,
+      status: { branch: "topic/live", clean: true }
+    });
+    // The primary is dirty only because the nested folder is now untracked.
+    expect(info.worktreeSummary).toMatchObject({
+      inspected: 6,
+      clean: 1,
+      dirty: 1,
+      missing: 4,
+      prunable: 3,
+      locked: 1
+    });
+    const bounded = await readRepositoryInfo(primary, undefined, { maxWorktrees: 2 });
+    expect(bounded.worktrees[1]?.missing).toBe(true);
+  });
+
+  it("treats a checkout removed mid-read as missing and still surfaces live failures", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-mcp-race-"));
+    cleanup.push(root);
+    const primary = join(root, "primary");
+    execFileSync("git", ["init", "-b", "main", primary], { stdio: "ignore" });
+    git(primary, ["config", "user.name", "PwrGit Test"]);
+    git(primary, ["config", "user.email", "pwrgit@example.test"]);
+    writeFileSync(join(primary, "tracked.txt"), "one\n");
+    git(primary, ["add", "tracked.txt"]);
+    git(primary, ["commit", "-m", "initial"]);
+    git(primary, ["worktree", "add", "-b", "topic/live", join(root, "live")]);
+    git(primary, ["worktree", "add", "-b", "topic/vanishing", join(root, "vanishing")]);
+    const live = await realpath(join(root, "live"));
+    const vanishing = await realpath(join(root, "vanishing"));
+
+    // Removed after the existence check, before git reads it.
+    const racing: CommandRunner = async (command, args, options) => {
+      if (args[0] === "status" && options.cwd === vanishing) {
+        rmSync(vanishing, { recursive: true, force: true });
+      }
+      return runCommand(command, args, options);
+    };
+    const info = await readRepositoryInfo(primary, racing);
+    expect(info.worktrees.find((worktree) => worktree.branch === "topic/vanishing"))
+      .toMatchObject({ missing: true, status: null });
+
+    const failing: CommandRunner = async (command, args, options) =>
+      args[0] === "status" && options.cwd === live
+        ? { exitCode: 128, stdout: "", stderr: "fatal: index file corrupt" }
+        : runCommand(command, args, options);
+    await expect(readRepositoryInfo(primary, failing)).rejects.toThrow("index file corrupt");
   });
 });

@@ -1,5 +1,5 @@
 import { access, realpath } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { git, requireSuccess, type CommandRunner } from "./command.js";
 import { summarizeRemotes } from "./remote.js";
 import type {
@@ -152,7 +152,34 @@ export async function readSafeStatus(
   return parsed;
 }
 
-type ParsedWorktree = Omit<WorktreeSummary, "primary" | "status">;
+/** Whether a worktree's checkout is still there. Git's own test for a
+ * `prunable` entry is the `.git` link inside the worktree, so a folder whose
+ * link is gone — an interrupted or in-flight removal — is as gone as a
+ * deleted folder. The desktop app's `checkoutExists` asks the same question. */
+function checkoutExists(worktreePath: string): Promise<boolean> {
+  return pathExists(join(worktreePath, ".git"));
+}
+
+/** A sibling worktree's status, or null when its checkout is gone. Git in a
+ * gone checkout either fails ("cannot change to", "not a git repository") or,
+ * for a folder nested inside another repository, quietly answers for that one.
+ * The `prunable` flag cannot stand in for this check: git never reports a
+ * locked worktree prunable, even when its folder has disappeared. */
+async function readWorktreeStatus(
+  worktreePath: string,
+  runner?: CommandRunner
+): Promise<SafeStatusSummary | null> {
+  if (!(await checkoutExists(worktreePath))) return null;
+  try {
+    return await readSafeStatus(worktreePath, runner);
+  } catch (error) {
+    // Removed between the check and the read: the same answer as above.
+    if (!(await checkoutExists(worktreePath))) return null;
+    throw error;
+  }
+}
+
+type ParsedWorktree = Omit<WorktreeSummary, "primary" | "missing" | "status">;
 
 export function parseWorktreeList(stdout: string): ParsedWorktree[] {
   const rows: ParsedWorktree[] = [];
@@ -256,13 +283,14 @@ function attentionRank(worktree: {
   primary: boolean;
   locked: boolean;
   prunable: boolean;
+  missing: boolean;
   status: SafeStatusSummary | null;
 }): number {
   if (worktree.primary) return 0;
   const status = worktree.status;
   if (status !== null && status.conflictedFiles > 0) return 1;
   if (status !== null && status.operation !== null) return 2;
-  if (worktree.prunable) return 3;
+  if (worktree.prunable || worktree.missing) return 3;
   if (status !== null && !status.clean) return 4;
   if (status !== null && (status.ahead > 0 || status.behind > 0)) return 5;
   if (worktree.locked) return 6;
@@ -274,6 +302,7 @@ function aggregateWorktrees(
     detached: boolean;
     locked: boolean;
     prunable: boolean;
+    missing: boolean;
     status: SafeStatusSummary | null;
   }[]
 ): WorktreeAggregate {
@@ -285,6 +314,7 @@ function aggregateWorktrees(
     detached: 0,
     locked: 0,
     prunable: 0,
+    missing: 0,
     withOperation: 0,
     ahead: 0,
     behind: 0
@@ -293,6 +323,7 @@ function aggregateWorktrees(
     if (worktree.detached) aggregate.detached += 1;
     if (worktree.locked) aggregate.locked += 1;
     if (worktree.prunable) aggregate.prunable += 1;
+    if (worktree.missing) aggregate.missing += 1;
     const status = worktree.status;
     if (status === null) continue;
     if (status.clean) aggregate.clean += 1;
@@ -336,12 +367,17 @@ export async function readRepositoryInfo(
   // Status is read for every inspected worktree so the aggregate is accurate
   // and the attention ranking below can see which rows matter. Only the
   // returned slice is bounded — the payload is what costs the caller, not
-  // the reads.
-  const inspectedWorktrees = await mapLimit(visibleWorktrees, 4, async (worktree, index) => ({
-    ...worktree,
-    primary: index === 0,
-    status: worktree.bare ? null : await readSafeStatus(worktree.path, runner)
-  }));
+  // the reads. A sibling whose checkout is gone is reported as missing: one
+  // stale registration must not fail the call for every other worktree.
+  const inspectedWorktrees = await mapLimit(visibleWorktrees, 4, async (worktree, index) => {
+    const status = worktree.bare ? null : await readWorktreeStatus(worktree.path, runner);
+    return {
+      ...worktree,
+      primary: index === 0,
+      missing: !worktree.bare && status === null,
+      status
+    };
+  });
   const worktreeSummary = aggregateWorktrees(inspectedWorktrees);
   const maxWorktrees = Math.min(
     Math.max(options.maxWorktrees ?? DEFAULT_RETURNED_WORKTREES, 1),

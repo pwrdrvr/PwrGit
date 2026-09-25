@@ -33,6 +33,9 @@ export type WorktreeSummary = {
   bare: boolean;
   locked: boolean;
   prunable: boolean;
+  /** The checkout (its folder or the `.git` link in it) is gone, so `status`
+   * is null. Unlike `prunable`, this also covers a locked worktree. */
+  missing: boolean;
   primary: boolean;
   status: SafeStatusSummary | null;
 };
@@ -70,6 +73,7 @@ export type WorktreeAggregate = {
   detached: number;
   locked: number;
   prunable: number;
+  missing: number;
   withOperation: number;
   ahead: number;
   behind: number;
