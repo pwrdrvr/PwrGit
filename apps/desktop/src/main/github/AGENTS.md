@@ -65,6 +65,10 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   atomic visible-set replacement. Main keeps unknown visible associations in a
   SHA monitor, moves discoveries into the shared repo+PR-number monitor, and
   unions commit-list and selected-worktree reasons before polling.
+  GitHub can return an upstream PR when asked about a fork's inherited commit:
+  preserve the PR node's `repository.nameWithOwner`. Status refresh groups the
+  cached identities by repository path and applies each answer only to matching
+  rows; a fork's `#3` and upstream's `#3` are independent PRs.
 - **Commit-author identity**: `github:commitAuthorIdentity` only fetches an
   exact full commit SHA from a recognized GitHub `origin`. It accepts a
   login/avatar only after SHA + local Git author name/email match. Exact proof

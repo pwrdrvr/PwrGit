@@ -28,6 +28,24 @@ describe("commit PR GraphQL query", () => {
     expect(built.query).toContain("c1: object(oid: $c1)");
     expect(built.query).toContain("associatedPullRequests(first: 10)");
     expect(built.query).not.toContain(hashes[0]);
+    expect(built.query).toContain("repository { nameWithOwner }");
+  });
+
+  it("retains an upstream PR's repository when looking up a commit through a fork", () => {
+    const parsed = parseCommitPrResponse(["inherited-commit"], {
+      repository: { c0: { associatedPullRequests: { nodes: [{
+        number: 3,
+        title: "Original upstream feature",
+        url: "https://github.com/upstream/project/pull/3",
+        repository: { nameWithOwner: "upstream/project" },
+        state: "MERGED",
+        isDraft: false
+      }] } } }
+    });
+    expect(parsed.get("inherited-commit")).toMatchObject({
+      number: 3, repoPath: "upstream/project",
+      url: "https://github.com/upstream/project/pull/3"
+    });
   });
 
   it("prefers an open associated PR, then the newest terminal PR", () => {

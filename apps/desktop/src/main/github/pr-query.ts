@@ -11,6 +11,7 @@ import { UNAVAILABLE_FORK } from "../forge/types";
  * before this shipped stops being refreshed and will never gain them.
  */
 const PR_NODE_FIELDS = `number title url state isDraft mergeable headRefName baseRefName
+      repository { nameWithOwner }
       additions deletions changedFiles commits(last: 1) {
         totalCount
         nodes { commit { statusCheckRollup {
@@ -36,6 +37,7 @@ type PrNode = {
   url: string;
   state: string;
   isDraft: boolean;
+  repository?: { nameWithOwner?: string | null } | null;
   mergeable?: string | null;
   headRefName?: string | null;
   baseRefName?: string | null;
@@ -133,6 +135,7 @@ function toSummary(node: PrNode): PrSummary {
       mergeState: node.mergeable === "CONFLICTING" ? "conflicting" as const
         : node.mergeable === "MERGEABLE" ? "mergeable" as const : "unknown" as const
     }),
+    ...optionalText("repoPath", node.repository?.nameWithOwner),
     ...optionalText("headRefName", node.headRefName),
     ...optionalText("baseRefName", node.baseRefName),
     ...optionalCount("additions", node.additions),

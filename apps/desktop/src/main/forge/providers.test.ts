@@ -107,6 +107,17 @@ describe("stampForge", () => {
     });
   });
 
+  it("preserves the repository returned for an inherited commit association", () => {
+    const stamped = stampForge(new Map([["sha", {
+      number: 3, title: "Upstream feature", state: "merged" as const,
+      isDraft: false, url: "https://github.com/upstream/project/pull/3",
+      repoPath: "upstream/project"
+    }]]), { kind: "github", host: "github.com", path: "fork/project" });
+    expect(stamped.get("sha")).toMatchObject({
+      forge: "github", host: "github.com", repoPath: "upstream/project"
+    });
+  });
+
   it("leaves a negative result null so it still negative-caches", () => {
     const stamped = stampForge(new Map([["b", null]]), repo);
     expect(stamped.has("b")).toBe(true);
