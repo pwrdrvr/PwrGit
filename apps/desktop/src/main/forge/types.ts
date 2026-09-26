@@ -131,7 +131,8 @@ export function toPrLifecycle(state: string): PrLifecycle {
  *
  * A number alone is ambiguous — `#4` means different things on two forges and
  * on two instances of one forge — so the identity travels with the summary
- * rather than being re-derived by every reader.
+ * rather than being re-derived by every reader. Commit association may return a
+ * PR from an upstream repository; preserve the provider's explicit path.
  */
 export function stampForge<K>(
   summaries: Map<K, PrSummary | null>,
@@ -142,7 +143,7 @@ export function stampForge<K>(
       key,
       summary === null
         ? null
-        : { ...summary, forge: repo.kind, host: repo.host, repoPath: repo.path }
+        : { ...summary, forge: repo.kind, host: repo.host, repoPath: summary.repoPath ?? repo.path }
     ])
   );
 }

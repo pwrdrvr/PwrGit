@@ -379,6 +379,50 @@ describe("PrService", () => {
     expect(service.cachedCommitPrs("repo", [hash]).get(hash)?.state).toBe("merged");
   });
 
+  it.each([false, true])("refreshes colliding upstream and fork PR numbers independently (upstream fails: %s)", async (upstreamFails) => {
+    const hash = "a".repeat(40);
+    const forkHash = "b".repeat(40);
+    const otherHash = "c".repeat(40);
+    const forkPr = pr({ number: 3, forge: "github", host: "github.com",
+      repoPath: GITHUB_ORIGIN.path, title: "Fork feature" });
+    const upstreamPr = pr({ number: 3, forge: "github", host: "github.com",
+      repoPath: "upstream/project", title: "Upstream feature",
+      url: "https://github.com/upstream/project/pull/3", state: "merged" });
+    const calls: Array<{ path: string; numbers: number[] }> = [];
+    const scopedService = new PrService(db, git, { resolveForge: fakeForge({
+      fetchPrsForBranches: async () => new Map([["feature/pr-state", forkPr]]),
+      fetchPrsForCommits: async () => new Map([[hash, upstreamPr], [forkHash, forkPr]]),
+      fetchPrsByNumbers: async (_token, repo, numbers) => {
+        calls.push({ path: repo.path, numbers });
+        if (repo.path === "upstream/project" && upstreamFails) throw new Error("offline");
+        const original = repo.path === "upstream/project" ? upstreamPr : forkPr;
+        return new Map([[3, { ...original, title: `${original.title} refreshed` }]]);
+      }
+    }) });
+    await scopedService.refreshRepo("repo");
+    await scopedService.refreshCommits("repo", [hash, forkHash]);
+    // Another profile has the same number and repository identity. It must not
+    // be read, refreshed, or overwritten by this profile's monitor.
+    db.prepare("INSERT INTO profiles (id, name, email) VALUES ('other', 'Other', 'other@example.com')").run();
+    db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('other-repo', 'other', 'Other', '/other')").run();
+    db.prepare(`INSERT INTO commit_pr (repo_id, commit_sha, number, title, state, forge, host, repo_path)
+      VALUES ('other-repo', ?, 3, 'Other profile', 'open', 'github', 'github.com', 'elsewhere/project')`).run(otherHash);
+
+    const changed = await scopedService.refreshPrNumbers("repo", [3, 3]);
+    expect(calls).toEqual(expect.arrayContaining([
+      { path: GITHUB_ORIGIN.path, numbers: [3] },
+      { path: "upstream/project", numbers: [3] }
+    ]));
+    expect(calls).toHaveLength(2);
+    expect(changed.branches.get("feature/pr-state")?.title).toBe("Fork feature refreshed");
+    expect(changed.commits.get(forkHash)?.title).toBe("Fork feature refreshed");
+    expect(scopedService.cachedCommitPrs("repo", [hash]).get(hash)).toMatchObject({
+      ...upstreamPr, title: upstreamFails ? "Upstream feature" : "Upstream feature refreshed"
+    });
+    expect(changed.commits.has(hash)).toBe(!upstreamFails);
+    expect(scopedService.cachedCommitPrs("other-repo", [otherHash]).get(otherHash)?.title).toBe("Other profile");
+  });
+
   it("does not let terminal status polls hide a later PR on a reused branch", async () => {
     response = new Map([[
       "feature/pr-state",

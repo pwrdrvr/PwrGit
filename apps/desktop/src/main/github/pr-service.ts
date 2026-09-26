@@ -1,4 +1,4 @@
-import { connectForge } from "../forge/types";
+import { connectForge, type ForgeRepo } from "../forge/types";
 import type { PrSummary } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
@@ -309,15 +309,49 @@ export class PrService {
     if (connection === null || !this.isCurrent(generation)) {
       return emptyPrStatusDeltas();
     }
-    try {
-      const prs = await connection.fetchPrsByNumbers(
-        forge.repo,
-        numbers
-      );
-      return this.upsertPrNumberStatuses(repoId, prs, generation);
-    } catch {
-      return emptyPrStatusDeltas();
+    // A local checkout can contain PRs from both a fork and its upstream.
+    // Numbers are only unique inside the repository that issued them.
+    const marks = numbers.map(() => "?").join(", ");
+    const identities = this.db.prepare(`
+      SELECT number, forge, host, repo_path FROM branch_pr
+      WHERE repo_id = ? AND number IN (${marks})
+      UNION
+      SELECT number, forge, host, repo_path FROM commit_pr
+      WHERE repo_id = ? AND number IN (${marks})
+    `).all(repoId, ...numbers, repoId, ...numbers) as CachedPrIdentity[];
+    const groups = new Map<string, Set<number>>();
+    for (const row of identities) {
+      // Origin resolved the enabled host and its credentials. A cached row
+      // from a different host must never redirect those credentials.
+      if ((row.forge ?? forge.repo.kind) !== forge.repo.kind ||
+          (row.host ?? forge.repo.host) !== forge.repo.host) continue;
+      const path = row.repo_path ?? forge.repo.path;
+      const group = groups.get(path) ?? new Set<number>();
+      group.add(row.number);
+      groups.set(path, group);
     }
+    for (const number of numbers) {
+      if (identities.some((row) => row.number === number)) continue;
+      const group = groups.get(forge.repo.path) ?? new Set<number>();
+      group.add(number);
+      groups.set(forge.repo.path, group);
+    }
+    const changed = emptyPrStatusDeltas();
+    for (const [path, group] of groups) {
+      if (!this.isCurrent(generation)) break;
+      const target = { ...forge.repo, path };
+      let prs: Map<number, PrSummary | null>;
+      try {
+        prs = await connection.fetchPrsByNumbers(target, [...group]);
+      } catch {
+        // Keep successful repositories even if another one is unavailable.
+        continue;
+      }
+      const delta = this.upsertPrNumberStatuses(repoId, prs, generation, target, forge.repo);
+      for (const [key, pr] of delta.branches) changed.branches.set(key, pr);
+      for (const [key, pr] of delta.commits) changed.commits.set(key, pr);
+    }
+    return changed;
   }
 
   private async refreshCommitHashes(
@@ -771,7 +805,9 @@ export class PrService {
   private upsertPrNumberStatuses(
     repoId: string,
     prs: Map<number, PrSummary | null>,
-    generation: number
+    generation: number,
+    target: ForgeRepo,
+    origin: ForgeRepo
   ): PrStatusDeltas {
     if (!this.canWrite(repoId, generation)) return emptyPrStatusDeltas();
     const numbers = [...prs.keys()];
@@ -811,6 +847,7 @@ export class PrService {
         update: ReturnType<DB["prepare"]>
       ): void => {
         for (const row of rows) {
+          if (!belongsToPrRepository(row, target, origin)) continue;
           const pr = prs.get(row.number);
           if (pr == null) continue;
           const next = cachedFromSummary(pr);
@@ -902,4 +939,22 @@ function summaryFromCached(cached: CachedPr): PrSummary | null {
 
 function emptyPrStatusDeltas(): PrStatusDeltas {
   return { branches: new Map(), commits: new Map() };
+}
+
+/** Legacy rows without identity belonged to origin; explicit identity wins. */
+type CachedPrIdentity = {
+  number: number;
+  forge: string | null;
+  host: string | null;
+  repo_path: string | null;
+};
+
+function belongsToPrRepository(
+  row: CachedPrIdentity,
+  target: ForgeRepo,
+  origin: ForgeRepo
+): boolean {
+  return (row.forge ?? origin.kind) === target.kind &&
+    (row.host ?? origin.host) === target.host &&
+    (row.repo_path ?? origin.path) === target.path;
 }
