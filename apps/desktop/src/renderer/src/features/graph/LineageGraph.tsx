@@ -1169,23 +1169,23 @@ export function LineageGraph({
         </button>
       </div>
 
+      {laneOverflow && vms.length > 0 && (
+        <div
+          className="lane-scrollbar"
+          ref={laneBarRef}
+          {...hoverTooltip(tip, "Scroll the lane gutter — commits stay put")}
+          style={{ width: gutterW }}
+          onScroll={(e) => {
+            cardRef.current?.style.setProperty(
+              "--lane-scroll",
+              `${-e.currentTarget.scrollLeft}px`
+            );
+          }}
+        >
+          <div style={{ width: prLandingLayout.laneCount * LANE_W, height: 1 }} />
+        </div>
+      )}
       <div className="graph-scroll" ref={scrollerRef}>
-        {laneOverflow && vms.length > 0 && (
-          <div
-            className="lane-scrollbar"
-            ref={laneBarRef}
-            {...hoverTooltip(tip, "Scroll the lane gutter — commits stay put")}
-            style={{ width: gutterW }}
-            onScroll={(e) => {
-              cardRef.current?.style.setProperty(
-                "--lane-scroll",
-                `${-e.currentTarget.scrollLeft}px`
-              );
-            }}
-          >
-            <div style={{ width: prLandingLayout.laneCount * LANE_W, height: 1 }} />
-          </div>
-        )}
         {vms.length > 0 ? (
           <div
             ref={cardRef}
