@@ -10,7 +10,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { StaleBranch } from "@pwrgit/shared";
+import { ok, type StaleBranch } from "@pwrgit/shared";
+import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 import {
   collectGarbage,
@@ -77,7 +78,9 @@ describe("repository maintenance with real Git", () => {
       const status = git(repo, "status", "--porcelain");
       // Git on Windows counts loose-object file lengths, then truncates to
       // whole KiB. This tiny fixture can legitimately report zero before GC.
-      expect(await objectStorageBytes(systemGit, repo)).toBeGreaterThanOrEqual(0);
+      expect(await objectStorageBytes(systemGit, repo)).toBeGreaterThanOrEqual(
+        0
+      );
       expect(await collectGarbage(systemGit, repo, mode)).toEqual({
         ok: true,
         value: undefined
@@ -145,6 +148,75 @@ describe("repository maintenance with real Git", () => {
       "refs/heads/main"
     );
     expect(git(repo, "config", "--list")).not.toContain("branch.finished.");
+  });
+
+  it.each([
+    ["origin", "production"],
+    ["upstream", "release/production"]
+  ])(
+    "protects %s's default branch when fetch leaves remote HEAD dangling",
+    async (remote, branch) => {
+      const { root, repo } = fixture();
+      if (remote !== "origin") {
+        git(repo, "remote", "add", remote, join(root, "remote.git"));
+      }
+      git(repo, "branch", branch);
+      git(repo, "push", "-u", remote, branch);
+      const remoteHead = `refs/remotes/${remote}/HEAD`;
+      const target = `refs/remotes/${remote}/${branch}`;
+      git(repo, "symbolic-ref", remoteHead, target);
+      git(join(root, "remote.git"), "update-ref", "-d", `refs/heads/${branch}`);
+      git(repo, "fetch", "--prune", remote);
+      expect(git(repo, "symbolic-ref", remoteHead)).toBe(target);
+      const refs = git(repo, "for-each-ref", "--format=%(refname)").split("\n");
+      expect(refs).not.toContain(remoteHead);
+      expect(refs).not.toContain(target);
+      gone(repo, "finished");
+
+      expect((await review(repo)).map((candidate) => candidate.branch)).toEqual(
+        ["finished"]
+      );
+      expect(git(repo, "branch", "--list", branch)).toContain(branch);
+    }
+  );
+
+  it("rechecks dangling remote HEAD protection before deleting a reviewed branch", async () => {
+    const { repo } = fixture();
+    gone(repo, "production");
+    const candidate = (await review(repo))[0]!;
+    expect(candidate.branch).toBe("production");
+    git(
+      repo,
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/production"
+    );
+
+    expect(await deleteStaleBranch(systemGit, repo, candidate)).toMatchObject({
+      ok: false,
+      error: { code: "stale_branch_review" }
+    });
+    expect(git(repo, "rev-parse", "refs/heads/production")).toBe(
+      candidate.expectedHead
+    );
+  });
+
+  it("refuses review when remote HEAD cannot be inspected", async () => {
+    const { repo } = fixture();
+    gone(repo, "production");
+    const unreadableHead: GitExec = (args, cwd, options) =>
+      args[0] === "symbolic-ref"
+        ? Promise.resolve(
+            ok({
+              exitCode: 128,
+              stdout: "",
+              stderr: "fatal: cannot read reference"
+            })
+          )
+        : systemGit(args, cwd, options);
+    expect((await scanStaleBranches(unreadableHead, repo, "repo")).ok).toBe(
+      false
+    );
   });
 
   it.each(["moved", "upstream-restored", "checked-out"])(

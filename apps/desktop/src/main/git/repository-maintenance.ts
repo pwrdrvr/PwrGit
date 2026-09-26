@@ -105,7 +105,7 @@ export async function scanStaleBranches(
 ): Promise<Result<StaleBranch[]>> {
   const refs = await output(git, cwd, [
     "for-each-ref",
-    "--format=%(refname)%09%(objectname)%09%(upstream)%09%(worktreepath)%09%(symref)%09%(upstream:remotename)",
+    "--format=%(refname)%09%(objectname)%09%(upstream)%09%(worktreepath)%09%(upstream:remotename)",
     "refs/heads/",
     "refs/remotes/"
   ]);
@@ -124,7 +124,9 @@ export async function scanStaleBranches(
   if (!merged.ok) return merged;
   const remotes = await output(git, cwd, ["remote"]);
   if (!remotes.ok) return remotes;
-  const remoteNames = new Set(remotes.value.trim().split(/\r?\n/));
+  const remoteNames = new Set(
+    remotes.value.trim().split(/\r?\n/).filter(Boolean)
+  );
   const names = new Set(rows.map((row) => row[0]));
   const mergedRefs = new Set(merged.value.trim().split(/\r?\n/));
   const protectedNames = new Set([
@@ -134,11 +136,20 @@ export async function scanStaleBranches(
     "develop",
     "development"
   ]);
-  for (const row of rows) {
-    const symbolic = row[4] ?? "";
-    for (const remote of remoteNames) {
-      if (symbolic.startsWith(`refs/remotes/${remote}/`)) {
-        protectedNames.add(symbolic.slice(`refs/remotes/${remote}/`.length));
+  for (const remote of remoteNames) {
+    // for-each-ref omits a dangling remote HEAD after fetch pruning. Read
+    // the symbolic target directly so its default branch stays protected.
+    const args = ["symbolic-ref", "--quiet", `refs/remotes/${remote}/HEAD`];
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    // Exit 1 means there is no symbolic HEAD configured for this remote.
+    if (raw.value.exitCode === 1) continue;
+    const checked = requireExit0(raw.value, args);
+    if (!checked.ok) return checked;
+    const symbolic = checked.value.stdout.trim();
+    for (const owner of remoteNames) {
+      if (symbolic.startsWith(`refs/remotes/${owner}/`)) {
+        protectedNames.add(symbolic.slice(`refs/remotes/${owner}/`.length));
       }
     }
   }
@@ -148,7 +159,6 @@ export async function scanStaleBranches(
     head = "",
     upstream = "",
     worktree = "",
-    ,
     remote = ""
   ] of rows) {
     if (!ref.startsWith("refs/heads/")) continue;
