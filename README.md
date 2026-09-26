@@ -56,6 +56,10 @@ of its own.
 - **Sync failures become decisions.** Fetch, pull, and push have visible
   progress. When branches diverge, PwrGit inspects the state first and offers a
   deliberate rebase or reset path instead of handing you a generic failure.
+- **Repository maintenance has visible results.** Run garbage collection across
+  known repositories and review merged local branches left behind by deleted
+  remote branches. See [repository maintenance](docs/repository-maintenance.md)
+  for cleanup options and retention behavior.
 - **Clone and fork without giving up the forge.** Search and clone repositories,
   create forks, see public/private/internal identity marks, and surface GitHub
   PR or GitLab MR status through authenticated `gh` and `glab` installations.

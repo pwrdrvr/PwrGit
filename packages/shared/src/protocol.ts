@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type { ForgeHostMap } from "./forge-remote";
+import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress } from "./maintenance";
 import type {
   AgentChoice,
   AgentMessageDraft,
@@ -1443,6 +1444,14 @@ export interface Commands {
     req: { operationId: string };
     res: { cancelled: boolean };
   };
+  "maintenance:run": {
+    req: MaintenanceScope & { operationId: string; action: MaintenanceAction };
+    res: MaintenanceSummary;
+  };
+  "maintenance:cancel": {
+    req: { operationId: string };
+    res: { cancelled: boolean };
+  };
   /**
    * Sweep a profile for worktrees that are safe to remove.
    *
@@ -2135,6 +2144,7 @@ export interface Events {
   "stash:changed": { repoId: string };
   /** Per-repository progress for profile-wide fetch / conservative pull. */
   "remote:bulkSyncProgress": BulkSyncProgress;
+  "maintenance:progress": MaintenanceProgress;
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
   /** Per-repository progress for the pruner's profile-wide sweep. */

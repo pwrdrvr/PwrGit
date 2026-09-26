@@ -4993,6 +4993,75 @@ button.agent-menu__item:hover {
 
 /* ---- Profile-wide repository synchronization ---- */
 
+.maintenance__tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 18px 0;
+}
+.maintenance__tabs button {
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 600 12px var(--font-sans);
+}
+.maintenance__tabs button[aria-pressed="true"] {
+  background: var(--accent-tint);
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+.maintenance__tabs button:focus-visible,
+.maintenance__body :is(input, summary):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.maintenance__body {
+  min-height: 0;
+  padding: 12px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font: 400 12px/1.5 var(--font-sans);
+}
+.maintenance__scope,
+.maintenance__options label,
+.maintenance__branch {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--text-primary);
+}
+.maintenance__body input { accent-color: var(--accent); }
+.maintenance__options {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.maintenance__options label + label { margin-top: 12px; }
+.maintenance__options small,
+.maintenance__branch small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.maintenance__help {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.maintenance__help p { margin: 0 0 8px; }
+.maintenance__help summary { cursor: pointer; color: var(--text-secondary); }
+.maintenance__help[open] summary { margin-bottom: 8px; }
+.maintenance__body > .bulk-sync__status { margin: 0; }
+.maintenance__results { display: flex; flex-direction: column; gap: 8px; }
+.maintenance__branch { padding: 6px 0; overflow-wrap: anywhere; }
+.maintenance__branch > span { min-width: 0; }
+.maintenance__body:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
 .bulk-sync-backdrop {
   padding-top: 8vh;
 }
