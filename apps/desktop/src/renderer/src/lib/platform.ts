@@ -69,6 +69,16 @@ export function pathLeaf(path: string): string {
   return pathSegments(path).pop() ?? path;
 }
 
+/** Show a full local path with the separator used by the target OS. Git often
+ * returns forward slashes on Windows; keep that spelling in the underlying
+ * value used for Git operations. */
+export function displayPath(
+  path: string,
+  platform: string = currentPlatform()
+): string {
+  return platform === "win32" ? path.replaceAll("/", "\\") : path;
+}
+
 /** Compact path label using the target platform's separator. Normalizing the
  *  input first keeps Git's C:/... output and native C:\\... / UNC paths equal. */
 export function pathTail(

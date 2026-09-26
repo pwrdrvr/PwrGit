@@ -1369,6 +1369,7 @@ export function Sidebar({
           profileId={activeProfile.id}
           repos={repos}
           mode={bulkSyncMode}
+          platform={platform}
           onClose={() => setBulkSyncMode(null)}
         />
       )}
