@@ -252,6 +252,35 @@ describe("BulkSyncDialog", () => {
       container.querySelector(".bulk-sync__repo-status.is-running")?.textContent
     ).toBe("Checking…");
 
+    const update: BulkSyncProgress = {
+      operationId,
+      mode: "soft-pull",
+      phase: "repo_progress",
+      totalRepos: 2,
+      completedRepos: 0,
+      repoId: "repo-safe",
+      totalWorktrees: 40,
+      detail: "feature/next: Checking for uncommitted changes…",
+      worktreePath: "/repos/safe-next"
+    };
+    await act(async () => {
+      progressHandler?.({ ...update, remoteResult: safeResult.remotes[0]! });
+      progressHandler?.({ ...update, worktreeResult: safeResult.worktrees[0]! });
+      // Duplicate deliveries do not inflate the count, and another window's
+      // operation must not replace this repository's current step.
+      progressHandler?.({ ...update, worktreeResult: safeResult.worktrees[0]! });
+      progressHandler?.({ ...update, operationId: "elsewhere", detail: "Wrong operation" });
+    });
+    const runningRepo = container.querySelector(".bulk-sync__repo.is-running");
+    expect(runningRepo?.textContent).toContain(update.detail);
+    expect(runningRepo?.textContent).toContain("/repos/safe-next");
+    expect(runningRepo?.textContent).toContain("1 of 40 worktrees checked");
+    expect(runningRepo?.textContent).toContain("Completed tasks (2)");
+    expect(runningRepo?.textContent).toContain("origin: fetched");
+    expect(runningRepo?.textContent).toContain("main: fast-forwarded");
+    expect(container.textContent).not.toContain("Wrong operation");
+    expect(status?.textContent).toContain("0 of 2 repositories");
+
     await act(async () => {
       progressHandler?.({
         operationId,

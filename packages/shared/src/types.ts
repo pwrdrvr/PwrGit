@@ -1718,12 +1718,18 @@ export type BulkSyncSummary = {
 export type BulkSyncProgress = {
   operationId: string;
   mode: BulkSyncMode;
-  phase: "starting" | "repo_started" | "repo_completed";
+  phase: "starting" | "repo_started" | "repo_progress" | "repo_completed";
   totalRepos: number;
   completedRepos: number;
   repoId?: RepoId;
   repoName?: string;
   result?: BulkSyncRepoResult;
+  /** Current step and incremental results; repository counts remain terminal-only. */
+  detail?: string;
+  worktreePath?: string;
+  totalWorktrees?: number;
+  remoteResult?: BulkSyncRemoteResult;
+  worktreeResult?: BulkSyncWorktreeResult;
 };
 
 /**

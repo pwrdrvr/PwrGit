@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { err, ok } from "@pwrgit/shared";
+import { type BulkSyncProgress, err, ok } from "@pwrgit/shared";
 import { bulkSyncRepositories, type BulkSyncRepoInput } from "./bulk-sync";
 import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
@@ -136,6 +136,8 @@ describe("bulk repository synchronization", () => {
     git(repo.input.path, "update-ref", "refs/remotes/origin/main", repo.base);
     git(repo.input.path, "update-ref", "refs/remotes/origin/release", repo.base);
 
+    const progress: BulkSyncProgress[] = [];
+    let observedLiveWorktreeResult = false;
     let fetches = 0;
     let fetchArgs: string[] | undefined;
     const countedGit: GitExec = (args, cwd, options) => {
@@ -143,13 +145,32 @@ describe("bulk repository synchronization", () => {
         fetches += 1;
         fetchArgs = args;
       }
+      if (args[0] === "status" && cwd === releasePath && !observedLiveWorktreeResult) {
+        observedLiveWorktreeResult = true;
+        expect(progress.some((event) => event.phase === "repo_completed")).toBe(false);
+        expect(progress.find((event) => event.remoteResult)?.remoteResult).toEqual({
+          remote: "origin", outcome: "fetched"
+        });
+        expect(progress.find((event) => event.worktreeResult)?.worktreeResult).toMatchObject({
+          worktreeId: repo.input.worktrees[0]!.id, outcome: "updated", afterHead: mainHead
+        });
+        expect(progress.at(-1)).toMatchObject({
+          repoId: repo.input.id, completedRepos: 0, totalWorktrees: 2,
+          worktreePath: releasePath,
+          detail: "release: Checking for uncommitted changes…"
+        });
+      }
       return systemGit(args, cwd, options);
     };
     const summary = await bulkSyncRepositories(countedGit, [repo.input], {
       operationId: "shared-success",
-      mode: "soft-pull"
+      mode: "soft-pull",
+      onProgress: (event) => progress.push(event)
     });
 
+    expect(observedLiveWorktreeResult).toBe(true);
+    expect(progress.filter((event) => event.worktreeResult)).toHaveLength(2);
+    expect(progress.map((event) => event.detail)).toContain("main: Fast-forwarding…");
     expect(fetches).toBe(1);
     expect(fetchArgs).toEqual(["fetch", "--atomic", "--prune", "origin"]);
     expect(summary.counts.worktrees.updated).toBe(2);
@@ -507,6 +528,43 @@ describe("bulk repository synchronization", () => {
       outcome: "cancelled",
       reason: "cancelled"
     });
+  });
+
+  it("reports a repository lock wait before starting any Git commands", async () => {
+    let unlock!: () => void;
+    const lock = new Promise<void>((resolve) => { unlock = resolve; });
+    let announceWait!: () => void;
+    const waiting = new Promise<void>((resolve) => { announceWait = resolve; });
+    const progress: BulkSyncProgress[] = [];
+    let commands = 0;
+    const fakeGit: GitExec = async () => {
+      commands += 1;
+      return ok({ stdout: "", stderr: "", exitCode: 0 });
+    };
+    const run = bulkSyncRepositories(fakeGit, [{
+      id: "locked", name: "locked", path: "/locked", worktrees: []
+    }], {
+      operationId: "lock-wait", mode: "fetch",
+      onProgress: (event) => progress.push(event),
+      runRepository: async (_id, operation) => {
+        announceWait();
+        await lock;
+        return operation();
+      }
+    });
+    await waiting;
+    try {
+      expect(commands).toBe(0);
+      expect(progress.at(-1)).toMatchObject({
+        phase: "repo_progress", repoId: "locked", completedRepos: 0,
+        detail: "Waiting for another repository operation…"
+      });
+    } finally {
+      unlock();
+      await run;
+    }
+    expect(commands).toBe(1);
+    expect(progress.at(-1)?.phase).toBe("repo_completed");
   });
 
   it("emits monotonic completion counts while repository maintenance overlaps", async () => {
