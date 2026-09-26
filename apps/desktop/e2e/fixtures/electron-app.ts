@@ -202,7 +202,14 @@ export async function launchApp(
   });
   const window = await app.firstWindow();
   await window.waitForSelector("#root");
-  if (seedOnboarding) await assertNoOnboardingWizard(window);
+  // The check reads `profile:list` through the preload bridge, which fails
+  // whichever read of an armed `failReadOnce` command arrives first. With
+  // `profile:list` armed, the check would race the renderer for that one
+  // failure, and winning it throws here before the spec starts (seen on Linux
+  // CI). Onboarding is still seeded; only this read-back is skipped.
+  if (seedOnboarding && opts.failReadOnce?.includes("profile:list") !== true) {
+    await assertNoOnboardingWizard(window);
+  }
 
   // Stub dialog.showOpenDialog in the main process; __pickDirs drives either a
   // single returned path or a multi-selection through the shared picker.

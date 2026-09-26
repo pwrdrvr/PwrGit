@@ -592,11 +592,32 @@ test("a commit tipped by many branches caps its chips instead of flooding", asyn
   await branchRow(window, "main").first().click();
 
   const headRow = window.locator(".graph-row--head");
-  await expect(headRow.locator(".ref-chip--more")).toHaveText("+7", {
-    timeout: 20_000
-  });
-  // Two named chips + the overflow pill, and the subject stays readable.
-  await expect(headRow.locator(".ref-chip")).toHaveCount(3);
+  // At most two named chips, and "+N" counts the rest, so all 9 tips are
+  // accounted for. How many of the two fit whole depends on the window: the
+  // 1024px Windows runner leaves the lineage card ~320px, where the second
+  // chip folds into the pill rather than being clipped mid-pill.
+  await expect
+    .poll(
+      () =>
+        headRow.locator(".ref-chips").evaluate((el) => {
+          const edge = el.getBoundingClientRect().right + 0.5;
+          const pill = el.querySelector(".ref-chip--more")?.textContent ?? "+0";
+          const named = el.querySelectorAll(".ref-chip__name").length;
+          return {
+            named,
+            accounted: named + Number(pill.slice(1)),
+            whole: [...el.querySelectorAll(":scope > *, :scope > * > *")].every(
+              (part) => part.getBoundingClientRect().right <= edge
+            )
+          };
+        }),
+      { timeout: 20_000 }
+    )
+    .toMatchObject({ accounted: 9, whole: true });
+  const named = await headRow.locator(".ref-chip__name").count();
+  expect(named).toBeGreaterThanOrEqual(1);
+  expect(named).toBeLessThanOrEqual(2);
+  // And the subject stays readable.
   await expect(headRow.locator(".commit-msg")).toContainText("initial commit");
   await expect(headRow.locator(".commit-msg")).toBeInViewport();
 });
