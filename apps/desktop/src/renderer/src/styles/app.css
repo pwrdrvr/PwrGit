@@ -7723,8 +7723,9 @@ button.agent-menu__item:hover {
   overflow: hidden;
 }
 /* Every chip folded: the pill is all the row says about its branches, so the
-   strip keeps it whole. On a row too narrow even for that, the line's tail
-   runs off the row instead: the byline, not the branches, is what gets cut. */
+   strip keeps it whole. Past that, the tag chip gives way (`.commit-tag--tag`);
+   on a row too narrow even for its mark, the line's tail runs off the row
+   instead: the byline, not the branches, is what gets cut. */
 .ref-chips.is-folded {
   flex-shrink: 0;
 }
@@ -15773,15 +15774,18 @@ button.agent-auth-node:focus-visible,
    the chip clips the name mid-glyph with no ellipsis and reads as a rendering
    fault rather than as truncation.
 
-   And it yields. `.commit-meta`'s rule is that the chips give way rather than
-   wrap the row, and the way a name-carrying chip does that here is `flex: 0 1
-   auto` + `min-width: 0` on the element that sits directly in the row — the
-   role `.ref-chips` plays for the branch chips. `flex-shrink: 0` made this the
-   one thing on the line that refuses, at its full 180px. */
+   And it yields, but in steps, never by the pixel. `.commit-meta`'s rule is
+   that the chips give way rather than wrap the row. A plain `flex: 0 1 auto`
+   + `min-width: 0` did that by sharing any shortfall with the branch strip in
+   proportion to width: on a narrow row the chip was cut to its mark and a
+   sliver of the name, and even while the byline was still yielding, its tiny
+   share ellipsized "v0.21.0" to "v0.21…" at full width. So `ref-chip-fit.ts`
+   fits it with the branch chips, and it gives way last, once every branch
+   chip has folded into "+N": whole, rigid, until then; then `.is-squeezed`;
+   then `.is-glyph`. */
 .commit-tag--tag {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   gap: 4px;
-  min-width: 0;
   max-width: 180px;
   padding: 0 7px;
   border: 1px solid var(--accent-border);
@@ -15799,6 +15803,19 @@ button.agent-auth-node:focus-visible,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The name ellipsizes down to the floor `.ref-chip.is-squeezed` keeps (a few
+   characters, and never wider than a short name). The fit checks the floor
+   after layout and drops the name when even that overflows. */
+.commit-tag--tag.is-squeezed {
+  flex-shrink: 1;
+  min-width: calc-size(max-content, min(size, 7em));
+}
+/* The mark alone: the name is still in the chip for assistive tech, and on
+   hover. Tighter padding, so the mark reads as a whole chip rather than a
+   named one emptied out. */
+.commit-tag--tag.is-glyph {
+  padding: 0 4px;
 }
 
 /* ---- First-run onboarding wizard ----
