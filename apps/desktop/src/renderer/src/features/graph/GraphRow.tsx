@@ -169,14 +169,24 @@ export function GraphRow({
   const isTip = chipCount > 0;
   const chipNames = [...refs, ...remoteRefs];
   // The strip shows only chips that fit whole; the rest fold into "+N". The
-  // view model and branch adornments are everything on the meta line besides
-  // its width, so a new identity for either re-measures.
+  // tag chip keeps its name until they have all folded. The view model and
+  // branch adornments are everything on the meta line besides its width, so a
+  // new identity for either re-measures.
+  const lineRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLSpanElement>(null);
   const chipContent = useMemo(() => [vm, branchInfo], [vm, branchInfo]);
-  const chipFit = useRefChipFit(stripRef, chipCount, chipContent);
-  // While measuring (null), every capped chip renders rigid, plus the pill.
+  const chipFit = useRefChipFit(
+    lineRef,
+    stripRef,
+    chipCount,
+    vm.tag !== undefined,
+    chipContent
+  );
+  // While measuring (null), the tag and every capped chip render rigid, plus
+  // the pill.
   const shownChips = chipFit?.shown ?? Math.min(chipCount, MAX_REF_CHIPS);
   const squeezeClass = chipFit?.squeeze === true ? " is-squeezed" : "";
+  const tagFit = chipFit?.tag ?? "whole";
   const foldedChips = chipNames.slice(shownChips);
   const x = cx(row.lane);
 
@@ -421,16 +431,21 @@ export function GraphRow({
           </span>
           <span className="commit-time">{shortWhen(commit.committedAt, now)}</span>
         </div>
-        <div className="commit-meta">
+        <div ref={lineRef} className="commit-meta">
           {pullRequest !== undefined && (
             // Hovering a PR chip shows the PR, here as everywhere else. It
             // used to open this row's commit card instead, which made the same
             // chip mean two different things depending on where it sat.
             <PrChip pr={pullRequest} hoverIntent={hoverIntent} />
           )}
+          {/* Fitted with the branch chips, and last to give way: its name
+              ellipsizes to a floor, then leaves the mark alone. The tooltip
+              and the hidden name still say which tag it is. */}
           {vm.tag !== undefined && (
             <span
-              className="commit-tag commit-tag--tag"
+              className={`commit-tag commit-tag--tag${
+                tagFit === "whole" ? "" : ` is-${tagFit}`
+              }`}
               {...hoverTooltip(
                 tip,
                 `${vm.tag.kind === "annotated" ? "Annotated tag" : "Tag"} ${vm.tag.name}`
@@ -442,7 +457,13 @@ export function GraphRow({
               <span className="a11y-sr-only">
                 {vm.tag.kind === "annotated" ? "Annotated tag " : "Tag "}
               </span>
-              <span className="commit-tag__name">{vm.tag.name}</span>
+              <span
+                className={`commit-tag__name${
+                  tagFit === "glyph" ? " a11y-sr-only" : ""
+                }`}
+              >
+                {vm.tag.name}
+              </span>
             </span>
           )}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}

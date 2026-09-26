@@ -1,11 +1,21 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 
-/** How much of a row's branch-chip strip is on screen. The first `shown`
- *  capped chips render whole; every other chip folds into the "+N" pill.
+/** How much of a row's tag chip is on screen: its whole name, the name
+ *  ellipsized down to a floor (app.css `.commit-tag--tag.is-squeezed`), or the
+ *  mark alone, the name left to the tooltip and to assistive tech. */
+export type TagChipFit = "whole" | "squeezed" | "glyph";
+
+/** How much of a row's ref chips are on screen. The first `shown` capped
+ *  branch chips render whole; every other chip folds into the "+N" pill.
  *  `squeeze` lets the one remaining chip ellipsize its name down to a floor
- *  (app.css `.ref-chip.is-squeezed`) — the last step before it folds too. */
-export type RefChipFit = { shown: number; squeeze: boolean };
+ *  (app.css `.ref-chip.is-squeezed`) — the last step before it folds too.
+ *  `tag` is the tag chip's step, or null on a row without one. */
+export type RefChipFit = {
+  shown: number;
+  squeeze: boolean;
+  tag: TagChipFit | null;
+};
 
 /** One measure pass: every capped chip rendered rigid, then the "+N" pill. */
 export type RefChipMeasure = {
@@ -26,27 +36,46 @@ export type RefChipMeasure = {
  *  avatar. */
 const SLACK_PX = 0.5;
 
-/** The most chips that fit whole, leaving room for "+N" whenever one folds. */
-export function fitRefChips(m: RefChipMeasure): RefChipFit {
+/** A row with no branch chips: nothing to measure. */
+const NO_STRIP: RefChipMeasure = {
+  available: 0,
+  slotRights: [],
+  pill: 0,
+  gap: 0,
+  total: 0
+};
+
+/** The most chips that fit whole, leaving room for "+N" whenever one folds.
+ *  The tag chip is measured whole: it gives way only after every branch chip
+ *  has folded, so it starts whole whenever the row has one. */
+export function fitRefChips(m: RefChipMeasure, hasTag: boolean): RefChipFit {
+  const tag = hasTag ? "whole" : null;
   for (let shown = m.slotRights.length; shown >= 1; shown--) {
     const right = m.slotRights[shown - 1] ?? 0;
     const pill = shown < m.total ? m.gap + m.pill : 0;
-    if (right + pill <= m.available + SLACK_PX) return { shown, squeeze: false };
+    if (right + pill <= m.available + SLACK_PX) return { shown, squeeze: false, tag };
   }
   // Not even one fits whole. Ellipsized, the first might: `useRefChipFit`
   // checks it once rendered and folds it when its floor overflows too.
   return m.slotRights.length > 0
-    ? { shown: 1, squeeze: true }
-    : { shown: 0, squeeze: false };
+    ? { shown: 1, squeeze: true, tag }
+    : { shown: 0, squeeze: false, tag };
 }
 
 /** One step less when a committed fit still overflows; null at the bottom.
- *  Whole trailing chips go first, then the last one ellipsizes, then it folds. */
+ *  The meta line gives way from its end, as the byline at its tail already
+ *  has: whole trailing chips go first, then the last one ellipsizes, then it
+ *  folds. Only then does the tag chip, ahead of them on the line, ellipsize
+ *  its name, and then drop it for the mark alone. */
 export function shedRefChip(fit: RefChipFit): RefChipFit | null {
-  if (fit.shown > 1) return { shown: fit.shown - 1, squeeze: false };
+  if (fit.shown > 1) return { ...fit, shown: fit.shown - 1, squeeze: false };
   if (fit.shown === 1) {
-    return fit.squeeze ? { shown: 0, squeeze: false } : { shown: 1, squeeze: true };
+    return fit.squeeze
+      ? { ...fit, shown: 0, squeeze: false }
+      : { ...fit, shown: 1, squeeze: true };
   }
+  if (fit.tag === "whole") return { ...fit, tag: "squeezed" };
+  if (fit.tag === "squeezed") return { ...fit, tag: "glyph" };
   return null;
 }
 
@@ -66,7 +95,7 @@ function measure(strip: HTMLElement, total: number): RefChipMeasure {
 
 /** Whether anything in the strip runs past its clipped edge. A squeezed group
  *  can shrink below its chip's floor, so this looks one level in as well. */
-function overflows(strip: HTMLElement): boolean {
+function stripOverflows(strip: HTMLElement): boolean {
   const edge = strip.getBoundingClientRect().right + SLACK_PX;
   for (const slot of strip.children) {
     if (slot.getBoundingClientRect().right > edge) return true;
@@ -75,6 +104,17 @@ function overflows(strip: HTMLElement): boolean {
     }
   }
   return false;
+}
+
+/** Whether the meta line's last item, the byline, is pushed past the line's
+ *  edge. The strip absorbs a shortfall until it has folded to "+N"; past that,
+ *  or on a row with no branch chips, this is where a shortfall shows. */
+function lineOverflows(line: HTMLElement): boolean {
+  const last = line.lastElementChild;
+  return (
+    last !== null &&
+    last.getBoundingClientRect().right > line.getBoundingClientRect().right + SLACK_PX
+  );
 }
 
 // One ResizeObserver for every row. Its callback refits inside flushSync:
@@ -121,18 +161,21 @@ function watchWidth(line: Element, refit: () => void): () => void {
 }
 
 /**
- * Fits a row's branch-chip strip to the width its meta line leaves it, so the
- * strip never draws part of a chip. Returns null while measuring: the caller
- * then renders every capped chip plus the "+N" pill, and this settles on a fit
- * in the same commit, before anything paints.
+ * Fits a row's ref chips — its branch-chip strip and its tag chip — to the
+ * width its meta line leaves them, so neither ever draws part of a chip.
+ * Returns null while measuring: the caller then renders the tag chip whole and
+ * every capped branch chip plus the "+N" pill, and this settles on a fit in
+ * the same commit, before anything paints.
  *
  * `content` is any value whose identity changes when the meta line's contents
  * might have (the row's view model); a new one re-measures. Width changes and
  * font loads re-measure on their own.
  */
 export function useRefChipFit(
+  lineRef: RefObject<HTMLElement | null>,
   stripRef: RefObject<HTMLElement | null>,
   total: number,
+  hasTag: boolean,
   content: unknown
 ): RefChipFit | null {
   const [settled, setSettled] = useState<{
@@ -145,27 +188,29 @@ export function useRefChipFit(
     settled !== null && settled.content === content && settled.epoch === epoch
       ? settled.fit
       : null;
+  const fits = total > 0 || hasTag;
 
   useLayoutEffect(() => {
+    const line = lineRef.current;
+    if (!fits || line === null) return;
     const strip = stripRef.current;
-    if (strip === null) return;
     if (fit === null) {
-      setSettled({ fit: fitRefChips(measure(strip, total)), content, epoch });
+      const measured = strip === null ? NO_STRIP : measure(strip, total);
+      setSettled({ fit: fitRefChips(measured, hasTag), content, epoch });
       return;
     }
-    // The measure pass predicts; this checks. A shrinkable neighbour (the tag
-    // chip) takes back width once chips fold, so a predicted fit can overflow.
-    if (!overflows(strip)) return;
+    // The measure pass predicts the strip; this checks it, and walks the tag
+    // chip down once the strip has nothing left to give.
+    if (!(strip !== null && stripOverflows(strip)) && !lineOverflows(line)) return;
     const next = shedRefChip(fit);
     if (next !== null) setSettled({ fit: next, content, epoch });
-  }, [stripRef, fit, total, content, epoch]);
+  }, [lineRef, stripRef, fits, fit, total, hasTag, content, epoch]);
 
-  const hasStrip = total > 0;
   useLayoutEffect(() => {
-    const line = stripRef.current?.parentElement;
-    if (!hasStrip || line == null) return;
+    const line = lineRef.current;
+    if (!fits || line === null) return;
     return watchWidth(line, () => setEpoch((n) => n + 1));
-  }, [stripRef, hasStrip]);
+  }, [lineRef, fits]);
 
   return fit;
 }

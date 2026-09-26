@@ -165,25 +165,53 @@ describe("GraphRow author", () => {
   });
 });
 
-describe("GraphRow chip strip", () => {
+describe("GraphRow ref chips", () => {
   const PILL = 20;
   const FLOOR = 40;
+  const GLYPH = 20;
+  const TAG_FLOOR = 50;
 
-  /** jsdom lays nothing out, so stand in for flex: the strip is `available`
-   *  wide and its children sit left to right with no gap, each at its chip's
-   *  natural width. A squeezed chip takes what is left, down to FLOOR — what
-   *  `.ref-chip.is-squeezed` does in app.css. */
-  function layOut(available: number, natural: Record<string, number>): void {
-    const widthOf = (el: Element): number => {
+  /** jsdom lays nothing out, so stand in for the meta line's flex layout. The
+   *  line has `room` for the tag chip and the strip; the byline, down to its
+   *  avatar, follows them at no width, so it shows when they overflow. The tag
+   *  chip is rigid at `tag`px, or GLYPH down to its mark. The strip takes the
+   *  rest of the line, its children left to right with no gap at their natural
+   *  widths, and holds its width once folded to "+N". Squeezed, the last chip
+   *  takes what the strip has left and the tag chip what the line has left,
+   *  down to FLOOR and TAG_FLOOR — what `.ref-chip.is-squeezed` and
+   *  `.commit-tag--tag.is-squeezed` do in app.css. */
+  function layOut(room: number, natural: Record<string, number>, tag = 0): void {
+    const widthOf = (el: Element, available: number): number => {
       if (el.classList.contains("ref-chip--more")) return PILL;
       const name = el.querySelector(".ref-chip__name")?.textContent ?? "";
       const width = natural[name] ?? 0;
       if (!el.classList.contains("is-squeezed")) return width;
       let others = 0;
       for (const sibling of el.parentElement?.children ?? []) {
-        if (sibling !== el) others += widthOf(sibling);
+        if (sibling !== el) others += widthOf(sibling, available);
       }
       return Math.min(width, Math.max(FLOOR, available - others));
+    };
+    const boxes = (line: Element) => {
+      const tagChip = line.querySelector(".commit-tag--tag");
+      const strip = line.querySelector(".ref-chips");
+      let held: number | null = null;
+      if (strip?.classList.contains("is-folded") === true) {
+        held = 0;
+        for (const slot of strip.children) held += widthOf(slot, 0);
+      }
+      let tagWidth = 0;
+      if (tagChip !== null) {
+        if (tagChip.querySelector(".commit-tag__name.a11y-sr-only") !== null) {
+          tagWidth = GLYPH;
+        } else if (tagChip.classList.contains("is-squeezed")) {
+          tagWidth = Math.min(tag, Math.max(TAG_FLOOR, room - (held ?? 0)));
+        } else {
+          tagWidth = tag;
+        }
+      }
+      const stripWidth = strip === null ? 0 : (held ?? Math.max(0, room - tagWidth));
+      return { tagChip, tagWidth, strip, stripWidth };
     };
     const rect = (left: number, width: number): DOMRect =>
       ({
@@ -199,14 +227,23 @@ describe("GraphRow chip strip", () => {
       }) as DOMRect;
     vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
       function (this: Element) {
-        const strip = this.closest(".ref-chips");
-        if (strip === null) return rect(0, 0);
-        if (this === strip) return rect(0, available);
-        let left = 0;
-        for (const slot of strip.children) {
-          // A chip's parts (name, PR chip, worktree button) share its box.
-          if (slot.contains(this)) return rect(left, widthOf(slot));
-          left += widthOf(slot);
+        const line = this.closest(".commit-meta");
+        if (line === null) return rect(0, 0);
+        if (this === line) return rect(0, room);
+        const { tagChip, tagWidth, strip, stripWidth } = boxes(line);
+        if (tagChip?.contains(this) === true) return rect(0, tagWidth);
+        if (strip?.contains(this) === true) {
+          if (this === strip) return rect(tagWidth, stripWidth);
+          let left = tagWidth;
+          for (const slot of strip.children) {
+            const width = widthOf(slot, stripWidth);
+            // A chip's parts (name, PR chip, worktree button) share its box.
+            if (slot.contains(this)) return rect(left, width);
+            left += width;
+          }
+        }
+        if (this.classList.contains("commit-byline")) {
+          return rect(tagWidth + stripWidth, 0);
         }
         return rect(0, 0);
       }
@@ -307,5 +344,96 @@ describe("GraphRow chip strip", () => {
       pill: "+2",
       spoken: "2 more branches: c, d"
     });
+  });
+
+  /** Render a row with a tag chip, hover it, and read what it shows. */
+  async function tagged(row: GraphRowVM): Promise<{
+    step: "whole" | "squeezed" | "glyph";
+    chips: string[];
+    pill: string | null;
+    spoken: string;
+    tooltip: string | null;
+  }> {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<GraphRow {...props(row)} />));
+    const tag = container.querySelector<HTMLElement>(".commit-tag--tag")!;
+    await act(async () => {
+      tag.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    const name = tag.querySelector(".commit-tag__name")!;
+    const result = {
+      step: name.classList.contains("a11y-sr-only")
+        ? ("glyph" as const)
+        : tag.classList.contains("is-squeezed")
+          ? ("squeezed" as const)
+          : ("whole" as const),
+      chips: [...container.querySelectorAll(".ref-chip__name")].map(
+        (n) => n.textContent ?? ""
+      ),
+      pill: container.querySelector(".ref-chip--more")?.textContent ?? null,
+      spoken: tag.textContent ?? "",
+      tooltip: document.querySelector('[role="tooltip"]')?.textContent ?? null
+    };
+    await act(async () => root.unmount());
+    container.remove();
+    return result;
+  }
+
+  const TAG = 70;
+  const released = vm({
+    ...tipped,
+    tag: { name: "v0.21.0", kind: "annotated" }
+  });
+
+  it("keeps the tag whole while branch chips fold beside it", async () => {
+    // 250 - 70 leaves the strip 180: the first chip (120) and "+1".
+    layOut(250, widths, TAG);
+    await expect(tagged(released)).resolves.toMatchObject({
+      step: "whole",
+      chips: ["feature/lane-g"],
+      pill: "+1"
+    });
+    // 100 - 70 leaves 30: not even the first chip's floor, so "+2" alone.
+    layOut(100, widths, TAG);
+    await expect(tagged(released)).resolves.toMatchObject({
+      step: "whole",
+      chips: [],
+      pill: "+2"
+    });
+  });
+
+  it("ellipsizes the tag once every branch chip has folded", async () => {
+    // Whole, 70 + 20 overflows 80; ellipsized to 60, it fits.
+    layOut(80, widths, TAG);
+    await expect(tagged(released)).resolves.toMatchObject({
+      step: "squeezed",
+      chips: [],
+      pill: "+2"
+    });
+  });
+
+  it("drops the name below its floor, and still names the tag", async () => {
+    // Even the floor, 50 + 20, overflows 60; the mark, 20 + 20, fits.
+    layOut(60, widths, TAG);
+    await expect(tagged(released)).resolves.toEqual({
+      step: "glyph",
+      chips: [],
+      pill: "+2",
+      spoken: "Annotated tag v0.21.0",
+      tooltip: "Annotated tag v0.21.0"
+    });
+  });
+
+  it.each([
+    [100, "whole"],
+    [60, "squeezed"],
+    [40, "glyph"]
+  ] as const)("fits a tag with no branch chips beside it (%ipx: %s)", async (room, step) => {
+    layOut(room, {}, TAG);
+    await expect(
+      tagged(vm({ tag: { name: "v0.20.3", kind: "lightweight" } }))
+    ).resolves.toMatchObject({ step, spoken: "Tag v0.20.3" });
   });
 });
