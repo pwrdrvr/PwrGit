@@ -133,6 +133,17 @@ the Electron build.
   because those kinds render no pin star — one row-kind change away from the
   same failure.
 
+- **Reach a page's native window with `app.browserWindow(page)`, never by
+  title.** Every profile window loads the same URL, and its title stays
+  index.html's `PwrGit` until `profile:list` answers and App renames it
+  `PwrGit — <profile>`. Anything stamped earlier can be asserted first —
+  `data-theme` comes from preload, before React loads — so a title read at that
+  point can be the transient one. A `getAllWindows().find(getTitle() === …)`
+  keyed on it then matches no window once the rename lands, and the poll
+  returns `null` until it times out. That was `profiles.spec.ts`'s theme
+  override flake. The handle is a `JSHandle<BrowserWindow>`; `evaluate` it
+  directly.
+
 - Specs run as **ESM** — use `import.meta.url` + `fileURLToPath`, not
   `__dirname`.
 - Confirms/alerts are **in-app** dialogs (not native), so drive them by clicking
