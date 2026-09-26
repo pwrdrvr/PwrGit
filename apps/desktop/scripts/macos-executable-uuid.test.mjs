@@ -111,12 +111,15 @@ describe("macOS main executable UUID", () => {
     await writeFile(file, fat(), { mode: 0o755 });
     await writeFile(framework, thin());
     await writeFile(join(contents, "Info.plist"), "bundle identity stays unchanged");
+    // Windows does not expose POSIX executable bits; assert preservation of
+    // the mode the filesystem actually assigned rather than the requested 0755.
+    const originalMode = (await stat(file)).mode;
     await afterPack(context(dir));
     expect(await readFile(file)).toEqual(patch(fat(), identity));
     const before = await stat(file);
     await afterPack(context(dir));
     expect((await stat(file)).mtimeMs).toBe(before.mtimeMs);
-    expect((await stat(file)).mode & 0o777).toBe(0o755);
+    expect((await stat(file)).mode).toBe(originalMode);
     expect(await readFile(framework)).toEqual(thin());
     expect(await readFile(join(contents, "Info.plist"), "utf8")).toBe("bundle identity stays unchanged");
   });
