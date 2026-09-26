@@ -7357,23 +7357,76 @@ button.agent-menu__item:hover {
   /* Branch chips live here now — let them shrink, never wrap the row. */
   min-width: 0;
 }
-/* One line, always. With no nowrap, the first pixel of pressure on the meta
-   line shrank the name to its longest word, breaking "First Last" over two
-   lines.
+/* The byline — avatar, then name — is the first thing on the meta line to
+   give way, and it degrades in three steps: the full name, the name
+   ellipsized down to a floor, then the avatar alone.
 
-   And it is the first thing on the line to give way. Flex shrink is weighted
-   by basis, so at an even 1 the chip strip — the widest item — took most of
-   any deficit and was clipped mid-pill. 1000 hands the whole deficit to the
-   name until it reaches its floor; only then do the chips yield. The floor
-   keeps about a first name readable ("Wilhelmi…"), and never widens a name
-   shorter than it ("you", "Bo Li").
+   First, because flex shrink is weighted by basis: at an even 1 the chip
+   strip, the widest item, took most of any deficit and was clipped mid-pill.
+   1000 hands the whole deficit to the byline until only the avatar is left;
+   then the chips yield.
+
+   The last step is a wrap, not a shrink. The name's flex basis is its floor
+   (5em, or its own width if shorter), so once even that no longer fits
+   beside the avatar it wraps to a second line, which the fixed height and
+   `overflow: hidden` keep out of sight. Shrinking it to nothing instead
+   passed through a lone "…" beside the avatar on the way down. Above the
+   floor, `flex-grow` takes it back up to `max-content`. The byline keeps the
+   width the name gave up, which is why it is last on the line: that room
+   trails off the end rather than opening a gap before the next chip. */
+.commit-byline {
+  display: inline-flex;
+  flex: 0 1000 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  column-gap: 5px;
+  height: 16px;
+  min-width: 16px;
+  overflow: hidden;
+}
+/* The commit context card's avatar at the row's scale. Neutral, not accent:
+   there is one on every row, and the lane colours are already doing the
+   talking on this line. */
+.commit-byline__avatar {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--bg-panel-elevated);
+  color: var(--text-muted);
+  font: 700 7px/1 var(--font-sans);
+}
+.commit-byline__avatar-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* One line, always: with no nowrap, the first pixel of pressure broke
+   "First Last" over two lines.
 
    The line box is 1.3, not 1: `overflow: hidden` clips at the line box, and
    at 1 that is 1.5px shorter than Geist's ascent + descent, which shaves the
-   tips off descenders. */
+   tips off descenders.
+
+   Longhands on purpose: Chromium takes `calc-size()` in `flex-basis` but
+   rejects the same value inside the `flex` shorthand, which drops the whole
+   declaration — the basis falls back to the full name and it wraps away at
+   the first pixel of pressure. */
 .commit-author {
-  flex: 0 1000 auto;
-  min-width: calc-size(max-content, min(size, 5em));
+  flex-grow: 1;
+  flex-shrink: 1;
+  flex-basis: calc-size(max-content, min(size, 5em));
+  min-width: 0;
+  max-width: max-content;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7670,9 +7723,8 @@ button.agent-menu__item:hover {
   overflow: hidden;
 }
 /* Every chip folded: the pill is all the row says about its branches, so the
-   strip keeps it whole. On a row too narrow even for that (a merged PR, tag,
-   pill, author floor and "merge" badge on one line), the line's tail runs off
-   the row instead: the badge, not the branches, is what gets cut. */
+   strip keeps it whole. On a row too narrow even for that, the line's tail
+   runs off the row instead: the byline, not the branches, is what gets cut. */
 .ref-chips.is-folded {
   flex-shrink: 0;
 }

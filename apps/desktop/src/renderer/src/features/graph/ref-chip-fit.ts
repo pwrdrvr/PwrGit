@@ -21,8 +21,9 @@ export type RefChipMeasure = {
   total: number;
 };
 
-/** The author yields at 1000× the strip's weight, not infinitely more, so the
- *  strip gives up a fraction of a pixel before the name reaches its floor. */
+/** The byline yields at 1000× the strip's weight, not infinitely more, so the
+ *  strip gives up a fraction of a pixel before the byline is down to its
+ *  avatar. */
 const SLACK_PX = 0.5;
 
 /** The most chips that fit whole, leaving room for "+N" whenever one folds. */

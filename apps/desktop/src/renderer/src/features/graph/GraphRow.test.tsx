@@ -70,8 +70,12 @@ const vm = (over: Partial<GraphRowVM>): GraphRowVM => ({
   defaultBranch: "main",
   ...over
 });
-const props = (row: GraphRowVM): ComponentProps<typeof GraphRow> => ({
+const props = (
+  row: GraphRowVM,
+  authorAvatarUrl?: string
+): ComponentProps<typeof GraphRow> => ({
   vm: row,
+  authorAvatarUrl,
   laneCount: 1,
   hoverIntent: {
     arm: () => undefined,
@@ -127,6 +131,37 @@ describe("GraphRow author", () => {
       text: "you",
       tooltip: null
     });
+  });
+
+  const avatar = (row: GraphRowVM, url?: string): string =>
+    renderToStaticMarkup(<GraphRow {...props(row, url)} />);
+
+  it("paints the proven avatar over the author's initials", () => {
+    const url =
+      "pwrgit-avatar://thumbnail/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?v=1";
+    const markup = avatar(vm({}), url);
+    expect(markup).toContain(
+      '<span class="commit-byline__avatar-initials">WC</span>'
+    );
+    expect(markup).toContain(`src="${url}"`);
+  });
+
+  it("falls back to initials alone with no proven avatar", () => {
+    const markup = avatar(vm({}));
+    expect(markup).toContain(
+      '<span class="commit-byline__avatar-initials">WC</span>'
+    );
+    expect(markup).not.toContain("commit-byline__avatar-image");
+  });
+
+  // The byline keeps the width its name gave up (app.css `.commit-byline`),
+  // so anything after it would sit behind a gap.
+  it("ends the meta line with the byline, after the merge tag", () => {
+    const markup = avatar(vm({ commit: { ...commit, isMerge: true } }));
+    expect(markup.indexOf(">merge<")).toBeGreaterThan(-1);
+    expect(markup.indexOf(">merge<")).toBeLessThan(
+      markup.indexOf('class="commit-byline"')
+    );
   });
 });
 
