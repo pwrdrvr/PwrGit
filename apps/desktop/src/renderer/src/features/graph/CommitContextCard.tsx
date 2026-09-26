@@ -8,16 +8,8 @@ import type { ReactNode } from "react";
 import { DiffStat } from "../diff/DiffStat";
 import { CopyTarget } from "../shell/CopyTarget";
 import { PrChip } from "../sidebar/PrChip";
+import { AuthorAvatar } from "./AuthorAvatar";
 import { localWhen, longWhen } from "./graph-view";
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return parts
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
-}
 
 function DetailRow({
   label,
@@ -114,25 +106,12 @@ export function CommitContextCard({
       </div>
 
       <div className="commit-context-card__identity">
-        <span className="commit-context-card__avatar" aria-hidden="true">
-          <span className="commit-context-card__avatar-initials">
-            {initials(authorName)}
-          </span>
-          {githubIdentity?.avatarUrl !== undefined ? (
-            <img
-              className="commit-context-card__avatar-image"
-              src={githubIdentity.avatarUrl}
-              alt=""
-              width={28}
-              height={28}
-              decoding="sync"
-              referrerPolicy="no-referrer"
-              onError={(event) => {
-                event.currentTarget.hidden = true;
-              }}
-            />
-          ) : null}
-        </span>
+        <AuthorAvatar
+          block="commit-context-card__avatar"
+          name={authorName}
+          avatarUrl={githubIdentity?.avatarUrl}
+          size={28}
+        />
         <span className="commit-context-card__author">
           <strong>{authorName}</strong>
           <span>{commit.authorEmail}</span>
