@@ -46,6 +46,12 @@ export type BulkSyncOptions = {
   now?: () => Date;
 };
 
+type RepoProgressUpdate = Pick<
+  BulkSyncProgress,
+  "detail" | "worktreePath" | "remoteResult" | "worktreeResult"
+>;
+type ReportProgress = (update: RepoProgressUpdate) => void;
+
 type ConfiguredRemote = {
   name: string;
   skipFetchAll: boolean;
@@ -126,14 +132,20 @@ function cancelledRemote(remote: string): BulkSyncRemoteResult {
 async function fetchConfiguredRemotes(
   git: GitExec,
   repo: BulkSyncRepoInput,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  report: ReportProgress
 ): Promise<Result<BulkSyncRemoteResult[]>> {
+  report({ detail: "Reading remote configuration…" });
   const listed = await configuredRemotes(git, repo.path);
   if (!listed.ok) return listed;
   const results: BulkSyncRemoteResult[] = [];
+  const complete = (result: BulkSyncRemoteResult): void => {
+    results.push(result);
+    report({ remoteResult: result });
+  };
   for (const remote of listed.value) {
     if (remote.configError) {
-      results.push({
+      complete({
         remote: remote.name,
         outcome: "failed",
         reason: "fetch_failed",
@@ -142,7 +154,7 @@ async function fetchConfiguredRemotes(
       continue;
     }
     if (remote.skipFetchAll) {
-      results.push({
+      complete({
         remote: remote.name,
         outcome: "skipped",
         reason: "skip_fetch_all",
@@ -151,22 +163,23 @@ async function fetchConfiguredRemotes(
       continue;
     }
     if (isAborted(signal)) {
-      results.push(cancelledRemote(remote.name));
+      complete(cancelledRemote(remote.name));
       continue;
     }
+    report({ detail: `Fetching ${remote.name}…` });
     const raw = await git(
       ["fetch", "--atomic", "--prune", remote.name],
       repo.path,
       signal === undefined ? undefined : { signal }
     );
     if (isAborted(signal)) {
-      results.push(cancelledRemote(remote.name));
+      complete(cancelledRemote(remote.name));
       continue;
     }
     if (!raw.ok || raw.value.exitCode !== 0) {
       const detail = raw.ok ? `${raw.value.stderr}\n${raw.value.stdout}` : raw.error.message;
       const authentication = authFailure(detail);
-      results.push({
+      complete({
         remote: remote.name,
         outcome: "failed",
         reason: authentication ? "authentication" : "fetch_failed",
@@ -176,7 +189,7 @@ async function fetchConfiguredRemotes(
       });
       continue;
     }
-    results.push({ remote: remote.name, outcome: "fetched" });
+    complete({ remote: remote.name, outcome: "fetched" });
   }
   return ok(results);
 }
@@ -214,8 +227,10 @@ async function inspectWorktree(
   git: GitExec,
   worktree: BulkSyncRepoInput["worktrees"][number],
   fetched: ReadonlyMap<string, BulkSyncRemoteResult>,
+  report: (detail: string) => void,
   expected?: ReadyWorktree
 ): Promise<WorktreeInspection> {
+  report("Checking for uncommitted changes…");
   const status = await checked(
     git,
     ["status", "--porcelain=v2", "--untracked-files=all"],
@@ -236,6 +251,7 @@ async function inspectWorktree(
     };
   }
 
+  report("Checking for in-progress Git operations…");
   for (const ref of IN_PROGRESS_REFS) {
     const raw = await git(
       ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", ref],
@@ -282,6 +298,7 @@ async function inspectWorktree(
     };
   }
 
+  report("Reading branch and upstream…");
   const branchRaw = await checked(git, ["branch", "--show-current"], worktree.path);
   if (!branchRaw.ok) {
     return unsafeProbe(worktree, "Git could not inspect the checked-out branch.");
@@ -429,6 +446,7 @@ async function inspectWorktree(
     };
   }
 
+  report("Comparing local and upstream commits…");
   const canFastForward = await git(
     ["merge-base", "--is-ancestor", head, upstreamHead],
     worktree.path,
@@ -479,7 +497,8 @@ async function softPullWorktree(
   git: GitExec,
   worktree: BulkSyncRepoInput["worktrees"][number],
   fetched: ReadonlyMap<string, BulkSyncRemoteResult>,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  report: (detail: string) => void
 ): Promise<BulkSyncWorktreeResult> {
   if (isAborted(signal)) {
     return worktreeResult(worktree, {
@@ -488,7 +507,7 @@ async function softPullWorktree(
       message: "Cancelled before this worktree was checked."
     });
   }
-  const first = await inspectWorktree(git, worktree, fetched);
+  const first = await inspectWorktree(git, worktree, fetched, report);
   if (first.kind === "result") return first.value;
   if (isAborted(signal)) {
     return worktreeResult(worktree, {
@@ -501,7 +520,11 @@ async function softPullWorktree(
 
   // Re-read every fact immediately before mutation. The exact upstream commit
   // is passed to merge, so this never follows a ref that changed after review.
-  const second = await inspectWorktree(git, worktree, fetched, first.value);
+  const second = await inspectWorktree(
+    git, worktree, fetched,
+    (detail) => report(`Rechecking before update: ${detail}`),
+    first.value
+  );
   if (second.kind === "result") return second.value;
   if (isAborted(signal)) {
     return worktreeResult(worktree, {
@@ -511,6 +534,7 @@ async function softPullWorktree(
       message: "Cancelled before the fast-forward started."
     });
   }
+  report("Fast-forwarding…");
   const merge = await git(
     [
       "merge",
@@ -530,6 +554,7 @@ async function softPullWorktree(
       beforeHead: second.value.head
     });
   }
+  report("Verifying updated commit…");
   const after = await checked(git, ["rev-parse", "--verify", "HEAD"], worktree.path);
   if (!after.ok || after.value.stdout.trim() !== second.value.upstreamHead) {
     return worktreeResult(worktree, {
@@ -597,10 +622,11 @@ function cancelledRepo(repo: BulkSyncRepoInput): BulkSyncRepoResult {
 async function syncRepo(
   git: GitExec,
   repo: BulkSyncRepoInput,
-  options: BulkSyncOptions
+  options: BulkSyncOptions,
+  report: ReportProgress
 ): Promise<BulkSyncRepoResult> {
   if (isAborted(options.signal)) return cancelledRepo(repo);
-  const fetched = await fetchConfiguredRemotes(git, repo, options.signal);
+  const fetched = await fetchConfiguredRemotes(git, repo, options.signal, report);
   if (!fetched.ok) {
     return {
       repoId: repo.id,
@@ -630,11 +656,16 @@ async function syncRepo(
         );
         continue;
       }
-      worktrees.push(
-        await runWorktree(worktree.id, () =>
-          softPullWorktree(git, worktree, fetchedByName, options.signal)
-        )
+      const reportWorktree = (detail: string): void => report({
+        detail: `${worktree.branch || "(detached)"}: ${detail}`,
+        worktreePath: worktree.path
+      });
+      reportWorktree("Waiting for another worktree operation…");
+      const result = await runWorktree(worktree.id, () =>
+        softPullWorktree(git, worktree, fetchedByName, options.signal, reportWorktree)
       );
+      worktrees.push(result);
+      report({ worktreeResult: result });
     }
   }
   return {
@@ -738,7 +769,19 @@ export async function bulkSyncRepositories(
       });
       let result: BulkSyncRepoResult;
       try {
-        result = await runRepository(repo.id, () => syncRepo(git, repo, options));
+        const report: ReportProgress = (update) => options.onProgress?.({
+          operationId: options.operationId,
+          mode: options.mode,
+          phase: "repo_progress",
+          totalRepos,
+          completedRepos,
+          repoId: repo.id,
+          repoName: repo.name,
+          totalWorktrees: repo.worktrees.length,
+          ...update
+        });
+        report({ detail: "Waiting for another repository operation…" });
+        result = await runRepository(repo.id, () => syncRepo(git, repo, options, report));
       } catch {
         result = {
           repoId: repo.id,

@@ -5355,6 +5355,32 @@ button.agent-menu__item:hover {
   color: var(--text-muted);
   font: 500 10.5px/1.35 var(--font-sans);
 }
+.bulk-sync__repo > p,
+.bulk-sync__details {
+  overflow-wrap: anywhere;
+}
+.bulk-sync__worktree-path {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-subtle);
+  font: 500 9px/1.35 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.bulk-sync__completed {
+  margin-top: 7px;
+  color: var(--text-muted);
+  font: 500 10px/1.35 var(--font-sans);
+}
+.bulk-sync__completed > summary {
+  cursor: pointer;
+}
+.bulk-sync__completed > summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.bulk-sync__completed[open] + .bulk-sync__recent {
+  display: none;
+}
 .bulk-sync__details {
   margin: 8px 0 0;
   padding: 7px 0 0 17px;

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   BulkSyncMode,
   BulkSyncRepoResult,
+  BulkSyncRemoteResult,
   BulkSyncSummary,
   BulkSyncWorktreeResult,
   Repo
@@ -17,7 +18,15 @@ import { BulkSyncStatus, type BulkSyncStatusPhase } from "./BulkSyncStatus";
 import { countOutcomes, finishedCount } from "./bulk-sync-progress";
 
 type RepoProgress =
-  | { phase: "waiting" | "running" }
+  | { phase: "waiting" }
+  | {
+      phase: "running";
+      detail?: string;
+      worktreePath?: string | undefined;
+      totalWorktrees?: number | undefined;
+      remotes: BulkSyncRemoteResult[];
+      worktrees: BulkSyncWorktreeResult[];
+    }
   | { phase: "complete"; result: BulkSyncRepoResult };
 
 const WORKTREE_REASON: Record<
@@ -140,12 +149,15 @@ function repoStatus(
   return state.result.outcome.replace("_", " ");
 }
 
-function RepoResultDetails({ result }: { result: BulkSyncRepoResult }) {
+function RepoResultDetails({ result, includeAll = false }: {
+  result: Pick<BulkSyncRepoResult, "remotes" | "worktrees">;
+  includeAll?: boolean;
+}) {
   const remoteDetails = result.remotes.filter(
-    (remote) => remote.outcome !== "fetched"
+    (remote) => includeAll || remote.outcome !== "fetched"
   );
   const worktreeDetails = result.worktrees.filter(
-    (worktree) => worktree.outcome !== "up_to_date"
+    (worktree) => includeAll || worktree.outcome !== "up_to_date"
   );
   if (remoteDetails.length === 0 && worktreeDetails.length === 0) return null;
   return (
@@ -159,9 +171,11 @@ function RepoResultDetails({ result }: { result: BulkSyncRepoResult }) {
         <li key={worktree.worktreeId}>
           <strong>{worktree.branch}</strong>: {worktree.outcome === "updated"
             ? "fast-forwarded"
-            : worktree.reason === undefined
-              ? worktree.outcome
-              : WORKTREE_REASON[worktree.reason]}
+            : worktree.outcome === "up_to_date"
+              ? "already current"
+              : worktree.reason === undefined
+                ? worktree.outcome
+                : WORKTREE_REASON[worktree.reason]}
           {worktree.message === undefined ? "" : ` — ${worktree.message}`}
         </li>
       ))}
@@ -211,7 +225,29 @@ export function BulkSyncDialog({
       setProgress((previous) => {
         const next = new Map(previous);
         if (event.phase === "repo_started") {
-          next.set(event.repoId!, { phase: "running" });
+          next.set(event.repoId!, { phase: "running", remotes: [], worktrees: [] });
+        } else if (event.phase === "repo_progress") {
+          const current = previous.get(event.repoId!);
+          if (current?.phase === "complete") return previous;
+          const state = current?.phase === "running"
+            ? current
+            : { phase: "running" as const, remotes: [], worktrees: [] };
+          next.set(event.repoId!, {
+            ...state,
+            ...(event.detail === undefined ? {} : {
+              detail: event.detail,
+              worktreePath: event.worktreePath
+            }),
+            totalWorktrees: event.totalWorktrees ?? state.totalWorktrees,
+            remotes: event.remoteResult === undefined ? state.remotes : [
+              ...state.remotes.filter((remote) => remote.remote !== event.remoteResult!.remote),
+              event.remoteResult
+            ],
+            worktrees: event.worktreeResult === undefined ? state.worktrees : [
+              ...state.worktrees.filter((worktree) => worktree.worktreeId !== event.worktreeResult!.worktreeId),
+              event.worktreeResult
+            ]
+          });
         } else if (event.phase === "repo_completed" && event.result !== undefined) {
           next.set(event.repoId!, { phase: "complete", result: event.result });
         }
@@ -397,7 +433,29 @@ export function BulkSyncDialog({
                   </span>
                 </div>
                 {result === null ? (
-                  <p>{state?.phase === "running" ? "Git is working…" : "Queued"}</p>
+                  state?.phase === "running" ? (
+                    <>
+                      <p role="status">{state.detail ?? "Preparing repository…"}</p>
+                      {state.worktreePath !== undefined && (
+                        <small className="bulk-sync__worktree-path selectable">{state.worktreePath}</small>
+                      )}
+                      {mode === "soft-pull" && state.totalWorktrees !== undefined && (
+                        <p>{state.worktrees.length} of {state.totalWorktrees} worktrees checked</p>
+                      )}
+                      {(state.remotes.length > 0 || state.worktrees.length > 0) && (
+                        <details className="bulk-sync__completed">
+                          <summary>Completed tasks ({state.remotes.length + state.worktrees.length})</summary>
+                          <RepoResultDetails result={state} includeAll />
+                        </details>
+                      )}
+                      <div className="bulk-sync__recent">
+                        <RepoResultDetails result={{
+                          remotes: state.worktrees.length === 0 ? state.remotes.slice(-3) : [],
+                          worktrees: state.worktrees.slice(-3)
+                        }} includeAll />
+                      </div>
+                    </>
+                  ) : <p>Queued</p>
                 ) : (
                   <>
                     <p>{repoSummary(result, mode)}</p>
