@@ -7654,7 +7654,13 @@ button.agent-menu__item:hover {
 }
 /* Branch-tip chips are tinted per lane inline (color / border / background),
    so a label and its lane read as one thing. The strip is capped in JSX (+N
-   pill) AND shrink-safe here, so it can never push the subject off the row. */
+   pill) AND shrink-safe here, so it can never push the subject off the row.
+
+   Shrinking alone clipped it at an arbitrary pixel, though: a chip sliced
+   mid-pill, "+N" cut away with it, and at narrow widths nothing left at all.
+   So `ref-chip-fit.ts` measures what the row leaves the strip and renders only
+   chips that fit whole, folding the rest into "+N". `overflow: hidden` stays
+   as a backstop, not as the way the strip gives up width. */
 .ref-chips {
   display: inline-flex;
   align-items: center;
@@ -7662,6 +7668,13 @@ button.agent-menu__item:hover {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
+}
+/* Every chip folded: the pill is all the row says about its branches, so the
+   strip keeps it whole. On a row too narrow even for that (a merged PR, tag,
+   pill, author floor and "merge" badge on one line), the line's tail runs off
+   the row instead: the badge, not the branches, is what gets cut. */
+.ref-chips.is-folded {
+  flex-shrink: 0;
 }
 .ref-chip {
   flex: 0 0 auto;
@@ -7718,6 +7731,18 @@ button.ref-chip:focus-visible {
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
+}
+/* The fit's last resort before the one remaining chip folds: its name
+   ellipsizes, down to a floor that keeps a few characters and never widens a
+   short name. The adornments beside it stay whole. The fit checks the floor
+   after layout and folds the chip if even that overflows. */
+.ref-group.is-squeezed {
+  flex-shrink: 1;
+  min-width: 0;
+}
+.ref-chip.is-squeezed {
+  flex-shrink: 1;
+  min-width: calc-size(max-content, min(size, 7em));
 }
 .ref-wt {
   flex: 0 0 auto;

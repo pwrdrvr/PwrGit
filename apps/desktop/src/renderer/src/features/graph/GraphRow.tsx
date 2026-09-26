@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import { useMemo, useRef, type MouseEvent } from "react";
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
@@ -8,6 +8,7 @@ import type { LaneRow } from "./lane-layout";
 import type { PrLandingSeg } from "./pr-landings";
 import type { BranchChipTarget } from "./BranchChipMenu";
 import { shortWhen } from "./graph-view";
+import { useRefChipFit } from "./ref-chip-fit";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -161,6 +162,17 @@ export function GraphRow({
   const color = laneColor(row.lane);
   const chipCount = refs.length + remoteRefs.length;
   const isTip = chipCount > 0;
+  const chipNames = [...refs, ...remoteRefs];
+  // The strip shows only chips that fit whole; the rest fold into "+N". The
+  // view model and branch adornments are everything on the meta line besides
+  // its width, so a new identity for either re-measures.
+  const stripRef = useRef<HTMLSpanElement>(null);
+  const chipContent = useMemo(() => [vm, branchInfo], [vm, branchInfo]);
+  const chipFit = useRefChipFit(stripRef, chipCount, chipContent);
+  // While measuring (null), every capped chip renders rigid, plus the pill.
+  const shownChips = chipFit?.shown ?? Math.min(chipCount, MAX_REF_CHIPS);
+  const squeezeClass = chipFit?.squeeze === true ? " is-squeezed" : "";
+  const foldedChips = chipNames.slice(shownChips);
   const x = cx(row.lane);
 
   const showContextFor = (target: HTMLElement): void => {
@@ -430,21 +442,23 @@ export function GraphRow({
           )}
           {isHead && <span className="commit-tag commit-tag--head">HEAD</span>}
           {/* Chips are capped — a commit tipped by dozens of stale branches
-              must not flood the row. Overflow collapses into a +N pill whose
-              tooltip lists everything. */}
+              must not flood the row — and fitted: a chip the row has no room
+              for folds into the +N pill whole rather than being clipped
+              mid-pill. The strip's tooltip lists every name either way. */}
           {chipCount > 0 && (
             <span
-              className="ref-chips"
-              {...hoverTooltip(tip, [...refs, ...remoteRefs].join("\n"))}
+              ref={stripRef}
+              className={`ref-chips${chipFit?.shown === 0 ? " is-folded" : ""}`}
+              {...hoverTooltip(tip, chipNames.join("\n"))}
             >
-              {refs.slice(0, MAX_REF_CHIPS).map((name) => {
+              {refs.slice(0, shownChips).map((name) => {
                 const info = branchInfo?.[name];
                 const wtId = info?.worktreeId;
                 return (
-                  <span key={name} className="ref-group">
+                  <span key={name} className={`ref-group${squeezeClass}`}>
                     <button
                       type="button"
-                      className="ref-chip"
+                      className={`ref-chip${squeezeClass}`}
                       aria-label={`Actions for branch ${name}`}
                       style={{
                         color,
@@ -477,7 +491,7 @@ export function GraphRow({
                 );
               })}
               {remoteRefs
-                .slice(0, Math.max(0, MAX_REF_CHIPS - refs.length))
+                .slice(0, Math.max(0, shownChips - refs.length))
                 .map((name) =>
                   // A collapsed chip names the remote alone ("origin", drawn
                   // when it sits on the local branch): its branch actions are
@@ -486,7 +500,7 @@ export function GraphRow({
                     <button
                       type="button"
                       key={`r:${name}`}
-                      className="ref-chip ref-chip--remote"
+                      className={`ref-chip ref-chip--remote${squeezeClass}`}
                       aria-label={`Actions for branch ${name}`}
                       style={{
                         color,
@@ -500,7 +514,7 @@ export function GraphRow({
                   ) : (
                     <span
                       key={`r:${name}`}
-                      className="ref-chip ref-chip--remote"
+                      className={`ref-chip ref-chip--remote${squeezeClass}`}
                       style={{
                         color,
                         borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
@@ -511,11 +525,22 @@ export function GraphRow({
                     </span>
                   )
                 )}
-              {chipCount > MAX_REF_CHIPS && (
+              {/* Measuring renders the pill at its widest count, so the fit
+                  knows what room "+N" takes before anything folds. */}
+              {(chipFit === null || foldedChips.length > 0) && (
                 <span className="ref-chip ref-chip--more">
-                  +{chipCount - MAX_REF_CHIPS}
+                  +{chipFit === null ? chipCount : foldedChips.length}
                 </span>
               )}
+            </span>
+          )}
+          {/* Folded chips leave the DOM, so name them for assistive tech
+              here, outside the strip the fit measures. */}
+          {chipFit !== null && foldedChips.length > 0 && (
+            <span className="a11y-sr-only">
+              {`${foldedChips.length} more ${
+                foldedChips.length === 1 ? "branch" : "branches"
+              }: ${foldedChips.join(", ")}`}
             </span>
           )}
           {/* Ellipsized under pressure, so the full name is on hover too. */}
