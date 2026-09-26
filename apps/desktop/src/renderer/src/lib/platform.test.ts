@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   elidePathMiddle,
+  displayPath,
   hasPrimaryModifier,
   joinDisplayPath,
   pathLeaf,
@@ -44,6 +45,17 @@ describe("platform labels", () => {
 });
 
 describe("cross-platform path labels", () => {
+  it("shows Git's Windows paths with native separators", () => {
+    expect(displayPath("C:/PwrLab/repos/PwrGit", "win32")).toBe(
+      "C:\\PwrLab\\repos\\PwrGit"
+    );
+    expect(displayPath("\\\\server/share/repo", "win32")).toBe(
+      "\\\\server\\share\\repo"
+    );
+    expect(displayPath("/repos/team\\alpha", "linux")).toBe(
+      "/repos/team\\alpha"
+    );
+  });
   it("joins child names without treating POSIX backslashes as separators", () => {
     expect(joinDisplayPath("/repos/team\\alpha", "repo", "darwin")).toBe(
       "/repos/team\\alpha/repo"

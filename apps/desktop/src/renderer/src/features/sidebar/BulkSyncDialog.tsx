@@ -7,6 +7,7 @@ import type {
   Repo
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
 import {
   hoverTooltip,
@@ -172,11 +173,13 @@ export function BulkSyncDialog({
   profileId,
   repos,
   mode,
+  platform,
   onClose
 }: {
   profileId: string;
   repos: Repo[];
   mode: BulkSyncMode;
+  platform: string;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
@@ -348,7 +351,10 @@ export function BulkSyncDialog({
               summary !== null
                 ? { kind: "summary", text: overallSummary(summary) }
                 : runningRepos.length === 1 && runningRepos[0] !== undefined
-                  ? { kind: "path", text: runningRepos[0].repo.path }
+                  ? {
+                      kind: "path",
+                      text: displayPath(runningRepos[0].repo.path, platform)
+                    }
                   : null
             }
             counts={outcomeCounts}
@@ -362,6 +368,7 @@ export function BulkSyncDialog({
 
         <div className="bulk-sync__repos" aria-label="Repository results">
           {ordered.map(({ repo, progress: state }) => {
+            const pathLabel = displayPath(repo.path, platform);
             const result = state?.phase === "complete" ? state.result : null;
             const status = repoStatus(state, mode);
             const stateClass =
@@ -380,9 +387,9 @@ export function BulkSyncDialog({
                     <strong>{repo.name}</strong>
                     <small
                       className="selectable"
-                      {...hoverTooltip(tip, repo.path)}
+                      {...hoverTooltip(tip, pathLabel)}
                     >
-                      {repo.path}
+                      {pathLabel}
                     </small>
                   </div>
                   <span className={`bulk-sync__repo-status is-${stateClass}`}>

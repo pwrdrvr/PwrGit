@@ -157,6 +157,53 @@ afterEach(async () => {
 });
 
 describe("BulkSyncDialog", () => {
+  it("shows native Windows paths while keeping Git paths in the results", async () => {
+    const bulk = deferred<{ ok: true; value: BulkSyncSummary }>();
+    dispatch.mockReturnValue(bulk.promise);
+    const windowsRepo = { ...repos[0]!, path: "C:/PwrLab/repos/PwrGit" };
+    await act(async () => {
+      root.render(
+        <BulkSyncDialog
+          profileId="profile-1"
+          repos={[windowsRepo]}
+          mode="soft-pull"
+          platform="win32"
+          onClose={vi.fn()}
+        />
+      );
+    });
+
+    const operationId = dispatch.mock.calls[0]?.[1].operationId as string;
+    await act(async () => {
+      progressHandler?.({
+        operationId,
+        mode: "soft-pull",
+        phase: "repo_started",
+        totalRepos: 1,
+        completedRepos: 0,
+        repoId: windowsRepo.id,
+        repoName: windowsRepo.name
+      });
+    });
+    expect(
+      container.querySelector(".bulk-sync__status-copy")?.textContent
+    ).toContain("C:\\PwrLab\\repos\\PwrGit");
+    expect(container.querySelector(".bulk-sync__repo small")?.textContent).toBe(
+      "C:\\PwrLab\\repos\\PwrGit"
+    );
+
+    await act(async () => {
+      bulk.resolve({
+        ok: true,
+        value: summary([{ ...safeResult, path: windowsRepo.path }])
+      });
+      await bulk.promise;
+    });
+    expect(container.querySelector(".bulk-sync__repo small")?.textContent).toBe(
+      "C:\\PwrLab\\repos\\PwrGit"
+    );
+  });
+
   it("starts only one Git operation through the app's StrictMode mount cycle", async () => {
     const empty = summary([]);
     dispatch.mockResolvedValue({ ok: true, value: empty });
@@ -167,6 +214,7 @@ describe("BulkSyncDialog", () => {
             profileId="profile-1"
             repos={[]}
             mode="fetch"
+            platform="darwin"
             onClose={vi.fn()}
           />
         </StrictMode>
@@ -196,6 +244,7 @@ describe("BulkSyncDialog", () => {
           profileId="profile-1"
           repos={repos}
           mode="soft-pull"
+          platform="darwin"
           onClose={vi.fn()}
         />
       );
@@ -320,6 +369,7 @@ describe("BulkSyncDialog", () => {
           profileId="profile-1"
           repos={repos}
           mode="fetch"
+          platform="darwin"
           onClose={vi.fn()}
         />
       );
@@ -370,6 +420,7 @@ describe("BulkSyncDialog", () => {
             profileId="profile-1"
             repos={four}
             mode="soft-pull"
+            platform="darwin"
             onClose={vi.fn()}
           />
         );
@@ -442,6 +493,7 @@ describe("BulkSyncDialog", () => {
           profileId="profile-1"
           repos={repos}
           mode="soft-pull"
+          platform="darwin"
           onClose={vi.fn()}
         />
       );
@@ -492,6 +544,7 @@ describe("BulkSyncDialog", () => {
           profileId="profile-1"
           repos={[repos[1]!]}
           mode="fetch"
+          platform="darwin"
           onClose={vi.fn()}
         />
       );
@@ -518,6 +571,7 @@ describe("BulkSyncDialog", () => {
           profileId="profile-1"
           repos={repos}
           mode="fetch"
+          platform="darwin"
           onClose={vi.fn()}
         />
       );
