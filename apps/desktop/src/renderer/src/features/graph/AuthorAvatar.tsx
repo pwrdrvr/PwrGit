@@ -34,7 +34,11 @@ export function AuthorAvatar({
     <span className={block} aria-hidden="true">
       <span className={`${block}-initials`}>{initials(name)}</span>
       {avatarUrl !== undefined ? (
+        // Keyed by URL: `hidden` is set imperatively on error, and React
+        // would otherwise reuse this element for a refreshed thumbnail and
+        // keep it hidden.
         <img
+          key={avatarUrl}
           className={`${block}-image`}
           src={avatarUrl}
           alt=""
