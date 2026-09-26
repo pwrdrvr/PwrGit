@@ -1203,6 +1203,9 @@ export function LineageGraph({
                 contextOpen={hoveredCommit === vm.commit.hash && commitContext.visible}
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
+                authorAvatarUrl={
+                  commitAuthorIdentityLookups[vm.commit.hash]?.identity?.avatarUrl
+                }
                 hoverIntent={hoverIntent}
                 onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}

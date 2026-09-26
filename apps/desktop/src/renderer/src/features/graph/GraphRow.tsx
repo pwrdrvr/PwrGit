@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
+import { AuthorAvatar } from "./AuthorAvatar";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
 import { PrChip } from "../sidebar/PrChip";
 import { TagGlyph } from "../../lib/TagGlyph";
@@ -100,6 +101,7 @@ export function GraphRow({
   contextOpen,
   flashing,
   branchInfo,
+  authorAvatarUrl,
   hoverIntent,
   onToggle,
   onOpen,
@@ -125,6 +127,9 @@ export function GraphRow({
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
   branchInfo?: Record<string, LaneBranchInfo>;
+  /** The author's proven GitHub avatar, from the graph's cache-only
+   *  hydration. Absent draws initials. */
+  authorAvatarUrl?: string | undefined;
   /** Shared hover-intent gate, owned by LineageGraph so hundreds of rows do
    *  not each mount their own. */
   hoverIntent: HoverIntent;
@@ -153,8 +158,9 @@ export function GraphRow({
     pullRequest
   } = vm;
   /** The row's plain tooltips — the rebase checkbox, the tag chip, the
-   *  overflow pill, the worktree button. Not the gated SHA/PR cards below,
-   *  which repeat down a column the pointer crosses (see lib/AGENTS.md). */
+   *  overflow pill, the worktree button, the author. Not the gated SHA/PR
+   *  cards below, which repeat down a column the pointer crosses (see
+   *  lib/AGENTS.md). */
   const tip = useViewportTooltip();
   const width = Math.max(1, laneCount) * LANE_W;
   const color = laneColor(row.lane);
@@ -517,10 +523,26 @@ export function GraphRow({
               )}
             </span>
           )}
-          <span className={`commit-author${isMine ? "" : " is-other"}`}>
-            {isMine ? "you" : commit.authorName}
-          </span>
           {commit.isMerge && <span className="commit-tag">merge</span>}
+          {/* Last on the line, so the room a name leaves when it drops out
+              (app.css `.commit-byline`) trails off the end instead of opening
+              a gap before the next chip. It gives way before anything else
+              here and can go entirely, leaving the avatar — so the full name
+              is on hover, over either of them. */}
+          <span
+            className="commit-byline"
+            {...(isMine ? {} : hoverTooltip(tip, commit.authorName))}
+          >
+            <AuthorAvatar
+              block="commit-byline__avatar"
+              name={commit.authorName}
+              avatarUrl={authorAvatarUrl}
+              size={16}
+            />
+            <span className={`commit-author${isMine ? "" : " is-other"}`}>
+              {isMine ? "you" : commit.authorName}
+            </span>
+          </span>
         </div>
       </div>
       {tip.tooltipNode}
