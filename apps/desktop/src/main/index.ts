@@ -47,6 +47,7 @@ import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGi
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
+import { registerMaintenanceHandlers } from "./git/maintenance-handlers";
 import { registerPruneHandlers } from "./git/prune-handlers";
 import { SshHostTrustService } from "./git/ssh-host-trust";
 import { registerSshHostTrustHandlers } from "./git/ssh-host-trust-handlers";
@@ -1009,6 +1010,7 @@ if (!gotSingleInstanceLock) {
       refresher,
       worktreeOperations
     );
+    const maintenanceHandlers = registerMaintenanceHandlers(bus, db, execGit, worktreeOperations, indexer);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
@@ -1129,6 +1131,7 @@ if (!gotSingleInstanceLock) {
       onWebContentsDestroyed: (webContentsId) => {
         githubHandlers.releaseWebContents(webContentsId);
         bulkSyncHandlers.releaseWebContents(webContentsId);
+        maintenanceHandlers.releaseWebContents(webContentsId);
         pruneHandlers.releaseWebContents(webContentsId);
         fileInsightHandlers.releaseWebContents(webContentsId);
         agentHandlers.releaseWebContents(webContentsId);
