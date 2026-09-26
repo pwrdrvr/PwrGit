@@ -200,8 +200,12 @@ test("a profile can override the app theme and return to inheritance live", asyn
   // while the title stays index.html's "PwrGit" until profile:list answers and
   // App renames it — so a title read here can be the transient one, and a
   // lookup keyed on it matches no window once the rename lands.
+  console.log(`THEME_PROBE captured=${JSON.stringify(await lightWindow.title())}`);
   const lightFrame: JSHandle<BrowserWindow> =
     await app.browserWindow(lightWindow);
+  console.log(
+    `THEME_PROBE firstPoll bg=${await lightFrame.evaluate((f) => f.getBackgroundColor())} now=${JSON.stringify(await lightWindow.title())}`
+  );
   const lightBackground = (): Promise<string> =>
     lightFrame.evaluate((frame) => frame.getBackgroundColor());
   await expect.poll(lightBackground).toBe("#FFFFFF");

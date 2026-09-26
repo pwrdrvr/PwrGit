@@ -235,7 +235,7 @@ jobs:
         # As on Windows, workers remains 1 within each runner and
         # `--fully-parallel` lets Playwright balance individual tests across
         # the two shards instead of assigning uneven whole spec files.
-        run: xvfb-run --auto-servernum pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/2
+        run: xvfb-run --auto-servernum pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/2 e2e/profiles.spec.ts -g override.the.app.theme --repeat-each=60 --retries=0
 
       - name: Upload desktop Playwright artifacts
         uses: actions/upload-artifact@v7
@@ -307,7 +307,7 @@ jobs:
         timeout-minutes: 20
         env:
           PWRGIT_E2E_DISABLE_GPU: "1"
-        run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4
+        run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4 e2e/profiles.spec.ts -g override.the.app.theme --repeat-each=60 --retries=0
 
       # Codec flags prevent new leaks; they cannot clear a guest already
       # degraded by earlier jobs. Keep before/after counts to distinguish that
@@ -478,7 +478,7 @@ jobs:
         # sharding granularity here: each runner still has workers=1, while
         # Playwright can balance individual tests 34/34/33/33 instead of
         # assigning whole, very uneven spec files to a shard.
-        run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4
+        run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4 e2e/profiles.spec.ts -g override.the.app.theme --repeat-each=60 --retries=0
 
       - name: Upload desktop Playwright artifacts
         uses: actions/upload-artifact@v7
