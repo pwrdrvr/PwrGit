@@ -1625,9 +1625,9 @@ function makePagedRemoteFixture(): { local: string; names: string[] } {
 describe("listRemoteBranchPage (paged remote refs)", () => {
   let fixture: { local: string; names: string[] };
 
-  // `hookTimeout` has no global override, so this is measured against
-  // Vitest's 10s default — far too tight for a fixture that pushes twelve
-  // branches across three remotes.
+  // Pushes twelve branches across three remotes in one hook: several times
+  // the git spawns of the per-test fixture repos the global `hookTimeout`
+  // (vitest.config.ts) is sized for, so it keeps a budget of its own.
   beforeAll(() => {
     fixture = makePagedRemoteFixture();
   }, 60_000);

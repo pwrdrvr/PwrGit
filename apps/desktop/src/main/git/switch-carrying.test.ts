@@ -90,7 +90,7 @@ describe("switchBranchCarryingChanges", () => {
     // And the destination's own version of the diverged file is intact.
     expect(read(dir, "shared.txt")).toBe("feature rewrite\n");
     expect(stashCount(dir)).toBe(0);
-  }, 20_000);
+  });
 
   it("keeps the staged/unstaged split rather than flattening it", async () => {
     const dir = makeRepo();
@@ -105,7 +105,7 @@ describe("switchBranchCarryingChanges", () => {
     // "M " is staged-modified; a flattened reapply would read " M".
     expect(porcelain(dir)).toContain("M  quiet.txt");
     expect(porcelain(dir)).toContain("?? also.txt");
-  }, 20_000);
+  });
 
   // The promise this function exists to make.
   it("puts everything back when the work cannot land on the destination", async () => {
@@ -132,7 +132,7 @@ describe("switchBranchCarryingChanges", () => {
     // No conflict markers anywhere — the whole point of rolling back rather
     // than leaving a half-applied stash on a branch nobody asked to be on.
     expect(read(dir, "shared.txt")).not.toContain("<<<<<<<");
-  }, 20_000);
+  });
 
   // A conflicted reapply restores the stash's untracked files onto the
   // destination, and `reset --hard` does not remove untracked paths. Without the
@@ -148,7 +148,7 @@ describe("switchBranchCarryingChanges", () => {
     expect(branchOf(dir)).toBe("main");
     expect(read(dir, "brand-new.txt")).toBe("untracked\n");
     expect(stashCount(dir)).toBe(0);
-  }, 20_000);
+  });
 
   // Rollback must clean only what the stash owned. A repository-wide
   // `clean -fd` would be a plausible-looking way to undo a failed reapply and
@@ -171,7 +171,7 @@ describe("switchBranchCarryingChanges", () => {
     expect(result.ok).toBe(false);
     expect(branchOf(dir)).toBe("main");
     expect(existsSync(join(dir, "bystander.txt"))).toBe(true);
-  }, 20_000);
+  });
 
   // A detached checkout has no branch to name, so the rollback restores a raw
   // commit. `git switch` refuses one without `--detach` ("a branch is expected,
@@ -199,7 +199,7 @@ describe("switchBranchCarryingChanges", () => {
     expect(read(dir, "shared.txt")).toBe("edited while detached\n");
     expect(read(dir, "brand-new.txt")).toBe("untracked\n");
     expect(stashCount(dir)).toBe(0);
-  }, 20_000);
+  });
 
   it("carries a detached checkout's work onto a branch when it fits", async () => {
     const dir = makeRepo();
@@ -212,7 +212,7 @@ describe("switchBranchCarryingChanges", () => {
     expect(branchOf(dir)).toBe("feature");
     expect(read(dir, "quiet.txt")).toBe("edited while detached\n");
     expect(stashCount(dir)).toBe(0);
-  }, 20_000);
+  });
 
   it("switches with nothing to carry when the tree went clean", async () => {
     const dir = makeRepo();
@@ -225,7 +225,7 @@ describe("switchBranchCarryingChanges", () => {
     expect(result.value.carried).toBe(false);
     expect(branchOf(dir)).toBe("feature");
     expect(stashCount(dir)).toBe(0);
-  }, 20_000);
+  });
 
   // A refused switch leaves the work in the stash and nothing else moved, so
   // the repair is the reapply — and the caller still needs git's own reason,
@@ -244,7 +244,7 @@ describe("switchBranchCarryingChanges", () => {
     expect(branchOf(dir)).toBe("main");
     expect(read(dir, "quiet.txt")).toBe("edited on main\n");
     expect(stashCount(dir)).toBe(0);
-  }, 20_000);
+  });
 
   // Stash positions shift. Resolving the entry by commit identity is what keeps
   // this from reapplying somebody else's work over the user's.
@@ -262,5 +262,5 @@ describe("switchBranchCarryingChanges", () => {
     // The pre-existing entry is untouched and still says what it said.
     expect(stashCount(dir)).toBe(1);
     expect(gitOut(dir, ["stash", "list"])).toContain("unrelated");
-  }, 20_000);
+  });
 });
