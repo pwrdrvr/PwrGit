@@ -279,7 +279,14 @@ export function registerMaintenanceHandlers(
               // A failed metadata cleanup can follow a successful ref change,
               // so refresh even when the deletion result was not successful.
               try {
-                await indexer.refreshRepoWorktrees(repo.id);
+                const refreshed = await indexer.refreshRepoWorktrees(repo.id);
+                if (!refreshed.ok) {
+                  result = {
+                    ...result,
+                    outcome: "partial",
+                    message: `${result.message} Refresh failed: ${sanitizeGitLogDetail(refreshed.error.message)}`
+                  };
+                }
               } catch (cause) {
                 result = {
                   ...result,

@@ -3,6 +3,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  err,
   ok,
   type MaintenanceAction,
   type MaintenanceSummary,
@@ -12,6 +13,8 @@ import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { openDatabase, type DB } from "../persistence/db";
 import type { GitExec } from "./dugite";
+import type { RepoIndexer } from "./repo-indexer";
+import * as maintenance from "./repository-maintenance";
 import {
   maintenanceRepos,
   registerMaintenanceHandlers
@@ -31,6 +34,9 @@ let bus: CommandBus;
 let git: ReturnType<typeof vi.fn<GitExec>>;
 let handlers: ReturnType<typeof registerMaintenanceHandlers>;
 let operations: WorktreeOperationQueue;
+let refreshRepoWorktrees: ReturnType<
+  typeof vi.fn<RepoIndexer["refreshRepoWorktrees"]>
+>;
 const gc: MaintenanceAction = { kind: "gc", mode: "standard" };
 const output = (stdout = "", exitCode = 0) =>
   ok({ stdout, stderr: "", exitCode });
@@ -67,13 +73,15 @@ beforeEach(() => {
   });
   bus = new CommandBus();
   operations = new WorktreeOperationQueue();
+  refreshRepoWorktrees = vi.fn<RepoIndexer["refreshRepoWorktrees"]>();
   handlers = registerMaintenanceHandlers(bus, db, git, operations, {
-    refreshRepoWorktrees: vi.fn()
+    refreshRepoWorktrees
   });
 });
 afterEach(() => {
   db.close();
   rmSync(root, { recursive: true, force: true });
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -346,6 +354,73 @@ describe("maintenance lifecycle and profile scope", () => {
       1
     );
   });
+
+  it.each(["error result", "exception"])(
+    "reports partial success after deletion when refresh fails with an %s",
+    async (failure) => {
+      vi.spyOn(maintenance, "deleteStaleBranch").mockResolvedValue(
+        ok(undefined)
+      );
+      const message = "Could not list worktrees";
+      if (failure === "error result") {
+        refreshRepoWorktrees.mockResolvedValue(
+          err({
+            kind: "repo",
+            code: "refresh_failed",
+            message
+          })
+        );
+      } else {
+        refreshRepoWorktrees.mockRejectedValue(new Error(message));
+      }
+      const branch = {
+        repoId: "a",
+        branch: "finished",
+        expectedHead: "abc123",
+        upstream: "refs/remotes/origin/finished"
+      };
+      const summary = value(
+        await bus.dispatch("maintenance:run", {
+          profileId: "one",
+          operationId: "delete",
+          action: {
+            kind: "delete-branches",
+            branches: [branch]
+          }
+        })
+      );
+      expect(maintenance.deleteStaleBranch).toHaveBeenCalledWith(
+        git,
+        join(root, "a"),
+        branch
+      );
+      expect(refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith("a");
+      expect(summary.results).toHaveLength(1);
+      expect(summary.results[0]).toMatchObject({
+        outcome: "partial",
+        message:
+          "1 local branch deleted; 0 retained. Refresh failed: Could not list worktrees",
+        branches: [
+          {
+            branch: "finished",
+            deleted: true,
+            message: "Deleted local branch."
+          }
+        ]
+      });
+      expect(emitEvent).toHaveBeenCalledWith(
+        "maintenance:progress",
+        expect.objectContaining({
+          phase: "repo_completed",
+          result: summary.results[0]
+        })
+      );
+      expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "a" });
+      expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+        profileId: "one"
+      });
+    }
+  );
 
   it("refuses branch deletion outside the chosen profile and invalid options before Git runs", async () => {
     const branch = {
