@@ -86,3 +86,156 @@ test("collects all repositories and reviews stale local branches without touchin
   );
   expect(sandbox.git(repo.path, "status", "--porcelain")).toBe(dirty);
 });
+
+for (const [width, height] of [
+  [1360, 860],
+  [1000, 650]
+]) {
+  test(`maintenance keeps its geometry across repository handoffs at ${width}x${height}`, async ({}, testInfo) => {
+    handle = await launchApp({
+      theme: "light",
+      identity: { name: "Demo Developer", email: "demo@example.test" }
+    });
+    const { app, window } = handle;
+    await window.emulateMedia({ reducedMotion: "reduce" });
+    const nativeWindow = await app.browserWindow(window);
+    await nativeWindow.evaluate(
+      (win, size) => win.setSize(size[0]!, size[1]!),
+      [width!, height!]
+    );
+    await window
+      .getByRole("button", { name: "Garbage collection…", exact: true })
+      .click();
+    const dialog = window.getByRole("dialog", {
+      name: "Repository maintenance"
+    });
+    // Script IPC progress at the real renderer boundary so both the brief
+    // between-repo gap and overlapping workers are deterministic on every CPU.
+    const fixture = await app.evaluateHandle(({ ipcMain }) => {
+      let send: ((event: object) => void) | undefined;
+      let finish: (() => void) | undefined;
+      ipcMain.removeHandler("pwrgit:dispatch");
+      ipcMain.handle("pwrgit:dispatch", (event, name, req) => {
+        if (name === "maintenance:cancel")
+          return { ok: true, value: { cancelled: true } };
+        if (name !== "maintenance:run")
+          return {
+            ok: false,
+            error: { kind: "repo", code: "fixture", message: "Layout fixture" }
+          };
+        send = (progress) =>
+          event.sender.send("pwrgit:event", "maintenance:progress", {
+            ...progress,
+            operationId: req.operationId,
+            profileId: req.profileId
+          });
+        return new Promise((resolve) => {
+          finish = () =>
+            resolve({
+              ok: true,
+              value: {
+                operationId: req.operationId,
+                startedAt: "2026-09-26T12:00:00Z",
+                finishedAt: "2026-09-26T12:00:02Z",
+                cancelled: true,
+                results: []
+              }
+            });
+        });
+      });
+      return { send: (event: object) => send!(event), finish: () => finish!() };
+    });
+    const geometry = () =>
+      dialog.evaluate((node) => {
+        const rect = (element: Element) => {
+          const { x, y, width, height } = element.getBoundingClientRect();
+          return { x, y, width, height };
+        };
+        return {
+          dialog: rect(node),
+          footer: rect(node.querySelector(".modal__actions")!),
+          status: node.querySelector(".bulk-sync__status")
+            ? rect(node.querySelector(".bulk-sync__status")!)
+            : null,
+          body: rect(node.querySelector(".maintenance__body")!)
+        };
+      });
+    const initial = await geometry();
+    await dialog
+      .getByRole("button", { name: "Run garbage collection", exact: true })
+      .click();
+    const repos = ["atlas-client", "beacon-api", "cedar-tools"].map((name) => ({
+      id: name,
+      name,
+      path: `/demo/projects/${name}`,
+      profileId: "demo",
+      profileName: "Demo"
+    }));
+    await fixture.evaluate(
+      (f, repos) => f.send({ phase: "starting", repos }),
+      repos
+    );
+    await fixture.evaluate(
+      (f, repo) => f.send({ phase: "repo_started", repo }),
+      repos[0]
+    );
+    await expect(dialog.getByRole("status")).toContainText(
+      "Collecting atlas-client"
+    );
+    const running = await geometry();
+    await dialog.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("maintenance-running.png")
+    });
+    await fixture.evaluate(
+      (f, repo) =>
+        f.send({
+          phase: "repo_completed",
+          repo,
+          result: {
+            repo,
+            outcome: "success",
+            message: "Garbage collection completed."
+          }
+        }),
+      repos[0]
+    );
+    await expect(dialog.getByRole("status")).toContainText(
+      "Waiting for the next repository"
+    );
+    await dialog.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("maintenance-waiting.png")
+    });
+    expect(await geometry()).toEqual(running);
+    expect(running.dialog).toEqual(initial.dialog);
+    expect(running.footer).toEqual(initial.footer);
+
+    await fixture.evaluate((f, repos) => {
+      f.send({ phase: "repo_started", repo: repos[1] });
+      f.send({ phase: "repo_started", repo: repos[2] });
+    }, repos);
+    await expect(dialog.getByRole("status")).toContainText(
+      "Collecting 2 repositories"
+    );
+    await expect(dialog).toContainText("2 in flight · 0 queued");
+    expect(await geometry()).toEqual(running);
+    await dialog.screenshot({
+      animations: "disabled",
+      path: testInfo.outputPath("maintenance-parallel.png")
+    });
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog.getByRole("status")).toContainText(
+      "Stopping after active repository operations"
+    );
+    expect(await geometry()).toEqual(running);
+    await fixture.evaluate((f) => f.finish());
+    await expect(dialog.getByRole("status")).toContainText("Cancelled");
+    expect(await geometry()).toEqual(running);
+    await dialog
+      .getByRole("button", { name: "Local branches", exact: true })
+      .click();
+    expect((await geometry()).dialog).toEqual(initial.dialog);
+    expect((await geometry()).footer).toEqual(initial.footer);
+  });
+}

@@ -156,7 +156,7 @@ describe("maintenance dialog", () => {
       operationId: request.operationId
     });
     expect(container.textContent).toContain(
-      "Stopping after the current repository operation"
+      "Stopping after active repository operations"
     );
     await act(async () =>
       finish({
@@ -178,6 +178,42 @@ describe("maintenance dialog", () => {
     expect(container.textContent).toContain("2.0 KiB → 1.0 KiB");
     await click("Close");
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps other repositories running when one parallel worker completes", async () => {
+    let finish!: (value: unknown) => void;
+    dispatch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    await click("Run garbage collection");
+    const { operationId } = dispatch.mock.calls[0]![1];
+    const second = { ...repo, id: "second", name: "second" };
+    const queued = { ...repo, id: "queued", name: "queued" };
+    const emit = (
+      event: Omit<MaintenanceProgress, "operationId" | "profileId">
+    ) => listener?.({ ...event, operationId, profileId: "one" });
+    await act(async () => {
+      emit({ phase: "starting", repos: [repo, second, queued] });
+      emit({ phase: "repo_started", repo });
+      emit({ phase: "repo_started", repo: second });
+    });
+    expect(container.textContent).toContain("Collecting 2 repositories");
+    expect(container.textContent).toContain("2 in flight · 1 queued");
+    expect(container.querySelectorAll("article.is-running")).toHaveLength(2);
+    await act(async () =>
+      emit({
+        phase: "repo_completed",
+        repo: second,
+        result: { repo: second, outcome: "success", message: "Collected" }
+      })
+    );
+    expect(container.textContent).toContain("Collecting example");
+    expect(container.textContent).toContain("1 in flight · 1 queued");
+    expect(container.querySelectorAll("article.is-running")).toHaveLength(1);
+    await act(async () => finish({ ok: true, value: summary([]) }));
   });
 
   it("requires review and branch selection before sending a deletion", async () => {

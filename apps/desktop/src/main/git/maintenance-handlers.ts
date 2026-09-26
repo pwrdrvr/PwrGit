@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import {
   err,
   ok,
@@ -10,6 +11,7 @@ import {
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
+import { mapLimit } from "../util/map-limit";
 import type { DB } from "../persistence/db";
 import { sanitizeGitLogDetail, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
@@ -113,7 +115,7 @@ export function registerMaintenanceHandlers(
     else ctx.signal?.addEventListener("abort", abort, { once: true });
     active = { id: req.operationId, owner: ctx.webContentsId, controller };
     const startedAt = new Date().toISOString();
-    const results: MaintenanceRepoResult[] = [];
+    const results = new Map<string, MaintenanceRepoResult>();
     const commonDirectories = new Set<string>();
     const progress = (
       event: Omit<MaintenanceProgress, "operationId" | "profileId">
@@ -126,7 +128,13 @@ export function registerMaintenanceHandlers(
 
     try {
       progress({ phase: "starting", repos });
-      for (const repo of repos) {
+      // Deletion stays serial because separate repo rows can name one shared
+      // object store. GC and review claim each common directory before work.
+      const concurrency =
+        action.kind === "delete-branches"
+          ? 1
+          : Math.max(1, Math.min(4, Math.floor(availableParallelism() / 2)));
+      await mapLimit(repos, concurrency, async (repo) => {
         const report = (detail: string): void =>
           progress({ phase: "repo_progress", repo, detail });
         let result: MaintenanceRepoResult;
@@ -169,7 +177,7 @@ export function registerMaintenanceHandlers(
                     repo,
                     outcome: "skipped",
                     message:
-                      "Shares an object store with a repository already processed in this run."
+                      "Shares an object store with a repository already claimed in this run."
                   };
                 }
                 commonDirectories.add(directory.value);
@@ -290,20 +298,20 @@ export function registerMaintenanceHandlers(
             };
           }
         }
-        results.push(result);
+        results.set(repo.id, result);
         progress({ phase: "repo_completed", repo, result });
         logMain(
           result.outcome === "failed" ? "warn" : "info",
           "maintenance",
           `${action.kind}: ${repo.path}: ${result.message}`
         );
-      }
+      });
       const summary: MaintenanceSummary = {
         operationId: req.operationId,
         startedAt,
         finishedAt: new Date().toISOString(),
         cancelled: controller.signal.aborted,
-        results
+        results: repos.map((repo) => results.get(repo.id)!)
       };
       return ok(summary);
     } finally {

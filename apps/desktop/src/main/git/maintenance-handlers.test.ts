@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -18,6 +18,10 @@ import {
 } from "./maintenance-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  availableParallelism: vi.fn(() => 2)
+}));
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 
@@ -32,6 +36,7 @@ const output = (stdout = "", exitCode = 0) =>
   ok({ stdout, stderr: "", exitCode });
 
 beforeEach(() => {
+  vi.mocked(availableParallelism).mockReturnValue(2);
   root = mkdtempSync(join(tmpdir(), "pwrgit-maintenance-handlers-"));
   db = openDatabase(":memory:");
   db.prepare("INSERT INTO profiles (id, name, email) VALUES (?, ?, ?)").run(
@@ -232,6 +237,114 @@ describe("maintenance lifecycle and profile scope", () => {
       )
     ).toBe(true);
     expect(git).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [1, 1],
+    [2, 1],
+    [4, 2],
+    [6, 3],
+    [8, 4],
+    [32, 4]
+  ])(
+    "uses %i available cores to run at most %i repositories and drains active GC on cancellation",
+    async (cores, limit) => {
+      vi.mocked(availableParallelism).mockReturnValue(cores);
+      for (const id of ["d", "e", "f", "g", "h"]) {
+        const path = join(root, id);
+        mkdirSync(join(path, ".git"), { recursive: true });
+        db.prepare(
+          "INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, ?, ?)"
+        ).run(id, "one", id, path);
+      }
+      const releases: Array<() => void> = [];
+      let inFlight = 0;
+      let peak = 0;
+      const original = git.getMockImplementation()!;
+      git.mockImplementation(async (args, cwd, opts) => {
+        if (args.includes("gc")) {
+          peak = Math.max(peak, ++inFlight);
+          await new Promise<void>((resolve) => releases.push(resolve));
+          inFlight--;
+        }
+        return original(args, cwd, opts);
+      });
+      let ended = false;
+      const pending = bus
+        .dispatch("maintenance:run", {
+          profileId: "one",
+          operationId: "parallel",
+          action: gc
+        })
+        .then((result) => {
+          ended = true;
+          return result;
+        });
+      await vi.waitFor(() => expect(releases).toHaveLength(limit));
+      // A completed worker must refill even if the first worker is still busy.
+      releases[limit - 1]!();
+      await vi.waitFor(() => expect(releases).toHaveLength(limit + 1));
+      await bus.dispatch("maintenance:cancel", { operationId: "parallel" });
+      expect(ended).toBe(false);
+      for (const release of releases) release();
+      const summary = value(await pending);
+      expect(peak).toBe(limit);
+      expect(summary.cancelled).toBe(true);
+      expect(
+        summary.results.filter((r) => r.outcome === "success")
+      ).toHaveLength(limit + 1);
+      expect(
+        summary.results.filter((r) => r.outcome === "cancelled")
+      ).toHaveLength(7 - limit - 1);
+      expect(summary.results.map((r) => r.repo.id)).toEqual([
+        "a",
+        "b",
+        "d",
+        "e",
+        "f",
+        "g",
+        "h"
+      ]);
+      expect(
+        git.mock.calls.filter(([args]) => args.includes("gc"))
+      ).toHaveLength(limit + 1);
+    }
+  );
+
+  it("claims a shared object store before parallel collection starts", async () => {
+    vi.mocked(availableParallelism).mockReturnValue(8);
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    git.mockImplementation(async (args) => {
+      if (args[0] === "rev-parse") return output(join(root, "a", ".git"));
+      if (args.includes("gc")) await gate;
+      return output();
+    });
+    const pending = bus.dispatch("maintenance:run", {
+      profileId: "one",
+      operationId: "shared",
+      action: gc
+    });
+    await vi.waitFor(() =>
+      expect(emitEvent).toHaveBeenCalledWith(
+        "maintenance:progress",
+        expect.objectContaining({
+          phase: "repo_completed",
+          result: expect.objectContaining({ outcome: "skipped" })
+        })
+      )
+    );
+    finish();
+    const summary = value(await pending);
+    expect(summary.results.map((r) => r.outcome).sort()).toEqual([
+      "skipped",
+      "success"
+    ]);
+    expect(git.mock.calls.filter(([args]) => args.includes("gc"))).toHaveLength(
+      1
+    );
   });
 
   it("refuses branch deletion outside the chosen profile and invalid options before Git runs", async () => {

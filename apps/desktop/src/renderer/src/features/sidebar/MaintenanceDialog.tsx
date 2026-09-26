@@ -38,7 +38,7 @@ export function MaintenanceDialog({
   const [running, setRunning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [repos, setRepos] = useState<MaintenanceRepo[]>([]);
-  const [current, setCurrent] = useState<string | null>(null);
+  const [current, setCurrent] = useState<Set<string>>(new Set());
   const [details, setDetails] = useState<Map<string, string>>(new Map());
   const [results, setResults] = useState<Map<string, MaintenanceRepoResult>>(
     new Map()
@@ -92,7 +92,7 @@ export function MaintenanceDialog({
     setResults(new Map());
     setDetails(new Map());
     setRepos([]);
-    setCurrent(null);
+    setCurrent(new Set());
     setError(null);
     setSelected(new Set());
     setStartedAt(Date.now());
@@ -104,7 +104,10 @@ export function MaintenanceDialog({
       )
         return;
       if (event.repos !== undefined) setRepos(event.repos);
-      if (event.phase === "repo_started") setCurrent(event.repo?.id ?? null);
+      if (event.phase === "repo_started" && event.repo !== undefined) {
+        const id = event.repo.id;
+        setCurrent((old) => new Set(old).add(id));
+      }
       if (event.repo !== undefined && event.detail !== undefined) {
         const { repo, detail } = event;
         setDetails((old) => new Map(old).set(repo.id, detail));
@@ -112,7 +115,11 @@ export function MaintenanceDialog({
       if (event.result !== undefined) {
         const result = event.result;
         setResults((old) => new Map(old).set(result.repo.id, result));
-        setCurrent(null);
+        setCurrent((old) => {
+          const next = new Set(old);
+          next.delete(result.repo.id);
+          return next;
+        });
       }
     });
     try {
@@ -141,7 +148,7 @@ export function MaintenanceDialog({
       active.current = null;
       if (live.current) {
         setRunning(false);
-        setCurrent(null);
+        setCurrent(new Set());
       }
     }
   };
@@ -170,7 +177,7 @@ export function MaintenanceDialog({
   const counts = countOutcomes(
     [...results.values()].map((result) => result.outcome)
   );
-  const currentRepo = repos.find((repo) => repo.id === current);
+  const currentRepo = repos.find((repo) => current.has(repo.id));
   const complete = summary !== null;
   const scanComplete = complete && action?.kind === "scan-branches";
   const toggleBranch = (key: string): void =>
@@ -250,10 +257,12 @@ export function MaintenanceDialog({
             title={
               running
                 ? cancelling
-                  ? "Stopping after the current repository operation…"
-                  : currentRepo
-                    ? `${action?.kind === "gc" ? "Collecting" : action?.kind === "scan-branches" ? "Reviewing" : "Cleaning branches in"} ${currentRepo.name}`
-                    : "Waiting for the next repository…"
+                  ? "Stopping after active repository operations…"
+                  : current.size > 1
+                    ? `${action?.kind === "gc" ? "Collecting" : "Reviewing"} ${current.size} repositories`
+                    : currentRepo
+                      ? `${action?.kind === "gc" ? "Collecting" : action?.kind === "scan-branches" ? "Reviewing" : "Cleaning branches in"} ${currentRepo.name}`
+                      : "Waiting for the next repository…"
                 : summary?.cancelled
                   ? "Cancelled"
                   : "Finished"
@@ -263,7 +272,13 @@ export function MaintenanceDialog({
                 ? currentRepo
                   ? {
                       kind: "path",
-                      text: displayPath(currentRepo.path, platform)
+                      text:
+                        current.size > 1
+                          ? repos
+                              .filter((repo) => current.has(repo.id))
+                              .map((repo) => repo.name)
+                              .join(" · ")
+                          : displayPath(currentRepo.path, platform)
                     }
                   : null
                 : {
@@ -272,11 +287,8 @@ export function MaintenanceDialog({
                   }
             }
             counts={counts}
-            inFlight={current === null ? 0 : 1}
-            queued={Math.max(
-              0,
-              repos.length - results.size - (current === null ? 0 : 1)
-            )}
+            inFlight={current.size}
+            queued={Math.max(0, repos.length - results.size - current.size)}
             startedAt={startedAt}
             durationMs={
               summary === null
@@ -394,7 +406,8 @@ export function MaintenanceDialog({
               </p>
               <p>
                 Git normally runs some maintenance automatically. PwrGit runs
-                collection in the foreground, one repository at a time, and
+                collection in the foreground with up to four repositories at a
+                time, capped at half the available CPU cores (at least one). It
                 preserves missing-worktree registrations. It does not request
                 immediate object pruning or force a competing collection. Your
                 existing Git retention configuration still applies.
@@ -464,7 +477,7 @@ export function MaintenanceDialog({
               const result = results.get(repo.id);
               const status =
                 result?.outcome ??
-                (current === repo.id
+                (current.has(repo.id)
                   ? "running"
                   : running
                     ? "queued"
@@ -491,7 +504,7 @@ export function MaintenanceDialog({
                   <p className="selectable">
                     {result?.message ??
                       details.get(repo.id) ??
-                      (current === repo.id
+                      (current.has(repo.id)
                         ? "Git is working…"
                         : running
                           ? "Queued"

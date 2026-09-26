@@ -18,10 +18,13 @@ storage and see the outcome across your repositories.
 | Keep the largest pack | `git gc --keep-largest-pack`: leave the largest pack intact while repacking others. | Reduce repacking work in a large repository; it may leave more storage in use. |
 | Aggressive compression | `git gc --aggressive`: spend more effort finding efficient ways to compress objects. | An occasional deliberate optimization when extra CPU, memory, and time are acceptable. A smaller result is not guaranteed. |
 
-PwrGit runs Git in the foreground, one repository at a time. Each repository
+PwrGit runs collection and branch review in the foreground with up to four
+repositories in parallel, capped at half the available logical CPU cores
+(rounded down, with a minimum of one). Local branch deletion stays serial.
+This caps simultaneous repositories, not Git's internal threads or CPU usage. Each repository
 reports queued, running, success, skipped, failure, or cancellation; a failed
 repository does not stop the others. Another window cannot start an overlapping
-maintenance run. **Cancel** finishes the current local operation and skips
+maintenance run. **Cancel** finishes active local operations and skips
 remaining work. Closing the owning window also requests cancellation.
 
 The before/after figures are the sizes of loose objects and packs reported by
