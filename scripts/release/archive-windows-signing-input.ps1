@@ -18,6 +18,8 @@ if (Test-Path -LiteralPath $workspaceLinkRoot) {
 $archiveInputs = @(
   "apps/desktop/release-stage",
   "apps/desktop/scripts/release.mjs",
+  "apps/desktop/scripts/afterpack-macos-uuid.mjs",
+  "apps/desktop/scripts/macos-executable-uuid.mjs",
   "apps/desktop/scripts/mac-release-artifacts.mjs",
   "apps/desktop/scripts/windows-release-artifacts.mjs",
   "apps/desktop/scripts/verify-asar-contents.mjs",

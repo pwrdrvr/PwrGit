@@ -318,6 +318,13 @@ there:
 
 ## macOS release architectures
 
+`scripts/afterpack-macos-uuid.mjs` personalizes only the staged main executable's
+`LC_UUID` before signing, including the final universal pass. Keep it before
+signing: UUID bytes are signature-covered. The hash uses app ID, app version,
+Electron version, CPU type and subtype; never use the previous UUID as input
+(the universal pass must be idempotent). Bundle IDs and signing identity stay
+unchanged. See `.github/workflows/README.md` for verification and symbol caveats.
+
 DMG and ZIP targets build universal and arm64. Keep `concurrency.jobs: 1`:
 `beforePack` mutates the shared stage's Git and SQLite files per architecture.
 `release.mjs` verifies both app trees, then `mac-release-artifacts.mjs` writes
