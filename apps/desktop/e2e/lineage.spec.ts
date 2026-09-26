@@ -645,7 +645,7 @@ test("a tip chip's worktree button jumps to that worktree", async () => {
   await expect(window.locator(".titlebar__branch-name")).toHaveText("feat/hop");
 });
 
-test("horizontal wheel over the lane gutter pans lanes, not commits", async () => {
+test("lane scrollbar stays above vertical scrolling and horizontal wheel pans lanes", async () => {
   sandbox = createGitSandbox();
   const s = sandbox;
   const repo = s.makeRepo("panner");
@@ -658,6 +658,11 @@ test("horizontal wheel over the lane gutter pans lanes, not commits", async () =
 
   handle = await launchApp();
   const { window } = handle;
+  const nativeWindow = await handle.app.browserWindow(window);
+  await nativeWindow.evaluate((win) => {
+    win.setSize(1200, 700);
+    win.setIgnoreMouseEvents(true);
+  });
   await addRootAndExpand(window, handle, s, "panner");
   await branchRow(window, "main").first().click();
   await expect(window.locator(".lane-scrollbar")).toBeVisible({ timeout: 20_000 });
@@ -672,6 +677,23 @@ test("horizontal wheel over the lane gutter pans lanes, not commits", async () =
       window.locator(".lane-scrollbar").evaluate((el) => el.scrollLeft)
     )
     .toBeGreaterThan(before);
+
+  const bar = window.locator(".lane-scrollbar");
+  const initialBarBox = await bar.boundingBox();
+  expect(initialBarBox).not.toBeNull();
+  const scroller = window.locator(".graph-scroll");
+  for (const scrollTop of [136, 280, 0]) {
+    await scroller.evaluate((el, y) => {
+      el.scrollTop = y;
+    }, scrollTop);
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBe(scrollTop);
+    const barBox = await bar.boundingBox();
+    const scrollBox = await scroller.boundingBox();
+    expect(barBox).not.toBeNull();
+    expect(scrollBox).not.toBeNull();
+    expect(barBox!.y).toBe(initialBarBox!.y);
+    expect(barBox!.y + barBox!.height).toBeLessThanOrEqual(scrollBox!.y);
+  }
 });
 
 test("All-branches scope reveals remote (teammate) branches", async () => {

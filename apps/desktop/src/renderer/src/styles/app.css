@@ -7644,14 +7644,14 @@ button.agent-menu__item:hover {
   transform: translateX(var(--lane-scroll, 0px));
 }
 .lane-scrollbar {
-  position: sticky;
-  top: 0;
-  z-index: 6;
+  /* Reserve a row above the vertical viewport so lanes cannot scroll behind
+     the transparent space around macOS's horizontal scrollbar. */
+  flex-shrink: 0;
   overflow-x: auto;
   overflow-y: hidden;
   height: 12px;
   max-width: clamp(16px, calc(100cqi - 230px), 160px);
-  margin: 0 0 4px 9px;
+  margin: 0 0 4px 29px;
 }
 .lane-scrollbar::-webkit-scrollbar {
   height: 8px;
