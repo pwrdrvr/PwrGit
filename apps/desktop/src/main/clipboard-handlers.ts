@@ -1,4 +1,4 @@
-import { clipboard, nativeImage } from "electron";
+import { clipboard, ClipboardItem, nativeImage } from "electron";
 import { err, ok, pwrGitError } from "@pwrgit/shared";
 import type { CommandBus } from "./command-bus";
 
@@ -12,12 +12,12 @@ import type { CommandBus } from "./command-bus";
  */
 export function registerClipboardHandlers(bus: CommandBus): void {
   bus.register("clipboard:writeImage", async (req) => {
-    const image = nativeImage.createFromBuffer(
-      Buffer.from(req.pngBase64, "base64")
-    );
+    const png = Buffer.from(req.pngBase64, "base64");
     // Electron returns an empty image rather than throwing on bytes it cannot
-    // decode, and writing that silently clears whatever the user had copied.
-    if (image.isEmpty()) {
+    // decode, and `clipboard.write` skips an image it cannot decode without
+    // rejecting — so a copy of bad bytes would report success having copied
+    // nothing.
+    if (nativeImage.createFromBuffer(png).isEmpty()) {
       return err(
         pwrGitError(
           "validation",
@@ -26,7 +26,12 @@ export function registerClipboardHandlers(bus: CommandBus): void {
         )
       );
     }
-    clipboard.writeImage(image);
+    // Electron 44 removed `clipboard.writeImage`. An `image/png` entry is
+    // decoded by the same helper `nativeImage.createFromBuffer` uses and
+    // written to the pasteboard as a bitmap, as `writeImage` did.
+    await clipboard.write([
+      new ClipboardItem({ "image/png": new Blob([png], { type: "image/png" }) })
+    ]);
     return ok(null);
   });
 }
