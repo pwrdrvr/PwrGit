@@ -105,6 +105,8 @@ jobs:
             apps/desktop/scripts/windows-release-artifacts.mjs \
             scripts/lib/cli-entrypoint.mjs \
             apps/desktop/scripts/beforepack-dugite-arch.mjs \
+            apps/desktop/scripts/afterpack-macos-uuid.mjs \
+            apps/desktop/scripts/macos-executable-uuid.mjs \
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs \
             apps/desktop/scripts/verify-asar-contents.mjs \
             apps/desktop/scripts/packaged-html-rules.mjs \

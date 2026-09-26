@@ -191,3 +191,49 @@ keeps it spelled the same as the published asset. A future Windows ARM build
 takes `PwrGit.Setup.Arm.exe`. This does not match the macOS aliases
 (`PwrGit.dmg`, `PwrGit-arm64.dmg`), which are already published URLs that must
 keep working; each platform keeps its own spelling deliberately.
+
+### macOS main executable UUID
+
+Electron's stock launcher has the same `LC_UUID` in unrelated apps that use the
+same Electron build. Apple [TN3178](https://developer.apple.com/documentation/technotes/tn3178-checking-for-and-resolving-build-uuid-problems)
+explains that some network subsystems use this UUID to identify the app and may
+cross-apply restrictions when it collides; see also
+[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).
+
+PwrGit's `afterPack` hook replaces only the staged
+`PwrGit.app/Contents/MacOS/PwrGit` UUID. It derives one UUID per CPU type/subtype
+from the bundle ID, app version and Electron version. Thin arm64/x86_64 and
+universal binaries use the same derivation, so the hook can run before and after
+merging without changing a slice a second time. A repeat build with those inputs
+is reproducible; a new app or Electron version receives new UUIDs. Custom
+Electron builds with different launcher code must have distinct Electron
+versions rather than reuse the same identity tuple.
+
+This deliberately leaves `com.pwrdrvr.pwrgit`, helper bundle IDs, the Developer
+ID signing identity, entitlements, and Electron Framework UUIDs unchanged.
+Changing `LC_UUID` invalidates the old signature; electron-builder signs after
+the hook. Never apply this hook to installed or already distributed apps.
+The hook and helper travel in both signing-input archives and the deploy stage.
+Windows and Linux return without touching their executable.
+
+For a packaged app, inspect `dwarfdump --uuid PwrGit.app/Contents/MacOS/PwrGit`
+and verify with `codesign --verify --deep --strict --all-architectures PwrGit.app`.
+The universal app should have distinct arm64 and x86_64 UUIDs; its arm64 UUID
+should match the standalone arm64 app built with the same versions. Compare
+against sibling products to confirm separation. The test suite also uses real
+Mach-O executables, `lipo`, `dwarfdump`, and ad-hoc signing on macOS.
+
+**Symbols:** the upstream Electron launcher dSYM no longer matches the
+personalized main executable. If collecting native launcher crash symbols,
+copy the corresponding upstream launcher dSYM and align its UUID for each
+architecture with the shipped executable before indexing/uploading it. Align
+any generated Breakpad/Crashpad module identifiers too, and retain the original
+and personalized UUID mapping with the release symbols. This hook intentionally
+accepts executables only; do not run it against a dSYM (`MH_DSYM`). Electron
+Framework UUIDs and its upstream symbols remain unchanged. This repository does
+not currently stage or upload launcher dSYMs.
+
+Binary and signing tests establish UUID separation and correct ordering; they
+do not establish how existing macOS permission decisions migrate. A signed
+upgrade and local-network permission test alongside sibling apps remains a
+manual release validation task. No installed-app mutation is part of this fix.

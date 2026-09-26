@@ -6,6 +6,17 @@ import { describe, expect, test } from "vitest";
 
 const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 
+test("UUID personalization runs after packing and travels in both signing archives", () => {
+  expect(read("apps/desktop/electron-builder.yml")).toContain('afterPack: "scripts/afterpack-macos-uuid.mjs"');
+  const workflow = read(".github/workflows/release.yml");
+  const macArchive = workflow.slice(workflow.indexOf("tar -czf"), workflow.indexOf('sha256="$(shasum'));
+  const windowsArchive = read("scripts/release/archive-windows-signing-input.ps1");
+  for (const file of ["afterpack-macos-uuid.mjs", "macos-executable-uuid.mjs"]) {
+    expect(macArchive).toContain(`apps/desktop/scripts/${file}`);
+    expect(windowsArchive).toContain(`apps/desktop/scripts/${file}`);
+  }
+});
+
 function read(path) {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }

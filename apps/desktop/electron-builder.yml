@@ -12,6 +12,9 @@ electronVersion: 41.10.7
 # build. See scripts/beforepack-dugite-arch.mjs.
 beforePack: "scripts/beforepack-dugite-arch.mjs"
 
+# Give the main executable a PwrGit-specific LC_UUID before code signing.
+afterPack: "scripts/afterpack-macos-uuid.mjs"
+
 # better-sqlite3 13 ships Node-API prebuilds and opts out of electron-rebuild's
 # implicit source build. beforePack selects one prebuild per target architecture
 # at the conventional build/Release path. Disable the default rebuild because
