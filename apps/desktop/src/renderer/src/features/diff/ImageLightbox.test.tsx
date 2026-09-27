@@ -98,7 +98,7 @@ describe("ImageLightbox as a modal", () => {
     expect(name(list[0]!)).toBe("Before");
     expect(name(list.at(-1)!)).toBe("Zoom in");
 
-    list.at(-1)!.focus();
+    act(() => list.at(-1)!.focus());
     press(document.activeElement!, "Tab");
     expect(document.activeElement).toBe(list[0]);
     press(document.activeElement!, "Tab", true);

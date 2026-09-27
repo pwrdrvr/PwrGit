@@ -28,7 +28,10 @@ const REAL_GIT_TIMEOUT_MS = 20_000;
 export default defineConfig({
   test: {
     environment: "node",
-    setupFiles: ["apps/desktop/src/main/git/test-support/tripwire-setup.ts"],
+    setupFiles: [
+      "apps/desktop/src/main/git/test-support/tripwire-setup.ts",
+      "apps/desktop/src/renderer/src/test-support/react-act-setup.ts"
+    ],
     testTimeout: REAL_GIT_TIMEOUT_MS,
     hookTimeout: REAL_GIT_TIMEOUT_MS,
     include: [
