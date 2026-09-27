@@ -7,7 +7,9 @@ import {
   useState
 } from "react";
 import {
+  commitAuthorInterest,
   commitAuthorPersonKey,
+  mergeCommitAuthorPeople,
   type CommitAuthorPerson,
   type FileBlameHunk,
   type FileBlamePage,
@@ -90,9 +92,10 @@ type IdentityCandidate = {
 };
 
 /**
- * Proven identities for these commits: the local cache on load, then whatever
- * main's people store pushes for their authors. This pane never registers
- * interest of its own — the lineage graph does — so it only ever reads.
+ * Proven identities for these commits: each commit's own cached proof, and the
+ * author as main's people store knows them. The pane registers the authors it
+ * shows, as the lineage graph does, so main keeps them fresh on its own
+ * schedule; nothing here asks a forge.
  */
 function useAuthorIdentities(
   worktreeId: string,
@@ -102,6 +105,7 @@ function useAuthorIdentities(
     Record<string, GitHubCommitAuthorIdentityLookup>
   >({});
   const [people, setPeople] = useState<Record<string, CommitAuthorPerson>>({});
+  const peopleMonitorIdRef = useRef(crypto.randomUUID());
   const unique = useMemo(() => {
     const commits = new Map<string, IdentityCandidate>();
     for (const candidate of candidates) commits.set(candidate.hash, candidate);
@@ -142,11 +146,41 @@ function useAuthorIdentities(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId, key]);
 
+  // Replace this pane's interest whenever its commits change; an empty list
+  // withdraws it.
+  useEffect(() => {
+    let active = true;
+    void dispatch("people:replaceInterest", {
+      worktreeId,
+      monitorId: peopleMonitorIdRef.current,
+      authors: commitAuthorInterest(unique)
+    }).then(
+      (result) => {
+        if (active && result.ok) {
+          setPeople((current) => mergeCommitAuthorPeople(current, result.value));
+        }
+      },
+      () => undefined
+    );
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worktreeId, key]);
+
+  // A pane that closes, or moves to another worktree, withdraws its interest.
+  useEffect(() => {
+    const monitorId = peopleMonitorIdRef.current;
+    return () => {
+      void dispatch("people:replaceInterest", { worktreeId, monitorId, authors: [] });
+    };
+  }, [worktreeId]);
+
   useEffect(
     () =>
       subscribe("people:changed", (payload) => {
         if (payload.worktreeId !== worktreeId) return;
-        setPeople((current) => ({ ...current, ...payload.people }));
+        setPeople((current) => mergeCommitAuthorPeople(current, payload.people));
       }),
     [worktreeId]
   );
@@ -155,10 +189,12 @@ function useAuthorIdentities(
     const identities: Record<string, GitHubCommitAuthorIdentity> = {};
     for (const candidate of unique) {
       const person = people[commitAuthorPersonKey(candidate.authorEmail)];
-      // A person the store has since answered for outranks the cache read.
-      const identity = person === undefined
-        ? lookups[candidate.hash]?.identity
-        : person.state === "proven" ? person.identity : undefined;
+      // A proven person carries the freshest login and face. Anything short of
+      // that is about the author's other commits, and must not hide this
+      // commit's own exact proof.
+      const identity = person?.state === "proven"
+        ? person.identity
+        : lookups[candidate.hash]?.identity;
       if (identity !== undefined) identities[candidate.hash] = identity;
     }
     return identities;

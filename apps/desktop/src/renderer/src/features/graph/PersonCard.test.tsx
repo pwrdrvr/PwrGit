@@ -77,6 +77,21 @@ describe("PersonCard", () => {
     expect(card({ state: "pending" }, { isMine: true })).not.toContain("person-card__actions");
   });
 
+  it("draws no actions row when no action applies", () => {
+    const html = renderToStaticMarkup(
+      <PersonCard
+        name="Build Bot"
+        email=""
+        isMine={false}
+        person={{ state: "none", forge: "github", checkedAt: NOW }}
+        stats={stats}
+        now={NOW}
+      />
+    );
+    expect(html).not.toContain("person-card__actions");
+    expect(html).not.toContain("Co-author line");
+  });
+
   it("folds tips past two into a count", () => {
     const markup = card(PROVEN, {
       stats: { ...stats, tips: ["feat/a", "feat/b", "feat/c", "feat/d"] }

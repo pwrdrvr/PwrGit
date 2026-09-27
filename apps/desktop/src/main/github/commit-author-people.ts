@@ -153,6 +153,11 @@ export class CommitAuthorPeopleStore {
     await mapLimit(registered, READ_CONCURRENCY, async (record) => {
       answered[record.key] = await this.known(record);
     });
+    // A tick may have visited someone while the others were read, and already
+    // published it; answer with that, not with what was known before it.
+    for (const record of registered) {
+      if (record.person !== undefined) answered[record.key] = record.person;
+    }
     return answered;
   }
 

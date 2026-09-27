@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   authorInterest,
   consumeBranchPrInvalidation,
-  personGraphStats
+  personGraphStats,
+  personStatsKey
 } from "./LineageGraph";
 
 describe("active lane PR invalidation", () => {
@@ -91,5 +92,19 @@ describe("personGraphStats", () => {
       tips: ["feat/lanes"]
     });
     expect(stats.get("grace@example.test")?.tips).toEqual(["main"]);
+  });
+
+  it("keeps authors with no email apart, by name", () => {
+    const bot = commit({ hash: "1".repeat(40), authorName: "Build Bot", authorEmail: "" });
+    const importer = commit({
+      hash: "2".repeat(40),
+      authorName: "Legacy Import",
+      authorEmail: " "
+    });
+    const stats = personGraphStats([bot, importer, commit({ hash: "3".repeat(40) })], {});
+
+    expect(stats.get(personStatsKey(bot))).toMatchObject({ count: 1, latest: bot });
+    expect(stats.get(personStatsKey(importer))).toMatchObject({ count: 1, latest: importer });
+    expect(personStatsKey(bot)).not.toBe(personStatsKey(importer));
   });
 });

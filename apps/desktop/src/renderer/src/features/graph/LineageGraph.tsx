@@ -9,7 +9,9 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import {
+  commitAuthorInterest,
   commitAuthorPersonKey,
+  mergeCommitAuthorPeople,
   type Commit,
   type CommitAuthorPerson,
   type CommitStats,
@@ -66,9 +68,6 @@ export function consumeBranchPrInvalidation(
   };
 }
 
-/** Most commits of one author main is told about; see `people:replaceInterest`. */
-const MAX_INTEREST_COMMITS_PER_AUTHOR = 3;
-
 /**
  * The authors a loaded graph shows, for `people:replaceInterest`: most recent
  * author first, each with their newest commits first. Main decides whether and
@@ -77,22 +76,17 @@ const MAX_INTEREST_COMMITS_PER_AUTHOR = 3;
 export function authorInterest(
   commits: readonly Commit[]
 ): Array<{ name: string; email: string; commitHashes: string[] }> {
-  const byKey = new Map<string, { name: string; email: string; commitHashes: string[] }>();
-  for (const commit of newestFirst(commits)) {
-    const key = commitAuthorPersonKey(commit.authorEmail);
-    if (key === "") continue;
-    const author = byKey.get(key);
-    if (author === undefined) {
-      byKey.set(key, {
-        name: commit.authorName,
-        email: commit.authorEmail,
-        commitHashes: [commit.hash]
-      });
-    } else if (author.commitHashes.length < MAX_INTEREST_COMMITS_PER_AUTHOR) {
-      author.commitHashes.push(commit.hash);
-    }
-  }
-  return [...byKey.values()];
+  return commitAuthorInterest(newestFirst(commits));
+}
+
+/**
+ * Which person card a commit belongs to. The email, as main keys people; an
+ * author with no email is only their name, so two blank-email authors are
+ * not counted as one.
+ */
+export function personStatsKey(commit: Commit): string {
+  const key = commitAuthorPersonKey(commit.authorEmail);
+  return key === "" ? `name:${commit.authorName.trim()}` : key;
 }
 
 /** Each author's footprint in the loaded graph, keyed by person key. */
@@ -102,7 +96,7 @@ export function personGraphStats(
 ): Map<string, PersonGraphStats> {
   const stats = new Map<string, PersonGraphStats>();
   for (const commit of newestFirst(commits)) {
-    const key = commitAuthorPersonKey(commit.authorEmail);
+    const key = personStatsKey(commit);
     const current = stats.get(key);
     if (current === undefined) {
       stats.set(key, {
@@ -288,9 +282,8 @@ export function LineageGraph({
   >({});
   /** Commit authors by person key, as main's people store knows them. */
   const [people, setPeople] = useState<Record<string, CommitAuthorPerson>>({});
-  /** The byline whose person card is open: which author, from which row. */
+  /** The byline whose person card is open: its row, and the name its label reads. */
   const [openPerson, setOpenPerson] = useState<{
-    key: string;
     hash: string;
     name: string;
   } | null>(null);
@@ -330,7 +323,7 @@ export function LineageGraph({
   const acceptPeople = useCallback(
     (incoming: Record<string, CommitAuthorPerson>): void => {
       if (Object.keys(incoming).length === 0) return;
-      setPeople((current) => ({ ...current, ...incoming }));
+      setPeople((current) => mergeCommitAuthorPeople(current, incoming));
     },
     []
   );
@@ -661,24 +654,23 @@ export function LineageGraph({
     () => personGraphStats(data?.commits ?? [], data?.tips ?? {}),
     [data]
   );
-  const myKey = commitAuthorPersonKey(activeEmail);
-  const personCardFor = (commit: Commit): ReactNode => {
-    const key = commitAuthorPersonKey(commit.authorEmail);
-    const stats = personStats.get(key);
+  const personCardFor = (vm: GraphRowVM): ReactNode => {
+    const { commit } = vm;
+    const stats = personStats.get(personStatsKey(commit));
     if (stats === undefined) return null;
     return (
       <PersonCard
         name={commit.authorName}
         email={commit.authorEmail}
-        isMine={key === myKey}
-        person={people[key]}
+        isMine={vm.isMine}
+        person={people[commitAuthorPersonKey(commit.authorEmail)]}
         stats={stats}
         now={now}
       />
     );
   };
   const openPersonVm = openPerson === null ? undefined : vmByHash.get(openPerson.hash);
-  const openPersonCard = openPersonVm === undefined ? null : personCardFor(openPersonVm.commit);
+  const openPersonCard = openPersonVm === undefined ? null : personCardFor(openPersonVm);
 
   // An open person card follows what main pushes and the shared clock, like
   // the commit card does.
@@ -688,14 +680,13 @@ export function LineageGraph({
     // `openPersonCard` is a new element every render; these are what it is
     // built from.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [personCard.update, personCard.visible, openPersonVm, people, personStats, now, myKey]);
+  }, [personCard.update, personCard.visible, openPersonVm, people, personStats, now]);
 
   const showPerson = (target: HTMLElement, vm: GraphRowVM): void => {
-    const card = personCardFor(vm.commit);
+    const card = personCardFor(vm);
     if (card === null) return;
     commitContext.hide();
     setOpenPerson({
-      key: commitAuthorPersonKey(vm.commit.authorEmail),
       hash: vm.commit.hash,
       name: vm.commit.authorName
     });

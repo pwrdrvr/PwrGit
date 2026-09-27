@@ -103,6 +103,8 @@ export function PersonCard({
   const shownTips = stats.tips.slice(0, MAX_TIPS);
   const moreTips = stats.tips.length - shownTips.length;
   const coAuthor = `Co-authored-by: ${displayName} <${email}>`;
+  // You don't co-author yourself, and a line with no address credits no one.
+  const canCoAuthor = !isMine && email !== "";
 
   return (
     <>
@@ -174,9 +176,9 @@ export function PersonCard({
         )}
       </div>
 
-      {(!isMine || profileUrl !== undefined) && (
+      {(canCoAuthor || profileUrl !== undefined) && (
         <div className="person-card__actions">
-          {!isMine && email !== "" && (
+          {canCoAuthor && (
             <CopyTarget
               value={coAuthor}
               label={`Copy co-author line for ${displayName}`}

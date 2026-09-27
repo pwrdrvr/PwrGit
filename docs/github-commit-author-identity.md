@@ -26,7 +26,14 @@ const known = await dispatch("people:replaceInterest", {
 
 The answer is a cache read. Anything learned later arrives as a targeted
 `people:changed { worktreeId, people }` delta. An empty `authors` list withdraws
-the interest; closing the window withdraws all of it.
+the interest; closing the window withdraws all of it. The lineage graph and
+File Insights each register the authors they show. `commitAuthorInterest` in
+`@pwrgit/shared` builds the list.
+
+The reply and a delta can reach a renderer in either order, because each one
+waits on its own avatar decode. Fold both with `mergeCommitAuthorPeople`, never
+with a plain spread: a `pending` never erases an answer, and an older
+`checkedAt` never replaces a newer one.
 
 ```ts
 type CommitAuthorPerson = {
@@ -55,7 +62,9 @@ The store's schedule:
 
 `github:hydrateCommitAuthorIdentities` is also a plain cache read of exact
 commits, for surfaces such as file history that show per-commit authors. It
-never starts a refresh.
+never starts a refresh. File Insights shows a proven person's identity when it
+has one. Otherwise it shows the commit's own exact proof. A `none` answer
+about an author's other commits must not hide that proof.
 
 `identity.avatarUrl`, when present, is a renderer-safe, versioned
 `pwrgit-avatar://thumbnail/<opaque-key>?v=<fetched-at>` URL for PwrGit's local
