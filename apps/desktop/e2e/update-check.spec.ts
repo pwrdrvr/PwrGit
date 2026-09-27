@@ -157,6 +157,13 @@ test("Settings offers a solid primary restart action in both themes", async ({},
       if (value === "light") document.documentElement.dataset.theme = "light";
       else delete document.documentElement.dataset.theme;
     }, theme);
+    const check = settings.getByRole("button", { name: "Check for Update", exact: true });
+    const restartBox = await restart.boundingBox();
+    const checkBox = await check.boundingBox();
+    expect(restartBox).not.toBeNull();
+    expect(checkBox).not.toBeNull();
+    expect(checkBox!.height).toBe(restartBox!.height);
+    expect(checkBox!.y).toBe(restartBox!.y);
     const colors = await restart.evaluate((button) => {
       const style = getComputedStyle(button);
       const probe = document.createElement("span");
