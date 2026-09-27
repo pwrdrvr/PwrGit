@@ -40,6 +40,7 @@ import {
 } from "./repo-view";
 import { repoForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
+import { repoWebUrl } from "./remote-info";
 import {
   identityDescription,
   RepoIdentityGlyphs
@@ -525,9 +526,7 @@ export function RepoRow({
   // One renderer-wide store, so every row reads the same names from one
   // `forge:hosts` call rather than one per row.
   const forgeNaming = useForgeNaming();
-  const forgeChip = forgeNaming.showChips
-    ? repoForgeChip(repo.identity, forgeNaming.displays)
-    : null;
+  const forgeChip = repoForgeChip(repo.identity, forgeNaming.displays);
 
   // `aria-label` pins the row's name to the repo name alone — every E2E step
   // helper resolves rows by that exact name, and it is the right name. But a
@@ -668,11 +667,9 @@ export function RepoRow({
           {repo.name}
         </span>
         {behind > 0 && <span className="badge badge--warn">↓{behind}</span>}
-        {/* Which forge this row's repo lives on, drawn only while that tells
-            the rows apart — one forge host on, and every chip in the sidebar
-            would read the same word. Before the counts, beside the identity
-            marks: like them it qualifies the repository, not its contents. */}
-        {forgeChip !== null && <ForgeChip chip={forgeChip} />}
+        {forgeChip !== null && (
+          <ForgeChip chip={forgeChip} url={repoWebUrl(repo.identity)} />
+        )}
         {/* Forge marks sit between the name and the counts: they qualify the
             repository (what it is), where the counts describe its contents.
             Absent `identity` means "not looked up yet" and draws nothing —

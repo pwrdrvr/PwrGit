@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { ForgeChip } from "./ForgeChip";
 
-async function draw(chip: Parameters<typeof ForgeChip>[0]["chip"]) {
+const { dispatch } = vi.hoisted(() => ({ dispatch: vi.fn() }));
+vi.mock("../../lib/pwrgit", () => ({ dispatch }));
+
+async function draw(chip: Parameters<typeof ForgeChip>[0]["chip"], url?: string, onClick = vi.fn(), onKeyDown = vi.fn()) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(<ForgeChip chip={chip} />));
+  await act(async () => root.render(<div onClick={onClick} onKeyDown={onKeyDown}><ForgeChip chip={chip} url={url ?? null} /></div>));
   const el = container.querySelector<HTMLElement>(".forge-chip")!;
   return {
     el,
@@ -153,5 +156,45 @@ it("draws a smaller mark inside a pill, which has a border to clear", async () =
     title: "origin is on ghe.acme.example"
   });
   expect(el.querySelector("img")?.getAttribute("width")).toBe("11");
+  await cleanup();
+});
+
+it("opens the repository page without toggling the containing row", async () => {
+  const url = "https://gitlab.com/pwrdrvr/PwrGit";
+  const toggle = vi.fn();
+  const rowKey = vi.fn();
+  const { el, cleanup } = await draw({ kind: "gitlab", name: null, others: 0, title: "origin is on gitlab.com" }, url, toggle, rowKey);
+  expect(el.tagName).toBe("A");
+  expect(el.getAttribute("href")).toBe(url);
+  expect(el.getAttribute("aria-hidden")).toBeNull();
+  expect(el.getAttribute("aria-label")).toContain(url);
+  await act(async () => { el.click(); });
+  expect(dispatch).toHaveBeenCalledWith("shell:openExternal", { url });
+  expect(toggle).not.toHaveBeenCalled();
+  const key = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  el.dispatchEvent(key);
+  expect(rowKey).not.toHaveBeenCalled();
+  expect(key.defaultPrevented).toBe(false);
+  await cleanup();
+});
+
+
+it("lets Escape dismiss a focused chip's tooltip and reach enclosing controls", async () => {
+  const rowKey = vi.fn();
+  const { el, cleanup } = await draw(
+    { kind: "github", name: null, others: 0, title: "origin is on github.com" },
+    "https://github.com/example/demo", vi.fn(), rowKey
+  );
+  await act(async () => el.focus());
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  await act(async () => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  });
+  expect(rowKey).toHaveBeenCalledOnce();
+  expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  expect(document.activeElement).toBe(el);
+  rowKey.mockClear();
+  el.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  expect(rowKey).toHaveBeenCalledOnce();
   await cleanup();
 });

@@ -4,6 +4,7 @@ import {
   isSafeForgeHostname,
   isSafeProjectPath,
   parseForgeRemote,
+  type RepoIdentity,
   type ForgeHostMap
 } from "@pwrgit/shared";
 
@@ -98,4 +99,12 @@ export function remoteUrlLines(remote: {
     { label: "Fetch", url: fetchUrl },
     { label: "Push", url: pushUrl }
   ];
+}
+
+/** Origin's repository page, independent of whether its integration is enabled. */
+export function repoWebUrl(identity: RepoIdentity | undefined): string | null {
+  if (identity === undefined || !isForgeKind(identity.host)) return null;
+  if (!isSafeForgeHostname(identity.hostname)) return null;
+  if (!isSafeProjectPath(identity.nameWithOwner)) return null;
+  return forgeWebUrl(identity.hostname, identity.nameWithOwner);
 }

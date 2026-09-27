@@ -211,3 +211,32 @@ describe("RepoRefsSections remote reveal", () => {
     await act(async () => settleSidebarReveal(seq));
   });
 });
+
+
+describe("RepoRefsSections forge links", () => {
+  it("keeps browser links separate from the remote disclosure", async () => {
+    const original = dispatchMock.getMockImplementation()!;
+    dispatchMock.mockImplementation((channel: string) => channel === "repo:refs"
+      ? Promise.resolve(ok({ ...refs, remotes: [{
+          ...remote("origin", "git@github.com:example/demo.git"),
+          pushUrl: "git@gitlab.com:example/demo.git"
+        }] }))
+      : original(channel));
+    await render(primary);
+    await act(async () => remotesHead()?.click());
+    const disclosure = remoteMain("origin")!;
+    const links = [...disclosure.parentElement!.querySelectorAll<HTMLAnchorElement>("a.forge-chip")];
+    expect(links).toHaveLength(2);
+    expect(disclosure.querySelector("a, button, [role=link]")).toBeNull();
+    expect(disclosure.textContent).not.toContain("Open repository");
+    for (const link of links) {
+      expect(link.parentElement).toBe(disclosure.parentElement);
+      expect(link.getAttribute("aria-label")).toContain(link.href);
+      await act(async () => link.click());
+      expect(dispatchMock).toHaveBeenCalledWith("shell:openExternal", { url: link.href });
+      expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    }
+    await act(async () => disclosure.click());
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+  });
+});
