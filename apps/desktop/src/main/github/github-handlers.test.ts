@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.useRealTimers();
 });
 
-describe("github:commitAuthorIdentity handler", () => {
+describe("github:hydrateCommitAuthorIdentities handler", () => {
   it("starts a whole cache hydration batch before awaiting any commit", async () => {
     const completions = new Map<
       string,
@@ -59,13 +59,11 @@ describe("github:commitAuthorIdentity handler", () => {
     await vi.waitFor(() => expect(identities.request).toHaveBeenCalledTimes(2));
     expect(identities.request).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ cacheOnly: true, commitHash: request.commitHash }),
-      expect.any(Function)
+      expect.objectContaining({ cacheOnly: true, commitHash: request.commitHash })
     );
     expect(identities.request).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ cacheOnly: true, commitHash: secondHash }),
-      expect.any(Function)
+      expect.objectContaining({ cacheOnly: true, commitHash: secondHash })
     );
 
     completions.get(request.commitHash)?.({
@@ -165,77 +163,107 @@ describe("github:commitAuthorIdentity handler", () => {
     expect(secondReads).toBe(2);
   });
 
-  it("waits for a cache-only local read", async () => {
-    let complete:
-      | ((value: { cacheState: "fresh"; refreshState: "idle" }) => void)
-      | undefined;
-    const completion = new Promise<{ cacheState: "fresh"; refreshState: "idle" }>(
-      (resolve) => {
-        complete = resolve;
-      }
-    );
+  it("is only ever a local read, and announces nothing", async () => {
     const identities = {
       request: vi.fn(() => ({
         lookup: { cacheState: "miss" as const, refreshState: "in-flight" as const },
-        completion
+        completion: Promise.resolve({ cacheState: "stale" as const, refreshState: "idle" as const })
       }))
     } as unknown as GitHubCommitAuthorIdentityService;
     const bus = new CommandBus();
     registerGitHubHandlers(bus, {} as PrService, identities);
 
-    let settled = false;
-    const dispatched = bus
-      .dispatch("github:commitAuthorIdentity", { ...request, cacheOnly: true })
-      .then((result) => {
-        settled = true;
-        return result;
-      });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-
-    complete?.({ cacheState: "fresh", refreshState: "idle" });
-    await expect(dispatched).resolves.toEqual({
-      ok: true,
-      value: { cacheState: "fresh", refreshState: "idle" }
-    });
-    expect(emitEvent).toHaveBeenCalledWith("github:commitAuthorIdentityChanged", {
+    await expect(bus.dispatch("github:hydrateCommitAuthorIdentities", {
       worktreeId: request.worktreeId,
-      commitHash: request.commitHash,
-      lookup: { cacheState: "fresh", refreshState: "idle" }
+      commits: [{
+        commitHash: request.commitHash,
+        authorName: request.authorName,
+        authorEmail: request.authorEmail
+      }]
+    })).resolves.toEqual({
+      ok: true,
+      value: { [request.commitHash]: { cacheState: "stale", refreshState: "idle" } }
     });
+    expect(identities.request).toHaveBeenCalledWith(
+      expect.objectContaining({ cacheOnly: true })
+    );
+    expect(emitEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("people:replaceInterest handler", () => {
+  const author = {
+    name: request.authorName,
+    email: request.authorEmail,
+    commitHashes: [request.commitHash]
+  };
+
+  const peopleIdentities = (): GitHubCommitAuthorIdentityService => ({
+    request: vi.fn(() => ({
+      lookup: { cacheState: "miss" as const, refreshState: "in-flight" as const },
+      completion: Promise.resolve({ cacheState: "miss" as const, refreshState: "idle" as const })
+    })),
+    worktreeForge: vi.fn(async () => ({
+      kind: "github" as const,
+      host: "github.com",
+      path: "octo-org/example"
+    }))
+  } as unknown as GitHubCommitAuthorIdentityService);
+
+  it("answers a window from cache, and asks the forge only on the store's clock", async () => {
+    vi.useFakeTimers();
+    const identities = peopleIdentities();
+    const bus = new CommandBus();
+    const handlers = registerGitHubHandlers(bus, {} as PrService, identities);
+
+    await expect(bus.dispatch(
+      "people:replaceInterest",
+      { worktreeId: request.worktreeId, monitorId: "graph", authors: [author] },
+      { webContentsId: 11 }
+    )).resolves.toEqual({
+      ok: true,
+      value: { "ada@example.test": { state: "pending", forge: "github" } }
+    });
+    const network = (): unknown[] =>
+      vi.mocked(identities.request).mock.calls.filter(([input]) => input.cacheOnly !== true);
+    expect(network()).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(network()).toHaveLength(1);
+    handlers.stop();
   });
 
-  it("returns the normal hover placeholder without waiting for completion", async () => {
-    let complete:
-      | ((value: { cacheState: "fresh"; refreshState: "idle" }) => void)
-      | undefined;
-    const completion = new Promise<{ cacheState: "fresh"; refreshState: "idle" }>(
-      (resolve) => {
-        complete = resolve;
-      }
-    );
-    const identities = {
-      request: vi.fn(() => ({
-        lookup: { cacheState: "miss" as const, refreshState: "in-flight" as const },
-        completion
-      }))
-    } as unknown as GitHubCommitAuthorIdentityService;
+  it("needs a window to own the interest", async () => {
+    const identities = peopleIdentities();
     const bus = new CommandBus();
-    registerGitHubHandlers(bus, {} as PrService, identities);
+    const handlers = registerGitHubHandlers(bus, {} as PrService, identities);
 
-    await expect(bus.dispatch("github:commitAuthorIdentity", request)).resolves.toEqual({
-      ok: true,
-      value: { cacheState: "miss", refreshState: "in-flight" }
-    });
+    await expect(bus.dispatch("people:replaceInterest", {
+      worktreeId: request.worktreeId,
+      monitorId: "graph",
+      authors: [author]
+    })).resolves.toEqual({ ok: true, value: {} });
+    expect(identities.request).not.toHaveBeenCalled();
+    handlers.stop();
+  });
 
-    complete?.({ cacheState: "fresh", refreshState: "idle" });
-    await vi.waitFor(() => {
-      expect(emitEvent).toHaveBeenCalledWith("github:commitAuthorIdentityChanged", {
-        worktreeId: request.worktreeId,
-        commitHash: request.commitHash,
-        lookup: { cacheState: "fresh", refreshState: "idle" }
-      });
-    });
+  it("stops looking after a closed window's authors", async () => {
+    vi.useFakeTimers();
+    const identities = peopleIdentities();
+    const bus = new CommandBus();
+    const handlers = registerGitHubHandlers(bus, {} as PrService, identities);
+
+    await bus.dispatch(
+      "people:replaceInterest",
+      { worktreeId: request.worktreeId, monitorId: "graph", authors: [author] },
+      { webContentsId: 11 }
+    );
+    handlers.releaseWebContents(11);
+    vi.mocked(identities.request).mockClear();
+
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(identities.request).not.toHaveBeenCalled();
+    handlers.stop();
   });
 });
 

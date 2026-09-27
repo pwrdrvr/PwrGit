@@ -132,7 +132,7 @@ describe("FileInsightsPane", () => {
           })
         );
       }
-      return Promise.resolve(ok(null));
+      return Promise.resolve(ok(name === "people:replaceInterest" ? {} : null));
     });
     const showCommit = vi.fn(() => true);
 
@@ -185,6 +185,76 @@ describe("FileInsightsPane", () => {
     );
     await act(async () => blameLineage?.click());
     expect(showCommit).toHaveBeenLastCalledWith(HASH_B, "clarify the guide");
+  });
+
+  it("registers its authors with main and keeps a commit's own proof over a weaker answer", async () => {
+    let peopleChanged: ((payload: unknown) => void) | undefined;
+    subscribeMock.mockImplementation(((name: string, handler: (payload: unknown) => void) => {
+      if (name === "people:changed") peopleChanged = handler;
+      return () => undefined;
+    }) as never);
+    dispatchMock.mockImplementation((name: string) => {
+      if (name === "file:history") {
+        return Promise.resolve(ok({ entries: [historyEntry()], nextCursor: null }));
+      }
+      if (name === "github:hydrateCommitAuthorIdentities") {
+        return Promise.resolve(ok({
+          [HASH_A]: { cacheState: "fresh", refreshState: "idle", identity: { login: "ada" } }
+        }));
+      }
+      if (name === "people:replaceInterest") {
+        // The store only knows the author's other commits link to no account.
+        return Promise.resolve(ok({
+          "ada@example.test": { state: "none", forge: "github", checkedAt: 1 }
+        }));
+      }
+      return Promise.resolve(ok(name === "people:replaceInterest" ? {} : null));
+    });
+
+    await act(async () => {
+      root.render(
+        <FileInsightsPane
+          worktreeId="wt-1"
+          path="docs/guide.txt"
+          context={{ kind: "commit", hash: HASH_A }}
+          initialTab="history"
+          onClose={() => undefined}
+          onShowCommit={() => true}
+        />
+      );
+    });
+    await settle();
+
+    expect(dispatchMock).toHaveBeenCalledWith("people:replaceInterest", {
+      worktreeId: "wt-1",
+      monitorId: expect.any(String),
+      authors: [{ name: "Ada Lovelace", email: "ada@example.test", commitHashes: [HASH_A] }]
+    });
+    expect(container.textContent).toContain("@ada");
+
+    await act(async () => {
+      peopleChanged?.({
+        worktreeId: "wt-1",
+        people: {
+          "ada@example.test": {
+            state: "proven",
+            identity: { login: "ada-l" },
+            forge: "github",
+            checkedAt: 2
+          }
+        }
+      });
+    });
+    expect(container.textContent).toContain("@ada-l");
+
+    await act(async () => root.unmount());
+    expect(dispatchMock).toHaveBeenCalledWith("people:replaceInterest", {
+      worktreeId: "wt-1",
+      monitorId: expect.any(String),
+      authors: []
+    });
+    root = createRoot(container);
+    subscribeMock.mockImplementation(() => () => undefined);
   });
 
   it("opens a commit's diff for the file without losing the history list", async () => {
@@ -1145,7 +1215,7 @@ describe("FileInsightsPane", () => {
   it("cancels an in-flight Git read when the view closes", async () => {
     dispatchMock.mockImplementation((name: string) => {
       if (name === "file:history") return new Promise(() => undefined);
-      return Promise.resolve(ok(null));
+      return Promise.resolve(ok(name === "people:replaceInterest" ? {} : null));
     });
 
     await act(async () => {
@@ -1195,7 +1265,7 @@ describe("FileInsightsPane", () => {
       if (name === "github:hydrateCommitAuthorIdentities") {
         return Promise.resolve(ok({}));
       }
-      return Promise.resolve(ok(null));
+      return Promise.resolve(ok(name === "people:replaceInterest" ? {} : null));
     });
 
     await act(async () => {

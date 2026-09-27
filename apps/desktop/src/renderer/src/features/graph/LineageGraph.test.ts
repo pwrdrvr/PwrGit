@@ -1,9 +1,10 @@
+import type { Commit } from "@pwrgit/shared";
 import { describe, expect, it } from "vitest";
 import {
+  authorInterest,
   consumeBranchPrInvalidation,
-  mergeCommitAuthorIdentityLookup,
-  reusableCommitAuthorIdentity,
-  shouldRequestCommitAuthorIdentity
+  personGraphStats,
+  personStatsKey
 } from "./LineageGraph";
 
 describe("active lane PR invalidation", () => {
@@ -30,177 +31,80 @@ describe("active lane PR invalidation", () => {
   });
 });
 
-describe("reusableCommitAuthorIdentity", () => {
-  it("keeps a previously proven identity ready for the next hover", () => {
-    expect(
-      reusableCommitAuthorIdentity({
-        identity: { login: "harold" },
-        cacheState: "fresh",
-        refreshState: "idle"
-      })
-    ).toEqual({ login: "harold" });
-  });
+const commit = (over: Partial<Commit> & Pick<Commit, "hash">): Commit => ({
+  shortHash: over.hash.slice(0, 7),
+  parents: [],
+  subject: "A change",
+  authorName: "Ada Lovelace",
+  authorEmail: "ada@example.test",
+  committedAt: "2026-09-01T12:00:00.000Z",
+  isMerge: false,
+  ...over
+});
 
-  it("does not make transient misses sticky in the renderer", () => {
-    expect(
-      reusableCommitAuthorIdentity({
-        cacheState: "miss",
-        refreshState: "in-flight"
-      })
-    ).toBeUndefined();
-    expect(
-      reusableCommitAuthorIdentity({
-        cacheState: "miss",
-        refreshState: "backing-off"
-      })
-    ).toBeUndefined();
-  });
+describe("authorInterest", () => {
+  it("lists each author once, most recent first, with their newest commits", () => {
+    const commits = [
+      commit({ hash: "1".repeat(40), committedAt: "2026-09-01T10:00:00.000Z" }),
+      commit({
+        hash: "2".repeat(40),
+        authorName: "Grace Hopper",
+        authorEmail: "grace@example.test",
+        committedAt: "2026-09-03T10:00:00.000Z"
+      }),
+      commit({ hash: "3".repeat(40), committedAt: "2026-09-02T10:00:00.000Z" }),
+      // One person, however the address was cased.
+      commit({
+        hash: "4".repeat(40),
+        authorEmail: "ADA@example.test",
+        committedAt: "2026-08-30T10:00:00.000Z"
+      }),
+      commit({ hash: "5".repeat(40), committedAt: "2026-08-29T10:00:00.000Z" })
+    ];
 
-  it("keeps an authoritative no-match quiet for the worktree session", () => {
-    expect(
-      reusableCommitAuthorIdentity({
-        cacheState: "fresh",
-        refreshState: "idle"
-      })
-    ).toBeNull();
-  });
-
-  it("retries stale identities only after their persisted backoff gate", () => {
-    expect(shouldRequestCommitAuthorIdentity(undefined, 1_000)).toBe(true);
-    expect(
-      shouldRequestCommitAuthorIdentity(
-        { cacheState: "stale", refreshState: "in-flight" },
-        1_000
-      )
-    ).toBe(false);
-    expect(
-      shouldRequestCommitAuthorIdentity(
-        { cacheState: "stale", refreshState: "backing-off", nextRetryAt: 1_001 },
-        1_000
-      )
-    ).toBe(false);
-    expect(
-      shouldRequestCommitAuthorIdentity(
-        { cacheState: "stale", refreshState: "backing-off", nextRetryAt: 1_000 },
-        1_000
-      )
-    ).toBe(true);
-    expect(
-      shouldRequestCommitAuthorIdentity(
-        { cacheState: "fresh", refreshState: "idle" },
-        1_000
-      )
-    ).toBe(false);
-    expect(
-      shouldRequestCommitAuthorIdentity(
-        {
-          cacheState: "fresh",
-          refreshState: "idle",
-          avatarCache: {
-            cacheState: "miss",
-            refreshState: "backing-off",
-            nextRetryAt: 1_001
-          }
-        },
-        1_000
-      )
-    ).toBe(false);
-    expect(
-      shouldRequestCommitAuthorIdentity(
-        {
-          cacheState: "fresh",
-          refreshState: "idle",
-          avatarCache: {
-            cacheState: "miss",
-            refreshState: "backing-off",
-            nextRetryAt: 1_000
-          }
-        },
-        1_000
-      )
-    ).toBe(true);
+    expect(authorInterest(commits)).toEqual([
+      { name: "Grace Hopper", email: "grace@example.test", commitHashes: ["2".repeat(40)] },
+      {
+        name: "Ada Lovelace",
+        email: "ada@example.test",
+        commitHashes: ["3".repeat(40), "1".repeat(40), "4".repeat(40)]
+      }
+    ]);
   });
 });
 
-describe("mergeCommitAuthorIdentityLookup", () => {
-  it("accepts a completed cache-only reply when an event is unavailable", () => {
-    expect(
-      mergeCommitAuthorIdentityLookup(undefined, {
-        identity: {
-          login: "huntharo",
-          avatarUrl: "pwrgit-avatar://thumbnail/a?v=1"
-        },
-        cacheState: "fresh",
-        refreshState: "idle",
-        refreshedAt: 1_000
-      })
-    ).toMatchObject({
-      identity: { login: "huntharo" },
-      cacheState: "fresh"
+describe("personGraphStats", () => {
+  it("counts an author's loaded commits, their latest, and the tips they own", () => {
+    const newest = commit({ hash: "3".repeat(40), committedAt: "2026-09-02T10:00:00.000Z" });
+    const stats = personGraphStats(
+      [
+        commit({ hash: "1".repeat(40) }),
+        commit({ hash: "2".repeat(40), authorEmail: "grace@example.test" }),
+        newest
+      ],
+      { ["1".repeat(40)]: ["feat/lanes"], ["2".repeat(40)]: ["main"] }
+    );
+
+    expect(stats.get("ada@example.test")).toEqual({
+      count: 2,
+      total: 3,
+      latest: newest,
+      tips: ["feat/lanes"]
     });
+    expect(stats.get("grace@example.test")?.tips).toEqual(["main"]);
   });
 
-  it("does not let an older optimistic reply erase an identity already received", () => {
-    const current = {
-      identity: {
-        login: "huntharo",
-        avatarUrl: "pwrgit-avatar://thumbnail/a?v=2"
-      },
-      cacheState: "fresh" as const,
-      refreshState: "idle" as const,
-      refreshedAt: 2_000
-    };
+  it("keeps authors with no email apart, by name", () => {
+    const bot = commit({ hash: "1".repeat(40), authorName: "Build Bot", authorEmail: "" });
+    const importer = commit({
+      hash: "2".repeat(40),
+      authorName: "Legacy Import",
+      authorEmail: " "
+    });
+    const stats = personGraphStats([bot, importer, commit({ hash: "3".repeat(40) })], {});
 
-    expect(
-      mergeCommitAuthorIdentityLookup(current, {
-        cacheState: "miss",
-        refreshState: "in-flight"
-      })
-    ).toBe(current);
-  });
-
-  it("does not let an optimistic reply erase a fresh no-match", () => {
-    const current = { cacheState: "fresh" as const, refreshState: "idle" as const };
-
-    expect(
-      mergeCommitAuthorIdentityLookup(current, {
-        cacheState: "miss",
-        refreshState: "in-flight"
-      })
-    ).toBe(current);
-  });
-
-  it("keeps a newer thumbnail event over an older completed cache reply", () => {
-    const current = {
-      identity: {
-        login: "huntharo",
-        avatarUrl: "pwrgit-avatar://thumbnail/a?v=2"
-      },
-      cacheState: "fresh" as const,
-      refreshState: "idle" as const,
-      refreshedAt: 1_000,
-      avatarCache: {
-        cacheState: "stale" as const,
-        refreshState: "in-flight" as const,
-        refreshedAt: 2_000
-      }
-    };
-
-    expect(
-      mergeCommitAuthorIdentityLookup(current, {
-        identity: {
-          login: "huntharo",
-          avatarUrl: "pwrgit-avatar://thumbnail/a?v=1"
-        },
-        cacheState: "fresh",
-        refreshState: "idle",
-        refreshedAt: 1_000,
-        avatarCache: {
-          cacheState: "stale",
-          refreshState: "in-flight",
-          refreshedAt: 1_000
-        }
-      })
-    ).toBe(current);
+    expect(stats.get(personStatsKey(bot))).toMatchObject({ count: 1, latest: bot });
+    expect(stats.get(personStatsKey(importer))).toMatchObject({ count: 1, latest: importer });
+    expect(personStatsKey(bot)).not.toBe(personStatsKey(importer));
   });
 });

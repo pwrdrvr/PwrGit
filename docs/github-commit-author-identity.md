@@ -6,42 +6,65 @@ main-process service with a typed command/event contract; the lineage context
 card remains responsible for rendering the local Git identity as its source of
 truth.
 
-## Renderer contract
+## Who decides when to ask
 
-The normal hover command is non-blocking and never waits for GitHub networking.
-It first validates the worktree's GitHub `origin` in the background, because
-the persistent cache is scoped to that exact origin and full commit SHA:
+Nothing a renderer does reaches GitHub. Hovering a row, opening a card, or
+reloading the graph only reads caches. The main process's people store
+(`apps/desktop/src/main/github/commit-author-people.ts`) is the one caller that
+may ask the forge, and it does so on its own clock.
+
+A window registers the authors it shows and gets back what main already knows
+about each, keyed by `commitAuthorPersonKey(email)`:
 
 ```ts
-const result = await dispatch("github:commitAuthorIdentity", {
+const known = await dispatch("people:replaceInterest", {
   worktreeId,
-  commitHash: commit.hash,
-  authorName: commit.authorName,
-  authorEmail: commit.authorEmail
+  monitorId, // one per surface; replaced on every call
+  authors: [{ name, email, commitHashes /* their newest, newest first */ }]
 });
-
-if (result.ok && result.value.identity !== undefined) {
-  contextCard.setGitHubIdentity(result.value.identity);
-}
 ```
 
-A normal hover command returns this presentation-neutral value immediately:
+The answer is a cache read. Anything learned later arrives as a targeted
+`people:changed { worktreeId, people }` delta. An empty `authors` list withdraws
+the interest; closing the window withdraws all of it. The lineage graph and
+File Insights each register the authors they show. `commitAuthorInterest` in
+`@pwrgit/shared` builds the list.
+
+The reply and a delta can reach a renderer in either order, because each one
+waits on its own avatar decode. Fold both with `mergeCommitAuthorPeople`, never
+with a plain spread: a `pending` never erases an answer, and an older
+`checkedAt` never replaces a newer one.
 
 ```ts
-type GitHubCommitAuthorIdentityLookup = {
-  identity?: { login: string; avatarUrl?: string };
-  cacheState: "fresh" | "stale" | "miss";
-  refreshState: "idle" | "in-flight" | "backing-off" | "not-eligible";
-  refreshedAt?: number;
-  nextRetryAt?: number;
-  avatarCache?: {
-    cacheState: "stale" | "miss";
-    refreshState: "in-flight" | "backing-off";
-    refreshedAt?: number;
-    nextRetryAt?: number;
-  };
+type CommitAuthorPerson = {
+  state: "proven" | "none" | "pending" | "unsupported";
+  identity?: { login: string; avatarUrl?: string }; // only when proven
+  profileUrl?: string; // https, built by main from the proven login
+  forge?: "github" | "gitlab" | "gitcafe";
+  checkedAt?: number;
 };
 ```
+
+The store's schedule:
+
+- A newly registered author waits two seconds before their first visit, so
+  flicking through graphs does not trigger anything.
+- Each tick visits at most four authors. Ticks are at least 15 seconds apart.
+- A visit asks the identity service with network allowed. The service still
+  calls the forge only when its persisted TTL or backoff says the answer is
+  due. A settled author is visited again after six hours, which is a local read
+  until a TTL below runs out.
+- A visit that leaves an author unsettled backs off: 10 minutes, doubling up to
+  six hours. When the forge could not see that commit, the next visit tries the
+  author's next one.
+- Registering again, from any number of windows, never moves a visit earlier.
+  The schedule outlives a window closing and reopening.
+
+`github:hydrateCommitAuthorIdentities` is also a plain cache read of exact
+commits, for surfaces such as file history that show per-commit authors. It
+never starts a refresh. File Insights shows a proven person's identity when it
+has one. Otherwise it shows the commit's own exact proof. A `none` answer
+about an author's other commits must not hide that proof.
 
 `identity.avatarUrl`, when present, is a renderer-safe, versioned
 `pwrgit-avatar://thumbnail/<opaque-key>?v=<fetched-at>` URL for PwrGit's local
@@ -49,21 +72,7 @@ thumbnail file. It is never GitHub's remote avatar source URL or a filesystem
 path. The main process serves only an existing opaque cache key with its
 recorded MIME type and size; the response is cacheable by Chromium. Its version
 changes after a successful refresh, so a card keeps the old local image until a
-new local image is ready. A cached login may arrive before its thumbnail; the
-same targeted event then carries the local thumbnail after its best-effort
-disk/network work settles. Consumers should reserve the avatar's dimensions,
-begin loading a returned local URL before it is visible when practical, and
-keep rendering the local Git author while either field is absent. `avatarCache`
-is present only while a proven thumbnail is stale, missing, or backing off; a
-later hover should use its retry timestamp without re-fetching a fresh identity
-on every pointer move.
-
-When origin validation, a proof-scoped cache read, a thumbnail read, or a
-background verification settles, main emits
-`github:commitAuthorIdentityChanged` with the same lookup plus the worktree ID
-and commit hash. A card can subscribe to that event and repaint only if it is
-still showing that commit. It must not delay opening or replace the local Git
-name/email while resolution is pending or absent.
+new local image is ready.
 
 ## Reliability rule
 
@@ -113,54 +122,34 @@ the forced 64px size (`s`), dropping any unexpected query parameters before
 SQLite or disk. It exposes a versioned, opaque local resource to the renderer,
 never a local path, remote source URL, or credential-bearing URL.
 
-Every eligible hover validates the worktree origin before using an exact proof.
-After that, a fresh cached identity and its local thumbnail require no GitHub
-network request. A stale row is returned immediately (including a stale local
-thumbnail when available) and starts revalidation in the background; the next
-event carries any changed login or thumbnail. This is intentional
-stale-while-revalidate behavior, not a relaxation of the exact-commit proof.
-
-The optional `cacheOnly: true` command mode is for a bounded graph warm pass:
-it waits only for local origin/proof/thumbnail work and never calls GitHub for
-a miss. A fresh row supplies its local URL; a stale row supplies its existing
-local URL and queues the normal refresh; a miss returns `miss`/`idle` without a
-GitHub REST call. The lineage graph uses this for its newest 32 rows at two
-concurrent local requests and asks Chromium to decode each returned local URL
-before a context card needs it. A normal hover omits `cacheOnly`, so it starts
-the exact GitHub proof only for a true miss.
+Every lookup validates the worktree origin before using an exact proof. A
+local lookup (`cacheOnly: true`) then reads only SQLite and the thumbnail
+index. However stale a row is, it reports the row as stale (`cacheState`,
+`avatarCache`) and starts nothing. A network lookup revalidates a stale or
+missing proof and downloads a missing or stale thumbnail, and waits for both
+before it settles. Only the people store makes network lookups.
 
 Both exact-commit revalidations and avatar downloads have an internal
-two-at-a-time queue. Consequently a graph with many stale cached rows keeps
-showing local images while it refreshes gradually instead of issuing a burst of
-GitHub requests.
+two-at-a-time queue, under the store's own per-tick bound.
 
-```ts
-void dispatch("github:commitAuthorIdentity", {
-  worktreeId,
-  commitHash: commit.hash,
-  authorName: commit.authorName,
-  authorEmail: commit.authorEmail,
-  cacheOnly: true
-});
-```
+A forge that cannot prove commit authors (GitCafe) is not eligible. It is
+never asked and gets no backoff row.
 
 `fetched_at` is the last successful remote refresh; `last_accessed_at` is
 touched at most once an hour per row to avoid SQLite write churn during pointer
 movement. `refreshedAt` and `nextRetryAt` project the relevant proof timestamps
-to a renderer consumer: it can retain a stale identity during an in-flight
-refresh and retry only after the persisted gate has elapsed. These are
-persisted so a later hover, restart, or large-repository session can decide
-whether it needs a background refresh.
+to the people store, which reads them to decide when its next visit is worth
+making. They are persisted, so a restart does not reset them.
 
 | Outcome | Cache behavior |
 | --- | --- |
 | Verified login | Fresh for 7 days; stale verified data remains usable during refresh |
 | Exact commit with no GitHub account | Negative-cached for 24 hours |
 | Git, `gh`, authentication, permission, network, malformed, or mismatch failure | Back off from 1 minute exponentially to 1 hour |
-| Avatar thumbnail | Local 64px file fresh for 30 days; stale file remains displayable while it refreshes |
+| Avatar thumbnail | Local 64px file fresh for 30 days; a stale file stays on screen until the store's next visit replaces it |
 
-There is no poller or retry timer. A later context-card request after the gate
-expires starts the next best-effort attempt. Cache cleanup keeps identity rows
+The identity service has no timer of its own. The people store's schedule,
+above, is the only thing that starts an attempt. Cache cleanup keeps identity rows
 for 90 days (resolved), 7 days (negative), or 1 day (unavailable) after their
 last access; thumbnail files and rows remain for 180 days after their last
 access. That makes dozens, hundreds, or thousands of tiny cached avatars cheap

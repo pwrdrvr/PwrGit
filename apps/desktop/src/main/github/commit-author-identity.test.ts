@@ -235,37 +235,12 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(fetchCalls).toBe(0);
   });
 
-  it("repaints with a local thumbnail after the identity has already settled", async () => {
+  it("downloads a missing thumbnail inside a network lookup, and never in a local one", async () => {
     thumbnailDataUrl = undefined;
     thumbnailNeedsRefresh = true;
-    let releaseThumbnail: ((avatarUrl: string) => void) | undefined;
-    let signalThumbnailStarted: (() => void) | undefined;
-    const thumbnailStarted = new Promise<void>((resolve) => {
-      signalThumbnailStarted = resolve;
-    });
-    refreshThumbnailImpl = async () =>
-      await new Promise<string>((resolve) => {
-        signalThumbnailStarted?.();
-        releaseThumbnail = resolve;
-      });
+    refreshThumbnailImpl = async () => CACHED_AVATAR_URL;
 
-    let resolveUpdated: ((lookup: unknown) => void) | undefined;
-    const updated = new Promise<unknown>((resolve) => {
-      resolveUpdated = resolve;
-    });
-    const request = service.request(INPUT, (lookup) => resolveUpdated?.(lookup));
-
-    expect(await requireCompletion(request.completion)).toEqual({
-      identity: { login: "ada" },
-      cacheState: "fresh",
-      refreshState: "idle",
-      refreshedAt: now,
-      avatarCache: { cacheState: "miss", refreshState: "in-flight" }
-    });
-    await thumbnailStarted;
-    releaseThumbnail?.(CACHED_AVATAR_URL);
-
-    expect(await updated).toEqual({
+    expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
       identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
       cacheState: "fresh",
       refreshState: "idle",
@@ -273,6 +248,20 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
     expect(thumbnailRefreshes).toBe(1);
     expect(thumbnailSources).toContain("https://avatars.githubusercontent.com/u/1?v=4&s=64");
+
+    // The file has gone missing since. A local read says so and fetches nothing.
+    thumbnailDataUrl = undefined;
+    thumbnailNeedsRefresh = true;
+    expect(await requireCompletion(
+      service.request({ ...INPUT, cacheOnly: true }).completion
+    )).toEqual({
+      identity: { login: "ada" },
+      cacheState: "fresh",
+      refreshState: "idle",
+      refreshedAt: now,
+      avatarCache: { cacheState: "miss", refreshState: "idle" }
+    });
+    expect(thumbnailRefreshes).toBe(1);
   });
 
   it("requires exact SHA, name, and email matches before accepting an identity", async () => {
@@ -342,21 +331,8 @@ describe("GitHubCommitAuthorIdentityService", () => {
       author: AUTHOR,
       account: null
     });
-    let resolveUpdated: ((lookup: unknown) => void) | undefined;
-    const updated = new Promise<unknown>((resolve) => {
-      resolveUpdated = resolve;
-    });
-    const first = service.request(
-      negativeInput,
-      (lookup) => resolveUpdated?.(lookup)
-    );
 
-    expect(await requireCompletion(first.completion)).toMatchObject({
-      identity: { login: "ada" },
-      cacheState: "stale",
-      refreshState: "in-flight"
-    });
-    expect(await updated).toEqual({
+    expect(await requireCompletion(service.request(negativeInput).completion)).toEqual({
       cacheState: "fresh",
       refreshState: "idle",
       refreshedAt: now
@@ -373,22 +349,20 @@ describe("GitHubCommitAuthorIdentityService", () => {
     });
     expect(fetchCalls).toBe(2);
 
+    // Stale, it stays the answer: a local read reports it as such, and only a
+    // network lookup asks again.
     const negativeFetchedAt = now;
     now += 24 * 60 * 60 * 1000 + 1;
-    let resolveRefreshed: ((lookup: unknown) => void) | undefined;
-    const refreshed = new Promise<unknown>((resolve) => {
-      resolveRefreshed = resolve;
-    });
-    const stale = service.request(
-      negativeInput,
-      (lookup) => resolveRefreshed?.(lookup)
-    );
-    expect(await requireCompletion(stale.completion)).toEqual({
+    expect(await requireCompletion(service.request({
+      ...negativeInput,
+      cacheOnly: true
+    }).completion)).toEqual({
       cacheState: "stale",
-      refreshState: "in-flight",
+      refreshState: "idle",
       refreshedAt: negativeFetchedAt
     });
-    expect(await refreshed).toEqual({
+    expect(fetchCalls).toBe(2);
+    expect(await requireCompletion(service.request(negativeInput).completion)).toEqual({
       cacheState: "fresh",
       refreshState: "idle",
       refreshedAt: now
@@ -396,7 +370,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
     expect(fetchCalls).toBe(3);
   });
 
-  it("serves a stale local identity, then deduplicates its exact-commit refresh", async () => {
+  it("reports a stale identity locally, and revalidates it once, only on a network lookup", async () => {
     await requireCompletion(service.request(INPUT).completion);
 
     let releaseFetch:
@@ -413,22 +387,20 @@ describe("GitHubCommitAuthorIdentityService", () => {
       });
     now += 7 * 24 * 60 * 60 * 1000 + 1;
 
-    let resolveUpdated: ((lookup: unknown) => void) | undefined;
-    const updated = new Promise<unknown>((resolve) => {
-      resolveUpdated = resolve;
-    });
-    const first = service.request(INPUT, (lookup) => resolveUpdated?.(lookup));
-    const duplicate = service.request(INPUT);
-    expect(first.lookup).toEqual({ cacheState: "miss", refreshState: "in-flight" });
-    expect(duplicate.lookup.refreshState).toBe("in-flight");
-    expect(first.completion).toBe(duplicate.completion);
-
-    expect(await requireCompletion(first.completion)).toEqual({
+    expect(await requireCompletion(
+      service.request({ ...INPUT, cacheOnly: true }).completion
+    )).toEqual({
       identity: { login: "ada", avatarUrl: CACHED_AVATAR_URL },
       cacheState: "stale",
-      refreshState: "in-flight",
+      refreshState: "idle",
       refreshedAt: 1_000_000
     });
+    expect(fetchCalls).toBe(1);
+
+    const first = service.request(INPUT);
+    const duplicate = service.request(INPUT);
+    expect(first.lookup).toEqual({ cacheState: "miss", refreshState: "in-flight" });
+    expect(first.completion).toBe(duplicate.completion);
 
     await fetchStarted;
     expect(fetchCalls).toBe(2);
@@ -441,7 +413,7 @@ describe("GitHubCommitAuthorIdentityService", () => {
       }
     });
 
-    expect(await updated).toEqual({
+    expect(await requireCompletion(first.completion)).toEqual({
       identity: {
         login: "ada-lovelace",
         avatarUrl: CACHED_AVATAR_URL
@@ -450,6 +422,44 @@ describe("GitHubCommitAuthorIdentityService", () => {
       refreshState: "idle",
       refreshedAt: now
     });
+  });
+
+  it("holds a stale author account behind this commit's retry gate", async () => {
+    await requireCompletion(service.request(INPUT).completion);
+    now += 30 * 24 * 60 * 60 * 1000 + 1;
+    const unseen = { ...INPUT, commitHash: "1111111111111111111111111111111111111111" };
+    fetchImpl = async () => {
+      throw new Error("offline");
+    };
+
+    expect(await requireCompletion(service.request(unseen).completion)).toMatchObject({
+      identity: { login: "ada" },
+      cacheState: "stale",
+      refreshState: "backing-off"
+    });
+    expect(fetchCalls).toBe(2);
+
+    // Asked again inside the backoff, the stale account answers on its own.
+    now += 1_000;
+    expect(await requireCompletion(service.request(unseen).completion)).toMatchObject({
+      identity: { login: "ada" },
+      cacheState: "stale",
+      refreshState: "backing-off"
+    });
+    expect(fetchCalls).toBe(2);
+  });
+
+  it("never asks a forge that cannot prove commit authors", async () => {
+    service = createService({
+      resolveForgeRepo: () => ({ kind: "gitcafe", host: "git.cafe", path: "octo-org/example-repo" })
+    });
+
+    expect(await requireCompletion(service.request(INPUT).completion)).toEqual({
+      cacheState: "miss",
+      refreshState: "not-eligible"
+    });
+    expect(fetchCalls).toBe(0);
+    expect(cacheRowCount()).toBe(0);
   });
 
   it("marks a reused author ambiguous when a later exact proof identifies another account", async () => {
@@ -466,21 +476,9 @@ describe("GitHubCommitAuthorIdentityService", () => {
         avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4"
       }
     });
-    let resolveUpdated: ((lookup: unknown) => void) | undefined;
-    const updated = new Promise<unknown>((resolve) => {
-      resolveUpdated = resolve;
-    });
-    const request = service.request(
-      { ...INPUT, commitHash: conflictingHash },
-      (lookup) => resolveUpdated?.(lookup)
-    );
+    const request = service.request({ ...INPUT, commitHash: conflictingHash });
 
     expect(await requireCompletion(request.completion)).toMatchObject({
-      identity: { login: "ada" },
-      cacheState: "stale",
-      refreshState: "in-flight"
-    });
-    expect(await updated).toMatchObject({
       identity: { login: "different-account" },
       cacheState: "fresh"
     });
@@ -813,6 +811,7 @@ describe("associatedAuthorMatches", () => {
 function createService(options?: {
   initialBackoffMs?: number;
   maxBackoffMs?: number;
+  resolveForgeRepo?: () => ForgeRepo | null;
 }): GitHubCommitAuthorIdentityService {
   const git: GitExec = async () => {
     gitCalls += 1;
@@ -825,19 +824,22 @@ function createService(options?: {
       return await fetchImpl(proof);
     }
   };
+  const read: GitHubAvatarThumbnailStore["read"] = async (sourceUrl) => {
+    thumbnailSources.push(sourceUrl);
+    thumbnailReads += 1;
+    return {
+      ...(thumbnailDataUrl === undefined ? {} : { avatarUrl: thumbnailDataUrl }),
+      cacheState: thumbnailDataUrl === undefined ? "miss" : "fresh",
+      refreshState: "idle",
+      ...(thumbnailDataUrl === undefined ? {} : { refreshedAt: now }),
+      needsRefresh: thumbnailNeedsRefresh
+    };
+  };
   const thumbnailStore: GitHubAvatarThumbnailStore = {
-    read: async (sourceUrl) => {
-      thumbnailSources.push(sourceUrl);
-      thumbnailReads += 1;
-      return {
-        ...(thumbnailDataUrl === undefined ? {} : { avatarUrl: thumbnailDataUrl }),
-        cacheState: thumbnailDataUrl === undefined ? "miss" : "fresh",
-        refreshState: "idle",
-        ...(thumbnailDataUrl === undefined ? {} : { refreshedAt: now }),
-        needsRefresh: thumbnailNeedsRefresh
-      };
-    },
-    refresh: async (sourceUrl) => {
+    read,
+    // Like the real store: only what `read` says needs it is downloaded.
+    refresh: async (sourceUrl, at) => {
+      if (!thumbnailNeedsRefresh) return await read(sourceUrl, at);
       thumbnailSources.push(sourceUrl);
       thumbnailRefreshes += 1;
       const avatarUrl = await refreshThumbnailImpl();

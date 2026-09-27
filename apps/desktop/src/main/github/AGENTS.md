@@ -69,8 +69,8 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   preserve the PR node's `repository.nameWithOwner`. Status refresh groups the
   cached identities by repository path and applies each answer only to matching
   rows; a fork's `#3` and upstream's `#3` are independent PRs.
-- **Commit-author identity**: `github:commitAuthorIdentity` only fetches an
-  exact full commit SHA from a recognized GitHub `origin`. It accepts a
+- **Commit-author identity**: the service only fetches an exact full commit
+  SHA from a recognized forge `origin`. It accepts a
   login/avatar only after SHA + local Git author name/email match. Exact proof
   normally comes from GitHub's commit `author`; when that field is null, a
   unique PR associated with that exact SHA may supply the account only if its
@@ -78,20 +78,28 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   conflict-safe hashed email→account association live in SQLite, so another
   GitHub commit by the same proven author paints immediately across repos.
   64px avatar bytes are deduplicated on disk under
-  `userData/cache/github-avatar-thumbnails`, with fetch/access timestamps and
-  stale-while-revalidate on hover. IPC exposes only a versioned local
-  `pwrgit-avatar://` URL, never the source URL or path; its protocol handler
-  reads just the opaque local thumbnail and lets Chromium cache it. A
-  `cacheOnly` request may warm already-proven identities without GitHub calls.
-  Graph load batches those reads before publishing interactive rows, coalesces
-  origin validation, and decodes available local thumbnails before first hover.
-  Stale proof and thumbnail refreshes are internally queued two at a time. Use
-  its update event to repaint a card, never to block hover. Its `gh api`
-  transport deliberately does not share the PR client's token-extraction flow.
-  GitLab's half of this lives in `../forge/gitlab/commit-author-transport.ts`.
+  `userData/cache/github-avatar-thumbnails`, with fetch/access timestamps. IPC
+  exposes only a versioned local `pwrgit-avatar://` URL, never the source URL
+  or path; its protocol handler reads just the opaque local thumbnail and lets
+  Chromium cache it. Its `gh api` transport deliberately does not share the PR
+  client's token-extraction flow. GitLab's half of this lives in
+  `../forge/gitlab/commit-author-transport.ts`.
+- **Only the people store asks a forge about an author**
+  (`commit-author-people.ts`). Renderers register who they show with
+  `people:replaceInterest` and get cached answers back; the store visits a few
+  authors per tick on its own clock and pushes `people:changed`.
+  `cacheOnly` lookups (the registration read, `github:hydrateCommitAuthorIdentities`)
+  are strictly local: no forge call and no thumbnail download, however stale
+  the row. There used to be a hover command that revalidated on demand. Don't
+  bring one back: a sweep down a history column would become a burst of API
+  calls, and "the user hovered" is not a reason to spend rate limit. If a
+  surface needs fresher data, change the store's schedule. Registering again
+  must never move a visit earlier. The store's tests pin that.
 - **Commit-author identity is forge-wide** — see `../forge/AGENTS.md`. The
-  service keeps its historical `GitHub*` names and IPC channel, but resolves any
-  recognized `origin` and routes to that forge's credential-opaque transport.
+  service keeps its historical `GitHub*` names and hydrate channel, but resolves
+  any recognized `origin` and routes to that forge's credential-opaque
+  transport. A forge whose product says `commitAuthorIdentity: false` is not
+  eligible and is never asked.
 - **`OpenPrService` holds each repository's open change requests**
   (`repo_open_pr`, migration 0032) — the list the refs browser's Pull requests
   tab and ⌘K search read, and the only cache that knows a PR whose head was

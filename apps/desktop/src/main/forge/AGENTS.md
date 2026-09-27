@@ -403,6 +403,10 @@ So, when adding anything per-product:
 
 `PrChip` opens `PrStatusCard` (renderer, beside the chip). It renders purely
 from the `PrSummary` already in the tree and issues **no** request of its own.
+The lineage byline's `PersonCard` follows the same rule: it renders from the
+graph's loaded commits and the `CommitAuthorPerson` main pushed, and the only
+thing that asks a forge about an author is main's people store
+(`../github/commit-author-people.ts`).
 
 Everything past `isDraft` on `PrSummary` is optional and must stay that way: a
 row cached before those fields existed will never gain them, because a change

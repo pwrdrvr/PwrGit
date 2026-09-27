@@ -6,6 +6,10 @@ import {
 import type { CommandBus, CommandContext } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { GitHubCommitAuthorIdentityService } from "./commit-author-identity";
+import {
+  CommitAuthorPeopleStore,
+  type CommitAuthorInterest
+} from "./commit-author-people";
 import { CommitAssociationMonitor } from "./commit-association-monitor";
 import { ForgeStatusService } from "../forge/status";
 import type { ForgeHostsView } from "../forge/hosts";
@@ -65,7 +69,7 @@ export function registerGitHubHandlers(
   const reasonGenerations = new Map<string, number>();
   const reasonsByWebContents = new Map<number, Set<string>>();
   const ownedReason = (
-    kind: "commit-list" | "worktree",
+    kind: "commit-list" | "worktree" | "people",
     monitorId: string,
     ctx: CommandContext
   ): string | null => {
@@ -271,35 +275,23 @@ export function registerGitHubHandlers(
     // Start the whole batch before awaiting any one commit. The identity
     // service then coalesces the worktree's `git remote get-url origin` proof,
     // so a large graph performs one origin validation instead of serially
-    // spawning Git once per row. A miss remains strictly local-cache-only.
+    // spawning Git once per row. Strictly local: a stale or missing row is
+    // reported as such and left for the people store to refresh.
     const hydrate = async (
       commits: typeof req.commits
     ): Promise<Record<string, GitHubCommitAuthorIdentityLookup>> =>
-      Object.fromEntries(await Promise.all(commits.map((commit) => {
-        const emitBackgroundUpdate = (
-          lookup: GitHubCommitAuthorIdentityLookup
-        ): void => {
-          emitEvent("github:commitAuthorIdentityChanged", {
-            worktreeId: req.worktreeId,
-            commitHash: commit.commitHash,
-            lookup
-          });
-        };
-        const request = commitAuthorIdentities.request(
-          {
-            worktreeId: req.worktreeId,
-            commitHash: commit.commitHash,
-            authorName: commit.authorName,
-            authorEmail: commit.authorEmail,
-            cacheOnly: true
-          },
-          emitBackgroundUpdate
-        );
-        return (
-          request.completion?.then(
-            (lookup) => [commit.commitHash, lookup] as const
-          ) ?? Promise.resolve([commit.commitHash, request.lookup] as const)
-        );
+      Object.fromEntries(await Promise.all(commits.map(async (commit) => {
+        const request = commitAuthorIdentities.request({
+          worktreeId: req.worktreeId,
+          commitHash: commit.commitHash,
+          authorName: commit.authorName,
+          authorEmail: commit.authorEmail,
+          cacheOnly: true
+        });
+        return [
+          commit.commitHash,
+          (await request.completion) ?? request.lookup
+        ] as const;
       })));
 
     const lookups = await hydrate(req.commits);
@@ -316,40 +308,35 @@ export function registerGitHubHandlers(
     return ok(lookups);
   });
 
-  bus.register("github:commitAuthorIdentity", (req) => {
-    const emitLookup = (lookup: GitHubCommitAuthorIdentityLookup): void => {
-      emitEvent("github:commitAuthorIdentityChanged", {
-        worktreeId: req.worktreeId,
-        commitHash: req.commitHash,
-        lookup
-      });
-    };
-    // A very fast stale revalidation must not overtake the first cache event:
-    // renderers need to see the current local thumbnail before any refreshed
-    // replacement. Queue background deltas until that initial event emits.
-    let initialEmitted = false;
-    const queuedUpdates: GitHubCommitAuthorIdentityLookup[] = [];
-    const emitBackgroundUpdate = (lookup: GitHubCommitAuthorIdentityLookup): void => {
-      if (!initialEmitted) {
-        queuedUpdates.push(lookup);
-        return;
-      }
-      emitLookup(lookup);
-    };
-    const request = commitAuthorIdentities.request(req, emitBackgroundUpdate);
-    void request.completion?.then((lookup) => {
-      emitLookup(lookup);
-      initialEmitted = true;
-      for (const update of queuedUpdates) emitLookup(update);
-    });
-    // A cache-only graph warm must wait for its local origin/proof/thumbnail
-    // read so the renderer's small worker pool is a real concurrency bound.
-    // Normal hover requests still return their optimistic placeholder without
-    // waiting for local or network work.
-    if (req.cacheOnly && request.completion !== undefined) {
-      return request.completion.then((lookup) => ok(lookup));
+  // The only door to a forge for commit authors, and it opens on main's
+  // schedule: interest registers people and is answered from cache; the store
+  // alone decides when to ask about them (`commit-author-people.ts`).
+  const people = new CommitAuthorPeopleStore({
+    identities: commitAuthorIdentities,
+    publish: (worktreeId, changed) => {
+      emitEvent("people:changed", { worktreeId, people: changed });
     }
-    return ok(request.lookup);
+  });
+  bus.register("people:replaceInterest", async (req, ctx) => {
+    const monitorId = req.monitorId.trim().slice(0, 128);
+    const worktreeId = req.worktreeId.trim().slice(0, 512);
+    if (monitorId === "" || worktreeId === "") return ok({});
+    const reasonId = ownedReason("people", monitorId, ctx);
+    if (reasonId === null) return ok({});
+    const authors: CommitAuthorInterest[] = (Array.isArray(req.authors) ? req.authors : [])
+      .filter((author) =>
+        typeof author?.name === "string" &&
+        typeof author.email === "string" &&
+        Array.isArray(author.commitHashes)
+      )
+      .map((author) => ({
+        name: author.name,
+        email: author.email,
+        commitHashes: author.commitHashes.filter(
+          (hash): hash is string => typeof hash === "string"
+        )
+      }));
+    return ok(await people.replace(reasonId, worktreeId, authors));
   });
 
   const releaseWebContents = (webContentsId: number): void => {
@@ -364,6 +351,7 @@ export function registerGitHubHandlers(
       prStatusMonitor.replace(reasonId, []);
       reasonGenerations.delete(reasonId);
     }
+    people.releaseReasons(reasons);
     reasonsByWebContents.delete(webContentsId);
   };
 
@@ -374,6 +362,7 @@ export function registerGitHubHandlers(
     reasonsByWebContents.clear();
     commitAssociationMonitor.stop();
     prStatusMonitor.stop();
+    people.stop();
   };
 
   return { stop, releaseWebContents };

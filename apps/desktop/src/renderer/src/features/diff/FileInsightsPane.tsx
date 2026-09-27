@@ -6,14 +6,19 @@ import {
   useRef,
   useState
 } from "react";
-import type {
-  FileBlameHunk,
-  FileBlamePage,
-  FileBlameUnavailableReason,
-  FileContents,
-  FileHistoryEntry,
-  FileInsightContext,
-  GitHubCommitAuthorIdentityLookup
+import {
+  commitAuthorInterest,
+  commitAuthorPersonKey,
+  mergeCommitAuthorPeople,
+  type CommitAuthorPerson,
+  type FileBlameHunk,
+  type FileBlamePage,
+  type FileBlameUnavailableReason,
+  type FileContents,
+  type FileHistoryEntry,
+  type FileInsightContext,
+  type GitHubCommitAuthorIdentity,
+  type GitHubCommitAuthorIdentityLookup
 } from "@pwrgit/shared";
 import { fileStatusChipProps, fileStatusLabel } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
@@ -86,13 +91,21 @@ type IdentityCandidate = {
   authorEmail: string;
 };
 
+/**
+ * Proven identities for these commits: each commit's own cached proof, and the
+ * author as main's people store knows them. The pane registers the authors it
+ * shows, as the lineage graph does, so main keeps them fresh on its own
+ * schedule; nothing here asks a forge.
+ */
 function useAuthorIdentities(
   worktreeId: string,
   candidates: IdentityCandidate[]
-): Record<string, GitHubCommitAuthorIdentityLookup> {
+): Record<string, GitHubCommitAuthorIdentity> {
   const [lookups, setLookups] = useState<
     Record<string, GitHubCommitAuthorIdentityLookup>
   >({});
+  const [people, setPeople] = useState<Record<string, CommitAuthorPerson>>({});
+  const peopleMonitorIdRef = useRef(crypto.randomUUID());
   const unique = useMemo(() => {
     const commits = new Map<string, IdentityCandidate>();
     for (const candidate of candidates) commits.set(candidate.hash, candidate);
@@ -102,6 +115,7 @@ function useAuthorIdentities(
 
   useEffect(() => {
     setLookups({});
+    setPeople({});
   }, [worktreeId]);
 
   useEffect(() => {
@@ -132,19 +146,59 @@ function useAuthorIdentities(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worktreeId, key]);
 
+  // Replace this pane's interest whenever its commits change; an empty list
+  // withdraws it.
+  useEffect(() => {
+    let active = true;
+    void dispatch("people:replaceInterest", {
+      worktreeId,
+      monitorId: peopleMonitorIdRef.current,
+      authors: commitAuthorInterest(unique)
+    }).then(
+      (result) => {
+        if (active && result.ok) {
+          setPeople((current) => mergeCommitAuthorPeople(current, result.value));
+        }
+      },
+      () => undefined
+    );
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [worktreeId, key]);
+
+  // A pane that closes, or moves to another worktree, withdraws its interest.
+  useEffect(() => {
+    const monitorId = peopleMonitorIdRef.current;
+    return () => {
+      void dispatch("people:replaceInterest", { worktreeId, monitorId, authors: [] });
+    };
+  }, [worktreeId]);
+
   useEffect(
     () =>
-      subscribe("github:commitAuthorIdentityChanged", (payload) => {
+      subscribe("people:changed", (payload) => {
         if (payload.worktreeId !== worktreeId) return;
-        setLookups((current) => ({
-          ...current,
-          [payload.commitHash]: payload.lookup
-        }));
+        setPeople((current) => mergeCommitAuthorPeople(current, payload.people));
       }),
     [worktreeId]
   );
 
-  return lookups;
+  return useMemo(() => {
+    const identities: Record<string, GitHubCommitAuthorIdentity> = {};
+    for (const candidate of unique) {
+      const person = people[commitAuthorPersonKey(candidate.authorEmail)];
+      // A proven person carries the freshest login and face. Anything short of
+      // that is about the author's other commits, and must not hide this
+      // commit's own exact proof.
+      const identity = person?.state === "proven"
+        ? person.identity
+        : lookups[candidate.hash]?.identity;
+      if (identity !== undefined) identities[candidate.hash] = identity;
+    }
+    return identities;
+  }, [lookups, people, unique]);
 }
 
 function AuthorLabel({
@@ -156,10 +210,10 @@ function AuthorLabel({
   hash: string | null;
   name: string;
   email: string;
-  lookups: Record<string, GitHubCommitAuthorIdentityLookup>;
+  lookups: Record<string, GitHubCommitAuthorIdentity>;
 }) {
   const tip = useViewportTooltip();
-  const identity = hash === null ? undefined : lookups[hash]?.identity;
+  const identity = hash === null ? undefined : lookups[hash];
   const label = identity?.login === undefined ? name : `@${identity.login}`;
   return (
     <span

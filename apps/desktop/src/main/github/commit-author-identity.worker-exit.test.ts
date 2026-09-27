@@ -16,7 +16,7 @@ describe("commit-author identity worker lifecycle", () => {
 
     expect(result.signal, output).toBeNull();
     expect(result.code, output).toBe(0);
-    expect(output).toMatch(/Tests\s+19 passed \(19\)/);
+    expect(output).toMatch(/Tests\s+21 passed \(21\)/);
   });
 });
 

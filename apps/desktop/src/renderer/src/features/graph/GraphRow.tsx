@@ -103,12 +103,16 @@ export function GraphRow({
   flashing,
   branchInfo,
   authorAvatarUrl,
+  personOpen = false,
   hoverIntent,
   onToggle,
   onOpen,
   onShowContext,
   onHideContext,
   onFocusContext,
+  onShowPerson,
+  onHidePerson,
+  onFocusPerson,
   onOpenContextMenu,
   onOpenBranchMenu,
   onRevealWorktree
@@ -128,9 +132,11 @@ export function GraphRow({
   flashing: boolean;
   /** branch name → PR / worktree adornments for tip chips. */
   branchInfo?: Record<string, LaneBranchInfo>;
-  /** The author's proven GitHub avatar, from the graph's cache-only
-   *  hydration. Absent draws initials. */
+  /** The author's proven forge avatar, from main's people store. Absent
+   *  draws initials. */
   authorAvatarUrl?: string | undefined;
+  /** This row's byline has the person card open. */
+  personOpen?: boolean;
   /** Shared hover-intent gate, owned by LineageGraph so hundreds of rows do
    *  not each mount their own. */
   hoverIntent: HoverIntent;
@@ -143,6 +149,12 @@ export function GraphRow({
   onHideContext: () => void;
   /** Move keyboard focus from the SHA trigger into the open context card. */
   onFocusContext: () => boolean;
+  /** Open the author's person card beside the byline. Omitted, the byline is
+   *  plain text. */
+  onShowPerson?: (target: HTMLElement) => void;
+  onHidePerson?: () => void;
+  /** Move keyboard focus from the byline into the open person card. */
+  onFocusPerson?: () => boolean;
   onOpenContextMenu: (position: { x: number; y: number }) => void;
   /** Open the branch menu for one tip chip, at the pointer. */
   onOpenBranchMenu?: (target: BranchChipTarget) => void;
@@ -204,6 +216,13 @@ export function GraphRow({
     show: showContextFor,
     hide: onHideContext
   });
+  // The byline is gated by the same intent: it repeats down a column the
+  // pointer crosses just as the SHA does.
+  const personCard = hoverIntentHandlers({
+    intent: hoverIntent,
+    show: (target) => onShowPerson?.(target),
+    hide: () => onHidePerson?.()
+  });
 
   // A tip chip is the branch's own surface: either button opens its menu, so a
   // right-click on a branch offers branch actions instead of the commit's, and
@@ -222,6 +241,20 @@ export function GraphRow({
     };
     return { onClick: open, onContextMenu: open };
   };
+
+  const byline = (
+    <>
+      <AuthorAvatar
+        block="commit-byline__avatar"
+        name={commit.authorName}
+        avatarUrl={authorAvatarUrl}
+        size={16}
+      />
+      <span className={`commit-author${isMine ? "" : " is-other"}`}>
+        {isMine ? "you" : commit.authorName}
+      </span>
+    </>
+  );
 
   // A lane that runs straight through both halves of the row is drawn as ONE
   // full-height line (no half-line seam at the vertical midpoint). Halves with
@@ -574,21 +607,32 @@ export function GraphRow({
               (app.css `.commit-byline`) trails off the end instead of opening
               a gap before the next chip. It gives way before anything else
               here and can go entirely, leaving the avatar — so the full name
-              is on hover, over either of them. */}
-          <span
-            className="commit-byline"
-            {...(isMine ? {} : hoverTooltip(tip, commit.authorName))}
-          >
-            <AuthorAvatar
-              block="commit-byline__avatar"
-              name={commit.authorName}
-              avatarUrl={authorAvatarUrl}
-              size={16}
-            />
-            <span className={`commit-author${isMine ? "" : " is-other"}`}>
-              {isMine ? "you" : commit.authorName}
-            </span>
-          </span>
+              is on the person card it opens, from either of them. */}
+          {onShowPerson === undefined ? (
+            <span className="commit-byline">{byline}</span>
+          ) : (
+            <button
+              type="button"
+              className={`commit-byline${personOpen ? " is-open" : ""}`}
+              aria-label={`Show author ${isMine ? "(you) " : ""}${commit.authorName}`}
+              aria-expanded={personOpen}
+              onMouseEnter={(e) => personCard.onMouseEnter(e.currentTarget)}
+              onMouseLeave={personCard.onMouseLeave}
+              onFocus={(e) => personCard.onFocus(e.currentTarget)}
+              onBlur={personCard.onBlur}
+              onKeyDown={(e) => {
+                if (e.key === "Tab" && !e.shiftKey && onFocusPerson?.() === true) {
+                  e.preventDefault();
+                }
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                personCard.showNow(e.currentTarget);
+              }}
+            >
+              {byline}
+            </button>
+          )}
         </div>
       </div>
       {tip.tooltipNode}

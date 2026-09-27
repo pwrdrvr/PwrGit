@@ -1583,17 +1583,18 @@ export type GitHubCommitAuthorIdentity = {
   avatarUrl?: string;
 };
 
-/** Thumbnail work still pending for an otherwise proven GitHub identity. */
+/** A proven identity whose local thumbnail is missing or past its TTL. */
 export type GitHubCommitAuthorAvatarCacheStatus = {
   cacheState: "stale" | "miss";
-  refreshState: "in-flight" | "backing-off";
+  /** `idle`: nothing is stopping a refresh; `backing-off`: a download failed. */
+  refreshState: "idle" | "backing-off";
   /** Epoch milliseconds of the thumbnail's last successful disk/network refresh. */
   refreshedAt?: number;
-  /** Epoch milliseconds before a later hover should retry a failed thumbnail refresh. */
+  /** Epoch milliseconds before a failed thumbnail download may be retried. */
   nextRetryAt?: number;
 };
 
-/** Immediate, presentation-neutral result of a commit-author identity lookup. */
+/** Presentation-neutral result of a commit-author identity lookup. */
 export type GitHubCommitAuthorIdentityLookup = {
   /** Present only after an exact commit proof has verified the mapping. */
   identity?: GitHubCommitAuthorIdentity;
@@ -1601,10 +1602,35 @@ export type GitHubCommitAuthorIdentityLookup = {
   refreshState: "idle" | "in-flight" | "backing-off" | "not-eligible";
   /** Epoch milliseconds of the last successful exact-commit proof, when known. */
   refreshedAt?: number;
-  /** Epoch milliseconds before which another hover should not retry a failure. */
+  /** Epoch milliseconds before which a failed proof may not be retried. */
   nextRetryAt?: number;
-  /** Present only while a proven avatar's local thumbnail needs later hover work. */
+  /** Present only while a proven avatar's local thumbnail is missing or stale. */
   avatarCache?: GitHubCommitAuthorAvatarCacheStatus;
+};
+
+/**
+ * One Git author as main's people store knows them, keyed by
+ * `commitAuthorPersonKey(email)`. Built only from the proof-backed identity
+ * cache; main alone decides when that cache is refreshed from the forge, so a
+ * renderer holding one of these never asks for a newer copy — it receives
+ * `people:changed`.
+ */
+export type CommitAuthorPerson = {
+  /**
+   * - `proven`: the forge linked this author's commits to `identity`.
+   * - `none`: the forge answered, and links them to no account.
+   * - `pending`: not known yet. Main has not asked, or is backing off.
+   * - `unsupported`: this worktree's origin is not a forge that can prove
+   *   commit authors, or the author has no usable email.
+   */
+  state: "proven" | "none" | "pending" | "unsupported";
+  identity?: GitHubCommitAuthorIdentity;
+  /** The account's https page on `forge`, built by main from the proven login. */
+  profileUrl?: string;
+  /** The forge that answered, or will be asked. Absent when not known. */
+  forge?: ForgeKind;
+  /** Epoch milliseconds of the proof behind `proven` or `none`. */
+  checkedAt?: number;
 };
 
 /** Cached, watcher-invalidated per-worktree sync/dirty snapshot (U8). */

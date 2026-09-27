@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   forgeAllowsPathDepth,
+  forgeProduct,
   isForgeKind,
   type GitHubCommitAuthorAvatarCacheStatus,
   type GitHubCommitAuthorIdentity,
@@ -197,12 +198,17 @@ export class GitHubCommitAuthorIdentityService {
   }
 
   /**
-   * Start an identity lookup in the background. The GitHub remote is validated
-   * before either the exact-SHA cache or reusable author-account cache is read.
-   * Callers must render local Git author data immediately and observe
-   * `completion` only to repaint. A stale resolved row is returned promptly
-   * and then revalidated in the background; `onBackgroundUpdate` receives the
-   * resulting targeted repaint without a polling loop.
+   * Look up one commit's author. The forge remote is validated before either
+   * the exact-SHA cache or the reusable author-account cache is read.
+   *
+   * `cacheOnly` is strictly local: no forge request and no thumbnail download,
+   * however stale a row is. The lookup reports what is stale or missing
+   * (`cacheState`, `avatarCache`) so the caller can decide whether to come back.
+   *
+   * Without `cacheOnly` the lookup may ask the forge — only when its persisted
+   * TTL and backoff say the answer is due — and waits for that proof and the
+   * avatar download before settling. Only main's people store asks this way;
+   * nothing a renderer does reaches it (`CommitAuthorPeopleStore`).
    */
   request(input: {
     worktreeId: string;
@@ -211,7 +217,7 @@ export class GitHubCommitAuthorIdentityService {
     authorEmail: string;
     /** Read only already-proven exact or author-account data. */
     cacheOnly?: boolean;
-  }, onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void): GitHubCommitAuthorIdentityRequest {
+  }): GitHubCommitAuthorIdentityRequest {
     const author = normalizeAuthor({
       name: input.authorName,
       email: input.authorEmail
@@ -231,23 +237,34 @@ export class GitHubCommitAuthorIdentityService {
       commitSha,
       author,
       cacheOnly: input.cacheOnly === true
-    }, onBackgroundUpdate);
+    });
     return {
       lookup: { cacheState: "miss", refreshState: "in-flight" },
       completion
     };
   }
 
+  /**
+   * The forge this worktree's `origin` resolves to: `null` when no forge
+   * claims it, `undefined` when Git could not say. Local only.
+   */
+  async worktreeForge(worktreeId: string): Promise<ForgeRepo | null | undefined> {
+    try {
+      return await this.worktreeRemote(worktreeId);
+    } catch {
+      return undefined;
+    }
+  }
+
   private startRefresh(
-    prepared: PreparedRequest,
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+    prepared: PreparedRequest
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     const requestKey = buildRequestKey(prepared);
     const existing = this.inFlight.get(requestKey);
     if (existing !== undefined) return existing;
 
     const completion = Promise.resolve()
-      .then(async () => await this.refresh(prepared, onBackgroundUpdate))
+      .then(async () => await this.refresh(prepared))
       .catch(
         (): GitHubCommitAuthorIdentityLookup => ({
           cacheState: "miss",
@@ -264,22 +281,33 @@ export class GitHubCommitAuthorIdentityService {
     return completion;
   }
 
+  private async worktreeRemote(
+    worktreeId: string
+  ): Promise<ForgeRepo | null | undefined> {
+    const worktree = this.db
+      .prepare("SELECT path FROM worktrees WHERE id = ?")
+      .get(worktreeId) as { path: string } | undefined;
+    if (worktree === undefined) return null;
+    return await this.originRemote(worktree.path);
+  }
+
   private async refresh(
-    prepared: PreparedRequest,
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+    prepared: PreparedRequest
   ): Promise<GitHubCommitAuthorIdentityLookup> {
+    const network = !prepared.cacheOnly;
     let identityKey: string | undefined;
     let authorKey: string | undefined;
     try {
-      const worktree = this.db
-        .prepare("SELECT path FROM worktrees WHERE id = ?")
-        .get(prepared.worktreeId) as { path: string } | undefined;
-      if (worktree === undefined) return notEligibleLookup();
-
-      const remote = await this.originRemote(worktree.path);
+      const remote = await this.worktreeRemote(prepared.worktreeId);
       if (remote === null) return notEligibleLookup();
       if (remote === undefined) {
         return { cacheState: "miss", refreshState: "backing-off" };
+      }
+      // A forge with no way to prove an author is not worth a backoff row:
+      // its transport answers nothing, which would read as inconclusive and
+      // retry forever.
+      if (!forgeProduct(remote.kind).capabilities.commitAuthorIdentity) {
+        return notEligibleLookup();
       }
 
       const proof = normalizeProof({ repo: remote, commitSha: prepared.commitSha });
@@ -302,54 +330,18 @@ export class GitHubCommitAuthorIdentityService {
         );
       }
 
-      if (cached?.identity !== undefined && isFresh(cached, now)) {
-        return await this.lookupFromCache(cached, now, "idle", onBackgroundUpdate);
-      }
-      if (
-        cached?.identity !== undefined &&
-        cached.nextRetryAt !== undefined &&
-        cached.nextRetryAt > now
-      ) {
-        return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
-      }
-
-      // Preserve a known local identity (and its on-disk thumbnail) while the
-      // next exact-commit proof runs. This is stale-while-revalidate, never a
-      // shortcut around the origin/SHA proof that was already established.
-      if (cached?.status === "resolved") {
-        const stale = await this.lookupFromCache(
-          cached,
-          now,
-          "in-flight",
-          onBackgroundUpdate
-        );
-        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
-        return stale;
-      }
-
-      // An exact negative is authoritative for this SHA and must suppress a
-      // broader author-email association. Preserve that decision while stale
-      // and revalidate it, just as we do for an exact resolved identity.
-      if (cached?.status === "negative") {
+      // An exact answer — an account, or an authoritative "no account" — is
+      // this SHA's truth and outranks a broader author-email association, even
+      // while stale. A stale one is revalidated only on a network lookup.
+      if (cached?.status === "resolved" || cached?.status === "negative") {
         if (isFresh(cached, now)) {
-          return await this.lookupFromCache(cached, now, "idle", onBackgroundUpdate);
+          return await this.lookupFromCache(cached, now, "idle", network);
         }
-        if (cached.nextRetryAt !== undefined && cached.nextRetryAt > now) {
-          return await this.lookupFromCache(
-            cached,
-            now,
-            "backing-off",
-            onBackgroundUpdate
-          );
+        if (isRetryGated(cached, now)) {
+          return await this.lookupFromCache(cached, now, "backing-off", network);
         }
-        const stale = await this.lookupFromCache(
-          cached,
-          now,
-          "in-flight",
-          onBackgroundUpdate
-        );
-        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
-        return stale;
+        if (!network) return await this.lookupFromCache(cached, now, "idle", false);
+        return await this.revalidateAndLookup(prepared, proof, identityKey, authorKey);
       }
 
       // GitHub associates command-line commits with accounts by author email.
@@ -359,44 +351,20 @@ export class GitHubCommitAuthorIdentityService {
       const account = this.readAuthorAccount(authorKey);
       if (account !== undefined) {
         this.touchAuthorAccount(account, now);
-        if (isFresh(account, now) || prepared.cacheOnly) {
-          return await this.lookupFromAuthorAccount(
-            account,
-            now,
-            "idle",
-            onBackgroundUpdate
-          );
+        if (isFresh(account, now) || !network) {
+          return await this.lookupFromCache(account, now, "idle", network);
         }
-        const stale = await this.lookupFromAuthorAccount(
-          account,
-          now,
-          "in-flight",
-          onBackgroundUpdate
-        );
-        this.scheduleRevalidation(prepared, proof, identityKey, onBackgroundUpdate);
-        return stale;
+        if (isRetryGated(cached, now)) {
+          return await this.lookupFromCache(account, now, "backing-off", network);
+        }
+        return await this.revalidateAndLookup(prepared, proof, identityKey, authorKey);
       }
 
-      if (cached?.nextRetryAt !== undefined && cached.nextRetryAt > now) {
-        return await this.lookupFromCache(cached, now, "backing-off", onBackgroundUpdate);
+      if (isRetryGated(cached, now)) {
+        return await this.lookupFromCache(cached, now, "backing-off", network);
       }
-
-      // The graph's bounded warm pass only hydrates identity proofs already in
-      // SQLite. It never turns opening a large history into a burst of GitHub
-      // requests; a hover sends the normal request when a proof is absent.
-      if (prepared.cacheOnly) {
-        return { cacheState: "miss", refreshState: "idle" };
-      }
-
-      const refreshed = await this.revalidate(prepared, proof, identityKey);
-      const completedAt = this.now();
-      return await this.lookupBestAvailable(
-        authorKey,
-        refreshed,
-        completedAt,
-        refreshStateFor(refreshed, completedAt),
-        onBackgroundUpdate
-      );
+      if (!network) return { cacheState: "miss", refreshState: "idle" };
+      return await this.revalidateAndLookup(prepared, proof, identityKey, authorKey);
     } catch {
       const now = this.now();
       if (identityKey === undefined) {
@@ -409,34 +377,26 @@ export class GitHubCommitAuthorIdentityService {
         cached,
         now,
         "backing-off",
-        onBackgroundUpdate
+        false
       );
     }
   }
 
-  private scheduleRevalidation(
+  private async revalidateAndLookup(
     prepared: PreparedRequest,
     proof: GitHubCommitAuthorProof,
     identityKey: string,
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
-  ): void {
-    void this.revalidate(prepared, proof, identityKey)
-      .then(async (entry) => {
-        if (onBackgroundUpdate === undefined) return;
-        const now = this.now();
-        onBackgroundUpdate(
-          await this.lookupBestAvailable(
-            buildGitHubCommitAuthorAccountCacheKey(prepared.author, proof.repo),
-            entry,
-            now,
-            refreshStateFor(entry, now),
-            onBackgroundUpdate
-          )
-        );
-      })
-      .catch(() => {
-        // `revalidate` handles expected failures; never surface a card error.
-      });
+    authorKey: string
+  ): Promise<GitHubCommitAuthorIdentityLookup> {
+    const refreshed = await this.revalidate(prepared, proof, identityKey);
+    const completedAt = this.now();
+    return await this.lookupBestAvailable(
+      authorKey,
+      refreshed,
+      completedAt,
+      refreshStateFor(refreshed, completedAt),
+      true
+    );
   }
 
   private revalidate(
@@ -519,13 +479,16 @@ export class GitHubCommitAuthorIdentityService {
     }
   }
 
+  /**
+   * Paint a cached row. A network lookup also refreshes a missing or stale
+   * thumbnail and waits for it (the thumbnail store keeps its own TTL and
+   * backoff, so a fresh one costs no download); a local one only reads it.
+   */
   private async lookupFromCache(
     entry: CacheEntry | undefined,
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void,
-    readCurrent: (key: string) => CacheEntry | undefined = (key) =>
-      this.readCache(key)
+    network: boolean
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     if (entry?.identity === undefined) return toLookup(entry, now, refreshState);
 
@@ -534,43 +497,15 @@ export class GitHubCommitAuthorIdentityService {
     if (sourceUrl === undefined) return toLookup(entry, now, refreshState, identity);
 
     try {
-      const thumbnail = await this.thumbnails.read(sourceUrl, now);
+      const thumbnail = network
+        ? await this.thumbnails.refresh(sourceUrl, now)
+        : await this.thumbnails.read(sourceUrl, now);
       if (thumbnail.avatarUrl !== undefined) identity.avatarUrl = thumbnail.avatarUrl;
-      const avatarCache = toAvatarCacheStatus(
-        thumbnail,
-        thumbnail.needsRefresh ? "in-flight" : undefined
-      );
-      if (thumbnail.needsRefresh) {
-        this.scheduleThumbnailRefresh(
-          entry,
-          sourceUrl,
-          now,
-          refreshState,
-          identity.avatarUrl,
-          onBackgroundUpdate,
-          readCurrent
-        );
-      }
-      return toLookup(entry, now, refreshState, identity, avatarCache);
+      return toLookup(entry, now, refreshState, identity, toAvatarCacheStatus(thumbnail));
     } catch {
       // A damaged/missing local thumbnail must not hide a proven login.
     }
     return toLookup(entry, now, refreshState, identity);
-  }
-
-  private lookupFromAuthorAccount(
-    entry: CacheEntry,
-    now: number,
-    refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
-  ): Promise<GitHubCommitAuthorIdentityLookup> {
-    return this.lookupFromCache(
-      entry,
-      now,
-      refreshState,
-      onBackgroundUpdate,
-      (key) => this.readAuthorAccount(key)
-    );
   }
 
   private async lookupBestAvailable(
@@ -578,59 +513,24 @@ export class GitHubCommitAuthorIdentityService {
     exact: CacheEntry | undefined,
     now: number,
     refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void
+    network: boolean
   ): Promise<GitHubCommitAuthorIdentityLookup> {
     // Exact positive and negative results both outrank the reusable account.
     // Only a true miss or transient unavailable row may fall back to it.
     if (exact?.status === "resolved" || exact?.status === "negative") {
-      return await this.lookupFromCache(exact, now, refreshState, onBackgroundUpdate);
+      return await this.lookupFromCache(exact, now, refreshState, network);
     }
     const account = authorKey === undefined
       ? undefined
       : this.readAuthorAccount(authorKey);
     return account === undefined
-      ? await this.lookupFromCache(exact, now, refreshState, onBackgroundUpdate)
-      : await this.lookupFromAuthorAccount(
+      ? await this.lookupFromCache(exact, now, refreshState, network)
+      : await this.lookupFromCache(
           account,
           now,
           isFresh(account, now) ? "idle" : refreshState,
-          onBackgroundUpdate
+          network
         );
-  }
-
-  private scheduleThumbnailRefresh(
-    entry: CacheEntry,
-    sourceUrl: string,
-    now: number,
-    refreshState: GitHubCommitAuthorIdentityLookup["refreshState"],
-    previousAvatarUrl: string | undefined,
-    onBackgroundUpdate?: (lookup: GitHubCommitAuthorIdentityLookup) => void,
-    readCurrent: (key: string) => CacheEntry | undefined = (key) =>
-      this.readCache(key)
-  ): void {
-    void this.thumbnails
-      .refresh(sourceUrl, now)
-      .then((thumbnail) => {
-        if (onBackgroundUpdate === undefined) return;
-        const current = readCurrent(entry.identityKey);
-        if (
-          current?.identity === undefined ||
-          current.identity.login !== entry.identity?.login ||
-          current.identity.avatarSourceUrl !== sourceUrl
-        ) {
-          return;
-        }
-        const avatarUrl = thumbnail.avatarUrl ?? previousAvatarUrl;
-        onBackgroundUpdate(
-          toLookup(current, this.now(), refreshState, {
-            login: current.identity.login,
-            ...(avatarUrl === undefined ? {} : { avatarUrl })
-          }, toAvatarCacheStatus(thumbnail))
-        );
-      })
-      .catch(() => {
-        // The thumbnail store has its own persisted backoff; remain silent.
-      });
   }
 
   /** `null` is a remote no forge claims; `undefined` is a transient Git failure. */
@@ -1189,19 +1089,15 @@ function toLookup(
 }
 
 function toAvatarCacheStatus(
-  thumbnail: Awaited<ReturnType<GitHubAvatarThumbnailStore["read"]>>,
-  refreshState?: "in-flight"
+  thumbnail: Awaited<ReturnType<GitHubAvatarThumbnailStore["read"]>>
 ): GitHubCommitAuthorAvatarCacheStatus | undefined {
-  if (thumbnail.cacheState === "fresh" && thumbnail.refreshState === "idle") {
-    return undefined;
-  }
-  const effectiveRefreshState = refreshState ?? thumbnail.refreshState;
-  if (effectiveRefreshState !== "in-flight" && effectiveRefreshState !== "backing-off") {
-    return undefined;
-  }
+  // Fresh bytes on disk need nothing. So does a source the thumbnail store
+  // refuses outright (miss, idle, nothing to refresh): no visit can fix it.
+  if (thumbnail.cacheState === "fresh") return undefined;
+  if (thumbnail.refreshState === "idle" && !thumbnail.needsRefresh) return undefined;
   return {
     cacheState: thumbnail.cacheState === "stale" ? "stale" : "miss",
-    refreshState: effectiveRefreshState,
+    refreshState: thumbnail.refreshState,
     ...(thumbnail.refreshedAt === undefined ? {} : { refreshedAt: thumbnail.refreshedAt }),
     ...(thumbnail.nextRetryAt === undefined ? {} : { nextRetryAt: thumbnail.nextRetryAt })
   };
@@ -1222,6 +1118,10 @@ function notEligibleLookup(): GitHubCommitAuthorIdentityLookup {
 
 function isFresh(entry: CacheEntry | undefined, now: number): boolean {
   return entry !== undefined && entry.status !== "unavailable" && entry.expiresAt > now;
+}
+
+function isRetryGated(entry: CacheEntry | undefined, now: number): boolean {
+  return entry?.nextRetryAt !== undefined && entry.nextRetryAt > now;
 }
 
 function isCacheStatus(value: string): value is CacheStatus {

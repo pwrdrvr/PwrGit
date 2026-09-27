@@ -26,7 +26,7 @@ function DetailRow({
   );
 }
 
-function CopyIcon() {
+export function CopyIcon() {
   return (
     <svg
       aria-hidden="true"

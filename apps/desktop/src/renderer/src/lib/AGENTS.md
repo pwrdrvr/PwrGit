@@ -32,7 +32,8 @@ moves into), tell the gate with `cardClosed()` when it leaves the screen, or its
 ## Which hover popups are gated
 
 Gate a popup when its trigger **repeats down a column the pointer crosses on
-its way elsewhere** (SHA chips, PR chips), or when opening it costs something.
+its way elsewhere** (SHA chips, PR chips, author bylines), or when opening it
+costs something.
 Leave it instant when the trigger is an isolated control the pointer had to aim
 at — `RepoRow`'s refresh button, `CopyTarget` inside an already-opened card.
 There is no sweep to suppress there, and a delay would only feel sluggish.

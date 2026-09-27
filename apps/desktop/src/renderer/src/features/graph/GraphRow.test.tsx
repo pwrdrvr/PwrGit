@@ -97,40 +97,79 @@ const props = (
 });
 
 describe("GraphRow author", () => {
-  /** Park the pointer on the author and read the card it opens, if any. */
-  async function hoverAuthor(row: GraphRowVM): Promise<{
-    text: string;
-    tooltip: string | null;
-  }> {
+  /** Mount a row whose byline opens a person card, and hand back its parts. */
+  async function mountByline(row: GraphRowVM, focusPerson = false) {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
-    await act(async () => root.render(<GraphRow {...props(row)} />));
-    const author = container.querySelector<HTMLElement>(".commit-author")!;
-    await act(async () => {
-      author.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-    });
-    const tooltip =
-      document.querySelector('[role="tooltip"]')?.textContent ?? null;
-    await act(async () => root.unmount());
-    container.remove();
-    return { text: author.textContent ?? "", tooltip };
+    const onShowPerson = vi.fn();
+    const onFocusPerson = vi.fn(() => focusPerson);
+    const onOpen = vi.fn();
+    await act(async () =>
+      root.render(
+        <GraphRow
+          {...props(row)}
+          hoverIntent={{
+            arm: () => undefined,
+            cancel: () => undefined,
+            immediate: (open) => open(),
+            cardClosed: () => undefined
+          }}
+          onOpen={onOpen}
+          onShowPerson={onShowPerson}
+          onHidePerson={() => undefined}
+          onFocusPerson={onFocusPerson}
+        />
+      )
+    );
+    const byline = container.querySelector<HTMLButtonElement>("button.commit-byline")!;
+    const unmount = async (): Promise<void> => {
+      await act(async () => root.unmount());
+      container.remove();
+    };
+    return { byline, onShowPerson, onFocusPerson, onOpen, unmount };
   }
 
-  // The name ellipsizes when the meta line runs short (app.css
-  // `.commit-author`), so the card is the only place the rest of it is.
-  it("carries the full name on hover, since the row may ellipsize it", async () => {
-    await expect(hoverAuthor(vm({}))).resolves.toEqual({
-      text: "Wilhelmina Castellanos",
-      tooltip: "Wilhelmina Castellanos"
-    });
+  it("opens the person card on click, without opening the commit", async () => {
+    const { byline, onShowPerson, onOpen, unmount } = await mountByline(vm({}));
+    expect(byline.textContent).toBe("WCWilhelmina Castellanos");
+    await act(async () => byline.click());
+    expect(onShowPerson).toHaveBeenCalledWith(byline);
+    expect(onOpen).not.toHaveBeenCalled();
+    await unmount();
   });
 
-  it("opens no card over your own commits' short 'you'", async () => {
-    await expect(hoverAuthor(vm({ isMine: true }))).resolves.toEqual({
-      text: "you",
-      tooltip: null
+  // The name ellipsizes, and can drop out entirely, when the meta line runs
+  // short (app.css `.commit-author`). The button's name never does.
+  it("names the whole author for assistive tech, yours included", async () => {
+    const other = await mountByline(vm({}));
+    expect(other.byline.getAttribute("aria-label")).toBe(
+      "Show author Wilhelmina Castellanos"
+    );
+    await other.unmount();
+    const mine = await mountByline(vm({ isMine: true }));
+    expect(mine.byline.textContent).toBe("WCyou");
+    expect(mine.byline.getAttribute("aria-label")).toBe(
+      "Show author (you) Wilhelmina Castellanos"
+    );
+    await mine.unmount();
+  });
+
+  it("hands Tab to an open person card", async () => {
+    const { byline, onFocusPerson, unmount } = await mountByline(vm({}), true);
+    const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => {
+      byline.dispatchEvent(tab);
     });
+    expect(onFocusPerson).toHaveBeenCalledOnce();
+    expect(tab.defaultPrevented).toBe(true);
+    await unmount();
+  });
+
+  it("is plain text where no card is wired", () => {
+    const markup = renderToStaticMarkup(<GraphRow {...props(vm({}))} />);
+    expect(markup).toContain('<span class="commit-byline">');
+    expect(markup).not.toContain("<button type=\"button\" class=\"commit-byline");
   });
 
   const avatar = (row: GraphRowVM, url?: string): string =>
