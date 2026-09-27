@@ -137,7 +137,7 @@ export class DiagnosticsManager {
   }
 
   /** Stop everything. Resolves once final events/manifests are flushed —
-   *  index.ts drains this (with a timeout) in `will-quit`. */
+   *  index.ts drains this (with a timeout) before windows close. */
   shutdown(): Promise<void> {
     this.shuttingDown = true;
     this.enqueueSync(async () => {
@@ -322,6 +322,8 @@ export class DiagnosticsManager {
 export type StartupCpuDiagnostics = {
   /** Bind the first window; starts the renderer profiler + completion timers. */
   attachFirstWindow: (window: BrowserWindow) => void;
+  /** Finish active captures, or join completion already started by a timer. */
+  stop: () => Promise<void>;
 };
 
 export async function startStartupCpuProfiling(options: {
@@ -354,28 +356,37 @@ export async function startStartupCpuProfiling(options: {
   }
 
   let rendererProfiler: RendererStartupCpuProfiler | null = null;
+  let rendererStarted: Promise<boolean> | null = null;
   let rendererWindow: BrowserWindow | null = null;
   let finished = false;
+  let finishPromise: Promise<void> | undefined;
   let postLoadTimer: ReturnType<typeof setTimeout> | null = null;
   let hardTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  let expireRendererStart!: () => void;
+  const rendererStartDeadline = new Promise<false>((resolve) => {
+    expireRendererStart = () => resolve(false);
+  });
 
-  const finish = async (reason: string): Promise<void> => {
-    if (finished) return;
-    finished = true;
+  const finishInner = async (reason: string): Promise<void> => {
     if (postLoadTimer) clearTimeout(postLoadTimer);
+    // A post-load completion can begin before renderer startup answers. Keep
+    // the original hard deadline alive until that wait settles; the hard-timeout
+    // completion itself must never wait on an unresponsive renderer startup.
+    const rendererReady = await Promise.race([rendererStarted, rendererStartDeadline]);
     if (hardTimeoutTimer) clearTimeout(hardTimeoutTimer);
-
     const rendererOk = (await rendererProfiler?.stop(reason)) ?? false;
     const mainOk = await mainProfiler.stop(reason);
 
-    if (config.captureHeapSnapshots) {
+    // Quit flushes active captures; it must not start a new synchronous heap
+    // snapshot, which would prevent the shutdown deadline from running.
+    if (config.captureHeapSnapshots && reason !== "app-quit") {
       try {
         const written = writeHeapSnapshot(session.mainHeapSnapshotPath);
         await session.registerHeapSnapshot(path.basename(written));
       } catch (error) {
         log.error("startup main heap snapshot failed", error);
       }
-      if (rendererWindow !== null && !rendererWindow.isDestroyed()) {
+      if (rendererReady && rendererWindow !== null && !rendererWindow.isDestroyed()) {
         try {
           await rendererWindow.webContents.takeHeapSnapshot(
             session.rendererHeapSnapshotPath
@@ -403,11 +414,19 @@ export async function startStartupCpuProfiling(options: {
     }
   };
 
+  const finish = (reason: string): Promise<void> => {
+    finished = true;
+    finishPromise ??= Promise.resolve().then(() => finishInner(reason));
+    return finishPromise;
+  };
+
   hardTimeoutTimer = setTimeout(() => {
+    expireRendererStart();
     void finish("hard-timeout");
   }, config.hardTimeoutMs);
 
   return {
+    stop: () => finish("app-quit"),
     attachFirstWindow: (window) => {
       if (rendererWindow !== null || finished) return;
       rendererWindow = window;
@@ -418,8 +437,9 @@ export async function startStartupCpuProfiling(options: {
           isDestroyed: () => window.webContents.isDestroyed()
         }
       });
-      void rendererProfiler.start();
+      rendererStarted = rendererProfiler.start();
       window.webContents.once("did-finish-load", () => {
+        if (finished) return;
         postLoadTimer = setTimeout(() => {
           void finish("post-load-elapsed");
         }, config.postLoadDurationMs);

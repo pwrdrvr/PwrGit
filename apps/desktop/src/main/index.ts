@@ -33,7 +33,7 @@ import {
 } from "./window-controls-bridge";
 import { linuxWindowIconPath } from "./window-icon";
 import { openAppDocumentWindow } from "./app-document-window";
-import { drainBeforeQuit } from "./bounded-shutdown";
+import { createQuitDrain, drainBeforeQuit } from "./bounded-shutdown";
 import {
   initAutoUpdater,
   handleUpdateSelectionChange,
@@ -1138,11 +1138,31 @@ if (!gotSingleInstanceLock) {
         agentHandlers.releaseWebContents(webContentsId);
       }
     });
+    const quitDrain = createQuitDrain({
+      stop: async () => {
+        // Start independently, retaining the agent's existing 1.5s limit
+        // inside the shared 10s deadline rather than adding a serial wait.
+        await Promise.allSettled([
+          Promise.resolve().then(() => diagnostics.shutdown()),
+          Promise.resolve().then(() => startupCpu?.stop()),
+          drainBeforeQuit([() => agentHandlers.dispose()], 1_500)
+        ]);
+      },
+      resumeQuit: () => {
+        app.quit();
+        // Preserve the normal-quit fail-safe if the resumed quit is swallowed.
+        setTimeout(() => app.exit(0), 500);
+      },
+      warn: (message, error) => logMain("warn", "diagnostics", message, error)
+    });
+    // Flush while renderer windows (and their inspector targets) still exist.
+    app.on("before-quit", (event) => quitDrain.beforeQuit(event));
     registerAppUpdateHandlers(bus);
     settings.onWrite(() => {
       handleUpdateSelectionChange();
     });
     initAutoUpdater({
+      beforeQuitAndInstall: () => quitDrain.flushForUpdate(),
       resolveSelection: () =>
         resolveUpdateSelection(settings.get().updates, appVersion)
     });
@@ -1205,26 +1225,6 @@ if (!gotSingleInstanceLock) {
       clearInterval(activeStatePoll);
       githubHandlers.stop();
       appearance.dispose();
-    });
-
-    // Drain diagnostics and agent subprocesses before quitting. Bounded and
-    // fail-safe: cleanup races a timeout, and if the resumed quit is swallowed
-    // (automation teardown, re-entrant quit), app.exit() still guarantees the
-    // process dies.
-    let quitDrainState: "pending" | "draining" | "done" = "pending";
-    app.on("will-quit", (event) => {
-      if (quitDrainState === "done") return;
-      event.preventDefault();
-      if (quitDrainState === "draining") return; // drain will re-quit
-      quitDrainState = "draining";
-      void drainBeforeQuit(
-        [() => diagnostics.shutdown(), () => agentHandlers.dispose()],
-        1_500
-      ).finally(() => {
-        quitDrainState = "done";
-        app.quit();
-        setTimeout(() => app.exit(0), 500);
-      });
     });
 
     // Boot into the last-used profile's window (its rescan kicks off inside).

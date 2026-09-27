@@ -66,6 +66,7 @@ export class RendererStartupCpuProfiler {
   }
 
   async start(): Promise<boolean> {
+    if (this.stopCompleted) return false;
     if (this.profiling) return true;
 
     if (this.target.debugger.isAttached()) {
@@ -86,7 +87,9 @@ export class RendererStartupCpuProfiler {
       this.attachedByProfiler = true;
       this.target.debugger.on("detach", this.detachListener);
       await this.target.debugger.sendCommand("Profiler.enable");
+      if (this.stopCompleted) return false;
       await this.target.debugger.sendCommand("Profiler.start");
+      if (this.stopCompleted) return false;
       this.profiling = true;
       await this.session.appendEvent({
         source: "renderer",
@@ -96,6 +99,9 @@ export class RendererStartupCpuProfiler {
       });
       return true;
     } catch (error) {
+      // stop() already detached a startup abandoned at its deadline. A late
+      // command rejection must not append events to the completed session.
+      if (this.stopCompleted) return false;
       await this.session.appendEvent({
         source: "renderer",
         capturedAt: this.now().toISOString(),
