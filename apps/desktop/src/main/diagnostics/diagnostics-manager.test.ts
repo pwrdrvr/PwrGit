@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeHeapSnapshot } from "node:v8";
-import type { BrowserWindow } from "electron";
+import { app, type BrowserWindow } from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startStartupCpuProfiling, type StartupCpuDiagnostics } from "./diagnostics-manager";
 import { MainProcessCpuProfiler } from "./main-process-cpu-profiler";
@@ -23,6 +23,7 @@ describe("startup capture shutdown", () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), "pwrgit-quit-profile-"));
     diagnostics = null;
+    vi.mocked(app.quit).mockClear();
     vi.stubEnv("PWRGIT_STARTUP_CPU_PROFILING_DIR", root);
     vi.stubEnv("PWRGIT_STARTUP_CPU_PROFILING_HEAP_SNAPSHOTS", "0");
     vi.stubEnv("PWRGIT_STARTUP_CPU_PROFILING_QUIT_ON_COMPLETE", "0");
@@ -99,5 +100,73 @@ describe("startup capture shutdown", () => {
     await stopping;
     expect(stop).toHaveBeenCalledExactlyOnceWith("app-quit");
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  describe.each(["hard-timeout", "post-load-elapsed"])("%s completion", (reason) => {
+    it.each([
+      ["Profiler.enable", "resolve"],
+      ["Profiler.start", "resolve"],
+      ["Profiler.enable", "reject"],
+      ["Profiler.start", "reject"]
+    ])("abandons hung %s at the hard deadline and ignores late %s", async (command, settlement) => {
+      vi.useFakeTimers();
+      vi.stubEnv("PWRGIT_STARTUP_CPU_PROFILING_POST_LOAD_MS", "5000");
+      vi.stubEnv("PWRGIT_STARTUP_CPU_PROFILING_QUIT_ON_COMPLETE", "1");
+      let resolve!: () => void;
+      let reject!: (error: unknown) => void;
+      const pendingCommand = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+      let attached = false;
+      const debuggerTarget = {
+        attach: () => { attached = true; },
+        detach: vi.fn(() => { attached = false; }),
+        isAttached: () => attached,
+        on: vi.fn(),
+        off: vi.fn(),
+        sendCommand: vi.fn((method: string) => method === command ? pendingCommand : Promise.resolve())
+      };
+      const contents = Object.assign(new EventEmitter(), {
+        debugger: debuggerTarget,
+        isDestroyed: () => false
+      });
+      const mainStop = vi.spyOn(MainProcessCpuProfiler.prototype, "stop");
+      const rendererStart = vi.spyOn(RendererStartupCpuProfiler.prototype, "start");
+      diagnostics = await startStartupCpuProfiling({ enabled: true, outputRoot: root });
+      diagnostics!.attachFirstWindow({ webContents: contents } as unknown as BrowserWindow);
+      if (reason === "post-load-elapsed") contents.emit("did-finish-load");
+      try {
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(debuggerTarget.sendCommand).toHaveBeenCalledWith(command);
+        expect(mainStop).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(mainStop).toHaveBeenCalledExactlyOnceWith(reason);
+        await diagnostics!.stop(); // Joins the timer's completion.
+        expect(debuggerTarget.detach).toHaveBeenCalledOnce();
+        expect(app.quit).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+
+        const [directory] = await readdir(root);
+        const manifestPath = join(root, directory!, "session.json");
+        const manifestBefore = await readFile(manifestPath, "utf8");
+        const manifest = JSON.parse(manifestBefore);
+        expect(manifest.status).toBe("partial");
+        expect(manifest.mainProfile.capturedAt).toEqual(expect.any(String));
+        expect(manifest.rendererProfile.capturedAt).toBeNull();
+        expect(manifest.completedAt).toEqual(expect.any(String));
+        const profile = JSON.parse(await readFile(join(root, directory!, "main.cpuprofile"), "utf8"));
+        expect(profile.nodes.length).toBeGreaterThan(0);
+        const eventsPath = join(root, directory!, "events.ndjson");
+        const eventsBefore = await readFile(eventsPath, "utf8");
+        const commandsBefore = debuggerTarget.sendCommand.mock.calls.length;
+        if (settlement === "resolve") resolve();
+        else reject(new Error("late inspector failure"));
+        await expect(rendererStart.mock.results[0]!.value).resolves.toBe(false);
+        expect(debuggerTarget.sendCommand).toHaveBeenCalledTimes(commandsBefore);
+        expect(await readFile(eventsPath, "utf8")).toBe(eventsBefore);
+        expect(await readFile(manifestPath, "utf8")).toBe(manifestBefore);
+        expect(app.quit).toHaveBeenCalledOnce();
+      } finally {
+        resolve(); // Also releases startup if an assertion fails before the deadline.
+      }
+    });
   });
 });

@@ -362,12 +362,18 @@ export async function startStartupCpuProfiling(options: {
   let finishPromise: Promise<void> | undefined;
   let postLoadTimer: ReturnType<typeof setTimeout> | null = null;
   let hardTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  let expireRendererStart!: () => void;
+  const rendererStartDeadline = new Promise<false>((resolve) => {
+    expireRendererStart = () => resolve(false);
+  });
 
   const finishInner = async (reason: string): Promise<void> => {
     if (postLoadTimer) clearTimeout(postLoadTimer);
+    // A post-load completion can begin before renderer startup answers. Keep
+    // the original hard deadline alive until that wait settles; the hard-timeout
+    // completion itself must never wait on an unresponsive renderer startup.
+    const rendererReady = await Promise.race([rendererStarted, rendererStartDeadline]);
     if (hardTimeoutTimer) clearTimeout(hardTimeoutTimer);
-
-    await rendererStarted;
     const rendererOk = (await rendererProfiler?.stop(reason)) ?? false;
     const mainOk = await mainProfiler.stop(reason);
 
@@ -380,7 +386,7 @@ export async function startStartupCpuProfiling(options: {
       } catch (error) {
         log.error("startup main heap snapshot failed", error);
       }
-      if (rendererWindow !== null && !rendererWindow.isDestroyed()) {
+      if (rendererReady && rendererWindow !== null && !rendererWindow.isDestroyed()) {
         try {
           await rendererWindow.webContents.takeHeapSnapshot(
             session.rendererHeapSnapshotPath
@@ -415,6 +421,7 @@ export async function startStartupCpuProfiling(options: {
   };
 
   hardTimeoutTimer = setTimeout(() => {
+    expireRendererStart();
     void finish("hard-timeout");
   }, config.hardTimeoutMs);
 
