@@ -6360,6 +6360,54 @@ button.agent-menu__item:hover {
   display: grid;
   gap: 12px;
 }
+.refs-fork-parent-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border-color: var(--accent-bright);
+}
+.refs-fork-parent-offer strong {
+  color: var(--text-primary);
+  font: 650 12px/1.4 var(--font-sans);
+}
+.refs-fork-parent-offer p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font: 500 11px/1.45 var(--font-sans);
+}
+.refs-fork-parent-offer button {
+  flex: none;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-bright);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  font: 650 10px/1 var(--font-sans);
+  cursor: pointer;
+}
+.refs-fork-parent-offer button[aria-busy="true"],
+.fork-parent-dialog .modal__create[aria-busy="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  cursor: wait;
+}
+.refs-fork-parent-offer button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.fork-parent-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--text-primary);
+  font: 600 11px/1.4 var(--font-sans);
+  cursor: pointer;
+}
+.fork-parent-choice input { accent-color: var(--accent-bright); }
 .refs-remote-card {
   border: 1px solid var(--border-default);
   border-radius: 10px;

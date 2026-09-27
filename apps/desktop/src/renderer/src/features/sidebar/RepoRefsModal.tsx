@@ -37,6 +37,9 @@ import { BranchRenameDialog } from "./BranchRenameDialog";
 import { PushRefsDialog } from "./PushRefsDialog";
 import { CreateTagDialog } from "./CreateTagDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
+import { ForkParentRemoteDialog } from "./ForkParentRemoteDialog";
+import { forkParentOffer } from "./fork-parent-offer";
+import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { TagRemoteDialog } from "./TagRemoteDialog";
 import { PrChip } from "./PrChip";
 import {
@@ -406,6 +409,11 @@ export function RepoRefsModal({
   const [remoteEditor, setRemoteEditor] = useState<RemoteSummary | "new" | null>(
     null
   );
+  const [parentDialogOpen, setParentDialogOpen] = useState(false);
+  const [addingParent, setAddingParent] = useState(false);
+  const addingParentRef = useRef(false);
+  const forgeHosts = useForgeHostMap();
+  const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
   const [renaming, setRenaming] = useState<LocalBranchSummary | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -638,6 +646,52 @@ export function RepoRefsModal({
     onRefresh();
   };
 
+  const addForkParent = async (choice: {
+    name: string;
+    renameExistingTo?: string;
+  }): Promise<boolean> => {
+    if (addingParentRef.current) return false;
+    addingParentRef.current = true;
+    setAddingParent(true);
+    try {
+      const added = await dispatch("remote:addForkParent", {
+        repoId: repo.id,
+        ...choice
+      });
+      if (!added.ok) {
+        showErrorToast({
+          title: "Add fork parent failed",
+          message: added.error.message,
+          subject: { repoId: repo.id }
+        });
+        await onRefresh();
+        return false;
+      }
+      const fetched = await dispatch("remote:fetchRepo", {
+        repoId: repo.id,
+        remote: added.value.name
+      });
+      await onRefresh();
+      if (!fetched.ok) {
+        showErrorToast({
+          title: "Fork parent added; fetch failed",
+          message: fetched.error.message,
+          subject: {
+            repoId: repo.id,
+            remote: {
+              name: added.value.name,
+              url: repo.identity?.parent?.url ?? ""
+            }
+          }
+        });
+      }
+      return true;
+    } finally {
+      addingParentRef.current = false;
+      setAddingParent(false);
+    }
+  };
+
   const reportDeleteFailure = async (message: string): Promise<void> => {
     showErrorToast({
       title: "Delete branch failed",
@@ -720,12 +774,13 @@ export function RepoRefsModal({
       else if (remoteTag !== null) setRemoteTag(null);
       else if (createTagOpen) setCreateTagOpen(false);
       else if (remoteEditor !== null) setRemoteEditor(null);
+      else if (parentDialogOpen) setParentDialogOpen(false);
       else if (pushOpen) setPushOpen(false);
       else onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [createTagOpen, onClose, pushOpen, remoteEditor, remoteTag, renaming]);
+  }, [createTagOpen, onClose, parentDialogOpen, pushOpen, remoteEditor, remoteTag, renaming]);
 
   // Escape stays with the handler above, which closes a nested dialog's state
   // before the browser itself. The trap is what makes this a modal: without
@@ -1206,6 +1261,32 @@ export function RepoRefsModal({
 
           {shownTab === "remotes" && (
             <div className="refs-remotes">
+              {parentOffer !== null && (
+                <section className="refs-remote-card refs-fork-parent-offer">
+                  <div>
+                    <strong>Fork parent: {parentOffer.parent}</strong>
+                    <p>
+                      This fork has no remote for its parent. Add one to check
+                      its commits now and on future fetches.
+                    </p>
+                  </div>
+                  <button
+                    aria-disabled={addingParent}
+                    aria-busy={addingParent}
+                    onClick={() => {
+                      if (addingParent) return;
+                      if (parentOffer.upstreamOccupied) setParentDialogOpen(true);
+                      else void addForkParent({ name: "upstream" });
+                    }}
+                  >
+                    {addingParent
+                      ? "Adding…"
+                      : parentOffer.upstreamOccupied
+                        ? "Set up parent remote…"
+                        : "Add upstream"}
+                  </button>
+                </section>
+              )}
               {refs.remotes.map((remote) => (
                 <section className="refs-remote-card" key={remote.name}>
                   <div className="refs-remote-card__head">
@@ -1272,6 +1353,15 @@ export function RepoRefsModal({
             {...(remoteEditor === "new" ? {} : { remote: remoteEditor })}
             onSaved={onRefresh}
             onClose={() => setRemoteEditor(null)}
+          />
+        )}
+        {parentDialogOpen && parentOffer !== null && (
+          <ForkParentRemoteDialog
+            parent={parentOffer.parent}
+            suggestedName={parentOffer.suggestedName}
+            remotes={refs.remotes}
+            onAdd={addForkParent}
+            onClose={() => setParentDialogOpen(false)}
           />
         )}
         {renaming !== null && (

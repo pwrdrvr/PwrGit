@@ -294,6 +294,32 @@ export function parseForgeRemote(
   };
 }
 
+/** Whether a fetch URL names this forge repository. A path alone is not
+ * enough: GitHub and GitLab can each have `owner/repo`. An unclassified SSH
+ * host may be a configured alias for a known forge; preserve that existing
+ * Git workflow, while rejecting a different known or mapped forge host. */
+export function remoteMatchesForgeRepo(
+  url: string,
+  target: { hostname: string; nameWithOwner: string },
+  overrides: ForgeHostMap = {}
+): boolean {
+  const remote = parseForgeRemote(url, overrides);
+  if (
+    remote === null ||
+    remote.nameWithOwner.toLowerCase() !== target.nameWithOwner.toLowerCase()
+  ) {
+    return false;
+  }
+  const host = canonicalForgeHostname(target.hostname);
+  if (remote.hostname === host) return true;
+  return (
+    host !== null &&
+    classifyForgeHost(host, overrides) !== "other" &&
+    remote.host === "other" &&
+    (/^ssh:\/\//i.test(url.trim()) || /^[^/]+@[^/]+:/.test(url.trim()))
+  );
+}
+
 /** The browser URL for a repository on a forge. */
 export function forgeWebUrl(hostname: string, nameWithOwner: string): string {
   return `https://${hostname}/${nameWithOwner}`;

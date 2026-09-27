@@ -5,6 +5,7 @@ import {
   type PwrGitError,
   type RemoteActivityPhase,
   type ForkStatus,
+  type ForgeHostMap,
   type RepoIdentity,
   type Result
 } from "@pwrgit/shared";
@@ -13,6 +14,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
+import { addForkParentRemote } from "./fork-remotes";
 import {
   addRemote,
   commitsSince,
@@ -200,7 +202,8 @@ export function registerRemoteHandlers(
    *  however recently it was written. */
   refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void,
   /** The stored forge identity, for the reset dialog's fork-source card. */
-  readIdentity?: (repoId: string) => RepoIdentity | undefined
+  readIdentity?: (repoId: string) => RepoIdentity | undefined,
+  hostsForRemotes?: () => ForgeHostMap
 ): void {
   // Every long-running remote command reports through one registry: the live
   // status surfaces read it, and the cancel button acts on it.
@@ -468,6 +471,24 @@ export function registerRemoteHandlers(
     refreshIdentity?.(req.repoId, { force: true });
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
+  });
+
+  bus.register("remote:addForkParent", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const identity = readIdentity?.(req.repoId);
+    const parent = forkParentOf(req.repoId);
+    if (identity === undefined || parent === null) {
+      return err({ kind: "remote", code: "remote_config_failed", message: "The forge has not identified a fork parent for this repository." });
+    }
+    const result = await operations.runRepository(req.repoId, () =>
+      addForkParentRemote(execGit, repo.path, parent, req, identity, hostsForRemotes?.())
+    );
+    if (!result.ok) return result;
+    logMain("info", "remote", `added fork parent as ${result.value.name} to ${repo.path}`);
+    refreshIdentity?.(req.repoId, { force: true });
+    refresher.refreshRepoWorktrees(req.repoId);
+    return result;
   });
 
   bus.register("remote:update", async (req) => {

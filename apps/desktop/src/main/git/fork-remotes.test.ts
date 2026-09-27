@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  addForkParentRemote,
   applyForkRemotes,
   forkRemoteUrl,
   planUpstreamRemote,
@@ -12,6 +13,8 @@ import {
   UPSTREAM_REMOTE
 } from "./fork-remotes";
 import { createSystemGit } from "./test-support/system-git";
+import { forkFetchRemotes } from "./git-service";
+import type { GitExec } from "./dugite";
 
 const systemGit = createSystemGit();
 
@@ -165,6 +168,100 @@ describe("readCheckoutRemotes", () => {
       { name: "mirror", url: "https://example.com/m.git" },
       { name: "origin", url: "git@github.com:desktop/dugite.git" }
     ]);
+  });
+});
+
+describe("addForkParentRemote", () => {
+  const parent = { hostname: "github.com", nameWithOwner: "source/diskhound" };
+  const fork = { hostname: "github.com", nameWithOwner: "me/diskhound" };
+
+  it("adds a missing parent as upstream using origin's SSH URL shape without changing branch tracking", async () => {
+    const path = repoWithOrigin("git@github.com:me/diskhound.git");
+    const result = await addForkParentRemote(systemGit, path, parent, { name: "upstream" }, fork);
+    expect(result).toEqual({ ok: true, value: { name: "upstream" } });
+    expect(config(path, "remote.upstream.url")).toBe("git@github.com:source/diskhound.git");
+    expect(config(path, "branch.main.remote")).toBe("origin");
+    execFileSync("git", ["update-ref", "refs/remotes/origin/main", "HEAD"], { cwd: path });
+    expect(await forkFetchRemotes(systemGit, path, parent)).toEqual(["origin", "upstream"]);
+  });
+
+  it("does not overwrite an occupied upstream and accepts a different name", async () => {
+    const path = repoWithOrigin("https://github.com/me/diskhound.git");
+    execFileSync("git", ["remote", "add", "upstream", "https://github.com/other/project.git"], { cwd: path });
+    const refused = await addForkParentRemote(systemGit, path, parent, { name: "upstream" }, fork);
+    expect(refused.ok).toBe(false);
+    expect(config(path, "remote.upstream.url")).toBe("https://github.com/other/project.git");
+    const added = await addForkParentRemote(systemGit, path, parent, { name: "source" }, fork);
+    expect(added.ok).toBe(true);
+    expect(config(path, "remote.source.url")).toBe("https://github.com/source/diskhound.git");
+  });
+
+  it("moves an occupied upstream under a chosen name before adding the parent", async () => {
+    const path = repoWithOrigin("git@github.com:me/diskhound.git");
+    execFileSync("git", ["remote", "add", "upstream", "git@github.com:other/project.git"], { cwd: path });
+    execFileSync("git", ["config", "branch.main.remote", "upstream"], { cwd: path });
+    const result = await addForkParentRemote(systemGit, path, parent, {
+      name: "upstream",
+      renameExistingTo: "old-upstream"
+    }, fork);
+    expect(result.ok).toBe(true);
+    expect(config(path, "remote.old-upstream.url")).toBe("git@github.com:other/project.git");
+    expect(config(path, "remote.upstream.url")).toBe("git@github.com:source/diskhound.git");
+    expect(config(path, "branch.main.remote")).toBe("old-upstream");
+  });
+
+  it("restores an occupied upstream if adding the parent fails", async () => {
+    const path = repoWithOrigin("git@github.com:me/diskhound.git");
+    execFileSync("git", ["remote", "add", "upstream", "git@github.com:other/project.git"], { cwd: path });
+    const failingGit: GitExec = (args, cwd, options) =>
+      args[0] === "remote" && args[1] === "add" && args[2] === "upstream"
+        ? Promise.resolve({ ok: true, value: { stdout: "", stderr: "blocked", exitCode: 1 } })
+        : systemGit(args, cwd, options);
+    const result = await addForkParentRemote(failingGit, path, parent, {
+      name: "upstream",
+      renameExistingTo: "old-upstream"
+    }, fork);
+    expect(result.ok).toBe(false);
+    expect(config(path, "remote.upstream.url")).toBe("git@github.com:other/project.git");
+    expect(execFileSync("git", ["remote"], { cwd: path, encoding: "utf8" })).not.toContain("old-upstream");
+  });
+
+  it("refuses a second parent remote", async () => {
+    const path = repoWithOrigin("git@github.com:me/diskhound.git");
+    execFileSync("git", ["remote", "add", "source", "git@github.com:source/diskhound.git"], { cwd: path });
+    const result = await addForkParentRemote(systemGit, path, parent, { name: "upstream" }, fork);
+    expect(result.ok).toBe(false);
+    expect(config(path, "remote.source.url")).toBe("git@github.com:source/diskhound.git");
+  });
+
+  it("recognizes a parent reached through an SSH host alias", async () => {
+    const path = repoWithOrigin("git@github.com:me/diskhound.git");
+    execFileSync("git", ["remote", "add", "source", "git@github-work:source/diskhound.git"], { cwd: path });
+    const result = await addForkParentRemote(systemGit, path, parent, { name: "upstream" }, fork);
+    expect(result.ok).toBe(false);
+    expect(execFileSync("git", ["remote"], { cwd: path, encoding: "utf8" })).not.toContain("upstream");
+  });
+
+  it("refuses a stale forge identity when origin has changed", async () => {
+    const path = repoWithOrigin("git@github.com:other/diskhound.git");
+    const result = await addForkParentRemote(systemGit, path, parent, { name: "upstream" }, fork);
+    expect(result.ok).toBe(false);
+    expect(config(path, "remote.origin.url")).toBe("git@github.com:other/diskhound.git");
+  });
+
+  it("refuses a stale identity when origin moves to another host with the same path", async () => {
+    const path = repoWithOrigin("git@gitlab.com:me/diskhound.git");
+    const result = await addForkParentRemote(systemGit, path, parent, { name: "upstream" }, fork);
+    expect(result.ok).toBe(false);
+    expect(execFileSync("git", ["remote"], { cwd: path, encoding: "utf8" }).trim()).toBe("origin");
+  });
+
+  it("adds the GitHub parent when a GitLab mirror has the same project path", async () => {
+    const path = repoWithOrigin("git@github.com:me/diskhound.git");
+    execFileSync("git", ["remote", "add", "mirror", "git@gitlab.com:source/diskhound.git"], { cwd: path });
+    const result = await addForkParentRemote(systemGit, path, parent, { name: "upstream" }, fork);
+    expect(result.ok).toBe(true);
+    expect(config(path, "remote.upstream.url")).toBe("git@github.com:source/diskhound.git");
   });
 });
 

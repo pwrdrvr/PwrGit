@@ -992,7 +992,8 @@ if (!gotSingleInstanceLock) {
       worktreeOperations,
       indexer,
       refreshIdentity,
-      (repoId) => identityService.read([repoId]).get(repoId)
+      (repoId) => identityService.read([repoId]).get(repoId),
+      () => forgeHosts.overrides()
     );
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,
