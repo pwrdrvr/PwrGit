@@ -45,10 +45,10 @@ const answersTo = (hit: RepoSearchHit): string[] =>
     ? [hit.name, pathLeaf(hit.path)]
     : [hit.name];
 
-/** 0 = the query names this hit (or its change request's number), 1 = it
- *  begins one of its names, 2 = the match is somewhere else entirely
+/** -1 = an exact repo name; 0 = the query names this hit (or its change
+ *  request's number), 1 = it begins one of its names, 2 = somewhere else
  *  (mid-name, deep in a path, a PR title). */
-export type SearchMatchTier = 0 | 1 | 2;
+export type SearchMatchTier = -1 | 0 | 1 | 2;
 
 export function searchMatchTier(
   hit: RepoSearchHit,
@@ -56,6 +56,7 @@ export function searchMatchTier(
 ): SearchMatchTier {
   const wanted = normalizeSearchName(query);
   if (wanted === "") return 2;
+  if (hit.kind === "repo" && normalizeSearchName(hit.name) === wanted) return -1;
   // `106` names change request #106 as surely as a branch's name names the
   // branch — and the index only knows it as a prefix, so #1060 matched too.
   const number = changeRequestNumberQuery(query);
@@ -76,8 +77,7 @@ export function searchMatchTier(
  * — see the tiers above. Among two things the query names, the one you can
  * open, `cd` into and already have work in is the stronger answer; the bare
  * ref is a branch you would have to create a worktree for. Repos and their
- * checkouts share rank 0, so an exactly-named repo and an exactly-named
- * worktree keep whatever order bm25 gave them.
+ * checkouts share kind rank 0; an exact repo name has its own leading tier.
  */
 const searchKindRank = (hit: RepoSearchHit): 0 | 1 =>
   hit.kind === "repo" || hit.kind === "worktree" ? 0 : 1;

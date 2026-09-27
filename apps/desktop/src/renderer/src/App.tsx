@@ -367,6 +367,9 @@ export function App() {
     if (resolved.kind === "wait") return;
     if (resolved.kind === "select") {
       setSelection({ repoId: repo.id, worktreeId: resolved.worktreeId });
+      // A repo-name pick must reveal the row even when its primary checkout
+      // was already selected and the user has since scrolled it away.
+      if (pendingReveal.worktreeId === null) requestSidebarReveal(repo.id);
     }
     setPendingReveal(null);
   }, [openBranchWorktreeModal, pendingReveal, repos]);

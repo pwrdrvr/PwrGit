@@ -34,6 +34,15 @@ const base = {
 };
 
 describe("pendingRevealForSearchHit", () => {
+  it("opens the primary checkout when a project name is picked", () => {
+    const hit: RepoSearchHit = { ...base, kind: "repo", name: "PwrAgent" };
+    expect(
+      resolveWorktreeReveal(pendingRevealForSearchHit(hit), [
+        worktree("feature"), worktree("main", true)
+      ])
+    ).toEqual({ kind: "select", worktreeId: "main" });
+  });
+
   it("preserves a remote branch while its repository is still loading", () => {
     const hit: RepoSearchHit = {
       ...base,

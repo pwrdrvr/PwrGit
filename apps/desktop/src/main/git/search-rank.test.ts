@@ -94,10 +94,10 @@ describe("rankSearchHits", () => {
     expect(rankSearchHits([branch, deep], "worktrees")).toEqual([branch, deep]);
   });
 
-  it("keeps bm25's order between two equally-named checkouts", () => {
+  it("puts an exact repo name above an equally-named checkout", () => {
     const first = worktree("release", "/wt/a/release");
     const second = hit({ kind: "repo", name: "release", path: "/repos/release" });
-    expect(rankSearchHits([first, second], "release")).toEqual([first, second]);
+    expect(rankSearchHits([first, second], "release")).toEqual([second, first]);
     expect(rankSearchHits([second, first], "release")).toEqual([second, first]);
   });
 });

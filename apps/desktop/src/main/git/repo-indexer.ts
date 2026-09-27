@@ -776,6 +776,8 @@ export class RepoIndexer {
     const only = scope.allProfiles ? null : scope.profileId;
     const mine = scope.profileId;
 
+    // Exact repo names lead even exact branch/folder matches, so naming a
+    // project cannot lose its row to a busy checkout collection.
     // Exact literal names come first so the intended row survives the result
     // cap — a name the user typed in full, or the final segment of a repo's or
     // a checkout's path, which is that directory's name and is not something
@@ -796,7 +798,9 @@ export class RepoIndexer {
         `SELECT entity_id, kind FROM search_fts
          WHERE search_fts MATCH ? AND kind <> 'change_request'
            AND (? IS NULL OR profile_id = ?)
-         ORDER BY CASE WHEN name = ? COLLATE NOCASE
+         ORDER BY CASE WHEN kind = 'repo' AND name = ? COLLATE NOCASE
+                       THEN -1
+                       WHEN name = ? COLLATE NOCASE
                          OR (kind IN ('repo', 'worktree')
                              AND (path LIKE ? ESCAPE '\\'
                                   OR path LIKE ? ESCAPE '\\'))
@@ -806,7 +810,10 @@ export class RepoIndexer {
                   bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT 60`
       )
-      .all(fts, only, only, query.trim(), leafPosix, leafWindows, prLike, mine) as {
+      .all(
+        fts, only, only, query.trim(), query.trim(),
+        leafPosix, leafWindows, prLike, mine
+      ) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
     }[];
