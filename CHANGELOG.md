@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.22.0 - 2026-09-27
+
+- Repository maintenance - Added garbage collection for one profile or all profiles, with per-repository progress and storage results. Review and safely remove local branches whose upstream is gone, with eligibility rechecked before deletion.
+- Bulk sync - Improved Try pull all and Fetch all with live per-worktree activity, wait states, and completed results; paths now display correctly on Windows.
+- Commit graph - Added author avatars and person cards with identity details, commits and branch tips in view, and verified forge links. Branch and tag labels remain readable as the graph narrows, and scrolling history no longer overlaps its horizontal scrollbar.
+- Pull requests - Fixed commit-to-PR associations on forks so a PR from the upstream repository retains the correct identity even when the fork has a PR with the same number.
+- macOS - Fixed a main-executable identity collision with other Electron apps by assigning PwrGit a unique, versioned UUID before signing, improving how macOS distinguishes its network permissions.
+
 ## v0.21.0 - 2026-09-25
 
 - Forks - Pull now compares a fork with its source, can fetch and fast-forward from upstream, and safely updates the fork with a leased push. The header shows upstream drift and offers separate source-only and fork-only pull choices.
