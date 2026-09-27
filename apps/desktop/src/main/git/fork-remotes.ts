@@ -2,6 +2,8 @@ import {
   err,
   forgeCloneUrls,
   forgeRemoteUrlLike,
+  isSafeForgeHostname,
+  isSafeProjectPath,
   ok,
   parseForgeRemote,
   type ForgeHostMap,
@@ -137,6 +139,114 @@ export function forkRemoteUrl(
   }
   const urls = forgeCloneUrls(hostname, nameWithOwner);
   return protocol === "ssh" ? urls.sshUrl : urls.httpsUrl;
+}
+
+/** Add a discovered fork parent to a checkout cloned from the fork itself.
+ * The parent comes from the forge identity in main, never from renderer input.
+ * An occupied name is left alone unless the user chose where to move it. */
+export async function addForkParentRemote(
+  git: GitExec,
+  cwd: string,
+  parent: { hostname: string; nameWithOwner: string },
+  choice: { name: string; renameExistingTo?: string },
+  forkNameWithOwner: string
+): Promise<Result<{ name: string }>> {
+  const remotes = await readCheckoutRemotes(git, cwd);
+  if (!remotes.ok) return remotes;
+  const origin = remotes.value.find((remote) => remote.name === "origin");
+  if (origin === undefined) {
+    return err({
+      kind: "remote",
+      code: "remote_config_failed",
+      message: "This fork has no origin remote."
+    });
+  }
+  if (
+    parseForgeRemote(origin.url)?.nameWithOwner.toLowerCase() !==
+    forkNameWithOwner.toLowerCase()
+  ) {
+    return err({
+      kind: "remote",
+      code: "remote_config_failed",
+      message: "Origin no longer points at the fork identified by the forge. Refresh forge info and retry."
+    });
+  }
+  if (
+    !isSafeForgeHostname(parent.hostname) ||
+    !isSafeProjectPath(parent.nameWithOwner)
+  ) {
+    return err({
+      kind: "remote",
+      code: "remote_config_failed",
+      message: "The fork parent's address is not a valid remote destination."
+    });
+  }
+  const existing = remotes.value.find(
+    (remote) =>
+      remote.name !== "origin" &&
+      parseForgeRemote(remote.url)?.nameWithOwner.toLowerCase() ===
+        parent.nameWithOwner.toLowerCase()
+  );
+  if (existing !== undefined) {
+    return err({
+      kind: "remote",
+      code: "remote_config_failed",
+      message: `The fork parent is already configured as ${existing.name}.`
+    });
+  }
+  const name = choice.name.trim();
+  const occupied = remotes.value.find((remote) => remote.name === name);
+  const movedTo = choice.renameExistingTo?.trim();
+  const validName = (value: string): boolean =>
+    /^[a-zA-Z0-9][a-zA-Z0-9._/-]*$/.test(value);
+  if (
+    !validName(name) ||
+    name === "origin" ||
+    (occupied !== undefined && (name !== "upstream" || movedTo === undefined)) ||
+    (movedTo !== undefined &&
+      (name !== "upstream" ||
+        occupied === undefined ||
+        !validName(movedTo) ||
+        remotes.value.some((remote) => remote.name === movedTo)))
+  ) {
+    return err({
+      kind: "remote",
+      code: "remote_config_failed",
+      message:
+        "Choose an unused remote name, or move the existing upstream to an unused name."
+    });
+  }
+  const run = async (args: string[]): Promise<Result<void>> => {
+    const raw = await git(args, cwd);
+    if (!raw.ok) return raw;
+    const checked = requireExit0(raw.value, args);
+    return checked.ok ? ok(undefined) : err(checked.error);
+  };
+  if (occupied !== undefined && movedTo !== undefined) {
+    const moved = await run(["remote", "rename", name, movedTo]);
+    if (!moved.ok) return moved;
+  }
+  const url = forkRemoteUrl(
+    remoteProtocol(origin.url),
+    parent.hostname,
+    parent.nameWithOwner,
+    origin.url
+  );
+  const added = await run(["remote", "add", name, url]);
+  if (!added.ok) {
+    if (occupied !== undefined && movedTo !== undefined) {
+      const restored = await run(["remote", "rename", movedTo, name]);
+      if (!restored.ok) {
+        return err({
+          kind: "remote",
+          code: "remote_config_failed",
+          message: `Could not add the fork parent: ${added.error.message}. The previous upstream remains named ${movedTo}; restoring its name failed: ${restored.error.message}`
+        });
+      }
+    }
+    return added;
+  }
+  return ok({ name });
 }
 
 export type ForkRemotePlan = {

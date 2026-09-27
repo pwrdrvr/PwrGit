@@ -1519,6 +1519,11 @@ export interface Commands {
     req: { repoId: string; name: string; fetchUrl: string; pushUrl?: string };
     res: null;
   };
+  /** Add the forge-confirmed fork parent without accepting a URL from the UI. */
+  "remote:addForkParent": {
+    req: { repoId: string; name: string; renameExistingTo?: string };
+    res: { name: string };
+  };
   "remote:update": {
     req: {
       repoId: string;

@@ -13,6 +13,7 @@ import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
+import { addForkParentRemote } from "./fork-remotes";
 import {
   addRemote,
   commitsSince,
@@ -468,6 +469,24 @@ export function registerRemoteHandlers(
     refreshIdentity?.(req.repoId, { force: true });
     refresher.refreshRepoWorktrees(req.repoId);
     return ok(null);
+  });
+
+  bus.register("remote:addForkParent", async (req) => {
+    const repo = repoOf(req.repoId);
+    if (repo === null) return err({ ...notFound, message: "repo not found" });
+    const identity = readIdentity?.(req.repoId);
+    const parent = forkParentOf(req.repoId);
+    if (identity === undefined || parent === null) {
+      return err({ kind: "remote", code: "remote_config_failed", message: "The forge has not identified a fork parent for this repository." });
+    }
+    const result = await operations.runRepository(req.repoId, () =>
+      addForkParentRemote(execGit, repo.path, parent, req, identity.nameWithOwner)
+    );
+    if (!result.ok) return result;
+    logMain("info", "remote", `added fork parent as ${result.value.name} to ${repo.path}`);
+    refreshIdentity?.(req.repoId, { force: true });
+    refresher.refreshRepoWorktrees(req.repoId);
+    return result;
   });
 
   bus.register("remote:update", async (req) => {

@@ -35,7 +35,8 @@ let root: Root;
 let opener: HTMLButtonElement;
 
 beforeEach(() => {
-  dispatchMock.mockImplementation((channel: string) => {
+  dispatchMock.mockImplementation((channel: string, request?: { name?: string }) => {
+    if (channel === "remote:addForkParent") return Promise.resolve(ok({ name: request?.name ?? "upstream" }));
     if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
     if (channel === "pr:openList") {
       return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [] }));
@@ -59,15 +60,15 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-async function open(): Promise<void> {
+async function open(currentRepo = repo, currentRefs = refs, initialTab: "branches" | "remotes" = "branches"): Promise<void> {
   await act(async () => {
     root.render(
       <RepoRefsModal
-        repo={repo}
-        refs={refs}
+        repo={currentRepo}
+        refs={currentRefs}
         focusedWorktree={null}
         now={0}
-        initialTab="branches"
+        initialTab={initialTab}
         onRefresh={() => undefined}
         onRevealWorktree={() => undefined}
         onCreateWorktree={() => undefined}
@@ -124,5 +125,89 @@ describe("RepoRefsModal as a modal", () => {
     await open();
     await act(async () => root.render(null));
     expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe("fork parent remote offer", () => {
+  const fork: Repo = {
+    ...repo,
+    identity: {
+      host: "github",
+      hostname: "github.com",
+      owner: "me",
+      name: "widget",
+      nameWithOwner: "me/widget",
+      visibility: "public",
+      parent: { nameWithOwner: "source/widget", url: "https://github.com/source/widget" }
+    }
+  };
+  const origin = {
+    name: "origin",
+    fetchUrl: "git@github.com:me/widget.git",
+    pushUrl: "git@github.com:me/widget.git",
+    skipFetchAll: false,
+    previewBranches: [],
+    branchCount: 0
+  };
+
+  it("offers one click to add and fetch the discovered parent", async () => {
+    await open(fork, { ...refs, remotes: [origin] }, "remotes");
+    const add = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Add upstream"));
+    expect(add).toBeDefined();
+    await act(async () => add?.click());
+    expect(dispatchMock).toHaveBeenCalledWith("remote:addForkParent", {
+      repoId: "repo-1",
+      name: "upstream"
+    });
+    expect(dispatchMock).toHaveBeenCalledWith("remote:fetchRepo", {
+      repoId: "repo-1",
+      remote: "upstream"
+    });
+  });
+
+  it("offers a custom name or moving an occupied upstream", async () => {
+    const occupied = { ...origin, name: "upstream", fetchUrl: "git@github.com:other/widget.git" };
+    await open(fork, { ...refs, remotes: [origin, occupied] }, "remotes");
+    const configure = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Set up parent remote"));
+    expect(configure).toBeDefined();
+    await act(async () => configure?.click());
+    expect(container.textContent).toContain("Use another name");
+    expect(container.textContent).toContain("Move current upstream");
+    const name = [...container.querySelectorAll("label")].find((label) =>
+      label.textContent?.includes("Parent remote name")
+    )?.querySelector("input");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(name, "parent-source");
+      name?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const add = [...container.querySelectorAll("button")].find((button) => button.textContent === "Add parent remote");
+    await act(async () => add?.click());
+    expect(dispatchMock).toHaveBeenCalledWith("remote:addForkParent", {
+      repoId: "repo-1",
+      name: "parent-source"
+    });
+  });
+
+  it("moves an occupied upstream only after the user chooses that option", async () => {
+    const occupied = { ...origin, name: "upstream", fetchUrl: "git@github.com:other/widget.git" };
+    await open(fork, { ...refs, remotes: [origin, occupied] }, "remotes");
+    const configure = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Set up parent remote"));
+    await act(async () => configure?.click());
+    const move = [...container.querySelectorAll("label")].find((label) => label.textContent?.includes("Move current upstream"));
+    await act(async () => move?.querySelector("input")?.click());
+    const add = [...container.querySelectorAll("button")].find((button) => button.textContent === "Add parent remote");
+    await act(async () => add?.click());
+    expect(dispatchMock).toHaveBeenCalledWith("remote:addForkParent", {
+      repoId: "repo-1",
+      name: "upstream",
+      renameExistingTo: "upstream-2"
+    });
+  });
+
+  it("does not offer a duplicate when a remote already points to the parent", async () => {
+    const parentRemote = { ...origin, name: "source", fetchUrl: "git@github.com:source/widget.git" };
+    await open(fork, { ...refs, remotes: [origin, parentRemote] }, "remotes");
+    expect(container.textContent).not.toContain("This fork has no remote for its parent");
   });
 });
