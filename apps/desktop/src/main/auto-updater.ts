@@ -91,9 +91,11 @@ type ParsedSemver = {
 
 type AutoUpdaterOptions = {
   resolveSelection: () => UpdatesSettings;
+  beforeQuitAndInstall?: () => Promise<void>;
 };
 
 let initialized = false;
+let beforeQuitAndInstall: (() => Promise<void>) | undefined;
 let resolveSelection: () => UpdatesSettings = () => ({
   train: "stable",
   channel: "latest"
@@ -1069,6 +1071,7 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
   if (initialized) return;
   initialized = true;
   resolveSelection = options.resolveSelection;
+  beforeQuitAndInstall = options.beforeQuitAndInstall;
 
   if (!productionUpdatesEnabled()) {
     logMain("info", "updater", "auto-update disabled in non-packaged builds");
@@ -1203,6 +1206,7 @@ export async function installDownloadedAppUpdate(): Promise<AppUpdateInstallResu
   }
   try {
     logMain("info", "updater", `installing downloaded update ${version}`);
+    await beforeQuitAndInstall?.();
     autoUpdater.quitAndInstall();
     return { status: "restarting" };
   } catch (err) {

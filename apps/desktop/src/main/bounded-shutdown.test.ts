@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { drainBeforeQuit } from "./bounded-shutdown";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createQuitDrain, drainBeforeQuit } from "./bounded-shutdown";
 
 describe("bounded quit drain", () => {
   it("waits for diagnostics and agent cleanup", async () => {
@@ -47,5 +47,149 @@ describe("bounded quit drain", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("quit diagnostics barrier", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function setup() {
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    const stopping = new Promise<void>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    const stop = vi.fn(() => stopping);
+    const resumeQuit = vi.fn();
+    const warn = vi.fn();
+    const drain = createQuitDrain({ stop, resumeQuit, warn });
+    const event = { preventDefault: vi.fn() };
+    return { drain, stop, resumeQuit, warn, event, resolve, reject };
+  }
+
+  it("waits for completion, clears the deadline, and passes reentrant quit", async () => {
+    const s = setup();
+    s.resumeQuit.mockImplementation(() => {
+      expect(s.drain.beforeQuit(s.event)).toBe(false);
+    });
+    expect(s.drain.beforeQuit(s.event)).toBe(true);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(s.stop).toHaveBeenCalledOnce();
+    expect(s.resumeQuit).not.toHaveBeenCalled();
+    s.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.resumeQuit).toHaveBeenCalledOnce();
+    expect(s.event.preventDefault).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(s.warn).not.toHaveBeenCalled();
+  });
+
+  it("keeps one deadline across repeated quits and releases a hung stop at 10s", async () => {
+    const s = setup();
+    s.drain.beforeQuit(s.event);
+    await vi.advanceTimersByTimeAsync(9_999);
+    s.drain.beforeQuit(s.event);
+    expect(s.stop).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(1);
+    expect(s.resumeQuit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(s.resumeQuit).toHaveBeenCalledOnce();
+    expect(s.warn).toHaveBeenCalledWith(expect.stringContaining("10000 ms"), undefined);
+    expect(s.drain.beforeQuit(s.event)).toBe(false);
+    expect(s.event.preventDefault).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["resolve", "reject"] as const)("ignores late %s after timeout", async (settle) => {
+    const s = setup();
+    s.drain.beforeQuit(s.event);
+    await vi.advanceTimersByTimeAsync(10_000);
+    if (settle === "resolve") s.resolve();
+    else s.reject(new Error("late failure"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.resumeQuit).toHaveBeenCalledOnce();
+    expect(s.warn).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["throw", "reject"])("releases quit on stop %s even if logging fails", async (mode) => {
+    const error = new Error("stop failed");
+    const resumeQuit = vi.fn();
+    const warn = vi.fn(() => { throw new Error("logger failed"); });
+    const drain = createQuitDrain({
+      stop: () => {
+        if (mode === "throw") throw error;
+        return Promise.reject(error);
+      },
+      resumeQuit,
+      warn
+    });
+    drain.beforeQuit({ preventDefault: vi.fn() });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resumeQuit).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed"), error);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("supports a synchronous stop that reenters quit", async () => {
+    const resumeQuit = vi.fn();
+    const event = { preventDefault: vi.fn() };
+    const stop = vi.fn(() => { drain.beforeQuit(event); });
+    const drain = createQuitDrain({ stop, resumeQuit, warn: vi.fn() });
+    drain.beforeQuit(event);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(event.preventDefault).toHaveBeenCalledTimes(2);
+    expect(resumeQuit).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("lets an update own quit (pending normal quit: %s)", async (normalQuit) => {
+    const s = setup();
+    if (normalQuit) s.drain.beforeQuit(s.event);
+    const flush = s.drain.flushForUpdate();
+    expect(s.drain.flushForUpdate()).toBe(flush);
+    s.drain.beforeQuit(s.event);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(s.stop).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(1);
+    s.resolve();
+    await flush;
+    expect(s.drain.beforeQuit(s.event)).toBe(false);
+    expect(s.resumeQuit).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("releases a hung update flush without resuming normal quit", async () => {
+    const s = setup();
+    s.drain.beforeQuit(s.event);
+    const flush = s.drain.flushForUpdate();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await flush;
+    expect(s.resumeQuit).not.toHaveBeenCalled();
+    expect(s.drain.beforeQuit(s.event)).toBe(false);
+  });
+
+  it("runs the agent's existing deadline alongside diagnostics", async () => {
+    let finishDiagnostics!: () => void;
+    const diagnostics = vi.fn(() => new Promise<void>((resolve) => { finishDiagnostics = resolve; }));
+    const agent = vi.fn(() => new Promise<void>(() => {}));
+    const resumeQuit = vi.fn();
+    const drain = createQuitDrain({
+      stop: async () => {
+        await Promise.allSettled([diagnostics(), drainBeforeQuit([agent], 1_500)]);
+      },
+      resumeQuit,
+      warn: vi.fn()
+    });
+    drain.beforeQuit({ preventDefault: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(agent).toHaveBeenCalledOnce();
+    expect(resumeQuit).not.toHaveBeenCalled();
+    finishDiagnostics();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resumeQuit).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

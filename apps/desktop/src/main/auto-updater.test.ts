@@ -157,9 +157,10 @@ describe("auto updater", () => {
     });
   }
 
-  async function startUpdater() {
+  async function startUpdater(beforeQuitAndInstall?: () => Promise<void>) {
     const updater = await importAutoUpdater();
     updater.initAutoUpdater({
+      ...(beforeQuitAndInstall ? { beforeQuitAndInstall } : {}),
       resolveSelection: () => ({
         channel: resolveChannel,
         train: resolveTrain
@@ -1097,6 +1098,20 @@ describe("auto updater", () => {
       status: "restarting"
     });
     expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes shutdown before handing the transition to the updater", async () => {
+    const flush = createDeferred<void>();
+    const beforeQuitAndInstall = vi.fn(() => flush.promise);
+    const updater = await startUpdater(beforeQuitAndInstall);
+    updateEventHandlers.get("update-downloaded")?.({ version: "1.0.0-beta.8" });
+    const installing = updater.installDownloadedAppUpdate();
+    await delayTicks();
+    expect(beforeQuitAndInstall).toHaveBeenCalledOnce();
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    flush.resolve();
+    await expect(installing).resolves.toEqual({ status: "restarting" });
+    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledOnce();
   });
 });
 
