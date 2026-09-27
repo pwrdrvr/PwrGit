@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.23.0 - 2026-09-27
+
+- Forks - Added a forge-verified parent-remote suggestion for repositories cloned from a fork. Add and fetch the parent in one step, or choose a safe name when `upstream` is already in use, so parent changes appear in fork status and sync controls.
+- Updates - Improved Settings so discovering a newer release or changing the update track starts its download automatically, while preserving canceled downloads and avoiding checks for unrelated settings changes.
+- Search - Fixed Cmd+K ranking so an exact repository name remains visible above similarly named worktrees, and choosing a repository reveals it in the sidebar.
+- Diagnostics - Fixed quitting during a capture or installing a downloaded update to flush diagnostics while renderer windows are still available, with a bounded wait if capture stops responding.
+
 ## v0.22.0 - 2026-09-27
 
 - Repository maintenance - Added garbage collection for one profile or all profiles, with per-repository progress and storage results. Review and safely remove local branches whose upstream is gone, with eligibility rechecked before deletion.
