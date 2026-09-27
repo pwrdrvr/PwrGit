@@ -21,6 +21,7 @@ import {
   isSafeForgeHostname,
   isSafeProjectPath,
   ok,
+  parseCloneRemote,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -705,6 +706,7 @@ export class CloneService {
       profileId: string;
       nameWithOwner: string;
       sourcePath?: string;
+      sourceUrl?: string;
       protocol: CloneProtocol;
       parentPath: string;
       host?: ForgeHost;
@@ -721,6 +723,17 @@ export class CloneService {
         message: `No profile "${input.profileId}"`
       });
     }
+    const explicit = input.sourceUrl === undefined
+      ? null
+      : parseCloneRemote(input.sourceUrl);
+    if (input.sourceUrl !== undefined &&
+        (explicit === null || input.sourcePath !== undefined)) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: "Enter a valid network Git URL."
+      });
+    }
     const local =
       input.sourcePath === undefined
         ? null
@@ -729,7 +742,7 @@ export class CloneService {
     const nameWithOwner =
       local?.ok === true
         ? local.value.nameWithOwner
-        : normalizeRepositoryPath(input.nameWithOwner);
+        : explicit?.nameWithOwner ?? normalizeRepositoryPath(input.nameWithOwner);
     if (nameWithOwner === null) {
       return err({
         kind: "validation",
@@ -744,9 +757,9 @@ export class CloneService {
         message: "Choose SSH, HTTPS, or the forge CLI."
       });
     }
-    const host = local?.ok === true ? "other" : (input.host ?? "github");
+    const host = local?.ok === true ? "other" : (explicit?.host ?? input.host ?? "github");
     const hostname =
-      local?.ok === true ? "local" : (input.hostname ?? defaultHostname(host));
+      local?.ok === true ? "local" : (explicit?.hostname ?? input.hostname ?? defaultHostname(host));
     // The hostname reaches this method from the renderer, and it is
     // interpolated straight into a git remote. Anything outside a bare
     // hostname could smuggle options or another host into the URL.
@@ -781,6 +794,7 @@ export class CloneService {
         hostname,
         nameWithOwner,
         protocol: input.protocol,
+        ...(explicit === null ? {} : { sourceUrl: explicit.sourceUrl }),
         ...(local?.ok === true ? { localPath: local.value.localPath } : {})
       },
       destination,
@@ -836,6 +850,7 @@ export class CloneService {
       nameWithOwner: string;
       protocol: CloneProtocol;
       localPath?: string;
+      sourceUrl?: string;
     },
     destination: string,
     workingDirectory: string,
@@ -843,9 +858,10 @@ export class CloneService {
     signal?: AbortSignal
   ): Promise<Result<true>> {
     const readProgress = createCloneProgressParser(onProgress);
-    if (source.localPath !== undefined) {
+    const directSource = source.sourceUrl ?? source.localPath;
+    if (directSource !== undefined) {
       const cloned = await this.git(
-        ["clone", "--progress", "--", source.localPath, destination],
+        ["clone", "--progress", "--", directSource, destination],
         workingDirectory,
         {
           onStderr: readProgress,

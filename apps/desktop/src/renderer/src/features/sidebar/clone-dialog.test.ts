@@ -118,7 +118,6 @@ describe("clone dialog filtering", () => {
     "huntharo/",
     "x-code-clone",
     "https://github.com/huntharo/x-code-clone/issues",
-    "git clone https://github.com/huntharo/x-code-clone.git",
     "gh repo clone huntharo/x-code-clone ./destination"
   ])("does not treat %s as an exact repository", (input) => {
     expect(exactRepository(input)).toBeNull();
@@ -128,7 +127,8 @@ describe("clone dialog filtering", () => {
     expect(exactRepository("https://gitlab.com/huntharo/x-code-clone")).toEqual({
       host: "gitlab",
       hostname: "gitlab.com",
-      nameWithOwner: "huntharo/x-code-clone"
+      nameWithOwner: "huntharo/x-code-clone",
+      sourceUrl: "https://gitlab.com/huntharo/x-code-clone"
     });
   });
 
@@ -143,14 +143,16 @@ describe("clone dialog filtering", () => {
     expect(exactRepository(url)).toEqual({
       host: "other",
       hostname: "gitlab.acme.io",
-      nameWithOwner: "acme/platform/billing"
+      nameWithOwner: "acme/platform/billing",
+      sourceUrl: url
     });
     expect(
       exactRepository(url, "github", { "gitlab.acme.io": "gitlab" })
     ).toEqual({
       host: "gitlab",
       hostname: "gitlab.acme.io",
-      nameWithOwner: "acme/platform/billing"
+      nameWithOwner: "acme/platform/billing",
+      sourceUrl: url
     });
   });
 
@@ -169,8 +171,9 @@ describe("clone dialog filtering", () => {
     ).toMatchObject({
       host: "gitlab",
       hostname: "gitlab.acme.io",
-      sshUrl: "git@gitlab.acme.io:acme/platform/billing.git",
-      httpsUrl: "https://gitlab.acme.io/acme/platform/billing.git"
+      sourceUrl: "git@gitlab.acme.io:acme/platform/billing.git",
+      sshUrl: "",
+      httpsUrl: ""
     });
   });
 
@@ -215,7 +218,10 @@ describe("clone dialog filtering", () => {
         "ssh://git@github.com/huntharo/x-code-clone.git",
         "https://github.com/huntharo/x-code-clone",
         "gh repo clone huntharo/x-code-clone"
-      ].map((input) => exactRepository(input))
+      ].map((input) => {
+        const exact = exactRepository(input)!;
+        return { host: exact.host, hostname: exact.hostname, nameWithOwner: exact.nameWithOwner };
+      })
     ).toEqual(
       Array.from({ length: 5 }, () => ({
         host: "github",
@@ -295,13 +301,16 @@ describe("SSH host verification recovery", () => {
 });
 
 
-describe("V8 clone coordinates", () => {
-  it("keeps the documented HTTPS source outside the forge integrations", () => {
-    const exact = exactRepository("https://chromium.googlesource.com/v8/v8.git");
-    expect(exact).toEqual({ host: "other", hostname: "chromium.googlesource.com", nameWithOwner: "v8/v8" });
-    expect(unverifiedCloneRepository(exact)).toMatchObject({
-      host: "other", visibility: "unknown",
-      httpsUrl: "https://chromium.googlesource.com/v8/v8.git"
-    });
+describe("explicit clone URLs", () => {
+  it.each([
+    "https://chromium.googlesource.com/v8/v8.git",
+    "https://git.example:8443/group/nested/repo",
+    "ssh://reviewer@git.example:29418/group/nested/repo.git",
+    "git@git.example:group/nested/repo.git",
+    "git://git.example/group/repo.git"
+  ])("preserves %s without inventing endpoints", (sourceUrl) => {
+    const exact = exactRepository(`git clone ${sourceUrl}`);
+    expect(exact).toMatchObject({ sourceUrl, host: "other" });
+    expect(unverifiedCloneRepository(exact)).toMatchObject({ sourceUrl, sshUrl: "", httpsUrl: "", visibility: "unknown" });
   });
 });

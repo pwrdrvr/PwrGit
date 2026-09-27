@@ -1,3 +1,4 @@
+import { parseCloneRemote } from "./forge-remote";
 import { describe, expect, it } from "vitest";
 import {
   canonicalForgeHostname,
@@ -263,5 +264,12 @@ describe("forgeRemoteUrlLike", () => {
     for (const value of ["", "   ", "/srv/git/widget-core.git", "widget-core"]) {
       expect(forgeRemoteUrlLike(value, "octo-dev/widget-core")).toBeNull();
     }
+  });
+});
+
+
+describe("parseCloneRemote", () => {
+  it.each(["--upload-pack=evil", "ext::evil", "file:///tmp/repo", "https://user:secret@git.example/group/repo", "https://git.example/group/repo?token=secret", "https://git.example/group/../repo", "https://git.example/group/repo\n--config=evil"])("rejects unsupported or ambiguous input %s", (input) => {
+    expect(parseCloneRemote(input)).toBeNull();
   });
 });
