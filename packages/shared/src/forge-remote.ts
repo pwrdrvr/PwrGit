@@ -382,3 +382,28 @@ export function forgeCloneUrls(
     httpsUrl: `https://${hostname}/${nameWithOwner}.git`
   };
 }
+
+/** Explicit network clone targets use Git's transport, not a forge's URL
+ * template. Keep the original bytes (including user, port and .git suffix).
+ * Limit this path to the network forms the clone dialog understands. */
+export function parseCloneRemote(
+  input: string,
+  overrides: ForgeHostMap = {}
+): (ForgeRemote & { sourceUrl: string }) | null {
+  const sourceUrl = input.trim();
+  if (/[\s\\?#]/.test(sourceUrl)) return null;
+  if (/^(?:https?|ssh|git):\/\//i.test(sourceUrl)) {
+    try {
+      const url = new URL(sourceUrl);
+      if (url.password !== "" || url.username.includes("%")) return null;
+    } catch {
+      return null;
+    }
+  } else if (!/^[\w.-]+@[\w.-]+:/.test(sourceUrl)) {
+    return null;
+  }
+  const remote = parseForgeRemote(sourceUrl, overrides);
+  if (remote === null || !isSafeForgeHostname(remote.hostname) ||
+      !isSafeProjectPath(remote.nameWithOwner)) return null;
+  return { ...remote, sourceUrl };
+}

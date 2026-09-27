@@ -1125,6 +1125,8 @@ export type CloneRepository = {
   parent?: ForgeRepoRef;
   /** Fork-network root, when it differs from `parent`. */
   root?: ForgeRepoRef;
+  /** Explicit Git URL; bypasses forge URL and transport selection. */
+  sourceUrl?: string;
   sshUrl: string;
   httpsUrl: string;
   updatedAt?: string;

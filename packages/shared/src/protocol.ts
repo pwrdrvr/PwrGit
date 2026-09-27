@@ -875,6 +875,8 @@ export interface Commands {
       nameWithOwner: string;
       /** Canonical local repository path; bypasses forge URL construction. */
       sourcePath?: string;
+      /** Explicit network Git URL, preserved without transport rewriting. */
+      sourceUrl?: string;
       protocol: CloneProtocol;
       parentPath: string;
       /** Which forge to clone from. Defaults to GitHub for older callers. */
