@@ -177,3 +177,37 @@ describe("searchAll profile scope", () => {
     expect(hits.filter((hit) => hit.kind === "local_branch").length).toBe(41);
   });
 });
+
+describe("exact project navigation", () => {
+  it.each([false, true])(
+    "keeps the named repo first beyond the cap (allProfiles=%s)",
+    (allProfiles) => {
+      db.prepare(
+        "UPDATE repos SET name = 'PwrAgent' WHERE id IN ('repo-ours', 'repo-theirs')"
+      ).run();
+      const insert = db.prepare(
+        "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES (?, ?, ?, ?, 0)"
+      );
+      for (let n = 0; n < 80; n++) {
+        for (const owner of ["ours", "theirs"]) {
+          insert.run(
+            `noise-${owner}-${n}`, `repo-${owner}`,
+            "pwragent", `/wt/${owner}/${n}/pwragent`
+          );
+        }
+      }
+      for (const query of ["PwrAgent", "pwragent", " PWRAGENT "]) {
+        const hits = indexer.searchAll(query, { profileId: mine, allProfiles });
+        expect(hits[0]).toMatchObject({
+          kind: "repo", repoId: "repo-ours", name: "PwrAgent"
+        });
+        expect(hits).toHaveLength(60);
+        if (allProfiles) {
+          expect(hits[1]).toMatchObject({ kind: "repo", repoId: "repo-theirs" });
+        } else {
+          expect(hits.every((hit) => hit.profileId === mine)).toBe(true);
+        }
+      }
+    }
+  );
+});
