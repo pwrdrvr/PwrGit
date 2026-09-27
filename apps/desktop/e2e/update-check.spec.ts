@@ -129,3 +129,58 @@ test("a Linux build says so rather than showing progress it cannot make", async 
   // Not dressed as a failure either — nothing is broken.
   await expect(toast.locator(".app-toast__eyebrow--info")).toBeVisible();
 });
+
+
+test("Settings offers a solid primary restart action in both themes", async ({}, testInfo) => {
+  test.skip(LINUX, LINUX_SKIP);
+  handle = await launchApp({ updateStepMs: 20 });
+  const { app } = handle;
+  const opened = app.waitForEvent("window");
+  await app.evaluate(({ Menu }) => {
+    for (const top of Menu.getApplicationMenu()?.items ?? []) {
+      const item = top.submenu?.items.find((entry) => entry.label === "Settings…");
+      if (item) { item.click(); return; }
+    }
+    throw new Error("Settings menu missing");
+  });
+  const settings = await opened;
+  const nativeWindow = await app.browserWindow(settings);
+  await nativeWindow.evaluate((window) => window.setIgnoreMouseEvents(true));
+  await settings.locator(".settings-nav__button", { hasText: "Updates" }).click();
+  await settings.getByRole("button", { name: "Check for Update", exact: true }).click();
+  const restart = settings.getByRole("button", { name: `Restart to Update (${FAKE_VERSION})`, exact: true });
+  await expect(restart).toBeVisible();
+  await settings.mouse.move(5, 5);
+  await expect.poll(() => restart.evaluate((button) => button.matches(":hover"))).toBe(false);
+  for (const theme of ["dark", "light"]) {
+    await settings.evaluate((value) => {
+      if (value === "light") document.documentElement.dataset.theme = "light";
+      else delete document.documentElement.dataset.theme;
+    }, theme);
+    const colors = await restart.evaluate((button) => {
+      const style = getComputedStyle(button);
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--accent)";
+      probe.style.color = "var(--accent-on)";
+      button.append(probe);
+      const expected = getComputedStyle(probe);
+      const bright = document.createElement("span");
+      bright.style.backgroundColor = "var(--accent-bright)";
+      button.append(bright);
+      const hoverAccent = getComputedStyle(bright).backgroundColor;
+      bright.remove();
+      const result = { hoverAccent, background: style.backgroundColor, foreground: style.color,
+        accent: expected.backgroundColor, onAccent: expected.color };
+      probe.remove();
+      return result;
+    });
+    expect(colors.background).toBe(colors.accent);
+    expect(colors.foreground).toBe(colors.onAccent);
+    await settings.screenshot({ path: testInfo.outputPath(`update-restart-${theme}.png`) });
+    await restart.hover();
+    await expect(restart).toHaveCSS("background-color", colors.hoverAccent);
+    await expect(restart).toHaveCSS("color", colors.onAccent);
+    await settings.mouse.move(5, 5);
+    await expect.poll(() => restart.evaluate((button) => button.matches(":hover"))).toBe(false);
+  }
+});

@@ -36,7 +36,7 @@ import { openAppDocumentWindow } from "./app-document-window";
 import { drainBeforeQuit } from "./bounded-shutdown";
 import {
   initAutoUpdater,
-  reconcileDownloadedUpdateEligibility,
+  handleUpdateSelectionChange,
   registerAppUpdateHandlers
 } from "./auto-updater";
 import { CommandBus, type CommandContext } from "./command-bus";
@@ -1140,7 +1140,7 @@ if (!gotSingleInstanceLock) {
     });
     registerAppUpdateHandlers(bus);
     settings.onWrite(() => {
-      reconcileDownloadedUpdateEligibility();
+      handleUpdateSelectionChange();
     });
     initAutoUpdater({
       resolveSelection: () =>
