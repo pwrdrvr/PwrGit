@@ -19,7 +19,7 @@ import { dispatch, subscribe } from "../lib/pwrgit";
  * Kept fresh from two events because two different things change the answer:
  * `settings:changed` carries a renamed host or a flipped switch, and
  * `forge:statusChanged` is CLI enumeration landing a second or two after
- * launch — the window that asked first would otherwise show no chips at all
+ * launch — the window that asked first would otherwise retain stale host names
  * until something else re-rendered it.
  */
 export type ForgeNaming = {
@@ -29,20 +29,11 @@ export type ForgeNaming = {
   /** The host→kind map main itself resolves with, for parsing a remote URL
    *  the same way main would. */
   overrides: ForgeHostMap;
-  /**
-   * Whether a forge chip says anything worth the room.
-   *
-   * More than one forge host switched on. With one, every chip in the window
-   * would read the same word — the same reason the repo identity marks draw
-   * no "source" badge when almost every repo is one.
-   */
-  showChips: boolean;
 };
 
 const EMPTY: ForgeNaming = {
   displays: new Map(),
-  overrides: {},
-  showChips: false
+  overrides: {}
 };
 
 let naming: ForgeNaming = EMPTY;
@@ -69,8 +60,7 @@ function notify(): void {
 function signature(value: ForgeNaming): string {
   return JSON.stringify([
     [...value.displays].sort(([a], [b]) => a.localeCompare(b)),
-    Object.entries(value.overrides).sort(([a], [b]) => a.localeCompare(b)),
-    value.showChips
+    Object.entries(value.overrides).sort(([a], [b]) => a.localeCompare(b))
   ]);
 }
 
@@ -112,8 +102,7 @@ function apply(rows: ForgeHostRow[], overrides: ForgeHostMap): void {
     // to the same word — or that share a product, and so a mark — have to be
     // told apart, and only the full set knows.
     displays: resolveForgeHostDisplays(namingSet(rows, overrides)),
-    overrides,
-    showChips: rows.filter((row) => row.enabled).length > 1
+    overrides
   };
   const nextSignature = signature(next);
   if (nextSignature === (namingSignature ??= signature(naming))) return;
@@ -156,8 +145,7 @@ function subscribeStore(listener: () => void): () => void {
 
 const getSnapshot = (): ForgeNaming => naming;
 
-/** What the forge hosts in this window are called, and whether saying so
- *  helps. */
+/** What the forge hosts in this window are called. */
 export function useForgeNaming(): ForgeNaming {
   return useSyncExternalStore(subscribeStore, getSnapshot, getSnapshot);
 }

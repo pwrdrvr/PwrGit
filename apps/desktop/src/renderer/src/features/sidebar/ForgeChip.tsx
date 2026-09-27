@@ -1,3 +1,4 @@
+import { dispatch } from "../../lib/pwrgit";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import type { ForgeChipView } from "./forge-chip";
 import { ForgeMark } from "./ForgeMark";
@@ -17,10 +18,7 @@ import { ForgeMark } from "./ForgeMark";
  * only one of these that ever rendered its `title`, which is why the mismatch
  * was visible rather than theoretical.)
  *
- * `aria-hidden` because the row that contains it already states the same facts
- * in its description (`identityDescription`) — announcing "gitlab.com" twice,
- * once as a bare word, is worse than once in a sentence. That is also what
- * makes a glyph-only chip safe: nothing depends on the mark being read.
+ * Linked chips expose their destination to assistive technology.
  *
  * The name and the count are separate spans, because only one of them may be
  * dropped: the name ellipsises when a collision has left it a full hostname,
@@ -44,13 +42,23 @@ import { ForgeMark } from "./ForgeMark";
  * towered over — at the notches either side.
  */
 const MARK_SIZE = { bare: 12, inPill: 11 } as const;
-export function ForgeChip({ chip }: { chip: ForgeChipView }) {
+export function ForgeChip({ chip, url = null }: { chip: ForgeChipView; url?: string | null }) {
   const tip = useViewportTooltip();
+  const Tag = url === null ? "span" : "a";
   return (
-    <span
-      aria-hidden="true"
+    <Tag
+      aria-hidden={url === null ? true : undefined}
+      href={url ?? undefined}
+      aria-label={url === null ? undefined : `Open repository in browser: ${url}`}
+      onClick={url === null ? undefined : (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        tip.hide();
+        void dispatch("shell:openExternal", { url });
+      }}
+      onKeyDown={url === null ? undefined : (event) => event.stopPropagation()}
       className={`forge-chip${chip.name === null ? " forge-chip--mark" : ""}`}
-      {...hoverTooltip(tip, chip.title)}
+      {...hoverTooltip(tip, url === null ? chip.title : `${chip.title}. Open repository in browser: ${url}`)}
     >
       {chip.kind !== null && (
         <ForgeMark
@@ -65,6 +73,6 @@ export function ForgeChip({ chip }: { chip: ForgeChipView }) {
         <span className="forge-chip__more">+{chip.others}</span>
       )}
       {tip.tooltipNode}
-    </span>
+    </Tag>
   );
 }

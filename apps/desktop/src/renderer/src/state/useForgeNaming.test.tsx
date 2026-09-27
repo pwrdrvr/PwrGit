@@ -63,12 +63,10 @@ async function mount(): Promise<{
   };
 }
 
-it("stays quiet while one forge host is on, and speaks once a second is", async () => {
-  // The chip's whole job is telling two rows apart. With one host every chip
-  // in the sidebar would read the same word.
+it("names both single and multiple forge hosts", async () => {
   answer([row({ host: "github.com" })]);
   const one = await mount();
-  expect(one.latest().showChips).toBe(false);
+  expect(one.latest().displays.get("github.com")?.kind).toBe("github");
   await one.unmount();
 
   resetForgeNamingForTests();
@@ -77,7 +75,7 @@ it("stays quiet while one forge host is on, and speaks once a second is", async 
     row({ host: "gitlab.com", kind: "gitlab", cli: "glab" })
   ]);
   const two = await mount();
-  expect(two.latest().showChips).toBe(true);
+  expect(two.latest().displays.size).toBe(2);
   // One host per product, so each chip is a bare mark.
   expect(two.latest().displays.get("github.com")).toEqual({
     kind: "github",
@@ -91,15 +89,14 @@ it("stays quiet while one forge host is on, and speaks once a second is", async 
   await two.unmount();
 });
 
-it("counts hosts that are ON, not hosts that have a row", async () => {
-  // A host switched off in Settings spawns nothing and holds no repos worth
-  // distinguishing; two rows with one switch on is still one forge.
+it("keeps disabled forge identities available", async () => {
   answer([
     row({ host: "github.com" }),
     row({ host: "gitlab.com", kind: "gitlab", cli: "glab", enabled: false })
   ]);
   const probe = await mount();
-  expect(probe.latest().showChips).toBe(false);
+  expect(probe.latest().displays.get("github.com")?.kind).toBe("github");
+  expect(probe.latest().displays.get("gitlab.com")?.kind).toBe("gitlab");
   await probe.unmount();
 });
 
@@ -145,11 +142,11 @@ it("re-reads when a host is renamed in another window", async () => {
 
 it("re-reads when CLI enumeration lands after the window opened", async () => {
   // Enumeration is two subprocesses. The first window asks before they
-  // finish, so without this event it would show no chips until something
+  // finish, so without this event it would keep stale names until something
   // else re-rendered it.
   answer([row({ host: "github.com" })]);
   const probe = await mount();
-  expect(probe.latest().showChips).toBe(false);
+  expect(probe.latest().displays.has("gitlab.com")).toBe(false);
 
   answer([
     row({ host: "github.com" }),
@@ -158,7 +155,7 @@ it("re-reads when CLI enumeration lands after the window opened", async () => {
   await act(async () => {
     handlers.get("forge:statusChanged")?.({ forges: [] });
   });
-  expect(probe.latest().showChips).toBe(true);
+  expect(probe.latest().displays.get("gitlab.com")?.kind).toBe("gitlab");
   await probe.unmount();
 });
 
