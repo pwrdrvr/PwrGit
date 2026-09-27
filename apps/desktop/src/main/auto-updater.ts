@@ -61,7 +61,13 @@ const DEV_FAKE_UPDATE_PERCENT_STEPS = [0, 15, 34, 58, 79, 93, 100];
 const DEV_FAKE_UPDATE_TOTAL_BYTES = 118_000_000;
 
 type UpdateSelectionKey = `${UpdateTrain}:${UpdateChannel}`;
-type AppUpdateCheckTrigger = "startup" | "periodic" | "manual" | "menu";
+type AppUpdateCheckTrigger =
+  | "startup"
+  | "periodic"
+  | "manual"
+  | "menu"
+  | "selection"
+  | "settings";
 
 type GitHubRelease = {
   assets?: GitHubReleaseAsset[];
@@ -96,6 +102,7 @@ type AutoUpdaterOptions = {
 
 let initialized = false;
 let beforeQuitAndInstall: (() => Promise<void>) | undefined;
+let observedSelection: UpdateSelectionKey | undefined;
 let resolveSelection: () => UpdatesSettings = () => ({
   train: "stable",
   channel: "latest"
@@ -188,6 +195,17 @@ function setUpdateStatus(nextStatus: AppUpdateStatus): void {
 export function readAppUpdateStatus(): AppUpdateStatus {
   reconcileDownloadedUpdateEligibility();
   return updateStatus;
+}
+
+/** Called after settings writes; unrelated preferences must not start checks. */
+export function handleUpdateSelectionChange(): void {
+  const selection = currentUpdateSelectionKey();
+  reconcileDownloadedUpdateEligibility(selection);
+  if (selection === observedSelection) return;
+  observedSelection = selection;
+  if (initialized && productionUpdatesEnabled()) {
+    runBackgroundUpdateCheck("selection");
+  }
 }
 
 function configureAutoUpdaterChannel(
@@ -392,7 +410,9 @@ async function runUpdateCheck(
   const release = await readAppUpdateReleaseForChannel(
     selected.channel,
     selected.train,
-    trigger === "manual" || trigger === "menu" ? 0 : undefined
+    trigger === "manual" || trigger === "menu" || trigger === "selection"
+      ? 0
+      : undefined
   );
   const currentVersion = autoUpdater.currentVersion?.version ?? "unknown";
   if (!release?.tag_name) {
@@ -498,7 +518,9 @@ async function runAvailableUpdateDownload(
 // limiting makes a rejection routine rather than exceptional — without this
 // the startup check and every hourly tick raise an unhandled rejection in
 // main, which has no process-level handler.
-function runBackgroundUpdateCheck(trigger: "startup" | "periodic"): void {
+function runBackgroundUpdateCheck(
+  trigger: "startup" | "periodic" | "selection" | "settings"
+): void {
   void checkForAppUpdatesNow(trigger).catch((err: unknown) => {
     logMain(
       "warn",
@@ -1037,6 +1059,22 @@ export async function readAppUpdateReleaseVersions(): Promise<AppUpdateReleaseVe
   try {
     const releases = await readGitHubReleases();
     const selected = selectPublishedUpdateReleases(releases);
+    // The matrix can discover a release between hourly checks. Start the
+    // download from the same cached list, without delaying the Settings read.
+    const selection = currentSelection();
+    const offered = releaseForSelection(
+      selectAppUpdateReleases(releases),
+      selection.channel,
+      selection.train
+    )?.tag_name?.replace(/^v/i, "");
+    if (
+      initialized &&
+      offered &&
+      compareSemver(offered, autoUpdater.currentVersion?.version ?? "unknown") > 0 &&
+      !(updateStatus.status === "canceled" && updateStatus.version === offered)
+    ) {
+      runBackgroundUpdateCheck("settings");
+    }
     return {
       fetchedAt: releaseCache?.fetchedAt ?? Date.now(),
       stable: {
@@ -1072,6 +1110,7 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
   initialized = true;
   resolveSelection = options.resolveSelection;
   beforeQuitAndInstall = options.beforeQuitAndInstall;
+  observedSelection = currentUpdateSelectionKey();
 
   if (!productionUpdatesEnabled()) {
     logMain("info", "updater", "auto-update disabled in non-packaged builds");

@@ -14049,7 +14049,7 @@ body.is-col-resizing {
 .settings-update-channel {
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 8px;
 }
 .settings-update-channel__restart {

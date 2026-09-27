@@ -233,6 +233,79 @@ describe("auto updater", () => {
     expect(checkForUpdatesMock).toHaveBeenCalledTimes(2);
   });
 
+  it("downloads and offers restart when Settings discovers a release after startup", async () => {
+    mockGitHubReleases([]);
+    const updater = await startUpdater();
+    await updater.checkForAppUpdatesNow("startup");
+    expect(checkForUpdatesMock).not.toHaveBeenCalled();
+    mockGitHubReleases();
+    await vi.advanceTimersByTimeAsync(updater.APP_UPDATE_RELEASE_CACHE_TTL_MS);
+    checkForUpdatesMock.mockImplementation(async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.0-beta.8" },
+      downloadPromise: Promise.resolve().then(() => {
+        updateEventHandlers.get("update-downloaded")?.({ version: "1.0.0-beta.8" });
+        return [];
+      })
+    }));
+
+    await Promise.all([
+      updater.readAppUpdateReleaseVersions(),
+      updater.readAppUpdateReleaseVersions()
+    ]);
+    await vi.waitFor(() => expect(updater.readAppUpdateStatus()).toEqual({
+      status: "downloaded", version: "1.0.0-beta.8"
+    }));
+    expect(autoUpdaterMock.autoDownload).toBe(true);
+    expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(emitEventMock).toHaveBeenCalledWith("app:updateStatus", {
+      status: "downloaded", version: "1.0.0-beta.8"
+    });
+  });
+
+  it("checks a changed track immediately but ignores unrelated settings writes", async () => {
+    mockGitHubReleases([]);
+    const updater = await startUpdater();
+    await updater.checkForAppUpdatesNow("startup");
+    expect(checkForUpdatesMock).not.toHaveBeenCalled();
+    updater.handleUpdateSelectionChange();
+    expect(checkForUpdatesMock).not.toHaveBeenCalled();
+
+    mockGitHubReleases([githubRelease("v1.1.0-prerelease", { prerelease: true })]);
+    checkForUpdatesMock.mockImplementation(async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.1.0-prerelease" },
+      downloadPromise: Promise.resolve().then(() => {
+        updateEventHandlers.get("update-downloaded")?.({ version: "1.1.0-prerelease" });
+        return [];
+      })
+    }));
+    resolveChannel = "prerelease";
+    updater.handleUpdateSelectionChange();
+    await vi.waitFor(() => expect(checkForUpdatesMock).toHaveBeenCalledTimes(1));
+    expect(setFeedURLMock).toHaveBeenCalledWith(expect.objectContaining({
+      url: expect.stringContaining("v1.1.0-prerelease")
+    }));
+    expect(updater.readAppUpdateStatus()).toEqual({
+      status: "downloaded", version: "1.1.0-prerelease"
+    });
+    updater.handleUpdateSelectionChange();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not restart a canceled download when Settings reads releases", async () => {
+    const updater = await startUpdater();
+    await updater.checkForAppUpdatesNow("startup");
+    updateEventHandlers.get("update-cancelled")?.({ version: "1.0.0-beta.8" });
+    checkForUpdatesMock.mockClear();
+    await updater.readAppUpdateReleaseVersions();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(checkForUpdatesMock).not.toHaveBeenCalled();
+  });
+
   it("does not check again when an update is already downloaded for the selected channel", async () => {
     const updater = await startUpdater();
     await vi.waitFor(() => {

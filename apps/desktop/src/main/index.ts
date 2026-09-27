@@ -36,7 +36,7 @@ import { openAppDocumentWindow } from "./app-document-window";
 import { createQuitDrain, drainBeforeQuit } from "./bounded-shutdown";
 import {
   initAutoUpdater,
-  reconcileDownloadedUpdateEligibility,
+  handleUpdateSelectionChange,
   registerAppUpdateHandlers
 } from "./auto-updater";
 import { CommandBus, type CommandContext } from "./command-bus";
@@ -1159,7 +1159,7 @@ if (!gotSingleInstanceLock) {
     app.on("before-quit", (event) => quitDrain.beforeQuit(event));
     registerAppUpdateHandlers(bus);
     settings.onWrite(() => {
-      reconcileDownloadedUpdateEligibility();
+      handleUpdateSelectionChange();
     });
     initAutoUpdater({
       beforeQuitAndInstall: () => quitDrain.flushForUpdate(),
