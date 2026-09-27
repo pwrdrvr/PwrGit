@@ -51,6 +51,7 @@ import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import { BulkSyncDialog } from "./BulkSyncDialog";
+import { MaintenanceDialog } from "./MaintenanceDialog";
 import { PruneWorktreesDialog } from "./PruneWorktreesDialog";
 import {
   DEFAULT_LENS,
@@ -341,6 +342,7 @@ export function Sidebar({
     "fetch" | "soft-pull" | null
   >(null);
   const [pruning, setPruning] = useState(false);
+  const [maintenance, setMaintenance] = useState(false);
   const [sel, setSel] = useState<Selection>({
     repoId: "",
     ids: EMPTY_IDS,
@@ -1168,7 +1170,7 @@ export function Sidebar({
             <button
               className="bulk-sync-action"
               disabled={activeProfile === null || repos.length === 0}
-              {...hoverTooltip(tip, "Fetch configured remotes once for every repository")}
+              {...hoverTooltip(tip, "Fetch and prune stale remote-tracking references in every repository; local branches are kept")}
               onClick={() => setBulkSyncMode("fetch")}
             >
               <RefreshGlyph size={12} />
@@ -1199,6 +1201,13 @@ export function Sidebar({
             >
               <PruneGlyph />
               <span className="bulk-sync-action__label">Prune worktrees…</span>
+            </button>
+          </div>
+          <div className="prune-actions" aria-label="Maintain repositories">
+            <button className="bulk-sync-action" disabled={activeProfile === null}
+              {...hoverTooltip(tip, "Collect Git garbage across repositories and review leftover local branches")}
+              onClick={() => setMaintenance(true)}>
+              <PruneGlyph /><span className="bulk-sync-action__label">Garbage collection…</span>
             </button>
           </div>
           {activeProfile !== null && activeProfile.roots.length === 0 && (
@@ -1373,6 +1382,7 @@ export function Sidebar({
           onClose={() => setBulkSyncMode(null)}
         />
       )}
+      {maintenance && activeProfile !== null && <MaintenanceDialog profileId={activeProfile.id} platform={platform} onClose={() => setMaintenance(false)} />}
 
       {pruning && activeProfile !== null && (
         <PruneWorktreesDialog

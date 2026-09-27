@@ -363,7 +363,7 @@ export function BulkSyncDialog({
             <h2>{title}</h2>
             <p>
               {mode === "fetch"
-                ? "Configured remotes are fetched once per repository; one failure does not stop the rest."
+                ? "Configured remotes are fetched with --prune once per repository. This removes stale remote-tracking references; local branches are kept. One failure does not stop the rest."
                 : "Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here."}
             </p>
           </div>
