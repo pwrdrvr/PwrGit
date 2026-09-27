@@ -9,6 +9,8 @@ import {
   type RepoIdentity
 } from "@pwrgit/shared";
 
+import { repositoryBrowserLabel, repositoryBrowserUrl } from "./repository-browser";
+
 /**
  * What a forge chip draws, and what it says when you rest on it.
  *
@@ -122,7 +124,8 @@ export function repoForgeChip(
  * This is where a repository with remotes on two forges is told plainly,
  * remote by remote — the repo row above can only carry a count.
  *
- * Null for a remote no product claims. A git remote is never evidence of a
+ * Documented repository browsers use a text label without a forge logo.
+ * Null for other remotes no product claims. A git remote is never evidence of a
  * forge (see `main/forge/AGENTS.md`): a bare repo on a NAS parses as a remote
  * perfectly well, and badging it would invent a forge for it.
  */
@@ -132,7 +135,12 @@ export function remoteForgeChip(
   displays: ReadonlyMap<string, ForgeHostDisplay>
 ): ForgeChipView | null {
   const parsed = parseForgeRemote(url, overrides);
-  if (parsed === null || !isForgeKind(parsed.host)) return null;
+  if (parsed === null) return null;
+  if (!isForgeKind(parsed.host)) {
+    const name = repositoryBrowserLabel(parsed.hostname);
+    if (name === null || repositoryBrowserUrl(parsed) === null) return null;
+    return { kind: null, name, others: 0, title: `Browse repository on ${parsed.hostname}` };
+  }
   const display =
     displays.get(parsed.hostname) ?? resolveOne(parsed.hostname, parsed.host);
   return {

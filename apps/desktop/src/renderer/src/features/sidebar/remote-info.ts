@@ -1,12 +1,10 @@
 import {
-  forgeWebUrl,
-  isForgeKind,
-  isSafeForgeHostname,
-  isSafeProjectPath,
   parseForgeRemote,
   type RepoIdentity,
   type ForgeHostMap
 } from "@pwrgit/shared";
+
+import { repositoryBrowserUrl } from "./repository-browser";
 
 /**
  * How git reaches a remote, read off the URL rather than guessed.
@@ -60,24 +58,15 @@ export function remoteHostname(url: string): string | null {
 /**
  * The page to open for a remote, or null when there is nothing honest to open.
  *
- * Only for a host a product actually claims. Building `https://<host>/<path>`
- * for an unrecognised host is the same invention `remoteForgeChip` refuses to
- * make — a bare repo on a NAS parses as a remote perfectly well, and handing
- * the user a link into it is worse than handing them none.
- *
- * Both halves are re-validated before interpolation even though they came out
- * of a parse: this string is handed to `shell:openExternal`, which opens it in
- * the user's own browser.
+ * Known integrations and explicitly documented repository browsers only.
+ * Browser recognition does not grant account, fork, or review capabilities.
  */
 export function remoteWebUrl(
   url: string,
   overrides: ForgeHostMap = {}
 ): string | null {
   const parsed = parseForgeRemote(url, overrides);
-  if (parsed === null || !isForgeKind(parsed.host)) return null;
-  if (!isSafeForgeHostname(parsed.hostname)) return null;
-  if (!isSafeProjectPath(parsed.nameWithOwner)) return null;
-  return forgeWebUrl(parsed.hostname, parsed.nameWithOwner);
+  return parsed === null ? null : repositoryBrowserUrl(parsed);
 }
 
 /**
@@ -103,8 +92,5 @@ export function remoteUrlLines(remote: {
 
 /** Origin's repository page, independent of whether its integration is enabled. */
 export function repoWebUrl(identity: RepoIdentity | undefined): string | null {
-  if (identity === undefined || !isForgeKind(identity.host)) return null;
-  if (!isSafeForgeHostname(identity.hostname)) return null;
-  if (!isSafeProjectPath(identity.nameWithOwner)) return null;
-  return forgeWebUrl(identity.hostname, identity.nameWithOwner);
+  return identity === undefined ? null : repositoryBrowserUrl(identity);
 }

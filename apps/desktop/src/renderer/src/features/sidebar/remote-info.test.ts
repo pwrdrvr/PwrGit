@@ -117,3 +117,26 @@ describe("repoWebUrl", () => {
     expect(repoWebUrl({ ...identity, nameWithOwner: "../PwrGit" })).toBeNull();
   });
 });
+
+
+describe("Chromium repository browsing", () => {
+  it("opens V8 without claiming a forge integration", () => {
+    const url = "https://chromium.googlesource.com/v8/v8";
+    expect(remoteWebUrl(`${url}.git`)).toBe(url);
+    expect(repoWebUrl({
+      host: "other", hostname: "chromium.googlesource.com", owner: "v8",
+      name: "v8", nameWithOwner: "v8/v8", visibility: "unknown"
+    })).toBe(url);
+  });
+
+  it.each([
+    "https://chromium.googlesource.com.evil.example/v8/v8.git",
+    "https://chromium-review.googlesource.com/v8/v8.git",
+    "https://unrecognized.googlesource.com/v8/v8.git",
+    "https://chromium.googlesource.com/../v8.git",
+    "https://chromium.googlesource.com/v8/v8/+/main",
+    "https://chromium.googlesource.com/v8/v8?format=JSON"
+  ])("does not invent a repository page for %s", (url) => {
+    expect(remoteWebUrl(url)).toBeNull();
+  });
+});

@@ -293,3 +293,15 @@ describe("SSH host verification recovery", () => {
     expect(sshHostVerificationCommand("Host key verification failed.", remote)).toBeNull();
   });
 });
+
+
+describe("V8 clone coordinates", () => {
+  it("keeps the documented HTTPS source outside the forge integrations", () => {
+    const exact = exactRepository("https://chromium.googlesource.com/v8/v8.git");
+    expect(exact).toEqual({ host: "other", hostname: "chromium.googlesource.com", nameWithOwner: "v8/v8" });
+    expect(unverifiedCloneRepository(exact)).toMatchObject({
+      host: "other", visibility: "unknown",
+      httpsUrl: "https://chromium.googlesource.com/v8/v8.git"
+    });
+  });
+});
