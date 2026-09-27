@@ -29,6 +29,7 @@ export function ForkParentRemoteDialog({
     !remotes.some((remote) => remote.name === chosenName);
 
   const save = async (): Promise<void> => {
+    if (busy || !available) return;
     setBusy(true);
     let added = false;
     try {
@@ -50,7 +51,7 @@ export function ForkParentRemoteDialog({
     >
       <div
         ref={modalRef}
-        className="modal remote-editor"
+        className="modal remote-editor fork-parent-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Add fork parent remote"
@@ -102,7 +103,9 @@ export function ForkParentRemoteDialog({
           </button>
           <button
             className="modal__create"
-            disabled={busy || !available}
+            disabled={!available}
+            aria-disabled={busy || !available}
+            aria-busy={busy}
             onClick={() => void save()}
           >
             {busy ? "Adding…" : "Add parent remote"}

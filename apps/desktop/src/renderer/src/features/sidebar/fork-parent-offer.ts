@@ -1,5 +1,6 @@
 import {
-  parseForgeRemote,
+  remoteMatchesForgeRepo,
+  type ForgeHostMap,
   type RepoIdentity,
   type RemoteSummary
 } from "@pwrgit/shared";
@@ -13,21 +14,26 @@ export type ForkParentOffer = {
 /** The persisted forge identity is the only reason to propose a parent. */
 export function forkParentOffer(
   identity: RepoIdentity | undefined,
-  remotes: readonly RemoteSummary[]
+  remotes: readonly RemoteSummary[],
+  hosts: ForgeHostMap = {}
 ): ForkParentOffer | null {
   const parent = identity?.parent?.nameWithOwner;
   if (
+    identity === undefined ||
     parent === undefined ||
     !remotes.some((remote) => remote.name === "origin")
   ) {
     return null;
   }
-  const slug = parent.toLowerCase();
   if (
     remotes.some(
       (remote) =>
         remote.name !== "origin" &&
-        parseForgeRemote(remote.fetchUrl)?.nameWithOwner.toLowerCase() === slug
+        remoteMatchesForgeRepo(
+          remote.fetchUrl,
+          { hostname: identity.hostname, nameWithOwner: parent },
+          hosts
+        )
     )
   ) {
     return null;

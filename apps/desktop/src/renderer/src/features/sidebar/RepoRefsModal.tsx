@@ -39,6 +39,7 @@ import { CreateTagDialog } from "./CreateTagDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
 import { ForkParentRemoteDialog } from "./ForkParentRemoteDialog";
 import { forkParentOffer } from "./fork-parent-offer";
+import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { TagRemoteDialog } from "./TagRemoteDialog";
 import { PrChip } from "./PrChip";
 import {
@@ -410,7 +411,9 @@ export function RepoRefsModal({
   );
   const [parentDialogOpen, setParentDialogOpen] = useState(false);
   const [addingParent, setAddingParent] = useState(false);
-  const parentOffer = forkParentOffer(repo.identity, refs.remotes);
+  const addingParentRef = useRef(false);
+  const forgeHosts = useForgeHostMap();
+  const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
   const [renaming, setRenaming] = useState<LocalBranchSummary | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -647,6 +650,8 @@ export function RepoRefsModal({
     name: string;
     renameExistingTo?: string;
   }): Promise<boolean> => {
+    if (addingParentRef.current) return false;
+    addingParentRef.current = true;
     setAddingParent(true);
     try {
       const added = await dispatch("remote:addForkParent", {
@@ -682,6 +687,7 @@ export function RepoRefsModal({
       }
       return true;
     } finally {
+      addingParentRef.current = false;
       setAddingParent(false);
     }
   };
@@ -1265,8 +1271,10 @@ export function RepoRefsModal({
                     </p>
                   </div>
                   <button
-                    disabled={addingParent}
+                    aria-disabled={addingParent}
+                    aria-busy={addingParent}
                     onClick={() => {
+                      if (addingParent) return;
                       if (parentOffer.upstreamOccupied) setParentDialogOpen(true);
                       else void addForkParent({ name: "upstream" });
                     }}

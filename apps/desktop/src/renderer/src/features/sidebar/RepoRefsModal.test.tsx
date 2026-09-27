@@ -210,4 +210,57 @@ describe("fork parent remote offer", () => {
     await open(fork, { ...refs, remotes: [origin, parentRemote] }, "remotes");
     expect(container.textContent).not.toContain("This fork has no remote for its parent");
   });
+
+  it("offers the parent when a same-path mirror is on GitLab", async () => {
+    const mirror = { ...origin, name: "mirror", fetchUrl: "git@gitlab.com:source/widget.git" };
+    await open(fork, { ...refs, remotes: [origin, mirror] }, "remotes");
+    expect(container.textContent).toContain("This fork has no remote for its parent");
+  });
+
+  it("does not offer a duplicate for an SSH host alias", async () => {
+    const alias = { ...origin, name: "source", fetchUrl: "git@github-work:source/widget.git" };
+    await open(fork, { ...refs, remotes: [origin, alias] }, "remotes");
+    expect(container.textContent).not.toContain("This fork has no remote for its parent");
+  });
+
+  it("keeps the one-click offer focused and prevents another add while fetching", async () => {
+    const original = dispatchMock.getMockImplementation()!;
+    let finishFetch!: (value: ReturnType<typeof ok>) => void;
+    const fetching = new Promise<ReturnType<typeof ok>>((resolve) => { finishFetch = resolve; });
+    dispatchMock.mockImplementation((channel: string, request: unknown) =>
+      channel === "remote:fetchRepo" ? fetching : original(channel, request)
+    );
+    await open(fork, { ...refs, remotes: [origin] }, "remotes");
+    const add = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Add upstream"))!;
+    add.focus();
+    await act(async () => { add.click(); await Promise.resolve(); });
+    expect(add.disabled).toBe(false);
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(add);
+    await act(async () => add.click());
+    expect(dispatchMock.mock.calls.filter(([channel]) => channel === "remote:addForkParent")).toHaveLength(1);
+    await act(async () => finishFetch(ok(undefined)));
+  });
+
+  it("keeps the dialog add button focused during fetch", async () => {
+    const original = dispatchMock.getMockImplementation()!;
+    let finishFetch!: (value: ReturnType<typeof ok>) => void;
+    const fetching = new Promise<ReturnType<typeof ok>>((resolve) => { finishFetch = resolve; });
+    dispatchMock.mockImplementation((channel: string, request: unknown) =>
+      channel === "remote:fetchRepo" ? fetching : original(channel, request)
+    );
+    const occupied = { ...origin, name: "upstream", fetchUrl: "git@github.com:other/widget.git" };
+    await open(fork, { ...refs, remotes: [origin, occupied] }, "remotes");
+    const configure = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Set up parent remote"))!;
+    await act(async () => configure.click());
+    const add = [...container.querySelectorAll("button")].find((button) => button.textContent === "Add parent remote")!;
+    add.focus();
+    await act(async () => { add.click(); await Promise.resolve(); });
+    expect(add.disabled).toBe(false);
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(add);
+    await act(async () => add.click());
+    expect(dispatchMock.mock.calls.filter(([channel]) => channel === "remote:addForkParent")).toHaveLength(1);
+    await act(async () => finishFetch(ok(undefined)));
+  });
 });

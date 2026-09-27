@@ -4,7 +4,8 @@ import {
   classifyForgeHost,
   forgeRemoteUrlLike,
   forgeWebUrl,
-  parseForgeRemote
+  parseForgeRemote,
+  remoteMatchesForgeRepo
 } from "./forge-remote";
 
 describe("parseForgeRemote", () => {
@@ -156,6 +157,23 @@ describe("parseForgeRemote", () => {
     expect(parseForgeRemote("https://gitlab.com/o/r/p")?.nameWithOwner).toBe(
       "o/r/p"
     );
+  });
+});
+
+describe("remoteMatchesForgeRepo", () => {
+  const parent = { hostname: "github.com", nameWithOwner: "source/widget" };
+
+  it("rejects the same project path on a different forge", () => {
+    expect(remoteMatchesForgeRepo("git@gitlab.com:source/widget.git", parent)).toBe(false);
+    expect(remoteMatchesForgeRepo("git@gitlab.corp:source/widget.git", parent, {
+      "gitlab.corp": "gitlab"
+    })).toBe(false);
+  });
+
+  it("recognizes the exact parent and an unclassified SSH host alias", () => {
+    expect(remoteMatchesForgeRepo("https://github.com/source/widget.git", parent)).toBe(true);
+    expect(remoteMatchesForgeRepo("git@github-work:source/widget.git", parent)).toBe(true);
+    expect(remoteMatchesForgeRepo("https://github-work/source/widget.git", parent)).toBe(false);
   });
 });
 

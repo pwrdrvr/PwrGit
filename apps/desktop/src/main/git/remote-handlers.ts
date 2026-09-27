@@ -5,6 +5,7 @@ import {
   type PwrGitError,
   type RemoteActivityPhase,
   type ForkStatus,
+  type ForgeHostMap,
   type RepoIdentity,
   type Result
 } from "@pwrgit/shared";
@@ -201,7 +202,8 @@ export function registerRemoteHandlers(
    *  however recently it was written. */
   refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void,
   /** The stored forge identity, for the reset dialog's fork-source card. */
-  readIdentity?: (repoId: string) => RepoIdentity | undefined
+  readIdentity?: (repoId: string) => RepoIdentity | undefined,
+  hostsForRemotes?: () => ForgeHostMap
 ): void {
   // Every long-running remote command reports through one registry: the live
   // status surfaces read it, and the cancel button acts on it.
@@ -480,7 +482,7 @@ export function registerRemoteHandlers(
       return err({ kind: "remote", code: "remote_config_failed", message: "The forge has not identified a fork parent for this repository." });
     }
     const result = await operations.runRepository(req.repoId, () =>
-      addForkParentRemote(execGit, repo.path, parent, req, identity.nameWithOwner)
+      addForkParentRemote(execGit, repo.path, parent, req, identity, hostsForRemotes?.())
     );
     if (!result.ok) return result;
     logMain("info", "remote", `added fork parent as ${result.value.name} to ${repo.path}`);

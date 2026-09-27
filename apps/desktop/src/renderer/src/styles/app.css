@@ -6388,7 +6388,16 @@ button.agent-menu__item:hover {
   font: 650 10px/1 var(--font-sans);
   cursor: pointer;
 }
-.refs-fork-parent-offer button:disabled { cursor: wait; opacity: 0.6; }
+.refs-fork-parent-offer button[aria-busy="true"],
+.fork-parent-dialog .modal__create[aria-busy="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  cursor: wait;
+}
+.refs-fork-parent-offer button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .fork-parent-choice {
   display: flex;
   align-items: center;

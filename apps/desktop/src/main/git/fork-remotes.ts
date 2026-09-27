@@ -6,6 +6,7 @@ import {
   isSafeProjectPath,
   ok,
   parseForgeRemote,
+  remoteMatchesForgeRepo,
   type ForgeHostMap,
   type Result
 } from "@pwrgit/shared";
@@ -149,7 +150,8 @@ export async function addForkParentRemote(
   cwd: string,
   parent: { hostname: string; nameWithOwner: string },
   choice: { name: string; renameExistingTo?: string },
-  forkNameWithOwner: string
+  fork: { hostname: string; nameWithOwner: string },
+  hosts: ForgeHostMap = {}
 ): Promise<Result<{ name: string }>> {
   const remotes = await readCheckoutRemotes(git, cwd);
   if (!remotes.ok) return remotes;
@@ -161,9 +163,11 @@ export async function addForkParentRemote(
       message: "This fork has no origin remote."
     });
   }
+  const currentOrigin = parseForgeRemote(origin.url, hosts);
   if (
-    parseForgeRemote(origin.url)?.nameWithOwner.toLowerCase() !==
-    forkNameWithOwner.toLowerCase()
+    currentOrigin?.nameWithOwner.toLowerCase() !==
+      fork.nameWithOwner.toLowerCase() ||
+    currentOrigin.hostname !== fork.hostname.toLowerCase()
   ) {
     return err({
       kind: "remote",
@@ -184,8 +188,7 @@ export async function addForkParentRemote(
   const existing = remotes.value.find(
     (remote) =>
       remote.name !== "origin" &&
-      parseForgeRemote(remote.url)?.nameWithOwner.toLowerCase() ===
-        parent.nameWithOwner.toLowerCase()
+      remoteMatchesForgeRepo(remote.url, parent, hosts)
   );
   if (existing !== undefined) {
     return err({
