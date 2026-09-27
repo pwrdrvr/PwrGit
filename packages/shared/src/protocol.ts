@@ -55,6 +55,7 @@ import type {
   FileInsightContext,
   FileSearchHit,
   GitHubCommitAuthorIdentityLookup,
+  CommitAuthorPerson,
   GraphLog,
   GitLfsReport,
   LaneGraph,
@@ -1149,29 +1150,9 @@ export interface Commands {
     };
   };
   /**
-   * Return immediately and start any eligible identity verification in the
-   * background. `cacheOnly` warms an existing exact or author-account proof
-   * without GitHub lookup on a miss. Results arrive via the targeted event
-   * after the worktree's GitHub origin has been validated.
-   */
-  "github:commitAuthorIdentity": {
-    req: {
-      worktreeId: string;
-      commitHash: string;
-      authorName: string;
-      authorEmail: string;
-      /**
-       * Warm only already-proven exact or author-account data. A cache-only
-       * request never calls GitHub for a miss; a normal hover request may.
-       */
-      cacheOnly?: boolean;
-    };
-    res: GitHubCommitAuthorIdentityLookup;
-  };
-  /**
-   * Hydrate every locally proven commit/author identity before graph rows are
-   * interactive. This is local-cache-only on a miss; stale proofs may publish
-   * targeted refresh events later.
+   * Every locally proven identity for these exact commits. Strictly a cache
+   * read: it never asks a forge and never starts a refresh, however stale a
+   * row is. Refreshing is the people store's decision (`people:replaceInterest`).
    */
   "github:hydrateCommitAuthorIdentities": {
     req: {
@@ -1183,6 +1164,28 @@ export interface Commands {
       }>;
     };
     res: Record<string, GitHubCommitAuthorIdentityLookup>;
+  };
+  /**
+   * Replace this window's interest (keyed by `monitorId`) in one worktree's
+   * commit authors, and answer with what main already knows about each, keyed
+   * by `commitAuthorPersonKey`. The answer is a cache read and never waits on a
+   * forge.
+   *
+   * Interest is not a request: main's people store decides whether and when to
+   * ask the forge about a registered author, refreshes rarely, and pushes what
+   * it learns as `people:changed`. Registering again, however often, cannot make
+   * it ask sooner. An empty `authors` list withdraws the interest; closing the
+   * window withdraws all of it.
+   */
+  "people:replaceInterest": {
+    req: {
+      worktreeId: string;
+      monitorId: string;
+      /** Most prominent first. Main caps both this list and each author's
+       *  commits, which are this author's newest in view, newest first. */
+      authors: Array<{ name: string; email: string; commitHashes: string[] }>;
+    };
+    res: Record<string, CommitAuthorPerson>;
   };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
 
@@ -2162,13 +2165,12 @@ export interface Events {
    */
   "forge:statusChanged": { forges: ForgeStatus[] };
   /**
-   * A non-blocking proof-backed identity lookup settled. Consumers that
-   * requested this commit can repaint without polling or blocking hover.
+   * The people store learned something new about some of a worktree's commit
+   * authors — a targeted delta keyed by `commitAuthorPersonKey`.
    */
-  "github:commitAuthorIdentityChanged": {
+  "people:changed": {
     worktreeId: string;
-    commitHash: string;
-    lookup: GitHubCommitAuthorIdentityLookup;
+    people: Record<string, CommitAuthorPerson>;
   };
   /** Native Profiles-menu actions — handled by whichever window has focus. */
   "ui:newProfile": Record<string, never>;

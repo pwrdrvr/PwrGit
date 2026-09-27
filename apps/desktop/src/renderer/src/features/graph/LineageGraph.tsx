@@ -1,13 +1,20 @@
 import { LocateGlyph } from "../../lib/LocateGlyph";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { flushSync } from "react-dom";
-import type {
-  Commit,
-  CommitStats,
-  GitHubCommitAuthorIdentity,
-  GitHubCommitAuthorIdentityLookup,
-  LaneGraph,
-  PrSummary
+import {
+  commitAuthorPersonKey,
+  type Commit,
+  type CommitAuthorPerson,
+  type CommitStats,
+  type LaneGraph,
+  type PrSummary
 } from "@pwrgit/shared";
 import { announce } from "../../lib/announce";
 import { prefersReducedMotion } from "../../lib/reducedMotion";
@@ -31,6 +38,7 @@ import { guardedSwitchBranch } from "../shell/branchSwitch";
 import { lastSegment } from "../sidebar/repo-view";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
+import { PersonCard, type PersonGraphStats } from "./PersonCard";
 import {
   GraphRow,
   type GraphRowVM,
@@ -58,101 +66,80 @@ export function consumeBranchPrInvalidation(
   };
 }
 
-/**
- * Keep only identity results that are stable for this worktree session. An
- * in-flight or temporarily unavailable lookup must remain retryable on a
- * later hover; a verified identity and authoritative no-match are reusable.
- */
-export function reusableCommitAuthorIdentity(
-  lookup: GitHubCommitAuthorIdentityLookup
-): GitHubCommitAuthorIdentity | null | undefined {
-  if (lookup.identity !== undefined) return lookup.identity;
-  return lookup.refreshState === "not-eligible" ||
-    (lookup.cacheState === "fresh" && lookup.refreshState === "idle")
-    ? null
-    : undefined;
-}
+/** Most commits of one author main is told about; see `people:replaceInterest`. */
+const MAX_INTEREST_COMMITS_PER_AUTHOR = 3;
 
 /**
- * IPC replies and targeted events can cross in either order. Keep the most
- * complete/newest proof so a delayed cache-only reply cannot erase a local
- * identity or thumbnail that was already painted by an event.
+ * The authors a loaded graph shows, for `people:replaceInterest`: most recent
+ * author first, each with their newest commits first. Main decides whether and
+ * when to ask a forge about any of them; this only says who is on screen.
  */
-export function mergeCommitAuthorIdentityLookup(
-  current: GitHubCommitAuthorIdentityLookup | undefined,
-  incoming: GitHubCommitAuthorIdentityLookup
-): GitHubCommitAuthorIdentityLookup {
-  if (current === undefined) return incoming;
-
-  if (current.identity !== undefined && incoming.identity === undefined) {
-    return current;
+export function authorInterest(
+  commits: readonly Commit[]
+): Array<{ name: string; email: string; commitHashes: string[] }> {
+  const byKey = new Map<string, { name: string; email: string; commitHashes: string[] }>();
+  for (const commit of newestFirst(commits)) {
+    const key = commitAuthorPersonKey(commit.authorEmail);
+    if (key === "") continue;
+    const author = byKey.get(key);
+    if (author === undefined) {
+      byKey.set(key, {
+        name: commit.authorName,
+        email: commit.authorEmail,
+        commitHashes: [commit.hash]
+      });
+    } else if (author.commitHashes.length < MAX_INTEREST_COMMITS_PER_AUTHOR) {
+      author.commitHashes.push(commit.hash);
+    }
   }
-  if (current.identity === undefined && incoming.identity !== undefined) {
-    return incoming;
-  }
-  // The normal hover transport responds immediately with this placeholder.
-  // It carries no proof and must never replace an already settled negative
-  // cache result just because the IPC reply beat the repaint event.
-  if (
-    incoming.cacheState === "miss" &&
-    incoming.refreshState === "in-flight" &&
-    current.cacheState === "fresh" &&
-    current.refreshState === "idle"
-  ) {
-    return current;
-  }
-
-  const currentRefreshedAt = current.refreshedAt ?? Number.NEGATIVE_INFINITY;
-  const incomingRefreshedAt = incoming.refreshedAt ?? Number.NEGATIVE_INFINITY;
-  if (incomingRefreshedAt < currentRefreshedAt) return current;
-  if (incomingRefreshedAt > currentRefreshedAt) return incoming;
-
-  const currentAvatarRefreshedAt =
-    current.avatarCache?.refreshedAt ?? Number.NEGATIVE_INFINITY;
-  const incomingAvatarRefreshedAt =
-    incoming.avatarCache?.refreshedAt ?? Number.NEGATIVE_INFINITY;
-  if (incomingAvatarRefreshedAt < currentAvatarRefreshedAt) return current;
-  if (incomingAvatarRefreshedAt > currentAvatarRefreshedAt) return incoming;
-
-  if (
-    current.identity?.avatarUrl !== undefined &&
-    incoming.identity?.avatarUrl === undefined
-  ) {
-    return current;
-  }
-  return incoming;
+  return [...byKey.values()];
 }
 
-/** Retry only when the main-process proof/asset cache says another hover can help. */
-export function shouldRequestCommitAuthorIdentity(
-  lookup: GitHubCommitAuthorIdentityLookup | undefined,
-  now: number
-): boolean {
-  if (lookup === undefined) return true;
-  if (lookup.refreshState === "not-eligible" || lookup.refreshState === "in-flight") {
-    return false;
+/** Each author's footprint in the loaded graph, keyed by person key. */
+export function personGraphStats(
+  commits: readonly Commit[],
+  tips: Readonly<Record<string, readonly string[]>>
+): Map<string, PersonGraphStats> {
+  const stats = new Map<string, PersonGraphStats>();
+  for (const commit of newestFirst(commits)) {
+    const key = commitAuthorPersonKey(commit.authorEmail);
+    const current = stats.get(key);
+    if (current === undefined) {
+      stats.set(key, {
+        count: 1,
+        total: commits.length,
+        latest: commit,
+        tips: [...(tips[commit.hash] ?? [])]
+      });
+    } else {
+      current.count += 1;
+      current.tips.push(...(tips[commit.hash] ?? []));
+    }
   }
-  if (lookup.refreshState === "backing-off") {
-    return lookup.nextRetryAt === undefined || lookup.nextRetryAt <= now;
-  }
-  if (lookup.cacheState !== "fresh") return true;
-  if (lookup.avatarCache === undefined) return false;
-  return lookup.avatarCache.refreshState === "backing-off" &&
-    (lookup.avatarCache.nextRetryAt === undefined || lookup.avatarCache.nextRetryAt <= now);
+  return stats;
 }
 
-// A proof-backed identity resolves to this opaque local resource. Cache
-// hydration waits for decode before graph rows become interactive and retains
-// the decoded image for the graph session. Keeping the element alive matters
-// for custom protocols: Chromium may otherwise discard its decoded surface
-// before a tooltip creates its own image element, causing one initials frame.
+/** Loaded order is topological; an author's "latest" is by commit time. */
+function newestFirst(commits: readonly Commit[]): Commit[] {
+  const time = (commit: Commit): number => {
+    const parsed = Date.parse(commit.committedAt);
+    return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+  };
+  return commits
+    .map((commit, index) => ({ commit, index, at: time(commit) }))
+    .sort((a, b) => b.at - a.at || a.index - b.index)
+    .map(({ commit }) => commit);
+}
+
+// A proven person resolves to an opaque local thumbnail. Graph load waits for
+// decode before rows become interactive and retains the decoded image for the
+// graph session. Keeping the element alive matters for custom protocols:
+// Chromium may otherwise discard its decoded surface before a card creates
+// its own image element, causing one initials frame.
 const MAX_RETAINED_COMMIT_AUTHOR_AVATARS = 256;
 const warmedCommitAuthorAvatars = new Map<string, HTMLImageElement>();
 const warmingCommitAuthorAvatarUrls = new Map<string, Promise<void>>();
-function warmCommitAuthorAvatar(
-  lookup: GitHubCommitAuthorIdentityLookup
-): Promise<void> {
-  const avatarUrl = lookup.identity?.avatarUrl;
+function warmCommitAuthorAvatar(avatarUrl: string | undefined): Promise<void> {
   if (
     avatarUrl === undefined ||
     !avatarUrl.startsWith("pwrgit-avatar://thumbnail/") ||
@@ -186,10 +173,17 @@ function warmCommitAuthorAvatar(
   return completion;
 }
 
-async function warmCommitAuthorAvatars(
-  lookups: Record<string, GitHubCommitAuthorIdentityLookup>
+async function warmPeopleAvatars(
+  people: Record<string, CommitAuthorPerson>
 ): Promise<void> {
-  await Promise.all(Object.values(lookups).map(warmCommitAuthorAvatar));
+  await Promise.all(
+    Object.values(people).map((person) => warmCommitAuthorAvatar(person.identity?.avatarUrl))
+  );
+}
+
+/** Only a proven identity is ever shown; the rest are initials. */
+function provenIdentity(person: CommitAuthorPerson | undefined) {
+  return person?.state === "proven" ? person.identity : undefined;
 }
 
 type CommitMenuState = { hash: string; x: number; y: number };
@@ -292,12 +286,21 @@ export function LineageGraph({
   const [commitPullRequests, setCommitPullRequests] = useState<
     Record<string, PrSummary | null>
   >({});
-  const [commitAuthorIdentityLookups, setCommitAuthorIdentityLookups] = useState<
-    Record<string, GitHubCommitAuthorIdentityLookup>
-  >({});
+  /** Commit authors by person key, as main's people store knows them. */
+  const [people, setPeople] = useState<Record<string, CommitAuthorPerson>>({});
+  /** The byline whose person card is open: which author, from which row. */
+  const [openPerson, setOpenPerson] = useState<{
+    key: string;
+    hash: string;
+    name: string;
+  } | null>(null);
   const now = useRelativeClock();
   const commitContext = useViewportTooltip("commit-context-card", {
     interactive: true
+  });
+  const personCard = useViewportTooltip("person-card", {
+    interactive: true,
+    label: openPerson === null ? "Author" : `Author: ${openPerson.name}`
   });
   /** The graph chrome's own card — the branch menu, the locate button, the
    *  scope toggle, the lane scrollbar. Separate from `commitContext` above,
@@ -311,10 +314,9 @@ export function LineageGraph({
   const laneBarRef = useRef<HTMLDivElement>(null);
   const scopeTouchedRef = useRef(false);
   const commitStatsRequestsRef = useRef(new Map<string, number>());
-  const commitAuthorIdentityRequestsRef = useRef(new Map<string, number>());
   const commitStatsEpochRef = useRef(0);
-  const commitAuthorIdentityEpochRef = useRef(0);
   const commitPrMonitorIdRef = useRef(crypto.randomUUID());
+  const peopleMonitorIdRef = useRef(crypto.randomUUID());
   const consumedBranchPrGenerationRef = useRef(0);
 
   const acceptCommitPullRequests = useCallback(
@@ -325,18 +327,13 @@ export function LineageGraph({
     []
   );
 
-  const acceptCommitAuthorIdentityLookup = useCallback((
-    commitHash: string,
-    lookup: GitHubCommitAuthorIdentityLookup
-  ): void => {
-    void warmCommitAuthorAvatar(lookup);
-    setCommitAuthorIdentityLookups((current) => {
-      const merged = mergeCommitAuthorIdentityLookup(current[commitHash], lookup);
-      return merged === current[commitHash]
-        ? current
-        : { ...current, [commitHash]: merged };
-    });
-  }, []);
+  const acceptPeople = useCallback(
+    (incoming: Record<string, CommitAuthorPerson>): void => {
+      if (Object.keys(incoming).length === 0) return;
+      setPeople((current) => ({ ...current, ...incoming }));
+    },
+    []
+  );
 
   useEffect(() => {
     let active = true;
@@ -393,36 +390,25 @@ export function LineageGraph({
 
         const graph = r.value;
         onCommitsChange(graph.commits);
-        void dispatch("github:hydrateCommitAuthorIdentities", {
+        // Registering who is on screen is all the graph does about people:
+        // main answers from its store at once, and decides on its own clock
+        // whether to ask a forge about anyone (`people:changed` follows).
+        void dispatch("people:replaceInterest", {
           worktreeId,
-          commits: graph.commits.map((commit) => ({
-            commitHash: commit.hash,
-            authorName: commit.authorName,
-            authorEmail: commit.authorEmail
-          }))
-        }).then(async (hydrated) => {
+          monitorId: peopleMonitorIdRef.current,
+          authors: authorInterest(graph.commits)
+        }).then(async (known) => {
           if (!active || sequence !== loadSequence) return;
-          if (hydrated.ok) {
-            await warmCommitAuthorAvatars(hydrated.value);
+          if (known.ok) {
+            await warmPeopleAvatars(known.value);
             if (!active || sequence !== loadSequence) return;
           }
           // Publish graph rows only after every available local avatar is
-          // decoded. Flush both state changes in one commit so a fresh cache
-          // hit is the tooltip's first and final rendered identity even if
-          // React's ambient async batching behavior changes.
+          // decoded. Flush both state changes in one commit so a cached face
+          // is the row's first and final rendered identity even if React's
+          // ambient async batching behavior changes.
           flushSync(() => {
-            if (hydrated.ok) {
-              setCommitAuthorIdentityLookups((current) => {
-                let next = current;
-                for (const [hash, lookup] of Object.entries(hydrated.value)) {
-                  const merged = mergeCommitAuthorIdentityLookup(next[hash], lookup);
-                  if (merged === next[hash]) continue;
-                  if (next === current) next = { ...current };
-                  next[hash] = merged;
-                }
-                return next;
-              });
-            }
+            if (known.ok) acceptPeople(known.value);
             setData(graph);
             setLoading(false);
           });
@@ -455,7 +441,16 @@ export function LineageGraph({
       active = false;
       off();
     };
-  }, [branchPrGeneration, onCommitsChange, repoId, worktreeId, scope, revealHash]);
+  }, [acceptPeople, branchPrGeneration, onCommitsChange, repoId, worktreeId, scope, revealHash]);
+
+  // Interest follows the window: a graph that goes away withdraws it, so main
+  // stops looking after authors nobody is shown.
+  useEffect(() => {
+    const monitorId = peopleMonitorIdRef.current;
+    return () => {
+      void dispatch("people:replaceInterest", { worktreeId, monitorId, authors: [] });
+    };
+  }, [worktreeId]);
 
   // The sidebar and graph keep separate view models. Apply the same targeted
   // PR delta to the graph cache so a hover/focused refresh updates both
@@ -649,27 +644,89 @@ export function LineageGraph({
     hoverIntent.cardClosed();
   }, [commitContext.visible, hoverIntent]);
 
-  // Identity verification is lazy like diffstats, but it must never delay a
-  // context card. Renderer results are retained by full commit hash for the
-  // current worktree view; the main process may reuse an author account that
-  // was established by an exact GitHub commit proof.
+  // The person card shares the rows' intent gate, and closes the same way.
+  const personWasVisible = useRef(false);
   useEffect(() => {
-    return subscribe("github:commitAuthorIdentityChanged", (payload) => {
-      if (payload.worktreeId !== worktreeId) return;
-      acceptCommitAuthorIdentityLookup(payload.commitHash, payload.lookup);
+    if (personCard.visible) {
+      personWasVisible.current = true;
+      return;
+    }
+    setOpenPerson(null);
+    if (!personWasVisible.current) return;
+    personWasVisible.current = false;
+    hoverIntent.cardClosed();
+  }, [personCard.visible, hoverIntent]);
+
+  const personStats = useMemo(
+    () => personGraphStats(data?.commits ?? [], data?.tips ?? {}),
+    [data]
+  );
+  const myKey = commitAuthorPersonKey(activeEmail);
+  const personCardFor = (commit: Commit): ReactNode => {
+    const key = commitAuthorPersonKey(commit.authorEmail);
+    const stats = personStats.get(key);
+    if (stats === undefined) return null;
+    return (
+      <PersonCard
+        name={commit.authorName}
+        email={commit.authorEmail}
+        isMine={key === myKey}
+        person={people[key]}
+        stats={stats}
+        now={now}
+      />
+    );
+  };
+  const openPersonVm = openPerson === null ? undefined : vmByHash.get(openPerson.hash);
+  const openPersonCard = openPersonVm === undefined ? null : personCardFor(openPersonVm.commit);
+
+  // An open person card follows what main pushes and the shared clock, like
+  // the commit card does.
+  useEffect(() => {
+    if (!personCard.visible || openPersonCard === null) return;
+    personCard.update(openPersonCard);
+    // `openPersonCard` is a new element every render; these are what it is
+    // built from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personCard.update, personCard.visible, openPersonVm, people, personStats, now, myKey]);
+
+  const showPerson = (target: HTMLElement, vm: GraphRowVM): void => {
+    const card = personCardFor(vm.commit);
+    if (card === null) return;
+    commitContext.hide();
+    setOpenPerson({
+      key: commitAuthorPersonKey(vm.commit.authorEmail),
+      hash: vm.commit.hash,
+      name: vm.commit.authorName
     });
-  }, [acceptCommitAuthorIdentityLookup, worktreeId]);
+    personCard.show(target, card);
+  };
+
+  // What main's people store learns arrives here; nothing in this view asks
+  // for it. A face is decoded before it is painted, as on load.
+  useEffect(() => {
+    let active = true;
+    const off = subscribe("people:changed", (payload) => {
+      if (payload.worktreeId !== worktreeId) return;
+      void warmPeopleAvatars(payload.people).then(() => {
+        // A switch while the face decoded: these people are another view's.
+        if (active) acceptPeople(payload.people);
+      });
+    });
+    return () => {
+      active = false;
+      off();
+    };
+  }, [acceptPeople, worktreeId]);
 
   // Diffstats are intentionally lazy: a graph can contain hundreds of commits,
   // but only the one under the pointer needs a numstat walk. Cache both success
   // and failure for this worktree so repeated hover is instant and quiet.
   useEffect(() => {
     commitStatsEpochRef.current += 1;
-    commitAuthorIdentityEpochRef.current += 1;
     commitStatsRequestsRef.current.clear();
-    commitAuthorIdentityRequestsRef.current.clear();
     setCommitStats({});
-    setCommitAuthorIdentityLookups({});
+    setPeople({});
   }, [worktreeId]);
 
   useEffect(() => {
@@ -698,46 +755,6 @@ export function LineageGraph({
       });
   }, [commitStats, hoveredVm, worktreeId]);
 
-  useEffect(() => {
-    if (hoveredVm === undefined) return;
-    const commit = hoveredVm.commit;
-    const lookup = commitAuthorIdentityLookups[commit.hash];
-    // A result comes only from a main-process proof-backed cache. Keep the
-    // display data while respecting its persisted TTL/backoff metadata, so a
-    // later hover can revalidate an old identity without a network image load.
-    if (!shouldRequestCommitAuthorIdentity(lookup, now)) return;
-    const epoch = commitAuthorIdentityEpochRef.current;
-    if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) return;
-    commitAuthorIdentityRequestsRef.current.set(commit.hash, epoch);
-    void dispatch("github:commitAuthorIdentity", {
-      worktreeId,
-      commitHash: commit.hash,
-      authorName: commit.authorName,
-      authorEmail: commit.authorEmail
-    }).then((result) => {
-      // Normal hover replies are optimistic today, but merge them rather than
-      // discarding them. This also keeps the renderer correct if a future
-      // transport can return a local proof directly.
-      if (
-        !result.ok ||
-        commitAuthorIdentityEpochRef.current !== epoch
-      ) {
-        return;
-      }
-      acceptCommitAuthorIdentityLookup(commit.hash, result.value);
-    }).finally(() => {
-      if (commitAuthorIdentityRequestsRef.current.get(commit.hash) === epoch) {
-        commitAuthorIdentityRequestsRef.current.delete(commit.hash);
-      }
-    });
-  }, [
-    acceptCommitAuthorIdentityLookup,
-    commitAuthorIdentityLookups,
-    hoveredVm,
-    now,
-    worktreeId
-  ]);
-
   // The context window remains current while it is open: its age changes with
   // the shared clock, while ref/base information and lazy diffstats update
   // after graph refreshes and local Git responses.
@@ -751,12 +768,9 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? hoveredVm.defaultBranch}
         now={now}
         stats={commitStats[hoveredVm.commit.hash]}
-        githubIdentity={reusableCommitAuthorIdentity(
-          commitAuthorIdentityLookups[hoveredVm.commit.hash] ?? {
-            cacheState: "miss",
-            refreshState: "in-flight"
-          }
-        ) ?? undefined}
+        githubIdentity={provenIdentity(
+          people[commitAuthorPersonKey(hoveredVm.commit.authorEmail)]
+        )}
         pullRequest={commitPullRequests[hoveredVm.commit.hash] ?? undefined}
       />
     );
@@ -767,7 +781,7 @@ export function LineageGraph({
     now,
     commitStats,
     commitPullRequests,
-    commitAuthorIdentityLookups,
+    people,
     viewingBranch
   ]);
 
@@ -777,6 +791,7 @@ export function LineageGraph({
     vm: GraphRowVM
   ): void => {
     setHoveredCommit(vm.commit.hash);
+    personCard.hide();
     void dispatch("pr:refreshCommits", {
       repoId,
       commitHashes: [vm.commit.hash],
@@ -793,12 +808,9 @@ export function LineageGraph({
         defaultRef={data?.defaultRef ?? vm.defaultBranch}
         now={now}
         stats={commitStats[vm.commit.hash]}
-        githubIdentity={reusableCommitAuthorIdentity(
-          commitAuthorIdentityLookups[vm.commit.hash] ?? {
-            cacheState: "miss",
-            refreshState: "in-flight"
-          }
-        ) ?? undefined}
+        githubIdentity={provenIdentity(
+          people[commitAuthorPersonKey(vm.commit.authorEmail)]
+        )}
         pullRequest={commitPullRequests[vm.commit.hash] ?? undefined}
       />,
       anchor
@@ -810,12 +822,14 @@ export function LineageGraph({
     position: { x: number; y: number }
   ): void => {
     commitContext.hide();
+    personCard.hide();
     setBranchMenu(null);
     setCommitMenu({ hash: vm.commit.hash, ...position });
   };
 
   const openBranchMenu = (target: BranchChipTarget): void => {
     commitContext.hide();
+    personCard.hide();
     setCommitMenu(null);
     setBranchMenu(target);
   };
@@ -1204,8 +1218,10 @@ export function LineageGraph({
                 flashing={flash === vm.commit.hash}
                 branchInfo={data?.branches ?? {}}
                 authorAvatarUrl={
-                  commitAuthorIdentityLookups[vm.commit.hash]?.identity?.avatarUrl
+                  provenIdentity(people[commitAuthorPersonKey(vm.commit.authorEmail)])
+                    ?.avatarUrl
                 }
+                personOpen={openPerson?.hash === vm.commit.hash && personCard.visible}
                 hoverIntent={hoverIntent}
                 onToggle={() => onToggleCommit(vm.commit.hash)}
                 onOpen={() => onOpenCommit(vm.commit.hash, vm.commit.subject)}
@@ -1214,6 +1230,9 @@ export function LineageGraph({
                 }
                 onHideContext={commitContext.scheduleHide}
                 onFocusContext={commitContext.focusFirst}
+                onShowPerson={(target) => showPerson(target, vm)}
+                onHidePerson={personCard.scheduleHide}
+                onFocusPerson={personCard.focusFirst}
                 onOpenContextMenu={(position) => openCommitMenu(vm, position)}
                 onOpenBranchMenu={openBranchMenu}
                 onRevealWorktree={onRevealWorktree}
@@ -1241,6 +1260,7 @@ export function LineageGraph({
         )}
       </div>
       {commitContext.tooltipNode}
+      {personCard.tooltipNode}
       {commitMenu !== null && menuVm !== undefined && (
         <CommitContextMenu
           x={commitMenu.x}

@@ -12,6 +12,7 @@ export * from "./release-notes";
 export * from "./appearance";
 export * from "./mcp-policy";
 export * from "./prunable";
+export * from "./people";
 export * from "./reclaim";
 export * from "./ai-providers";
 export * from "./settings-pages";

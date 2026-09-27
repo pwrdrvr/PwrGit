@@ -6,14 +6,17 @@ import {
   useRef,
   useState
 } from "react";
-import type {
-  FileBlameHunk,
-  FileBlamePage,
-  FileBlameUnavailableReason,
-  FileContents,
-  FileHistoryEntry,
-  FileInsightContext,
-  GitHubCommitAuthorIdentityLookup
+import {
+  commitAuthorPersonKey,
+  type CommitAuthorPerson,
+  type FileBlameHunk,
+  type FileBlamePage,
+  type FileBlameUnavailableReason,
+  type FileContents,
+  type FileHistoryEntry,
+  type FileInsightContext,
+  type GitHubCommitAuthorIdentity,
+  type GitHubCommitAuthorIdentityLookup
 } from "@pwrgit/shared";
 import { fileStatusChipProps, fileStatusLabel } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
@@ -86,13 +89,19 @@ type IdentityCandidate = {
   authorEmail: string;
 };
 
+/**
+ * Proven identities for these commits: the local cache on load, then whatever
+ * main's people store pushes for their authors. This pane never registers
+ * interest of its own — the lineage graph does — so it only ever reads.
+ */
 function useAuthorIdentities(
   worktreeId: string,
   candidates: IdentityCandidate[]
-): Record<string, GitHubCommitAuthorIdentityLookup> {
+): Record<string, GitHubCommitAuthorIdentity> {
   const [lookups, setLookups] = useState<
     Record<string, GitHubCommitAuthorIdentityLookup>
   >({});
+  const [people, setPeople] = useState<Record<string, CommitAuthorPerson>>({});
   const unique = useMemo(() => {
     const commits = new Map<string, IdentityCandidate>();
     for (const candidate of candidates) commits.set(candidate.hash, candidate);
@@ -102,6 +111,7 @@ function useAuthorIdentities(
 
   useEffect(() => {
     setLookups({});
+    setPeople({});
   }, [worktreeId]);
 
   useEffect(() => {
@@ -134,17 +144,25 @@ function useAuthorIdentities(
 
   useEffect(
     () =>
-      subscribe("github:commitAuthorIdentityChanged", (payload) => {
+      subscribe("people:changed", (payload) => {
         if (payload.worktreeId !== worktreeId) return;
-        setLookups((current) => ({
-          ...current,
-          [payload.commitHash]: payload.lookup
-        }));
+        setPeople((current) => ({ ...current, ...payload.people }));
       }),
     [worktreeId]
   );
 
-  return lookups;
+  return useMemo(() => {
+    const identities: Record<string, GitHubCommitAuthorIdentity> = {};
+    for (const candidate of unique) {
+      const person = people[commitAuthorPersonKey(candidate.authorEmail)];
+      // A person the store has since answered for outranks the cache read.
+      const identity = person === undefined
+        ? lookups[candidate.hash]?.identity
+        : person.state === "proven" ? person.identity : undefined;
+      if (identity !== undefined) identities[candidate.hash] = identity;
+    }
+    return identities;
+  }, [lookups, people, unique]);
 }
 
 function AuthorLabel({
@@ -156,10 +174,10 @@ function AuthorLabel({
   hash: string | null;
   name: string;
   email: string;
-  lookups: Record<string, GitHubCommitAuthorIdentityLookup>;
+  lookups: Record<string, GitHubCommitAuthorIdentity>;
 }) {
   const tip = useViewportTooltip();
-  const identity = hash === null ? undefined : lookups[hash]?.identity;
+  const identity = hash === null ? undefined : lookups[hash];
   const label = identity?.login === undefined ? name : `@${identity.login}`;
   return (
     <span
