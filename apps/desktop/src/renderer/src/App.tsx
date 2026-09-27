@@ -369,7 +369,7 @@ export function App() {
       setSelection({ repoId: repo.id, worktreeId: resolved.worktreeId });
       // A repo-name pick must reveal the row even when its primary checkout
       // was already selected and the user has since scrolled it away.
-      if (pendingReveal.worktreeId === null) requestSidebarReveal(repo.id);
+      if (pendingReveal.revealRepoRow === true) requestSidebarReveal(repo.id);
     }
     setPendingReveal(null);
   }, [openBranchWorktreeModal, pendingReveal, repos]);

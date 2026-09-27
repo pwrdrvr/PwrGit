@@ -4,6 +4,9 @@ export type PendingRepoReveal = {
   repoId: string;
   worktreeId: string | null;
   branch: BranchReveal | null;
+  /** A repo-name pick explicitly requests a row reveal after selection.
+   * Other navigation may already carry a more specific sidebar target. */
+  revealRepoRow?: true;
   /**
    * Hold the reveal until that exact worktree is in the tree, instead of
    * settling for the repo's primary. A worktree PwrGit just created is indexed
@@ -58,7 +61,8 @@ export function pendingRevealForSearchHit(
   return {
     repoId: hit.repoId,
     worktreeId: hit.worktreeId ?? null,
-    branch: branchRevealForSearchHit(hit)
+    branch: branchRevealForSearchHit(hit),
+    ...(hit.kind === "repo" ? { revealRepoRow: true as const } : {})
   };
 }
 
