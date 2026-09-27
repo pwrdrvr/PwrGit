@@ -303,7 +303,9 @@ describe("BranchFromCommitDialog", () => {
         expect.objectContaining({ title: "Still creating" })
       );
 
-      held.finish();
+      await act(async () => {
+        held.finish();
+      });
     });
 
     it("still confirms the outcome after the dialog is gone", async () => {

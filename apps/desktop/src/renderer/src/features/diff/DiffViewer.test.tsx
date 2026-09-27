@@ -137,7 +137,7 @@ async function openLightbox(patch: string): Promise<void> {
   await decodeAll({ w: 64, h: 64 });
   // A real click focuses the button it lands on; a synthetic one does not,
   // and where focus sits decides whether the pane behind keeps its Escape.
-  frames()[0]?.focus();
+  await act(async () => frames()[0]?.focus());
   await click(frames()[0] ?? null);
   // The lightbox mounts its own copies of both revisions.
   await decodeAll({ w: 64, h: 64 });
@@ -887,7 +887,7 @@ describe("DiffViewer image lightbox", () => {
       after: { w: 1552, h: 1012 }
     };
     await decode(sizes);
-    frames()[0]?.focus();
+    await act(async () => frames()[0]?.focus());
     await click(frames()[0] ?? null);
     await decode(sizes);
     await press("ArrowRight");
