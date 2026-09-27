@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import dugite from "dugite";
@@ -39,8 +39,10 @@ function homebrewGit(root: string, version: string, helper = true): { bin: strin
   }
   mkdirSync(join(root, "bin"), { recursive: true });
   const bin = join(root, "bin");
-  rmSync(join(bin, "git"), { force: true });
-  symlinkSync(join(keg, "bin", "git"), join(bin, "git"));
+  const link = join(bin, "git");
+  // rmSync(force) leaves a dangling symlink behind on Node 24.
+  if (lstatSync(link, { throwIfNoEntry: false })) unlinkSync(link);
+  symlinkSync(join(keg, "bin", "git"), link);
   return { bin, helper: helperPath };
 }
 
