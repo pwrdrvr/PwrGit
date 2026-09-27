@@ -56,7 +56,11 @@ export function ForgeChip({ chip, url = null }: { chip: ForgeChipView; url?: str
         tip.hide();
         void dispatch("shell:openExternal", { url });
       }}
-      onKeyDown={url === null ? undefined : (event) => event.stopPropagation()}
+      onKeyDown={url === null ? undefined : (event) => {
+        // Keep row activation separate, but let Escape and navigation reach
+        // the tooltip and enclosing dialog's keyboard handlers.
+        if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+      }}
       className={`forge-chip${chip.name === null ? " forge-chip--mark" : ""}`}
       {...hoverTooltip(tip, url === null ? chip.title : `${chip.title}. Open repository in browser: ${url}`)}
     >

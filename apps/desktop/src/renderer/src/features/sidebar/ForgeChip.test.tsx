@@ -177,3 +177,24 @@ it("opens the repository page without toggling the containing row", async () => 
   expect(key.defaultPrevented).toBe(false);
   await cleanup();
 });
+
+
+it("lets Escape dismiss a focused chip's tooltip and reach enclosing controls", async () => {
+  const rowKey = vi.fn();
+  const { el, cleanup } = await draw(
+    { kind: "github", name: null, others: 0, title: "origin is on github.com" },
+    "https://github.com/example/demo", vi.fn(), rowKey
+  );
+  await act(async () => el.focus());
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+  await act(async () => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  });
+  expect(rowKey).toHaveBeenCalledOnce();
+  expect(document.querySelector('[role="tooltip"]')).toBeNull();
+  expect(document.activeElement).toBe(el);
+  rowKey.mockClear();
+  el.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+  expect(rowKey).toHaveBeenCalledOnce();
+  await cleanup();
+});

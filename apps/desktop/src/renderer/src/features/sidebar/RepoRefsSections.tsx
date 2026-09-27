@@ -869,11 +869,6 @@ export function RepoRefsSections({
                     >
                       <SectionChevron open={open} />
                       <span>{remote.name}</span>
-                      {/* Per remote, because the repo row above can only
-                          carry a count: this is where a checkout that pushes
-                          to one forge and mirrors to another says which is
-                          which. Silent for a remote no product claims. */}
-                      {forgeChipsFor(remote)}
                       {/* The read-only fact belongs to a REMOTE, and this is
                           the remote it is about — `origin` is what `git push`
                           uses and what the repo row's mark is really saying.
@@ -898,6 +893,11 @@ export function RepoRefsSections({
                             : `${remote.branchCount} refs`}
                       </small>
                     </button>
+                    {/* Per remote, because the repo row above can only
+                        carry a count: this is where a checkout that pushes
+                        to one forge and mirrors to another says which is
+                        which. Silent for a remote no product claims. */}
+                    {forgeChipsFor(remote)}
                     {/* A direct action rather than a menu holding one item.
                         Offered whenever `origin` is on a forge, without first
                         asking the forge whether a fork already exists: that
