@@ -16,6 +16,7 @@ import { RepoIndexer } from "../git/repo-indexer";
 import type { GitExec, GitOutput } from "../git/dugite";
 import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
+import { GerritRepoProvider } from "./gerrit/repo-provider";
 import { ForgeHosts } from "./hosts";
 import { ForgeRepoRegistry } from "./repo-provider";
 import {
@@ -101,6 +102,7 @@ async function fixture(
   );
   return {
     db,
+    registry,
     glab,
     indexer,
     profileId: profile.id,
@@ -1009,4 +1011,19 @@ describe("IdentityService and the per-host switch", () => {
     expect(await identities.refresh(repos)).toEqual([]);
     expect(calls).toEqual([]);
   });
+});
+
+
+it("preserves an ownerless Gerrit identity in both persistence readers", async () => {
+  const { db, registry, identities, indexer, profileId } = await fixture(async () => "{}", {
+    origin: "https://codereview.qt-project.org/project"
+  });
+  try {
+    registry.register(new GerritRepoProvider("codereview.qt-project.org", () => undefined, async () => ({ id: "project" })));
+    const repo = indexer.listRepos(profileId)[0]!;
+    const changes = await identities.refresh([repo]);
+    expect(changes[0]?.identity.nameWithOwner).toBe("project");
+    expect(identities.read([repo.id]).get(repo.id)).toMatchObject({ owner: "", name: "project", nameWithOwner: "project" });
+    expect(indexer.listRepos(profileId)[0]?.identity).toMatchObject({ owner: "", name: "project", nameWithOwner: "project" });
+  } finally { db.close(); }
 });

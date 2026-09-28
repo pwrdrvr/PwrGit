@@ -242,7 +242,7 @@ export class IdentityService {
           hostname: row.hostname,
           owner: row.owner,
           name: row.name,
-          nameWithOwner: `${row.owner}/${row.name}`,
+          nameWithOwner: row.owner === "" ? row.name : `${row.owner}/${row.name}`,
           visibility:
             row.visibility === "public" ||
             row.visibility === "private" ||

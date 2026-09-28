@@ -110,7 +110,7 @@ export function repoIdentityFromRow(row: RepoIdentityRow): RepoIdentity {
     hostname: row.hostname,
     owner: row.owner,
     name: row.name,
-    nameWithOwner: `${row.owner}/${row.name}`,
+    nameWithOwner: row.owner === "" ? row.name : `${row.owner}/${row.name}`,
     visibility,
     fetchedAt: row.fetched_at
   };
