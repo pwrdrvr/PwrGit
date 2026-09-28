@@ -45,6 +45,7 @@ type CachedPr = {
   repo_path: string | null;
   head_ref: string | null;
   base_ref: string | null;
+  head_oid: string | null;
   additions: number | null;
   deletions: number | null;
   changed_files: number | null;
@@ -910,6 +911,7 @@ function cachedFromSummary(pr: PrSummary | null): CachedPr {
     repo_path: pr?.repoPath ?? null,
     head_ref: pr?.headRefName ?? null,
     base_ref: pr?.baseRefName ?? null,
+    head_oid: pr?.headOid ?? null,
     additions: pr?.additions ?? null,
     deletions: pr?.deletions ?? null,
     changed_files: pr?.changedFiles ?? null,

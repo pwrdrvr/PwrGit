@@ -1,7 +1,11 @@
 import { availableParallelism } from "node:os";
 import {
+  DEFAULT_BRANCH_CLEANUP_OPTIONS,
   err,
+  isBranchCleanupKeepDays,
   ok,
+  type BranchCleanupOptions,
+  type DeletedBranchResult,
   type MaintenanceRepo,
   type MaintenanceRepoResult,
   type MaintenanceScope,
@@ -16,12 +20,15 @@ import type { DB } from "../persistence/db";
 import { sanitizeGitLogDetail, type GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeOperationQueue } from "./worktree-operation-queue";
+import type { PrService } from "../github/pr-service";
 import {
   collectGarbage,
   deleteStaleBranch,
   maintenanceCommonDirectory,
   objectStorageBytes,
-  scanStaleBranches
+  restoreStaleBranch,
+  reviewStaleBranches,
+  type BranchPrEvidence
 } from "./repository-maintenance";
 
 export function maintenanceRepos(
@@ -33,7 +40,7 @@ export function maintenanceRepos(
     undefined
   )
     return null;
-  return db
+  const repos = db
     .prepare(
       `SELECT r.id, r.name, r.path, r.profile_id AS profileId, p.name AS profileName
     FROM repos r JOIN profiles p ON p.id = r.profile_id
@@ -43,14 +50,82 @@ export function maintenanceRepos(
     .all(
       ...(scope.allProfiles === true ? [] : [scope.profileId])
     ) as MaintenanceRepo[];
+  // A narrowing, never a widening: an id outside the profile scope above is
+  // dropped rather than reached.
+  if (scope.repoIds === undefined) return repos;
+  const wanted = new Set(scope.repoIds);
+  return repos.filter((repo) => wanted.has(repo.id));
 }
+
+/**
+ * Each local branch's cached pull request — the review's evidence for squash
+ * and rebase merges. Read from `branch_pr`, keyed by branch name; a row with
+ * no number is the cache saying "no PR", which is the same as no row here.
+ */
+export function branchPrEvidence(
+  db: DB,
+  repoId: string
+): Map<string, BranchPrEvidence> {
+  const rows = db
+    .prepare(
+      `SELECT branch, number, url, state, merged_at, head_oid FROM branch_pr
+       WHERE repo_id = ? AND number IS NOT NULL`
+    )
+    .all(repoId) as {
+    branch: string;
+    number: number;
+    url: string | null;
+    state: string | null;
+    merged_at: number | null;
+    head_oid: string | null;
+  }[];
+  return new Map(
+    rows.map((row) => [
+      row.branch,
+      {
+        number: row.number,
+        url: row.url ?? "",
+        state:
+          row.state === "merged"
+            ? "merged"
+            : row.state === "closed"
+              ? "closed"
+              : "open",
+        ...(typeof row.merged_at === "number"
+          ? { mergedAt: row.merged_at }
+          : {}),
+        ...(typeof row.head_oid === "string" && row.head_oid !== ""
+          ? { headOid: row.head_oid }
+          : {})
+      }
+    ])
+  );
+}
+
+/** Options cross IPC; anything malformed falls back to the defaults whole. */
+function cleanupOptions(
+  value: BranchCleanupOptions | undefined
+): BranchCleanupOptions {
+  if (
+    value === undefined ||
+    typeof value.prProof !== "boolean" ||
+    !(value.keepDays === null || isBranchCleanupKeepDays(value.keepDays))
+  )
+    return DEFAULT_BRANCH_CLEANUP_OPTIONS;
+  return { prProof: value.prProof, keepDays: value.keepDays };
+}
+
+const plural = (n: number, one: string, many: string): string =>
+  `${n} ${n === 1 ? one : many}`;
 
 export function registerMaintenanceHandlers(
   bus: CommandBus,
   db: DB,
   git: GitExec,
   operations: WorktreeOperationQueue,
-  indexer: Pick<RepoIndexer, "refreshRepoWorktrees">
+  indexer: Pick<RepoIndexer, "refreshRepoWorktrees">,
+  prs?: Pick<PrService, "refreshRepo">,
+  now: () => number = Date.now
 ): { releaseWebContents: (id: number) => void } {
   // One sweep across all windows, regardless of operation ids or profiles.
   // Renderer bugs cannot create an unbounded GC process/queue per click.
@@ -63,6 +138,35 @@ export function registerMaintenanceHandlers(
       return ok({ cancelled: false });
     active.controller.abort();
     return ok({ cancelled: true });
+  });
+
+  bus.register("maintenance:restoreBranch", async (req) => {
+    const repo = db
+      .prepare("SELECT id, path, profile_id AS profileId FROM repos WHERE id = ?")
+      .get(req.repoId) as
+      | { id: string; path: string; profileId: string }
+      | undefined;
+    if (repo === undefined)
+      return err({
+        kind: "repo",
+        code: "repo_not_found",
+        message: "This repository is no longer indexed."
+      });
+    if (!/^[0-9a-f]{40,64}$/i.test(req.head ?? "") || !req.branch?.trim())
+      return err({
+        kind: "validation",
+        code: "invalid_restore",
+        message: "Choose a deleted branch from the receipt to restore."
+      });
+    const restored = await operations.runRepository(repo.id, () =>
+      restoreStaleBranch(git, repo.path, req.branch, req.head)
+    );
+    if (!restored.ok) return restored;
+    logMain("info", "maintenance", `restored ${req.branch} at ${req.head.slice(0, 12)} in ${repo.path}`);
+    await indexer.refreshRepoWorktrees(repo.id);
+    emitEvent("graph:changed", { repoId: repo.id });
+    emitEvent("repo:changed", { profileId: repo.profileId });
+    return ok(null);
   });
 
   bus.register("maintenance:run", async (req, ctx) => {
@@ -181,6 +285,13 @@ export function registerMaintenanceHandlers(
                   };
                 }
                 commonDirectories.add(directory.value);
+                /** The review, with the evidence the action asked for. */
+                const review = async (options: BranchCleanupOptions) =>
+                  reviewStaleBranches(git, repo.path, repo.id, {
+                    options,
+                    prs: branchPrEvidence(db, repo.id),
+                    now: now()
+                  });
                 if (action.kind === "gc") {
                   report("Measuring object storage before collection…");
                   const beforeBytes = await objectStorageBytes(git, repo.path);
@@ -195,6 +306,15 @@ export function registerMaintenanceHandlers(
                   );
                   report("Measuring object storage after collection…");
                   const afterBytes = await objectStorageBytes(git, repo.path);
+                  // Collection never removes a branch name, which is exactly
+                  // what people run it hoping for. Count what the branch
+                  // review would offer — cached PR rows only, no forge
+                  // request — so the receipt can hand off to it. A failed
+                  // count costs the offer, never the collection's result.
+                  const finished =
+                    collected.ok && action.branchOptions !== undefined
+                      ? await review(cleanupOptions(action.branchOptions))
+                      : undefined;
                   return {
                     repo,
                     outcome: collected.ok ? "success" : "failed",
@@ -202,24 +322,36 @@ export function registerMaintenanceHandlers(
                       ? "Garbage collection completed."
                       : sanitizeGitLogDetail(collected.error.message),
                     ...(beforeBytes === undefined ? {} : { beforeBytes }),
-                    ...(afterBytes === undefined ? {} : { afterBytes })
+                    ...(afterBytes === undefined ? {} : { afterBytes }),
+                    ...(finished?.ok === true
+                      ? {
+                          candidates: finished.value.candidates,
+                          kept: finished.value.kept
+                        }
+                      : {})
                   };
                 }
                 if (action.kind === "scan-branches") {
+                  const options = cleanupOptions(action.options);
+                  if (options.prProof && prs !== undefined) {
+                    // Squash merges are proven by a PR's head commit, and a
+                    // row cached before that was fetched has none. Best
+                    // effort: the refresh keeps whatever is cached when the
+                    // forge cannot be reached, and those rows are kept.
+                    report("Checking pull requests for local branches…");
+                    await prs.refreshRepo(repo.id, { trigger: "user" });
+                  }
                   report(
                     "Checking local branches, upstreams, and merged commits…"
                   );
-                  const scanned = await scanStaleBranches(
-                    git,
-                    repo.path,
-                    repo.id
-                  );
+                  const scanned = await review(options);
                   return scanned.ok
                     ? {
                         repo,
                         outcome: "success",
-                        candidates: scanned.value,
-                        message: `${scanned.value.length} eligible local branch${scanned.value.length === 1 ? "" : "es"}. Other branches are retained.`
+                        candidates: scanned.value.candidates,
+                        kept: scanned.value.kept,
+                        message: `${plural(scanned.value.candidates.length, "finished branch", "finished branches")} · ${scanned.value.kept.length} kept.`
                       }
                     : {
                         repo,
@@ -227,30 +359,42 @@ export function registerMaintenanceHandlers(
                         message: sanitizeGitLogDetail(scanned.error.message)
                       };
                 }
-                const branches: NonNullable<MaintenanceRepoResult["branches"]> =
-                  [];
+                const branches: DeletedBranchResult[] = [];
                 const repoCandidates = selected.filter(
                   (branch) => branch.repoId === repo.id
                 );
+                // One fresh review for the batch, not one per branch: each
+                // delete below still rechecks the tip and worktrees itself,
+                // and a review per branch made a 200-branch clean-up
+                // quadratic in Git processes.
+                report("Checking the reviewed branches again…");
+                const fresh = await review(cleanupOptions(action.options));
                 for (const candidate of repoCandidates) {
+                  const entry = {
+                    branch: candidate.branch,
+                    head: candidate.expectedHead
+                  };
                   if (controller.signal.aborted) {
                     branches.push({
-                      branch: candidate.branch,
+                      ...entry,
                       deleted: false,
                       message: "Cancelled; retained."
                     });
                     continue;
                   }
                   report(
-                    `Checking branch ${branches.length + 1} of ${repoCandidates.length}: ${candidate.branch}`
+                    `Deleting branch ${branches.length + 1} of ${repoCandidates.length}: ${candidate.branch}`
                   );
-                  const deleted = await deleteStaleBranch(
-                    git,
-                    repo.path,
-                    candidate
-                  );
+                  const deleted = fresh.ok
+                    ? await deleteStaleBranch(
+                        git,
+                        repo.path,
+                        candidate,
+                        fresh.value
+                      )
+                    : fresh;
                   branches.push({
-                    branch: candidate.branch,
+                    ...entry,
                     deleted: deleted.ok,
                     message: deleted.ok
                       ? "Deleted local branch."

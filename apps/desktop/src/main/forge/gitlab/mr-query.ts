@@ -17,9 +17,11 @@ import { toPrLifecycle } from "../types";
 /**
  * `diffStatsSummary` is GitLab's equivalent of GitHub's additions/deletions/
  * changedFiles triple; `fileCount` is the field GitHub calls `changedFiles`.
+ * `diffHeadSha` is GitHub's `headRefOid`: the head commit of the MR's latest
+ * diff, which for a merged MR is the last commit it merged.
  */
 const MR_FIELDS = `iid title webUrl state draft sourceBranch targetBranch
-        createdAt mergedAt closedAt commitCount
+        diffHeadSha createdAt mergedAt closedAt commitCount
         diffStatsSummary { additions deletions fileCount }`;
 
 /**
@@ -42,6 +44,12 @@ export type MrNode = {
   source_branch?: string | null;
   targetBranch?: string | null;
   target_branch?: string | null;
+  /**
+   * The head commit. REST has no `diff_head_sha`; its merge request object
+   * carries the same commit as plain `sha`.
+   */
+  diffHeadSha?: string | null;
+  sha?: string | null;
   createdAt?: string | null;
   created_at?: string | null;
   mergedAt?: string | null;
@@ -258,6 +266,7 @@ export function toSummary(node: MrNode): PrSummary {
     isDraft: node.draft === true,
     ...optionalText("headRefName", sourceBranchOf(node)),
     ...optionalText("baseRefName", either(node.targetBranch, node.target_branch)),
+    ...optionalText("headOid", either(node.diffHeadSha, node.sha)),
     ...optionalCount("additions", node.diffStatsSummary?.additions),
     ...optionalCount("deletions", node.diffStatsSummary?.deletions),
     ...optionalCount("changedFiles", node.diffStatsSummary?.fileCount),

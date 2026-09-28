@@ -26,8 +26,30 @@ const candidate = {
   repoId: "repo",
   branch: "finished",
   expectedHead: "abc123",
-  upstream: "refs/remotes/origin/finished"
+  upstream: "refs/remotes/origin/finished",
+  evidence: "ancestry" as const
 };
+const squashed = {
+  repoId: "repo",
+  branch: "fix/tooltip",
+  expectedHead: "f".repeat(40),
+  upstream: "refs/remotes/origin/fix/tooltip",
+  evidence: "pr" as const,
+  pr: { number: 412, url: "https://example.test/pull/412" }
+};
+const kept = [
+  { branch: "spike/a", reason: "pr_closed" as const, detail: "#377 closed without merging" },
+  { branch: "spike/b", reason: "pr_closed" as const, detail: "#378 closed without merging" },
+  { branch: "wip", reason: "recent" as const, detail: "Touched yesterday, inside the 7-day guard" }
+];
+/** What `settings:read` answers on mount — only the two fields the dialog
+ *  reads matter. */
+const settings = (prProof: boolean, keepDays: number | null) => ({
+  ok: true,
+  value: { general: { branchCleanupPrProof: prProof, branchCleanupKeepDays: keepDays } }
+});
+const runCalls = () =>
+  dispatch.mock.calls.filter(([name]) => name === "maintenance:run");
 function summary(results: MaintenanceRepoResult[]): MaintenanceSummary {
   return {
     operationId: "run",
@@ -62,6 +84,9 @@ beforeEach(async () => {
       return vi.fn();
     }
   );
+  dispatch.mockImplementation(async (name: string) =>
+    name === "settings:read" ? settings(true, 7) : { ok: true, value: null }
+  );
   await act(async () =>
     root.render(
       <StrictMode>
@@ -69,6 +94,9 @@ beforeEach(async () => {
       </StrictMode>
     )
   );
+  // The mount's `settings:read` is not what these tests are about; the call
+  // log starts at the reader's first action.
+  dispatch.mockClear();
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -78,7 +106,7 @@ afterEach(async () => {
 
 describe("maintenance dialog", () => {
   it("explains the choices and waits for explicit start even in StrictMode", async () => {
-    expect(dispatch).not.toHaveBeenCalled();
+    expect(runCalls()).toEqual([]);
     expect(container.textContent).toContain("Standard (recommended)");
     expect(container.textContent).toContain("no guaranteed size reduction");
     dispatch.mockResolvedValue({ ok: true, value: summary([]) });
@@ -88,7 +116,13 @@ describe("maintenance dialog", () => {
       expect.objectContaining({
         profileId: "one",
         allProfiles: false,
-        action: { kind: "gc", mode: "standard" }
+        // Collection counts finished branches with the saved rules, so its
+        // receipt can offer the review.
+        action: {
+          kind: "gc",
+          mode: "standard",
+          branchOptions: { prProof: true, keepDays: 7 }
+        }
       })
     );
     expect(container.textContent).toContain("Finished");
@@ -229,14 +263,17 @@ describe("maintenance dialog", () => {
       ])
     });
     await click("Local branches");
-    expect(container.textContent).toContain("Fetch all repos first");
-    expect(dispatch).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Never offered");
+    expect(runCalls()).toEqual([]);
     await click("Review local branches");
-    expect(button("Delete 0 selected local branches").disabled).toBe(true);
-    expect(container.textContent).toContain("origin/finished");
+    // Finished is checked by default: every row carries its proof.
+    expect(container.textContent).toContain("Already in HEAD");
     const checkbox = container.querySelector<HTMLInputElement>(
       ".maintenance__branch input"
     )!;
+    expect(checkbox.checked).toBe(true);
+    await act(async () => checkbox.click());
+    expect(button("Delete 0 selected local branches").disabled).toBe(true);
     await act(async () => checkbox.click());
     dispatch.mockResolvedValue({
       ok: true,
@@ -248,6 +285,7 @@ describe("maintenance dialog", () => {
           branches: [
             {
               branch: "finished",
+              head: "abc123",
               deleted: true,
               message: "Deleted local branch."
             }
@@ -259,11 +297,146 @@ describe("maintenance dialog", () => {
     expect(dispatch).toHaveBeenLastCalledWith(
       "maintenance:run",
       expect.objectContaining({
-        action: { kind: "delete-branches", branches: [candidate] }
+        action: {
+          kind: "delete-branches",
+          branches: [candidate],
+          options: { prProof: true, keepDays: 7 }
+        }
       })
     );
     expect(container.querySelector(".maintenance__branch")).toBeNull();
     expect(container.textContent).toContain("Deleted local branch.");
+    // The receipt is the undo: a deleted branch's reflog goes with it.
+    dispatch.mockResolvedValue({ ok: true, value: null });
+    await click("Restore");
+    expect(dispatch).toHaveBeenLastCalledWith("maintenance:restoreBranch", {
+      repoId: "repo",
+      branch: "finished",
+      head: "abc123"
+    });
+    expect(button("Restored").disabled).toBe(true);
+  });
+
+  it("shows each finished branch's evidence and counts kept ones by reason", async () => {
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: summary([
+        {
+          repo,
+          outcome: "success",
+          message: "1 finished",
+          candidates: [squashed],
+          kept
+        }
+      ])
+    });
+    await click("Local branches");
+    await click("Review local branches");
+    expect(container.textContent).toContain("#412 merged · tip is its head");
+    const reasons = [
+      ...container.querySelectorAll(".maintenance__kept-reasons span")
+    ].map((node) => node.textContent);
+    expect(reasons).toEqual([
+      "2 closed without merging",
+      "1 touched in the last 7 days"
+    ]);
+    expect(container.textContent).not.toContain("#377 closed without merging");
+    await click("Show");
+    expect(container.textContent).toContain("#377 closed without merging");
+  });
+
+  it("remembers the rules and drops a review they no longer describe", async () => {
+    dispatch.mockImplementation(async (name: string) =>
+      name === "maintenance:run"
+        ? {
+            ok: true,
+            value: summary([
+              { repo, outcome: "success", message: "1", candidates: [candidate] }
+            ])
+          }
+        : { ok: true, value: null }
+    );
+    await click("Local branches");
+    await click("Review local branches");
+    const select = container.querySelector<HTMLSelectElement>(
+      "select[aria-label='Age guard']"
+    )!;
+    expect(select.value).toBe("7");
+    await act(async () => {
+      select.value = "30";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(dispatch).toHaveBeenCalledWith("settings:update", {
+      patch: {
+        general: { branchCleanupPrProof: true, branchCleanupKeepDays: 30 }
+      }
+    });
+    expect(container.querySelector(".maintenance__branch")).toBeNull();
+    await click("Review local branches");
+    expect(runCalls().at(-1)![1]).toMatchObject({
+      action: { kind: "scan-branches", options: { prProof: true, keepDays: 30 } }
+    });
+  });
+
+  it("offers the branch review from a collection's receipt without scanning again", async () => {
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: summary([
+        {
+          repo,
+          outcome: "success",
+          message: "Garbage collection completed.",
+          beforeBytes: 2048,
+          afterBytes: 1024,
+          candidates: [candidate, squashed],
+          kept
+        }
+      ])
+    });
+    await click("Run garbage collection");
+    expect(container.textContent).toContain(
+      "2 finished local branches across 1 repository"
+    );
+    await click("Review…");
+    expect(runCalls()).toHaveLength(1);
+    expect(
+      button("Local branches").getAttribute("aria-pressed")
+    ).toBe("true");
+    expect(button("Delete 2 selected local branches").disabled).toBe(false);
+  });
+});
+
+describe("maintenance dialog opened from a repository's branch list", () => {
+  it("reviews that repository on open, with the saved rules", async () => {
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    dispatch.mockImplementation(async (name: string) =>
+      name === "settings:read"
+        ? settings(false, null)
+        : { ok: true, value: summary([]) }
+    );
+    await act(async () =>
+      root.render(
+        <MaintenanceDialog
+          profileId="one"
+          platform="linux"
+          onClose={onClose}
+          repoScope={{ id: "repo", name: "example" }}
+          initialTab="branches"
+          autoReview
+        />
+      )
+    );
+    expect(runCalls()).toHaveLength(1);
+    expect(runCalls()[0]![1]).toMatchObject({
+      repoIds: ["repo"],
+      action: {
+        kind: "scan-branches",
+        options: { prProof: false, keepDays: null }
+      }
+    });
+    expect(container.textContent).toContain("Only example");
+    expect(container.textContent).not.toContain("Include all profiles");
   });
 
   it("invalidates a branch review when the profile scope changes", async () => {

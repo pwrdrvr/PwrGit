@@ -1085,6 +1085,7 @@ describe("PrService change-request detail", () => {
     repoPath: "pwrdrvr/PwrGit",
     headRefName: "feat",
     baseRefName: "main",
+    headOid: "1111111111111111111111111111111111111111",
     additions: 10,
     deletions: 3,
     changedFiles: 2,
@@ -1127,11 +1128,40 @@ describe("PrService change-request detail", () => {
       repoPath: "pwrdrvr/PwrGit",
       headRefName: "feat",
       baseRefName: "main",
+      headOid: "1111111111111111111111111111111111111111",
       additions: 10,
       deletions: 3,
       changedFiles: 2,
       commitCount: 4,
       createdAt: 1_000
+    });
+  });
+
+  it("announces a head commit arriving on a row cached without one", async () => {
+    // Rows cached before head_oid existed hold NULL there. The refetch 0035
+    // forces must be written AND published, or the renderer keeps a summary
+    // that cannot prove a squash-merged branch was merged.
+    const withoutHead: PrSummary = { ...DETAILED };
+    delete withoutHead.headOid;
+    let answer = withoutHead;
+    let now = 1_000_000;
+    const service = new PrService(db, detailGit, {
+      resolveForge: fakeForge({
+        fetchPrsForBranches: async () => new Map([["feat", answer]])
+      }),
+      now: () => now
+    });
+
+    await service.refreshRepo("r");
+    expect(service.cachedBranchPr("r", "feat")).not.toHaveProperty("headOid");
+
+    answer = DETAILED;
+    now += 60 * 60_000;
+    const changed = await service.refreshRepo("r");
+
+    expect(changed.get("feat")).toMatchObject({ headOid: DETAILED.headOid });
+    expect(service.cachedBranchPr("r", "feat")).toMatchObject({
+      headOid: DETAILED.headOid
     });
   });
 
@@ -1159,7 +1189,7 @@ describe("PrService change-request detail", () => {
 
     const cached = service.cachedBranchPr("r", "feat");
     // "Not known" must survive the round trip as absent, never as 0.
-    for (const key of ["additions", "deletions", "changedFiles", "commitCount"]) {
+    for (const key of ["additions", "deletions", "changedFiles", "commitCount", "headOid"]) {
       expect(cached).not.toHaveProperty(key);
     }
   });
@@ -1170,6 +1200,7 @@ describe("PrService change-request detail", () => {
     const merged: PrSummary = {
       ...DETAILED,
       state: "merged",
+      headOid: "2222222222222222222222222222222222222222",
       additions: 99,
       mergedAt: 2_000
     };
@@ -1187,6 +1218,7 @@ describe("PrService change-request detail", () => {
     expect(deltas.branches.get("feat")).toMatchObject({ state: "merged" });
     expect(service.cachedBranchPr("r", "feat")).toMatchObject({
       state: "merged",
+      headOid: "2222222222222222222222222222222222222222",
       additions: 99,
       mergedAt: 2_000
     });

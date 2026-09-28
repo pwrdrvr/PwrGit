@@ -45,6 +45,7 @@ describe("prSummaryFromRow", () => {
     pr_repo_path: "g/s/p",
     pr_head_ref: "feature",
     pr_base_ref: "main",
+    pr_head_oid: "0123456789abcdef0123456789abcdef01234567",
     pr_additions: 12,
     pr_deletions: 5,
     pr_changed_files: 3,
@@ -66,6 +67,7 @@ describe("prSummaryFromRow", () => {
       repoPath: "g/s/p",
       headRefName: "feature",
       baseRefName: "main",
+      headOid: "0123456789abcdef0123456789abcdef01234567",
       additions: 12,
       deletions: 5,
       changedFiles: 3,
@@ -88,7 +90,7 @@ describe("prSummaryFromRow", () => {
       pr_state: "open",
       pr_is_draft: 0
     });
-    for (const key of ["additions", "changedFiles", "commitCount", "createdAt"]) {
+    for (const key of ["additions", "changedFiles", "commitCount", "createdAt", "headOid"]) {
       expect(summary).not.toHaveProperty(key);
     }
   });

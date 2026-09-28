@@ -102,6 +102,7 @@ first.
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
 | `Person Card - UX Review.dc.html` | Who wrote this commit? The lineage byline that had a hand cursor and no action, four answers to it (the card from what PwrGit already knows, one with a GitHub profile section, one that filters the graph to one author, and a live prototype of all three), and the recommended card in every state it can be in: proven, proven with no photo, no linked account, yours, and a forge that cannot link commits to accounts. Then the wiring it borrows from the PR and SHA chips, and main's people store, the only thing that asks a forge about an author. Interactive. |
+| `Finished Branches - UX Review.dc.html` | Why the sidebar's `↑2` and `225 gone` could not be clicked, why garbage collection and `fetch --prune` never remove a gone branch, and why Maintenance › Local branches declined every squash merge. Then the counts as filter chips, a status filter in the refs browser, the evidence rules (a merged PR whose final head *is* the local tip), the redrawn review with an age guard, and garbage collection's hand-off to it. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -396,6 +397,20 @@ match it: the status copy, GitCafe as the forge that cannot prove authors
 (GitLab can), and a click that opens the card without pinning it. Every
 person, email, login and avatar in it is contrived, and the avatars are drawn
 SVG. It carries no `assets/`.
+
+`Finished Branches - UX Review.dc.html` was written here and pushed up through
+`DesignSync`; the project copy was verified at the same 76,120 bytes. The design
+round is in the project's chat panel as "Finished branches — make the counts
+act, clean up gone branches". It is a
+proposal: nothing in the app changed with it. Turn **1** is the diagnosis from
+one report (a sidebar's `↑2` that only folded the section, and `225 gone` that
+survived a garbage collection). Turn **2** makes the counts filter chips, turn
+**3** is the evidence table, turn **4** redraws Maintenance › Local branches and
+the garbage-collection receipt that offers it, **5a** is a live `DCLogic`
+prototype of the review with the age dropdown and PR-proof toggle, and turn
+**6** is the build list. Its repository, branches, PR numbers and SHAs
+(`orbit-deploy`, `fix/tooltip-flicker`, `#412`) are invented; the counts in the
+report were rounded into invented ones. It carries no `assets/`.
 
 ## Deliberately NOT copied in
 

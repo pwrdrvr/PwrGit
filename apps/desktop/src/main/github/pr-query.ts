@@ -11,6 +11,7 @@ import { UNAVAILABLE_FORK } from "../forge/types";
  * before this shipped stops being refreshed and will never gain them.
  */
 const PR_NODE_FIELDS = `number title url state isDraft mergeable headRefName baseRefName
+      headRefOid
       repository { nameWithOwner }
       additions deletions changedFiles commits(last: 1) {
         totalCount
@@ -41,6 +42,11 @@ type PrNode = {
   mergeable?: string | null;
   headRefName?: string | null;
   baseRefName?: string | null;
+  /**
+   * The head commit as the PR last saw it. GitHub keeps answering this after
+   * the head branch is deleted, so a merged PR still names its final commit.
+   */
+  headRefOid?: string | null;
   additions?: number | null;
   deletions?: number | null;
   changedFiles?: number | null;
@@ -138,6 +144,7 @@ function toSummary(node: PrNode): PrSummary {
     ...optionalText("repoPath", node.repository?.nameWithOwner),
     ...optionalText("headRefName", node.headRefName),
     ...optionalText("baseRefName", node.baseRefName),
+    ...optionalText("headOid", node.headRefOid),
     ...optionalCount("additions", node.additions),
     ...optionalCount("deletions", node.deletions),
     ...optionalCount("changedFiles", node.changedFiles),

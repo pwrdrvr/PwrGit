@@ -110,6 +110,7 @@ export function RepoRow({
   onRevealWorktree,
   onCreateWorktreeFromRef,
   onForkRepo,
+  onCleanUpBranches,
   arrangeable,
   dragProps,
   dragging,
@@ -170,6 +171,9 @@ export function RepoRow({
   /** Open the fork prompt for this repository — raised by the read-only mark,
    *  the `origin` row under REMOTES, and the row's own actions menu. */
   onForkRepo: () => void;
+  /** Open Maintenance › Local branches on this repository, already reviewing
+   *  — the refs browser's Gone view offers it. */
+  onCleanUpBranches?: (() => void) | undefined;
   /** The current lens is one the user can arrange by hand (Pinned only). */
   arrangeable: boolean;
   /** Repo-level drag handlers from the sidebar's useListReorder. */
@@ -933,6 +937,7 @@ export function RepoRow({
           <RepoRefsSections
             onLocateTag={onLocateTag}
             onFork={onForkRepo}
+            onCleanUpBranches={onCleanUpBranches}
             browserRequest={refsBrowserRequest}
             onBrowserRequestHandled={clearRefsBrowserRequest}
             repo={repo}

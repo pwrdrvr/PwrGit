@@ -10,7 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ok, type StaleBranch } from "@pwrgit/shared";
+import {
+  ok,
+  type BranchCleanupOptions,
+  type StaleBranch
+} from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 import {
@@ -19,7 +23,10 @@ import {
   garbageCollectionArgs,
   maintenanceCommonDirectory,
   objectStorageBytes,
-  scanStaleBranches
+  restoreStaleBranch,
+  reviewStaleBranches,
+  type BranchPrEvidence,
+  type StaleBranchReview
 } from "./repository-maintenance";
 
 const systemGit = createSystemGit();
@@ -29,6 +36,14 @@ function git(cwd: string, ...args: string[]): string {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"]
   }).trim();
+}
+/** A commit whose committer date is `date`, so the age guard has an old tip
+ *  to look at without the test waiting a week. */
+function commitAt(cwd: string, date: string, message: string): void {
+  execFileSync("git", ["-C", cwd, "commit", "--allow-empty", "-m", message], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date }
+  });
 }
 function fixture(): { root: string; repo: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-maintenance-")));
@@ -52,11 +67,51 @@ function gone(repo: string, name: string): void {
   git(repo, "push", "-u", "origin", name);
   git(repo, "push", "origin", "--delete", name);
 }
-async function review(repo: string): Promise<StaleBranch[]> {
-  const result = await scanStaleBranches(systemGit, repo, "repo");
+/** No age guard unless a test asks: fixture commits are all minutes old. */
+const NO_GUARD: BranchCleanupOptions = { prProof: true, keepDays: null };
+async function reviewed(
+  repo: string,
+  input: {
+    options?: BranchCleanupOptions;
+    prs?: Map<string, BranchPrEvidence>;
+    now?: number;
+  } = {}
+): Promise<StaleBranchReview> {
+  const result = await reviewStaleBranches(systemGit, repo, "repo", {
+    options: input.options ?? NO_GUARD,
+    prs: input.prs ?? new Map(),
+    now: input.now ?? Date.now()
+  });
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
 }
+async function review(repo: string): Promise<StaleBranch[]> {
+  return (await reviewed(repo)).candidates;
+}
+async function remove(repo: string, candidate: StaleBranch) {
+  return deleteStaleBranch(systemGit, repo, candidate, await reviewed(repo));
+}
+/** A gone branch with one commit of its own, squash-merged into main — the
+ *  shape GitHub's squash button leaves behind. Returns the branch's tip. */
+function squashMerged(repo: string, name: string): string {
+  gone(repo, name);
+  git(repo, "checkout", name);
+  writeFileSync(join(repo, `${name}.txt`), "feature\n");
+  git(repo, "add", ".");
+  git(repo, "commit", "-m", "Feature");
+  const tip = git(repo, "rev-parse", "HEAD");
+  git(repo, "checkout", "main");
+  git(repo, "merge", "--squash", name);
+  git(repo, "commit", "-m", "Squashed feature");
+  return tip;
+}
+const merged = (headOid?: string): BranchPrEvidence => ({
+  number: 412,
+  url: "https://example.test/pull/412",
+  state: "merged",
+  mergedAt: Date.parse("2026-09-01T00:00:00Z"),
+  ...(headOid === undefined ? {} : { headOid })
+});
 afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
@@ -133,16 +188,31 @@ describe("repository maintenance with real Git", () => {
     git(repo, "add", ".");
     git(repo, "commit", "-m", "Unique work");
     git(repo, "checkout", "main");
-    expect((await review(repo)).map((branch) => branch.branch)).toEqual([
+    const result = await reviewed(repo);
+    expect(result.candidates.map((branch) => branch.branch)).toEqual([
       "finished"
     ]);
+    expect(result.candidates[0]).toMatchObject({ evidence: "ancestry" });
+    // Every gone branch is accounted for: protected names are not listed,
+    // the rest say why they stayed.
+    expect(
+      result.kept.map(({ branch, reason }) => [branch, reason])
+    ).toEqual(
+      expect.arrayContaining([
+        ["held", "worktree"],
+        ["unique", "no_proof"]
+      ])
+    );
+    expect(result.kept.map((branch) => branch.branch)).not.toContain(
+      "develop"
+    );
   });
 
   it("deletes only the reviewed local branch and its tracking configuration", async () => {
     const { repo } = fixture();
     gone(repo, "finished");
     const candidate = (await review(repo))[0]!;
-    expect((await deleteStaleBranch(systemGit, repo, candidate)).ok).toBe(true);
+    expect((await remove(repo, candidate)).ok).toBe(true);
     expect(git(repo, "branch", "--list", "finished")).toBe("");
     expect(git(repo, "ls-remote", "--heads", "origin")).toContain(
       "refs/heads/main"
@@ -192,7 +262,7 @@ describe("repository maintenance with real Git", () => {
       "refs/remotes/origin/production"
     );
 
-    expect(await deleteStaleBranch(systemGit, repo, candidate)).toMatchObject({
+    expect(await remove(repo, candidate)).toMatchObject({
       ok: false,
       error: { code: "stale_branch_review" }
     });
@@ -214,9 +284,15 @@ describe("repository maintenance with real Git", () => {
             })
           )
         : systemGit(args, cwd, options);
-    expect((await scanStaleBranches(unreadableHead, repo, "repo")).ok).toBe(
-      false
-    );
+    expect(
+      (
+        await reviewStaleBranches(unreadableHead, repo, "repo", {
+          options: NO_GUARD,
+          prs: new Map(),
+          now: Date.now()
+        })
+      ).ok
+    ).toBe(false);
   });
 
   it.each(["moved", "upstream-restored", "checked-out"])(
@@ -231,24 +307,161 @@ describe("repository maintenance with real Git", () => {
       } else if (change === "upstream-restored") {
         git(repo, "update-ref", "refs/remotes/origin/finished", "HEAD");
       } else git(repo, "worktree", "add", join(root, "held"), "finished");
-      expect((await deleteStaleBranch(systemGit, repo, candidate)).ok).toBe(
-        false
-      );
+      expect((await remove(repo, candidate)).ok).toBe(false);
       expect(git(repo, "branch", "--list", "finished")).toContain("finished");
     }
   );
 
-  it("retains squash-merged tips whose original commit is not reachable", async () => {
+  it("retains squash-merged tips that no merged pull request proves", async () => {
     const { repo } = fixture();
-    gone(repo, "squashed");
-    git(repo, "checkout", "squashed");
-    writeFileSync(join(repo, "feature.txt"), "feature\n");
-    git(repo, "add", ".");
-    git(repo, "commit", "-m", "Feature");
+    squashMerged(repo, "squashed");
+    const result = await reviewed(repo);
+    expect(result.candidates).toEqual([]);
+    expect(result.kept).toEqual([
+      expect.objectContaining({ branch: "squashed", reason: "no_proof" })
+    ]);
+    expect(existsSync(join(repo, "squashed.txt"))).toBe(true);
+  });
+
+  it("offers a squash-merged branch whose tip is its merged PR's head, and deletes it", async () => {
+    const { repo } = fixture();
+    const tip = squashMerged(repo, "squashed");
+    const prs = new Map([["squashed", merged(tip)]]);
+    const result = await reviewed(repo, { prs });
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        branch: "squashed",
+        evidence: "pr",
+        expectedHead: tip,
+        pr: expect.objectContaining({ number: 412 })
+      })
+    ]);
+    // `git branch -d` refuses this branch — its commits are not in HEAD —
+    // so the PR-proven path must be the compare-and-swap, not the merge check.
+    expect(
+      await deleteStaleBranch(systemGit, repo, result.candidates[0]!, result)
+    ).toEqual({ ok: true, value: undefined });
+    expect(git(repo, "branch", "--list", "squashed")).toBe("");
+    expect(git(repo, "config", "--list")).not.toContain("branch.squashed.");
+  });
+
+  it("proves a tip that is an ancestor of the PR's head", async () => {
+    const { repo } = fixture();
+    const tip = squashMerged(repo, "squashed");
+    // Someone pushed one more commit to the PR after this checkout's copy.
+    git(repo, "checkout", "--detach", tip);
+    git(repo, "commit", "--allow-empty", "-m", "Reviewer fix");
+    const prHead = git(repo, "rev-parse", "HEAD");
     git(repo, "checkout", "main");
-    git(repo, "merge", "--squash", "squashed");
-    git(repo, "commit", "-m", "Squashed feature");
-    expect(await review(repo)).toEqual([]);
-    expect(existsSync(join(repo, "feature.txt"))).toBe(true);
+    const result = await reviewed(repo, {
+      prs: new Map([["squashed", merged(prHead)]])
+    });
+    expect(result.candidates.map((branch) => branch.evidence)).toEqual(["pr"]);
+  });
+
+  it("keeps a merged-PR branch with local commits the PR never had", async () => {
+    const { repo } = fixture();
+    const tip = squashMerged(repo, "squashed");
+    git(repo, "checkout", "squashed");
+    git(repo, "commit", "--allow-empty", "-m", "After the merge");
+    git(repo, "commit", "--allow-empty", "-m", "And another");
+    git(repo, "checkout", "main");
+    const result = await reviewed(repo, {
+      prs: new Map([["squashed", merged(tip)]])
+    });
+    expect(result.candidates).toEqual([]);
+    expect(result.kept).toEqual([
+      expect.objectContaining({
+        reason: "unmerged_commits",
+        detail: "2 local commits not in #412"
+      })
+    ]);
+  });
+
+  it.each([
+    ["no head commit is known", merged(), "no_proof"],
+    ["the PR closed unmerged", { ...merged(), state: "closed" as const }, "pr_closed"],
+    ["the PR is open", { ...merged(), state: "open" as const }, "pr_open"]
+  ])("keeps a squash-merged branch when %s", async (_name, pr, reason) => {
+    const { repo } = fixture();
+    squashMerged(repo, "squashed");
+    const result = await reviewed(repo, { prs: new Map([["squashed", pr]]) });
+    expect(result.candidates).toEqual([]);
+    expect(result.kept[0]).toMatchObject({ reason });
+  });
+
+  it("keeps PR-proven branches when PR proof is switched off", async () => {
+    const { repo } = fixture();
+    const tip = squashMerged(repo, "squashed");
+    const result = await reviewed(repo, {
+      options: { prProof: false, keepDays: null },
+      prs: new Map([["squashed", merged(tip)]])
+    });
+    expect(result.candidates).toEqual([]);
+    expect(result.kept[0]).toMatchObject({ reason: "pr_proof_off" });
+  });
+
+  it("holds proven branches touched inside the age guard, and only those", async () => {
+    const { repo } = fixture();
+    gone(repo, "recent");
+    git(repo, "checkout", "-b", "old");
+    commitAt(repo, "2020-01-01T00:00:00Z", "Old work");
+    git(repo, "checkout", "main");
+    git(repo, "merge", "--ff-only", "old");
+    git(repo, "push", "-u", "origin", "old");
+    git(repo, "push", "origin", "--delete", "old");
+    const week = { prProof: true, keepDays: 7 } as const;
+    // `old`'s tip is from 2020 but it was checked out moments ago, which the
+    // HEAD reflog remembers and the commit date does not.
+    let result = await reviewed(repo, { options: week });
+    expect(result.kept.map(({ branch, reason }) => [branch, reason])).toEqual(
+      expect.arrayContaining([
+        ["recent", "recent"],
+        ["old", "recent"]
+      ])
+    );
+    const later = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    result = await reviewed(repo, { options: week, now: later });
+    expect(result.candidates.map((branch) => branch.branch).sort()).toEqual([
+      "old",
+      "recent"
+    ]);
+    expect(result.candidates.every((branch) => branch.touchedAt! > Date.parse("2021-01-01"))).toBe(true);
+  });
+
+  it("restores a deleted branch at its tip, and refuses a taken name", async () => {
+    const { repo } = fixture();
+    const tip = squashMerged(repo, "squashed");
+    const result = await reviewed(repo, {
+      prs: new Map([["squashed", merged(tip)]])
+    });
+    await deleteStaleBranch(systemGit, repo, result.candidates[0]!, result);
+    expect(await restoreStaleBranch(systemGit, repo, "squashed", tip)).toEqual({
+      ok: true,
+      value: undefined
+    });
+    expect(git(repo, "rev-parse", "refs/heads/squashed")).toBe(tip);
+    // The upstream was the thing that was gone; do not resurrect it.
+    expect(git(repo, "config", "--list")).not.toContain("branch.squashed.");
+    expect(
+      await restoreStaleBranch(systemGit, repo, "squashed", tip)
+    ).toMatchObject({ ok: false, error: { code: "branch_exists" } });
+  });
+
+  it("refuses to delete a branch reviewed on different evidence", async () => {
+    const { repo } = fixture();
+    const tip = squashMerged(repo, "squashed");
+    const prs = new Map([["squashed", merged(tip)]]);
+    const result = await reviewed(repo, { prs });
+    // PR proof switched off between review and delete: the fresh review no
+    // longer offers it, so nothing is force-deleted.
+    const fresh = await reviewed(repo, {
+      prs,
+      options: { prProof: false, keepDays: null }
+    });
+    expect(
+      await deleteStaleBranch(systemGit, repo, result.candidates[0]!, fresh)
+    ).toMatchObject({ ok: false, error: { code: "stale_branch_review" } });
+    expect(git(repo, "rev-parse", "refs/heads/squashed")).toBe(tip);
   });
 });

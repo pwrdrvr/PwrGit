@@ -16,6 +16,7 @@ import type { GitExec } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import * as maintenance from "./repository-maintenance";
 import {
+  branchPrEvidence,
   maintenanceRepos,
   registerMaintenanceHandlers
 } from "./maintenance-handlers";
@@ -377,7 +378,8 @@ describe("maintenance lifecycle and profile scope", () => {
         repoId: "a",
         branch: "finished",
         expectedHead: "abc123",
-        upstream: "refs/remotes/origin/finished"
+        upstream: "refs/remotes/origin/finished",
+        evidence: "ancestry" as const
       };
       const summary = value(
         await bus.dispatch("maintenance:run", {
@@ -389,10 +391,12 @@ describe("maintenance lifecycle and profile scope", () => {
           }
         })
       );
+      // Against one fresh review for the batch, not a review per branch.
       expect(maintenance.deleteStaleBranch).toHaveBeenCalledWith(
         git,
         join(root, "a"),
-        branch
+        branch,
+        { candidates: [], kept: [] }
       );
       expect(refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith("a");
       expect(summary.results).toHaveLength(1);
@@ -403,6 +407,7 @@ describe("maintenance lifecycle and profile scope", () => {
         branches: [
           {
             branch: "finished",
+            head: "abc123",
             deleted: true,
             message: "Deleted local branch."
           }
@@ -427,7 +432,8 @@ describe("maintenance lifecycle and profile scope", () => {
       repoId: "c",
       branch: "old",
       expectedHead: "abc",
-      upstream: "refs/remotes/origin/old"
+      upstream: "refs/remotes/origin/old",
+      evidence: "ancestry" as const
     };
     expect(
       (
@@ -457,5 +463,183 @@ describe("maintenance lifecycle and profile scope", () => {
       ).ok
     ).toBe(false);
     expect(git).not.toHaveBeenCalled();
+  });
+});
+
+describe("finished-branch review", () => {
+  const review = { candidates: [], kept: [] };
+  const finished = {
+    repoId: "a",
+    branch: "fix/tooltip",
+    expectedHead: "a".repeat(40),
+    upstream: "refs/remotes/origin/fix/tooltip",
+    evidence: "pr" as const
+  };
+  function insertPr(repoId: string, branch: string, headOid: string | null) {
+    db.prepare(
+      `INSERT INTO branch_pr (repo_id, branch, number, url, title, state, is_draft, merged_at, head_oid, fetched_at)
+       VALUES (?, ?, 412, 'https://example.test/pull/412', 't', 'merged', 0, 1756684800000, ?, '2026-09-27T00:00:00.000Z')`
+    ).run(repoId, branch, headOid);
+  }
+
+  it("narrows the scope to named repositories, never past the profile", () => {
+    expect(
+      maintenanceRepos(db, { profileId: "one", repoIds: ["b", "c"] })?.map(
+        (repo) => repo.id
+      )
+    ).toEqual(["b"]);
+  });
+
+  it("reads PR evidence for one repository, not another profile's branch of the same name", () => {
+    insertPr("a", "fix/tooltip", "a".repeat(40));
+    insertPr("c", "fix/tooltip", "c".repeat(40));
+    db.prepare(
+      `INSERT INTO branch_pr (repo_id, branch, number, state, is_draft, fetched_at)
+       VALUES ('a', 'no-pr', NULL, NULL, 0, '2026-09-27T00:00:00.000Z')`
+    ).run();
+    const evidence = branchPrEvidence(db, "a");
+    expect([...evidence.keys()]).toEqual(["fix/tooltip"]);
+    expect(evidence.get("fix/tooltip")).toEqual({
+      number: 412,
+      url: "https://example.test/pull/412",
+      state: "merged",
+      mergedAt: 1756684800000,
+      headOid: "a".repeat(40)
+    });
+  });
+
+  it("refreshes pull requests before a review that counts them, and not otherwise", async () => {
+    const refreshRepo = vi.fn(async () => new Map());
+    const spy = vi
+      .spyOn(maintenance, "reviewStaleBranches")
+      .mockResolvedValue(ok({ candidates: [finished], kept: [] }));
+    const scoped = new CommandBus();
+    registerMaintenanceHandlers(
+      scoped,
+      db,
+      git,
+      operations,
+      { refreshRepoWorktrees },
+      { refreshRepo },
+      () => 1_000
+    );
+    const summary = value(
+      await scoped.dispatch("maintenance:run", {
+        profileId: "one",
+        repoIds: ["a"],
+        operationId: "review",
+        action: {
+          kind: "scan-branches",
+          options: { prProof: true, keepDays: 30 }
+        }
+      })
+    );
+    expect(refreshRepo).toHaveBeenCalledExactlyOnceWith("a", {
+      trigger: "user"
+    });
+    expect(spy).toHaveBeenCalledWith(git, join(root, "a"), "a", {
+      options: { prProof: true, keepDays: 30 },
+      prs: expect.any(Map),
+      now: 1_000
+    });
+    expect(summary.results).toEqual([
+      expect.objectContaining({
+        candidates: [finished],
+        kept: [],
+        message: "1 finished branch · 0 kept."
+      })
+    ]);
+    refreshRepo.mockClear();
+    await scoped.dispatch("maintenance:run", {
+      profileId: "one",
+      repoIds: ["a"],
+      operationId: "review-off",
+      action: {
+        kind: "scan-branches",
+        options: { prProof: false, keepDays: null }
+      }
+    });
+    expect(refreshRepo).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the default rules when options arrive malformed", async () => {
+    const spy = vi
+      .spyOn(maintenance, "reviewStaleBranches")
+      .mockResolvedValue(ok(review));
+    await bus.dispatch("maintenance:run", {
+      profileId: "one",
+      repoIds: ["a"],
+      operationId: "bad",
+      action: {
+        kind: "scan-branches",
+        options: { prProof: true, keepDays: 5 }
+      } as unknown as MaintenanceAction
+    });
+    expect(spy.mock.calls[0]![3].options).toEqual({
+      prProof: true,
+      keepDays: 7
+    });
+  });
+
+  it("counts finished branches after a collection so the receipt can offer them", async () => {
+    vi.spyOn(maintenance, "reviewStaleBranches").mockResolvedValue(
+      ok({ candidates: [finished], kept: [] })
+    );
+    const summary = value(
+      await bus.dispatch("maintenance:run", {
+        profileId: "one",
+        repoIds: ["a"],
+        operationId: "gc",
+        action: {
+          ...gc,
+          branchOptions: { prProof: true, keepDays: 7 }
+        }
+      })
+    );
+    expect(summary.results[0]).toMatchObject({
+      outcome: "success",
+      message: "Garbage collection completed.",
+      candidates: [finished]
+    });
+    // No count requested, no review run.
+    vi.mocked(maintenance.reviewStaleBranches).mockClear();
+    await bus.dispatch("maintenance:run", {
+      profileId: "one",
+      repoIds: ["a"],
+      operationId: "gc-plain",
+      action: gc
+    });
+    expect(maintenance.reviewStaleBranches).not.toHaveBeenCalled();
+  });
+
+  it("restores a deleted branch under the repository lock and announces it", async () => {
+    const restore = vi
+      .spyOn(maintenance, "restoreStaleBranch")
+      .mockResolvedValue(ok(undefined));
+    expect(
+      await bus.dispatch("maintenance:restoreBranch", {
+        repoId: "a",
+        branch: "fix/tooltip",
+        head: "a".repeat(40)
+      })
+    ).toEqual(ok(null));
+    expect(restore).toHaveBeenCalledWith(
+      git,
+      join(root, "a"),
+      "fix/tooltip",
+      "a".repeat(40)
+    );
+    expect(refreshRepoWorktrees).toHaveBeenCalledWith("a");
+    expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "a" });
+    expect(
+      (
+        await bus.dispatch("maintenance:restoreBranch", {
+          repoId: "a",
+          branch: "fix/tooltip",
+          head: "HEAD~1"
+        })
+      ).ok
+    ).toBe(false);
+    expect(restore).toHaveBeenCalledTimes(1);
   });
 });

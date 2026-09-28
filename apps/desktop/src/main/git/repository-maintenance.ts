@@ -1,11 +1,15 @@
 import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import {
   err,
   ok,
+  type BranchCleanupOptions,
   type GarbageCollectionMode,
+  type KeptBranch,
+  type PrLifecycle,
   type Result,
-  type StaleBranch
+  type StaleBranch,
+  type StaleBranchPr
 } from "@pwrgit/shared";
 import { deleteLocalBranch } from "./branch-lifecycle";
 import { requireExit0, type GitExec } from "./dugite";
@@ -95,17 +99,63 @@ export async function collectGarbage(
   return result.ok ? ok(undefined) : result;
 }
 
-/** Conservative local-only review. An upstream must be a missing remote ref,
- * the tip must be reachable from this checkout's HEAD, and no worktree may
- * hold the branch. No translated '[gone]' strings or forge guesses. */
-export async function scanStaleBranches(
+/** What the review knows about a branch's pull request, from `branch_pr`. */
+export type BranchPrEvidence = {
+  number: number;
+  url: string;
+  state: PrLifecycle;
+  mergedAt?: number;
+  /** The PR's final head commit. Absent on rows cached before it was fetched,
+   *  and on forges that do not report it. */
+  headOid?: string;
+};
+
+export type StaleBranchReview = {
+  candidates: StaleBranch[];
+  kept: KeptBranch[];
+};
+
+export type StaleBranchReviewInput = {
+  options: BranchCleanupOptions;
+  /** Cached pull requests by local branch name. */
+  prs: ReadonlyMap<string, BranchPrEvidence>;
+  /** Epoch ms, injected so the age guard is testable. */
+  now: number;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** "today", "yesterday", "12 days ago" — the Kept line's age. */
+export function touchedAgo(touchedAt: number, now: number): string {
+  const days = Math.max(0, Math.floor((now - touchedAt) / DAY_MS));
+  return days === 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/**
+ * Review every local branch whose upstream is gone, and give each one verdict.
+ *
+ * The rule underneath: a branch is offered only when every commit on it is
+ * proven to exist somewhere else. Ancestry proves it when the tip is in HEAD.
+ * For a squash or rebase merge nothing reaches HEAD by ancestry, so a merged
+ * PR proves it — but only when the PR's final head IS the local tip, or
+ * contains it. A merged PR alone proves the branch was finished once, not
+ * that nobody committed to it the next morning. That same proof covers "never
+ * pushed" by construction: an unpushed tip cannot be any PR's head, and a
+ * branch with no upstream is never gone in the first place.
+ *
+ * No translated '[gone]' strings: an upstream must be a missing
+ * `refs/remotes/*` ref on a known remote.
+ */
+export async function reviewStaleBranches(
   git: GitExec,
   cwd: string,
-  repoId: string
-): Promise<Result<StaleBranch[]>> {
+  repoId: string,
+  input: StaleBranchReviewInput
+): Promise<Result<StaleBranchReview>> {
+  const { options, prs, now } = input;
   const refs = await output(git, cwd, [
     "for-each-ref",
-    "--format=%(refname)%09%(objectname)%09%(upstream)%09%(worktreepath)%09%(upstream:remotename)",
+    "--format=%(refname)%09%(objectname)%09%(upstream)%09%(worktreepath)%09%(upstream:remotename)%09%(committerdate:unix)",
     "refs/heads/",
     "refs/remotes/"
   ]);
@@ -114,7 +164,8 @@ export async function scanStaleBranches(
     .trimEnd()
     .split(/\r?\n/)
     .map((line) => line.split("\t"));
-  if (!rows.some((row) => row[0]?.startsWith("refs/heads/"))) return ok([]);
+  const empty: StaleBranchReview = { candidates: [], kept: [] };
+  if (!rows.some((row) => row[0]?.startsWith("refs/heads/"))) return ok(empty);
   const merged = await output(git, cwd, [
     "for-each-ref",
     "--merged=HEAD",
@@ -153,44 +204,234 @@ export async function scanStaleBranches(
       }
     }
   }
+  // Read lazily: only a proven branch whose commit date is already outside
+  // the age guard needs its reflog, and most reviews prove few branches.
+  let checkouts: Map<string, number> | undefined;
   const candidates: StaleBranch[] = [];
+  const kept: KeptBranch[] = [];
   for (const [
     ref = "",
     head = "",
     upstream = "",
     worktree = "",
-    remote = ""
+    remote = "",
+    committed = ""
   ] of rows) {
     if (!ref.startsWith("refs/heads/")) continue;
     const branch = ref.slice("refs/heads/".length);
-    if (protectedNames.has(branch) || worktree !== "" || !mergedRefs.has(ref))
-      continue;
+    if (protectedNames.has(branch)) continue;
     if (
       !upstream.startsWith("refs/remotes/") ||
       names.has(upstream) ||
       !remoteNames.has(remote)
     )
       continue;
-    candidates.push({ repoId, branch, expectedHead: head, upstream });
+    const cached = prs.get(branch);
+    const pr: StaleBranchPr | undefined =
+      cached === undefined
+        ? undefined
+        : {
+            number: cached.number,
+            url: cached.url,
+            ...(cached.mergedAt === undefined
+              ? {}
+              : { mergedAt: cached.mergedAt })
+          };
+    const withPr = pr === undefined ? {} : { pr };
+    const committedAt = Number(committed) * 1000;
+    const base = Number.isFinite(committedAt) && committedAt > 0
+      ? { touchedAt: committedAt }
+      : {};
+    if (worktree !== "") {
+      kept.push({
+        branch,
+        reason: "worktree",
+        detail: `Checked out in ${basename(worktree)}`,
+        ...withPr,
+        ...base
+      });
+      continue;
+    }
+    let evidence: StaleBranch["evidence"];
+    if (mergedRefs.has(ref)) evidence = "ancestry";
+    else {
+      const verdict = await prVerdict(git, cwd, head, cached);
+      if (verdict !== "proven") {
+        kept.push({ branch, ...verdict, ...withPr, ...base });
+        continue;
+      }
+      if (!options.prProof) {
+        kept.push({
+          branch,
+          reason: "pr_proof_off",
+          detail: `#${cached!.number} merged, but its commits are not in HEAD by ancestry`,
+          ...withPr,
+          ...base
+        });
+        continue;
+      }
+      evidence = "pr";
+    }
+    let touchedAt = base.touchedAt;
+    if (options.keepDays !== null) {
+      const guard = options.keepDays * DAY_MS;
+      if (touchedAt === undefined || now - touchedAt >= guard) {
+        checkouts ??= await lastCheckouts(git, cwd);
+        const reflogged = Math.max(
+          checkouts.get(branch) ?? 0,
+          await lastReflogEntry(git, cwd, ref)
+        );
+        if (reflogged > (touchedAt ?? 0)) touchedAt = reflogged;
+      }
+      if (touchedAt !== undefined && now - touchedAt < guard) {
+        kept.push({
+          branch,
+          reason: "recent",
+          detail: `Touched ${touchedAgo(touchedAt, now)}, inside the ${options.keepDays}-day guard`,
+          ...withPr,
+          touchedAt
+        });
+        continue;
+      }
+    }
+    candidates.push({
+      repoId,
+      branch,
+      expectedHead: head,
+      upstream,
+      evidence,
+      ...(evidence === "pr" ? withPr : {}),
+      ...(touchedAt === undefined ? {} : { touchedAt })
+    });
   }
-  return ok(candidates);
+  return ok({ candidates, kept });
 }
 
-/** Recheck eligibility and the reviewed tip; reuse the ordinary non-force
- * deletion path, including its worktree/operation guards and Git merge check. */
+/**
+ * Does the branch's merged PR prove its tip? "proven" when the tip is the
+ * PR's final head, or an ancestor of it — the PR carried everything local and
+ * perhaps more. Otherwise the reason it does not.
+ */
+async function prVerdict(
+  git: GitExec,
+  cwd: string,
+  head: string,
+  pr: BranchPrEvidence | undefined
+): Promise<"proven" | Pick<KeptBranch, "reason" | "detail">> {
+  if (pr === undefined)
+    return {
+      reason: "no_proof",
+      detail: "No merged pull request found, and not in HEAD"
+    };
+  if (pr.state === "open")
+    return { reason: "pr_open", detail: `#${pr.number} is still open` };
+  if (pr.state === "closed")
+    return {
+      reason: "pr_closed",
+      detail: `#${pr.number} closed without merging`
+    };
+  if (pr.headOid === undefined)
+    return {
+      reason: "no_proof",
+      detail: `#${pr.number} merged, but its head commit is not known yet`
+    };
+  if (pr.headOid === head) return "proven";
+  // Exit 0: the tip is inside the PR. 1: it is not. Anything else (128): the
+  // PR's head was never fetched here, so the two cannot be compared.
+  const ancestor = await git(
+    ["merge-base", "--is-ancestor", head, pr.headOid],
+    cwd
+  );
+  if (ancestor.ok && ancestor.value.exitCode === 0) return "proven";
+  if (ancestor.ok && ancestor.value.exitCode === 1) {
+    const count = await git(
+      ["rev-list", "--count", `${pr.headOid}..${head}`],
+      cwd
+    );
+    const extra =
+      count.ok && count.value.exitCode === 0
+        ? Number(count.value.stdout.trim())
+        : NaN;
+    return {
+      reason: "unmerged_commits",
+      detail: Number.isFinite(extra) && extra > 0
+        ? `${extra} local commit${extra === 1 ? "" : "s"} not in #${pr.number}`
+        : `Local commits not in #${pr.number}`
+    };
+  }
+  return {
+    reason: "unmerged_commits",
+    detail: `Tip differs from #${pr.number}'s head, which was never fetched here`
+  };
+}
+
+/** When each branch was last checked out, from this checkout's HEAD reflog.
+ *  Epoch ms. A checkout does not touch the branch's own reflog. */
+async function lastCheckouts(
+  git: GitExec,
+  cwd: string
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const raw = await git(
+    ["log", "-g", "-n", "5000", "--date=unix", "--format=%gd%x09%gs", "HEAD", "--"],
+    cwd
+  );
+  if (!raw.ok || raw.value.exitCode !== 0) return out;
+  for (const line of raw.value.stdout.split(/\r?\n/)) {
+    const [selector = "", subject = ""] = line.split("\t");
+    const at = reflogTime(selector);
+    const moved = /^checkout: moving from .+ to (.+)$/.exec(subject);
+    if (at === 0 || moved === null) continue;
+    const branch = moved[1]!;
+    if (at > (out.get(branch) ?? 0)) out.set(branch, at);
+  }
+  return out;
+}
+
+/** The newest entry in one branch's own reflog (a commit, reset, rename), in
+ *  epoch ms, or 0 when it has none. */
+async function lastReflogEntry(
+  git: GitExec,
+  cwd: string,
+  ref: string
+): Promise<number> {
+  const raw = await git(
+    ["log", "-g", "-n", "1", "--date=unix", "--format=%gd", ref, "--"],
+    cwd
+  );
+  if (!raw.ok || raw.value.exitCode !== 0) return 0;
+  return reflogTime(raw.value.stdout.trim());
+}
+
+/** `HEAD@{1700000000}` under `--date=unix` → epoch ms. */
+function reflogTime(selector: string): number {
+  const match = /@\{(\d+)\}$/.exec(selector);
+  return match === null ? 0 : Number(match[1]) * 1000;
+}
+
+/**
+ * Delete one reviewed branch, against a review taken just before the batch.
+ *
+ * The branch must still be a candidate, at the same tip and upstream and on
+ * the same evidence. Ancestry reuses the ordinary non-force path, including
+ * Git's own merge check. PR evidence cannot — `git branch -d` refuses a
+ * squash merge — so it takes the compare-and-swap on the reviewed tip, which
+ * refuses a branch that moved after the review as stale. Both paths recheck
+ * worktrees and the tip themselves.
+ */
 export async function deleteStaleBranch(
   git: GitExec,
   cwd: string,
-  candidate: StaleBranch
+  candidate: StaleBranch,
+  fresh: StaleBranchReview
 ): Promise<Result<void>> {
-  const fresh = await scanStaleBranches(git, cwd, candidate.repoId);
-  if (!fresh.ok) return fresh;
   if (
-    !fresh.value.some(
+    !fresh.candidates.some(
       (branch) =>
         branch.branch === candidate.branch &&
         branch.expectedHead === candidate.expectedHead &&
-        branch.upstream === candidate.upstream
+        branch.upstream === candidate.upstream &&
+        branch.evidence === candidate.evidence
     )
   ) {
     return err({
@@ -200,5 +441,39 @@ export async function deleteStaleBranch(
         "The branch changed or is no longer eligible. Review it again; nothing was deleted."
     });
   }
-  return deleteLocalBranch(git, cwd, candidate, false);
+  return deleteLocalBranch(
+    git,
+    cwd,
+    candidate,
+    candidate.evidence === "pr"
+  );
+}
+
+/**
+ * Recreate a branch the clean-up deleted, at its reviewed tip. `--no-track`:
+ * its upstream is the thing that was gone. Fails, and changes nothing, when
+ * the name is taken again or Git has since pruned the commit.
+ */
+export async function restoreStaleBranch(
+  git: GitExec,
+  cwd: string,
+  branch: string,
+  head: string
+): Promise<Result<void>> {
+  const args = ["branch", "--no-track", "--", branch, head];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  if (raw.value.exitCode !== 0) {
+    const detail = raw.value.stderr.trim();
+    return err({
+      kind: "repo",
+      code: /already exists/i.test(detail)
+        ? "branch_exists"
+        : "branch_restore_failed",
+      message: /already exists/i.test(detail)
+        ? `A branch named ${branch} exists again; nothing was restored.`
+        : `Could not restore ${branch} at ${head.slice(0, 8)}. Git may have pruned the commit. ${detail}`.trim()
+    });
+  }
+  return ok(undefined);
 }

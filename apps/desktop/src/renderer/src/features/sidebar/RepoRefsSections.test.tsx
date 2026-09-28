@@ -211,3 +211,120 @@ describe("RepoRefsSections remote reveal", () => {
     await act(async () => settleSidebarReveal(seq));
   });
 });
+
+describe("RepoRefsSections branch counts", () => {
+  const branch = (
+    name: string,
+    over: Partial<RepoRefs["branches"][number]> = {}
+  ): RepoRefs["branches"][number] => ({
+    name,
+    fullName: `refs/heads/${name}`,
+    head: "a".repeat(40),
+    upstream: `origin/${name}`,
+    ahead: 0,
+    behind: 0,
+    tracking: "up_to_date",
+    checkedOutWorktreeIds: [],
+    ...over
+  });
+  const counted: RepoRefs = {
+    ...refs,
+    branches: [
+      branch("main", { checkedOutWorktreeIds: ["wt-1"] }),
+      branch("feat/range", { ahead: 3, tracking: "ahead" }),
+      branch("fix/legend", { ahead: 1, behind: 4, tracking: "diverged" }),
+      branch("fix/tooltip", {
+        tracking: "upstream_missing",
+        pr: {
+          number: 412,
+          url: "https://example.test/pull/412",
+          title: "Tooltip",
+          state: "merged",
+          isDraft: false
+        }
+      }),
+      branch("spike/lazy", { tracking: "upstream_missing" })
+    ]
+  };
+
+  async function renderCounted(onCleanUpBranches?: () => void): Promise<void> {
+    dispatchMock.mockImplementation((channel: string) => {
+      if (channel === "repo:refs") return Promise.resolve(ok(counted));
+      if (channel === "forge:hosts")
+        return Promise.resolve(ok({ hosts: [], overrides: {} }));
+      if (channel === "repo:remoteBranches")
+        return Promise.resolve(ok({ rows: [], total: 0 }));
+      // No forge: the browser draws no change-request tab.
+      if (channel === "pr:openList") return Promise.resolve(ok(null));
+      return Promise.resolve(ok(undefined));
+    });
+    await act(async () => {
+      root.render(
+        <RepoRefsSections
+          repo={repo}
+          now={0}
+          focusedWorktree={primary}
+          onRevealWorktree={() => undefined}
+          onCreateWorktree={() => undefined}
+          onFork={() => undefined}
+          onCleanUpBranches={onCleanUpBranches}
+        />
+      );
+    });
+  }
+  const rowNames = (): string[] =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        ".refs-table__row .refs-table__identity strong"
+      )
+    ].map((node) => node.textContent?.split("#")[0]?.trim() ?? "");
+
+  it("draws each count as its own control beside the disclosure", async () => {
+    await renderCounted();
+    const head = [
+      ...container.querySelectorAll<HTMLButtonElement>(".ref-section__head")
+    ].find((node) => node.textContent?.includes("Branches"))!;
+    // The counts left the disclosure: clicking them no longer folds it.
+    expect(head.textContent).not.toContain("↑");
+    expect(button("Show 2 branches with commits to push")?.textContent).toBe(
+      "↑2"
+    );
+    expect(button("Show 1 branch behind their upstream")?.textContent).toBe(
+      "↓1"
+    );
+    expect(
+      button("Show 2 branches whose remote branch was deleted")?.textContent
+    ).toBe("2 gone");
+  });
+
+  it("opens the refs browser on the branches the ↑ count means", async () => {
+    await renderCounted();
+    await act(async () =>
+      button("Show 2 branches with commits to push")?.click()
+    );
+    const active = document.querySelector(".refs-status-chip.is-active");
+    expect(active?.textContent).toBe("To push 2");
+    expect(active?.getAttribute("aria-pressed")).toBe("true");
+    expect(rowNames()).toEqual(["feat/range", "fix/legend"]);
+  });
+
+  it("leads the Gone view with its way out, and hands off to the clean-up", async () => {
+    const onCleanUp = vi.fn();
+    await renderCounted(onCleanUp);
+    await act(async () =>
+      button("Show 2 branches whose remote branch was deleted")?.click()
+    );
+    expect(rowNames()).toEqual(["fix/tooltip", "spike/lazy"]);
+    const banner = document.querySelector(".refs-gone-banner");
+    expect(banner?.textContent).toContain(
+      "1 of these has a merged pull request."
+    );
+    const cleanUp = [...banner!.querySelectorAll("button")].find(
+      (node) => node.textContent === "Clean up finished branches…"
+    )!;
+    await act(async () => cleanUp.click());
+    expect(onCleanUp).toHaveBeenCalledOnce();
+    // The dialog replaces the browser rather than stacking on it.
+    expect(document.querySelector(".refs-browser")).toBeNull();
+  });
+});
