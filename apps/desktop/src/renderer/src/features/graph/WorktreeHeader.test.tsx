@@ -1317,7 +1317,7 @@ describe("WorktreeHeader settled status card", () => {
       { kind: "pull", phase: "fetch", lastOutputAt: Date.now() }
     ]);
     expect(health()).toBe("Fetching updates");
-    finish();
+    await act(async () => finish());
   });
 
   // The card holds per-operation state, and the pinned popover UPDATES one
@@ -1357,7 +1357,7 @@ describe("WorktreeHeader settled status card", () => {
       health(),
       "a healthy operation must not wear the last one's warning"
     ).toBeNull();
-    second();
+    await act(async () => second());
   });
 
   // Dropping the health line at settle was the same defect the evidence block
@@ -1412,7 +1412,7 @@ describe("WorktreeHeader settled status card", () => {
       command?.closest(".remote-activity__evidence"),
       "a line that reflows at Git's rate must not sit in the card's own column"
     ).not.toBeNull();
-    finish();
+    await act(async () => finish());
   });
 
   // A row is appended, changes once when its own work ends, and then holds.

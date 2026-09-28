@@ -420,7 +420,7 @@ describe("StashesTab", () => {
     if (inspect === null) throw new Error("inspect button missing");
     await act(async () => inspect.click());
     const apply = button("Apply");
-    apply.focus();
+    await act(async () => apply.focus());
     await act(async () => apply.click());
 
     // In flight is aria-disabled, never `disabled`: a disabled button drops

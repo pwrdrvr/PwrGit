@@ -128,9 +128,7 @@ export function RepoRefsSections({
    *  styles in one 320px column is the part a user actually notices. */
   const tip = useViewportTooltip();
   /**
-   * Null whenever a chip would say nothing — one forge host on, or a remote
-   * no product claims. Same gate the repo row uses, so the two surfaces cannot
-   * disagree about whether forges are worth naming here.
+   * Show known forges even when their integration is switched off.
    *
    * Both URLs, because a remote is two URLs and `remote.pushUrl` is exactly
    * how a checkout keeps a mirror on a second forge. The repo row's `+n`
@@ -140,19 +138,21 @@ export function RepoRefsSections({
    * Identical URLs draw one chip, which is the ordinary case.
    */
   const forgeChipsFor = (remote: { fetchUrl: string; pushUrl: string }) => {
-    if (!forgeNaming.showChips) return null;
     const urls =
       remote.pushUrl === "" || remote.pushUrl === remote.fetchUrl
         ? [remote.fetchUrl]
         : [remote.fetchUrl, remote.pushUrl];
     const chips = urls
-      .map((url) => remoteForgeChip(url, forgeNaming.overrides, forgeNaming.displays))
+      .map((url) => {
+        const chip = remoteForgeChip(url, forgeNaming.overrides, forgeNaming.displays);
+        return chip === null ? null : { ...chip, url: remoteWebUrl(url, forgeNaming.overrides) };
+      })
       .filter((chip) => chip !== null);
-    // Two remotes on the same forge is one chip's worth of information.
+    // Keep distinct repository destinations even when they share a forge.
     const unique = chips.filter(
-      (chip, index) => chips.findIndex((other) => other.title === chip.title) === index
+      (chip, index) => chips.findIndex((other) => other.title === chip.title && other.url === chip.url) === index
     );
-    return unique.map((chip) => <ForgeChip key={chip.title} chip={chip} />);
+    return unique.map((chip) => <ForgeChip key={`${chip.title}:${chip.url}`} chip={chip} url={chip.url} />);
   };
   const [refs, setRefs] = useState<RepoRefs | null>(null);
   const [loading, setLoading] = useState(true);
@@ -914,11 +914,6 @@ export function RepoRefsSections({
                     >
                       <SectionChevron open={open} />
                       <span>{remote.name}</span>
-                      {/* Per remote, because the repo row above can only
-                          carry a count: this is where a checkout that pushes
-                          to one forge and mirrors to another says which is
-                          which. Silent for a remote no product claims. */}
-                      {forgeChipsFor(remote)}
                       {/* The read-only fact belongs to a REMOTE, and this is
                           the remote it is about — `origin` is what `git push`
                           uses and what the repo row's mark is really saying.
@@ -943,6 +938,11 @@ export function RepoRefsSections({
                             : `${remote.branchCount} refs`}
                       </small>
                     </button>
+                    {/* Per remote, because the repo row above can only
+                        carry a count: this is where a checkout that pushes
+                        to one forge and mirrors to another says which is
+                        which. Silent for a remote no product claims. */}
+                    {forgeChipsFor(remote)}
                     {/* A direct action rather than a menu holding one item.
                         Offered whenever `origin` is on a forge, without first
                         asking the forge whether a fork already exists: that

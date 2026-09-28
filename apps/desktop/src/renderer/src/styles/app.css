@@ -1215,9 +1215,7 @@ textarea,
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
 }
 
-/* Which forge a row's repository lives on. Drawn only while more than one
-   forge host is switched on — with one, every chip in the sidebar would read
-   the same word.
+/* Which forge a row's repository lives on, regardless of integration settings.
 
    On the chip tier with the counts and the focus reason beside it, one step
    under the name: it is a qualifier, and it should stay subordinate to the
@@ -1248,6 +1246,18 @@ textarea,
      for it; it joined the tier before the tier learned to move. */
   font: 600 var(--sidebar-chip-size)/1 var(--font-mono);
 }
+a.forge-chip {
+  text-decoration: none;
+  cursor: pointer;
+}
+a.forge-chip:hover {
+  background: var(--bg-hover-strong);
+}
+a.forge-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* The mark inside a pill is bounded by the pill, so it has to follow the
    chip's type rather than stay behind it: `1em` resolves to the chip size,
    which is the 11px `ForgeChip.tsx` used to hard-code at "md" and keeps the
