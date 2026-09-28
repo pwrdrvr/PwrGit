@@ -30,7 +30,12 @@ vi.mock("../../lib/copyText", () => ({ copyText: mocks.copyText }));
 // this file's single-handler event harness focused on ChangesTab's list logic.
 vi.mock("./SubmodulePanel", () => ({ SubmodulePanel: () => null }));
 
-import { ChangesTab, confirmAndDiscardAllChanges, groupChanges } from "./ChangesTab";
+import {
+  ChangesTab,
+  commitFailureTitle,
+  confirmAndDiscardAllChanges,
+  groupChanges
+} from "./ChangesTab";
 
 const changes: ChangeSet = {
   staged: [
@@ -63,6 +68,31 @@ describe("ChangesTab discard all", () => {
       "changes:discardAll",
       { worktreeId: "worktree-1" }
     );
+  });
+});
+
+describe("commitFailureTitle", () => {
+  const failure = (code: string, message: string) =>
+    ({ kind: "git", code, message }) as const;
+
+  it("names a hook when the hook's output says so", () => {
+    expect(
+      commitFailureTitle(
+        failure("commit_failed", "husky - pre-commit script failed (code 1)")
+      )
+    ).toBe("A Git hook refused the commit");
+    expect(
+      commitFailureTitle(failure("commit_failed", "commit-msg hook: bad subject"))
+    ).toBe("A Git hook refused the commit");
+  });
+
+  it("falls back to a plain failure otherwise", () => {
+    expect(
+      commitFailureTitle(failure("commit_failed", "gpg failed to sign the data"))
+    ).toBe("Commit failed");
+    expect(
+      commitFailureTitle(failure("nothing_to_commit", "nothing to commit"))
+    ).toBe("Nothing to commit");
   });
 });
 
@@ -299,6 +329,52 @@ describe("ChangesTab partially staged files", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+  });
+
+  it("surfaces a hook-refused commit and keeps the message", async () => {
+    mocks.dispatch.mockImplementation(async (command: string) => {
+      if (command === "changes:list") return ok(changes);
+      if (command === "changes:commit") {
+        return {
+          ok: false,
+          error: {
+            kind: "git",
+            code: "commit_failed",
+            message: "husky - pre-commit script failed (code 1)"
+          }
+        };
+      }
+      return ok(null);
+    });
+    const input = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Commit message"]'
+    );
+    if (input === null) throw new Error("no commit message box");
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
+    )?.set;
+    await act(async () => {
+      setter?.call(input, "feat: add thing");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".commit-btn")?.click();
+    });
+
+    expect(mocks.dispatch).toHaveBeenCalledWith("changes:commit", {
+      worktreeId: "worktree-1",
+      message: "feat: add thing",
+      amend: false
+    });
+    expect(mocks.showErrorToast).toHaveBeenCalledWith({
+      title: "A Git hook refused the commit",
+      message: "husky - pre-commit script failed (code 1)",
+      detail: "changes:commit",
+      subject: { worktreeId: "worktree-1" }
+    });
+    expect(input.value).toBe("feat: add thing");
   });
 
   it("marks both rows of a path git lists on either side of the index", async () => {

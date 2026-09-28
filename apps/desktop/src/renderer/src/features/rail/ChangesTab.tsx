@@ -6,7 +6,12 @@ import {
   useRef,
   useState
 } from "react";
-import type { ChangeSet, FileChange, Worktree } from "@pwrgit/shared";
+import type {
+  ChangeSet,
+  FileChange,
+  PwrGitError,
+  Worktree
+} from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
@@ -88,6 +93,19 @@ export async function confirmAndDiscardAllChanges(
   });
   if (!yes) return;
   await dispatch("changes:discardAll", { worktreeId });
+}
+
+/**
+ * Title for a refused `changes:commit`. Git says nothing of its own when a
+ * pre-commit or commit-msg hook exits non-zero — stderr is whatever the hook
+ * printed — so "hook" here is a best guess from that output (plain hooks,
+ * husky, lefthook), not a code main can hand over.
+ */
+export function commitFailureTitle(error: PwrGitError): string {
+  if (error.code === "nothing_to_commit") return "Nothing to commit";
+  return /hook|husky/i.test(error.message)
+    ? "A Git hook refused the commit"
+    : "Commit failed";
 }
 
 /**
@@ -505,7 +523,18 @@ export function ChangesTab({
     if (wtId === null || message.trim() === "") return;
     void dispatch("changes:commit", { worktreeId: wtId, message, amend }).then(
       (r) => {
-        if (r.ok) draft.reset("");
+        if (r.ok) {
+          draft.reset("");
+          return;
+        }
+        // The draft stays put: a hook refusal is fixed and retried, and the
+        // message should survive the round trip.
+        showErrorToast({
+          title: commitFailureTitle(r.error),
+          message: r.error.message,
+          detail: `changes:commit${amend ? " --amend" : ""}`,
+          subject: { worktreeId: wtId }
+        });
       }
     );
   };
