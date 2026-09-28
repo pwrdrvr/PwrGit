@@ -339,7 +339,15 @@ export function registerMaintenanceHandlers(
                     // effort: the refresh keeps whatever is cached when the
                     // forge cannot be reached, and those rows are kept.
                     report("Checking pull requests for local branches…");
-                    await prs.refreshRepo(repo.id, { trigger: "user" });
+                    try {
+                      await prs.refreshRepo(repo.id, { trigger: "user" });
+                    } catch (cause) {
+                      logMain(
+                        "warn",
+                        "maintenance",
+                        `PR refresh before branch review failed for ${repo.id}: ${cause instanceof Error ? cause.message : String(cause)}`
+                      );
+                    }
                   }
                   report(
                     "Checking local branches, upstreams, and merged commits…"

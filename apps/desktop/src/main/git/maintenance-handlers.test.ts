@@ -562,6 +562,40 @@ describe("finished-branch review", () => {
     expect(refreshRepo).not.toHaveBeenCalled();
   });
 
+  it("reviews on the cached rows when the pull request refresh throws", async () => {
+    const refreshRepo = vi.fn(async (): Promise<Map<string, null>> => {
+      throw new Error("forge unreachable");
+    });
+    vi.spyOn(maintenance, "reviewStaleBranches").mockResolvedValue(
+      ok({ candidates: [finished], kept: [] })
+    );
+    const scoped = new CommandBus();
+    registerMaintenanceHandlers(
+      scoped,
+      db,
+      git,
+      operations,
+      { refreshRepoWorktrees },
+      { refreshRepo },
+      () => 1_000
+    );
+    const summary = value(
+      await scoped.dispatch("maintenance:run", {
+        profileId: "one",
+        repoIds: ["a"],
+        operationId: "offline",
+        action: {
+          kind: "scan-branches",
+          options: { prProof: true, keepDays: null }
+        }
+      })
+    );
+    expect(refreshRepo).toHaveBeenCalledOnce();
+    expect(summary.results).toEqual([
+      expect.objectContaining({ outcome: "success", candidates: [finished] })
+    ]);
+  });
+
   it("falls back to the default rules when options arrive malformed", async () => {
     const spy = vi
       .spyOn(maintenance, "reviewStaleBranches")

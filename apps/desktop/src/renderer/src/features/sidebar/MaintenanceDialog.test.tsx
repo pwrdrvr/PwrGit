@@ -315,6 +315,35 @@ describe("maintenance dialog", () => {
       head: "abc123"
     });
     expect(button("Restored").disabled).toBe(true);
+    // The restored branch is offered and deleted again: the new receipt is
+    // its own undo, not the last one's "Restored".
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: summary([
+        { repo, outcome: "success", message: "Reviewed", candidates: [candidate] }
+      ])
+    });
+    await click("Review again");
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: summary([
+        {
+          repo,
+          outcome: "success",
+          message: "Deleted",
+          branches: [
+            {
+              branch: "finished",
+              head: "abc123",
+              deleted: true,
+              message: "Deleted local branch."
+            }
+          ]
+        }
+      ])
+    });
+    await click("Delete 1 selected local branch");
+    expect(button("Restore").disabled).toBe(false);
   });
 
   it("shows each finished branch's evidence and counts kept ones by reason", async () => {

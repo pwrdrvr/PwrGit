@@ -44,24 +44,16 @@ export function branchMatchesStatus(
   }
 }
 
-/** Every filter's count in one pass — the chips show them all at once. */
+/** Every filter's count, through the same predicate the filter lists with,
+ *  so a chip can never promise a different number than the list it opens. */
 export function branchStatusCounts(
   branches: readonly LocalBranchSummary[]
 ): Record<BranchStatusFilter, number> {
-  const counts: Record<BranchStatusFilter, number> = {
-    all: 0,
-    ahead: 0,
-    behind: 0,
-    gone: 0,
-    unpublished: 0
-  };
-  for (const branch of branches) {
-    counts.all += 1;
-    if (branch.ahead > 0) counts.ahead += 1;
-    if (branch.behind > 0) counts.behind += 1;
-    if (branch.tracking === "upstream_missing") counts.gone += 1;
-    if (branch.tracking === "unpublished") counts.unpublished += 1;
-  }
+  const counts = {} as Record<BranchStatusFilter, number>;
+  for (const { value } of BRANCH_STATUS_FILTERS)
+    counts[value] = branches.filter((branch) =>
+      branchMatchesStatus(branch, value)
+    ).length;
   return counts;
 }
 

@@ -158,19 +158,22 @@ export function MaintenanceDialog({
 
   useEffect(() => {
     let cancelled = false;
-    void dispatch("settings:read", undefined).then((result) => {
-      if (cancelled) return;
-      if (result.ok) {
-        const general = result.value.general;
-        setOptions({
-          prProof: general.branchCleanupPrProof,
-          keepDays: general.branchCleanupKeepDays
-        });
-        if (general.branchCleanupKeepDays !== null)
-          setLastKeepDays(general.branchCleanupKeepDays);
-      }
-      setOptionsLoaded(true);
-    });
+    void dispatch("settings:read", undefined)
+      .catch(() => null)
+      .then((result) => {
+        if (cancelled) return;
+        // Unreadable settings: review on the defaults rather than never.
+        if (result?.ok === true) {
+          const general = result.value.general;
+          setOptions({
+            prProof: general.branchCleanupPrProof,
+            keepDays: general.branchCleanupKeepDays
+          });
+          if (general.branchCleanupKeepDays !== null)
+            setLastKeepDays(general.branchCleanupKeepDays);
+        }
+        setOptionsLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -218,6 +221,9 @@ export function MaintenanceDialog({
     setCurrent(new Set());
     setError(null);
     setSelected(new Set());
+    // Keyed by branch name, so a later receipt for the same name must not
+    // inherit this one's "Restored".
+    setRestores(new Map());
     setStartedAt(Date.now());
     offProgress.current = subscribe("maintenance:progress", (event) => {
       if (
@@ -359,15 +365,19 @@ export function MaintenanceDialog({
     const key = `${repoId}:${deleted.branch}`;
     if (restores.get(key) === "restoring") return;
     setRestores((old) => new Map(old).set(key, "restoring"));
-    const response = await dispatch("maintenance:restoreBranch", {
-      repoId,
-      branch: deleted.branch,
-      head: deleted.head
-    });
+    let outcome: string;
+    try {
+      const response = await dispatch("maintenance:restoreBranch", {
+        repoId,
+        branch: deleted.branch,
+        head: deleted.head
+      });
+      outcome = response.ok ? "restored" : response.error.message;
+    } catch (cause) {
+      outcome = cause instanceof Error ? cause.message : String(cause);
+    }
     if (!live.current) return;
-    setRestores((old) =>
-      new Map(old).set(key, response.ok ? "restored" : response.error.message)
-    );
+    setRestores((old) => new Map(old).set(key, outcome));
   };
   const counts = countOutcomes(
     [...results.values()].map((result) => result.outcome)
