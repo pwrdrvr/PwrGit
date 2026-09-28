@@ -87,6 +87,7 @@ import {
 } from "./git/worktree-handlers";
 import { WorktreeOperationQueue } from "./git/worktree-operation-queue";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
+import { createMissingRepoRescan } from "./git/missing-repo-rescan";
 import { WorktreeStateService } from "./git/worktree-state";
 import {
   GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME,
@@ -738,8 +739,11 @@ if (!gotSingleInstanceLock) {
     let activeWorktreeId: string | null = null;
     const profileScans = new ProfileScanCoordinator();
 
-    const rescanInBackground = (profile: Profile): void => {
-      if (!indexer.shouldRescanProfile(profile.id)) return;
+    const rescanInBackground = (
+      profile: Profile,
+      { force = false }: { force?: boolean } = {}
+    ): void => {
+      if (!force && !indexer.shouldRescanProfile(profile.id)) return;
       const signal = profileScans.begin(profile.id);
       if (signal === null) return;
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
@@ -765,6 +769,29 @@ if (!gotSingleInstanceLock) {
         })
         .finally(() => profileScans.finish(profile.id, signal));
     };
+    // A repository's folder was deleted or moved: its row only leaves
+    // through a rescan, so ask for one now (missing-repo-rescan.ts says why
+    // that is safe).
+    stateService.onRepoPathMissing(
+      createMissingRepoRescan({
+        profileOf: (repoId) =>
+          (
+            db
+              .prepare("SELECT profile_id AS profileId FROM repos WHERE id = ?")
+              .get(repoId) as { profileId: string } | undefined
+          )?.profileId ?? null,
+        rescan: (profileId) => {
+          const profile = profiles.get(profileId);
+          if (profile === null) return;
+          logMain(
+            "info",
+            "scan",
+            `a repository folder is gone; rescanning profile "${profile.name}"`
+          );
+          rescanInBackground(profile, { force: true });
+        }
+      })
+    );
 
     // One window per profile. Opening a profile that already has a window
     // focuses it; cross-profile reveals are stashed until the new window asks.

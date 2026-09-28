@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import type { GitExec } from "./dugite";
@@ -213,6 +213,8 @@ describe("WorktreeStateService (system git)", () => {
     const row = added.value.worktrees.find((w) => w.branch === "feature");
     if (row === undefined) throw new Error("linked worktree not indexed");
     const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    const repoGone = vi.fn();
+    isolated.onRepoPathMissing(repoGone);
 
     const healthy = await isolated.compute(row.id);
     expect(healthy).toMatchObject({ dirty: 1 });
@@ -220,6 +222,8 @@ describe("WorktreeStateService (system git)", () => {
 
     rmSync(linked, { recursive: true, force: true });
     const gone = await isolated.compute(row.id);
+    // A linked worktree going is that row's news, not the repository's.
+    expect(repoGone).not.toHaveBeenCalled();
     // Not the cached snapshot: the checkout is gone, so nothing is dirty.
     expect(gone).toMatchObject({ missing: true, dirty: 0, ahead: 0, behind: 0 });
     expect(isolated.getCached(row.id)).toMatchObject({ missing: true });
@@ -235,6 +239,38 @@ describe("WorktreeStateService (system git)", () => {
     expect(back?.missing).toBeUndefined();
     expect(back).toMatchObject({ dirty: 0, branch: "feature" });
     expect(isolated.getCached(row.id)?.missing).toBeUndefined();
+  });
+
+  // Deleting the repository itself leaves its primary row pointing at
+  // nothing, and only a profile rescan can remove a repo row — which the
+  // day-long throttle would hold back. The probe is the first to notice.
+  it("reports a repository whose own checkout is gone", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-repo-gone-"));
+    const repo = join(isolatedRoot, "repo");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "t@t.com"]);
+    git(repo, ["config", "user.name", "Tester"]);
+    git(repo, ["commit", "--allow-empty", "-m", "init"]);
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({
+      name: "G",
+      email: "g@t.com"
+    });
+    const indexer = new RepoIndexer(isolatedDb, systemGit);
+    const added = await indexer.indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const primary = added.value.worktrees.find((w) => w.isPrimary);
+    if (primary === undefined) throw new Error("primary not indexed");
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    const repoGone = vi.fn();
+    isolated.onRepoPathMissing(repoGone);
+
+    await isolated.compute(primary.id);
+    expect(repoGone).not.toHaveBeenCalled();
+    rmSync(repo, { recursive: true, force: true });
+    expect(await isolated.compute(primary.id)).toMatchObject({ missing: true });
+    expect(repoGone).toHaveBeenCalledExactlyOnceWith(added.value.id);
   });
 
   // A linked worktree nested inside the primary's tree (`<repo>/.worktrees/x`
