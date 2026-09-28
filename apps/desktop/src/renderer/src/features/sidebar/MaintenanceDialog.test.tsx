@@ -247,6 +247,9 @@ describe("maintenance dialog", () => {
         }
       })
     );
+    // A 1 KiB saving is below the fold; the quiet line still reaches it.
+    expect(container.textContent).toContain("1 repository with less than 1 MiB to reclaim");
+    await click("Show");
     expect(container.textContent).toContain("2.0 KiB → 1.0 KiB");
     await click("Close");
     expect(onClose).toHaveBeenCalledOnce();
@@ -304,8 +307,9 @@ describe("maintenance dialog", () => {
     expect(container.textContent).toContain("Never offered");
     expect(runCalls()).toEqual([]);
     await click("Review local branches");
-    // Finished is checked by default: every row carries its proof.
-    expect(container.textContent).toContain("Already in HEAD");
+    // Finished is checked by default: every row carries its proof, drawn
+    // apart from the facts after it.
+    expect(container.querySelector(".maintenance__branch small i")?.textContent).toBe("Already in HEAD");
     const checkbox = container.querySelector<HTMLInputElement>(
       ".maintenance__branch input"
     )!;
@@ -343,7 +347,9 @@ describe("maintenance dialog", () => {
       })
     );
     expect(container.querySelector(".maintenance__branch")).toBeNull();
-    expect(container.textContent).toContain("Deleted local branch.");
+    // One line per deleted branch: name, reviewed tip, Restore. The success
+    // message is implied by the tip; only a failure spells itself out.
+    expect(container.querySelector(".maintenance__receipt li")?.textContent).toBe("finishedabc123Restore");
     // The receipt is the undo: a deleted branch's reflog goes with it.
     dispatch.mockResolvedValue({ ok: true, value: null });
     await click("Restore");
@@ -467,6 +473,27 @@ describe("maintenance dialog", () => {
     expect(runCalls().at(-1)![1]).toMatchObject({
       action: { kind: "scan-branches", options: { prProof: true, keepDays: 30 } }
     });
+  });
+
+  it("shows collections that reclaimed space, largest first, and folds the rest", async () => {
+    const small = { ...repo, id: "small", name: "small" };
+    const big = { ...repo, id: "big", name: "big" };
+    const bigger = { ...repo, id: "bigger", name: "bigger" };
+    const MiB = 1024 * 1024;
+    dispatch.mockResolvedValue({
+      ok: true,
+      value: summary([
+        { repo: small, outcome: "success", message: "Collected", beforeBytes: 11 * 1024, afterBytes: 11 * 1024 },
+        { repo: big, outcome: "success", message: "Collected", beforeBytes: 3 * MiB, afterBytes: MiB },
+        { repo: bigger, outcome: "success", message: "Collected", beforeBytes: 9 * MiB, afterBytes: MiB }
+      ])
+    });
+    await click("Run garbage collection");
+    const names = () => [...container.querySelectorAll(".bulk-sync__repo strong")].map((node) => node.textContent);
+    expect(names()).toEqual(["bigger", "big"]);
+    expect(container.textContent).toContain("1 repository with less than 1 MiB to reclaim");
+    await click("Show");
+    expect(names()).toEqual(["bigger", "big", "small"]);
   });
 
   it("offers the branch review from a collection's receipt without scanning again", async () => {
@@ -650,6 +677,18 @@ describe("combined maintenance workflow", () => {
     expect(container.textContent).toContain("1 removed");
     expect(container.textContent).toContain("1 deleted");
     expect(button("Restore")).toBeTruthy();
+  });
+  it("names deletion, not review, in the rail while branches are deleted", async () => {
+    await open();
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation((name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? new Promise(() => undefined)
+      : previous(name, req));
+    await click("Start");
+    await click("Skip worktrees");
+    expect(container.querySelector(".maintenance__step.is-on small")?.textContent).toMatch(/^review · 1 in 1 repos$/);
+    await click("Delete 1 branch and continue");
+    expect(container.querySelector(".maintenance__step.is-on small")?.textContent).toMatch(/^deleting /);
   });
   it("stays on worktree review if a requested removal did not succeed", async () => {
     await open();

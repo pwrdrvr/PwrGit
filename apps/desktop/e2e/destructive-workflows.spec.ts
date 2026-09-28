@@ -573,6 +573,6 @@ test("combined maintenance waits for Analyze, prunes, reviews gone branches, the
   expect(box.git(repo.path, "branch", "--list", "feat/finished").trim()).toBe("");
   expect(box.git(repo.path, "cat-file", "-t", head).trim()).toBe("commit");
   await dialog.getByRole("button", { name: "Restore", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: "restored", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Restored", exact: true })).toBeDisabled();
   expect(box.git(repo.path, "rev-parse", "feat/finished").trim()).toBe(head);
 });

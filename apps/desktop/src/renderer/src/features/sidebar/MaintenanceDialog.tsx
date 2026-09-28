@@ -19,7 +19,7 @@ import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
 import { MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
-import { BulkSyncStatus } from "./BulkSyncStatus";
+import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
 
 const branchKey = (branch: StaleBranch): string =>
@@ -27,6 +27,10 @@ const branchKey = (branch: StaleBranch): string =>
 /** How many Finished rows a repository shows before "Show all". One
  *  repository with 200 finished branches must not push the others away. */
 const FINISHED_SLICE = 20;
+/** Garbage collection results below this saving fold into the quiet line:
+ *  "11.0 KiB → 11.0 KiB" across 80 cards is the noise the branch review
+ *  already stopped showing. */
+const GC_QUIET_BYTES = 1024 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** "today", "3 days ago", "5 weeks ago", "4 months ago". */
@@ -40,14 +44,21 @@ function ago(at: number, now: number): string {
   return `${Math.round(days / 365)} years ago`;
 }
 
-/** The evidence line under a Finished row. */
-export function finishedEvidence(branch: StaleBranch, now: number): string {
+/** The evidence line under a Finished row: the proof (drawn in the success
+ *  colour, as a worktree row's reason is) and the facts after it. */
+export function finishedEvidence(
+  branch: StaleBranch,
+  now: number
+): { proof: string; rest: string } {
   const touched =
     branch.touchedAt === undefined ? "" : ` · touched ${ago(branch.touchedAt, now)}`;
-  if (branch.evidence === "ancestry") return `Already in HEAD${touched}`;
+  if (branch.evidence === "ancestry") return { proof: "Already in HEAD", rest: touched };
   const merged =
     branch.pr?.mergedAt === undefined ? "" : ` ${ago(branch.pr.mergedAt, now)}`;
-  return `#${branch.pr?.number ?? "?"} merged${merged} · tip is its head${touched}`;
+  return {
+    proof: `#${branch.pr?.number ?? "?"} merged${merged}`,
+    rest: ` · tip is its head${touched}`
+  };
 }
 
 /** A Kept chip's words, per reason. `keepDays` names the guard that held. */
@@ -151,6 +162,8 @@ export function MaintenanceDialog({
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showQuietRepos, setShowQuietRepos] = useState(false);
+  /** Receipt steps showing every row rather than the first FINISHED_SLICE. */
+  const [receiptAll, setReceiptAll] = useState<Set<StepKey>>(new Set());
   const [restores, setRestores] = useState<
     Map<string, "restoring" | "restored" | string>
   >(new Map());
@@ -366,7 +379,8 @@ export function MaintenanceDialog({
       if (live.current) setBranchReceipt(result);
       if (stopped(result, "branches")) return;
       const deleted = result!.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length;
-      recordStep("branches", { state: "done", summary: `${deleted} deleted in ${result!.results.filter((row) => (row.branches ?? []).some((branch) => branch.deleted)).length} repositories` });
+      const touched = result!.results.filter((row) => (row.branches ?? []).some((branch) => branch.deleted)).length;
+      recordStep("branches", { state: "done", summary: `${deleted} deleted in ${touched} ${touched === 1 ? "repository" : "repositories"}` });
     } else recordStep("branches", { state: "skipped", summary: "No branches deleted" });
     await finishWorkflow();
   };
@@ -506,15 +520,47 @@ export function MaintenanceDialog({
   const complete = summary !== null;
   const scanComplete = complete && action?.kind === "scan-branches";
   const branchScan = action?.kind === "scan-branches";
-  const proposingRepos = branchScan ? [...repos].filter((repo) => current.has(repo.id) ||
+  const collecting = action?.kind === "gc";
+  const saved = (id: string): number => {
+    const row = results.get(id);
+    return row?.beforeBytes === undefined || row.afterBytes === undefined
+      ? 0
+      : row.beforeBytes - row.afterBytes;
+  };
+  /** A branch review and a collection show a card only for a repository
+   *  that is running, failed, or has something to show; the rest fold into
+   *  one quiet line. Deletion shows every repository it touched. */
+  const weight = (id: string): number =>
+    branchScan ? results.get(id)?.candidates?.length ?? 0 : saved(id);
+  const proposingRepos = branchScan || collecting ? [...repos].filter((repo) => current.has(repo.id) ||
     ["failed", "partial", "cancelled"].includes(results.get(repo.id)?.outcome ?? "") ||
-    (results.get(repo.id)?.candidates?.length ?? 0) > 0).sort((a, b) =>
-      (results.get(b.id)?.candidates?.length ?? 0) - (results.get(a.id)?.candidates?.length ?? 0)) : repos;
-  const quietRepos = branchScan ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
+    (branchScan ? weight(repo.id) > 0 : weight(repo.id) >= GC_QUIET_BYTES)).sort((a, b) =>
+      weight(b.id) - weight(a.id)) : repos;
+  const quietRepos = branchScan || collecting ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
   const quietWithKept = quietRepos.filter((repo) => (results.get(repo.id)?.kept?.length ?? 0) > 0).length;
   const deletedCount = branchReceipt?.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length ?? 0;
   const collectedBefore = gcReceipt?.results.reduce((sum, row) => sum + (row.beforeBytes ?? 0), 0) ?? 0;
   const collectedAfter = gcReceipt?.results.reduce((sum, row) => sum + (row.afterBytes ?? 0), 0) ?? 0;
+  const deleting = action?.kind === "delete-branches";
+  const receiptRows = (key: StepKey): number =>
+    key === "branches" ? deletedCount : key === "gc" ? gcReceipt?.results.length ?? 0 : 0;
+  /** A receipt step lists its first FINISHED_SLICE rows until "Show all":
+   *  382 deleted branches must not bury the garbage-collection card. */
+  const sliceReceipt = <T,>(key: StepKey, rows: T[]): T[] =>
+    receiptAll.has(key) ? rows : rows.slice(0, FINISHED_SLICE);
+  const proposingCount =
+    summary?.results.filter((row) => (row.candidates?.length ?? 0) > 0).length ?? 0;
+  /** The current rail cell's line: the verb is whatever is running now. */
+  const railProgress =
+    workflowStep === "worktrees"
+      ? worktreeCandidateCount === null
+        ? "scanning"
+        : `review · ${worktreeCandidateCount} finished`
+      : running
+        ? `${deleting ? "deleting" : collecting ? "collecting" : "reviewing"} ${results.size} of ${repos.length}`
+        : workflowStep === "branches" && scanComplete
+          ? `review · ${candidates.length} in ${proposingCount} repos`
+          : "running";
   const toggleBranch = (key: string): void =>
     setSelected((old) => {
       const next = new Set(old);
@@ -583,7 +629,7 @@ export function MaintenanceDialog({
         </div>
         {tab === "combined" && workflowStep !== "setup" && workflowStep !== "done" &&
           <MaintenanceSteps plan={plan} current={workflowStep} results={stepResults} branchMode={branchMode}
-            gcMode={mode} progress={workflowStep === "worktrees" ? worktreeCandidateCount === null ? "scanning" : `review · ${worktreeCandidateCount} finished` : running && workflowStep === "branches" ? `reviewing ${results.size} of ${repos.length}` : workflowStep === "branches" && scanComplete ? `review · ${candidates.length} in ${summary?.results.filter((row) => (row.candidates?.length ?? 0) > 0).length ?? 0} repos` : "running"} />}
+            gcMode={mode} progress={railProgress} />}
         {tab === "combined" && workflowStep === "setup" ? (
           <>
             <MaintenancePlanForm plan={plan} onChange={setPlan}
@@ -618,7 +664,7 @@ export function MaintenanceDialog({
         ) : (
           <>
         {tab === "combined" && workflowStep === "done" ? <>
-          <div className={`maintenance__done-status${workflowStopped ? " is-stopped" : ""}`}><span>✓</span><div><strong>{workflowStopped ? "Maintenance stopped" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done").length} of {Object.values(plan).filter(Boolean).length} steps · {stepResults.worktrees?.items?.length ?? 0} {stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}, {deletedCount} {deletedCount === 1 ? "branch" : "branches"}{collectedBefore > collectedAfter ? `, ${bytes(collectedBefore - collectedAfter)} of object storage` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
+          <div className={`maintenance__done-status${workflowStopped ? " is-stopped" : ""}`}><StatusMark mark={workflowStopped ? "failed" : "ok"} /><div><strong>{workflowStopped ? "Maintenance stopped" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done").length} of {Object.values(plan).filter(Boolean).length} steps · {stepResults.worktrees?.items?.length ?? 0} {stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}, {deletedCount} {deletedCount === 1 ? "branch" : "branches"}{collectedBefore > collectedAfter ? `, ${bytes(collectedBefore - collectedAfter)} of object storage` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
           <div className="maintenance__body">
             <div className="maintenance__receipt-steps">
               {(["worktrees", "branches", "gc"] as StepKey[]).map((key, index) => {
@@ -630,11 +676,12 @@ export function MaintenanceDialog({
                   <div className="maintenance__receipt-head"><span className="maintenance__step-num">{index + 1}</span><strong>{title}</strong><span>{result?.summary ?? (state === "not-started" ? "Not started" : "Skipped")}</span>
                     {result !== undefined && result.state === "done" && <button onClick={() => setReceiptExpanded((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{expandedNow ? "Hide" : "Show"}</button>}
                   </div>
-                  {expandedNow && key === "branches" && branchReceipt?.results.flatMap((row) => (row.branches ?? []).filter((branch) => branch.deleted).map((branch) => {
+                  {expandedNow && key === "branches" && sliceReceipt(key, branchReceipt?.results.flatMap((row) => (row.branches ?? []).filter((branch) => branch.deleted).map((branch) => ({ row, branch }))) ?? []).map(({ row, branch }) => {
                     const state = restores.get(`${row.repo.id}:${branch.branch}`);
-                    return <div className="maintenance__receipt-row" key={`${row.repo.id}:${branch.branch}`}><strong>{row.repo.name} · {branch.branch}</strong><code>{branch.head.slice(0, 8)}</code><button className="maintenance__restore" disabled={state === "restored" || state === "restoring"} onClick={() => void restore(row.repo.id, branch)}>{state ?? "Restore"}</button></div>;
-                  }))}
-                  {expandedNow && key === "gc" && gcReceipt?.results.map((row) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name}</strong><span>{row.beforeBytes !== undefined && row.afterBytes !== undefined ? `${bytes(row.beforeBytes)} → ${bytes(row.afterBytes)}` : row.message}</span></div>)}
+                    return <div className="maintenance__receipt-row" key={`${row.repo.id}:${branch.branch}`}><strong>{row.repo.name} · {branch.branch}</strong><code>{branch.head.slice(0, 8)}</code><button className="maintenance__restore" disabled={state === "restored" || state === "restoring"} onClick={() => void restore(row.repo.id, branch)}>{state === "restored" ? "Restored" : state === "restoring" ? "Restoring…" : state ?? "Restore"}</button></div>;
+                  })}
+                  {expandedNow && key === "gc" && sliceReceipt(key, [...(gcReceipt?.results ?? [])].sort((a, b) => ((b.beforeBytes ?? 0) - (b.afterBytes ?? 0)) - ((a.beforeBytes ?? 0) - (a.afterBytes ?? 0)))).map((row) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name}</strong><span>{row.beforeBytes !== undefined && row.afterBytes !== undefined ? `${bytes(row.beforeBytes)} → ${bytes(row.afterBytes)}` : row.message}</span></div>)}
+                  {expandedNow && receiptRows(key) > FINISHED_SLICE && <div className="maintenance__receipt-more"><button onClick={() => setReceiptAll((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{receiptAll.has(key) ? "Show fewer" : `Show all ${receiptRows(key)}`}</button></div>}
                   {expandedNow && key === "worktrees" && result?.items?.map((item) => <div className="maintenance__receipt-row" key={item.detail}><strong>{item.label}</strong><code className="selectable">{displayPath(item.detail, platform)}</code></div>)}
                 </article>;
               })}
@@ -661,14 +708,14 @@ export function MaintenanceDialog({
                 ? cancelling
                   ? "Stopping after active repository operations…"
                   : current.size > 1
-                    ? `${action?.kind === "gc" ? "Collecting" : "Reviewing"} ${current.size} repositories`
+                    ? `${collecting ? "Collecting" : deleting ? "Deleting branches in" : "Reviewing"} ${current.size} repositories`
                     : currentRepo
-                      ? `${action?.kind === "gc" ? "Collecting" : action?.kind === "scan-branches" ? "Reviewing" : "Cleaning branches in"} ${currentRepo.name}`
+                      ? `${collecting ? "Collecting" : branchScan ? "Reviewing" : "Deleting branches in"} ${currentRepo.name}`
                       : "Waiting for the next repository…"
                 : summary?.cancelled
                   ? "Cancelled"
                   : scanComplete
-                    ? `${candidates.length} finished ${candidates.length === 1 ? "branch" : "branches"} in ${summary?.results.filter((row) => (row.candidates?.length ?? 0) > 0).length ?? 0} of ${repos.length} ${repos.length === 1 ? "repository" : "repositories"}`
+                    ? `${candidates.length} finished ${candidates.length === 1 ? "branch" : "branches"} in ${proposingCount} of ${repos.length} ${repos.length === 1 ? "repository" : "repositories"}`
                     : "Finished"
             }
             detail={
@@ -1001,7 +1048,7 @@ export function MaintenanceDialog({
                     </div>
                     {scanComplete && (result?.candidates?.length ?? 0) > 0 ? <span className="maintenance__repo-count">{(result?.candidates ?? []).filter((branch) => selected.has(branchKey(branch))).length} of {result?.candidates?.length ?? 0} selected</span> : <span className={`bulk-sync__repo-status is-${status}`}>{status}</span>}
                   </div>
-                  <p className="selectable">
+                  {!(scanComplete && (result?.candidates?.length ?? 0) + (result?.kept?.length ?? 0) > 0) && <p className="selectable">
                     {result?.message ??
                       details.get(repo.id) ??
                       (current.has(repo.id)
@@ -1009,7 +1056,7 @@ export function MaintenanceDialog({
                         : running
                           ? "Queued"
                           : "No result received.")}
-                  </p>
+                  </p>}
                   {result?.beforeBytes !== undefined &&
                     result.afterBytes !== undefined && (
                       <p>
@@ -1039,29 +1086,27 @@ export function MaintenanceDialog({
                   )}
                   {result?.branches !== undefined && (
                     <ul className="bulk-sync__details maintenance__receipt">
-                      {result.branches.map((branch) => {
+                      {(expanded.has(`deleted:${repo.id}`) ? result.branches : result.branches.slice(0, FINISHED_SLICE)).map((branch) => {
                         const state = restores.get(`${repo.id}:${branch.branch}`);
                         return (
                           <li key={branch.branch}>
-                            <span>
-                              <strong>{branch.branch}</strong>: {branch.message}
-                              {branch.deleted && (
-                                <>
-                                  {" "}
-                                  <code className="selectable">
-                                    {branch.head.slice(0, 8)}
-                                  </code>
-                                </>
+                            <strong>{branch.branch}</strong>
+                            {branch.deleted ? (
+                              <code className="selectable">
+                                {branch.head.slice(0, 8)}
+                              </code>
+                            ) : (
+                              <span className="maintenance__restore-error">
+                                {branch.message}
+                              </span>
+                            )}
+                            {state !== undefined &&
+                              state !== "restoring" &&
+                              state !== "restored" && (
+                                <span className="maintenance__restore-error">
+                                  {state}
+                                </span>
                               )}
-                              {state !== undefined &&
-                                state !== "restoring" &&
-                                state !== "restored" && (
-                                  <span className="maintenance__restore-error">
-                                    {" "}
-                                    {state}
-                                  </span>
-                                )}
-                            </span>
                             {branch.deleted && (
                               <button
                                 className="maintenance__restore"
@@ -1081,12 +1126,25 @@ export function MaintenanceDialog({
                           </li>
                         );
                       })}
+                      {result.branches.length > FINISHED_SLICE && (
+                        <li className="maintenance__receipt-more">
+                          <button onClick={() => setExpanded((old) => {
+                            const next = new Set(old);
+                            const key = `deleted:${repo.id}`;
+                            if (next.has(key)) next.delete(key);
+                            else next.add(key);
+                            return next;
+                          })}>
+                            {expanded.has(`deleted:${repo.id}`) ? "Show fewer" : `Show all ${result.branches.length}`}
+                          </button>
+                        </li>
+                      )}
                     </ul>
                   )}
                 </article>
               );
             })}
-            {branchScan && quietRepos.length > 0 && <div className="maintenance__quiet"><strong>{quietRepos.length}</strong> repositories with nothing to delete · <strong>{quietWithKept}</strong> of them keep branches <button onClick={() => setShowQuietRepos((old) => !old)}>{showQuietRepos ? "Hide" : "Show"}</button></div>}
+            {quietRepos.length > 0 && <div className="maintenance__quiet"><strong>{quietRepos.length}</strong> {quietRepos.length === 1 ? "repository" : "repositories"} {collecting ? "with less than 1 MiB to reclaim" : <>with nothing to delete · <strong>{quietWithKept}</strong> of them keep branches</>} <button onClick={() => setShowQuietRepos((old) => !old)}>{showQuietRepos ? "Hide" : "Show"}</button></div>}
           </div>
         </div>
         <div className="modal__actions">
@@ -1109,9 +1167,9 @@ export function MaintenanceDialog({
                     recordStep("branches", { state: "skipped", summary: "Skipped" });
                     void finishWorkflow();
                   }}>Skip branches</button>
-                  <button className="modal__create" onClick={() => void removeBranchesAndContinue(
+                  <button className="modal__create" disabled={selected.size === 0} onClick={() => void removeBranchesAndContinue(
                     candidates.filter((branch) => selected.has(branchKey(branch)))
-                  )}>Delete {selected.size} {selected.size === 1 ? "branch" : "branches"} and continue</button>
+                  )}>{selected.size === 0 ? "Delete branches and continue" : `Delete ${selected.size} ${selected.size === 1 ? "branch" : "branches"} and continue`}</button>
                 </>
               ) : null}
             </>
@@ -1224,19 +1282,22 @@ function BranchReview({
           )}
         </div>
       )}
-      {shown.map((branch) => (
-        <label className="maintenance__branch" key={branch.branch}>
-          <input
-            type="checkbox"
-            checked={selected.has(branchKey(branch))}
-            onChange={() => onToggle(branchKey(branch))}
-          />
-          <span>
-            <strong>{branch.branch}</strong>
-            <small>{finishedEvidence(branch, now)}</small>
-          </span>
-        </label>
-      ))}
+      {shown.map((branch) => {
+        const evidence = finishedEvidence(branch, now);
+        return (
+          <label className="maintenance__branch" key={branch.branch}>
+            <input
+              type="checkbox"
+              checked={selected.has(branchKey(branch))}
+              onChange={() => onToggle(branchKey(branch))}
+            />
+            <span>
+              <strong>{branch.branch}</strong>
+              <small><i>{evidence.proof}</i>{evidence.rest}</small>
+            </span>
+          </label>
+        );
+      })}
       {kept.length > 0 && (
         <>
           <div className="maintenance__group">

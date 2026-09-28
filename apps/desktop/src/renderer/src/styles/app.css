@@ -5274,7 +5274,18 @@ button.agent-menu__item:hover {
   align-items: baseline;
   gap: 8px;
 }
-.maintenance__receipt li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A deleted branch is one line: name, reviewed tip, Restore. The "Deleted
+   local branch." message only appears when deletion failed. */
+.maintenance__receipt li > strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font: 500 11px/1.3 var(--font-mono);
+}
+.maintenance__receipt li > span { min-width: 0; overflow-wrap: anywhere; }
 .maintenance__receipt code {
   color: var(--text-subtle);
   font: 500 10px/1 var(--font-mono);
@@ -5746,7 +5757,9 @@ button.agent-menu__item:hover {
   padding: 11px 12px;
   border: 1px solid var(--accent-border);
   border-radius: 8px;
-  background: var(--accent-soft);
+  /* The live status card's shape: neutral fill, accent border. A filled
+     accent bar read as a warning. */
+  background: var(--bg-panel);
 }
 .prune__spinner {
   width: 15px;
@@ -17046,6 +17059,12 @@ button.agent-auth-node:focus-visible,
 .maintenance__step.is-stop { border-color: var(--danger-border); }
 .maintenance__step.is-stop .maintenance__step-num { border: 0; background: var(--danger-soft); color: var(--danger-text); }
 .maintenance__step.is-stop small { color: var(--danger-text); }
+.maintenance__step-num svg { width: 10px; height: 10px; }
+/* A Finished row's proof, in the success colour a worktree row's reason uses. */
+.maintenance__branch small i { font-style: normal; color: var(--success-text); }
+.maintenance__receipt-more { padding: 6px 0 0 27px; }
+.maintenance__receipt li.maintenance__receipt-more { padding-left: 0; }
+.maintenance__receipt-more button { border: 0; padding: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
 .maintenance__plan { display: flex; flex-direction: column; gap: 8px; }
 .maintenance__plan-step { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
 .maintenance__plan-step > input { margin: 2px 0 0; }
@@ -17078,7 +17097,7 @@ button.agent-auth-node:focus-visible,
 .maintenance__quiet button { margin-left: auto; border: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
 .maintenance .bulk-sync__repo-status:has(+ *) { white-space: nowrap; }
 .maintenance__done-status { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
-.maintenance__done-status > span { display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--success-soft); color: var(--success-text); }
+.maintenance__done-status > .bulk-sync__mark { width: 16px; height: 16px; }
 .maintenance__done-status strong, .maintenance__done-status small { display: block; }
 .maintenance__done-status time { margin-left: auto; flex: 0 0 auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
 .maintenance__done-status strong { font: 650 11.5px/1.25 var(--font-sans); }
@@ -17111,10 +17130,10 @@ button.agent-auth-node:focus-visible,
 .prune__intro-note { margin: 12px 18px 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); }
 .prune__summary { align-items: center; border-color: var(--border-subtle); background: var(--bg-panel); }
 .prune__summary > div { flex: 1; }
-.prune__summary strong, .prune__summary span { display: block; }
+.prune__summary > div > strong, .prune__summary > div > span { display: block; }
 .prune__summary strong { color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
-.prune__summary span { margin-top: 3px; font-size: 10.5px; }
-.prune__summary-mark { flex: 0 0 auto; display: grid !important; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--success-soft); color: var(--success-text); font-size: 10px !important; }
+.prune__summary > div > span { margin-top: 3px; font-size: 10.5px; }
+.prune__summary > .bulk-sync__mark { width: 16px; height: 16px; }
 .prune__summary time { color: var(--text-muted); font: 500 10px var(--font-mono); }
 .prune__panel > .maintenance__applied { flex: 0 0 auto; margin: 12px 18px 0; }
 .prune__select { justify-content: flex-start; padding: 0; border: 0; background: transparent; }

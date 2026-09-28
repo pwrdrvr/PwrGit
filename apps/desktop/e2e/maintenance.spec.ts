@@ -49,6 +49,14 @@ test("collects all repositories and reviews stale local branches without touchin
     timeout: 30_000
   });
   await expect(dialog).toContainText("2 succeeded");
+  // Fixture repositories reclaim kilobytes, so both fold into the quiet line.
+  await expect(dialog.locator(".maintenance__quiet")).toContainText(
+    "2 repositories with less than 1 MiB to reclaim"
+  );
+  await dialog
+    .locator(".maintenance__quiet")
+    .getByRole("button", { name: "Show", exact: true })
+    .click();
   await expect(dialog.locator(".bulk-sync__repo")).toHaveCount(2);
   await expect(dialog.locator(".bulk-sync__repo").first()).toContainText(
     "Object storage:"

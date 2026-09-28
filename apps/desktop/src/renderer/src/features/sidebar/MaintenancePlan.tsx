@@ -4,6 +4,7 @@ import {
   type BranchCleanupOptions,
   type GarbageCollectionMode
 } from "@pwrgit/shared";
+import { StatusGlyph } from "./BulkSyncStatus";
 
 export type MaintenancePlan = { worktrees: boolean; branches: boolean; gc: boolean };
 export type StepKey = keyof MaintenancePlan;
@@ -41,7 +42,7 @@ export function MaintenanceSteps({ plan, current, results, branchMode, gcMode, p
           step.key === "branches" ? `next · ${branchMode === "review" ? "pauses for review" : "deletes without asking"}` :
             `last · ${gcMode}`);
       return <div key={step.key} className={`maintenance__step is-${state}`}>
-        <span className="maintenance__step-num">{state === "done" ? "✓" : index + 1}</span>
+        <span className="maintenance__step-num">{state === "done" ? <StatusGlyph mark="ok" /> : state === "stop" ? <StatusGlyph mark="failed" /> : index + 1}</span>
         <div><strong>{step.title}</strong><small>{detail}</small></div>
       </div>;
     })}
@@ -118,7 +119,7 @@ export function MaintenancePlanForm({
             </div><div className="maintenance__plan-rule">
             <label className="maintenance__plan-mode">When the list is ready <select aria-label="Branch removal" value={branchMode} onChange={(event) => onBranchMode(event.target.value as "review" | "auto")}>
               <option value="review">Let me review it</option><option value="auto">Delete without asking</option>
-            </select></label><small>or “Delete without asking”</small></div>
+            </select></label></div>
           </div>}
         </div>
       </article>

@@ -15,6 +15,7 @@ import {
 } from "../../lib/useViewportTooltip";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
 import { MaintenanceRulesApplied } from "./MaintenancePlan";
+import { StatusMark } from "./BulkSyncStatus";
 import {
   describeBytes,
   emptyReviewCopy,
@@ -406,7 +407,7 @@ export function PruneWorktreesPanel({
 
             {summary !== null && (
               <div className="prune__summary" role="status">
-                <span className="prune__summary-mark">✓</span><div>
+                <StatusMark mark={summary.cancelled ? "cancelled" : "ok"} /><div>
                 <strong>
                   {summary.cancelled ? "Stopped early" : "Sweep finished"}
                 </strong>
@@ -419,7 +420,7 @@ export function PruneWorktreesPanel({
                     ? ` · ${summary.counts.repos.failed} unreadable`
                     : ""}
                 </span>
-                </div><time>{Math.max(0, Math.round((Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)) / 1000))}s</time>
+                </div><time>took {Math.max(0, Math.round((Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)) / 1000))}s</time>
               </div>
             )}
             {error !== null && <div className="modal__error">{error}</div>}
@@ -530,7 +531,7 @@ export function PruneWorktreesPanel({
                   >
                     {stage.kind === "removing"
                       ? "Removing…"
-                      : onContinue !== undefined ? `Remove ${totals.count} worktree${totals.count === 1 ? "" : "s"} and continue`
+                      : onContinue !== undefined ? totals.count === 0 ? "Remove worktrees and continue" : `Remove ${totals.count} worktree${totals.count === 1 ? "" : "s"} and continue`
                       : `Remove ${totals.count === 0 ? "" : totals.count} worktree${
                           totals.count === 1 ? "" : "s"
                         }…`}

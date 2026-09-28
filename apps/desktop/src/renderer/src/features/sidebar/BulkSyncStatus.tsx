@@ -17,7 +17,7 @@ export type BulkSyncStatusPhase =
   | "finished"
   | "cancelled";
 
-type StatusMarkKind = "ok" | "failed" | "cancelled";
+export type StatusMarkKind = "ok" | "failed" | "cancelled";
 
 /**
  * The run status card: one element from the first repository to the receipt.
@@ -210,26 +210,36 @@ function LiveClock({
   );
 }
 
-function StatusMark({ mark }: { mark: StatusMarkKind }): ReactElement {
+/** The mark's glyph alone, for a caller that supplies its own circle (the
+ *  maintenance step rail). An SVG, not a "✓" character: a text glyph sits on
+ *  the font's baseline and never centres in a round badge. */
+export function StatusGlyph({ mark }: { mark: StatusMarkKind }): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {mark === "ok" && <path d="M2.4 5.3l1.8 1.8 3.5-3.9" />}
+      {mark === "failed" && (
+        <>
+          <path d="M5 2.2v3.4" />
+          <path d="M5 7.8v.01" />
+        </>
+      )}
+      {mark === "cancelled" && <path d="M2.6 5h4.8" />}
+    </svg>
+  );
+}
+
+export function StatusMark({ mark }: { mark: StatusMarkKind }): ReactElement {
   return (
     <span className={`bulk-sync__mark is-${mark}`} aria-hidden="true">
-      <svg
-        viewBox="0 0 10 10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {mark === "ok" && <path d="M2.4 5.3l1.8 1.8 3.5-3.9" />}
-        {mark === "failed" && (
-          <>
-            <path d="M5 2.2v3.4" />
-            <path d="M5 7.8v.01" />
-          </>
-        )}
-        {mark === "cancelled" && <path d="M2.6 5h4.8" />}
-      </svg>
+      <StatusGlyph mark={mark} />
     </span>
   );
 }
