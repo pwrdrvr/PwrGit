@@ -202,7 +202,14 @@ test("menu opens the Settings window; panes render and settings persist", async 
     // The chip is the product's own state, so it can never again read
     // "Connected" for one forge while naming another's hosts.
     const chip = section.locator(".settings-card__chip").first();
-    await expect(chip).toHaveText(/Connected|Signed out|Off|Not installed/);
+    // Public adapters do not have a CLI login state. Keep the CLI assertion
+    // separate so an authenticated product cannot accidentally claim public
+    // access, and Gerrit cannot regress to a sign-in/install prompt.
+    await expect(chip).toHaveText(
+      product.access === "public"
+        ? "Public access"
+        : /Connected|Signed out|Off|Not installed/
+    );
     // Each product owns its own way in, which is what a shared empty state
     // could not offer. WHICH way in depends on the product's state, and both
     // branches are covered by the fixture. A missing CLI is the one state
