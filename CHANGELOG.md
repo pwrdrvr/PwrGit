@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.24.0 - 2026-09-28
+
+- Branches - Added a reviewed cleanup for local branches whose upstream is gone. PwrGit offers a branch only when its commits are reachable from the current branch or a merged pull request, keeps recent or unproven work, and provides a Restore action after deletion. Sidebar branch counts now open matching filtered views.
+- Forges - Improved repository and remote forge logos so known identities remain visible even with one integration enabled, and clicking a logo opens the matching repository page.
+- Repositories - Fixed deleted repository folders lingering in the sidebar until the next scheduled scan. PwrGit now rescans promptly when a primary checkout disappears while retaining the existing safeguards against pruning unavailable roots or manually added repositories.
+
 ## v0.23.0 - 2026-09-27
 
 - Forks - Added a forge-verified parent-remote suggestion for repositories cloned from a fork. Add and fetch the parent in one step, or choose a safe name when `upstream` is already in use, so parent changes appear in fork status and sync controls.
