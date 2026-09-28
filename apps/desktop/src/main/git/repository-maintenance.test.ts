@@ -486,13 +486,30 @@ describe("repository maintenance with real Git", () => {
     // compare-and-swap can catch it) and one is checked out.
     git(repo, "update-ref", "refs/heads/done/005", `${head}~1`);
     git(repo, "worktree", "add", join(root, "held"), "done/120");
-    const progress: number[] = [];
+    // Cancelled before it starts: nothing is attempted, so nothing answers.
+    const cancelled = await deleteStaleBranches(
+      systemGit,
+      repo,
+      fresh.candidates,
+      fresh,
+      { signal: AbortSignal.abort() }
+    );
+    expect(cancelled.ok && cancelled.value.size).toBe(0);
+    const progress: Array<[number, number]> = [];
     const results = await deleteStaleBranches(
       systemGit,
       repo,
       fresh.candidates,
       fresh,
-      { onProgress: (done) => progress.push(done) }
+      {
+        onProgress: (done, deleted) => {
+          // Between the two transactions a worktree takes a branch the
+          // second one would delete; update-ref alone would not refuse it.
+          if (progress.length === 0)
+            git(repo, "worktree", "add", join(root, "late"), "done/110");
+          progress.push([done, deleted]);
+        }
+      }
     );
     if (!results.ok) throw new Error(results.error.message);
     expect(results.value.get("done/005")).toMatchObject({
@@ -503,16 +520,22 @@ describe("repository maintenance with real Git", () => {
       ok: false,
       error: { code: "branch_checked_out" }
     });
+    expect(results.value.get("done/110")).toMatchObject({
+      ok: false,
+      error: { code: "branch_checked_out" }
+    });
     expect(
       [...results.value.values()].filter((result) => result.ok)
-    ).toHaveLength(128);
-    expect(progress.at(-1)).toBe(130);
+    ).toHaveLength(127);
+    expect(progress.at(-1)).toEqual([130, 127]);
     expect(
       git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/done/")
-    ).toBe("done/005\ndone/120");
+    ).toBe("done/005\ndone/110\ndone/120");
     expect(
       git(repo, "config", "--get-regexp", "^branch\\.done/.*\\.remote$")
-    ).toBe("branch.done/005.remote origin\nbranch.done/120.remote origin");
+    ).toBe(
+      "branch.done/005.remote origin\nbranch.done/110.remote origin\nbranch.done/120.remote origin"
+    );
   });
 
   it("refuses to delete a branch reviewed on different evidence", async () => {

@@ -428,9 +428,13 @@ export async function deleteStaleBranches(
   cwd: string,
   candidates: readonly StaleBranch[],
   fresh: StaleBranchReview,
-  progress: { onProgress?: (done: number) => void; signal?: AbortSignal } = {}
+  progress: {
+    onProgress?: (done: number, deleted: number) => void;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<Result<Map<string, Result<void>>>> {
   const results = new Map<string, Result<void>>();
+  if (progress.signal?.aborted === true) return ok(results);
   const stale = (message: string): Result<void> =>
     err({ kind: "repo", code: "stale_branch_review", message });
   const eligible = candidates.filter((candidate) => {

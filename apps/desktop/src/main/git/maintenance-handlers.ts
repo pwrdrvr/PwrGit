@@ -254,14 +254,18 @@ export function registerMaintenanceHandlers(
         1,
         Math.min(4, Math.floor(availableParallelism() / 2))
       );
+      const selectedCount = new Map<string, number>();
+      for (const branch of selected)
+        selectedCount.set(
+          branch.repoId,
+          (selectedCount.get(branch.repoId) ?? 0) + 1
+        );
       // The longest deletion starts first, so it is not the one left running
       // alone at the end. The rows keep their reviewed order on screen.
       const order =
         action.kind === "delete-branches"
           ? [...repos].sort(
-              (a, b) =>
-                selected.filter((branch) => branch.repoId === b.id).length -
-                selected.filter((branch) => branch.repoId === a.id).length
+              (a, b) => (selectedCount.get(b.id) ?? 0) - (selectedCount.get(a.id) ?? 0)
             )
           : repos;
       await mapLimit(order, concurrency, async (repo) => {
@@ -400,6 +404,20 @@ export function registerMaintenanceHandlers(
                 // transactions on it fight over packed-refs.lock. Rows that
                 // share a store take turns; every other repository runs.
                 return inStoreTurn(directory.value, async () => {
+                  // Cancelled while waiting for the store: spend no Git on
+                  // a review whose answer nothing will act on.
+                  if (controller.signal.aborted)
+                    return {
+                      repo,
+                      outcome: "cancelled",
+                      message: `0 local branches deleted; ${repoCandidates.length} retained.`,
+                      branches: repoCandidates.map((candidate) => ({
+                        branch: candidate.branch,
+                        head: candidate.expectedHead,
+                        deleted: false,
+                        message: "Cancelled; retained."
+                      }))
+                    };
                   // One fresh review for the batch, not one per branch, and
                   // one batched delete: per branch, the old path cost five
                   // Git processes plus one per worktree.
@@ -415,8 +433,10 @@ export function registerMaintenanceHandlers(
                         fresh.value,
                         {
                           signal: controller.signal,
-                          onProgress: (done) =>
-                            report(`Deleted ${done} of ${total} branches…`)
+                          onProgress: (done, deleted) =>
+                            report(
+                              `Checked ${done} of ${total} branches · ${deleted} deleted…`
+                            )
                         }
                       )
                     : fresh;

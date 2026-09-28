@@ -453,10 +453,16 @@ export async function deleteReviewedBranches(
   {
     onProgress,
     signal
-  }: { onProgress?: (done: number) => void; signal?: AbortSignal } = {}
+  }: {
+    /** After each chunk: branches answered so far, and how many went. */
+    onProgress?: (done: number, deleted: number) => void;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<Result<Map<string, Result<void>>>> {
   const results = new Map<string, Result<void>>();
-  if (reviewed.length === 0) return ok(results);
+  // A function, not a narrowed field: the signal flips while this awaits.
+  const stopped = (): boolean => signal?.aborted === true;
+  if (reviewed.length === 0 || stopped()) return ok(results);
   const holders = await worktreeHolders(git, cwd);
   if (!holders.ok) return holders;
   const deletable: ReviewedBranch[] = [];
@@ -482,12 +488,33 @@ export async function deleteReviewedBranches(
     else deletable.push(branch);
   }
   const sections = await branchConfigSections(git, cwd);
-  let done = reviewed.length - deletable.length;
   for (let start = 0; start < deletable.length; start += DELETE_CHUNK) {
     // Between chunks, never inside one: a transaction either lands whole or
     // is retried whole, so cancelling cannot split one.
-    if (signal?.aborted === true) break;
-    const chunk = deletable.slice(start, start + DELETE_CHUNK);
+    if (stopped()) break;
+    let chunk = deletable.slice(start, start + DELETE_CHUNK);
+    if (start > 0) {
+      // `update-ref` does not refuse a checked-out branch the way
+      // `branch -d` does, so every later chunk looks again: a batch takes
+      // seconds, and a worktree can take a branch in the meantime.
+      const listed = await listWorktrees(git, cwd);
+      const held = new Map(
+        listed.ok
+          ? listed.value
+              .filter((worktree) => !worktree.detached && !worktree.bare)
+              .map((worktree) => [worktree.branch, worktree.path])
+          : []
+      );
+      chunk = chunk.filter((branch) => {
+        const refusal = !listed.ok
+          ? err(listed.error)
+          : held.has(branch.branch)
+            ? err(checkedOutError(branch.branch, held.get(branch.branch)!))
+            : null;
+        if (refusal !== null) results.set(branch.branch, refusal);
+        return refusal === null;
+      });
+    }
     const input = chunk
       .map((branch) => `delete refs/heads/${branch.branch} ${branch.expectedHead}\n`)
       .join("");
@@ -504,8 +531,10 @@ export async function deleteReviewedBranches(
       for (const branch of chunk)
         results.set(branch.branch, await forceDeleteExpectedRef(git, cwd, branch));
     }
-    done += chunk.length;
-    onProgress?.(done);
+    onProgress?.(
+      results.size,
+      [...results.values()].filter((result) => result.ok).length
+    );
   }
   return ok(results);
 }

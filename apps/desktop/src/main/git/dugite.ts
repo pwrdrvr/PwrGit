@@ -387,7 +387,10 @@ export const execGit: GitExec = async (args, cwd, options) => {
         ? { killSignal: options.killSignal }
         : {}),
       processCallback: (child) => {
-        if (options?.input !== undefined) child.stdin?.end(options.input);
+        // Always closed: nothing here answers a prompt, and a `--stdin`
+        // command whose input went missing would otherwise wait for an EOF
+        // that never comes. The test double closes it the same way.
+        child.stdin?.end(options?.input);
         child.stdout?.on("data", () => options?.onActivity?.());
         child.stderr?.on("data", (chunk: Buffer | string) => {
           options?.onActivity?.();
