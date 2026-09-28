@@ -16982,9 +16982,6 @@ button.agent-auth-node:focus-visible,
 }
 .prune__protection p { margin: 8px 0 0; line-height: 1.45; }
 
-.maintenance.maintenance--worktrees {
-  width: min(860px, 95vw);
-}
 .prune__panel {
   flex: 1;
   display: flex;
