@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 860px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 860px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .find { width: 560px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- tables ---- */
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 150px minmax(0, 1fr) 200px; gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr.five { grid-template-columns: 120px repeat(4, minmax(0, 1fr)); }
+          .tr.build { grid-template-columns: 210px minmax(0, 1fr); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr .bad { color: #ffb0a1; }
+
+          /* ---- theme scope: the app's own light tokens (tokens.css) ---- */
+          .th-light {
+            --bg-stage: #efe9df; --bg-panel: #fdfcfa; --bg-menu: #ffffff; --bg-panel-elevated: #ffffff; --bg-input: #ffffff;
+            --bg-panel-hover: #f4f0e8; --bg-row-active: #fff5e9;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --success-text: #1a5c2e; --success-soft: rgba(46, 110, 64, 0.14);
+            --danger-text: #8a1f12; --danger-base: #8a1f12; --danger-soft: rgba(138, 31, 18, 0.12); --danger-border: rgba(138, 31, 18, 0.28);
+            --status-ok: #2e7d3c; --status-warning: #805200;
+            --shadow-overlay: 0 24px 60px rgba(40, 28, 12, 0.18);
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+          }
+          .stage { position: relative; padding: 22px; border-radius: 10px; background: var(--bg-stage); }
+
+          /* ============================================================
+             Maintenance dialog, true size from app.css
+             ============================================================ */
+          .bs { width: 820px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .bs-head { display: flex; align-items: flex-start; gap: 18px; padding: 18px; border-bottom: 1px solid var(--border-subtle); }
+          .bs-head > div { flex: 1; min-width: 0; }
+          .bs-head h2 { margin: 0; color: var(--text-primary); font: 700 14px/1.2 var(--font-sans); }
+          .bs-head p { margin: 7px 0 0; color: var(--text-muted); font: 500 11px/1.45 var(--font-sans); }
+          .bs-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); }
+          .mt-tabs { display: flex; gap: 8px; padding: 12px 18px 0; }
+          .mt-tab { padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel); color: var(--text-secondary); font: 600 12px/1 var(--font-sans); }
+          .mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+          .mt-tab.dis { opacity: .45; }
+          .mt-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 18px; color: var(--text-primary); font: 400 12px/1.5 var(--font-sans); overflow: hidden; }
+          .mt-help { margin: 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); text-wrap: pretty; }
+          .mt-help b { color: var(--text-secondary); font-weight: 600; }
+          .mt-opts { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; }
+          .mt-opts legend { padding: 0 4px; color: var(--text-secondary); font: 600 11px/1 var(--font-sans); }
+          .mt-opt { display: flex; align-items: flex-start; gap: 9px; }
+          .mt-opt > div { flex: 1; min-width: 0; }
+          .mt-opt strong { display: block; color: var(--text-primary); font: 600 12px/1.35 var(--font-sans); }
+          .mt-opt small { display: block; margin-top: 2px; color: var(--text-muted); font: 400 11px/1.45 var(--font-sans); text-wrap: pretty; }
+          .mt-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+          .box { position: relative; flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg-input); }
+          .box.on { border-color: var(--accent); background: var(--accent); }
+          .box.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid var(--accent-on); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+          .box.mid { border-color: var(--accent); background: var(--accent); }
+          .box.mid::after { content: ""; position: absolute; left: 3px; top: 5.5px; width: 6px; height: 2px; background: var(--accent-on); }
+          .sel { display: inline-flex; align-items: center; height: 26px; padding: 0 26px 0 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 13px) 11px, calc(100% - 9px) 11px; background-size: 4px 4px; background-repeat: no-repeat; white-space: nowrap; }
+          .radio { position: relative; flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--bg-input); }
+          .radio.on { border-color: var(--accent); }
+          .radio.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent); }
+          .fixed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--bg-panel); border: 1px solid var(--border-faint); }
+          .fixed > span { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); font: 500 11px/1.45 var(--font-sans); }
+          .fixed > span::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--danger-base); transform: translateY(-1px); }
+          .fixed > em { font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .fixed > span > i { flex: none; width: 74px; font-style: normal; font: 600 10px/1.45 var(--font-mono); color: var(--text-subtle); }
+          .bs-repo { flex: none; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .bs-repo.is-success { border-color: color-mix(in srgb, var(--success-text) 32%, transparent); }
+          .bs-repo.is-running { border-color: var(--accent-border); background: var(--accent-tint); }
+          .bs-rh { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+          .bs-rh > div { flex: 1; min-width: 0; }
+          .bs-rh strong, .bs-rh small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .bs-rh strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+          .bs-rh small { margin-top: 3px; color: var(--text-subtle); font: 500 9px/1.2 var(--font-mono); }
+          .bs-st { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--success-text); font: 600 9.5px/1 var(--font-mono); }
+          .bs-st::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; }
+          .bs-st.run { color: var(--accent-bright); }
+          .bs-repo > p { margin: 5px 0 0; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .grp { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; padding-top: 8px; border-top: 1px solid var(--border-faint); font: 700 9px/1 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .grp.first { margin-top: 0; padding-top: 0; border-top: 0; }
+          .grp b { color: var(--text-secondary); font-family: var(--font-mono); }
+          .grp .lnk { margin-left: auto; font: 600 10px/1 var(--font-sans); letter-spacing: 0; text-transform: none; color: var(--accent); }
+          .brow { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; }
+          .brow > div { flex: 1; min-width: 0; }
+          .brow strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+          .brow strong .rn { font-family: var(--font-sans); font-weight: 650; color: var(--text-secondary); }
+          .brow small { display: block; margin-top: 2px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .brow small i { font-style: normal; color: var(--success-text); }
+          .brow small i.warn { color: var(--status-warning); }
+          .brow small.path { font: 500 9px/1.3 var(--font-mono); color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .brow .sz { flex: none; padding-top: 1px; font: 600 10.5px/1.3 var(--font-mono); color: var(--text-secondary); }
+          .kchips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+          .kchip { display: inline-flex; align-items: baseline; gap: 4px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 500 10px/1 var(--font-sans); white-space: nowrap; }
+          .kchip b { color: var(--text-secondary); font: 700 10px/1 var(--font-mono); }
+          .selall { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 400 12px/1.4 var(--font-sans); }
+          .selall .box { margin-top: 0; }
+          .quiet-line { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px dashed var(--border-default); border-radius: 8px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .quiet-line b { color: var(--text-secondary); font: 700 10.5px/1 var(--font-mono); }
+          .quiet-line .lnk { margin-left: auto; color: var(--accent); font-weight: 600; }
+
+          /* status card (BulkSyncStatus), finished and live */
+          .rstatus { display: flex; flex-direction: column; gap: 9px; margin: 12px 18px 0; padding: 11px 12px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rstatus.live { border-color: var(--accent-border); }
+          .rtop { display: flex; align-items: center; gap: 11px; }
+          .rtop > div { flex: 1; min-width: 0; }
+          .rtop strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .rtop span { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .rtop span.pth { color: var(--text-muted); font: 500 9.5px/1.2 var(--font-mono); }
+          .rtime { flex: none; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+          .mark { flex: none; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--success-soft); color: var(--success-text); font: 700 10px/1 var(--font-sans); }
+          .spin { flex: none; width: 15px; height: 15px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; }
+          .pbar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--border-subtle); }
+          .pbar .ok { background: var(--status-ok); }
+          .pbar .fly { background: repeating-linear-gradient(135deg, var(--accent) 0 4px, color-mix(in srgb, var(--accent) 45%, transparent) 4px 8px); }
+          .plegend { display: flex; align-items: center; gap: 14px; color: var(--text-secondary); font: 500 10.5px/1 var(--font-sans); }
+          .plegend b { color: var(--text-primary); font-weight: 650; }
+          .plegend .dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 2px; background: var(--status-ok); }
+          .plegend .r { margin-left: auto; color: var(--text-muted); }
+          .plegend .r b { color: var(--accent-bright); }
+
+          /* ============================================================
+             Proposed: the step rail
+             ============================================================ */
+          .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 12px 18px 0; }
+          .step { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .step > div { min-width: 0; }
+          .step strong { display: block; color: var(--text-secondary); font: 650 11.5px/1.2 var(--font-sans); }
+          .step small { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+          .num { flex: none; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-default); background: var(--bg-input); color: var(--text-muted); font: 700 10px/1 var(--font-mono); }
+          .step.on { border-color: var(--accent-border); background: var(--accent-tint); box-shadow: inset 0 -2px 0 0 var(--accent); }
+          .step.on strong { color: var(--text-primary); }
+          .step.on small { color: var(--accent-bright); }
+          .step.on .num { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .step.done .num { border-color: transparent; background: var(--success-soft); color: var(--success-text); }
+          .step.done strong { color: var(--text-primary); }
+          .step.done small { color: var(--success-text); }
+          .step.off { border-style: dashed; background: transparent; }
+          .step.off strong, .step.off small { color: var(--text-subtle); }
+          .step.off .num { background: transparent; border-style: dashed; }
+          .step.stop { border-color: var(--danger-border); }
+          .step.stop .num { border-color: transparent; background: var(--danger-soft); color: var(--danger-text); }
+          .step.stop small { color: var(--danger-text); }
+
+          /* Proposed: the plan as numbered step cards */
+          .plan { display: flex; flex-direction: column; gap: 8px; }
+          .pstep { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .pstep .num { margin-top: -1px; }
+          .pstep.in .num { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .pstep.out { background: transparent; border-style: dashed; }
+          .pstep.out h3, .pstep.out p { color: var(--text-subtle); }
+          .phd { display: flex; align-items: baseline; gap: 8px; }
+          .pstep h3 { margin: 0; color: var(--text-primary); font: 650 12.5px/1.3 var(--font-sans); }
+          .pstep p { margin: 2px 0 0; color: var(--text-muted); font: 400 11px/1.45 var(--font-sans); text-wrap: pretty; }
+          .ptag { margin-left: auto; flex: none; padding: 3px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 600 9.5px/1.2 var(--font-sans); white-space: nowrap; }
+          .ptag.pause { border-color: var(--accent-border); color: var(--accent-bright); background: var(--accent-tint); }
+          .ptag.auto { border-color: color-mix(in srgb, var(--status-warning) 44%, transparent); color: var(--status-warning); }
+          .prules { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-faint); }
+          .prule { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--text-secondary); font: 500 11.5px/1.3 var(--font-sans); }
+          .prule .box { margin-top: 0; }
+          .prule .hint { color: var(--text-subtle); font: 400 10.5px/1.3 var(--font-sans); }
+
+          /* Proposed: the rules in force, restated above every review */
+          .applied { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .applied > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+          .applied em { flex: none; width: 56px; font: 700 9px/1.4 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .applied b { color: var(--text-primary); font-weight: 600; }
+          .applied .sep { color: var(--text-subtle); }
+          .applied .never b { color: var(--danger-text); }
+          .applied .lnk { margin-left: auto; color: var(--accent); font: 600 10.5px/1 var(--font-sans); }
+          .bs-rh .cnt { flex: none; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); padding-top: 2px; }
+
+          /* Proposed: the finished receipt, one card per step */
+          .rc { display: flex; flex-direction: column; gap: 8px; }
+          .rcs { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rch { display: flex; align-items: center; gap: 9px; }
+          .rch .num { width: 18px; height: 18px; font-size: 9.5px; border-color: transparent; background: var(--success-soft); color: var(--success-text); }
+          .rch strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+          .rch > span:not(.num):not(.lnk) { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+          .rch .lnk { margin-left: 10px; color: var(--accent); font: 600 10.5px/1 var(--font-sans); }
+          .rcs.skip { border-style: dashed; background: transparent; }
+          .rcs.skip .num { background: transparent; border: 1px dashed var(--border-default); color: var(--text-subtle); }
+          .rcs.skip strong, .rcs.skip span:not(.num) { color: var(--text-subtle); }
+          .rcpt { display: flex; align-items: center; gap: 10px; padding: 5px 0 0 27px; }
+          .rcpt strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 500 11px/1.3 var(--font-mono); }
+          .rcpt strong .rn { font-family: var(--font-sans); color: var(--text-muted); }
+          .rcpt code { color: var(--text-subtle); font: 500 10px/1 var(--font-mono); }
+          .rcpt a { font: 600 10.5px/1 var(--font-sans); color: var(--accent); }
+
+          .bs-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--border-subtle); }
+          .bs-actions .lead { margin-right: auto; color: var(--text-muted); font: 500 10.5px/1.3 var(--font-sans); }
+          .bs-actions .lead b { color: var(--text-secondary); font-weight: 600; }
+          .bs-btn { height: 28px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-panel-elevated); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); white-space: nowrap; }
+          .bs-btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-on); }
+          .bs-btn.danger { border-color: transparent; background: var(--danger-base); color: #ffffff; }
+          .bs-btn.ghost { border-color: var(--border-default); background: transparent; color: var(--text-secondary); }
+          .bs-btn:disabled { opacity: .5; }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Combined as built">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Combined mode as built — a form, then a run that doesn’t say where it is</span>
+        </div>
+        <p class="dv-sub">The combined tab chains three jobs the other tabs already do one at a time: remove finished worktrees, delete finished local branches, then collect garbage. The plan is a column of checkboxes. The run borrows each tab’s view as it goes. Nothing on screen holds the sequence together, so after the worktree review ends and branch scanning starts, the dialog looks like the Local branches tab running on its own, with no sign that a third step is still to come. The worktree step’s own copy replaces the dialog’s lead, the only step marker is an 11&#8239;px muted line, and the one repository with something to review sits among 81 cards that say <b>0 finished branches · 0 kept</b>.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Where the step is named">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>What tells you which step you are in, moment by moment</div>
+            <div class="tbl" style="width:820px">
+              <div class="tr head"><span>Moment</span><span>What names the step</span><span>Where it sits</span></div>
+              <div class="tr"><b>Plan</b><span>“Tasks run in order: worktrees, gone local branches, then Git storage.” The order exists only in this sentence.</span><span>Help text above the fieldset</span></div>
+              <div class="tr"><b>Worktree review</b><span class="bad">Nothing. The panel is the Worktrees tab as it is, and its description of the sweep replaces the dialog’s lead.</span><span>—</span></div>
+              <div class="tr"><b>Branch scan</b><span>“Step: gone local branches”, 11&#8239;px muted, under an accent-bordered progress card that looks the same as a standalone scan.</span><span>Between status and receipts</span></div>
+              <div class="tr"><b>Branch review</b><span>The same line. The status title changes to “Review gone branches”. The rules the list was built with are not shown.</span><span>Same</span></div>
+              <div class="tr"><b>Git collection</b><span>“Step: Git collection”.</span><span>Same</span></div>
+              <div class="tr"><b>Done</b><span>“Maintenance complete.” and a bulleted list: “6 worktrees removed; continued after review.”</span><span>Same</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>The sequence is invisible once it starts</h4><p>Upcoming steps are not shown anywhere, and completed ones exist only as bullets. The Combined tab stays lit while each step borrows another tab’s view, so the tab strip contradicts the content.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The plan reads as a form, not a sequence</h4><p>Three unnumbered checkboxes. Nothing says where the run will stop for you: worktrees always pause, branches pause only in Review mode, and collection never pauses.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>Three spellings of one age guard</h4><p><b>Keep branches touched within</b> here, <b>Keep branches touched in the last</b> on Local branches, and <b>Protect recently touched worktrees · Within the last</b> on Worktrees, with different notches (1/3/7/14/30/90 against 1/7/14/30). The branch rules also lose the <b>Never offered</b> box from <a href="Finished%20Branches%20-%20UX%20Review.dc.html#4a">Finished Branches 4a</a> and become a five-line paragraph.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>Every repository gets a card, alphabetically</h4><p>The branch step lists all 82 repositories, including the dozens that report “0 finished branches · 0 kept”. With 382 finished branches spread over a handful of repositories, you have to scroll the whole list to find the ones that propose something. Nothing shows which repositories they are, or how many each one proposes, before you reach its card.</p></div></div>
+              <div class="fitem"><span class="pin">5</span><div><h4>Two voices</h4><p>“Propose Worktrees to Prune”, “Start Pruning and Continue” and “Continue without Pruning” are Title Case. The rest of the dialog is sentence case. “Continue without Pruning” is really <i>skip</i>, but it carries the same visual weight as the action.</p></div></div>
+              <div class="fitem"><span class="pin">6</span><div><h4>The review forgets the rules it applied</h4><p>You set the age guard, PR proof and branch mode on the plan, and then the plan is gone. At the moment you are asked to delete 382 branches, nothing on screen says they were filtered by <b>touched in the last 7 days</b>, or that never-pushed branches, branches held by a worktree and protected names were already excluded. The worktree review repeats its protection window only because it is that tab’s own box.</p></div></div>
+              <div class="fitem"><span class="pin">7</span><div><h4>The Worktrees tab drifted from its siblings</h4><p>The sweep result sits in an accent-filled bar that reads like a warning, where the sibling tabs use a neutral status card with a check. Select all has a bordered box to itself. Every candidate is its own card and turns red when checked. The dialog also widens from 720 to 860&#8239;px when you switch to it.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 One anatomy">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">One anatomy for four tabs</span>
+        </div>
+        <p class="dv-sub">Each tab is built from the same six parts in the same order: <b>rules → never box → status card → rules in force → Finished / Kept → footer</b>. Once a review is on screen the rules fieldset is gone, so a one-line <b>rules in force</b> strip restates it right above the list you are about to act on. Combined adds one more part, the <b>step rail</b>, and otherwise reuses the parts of whichever step is running. The words match across tabs too. Both reviews say <b>Finished</b> and <b>Kept</b>, and both age guards read “Keep … touched in the last [n days]”.</p>
+        <div class="tbl" style="width:1020px">
+          <div class="tr five head"><span>Part</span><span>Garbage collection</span><span>Local branches</span><span>Worktrees</span><span>Combined</span></div>
+          <div class="tr five"><b>Width</b><span>820&#8239;px</span><span>820&#8239;px</span><span>820&#8239;px (was 860)</span><span>820&#8239;px (was 860). Switching tabs no longer resizes the dialog.</span></div>
+          <div class="tr five"><b>Lead</b><span style="grid-column: 2 / -1">The dialog’s one sentence, always. A tab never replaces it; tab-specific copy goes in the rules.</span></div>
+          <div class="tr five"><b>Rules</b><span>Collection mode, as radios</span><span>“Finished branches” fieldset</span><span>“Finished worktrees” fieldset</span><span>One card per step, rules inline</span></div>
+          <div class="tr five"><b>Age guard</b><span>—</span><span>Keep branches touched in the last [7 days]</span><span>Keep worktrees touched in the last [7 days]</span><span>Both, inside their step cards</span></div>
+          <div class="tr five"><b>Notches</b><span>—</span><span>1, 3, 7, 14, 30, 90 days</span><span>1, 3, 7, 14, 30, 90 days (was 1, 7, 14, 30)</span><span>Same</span></div>
+          <div class="tr five"><b>Never box</b><span>—</span><span>Never offered</span><span>Never offered</span><span>One box, one line per step</span></div>
+          <div class="tr five"><b>Rules in force</b><span>Mode, on the receipt</span><span>Applied strip above the list</span><span>Applied strip above the list</span><span>The current step’s strip, with <b>Change</b> back to the plan</span></div>
+          <div class="tr five"><b>Status</b><span>BulkSyncStatus</span><span>BulkSyncStatus</span><span>BulkSyncStatus shape: spinner while sweeping, check when done (was an accent bar)</span><span>Step rail above the current step’s status card</span></div>
+          <div class="tr five"><b>Results</b><span>Repo cards with storage before → after</span><span>Finished (checked) · Kept (chips)</span><span>Finished (checked) · Kept (chips) (was a list of red-on-check cards)</span><span>Only repositories with something to show, plus one line counting the rest</span></div>
+          <div class="tr five"><b>Final action</b><span>Collect garbage</span><span>Delete N local branches</span><span>Remove N worktrees…</span><span>“… and continue”, with <b>Skip</b> as a ghost button</span></div>
+          <div class="tr five"><b>Danger colour</b><span>—</span><span>No. Every tip is on the receipt and can be restored.</span><span>Yes. The working directory is gone.</span><span>Follows the step</span></div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Combined redrawn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Combined, redrawn — the plan becomes the rail</span>
+        </div>
+        <p class="dv-sub">Before the run, the three steps are numbered cards, each carrying its own rules and a tag that says whether it pauses. After <b>Start</b>, the same three steps shrink into a rail that stays under the tabs until the run ends. The rail always answers three questions: which step is running, what the finished steps did, and what is still to come. Everything under the rail belongs to the current step and uses that step’s parts from turn 2. All data is invented.</p>
+        <div class="dv-opts">
+
+          <!-- 3a -->
+          <div class="dv-opt" id="3a" data-screen-label="3a Plan">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Plan — numbered steps, each saying whether it pauses</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="mt-body">
+                  <p class="mt-help">Runs top to bottom in this window’s profile. Each step works on what the step before it left.</p>
+                  <div class="plan">
+                    <div class="pstep in">
+                      <span class="box on"></span><span class="num">1</span>
+                      <div>
+                        <div class="phd"><h3>Remove finished worktrees</h3><span class="ptag pause">Pauses for review</span></div>
+                        <p>Clean worktrees whose branch merged, or that have been inactive for 14 days after merging into the default branch.</p>
+                        <div class="prules">
+                          <div class="prule"><span class="box on"></span>Keep worktrees touched in the last <span class="sel">7 days</span><span class="hint">commits and file changes, ignored files included</span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="pstep in">
+                      <span class="box on"></span><span class="num">2</span>
+                      <div>
+                        <div class="phd"><h3>Delete finished local branches</h3><span class="ptag pause">Pauses for review</span></div>
+                        <p>Branches whose upstream is gone and whose commits are proven to exist elsewhere.</p>
+                        <div class="prules">
+                          <div class="prule"><span class="box on"></span>Count a merged pull request as proof<span class="hint">when the tip is the PR’s final head</span></div>
+                          <div class="prule"><span class="box on"></span>Keep branches touched in the last <span class="sel">7 days</span></div>
+                          <div class="prule">When the list is ready <span class="sel">Let me review it</span><span class="hint">or “Delete without asking”</span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="pstep in">
+                      <span class="box on"></span><span class="num">3</span>
+                      <div>
+                        <div class="phd"><h3>Collect garbage</h3><span class="ptag">Runs last, no pause</span></div>
+                        <p>Repacks objects and expires unreachable ones. Runs last so it can reclaim what steps 1 and 2 freed.</p>
+                        <div class="prules">
+                          <div class="prule">Mode <span class="sel">Standard (recommended)</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="fixed">
+                    <em>Never removed</em>
+                    <span><i>worktrees</i>Worktrees with uncommitted or untracked changes, the main checkout, and any whose activity could not be read</span>
+                    <span><i>branches</i>Branches never pushed, checked out in a worktree, or with commits no merged PR or HEAD contains</span>
+                    <span><i>names</i>main, master, trunk, develop, and each remote’s default branch</span>
+                  </div>
+                </div>
+                <div class="bs-actions"><span class="lead">82 repositories · stops twice for you</span><button class="bs-btn">Close</button><button class="bs-btn primary">Start</button></div>
+              </section>
+            </div>
+            <p class="note">Unchecking a step dims its card (dashed, rules hidden) and drops it from the rail. The lead counts the pauses from the tags: <b>stops twice for you</b>, <b>stops once for you</b> when branches are set to delete without asking (that tag turns amber and reads “Deletes without asking”), or <b>runs without stopping</b>. <b>Start</b> replaces <b>Analyze</b>, because with branches on auto the run can delete something. Tab order changes to follow the steps: Worktrees, Local branches, Garbage collection.</p>
+          </div>
+
+          <!-- 3b -->
+          <div class="dv-opt" id="3b" data-screen-label="3b Step 1 review">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Step 1 paused for review — the rail names it, and the footer says what comes next</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">6 found</span></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab dis">Worktrees</span><span class="mt-tab dis">Local branches</span><span class="mt-tab dis">Garbage collection</span></div>
+                <div class="steps">
+                  <div class="step on"><span class="num">1</span><div><strong>Worktrees</strong><small>review · 6 finished</small></div></div>
+                  <div class="step"><span class="num">2</span><div><strong>Local branches</strong><small>next · pauses for review</small></div></div>
+                  <div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>last · standard</small></div></div>
+                </div>
+                <div class="rstatus"><div class="rtop"><span class="mark">✓</span><div><strong>Sweep finished</strong><span>14 read · 122 worktrees considered · 6 finished · 43.8 MB</span></div><span class="rtime">took 9s</span></div></div>
+                <div class="mt-body">
+                  <div class="applied">
+                    <div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">·</span><span>finished = <b>merged PR</b> or <b>merged 14 days ago</b></span><span class="lnk">Change</span></div>
+                    <div class="never"><em>Never</em><span><b>uncommitted changes</b></span><span class="sep">·</span><span><b>main checkout</b></span><span class="sep">·</span><span><b>activity unreadable</b></span></div>
+                  </div>
+                  <label class="selall"><span class="box mid"></span>Select all 6 finished worktrees</label>
+                  <article class="bs-repo">
+                    <div class="grp first">Finished <b>6</b></div>
+                    <div class="brow"><span class="box on"></span><div><strong><span class="rn">orbit-deploy</span> · detached@6f03ccf</strong><small><i>Merged into main</i> · commit 1 month ago · touched 1 month ago</small><small class="path">~/.agents/worktrees/msv5ag/orbit-deploy</small></div><span class="sz">40.0 MB</span></div>
+                    <div class="brow"><span class="box on"></span><div><strong><span class="rn">atlas-forge</span> · agent/launchd-controller</strong><small><i>Merged PR #34</i> · commit 3 weeks ago · touched 3 weeks ago</small><small class="path">~/.agents/worktrees/mthzxg/atlas-forge</small></div><span class="sz">895 KB</span></div>
+                    <div class="brow"><span class="box on"></span><div><strong><span class="rn">ledger-web</span> · fix/currency-round</strong><small><i>Merged PR #118</i> · commit 3 weeks ago · touched 3 weeks ago</small><small class="path">~/src/ledger-web.worktrees/currency-round</small></div><span class="sz">1.2 MB</span></div>
+                    <div class="brow"><span class="box"></span><div><strong><span class="rn">kiln-cli</span> · spike/wasm-loader</strong><small><i class="warn">No common ancestor with main</i> · commit 6 weeks ago · touched 5 weeks ago</small><small class="path">~/src/kiln-cli.worktrees/wasm-loader</small></div><span class="sz">1.6 MB</span></div>
+                    <div class="grp">Kept <b>77</b><span class="lnk">Show</span></div>
+                    <div class="kchips"><span class="kchip"><b>71</b> touched in the last 7 days</span><span class="kchip"><b>4</b> uncommitted changes</span><span class="kchip"><b>2</b> activity could not be read</span></div>
+                  </article>
+                </div>
+                <div class="bs-actions"><span class="lead"><b>5 selected · 43.0 MB</b> · then local branches</span><button class="bs-btn ghost">Re-read all</button><button class="bs-btn">Skip worktrees</button><button class="bs-btn danger">Remove 5 worktrees and continue</button></div>
+              </section>
+            </div>
+            <p class="note">This is the Worktrees tab’s own review (<a href="#4b">4b</a>) under the rail. What changes in combined mode: the tab strip is visibly disabled rather than lit on a tab it isn’t showing, the rules set on the plan come back as a two-line <b>Rules / Never</b> strip right above the list, where <b>Change</b> returns to the plan, and the footer names what comes next. <b>Skip worktrees</b> replaces “Continue without Pruning”. The danger fill is kept because removing a worktree cannot be undone.</p>
+          </div>
+
+          <!-- 3c -->
+          <div class="dv-opt" id="3c" data-screen-label="3c Step 2 running">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Step 2 running — the moment reported as unreadable</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">30 / 82</span></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab dis">Worktrees</span><span class="mt-tab dis">Local branches</span><span class="mt-tab dis">Garbage collection</span></div>
+                <div class="steps">
+                  <div class="step done"><span class="num">✓</span><div><strong>Worktrees</strong><small>5 removed · 43.0 MB</small></div></div>
+                  <div class="step on"><span class="num">2</span><div><strong>Local branches</strong><small>reviewing 30 of 82</small></div></div>
+                  <div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>next · standard</small></div></div>
+                </div>
+                <div class="rstatus live">
+                  <div class="rtop"><span class="spin"></span><div><strong>Reviewing 4 repositories</strong><span class="pth">harbor-docs · kiln-cli · ledger-web · northwind-api</span></div><span class="rtime">5s elapsed · about 10s left</span></div>
+                  <div class="pbar"><span class="ok" style="width:34%"></span><span class="fly" style="width:5%"></span></div>
+                  <div class="plegend"><span><b>30</b> of 82 repositories</span><span><span class="dot"></span><b>30</b> success</span><span class="r"><b>4</b> in flight · 48 queued</span></div>
+                </div>
+                <div class="mt-body">
+                  <article class="bs-repo is-success">
+                    <div class="bs-rh"><div><strong>orbit-deploy</strong><small>/Users/dana/src/orbit-deploy</small></div><span class="bs-st">Success</span></div>
+                    <p>18 finished · 11 kept</p>
+                  </article>
+                  <article class="bs-repo is-running">
+                    <div class="bs-rh"><div><strong>ledger-web</strong><small>/Users/dana/src/ledger-web</small></div><span class="bs-st run">Running</span></div>
+                    <p>Checking merged pull requests…</p>
+                  </article>
+                  <div class="quiet-line"><b>28</b> repositories reviewed with nothing to delete<span class="lnk">Show</span></div>
+                </div>
+                <div class="bs-actions"><span class="lead">Step 2 of 3 · the review opens here when the scan finishes</span><button class="bs-btn">Cancel</button></div>
+              </section>
+            </div>
+            <p class="note">In the screenshot this moment was a progress card, one muted line and 30 identical cards. Now the rail reads left to right as <b>done → running → next</b>, and a repository gets a card only while it is running, when it finds something, or when it fails. The others collapse into one dashed count, and <b>Show</b> expands them. The standalone Local branches tab uses the same filter, because it has the same 82-card problem.</p>
+          </div>
+
+          <!-- 3d -->
+          <div class="dv-opt" id="3d" data-screen-label="3d Step 2 review">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Step 2 paused for review — Finished Branches 4b, under the rail</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">82 / 82</span></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab dis">Worktrees</span><span class="mt-tab dis">Local branches</span><span class="mt-tab dis">Garbage collection</span></div>
+                <div class="steps">
+                  <div class="step done"><span class="num">✓</span><div><strong>Worktrees</strong><small>5 removed · 43.0 MB</small></div></div>
+                  <div class="step on"><span class="num">2</span><div><strong>Local branches</strong><small>review · 23 in 3 repos</small></div></div>
+                  <div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>next · standard</small></div></div>
+                </div>
+                <div class="rstatus"><div class="rtop"><span class="mark">✓</span><div><strong>23 finished branches in 3 of 82 repositories</strong><span>82 reviewed · 0 need attention · 61 kept</span></div><span class="rtime">took 14s</span></div></div>
+                <div class="mt-body">
+                  <div class="applied">
+                    <div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">·</span><span><b>Merged PR</b> counts as proof when the tip is its head</span><span class="lnk">Change</span></div>
+                    <div class="never"><em>Never</em><span><b>never pushed</b></span><span class="sep">·</span><span><b>commits not in HEAD or a merged PR</b></span><span class="sep">·</span><span><b>checked out in a worktree</b></span><span class="sep">·</span><span><b>main, master, trunk, develop</b></span></div>
+                  </div>
+                  <label class="selall"><span class="box mid"></span>Select all 23 finished branches</label>
+                  <article class="bs-repo">
+                    <div class="bs-rh"><div><strong>orbit-deploy</strong><small>/Users/dana/src/orbit-deploy</small></div><span class="cnt">16 of 18 selected</span></div>
+                    <div class="grp">Finished <b>18</b><span class="lnk">Show all</span></div>
+                    <div class="brow"><span class="box on"></span><div><strong>fix/tooltip-flicker</strong><small><i>#412 merged 3 weeks ago</i> · tip is its head · touched 26 days ago</small></div></div>
+                    <div class="brow"><span class="box on"></span><div><strong>chore/bump-vite</strong><small><i>Already in HEAD</i> · touched 41 days ago</small></div></div>
+                    <div class="brow"><span class="box"></span><div><strong>feat/sparkline-theme</strong><small><i>#389 merged 2 months ago</i> · tip is its head · touched 2 months ago</small></div></div>
+                    <div class="grp">Kept <b>11</b><span class="lnk">Show</span></div>
+                    <div class="kchips"><span class="kchip"><b>5</b> no merged PR</span><span class="kchip"><b>3</b> touched in the last 7 days</span><span class="kchip"><b>3</b> checked out in a worktree</span></div>
+                  </article>
+                  <article class="bs-repo">
+                    <div class="bs-rh"><div><strong>ledger-web</strong><small>/Users/dana/src/ledger-web</small></div><span class="cnt">3 of 3 selected</span></div>
+                    <div class="grp">Finished <b>3</b></div>
+                    <div class="brow"><span class="box on"></span><div><strong>fix/currency-round</strong><small><i>#118 merged 3 weeks ago</i> · tip is its head · touched 3 weeks ago</small></div></div>
+                    <div class="brow"><span class="box on"></span><div><strong>chore/drop-moment</strong><small><i>Already in HEAD</i> · touched 2 months ago</small></div></div>
+                    <div class="brow"><span class="box on"></span><div><strong>docs/changelog-0-9</strong><small><i>Already in HEAD</i> · touched 3 months ago</small></div></div>
+                  </article>
+                  <article class="bs-repo">
+                    <div class="bs-rh"><div><strong>kiln-cli</strong><small>/Users/dana/src/kiln-cli</small></div><span class="cnt">2 of 2 selected</span></div>
+                    <div class="grp">Finished <b>2</b></div>
+                    <div class="brow"><span class="box on"></span><div><strong>fix/argv-quoting</strong><small><i>#61 merged 5 weeks ago</i> · tip is its head · touched 5 weeks ago</small></div></div>
+                    <div class="brow"><span class="box on"></span><div><strong>feat/json-out</strong><small><i>Already in HEAD</i> · touched 2 months ago</small></div></div>
+                  </article>
+                  <div class="quiet-line"><b>79</b> repositories with nothing to delete · <b>12</b> of them keep branches<span class="lnk">Show</span></div>
+                </div>
+                <div class="bs-actions"><span class="lead"><b>21 selected</b> · then garbage collection</span><button class="bs-btn">Skip branches</button><button class="bs-btn primary">Delete 21 branches and continue</button></div>
+              </section>
+            </div>
+            <p class="note">Only repositories that propose something get a card, sorted by how many they propose, and each card’s header counts its own selection. The other 79 collapse into one line that also says how many of them hold kept branches, so a repository whose only branches were kept is one click away but never in the way. The status title leads with the answer, <b>23 in 3 of 82</b>, rather than the success count. The <b>Rules / Never</b> strip repeats the guard, the proof and the refusals from the plan, right above the Delete button they justify. Below that, the body is the Local branches review from <a href="Finished%20Branches%20-%20UX%20Review.dc.html#4b">Finished Branches 4b</a> as shipped. Branch deletion keeps the accent fill because every tip goes on the receipt with <b>Restore</b>. The <b>3 checked out in a worktree</b> chip is where the step-1 worktree decision shows up here: the worktrees you kept still hold those branches.</p>
+          </div>
+
+          <!-- 3e -->
+          <div class="dv-opt" id="3e" data-screen-label="3e Done">
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a>Done — the receipt is the rail, expanded</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">82 / 82</span></div>
+                <div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="rstatus"><div class="rtop"><span class="mark">✓</span><div><strong>Maintenance finished</strong><span>3 of 3 steps · 5 worktrees, 21 branches, 512 MB of object storage</span></div><span class="rtime">took 2m 18s</span></div></div>
+                <div class="mt-body">
+                  <div class="rc">
+                    <div class="rcs">
+                      <div class="rch"><span class="num">1</span><strong>Worktrees</strong><span>5 removed · 43.0 MB</span><span class="lnk">Show</span></div>
+                    </div>
+                    <div class="rcs">
+                      <div class="rch"><span class="num">2</span><strong>Local branches</strong><span>21 deleted in 3 repositories</span><span class="lnk">Hide</span></div>
+                      <div class="rcpt"><strong><span class="rn">orbit-deploy</span> · fix/tooltip-flicker</strong><code>9c1e04ab</code><a>Restore</a></div>
+                      <div class="rcpt"><strong><span class="rn">orbit-deploy</span> · chore/bump-vite</strong><code>31d7f2e0</code><a>Restore</a></div>
+                      <div class="rcpt"><strong><span class="rn">ledger-web</span> · fix/currency-round</strong><code>e40b9a17</code><a>Restore</a></div>
+                    </div>
+                    <div class="rcs">
+                      <div class="rch"><span class="num">3</span><strong>Garbage collection</strong><span>82 collected · 4.12 GiB → 3.61 GiB</span><span class="lnk">Show</span></div>
+                    </div>
+                  </div>
+                  <p class="mt-help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>
+                </div>
+                <div class="bs-actions"><button class="bs-btn">Close</button><button class="bs-btn">New plan</button></div>
+              </section>
+            </div>
+            <p class="note">When the run finishes, the rail becomes the receipt: one card per step, in order, each with its result, and the three steps can be expanded independently. A skipped step gets a dashed card that reads “Skipped”. If a step stops with failures, its card turns danger-bordered and says what failed. The steps after it are drawn dashed with “Not started”, which states what the old line “Later tasks were not started” meant. The tab strip unlocks.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 Worktrees tab aligned">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Worktrees tab, brought in line with its siblings</span>
+        </div>
+        <p class="dv-sub">Garbage collection and Local branches already match <a href="Finished%20Branches%20-%20UX%20Review.dc.html#t4">Finished Branches turn 4</a>, and they stay as they are. Worktrees is the tab that drifted, so it gets the same parts. Its protection box becomes a <b>Finished worktrees</b> fieldset worded like the branch one. The sweep result moves into the neutral status card. Candidates become Finished rows in one card, and the protected ones become <b>Kept</b> chips counted by reason.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Worktrees before">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Before a sweep — rules, never box, one action</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div></div>
+                <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab on">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="mt-body">
+                  <p class="mt-help">Every repository in this window’s profile.</p>
+                  <fieldset class="mt-opts">
+                    <legend>Finished worktrees</legend>
+                    <div class="mt-opt"><span class="radio on"></span><div><strong>Finished means merged</strong><small>A merged pull request, or merged into the default branch with no commits for 14 days. Worktrees that share no history with the default branch count too.</small></div></div>
+                    <div class="mt-opt"><span class="box on"></span><div><div class="mt-inline"><strong>Keep worktrees touched in the last</strong><span class="sel">7 days</span></div><small>Touched is the newest commit or file change, ignored files included. Resets to 7 days each time you open this tab.</small></div></div>
+                  </fieldset>
+                  <div class="fixed">
+                    <em>Never offered</em>
+                    <span>Worktrees with uncommitted or untracked changes</span>
+                    <span>The repository’s main checkout, and worktrees on the default branch</span>
+                    <span>Worktrees whose activity could not be fully read</span>
+                  </div>
+                  <p class="mt-help">Removing a worktree deletes its folder. Its branch is kept, and so are the commits.</p>
+                </div>
+                <div class="bs-actions"><button class="bs-btn">Close</button><button class="bs-btn primary">Find finished worktrees</button></div>
+              </section>
+            </div>
+            <p class="note">The first option is drawn as a fixed rule rather than a choice. It restates the old header paragraph in the fieldset, where the branch tab states its evidence. <b>Find finished worktrees</b> replaces <b>Analyze</b> so that the verb says what happens.</p>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Worktrees after">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>After a sweep — Finished is checked, Kept is counted</div>
+            <div class="stage th-light">
+              <section class="bs">
+                <div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">6 found</span></div>
+                <div class="mt-tabs"><span class="mt-tab">Combined</span><span class="mt-tab on">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+                <div class="rstatus"><div class="rtop"><span class="mark">✓</span><div><strong>Sweep finished</strong><span>14 read · 0 reused · 122 worktrees considered · 6 finished · 43.8 MB</span></div><span class="rtime">took 9s</span></div></div>
+                <div class="mt-body">
+                  <div class="applied">
+                    <div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">·</span><span>finished = <b>merged PR</b> or <b>merged 14 days ago</b></span><span class="lnk">Change</span></div>
+                    <div class="never"><em>Never</em><span><b>uncommitted changes</b></span><span class="sep">·</span><span><b>main checkout</b></span><span class="sep">·</span><span><b>activity unreadable</b></span></div>
+                  </div>
+                  <label class="selall"><span class="box"></span>Select all 6 finished worktrees</label>
+                  <article class="bs-repo">
+                    <div class="grp first">Finished <b>6</b><span class="lnk">Show all</span></div>
+                    <div class="brow"><span class="box"></span><div><strong><span class="rn">orbit-deploy</span> · detached@6f03ccf</strong><small><i>Merged into main</i> · commit 1 month ago · touched 1 month ago</small><small class="path">~/.agents/worktrees/msv5ag/orbit-deploy</small></div><span class="sz">40.0 MB</span></div>
+                    <div class="brow"><span class="box"></span><div><strong><span class="rn">harbor-docs</span> · detached@0c402ae</strong><small><i>Merged into main</i> · commit 3 weeks ago · touched 3 weeks ago</small><small class="path">~/.agents/worktrees/mtl1xa/harbor-docs</small></div><span class="sz">1.2 MB</span></div>
+                    <div class="brow"><span class="box"></span><div><strong><span class="rn">atlas-forge</span> · agent/launchd-controller</strong><small><i>Merged PR #34</i> · commit 3 weeks ago · touched 3 weeks ago</small><small class="path">~/.agents/worktrees/mthzxg/atlas-forge</small></div><span class="sz">895 KB</span></div>
+                    <div class="grp">Kept <b>77</b><span class="lnk">Show</span></div>
+                    <div class="kchips"><span class="kchip"><b>71</b> touched in the last 7 days</span><span class="kchip"><b>4</b> uncommitted changes</span><span class="kchip"><b>2</b> activity could not be read</span></div>
+                  </article>
+                </div>
+                <div class="bs-actions"><span class="lead">Nothing selected</span><button class="bs-btn ghost">Re-read all</button><button class="bs-btn">Close</button><button class="bs-btn">Reclaim disk space…</button><button class="bs-btn danger" disabled="">Remove worktrees…</button></div>
+              </section>
+            </div>
+            <p class="note">Rows use the branch row’s anatomy: checkbox, a mono name with the repository in sans, and an evidence line with the proof in green. The path and the size are the two things only worktrees have. A checked row is not tinted red; the footer count and the danger button carry that weight. Finished starts unchecked here, as it does today, because removal cannot be undone. Kept chips need the sweep to report its protected worktrees by reason; today it reports only a total.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ============================ TURN 5 ============================ -->
+      <section class="dv-turn" id="t5" data-screen-label="Turn 5 Build">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">What gets built</span>
+        </div>
+        <p class="dv-sub">Renderer only except for one field on the worktree sweep. The combined workflow’s state machine in <code>MaintenanceDialog</code> is unchanged; it gains a view of itself.</p>
+        <div class="tbl" style="width:900px">
+          <div class="tr build head"><span>Piece</span><span>Change</span></div>
+          <div class="tr build"><b>Step rail</b><span>New <code>MaintenanceSteps</code> in <code>MaintenancePlan.tsx</code>. Renders the plan cards at <code>workflowStep === "setup"</code> and the three-cell rail for every other step. Each cell’s small line comes from the current step’s state and from a per-step result record, which replaces the <code>receipts: string[]</code> bullets.</span></div>
+          <div class="tr build"><b>Plan cards</b><span>Numbered cards with the pause tag and inline rules, a shared never box, and a footer lead that counts pauses. <b>Start</b> replaces Analyze. Branch mode wording: “Let me review it” / “Delete without asking”.</span></div>
+          <div class="tr build"><b>Worktree step</b><span><code>PruneWorktreesPanel</code> gains a <code>step</code> prop. It hides the tab’s own intro and options, shows the rules-in-force strip in their place, and labels the buttons <b>Skip worktrees</b> and <b>Remove N worktrees and continue</b>.</span></div>
+          <div class="tr build"><b>Proposing repositories only</b><span>In the branch step, both in Combined and on the Local branches tab, a repository gets a card only while it is running, if it failed, or if it has candidates. Cards are sorted by candidate count, and each header shows “n of m selected”. Repositories with nothing to delete, including those that only keep branches, collapse into one dashed line with <b>Show</b>. The status title leads with “N finished branches in R of T repositories”.</span></div>
+          <div class="tr build"><b>Rules in force</b><span>New <code>MaintenanceRulesApplied</code>, a <b>Rules</b> line and a <b>Never</b> line built from the same options object the review ran with. It sits above the select-all line in every review: worktree step, branch step, the Worktrees tab and the Local branches tab. <b>Change</b> returns to the plan in Combined and to the options in a standalone tab.</span></div>
+          <div class="tr build"><b>Receipt</b><span>At <code>done</code>, one card per step with its result and an expandable list. Branch rows keep <b>Restore</b>. A stopped step turns danger-bordered, and the steps after it read “Not started”.</span></div>
+          <div class="tr build"><b>Worktrees tab</b><span>The <code>prune__summary</code> accent bar becomes the status-card shape, <code>prune__select</code> becomes the plain select-all line, and <code>prune__row</code> cards become rows in one card. The protection box becomes the <b>Finished worktrees</b> fieldset, with notches 1, 3, 7, 14, 30, 90, and a Never offered box is added. The sweep returns protected counts by reason for the Kept chips.</span></div>
+          <div class="tr build"><b>Shell</b><span>One width for every tab (<code>min(820px, 95vw)</code>), which drops <code>.maintenance--worktrees</code>. Tabs are ordered Combined, Worktrees, Local branches, Garbage collection. Every label is sentence case.</span></div>
+        </div>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>
