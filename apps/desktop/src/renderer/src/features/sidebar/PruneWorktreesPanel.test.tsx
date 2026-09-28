@@ -27,7 +27,7 @@ vi.mock("../../lib/platform", async (importOriginal) => ({
 }));
 
 
-import { PruneWorktreesDialog } from "./PruneWorktreesDialog";
+import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 
 function candidate(
   partial: Partial<PruneCandidate> & { worktreeId: string }
@@ -121,7 +121,7 @@ async function render(
   await act(async () => {
     root.render(
       <StrictMode>
-        <PruneWorktreesDialog
+        <PruneWorktreesPanel
           profileId="profile-1"
           onRemove={onRemove}
           onClose={vi.fn()}
@@ -145,7 +145,7 @@ const buttonNamed = (label: string): HTMLButtonElement => {
   return found;
 };
 
-describe("PruneWorktreesDialog", () => {
+describe("PruneWorktreesPanel", () => {
   it("protects recent and unknown activity, updates totals instantly, and clears selections", async () => {
     dispatch.mockResolvedValue({ ok: true, value: summary([
       candidate({ worktreeId: "old" }),

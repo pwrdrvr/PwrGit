@@ -17,6 +17,7 @@ import {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
+import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 import { BulkSyncStatus } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
 
@@ -84,6 +85,7 @@ export function MaintenanceDialog({
   profileId,
   platform,
   onClose,
+  onRemoveWorktrees,
   initialTab = "gc",
   repoScope,
   autoReview = false,
@@ -92,7 +94,8 @@ export function MaintenanceDialog({
   profileId: string;
   platform: string;
   onClose: () => void;
-  initialTab?: "gc" | "branches";
+  onRemoveWorktrees: (ids: string[]) => Promise<void>;
+  initialTab?: "gc" | "branches" | "worktrees";
   /** Review one repository only — the refs browser's "Clean up finished
    *  branches…" opens the dialog on the repository it was showing. */
   repoScope?: { id: string; name: string } | undefined;
@@ -101,7 +104,8 @@ export function MaintenanceDialog({
   autoReview?: boolean;
   now?: () => number;
 }) {
-  const [tab, setTab] = useState<"gc" | "branches">(initialTab);
+  const [tab, setTab] = useState<"gc" | "branches" | "worktrees">(initialTab);
+  const [worktreesBusy, setWorktreesBusy] = useState(false);
   const [mode, setMode] = useState<GarbageCollectionMode>("standard");
   const [allProfiles, setAllProfiles] = useState(false);
   const [action, setAction] = useState<MaintenanceAction | null>(null);
@@ -138,7 +142,7 @@ export function MaintenanceDialog({
   const footerFocus = useRef<HTMLButtonElement>(null);
   const modalRef = useModal<HTMLDivElement>({
     onClose: () => {
-      if (!active.current) onClose();
+      if (!active.current && !worktreesBusy) onClose();
     }
   });
 
@@ -396,12 +400,12 @@ export function MaintenanceDialog({
   return (
     <div
       className="overlay-backdrop bulk-sync-backdrop"
-      onClick={running ? undefined : onClose}
+      onClick={running || worktreesBusy ? undefined : onClose}
     >
       <section
         ref={modalRef}
         tabIndex={-1}
-        className="modal bulk-sync maintenance"
+        className={`modal bulk-sync maintenance${tab === "worktrees" ? " maintenance--worktrees" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label="Repository maintenance"
@@ -411,11 +415,11 @@ export function MaintenanceDialog({
           <div>
             <h2>Repository maintenance</h2>
             <p>
-              Clean up Git storage and review leftover local branches across
-              your repositories.
+              Clean up Git storage, finished worktrees, and leftover local branches
+              across your repositories.
             </p>
           </div>
-          {action !== null && (
+          {tab !== "worktrees" && action !== null && (
             <span className="bulk-sync__count">
               {results.size} / {repos.length}
             </span>
@@ -428,7 +432,7 @@ export function MaintenanceDialog({
         >
           <button
             aria-pressed={tab === "gc"}
-            disabled={running}
+            disabled={running || worktreesBusy}
             onClick={() => {
               setTab("gc");
               reset();
@@ -438,7 +442,7 @@ export function MaintenanceDialog({
           </button>
           <button
             aria-pressed={tab === "branches"}
-            disabled={running}
+            disabled={running || worktreesBusy}
             onClick={() => {
               setTab("branches");
               reset();
@@ -446,7 +450,29 @@ export function MaintenanceDialog({
           >
             Local branches
           </button>
+          {repoScope === undefined && (
+            <button
+              aria-pressed={tab === "worktrees"}
+              disabled={running || worktreesBusy}
+              onClick={() => {
+                if (tab === "worktrees") return;
+                setWorktreesBusy(true);
+                setTab("worktrees");
+              }}
+            >
+              Worktrees
+            </button>
+          )}
         </div>
+        {tab === "worktrees" ? (
+          <PruneWorktreesPanel
+            profileId={profileId}
+            onRemove={onRemoveWorktrees}
+            onClose={onClose}
+            onBusyChange={setWorktreesBusy}
+          />
+        ) : (
+          <>
         {(running || complete) && (
           <BulkSyncStatus
             phase={
@@ -947,6 +973,8 @@ export function MaintenanceDialog({
             </>
           )}
         </div>
+          </>
+        )}
       </section>
     </div>
   );

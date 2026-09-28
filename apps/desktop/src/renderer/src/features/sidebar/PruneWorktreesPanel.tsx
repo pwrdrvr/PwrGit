@@ -9,7 +9,6 @@ import { confirmDialog } from "../shell/dialogs";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { currentPlatform } from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
-import { useModal } from "../../lib/useModal";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -46,10 +45,11 @@ type Stage =
  * list of things it believes are safe to delete, and a pre-ticked list of
  * those is a dialog that deletes by default.
  */
-export function PruneWorktreesDialog({
+export function PruneWorktreesPanel({
   profileId,
   onRemove,
-  onClose
+  onClose,
+  onBusyChange
 }: {
   profileId: string;
   /**
@@ -59,6 +59,7 @@ export function PruneWorktreesDialog({
    */
   onRemove: (worktreeIds: string[]) => Promise<void>;
   onClose: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [protectRecent, setProtectRecent] = useState(true);
   const [protectionDays, setProtectionDays] = useState(7);
@@ -241,36 +242,18 @@ export function PruneWorktreesDialog({
 
   const busy =
     stage.kind === "sweeping" || stage.kind === "removing" || reclaiming;
-  // useModal: "A dialog mid-flight ... should pass an `onClose` that refuses,
-  // exactly as its backdrop click already does — this hook does not decide
-  // that." Escape during a removal would unmount the dialog while
-  // `worktree:removeMany` keeps deleting working directories, taking the
-  // progress and the `worktree:removed` subscription with it; the sweep has
-  // its own Cancel button, which is the way out that actually stops the work.
-  const modalRef = useModal<HTMLDivElement>({
-    onClose: () => {
-      if (busy) return;
-      onClose();
-    }
-  });
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
+
   const selectedCandidates = candidates.filter((candidate) =>
     selected.has(candidate.worktreeId)
   );
 
   return (
-    <div
-      className="overlay-backdrop prune-backdrop"
-      onClick={busy ? undefined : onClose}
-    >
-      <section
-        ref={modalRef}
-        tabIndex={-1}
-        className="modal prune"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Prune worktrees"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <div className="prune__panel">
         {stage.kind === "reclaiming" ? (
           <ReclaimDiskPanel
             candidates={selectedCandidates}
@@ -295,9 +278,8 @@ export function PruneWorktreesDialog({
           <>
             <div className="prune__head">
               <div>
-                <h2>Prune worktrees</h2>
                 <p>
-                  Every repository is checked for worktrees that are clean, not
+                  Every repository in this window’s profile is checked for worktrees that are clean, not
                   the default branch, and finished — a merged pull request,
                   or merged into the default branch (or sharing no history
                   with it) with no commits for {STALE_AGE_DAYS} days.
@@ -337,7 +319,7 @@ export function PruneWorktreesDialog({
                 </label>
               </div>
               <p>Uses commits and file or folder changes, including ignored files.
-                Incomplete activity checks stay protected. Resets to 7 days each time you open this dialog.</p>
+                Incomplete activity checks stay protected. Resets to 7 days each time you open this tab.</p>
               <p role="status">
                 {summary === null ? "Checking activity during the sweep…" :
                   `${candidates.length} proposed · ${describeBytes(proposedTotals)} · ${protectedCount} protected`}
@@ -460,7 +442,7 @@ export function PruneWorktreesDialog({
                 </button>
               ) : (
                 <>
-                  <button className="modal__cancel" onClick={onClose}>
+                  <button className="modal__cancel" disabled={busy} onClick={onClose}>
                     Close
                   </button>
                   <button
@@ -493,7 +475,6 @@ export function PruneWorktreesDialog({
             </div>
           </>
         )}
-      </section>
     </div>
   );
 }

@@ -74,7 +74,7 @@ export const LENS_EMPTY_COPY: Record<Lens, string> = {
   Behind:
     "No repo is behind its upstream. PwrGit compares each one with its upstream as you open its row.",
   Stale:
-    "No worktrees look safe to prune. PwrGit works out what's prunable as you open each repo's row — or use Prune worktrees to check every repository at once.",
+    "No worktrees look safe to prune. PwrGit works out what's prunable as you open each repo's row — or open Repository maintenance → Worktrees to check every repository at once.",
   All: "No repos yet — add a folder above and PwrGit will scan it."
 };
 

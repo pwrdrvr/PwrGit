@@ -33,7 +33,7 @@ test("collects all repositories and reviews stale local branches without touchin
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "atlas-client");
   await window
-    .getByRole("button", { name: "Garbage collection…", exact: true })
+    .getByRole("button", { name: "Repository maintenance…", exact: true })
     .click();
   const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
   await expect(dialog.getByRole("radio", { name: /Standard/ })).toBeChecked();
@@ -117,7 +117,7 @@ for (const [width, height] of [
       [width!, height!]
     );
     await window
-      .getByRole("button", { name: "Garbage collection…", exact: true })
+      .getByRole("button", { name: "Repository maintenance…", exact: true })
       .click();
     const dialog = window.getByRole("dialog", {
       name: "Repository maintenance"

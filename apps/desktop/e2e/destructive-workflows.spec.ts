@@ -330,8 +330,9 @@ test("the pruner sweeps a never-browsed profile, then reclaims only ignored file
   // The premise: nothing has computed Git state, so the lens has no answer.
   await expect(lensChip(window, "Stale")).toHaveAttribute("aria-label", "Stale");
 
-  await window.getByRole("button", { name: /Prune worktrees/ }).click();
-  const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
+  await window.getByRole("button", { name: "Worktrees", exact: true }).click();
+  const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
   await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
   await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
   await expect(dialog.locator(".prune__row")).toHaveCount(0);
@@ -342,6 +343,12 @@ test("the pruner sweeps a never-browsed profile, then reclaims only ignored file
   if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
     await expect(dialog.locator(".prune__row")).toHaveCount(1);
     await dialog.screenshot({ path: "/tmp/pwrgit-prune-off.png" });
+    const nativeWindow = await handle.app.browserWindow(window);
+    await nativeWindow.evaluate((win) => win.setSize(1000, 650));
+    await expect(dialog.getByRole("button", { name: "Remove worktrees…" })).toBeInViewport();
+    await expect(dialog.locator(".prune__row input")).toBeInViewport();
+    await dialog.screenshot({ path: "/tmp/pwrgit-prune-small.png" });
+    await nativeWindow.evaluate((win) => win.setSize(1360, 860));
   }
   await expect(dialog).toBeVisible({ timeout: 20_000 });
 
@@ -402,8 +409,9 @@ test("removing from the pruner confirms the count, deletes the checkout, and kee
   await addRootUnexpanded(window, handle, box);
   await expect(repoGroup(window, repo.name)).toBeVisible({ timeout: 20_000 });
 
-  await window.getByRole("button", { name: /Prune worktrees/ }).click();
-  const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
+  await window.getByRole("button", { name: "Worktrees", exact: true }).click();
+  const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
   await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
   await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
   await expect(dialog.locator(".prune__row")).toHaveCount(0);
@@ -478,8 +486,9 @@ test("the pruner never offers a dirty or unmerged worktree", async () => {
   await addRootUnexpanded(window, handle, box);
   await expect(repoGroup(window, repo.name)).toBeVisible({ timeout: 20_000 });
 
-  await window.getByRole("button", { name: /Prune worktrees/ }).click();
-  const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
+  await window.getByRole("button", { name: "Worktrees", exact: true }).click();
+  const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
   await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
   await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
   await expect(dialog.locator(".prune__row")).toHaveCount(0);

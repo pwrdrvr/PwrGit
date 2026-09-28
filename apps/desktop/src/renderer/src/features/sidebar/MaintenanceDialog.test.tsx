@@ -90,7 +90,7 @@ beforeEach(async () => {
   await act(async () =>
     root.render(
       <StrictMode>
-        <MaintenanceDialog profileId="one" platform="linux" onClose={onClose} />
+        <MaintenanceDialog onRemoveWorktrees={async () => undefined} profileId="one" platform="linux" onClose={onClose} />
       </StrictMode>
     )
   );
@@ -105,6 +105,37 @@ afterEach(async () => {
 });
 
 describe("maintenance dialog", () => {
+  it("hosts worktree review in one modal and blocks leaving while the sweep runs", async () => {
+    let resolveScan!: (value: unknown) => void;
+    const scan = new Promise((resolve) => { resolveScan = resolve; });
+    dispatch.mockImplementation((name: string) => name === "prune:scan"
+      ? scan : Promise.resolve({ ok: true, value: null }));
+    await click("Worktrees");
+    expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(container.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("Repository maintenance");
+    expect(container.textContent).toContain("Protect recently touched worktrees");
+    expect(button("Garbage collection").disabled).toBe(true);
+    expect(button("Local branches").disabled).toBe(true);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => resolveScan({ ok: true, value: {
+      operationId: "scan", cancelled: false,
+      startedAt: "2026-09-28T00:00:00Z", finishedAt: "2026-09-28T00:00:01Z",
+      counts: { repos: { scanned: 0, cached: 0, skipped: 0, failed: 0, cancelled: 0 },
+        worktreesConsidered: 0, candidates: 0, sizeBytes: 0 }, results: []
+    } }));
+    expect(button("Garbage collection").disabled).toBe(false);
+    await click("Worktrees");
+    expect(dispatch.mock.calls.filter(([name]) => name === "prune:scan")).toHaveLength(1);
+    await click("Garbage collection");
+    expect(container.querySelector(".prune__panel")).toBeNull();
+    expect(button("Run garbage collection")).toBeTruthy();
+    await click("Close");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("explains the choices and waits for explicit start even in StrictMode", async () => {
     expect(runCalls()).toEqual([]);
     expect(container.textContent).toContain("Standard (recommended)");
@@ -447,6 +478,7 @@ describe("maintenance dialog opened from a repository's branch list", () => {
     await act(async () =>
       root.render(
         <MaintenanceDialog
+          onRemoveWorktrees={async () => undefined}
           profileId="one"
           platform="linux"
           onClose={onClose}
