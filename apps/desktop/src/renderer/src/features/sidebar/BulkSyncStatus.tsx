@@ -36,7 +36,8 @@ export function BulkSyncStatus({
   inFlight,
   queued,
   startedAt,
-  durationMs
+  durationMs,
+  compactWhenFinished = false
 }: {
   phase: BulkSyncStatusPhase;
   /** Whether the ended run failed anywhere; picks the mark that replaces the spinner. */
@@ -51,6 +52,8 @@ export function BulkSyncStatus({
   startedAt: number;
   /** Main's own measure of the finished run; read only once it has ended. */
   durationMs: number | null;
+  /** Maintenance reviews use the same neutral card without the completed progress bar. */
+  compactWhenFinished?: boolean;
 }): ReactElement {
   const live = phase === "running" || phase === "cancelling";
   const finished = finishedCount(counts);
@@ -107,7 +110,7 @@ export function BulkSyncStatus({
         )}
       </div>
 
-      {total > 0 && (
+      {total > 0 && (live || !compactWhenFinished) && (
         <>
           <div
             className="bulk-sync__bar"

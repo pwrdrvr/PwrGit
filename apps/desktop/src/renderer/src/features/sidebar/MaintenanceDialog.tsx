@@ -17,7 +17,7 @@ import {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
-import { MaintenancePlanForm, type MaintenancePlan } from "./MaintenancePlan";
+import { MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 import { BulkSyncStatus } from "./BulkSyncStatus";
 import { countOutcomes } from "./bulk-sync-progress";
@@ -107,13 +107,21 @@ export function MaintenanceDialog({
 }) {
   const [tab, setTab] = useState<"combined" | "gc" | "branches" | "worktrees">(initialTab);
   const [worktreesBusy, setWorktreesBusy] = useState(false);
+  const [worktreeCandidateCount, setWorktreeCandidateCount] = useState<number | null>(null);
+  const [scopeRepoCount, setScopeRepoCount] = useState<number | null>(null);
   const [plan, setPlan] = useState<MaintenancePlan>({ worktrees: true, branches: true, gc: true });
   const [branchMode, setBranchMode] = useState<"review" | "auto">("review");
   const [workflowStep, setWorkflowStep] = useState<"setup" | "worktrees" | "branches" | "gc" | "done">("setup");
   const [workflowStopped, setWorkflowStopped] = useState(false);
-  const [receipts, setReceipts] = useState<string[]>([]);
+  const [stepResults, setStepResults] = useState<Partial<Record<StepKey, StepResult>>>({});
+  const [receiptExpanded, setReceiptExpanded] = useState<Set<StepKey>>(new Set(["branches"]));
   const [branchReceipt, setBranchReceipt] = useState<MaintenanceSummary | null>(null);
+  const [gcReceipt, setGcReceipt] = useState<MaintenanceSummary | null>(null);
+  const [protectRecent, setProtectRecent] = useState(true);
+  const [protectionDays, setProtectionDays] = useState(7);
   const workflowStarted = useRef(false);
+  const workflowStartedAt = useRef(0);
+  const [workflowDurationMs, setWorkflowDurationMs] = useState(0);
   const workflowActive = tab === "combined" && workflowStep !== "setup" && workflowStep !== "done";
   const taskTab = tab === "combined" ? (workflowStep === "branches" ? "branches" : "gc") : tab;
 
@@ -142,6 +150,7 @@ export function MaintenanceDialog({
     DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays ?? 7
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [showQuietRepos, setShowQuietRepos] = useState(false);
   const [restores, setRestores] = useState<
     Map<string, "restoring" | "restored" | string>
   >(new Map());
@@ -195,6 +204,14 @@ export function MaintenanceDialog({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void dispatch("repo:list", { profileId }).then((response) => {
+      if (!cancelled && response.ok && Array.isArray(response.value)) setScopeRepoCount(response.value.length);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [profileId]);
+
   /** Change the rules, remember them, and drop a review they no longer
    *  describe — a list reviewed under a 7-day guard is not a 30-day list. */
   const changeOptions = (next: BranchCleanupOptions): void => {
@@ -218,6 +235,7 @@ export function MaintenanceDialog({
     setRepos([]);
     setSelected(new Set());
     setExpanded(new Set());
+    setShowQuietRepos(false);
     setRestores(new Map());
     setError(null);
     setAction(null);
@@ -312,16 +330,16 @@ export function MaintenanceDialog({
     }
   };
 
-  const note = (text: string): void => setReceipts((old) => [...old, text]);
-  const combinedOptions = (): BranchCleanupOptions => ({
-    ...options, keepDays: options.keepDays ?? lastKeepDays
-  });
-  const stopped = (result: MaintenanceSummary | null, task: string): boolean => {
+  const recordStep = (key: StepKey, result: StepResult): void =>
+    setStepResults((old) => ({ ...old, [key]: result }));
+  const combinedOptions = (): BranchCleanupOptions => options;
+  const stopped = (result: MaintenanceSummary | null, task: StepKey): boolean => {
     if (!live.current) return true;
     if (result === null || result.cancelled || result.results.some((row) =>
       row.outcome === "failed" || row.outcome === "partial" || row.outcome === "cancelled")) {
-      note(`${task} stopped or needs attention. Later tasks were not started.`);
+      recordStep(task, { state: "failed", summary: "Stopped · needs attention" });
       setWorkflowStopped(true);
+      setWorkflowDurationMs(Date.now() - workflowStartedAt.current);
       setWorkflowStep("done");
       return true;
     }
@@ -332,9 +350,13 @@ export function MaintenanceDialog({
     if (plan.gc) {
       setWorkflowStep("gc");
       const result = await run({ kind: "gc", mode });
-      if (stopped(result, "Git collection")) return;
-      note("Git collection completed.");
+      setGcReceipt(result);
+      if (stopped(result, "gc")) return;
+      const measured = result!.results.filter((row) => row.beforeBytes !== undefined && row.afterBytes !== undefined);
+      const storage = measured.length > 0 ? ` · ${bytes(measured.reduce((sum, row) => sum + row.beforeBytes!, 0))} → ${bytes(measured.reduce((sum, row) => sum + row.afterBytes!, 0))}` : "";
+      recordStep("gc", { state: "done", summary: `${result!.results.filter((row) => row.outcome === "success").length} collected${storage}` });
     }
+    setWorkflowDurationMs(Date.now() - workflowStartedAt.current);
     setWorkflowStep("done");
   };
   const removeBranchesAndContinue = async (branches: StaleBranch[]): Promise<void> => {
@@ -342,10 +364,10 @@ export function MaintenanceDialog({
     if (branches.length > 0) {
       const result = await run({ kind: "delete-branches", branches, options: combinedOptions() });
       if (live.current) setBranchReceipt(result);
-      if (stopped(result, "Branch removal")) return;
+      if (stopped(result, "branches")) return;
       const deleted = result!.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length;
-      note(`${deleted} local branch${deleted === 1 ? "" : "es"} removed.`);
-    } else note("No local branches selected for removal.");
+      recordStep("branches", { state: "done", summary: `${deleted} deleted in ${result!.results.filter((row) => (row.branches ?? []).some((branch) => branch.deleted)).length} repositories` });
+    } else recordStep("branches", { state: "skipped", summary: "No branches deleted" });
     await finishWorkflow();
   };
   const continueAfterWorktrees = async (): Promise<void> => {
@@ -353,7 +375,7 @@ export function MaintenanceDialog({
     if (plan.branches) {
       setWorkflowStep("branches");
       const result = await run({ kind: "scan-branches", options: combinedOptions() });
-      if (stopped(result, "Branch analysis")) return;
+      if (stopped(result, "branches")) return;
       const branches = result!.results.flatMap((row) => row.candidates ?? []);
       if (branchMode === "review" && branches.length > 0) return;
       await removeBranchesAndContinue(branches);
@@ -362,8 +384,10 @@ export function MaintenanceDialog({
   const analyze = (): void => {
     if (workflowStarted.current || !optionsLoaded || !Object.values(plan).some(Boolean)) return;
     workflowStarted.current = true;
+    workflowStartedAt.current = Date.now();
     reset();
-    setReceipts([]);
+    setWorktreeCandidateCount(null);
+    setStepResults({});
     setWorkflowStopped(false);
     setBranchReceipt(null);
     // The whole combined run stays in the profile named above, regardless of
@@ -379,10 +403,13 @@ export function MaintenanceDialog({
   };
   const restartWorkflow = (): void => {
     workflowStarted.current = false;
+    setWorktreeCandidateCount(null);
+    setWorkflowDurationMs(0);
     setWorkflowStep("setup");
-    setReceipts([]);
+    setStepResults({});
     setWorkflowStopped(false);
     setBranchReceipt(null);
+    setGcReceipt(null);
     reset();
   };
 
@@ -478,6 +505,16 @@ export function MaintenanceDialog({
   const currentRepo = repos.find((repo) => current.has(repo.id));
   const complete = summary !== null;
   const scanComplete = complete && action?.kind === "scan-branches";
+  const branchScan = action?.kind === "scan-branches";
+  const proposingRepos = branchScan ? [...repos].filter((repo) => current.has(repo.id) ||
+    ["failed", "partial", "cancelled"].includes(results.get(repo.id)?.outcome ?? "") ||
+    (results.get(repo.id)?.candidates?.length ?? 0) > 0).sort((a, b) =>
+      (results.get(b.id)?.candidates?.length ?? 0) - (results.get(a.id)?.candidates?.length ?? 0)) : repos;
+  const quietRepos = branchScan ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
+  const quietWithKept = quietRepos.filter((repo) => (results.get(repo.id)?.kept?.length ?? 0) > 0).length;
+  const deletedCount = branchReceipt?.results.flatMap((row) => row.branches ?? []).filter((branch) => branch.deleted).length ?? 0;
+  const collectedBefore = gcReceipt?.results.reduce((sum, row) => sum + (row.beforeBytes ?? 0), 0) ?? 0;
+  const collectedAfter = gcReceipt?.results.reduce((sum, row) => sum + (row.afterBytes ?? 0), 0) ?? 0;
   const toggleBranch = (key: string): void =>
     setSelected((old) => {
       const next = new Set(old);
@@ -494,7 +531,7 @@ export function MaintenanceDialog({
       <section
         ref={modalRef}
         tabIndex={-1}
-        className={`modal bulk-sync maintenance${tab === "worktrees" || tab === "combined" ? " maintenance--worktrees" : ""}`}
+        className="modal bulk-sync maintenance"
         role="dialog"
         aria-modal="true"
         aria-label="Repository maintenance"
@@ -504,13 +541,13 @@ export function MaintenanceDialog({
           <div>
             <h2>Repository maintenance</h2>
             <p>
-              Clean up Git storage, finished worktrees, and leftover local branches
+              Clean up finished worktrees, leftover local branches and Git storage
               across your repositories.
             </p>
           </div>
-          {tab !== "worktrees" && action !== null && (
+          {action !== null && (
             <span className="bulk-sync__count">
-              {results.size} / {repos.length}
+              {tab === "combined" && workflowStep === "done" ? scopeRepoCount ?? repos.length : results.size} / {tab === "combined" && workflowStep === "done" ? scopeRepoCount ?? repos.length : repos.length}
             </span>
           )}
         </div>
@@ -526,16 +563,11 @@ export function MaintenanceDialog({
               Combined
             </button>
           )}
-          <button
-            aria-pressed={tab === "gc"}
-            disabled={running || worktreesBusy || workflowActive}
-            onClick={() => {
-              setTab("gc");
-              reset();
-            }}
-          >
-            Garbage collection
-          </button>
+          {repoScope === undefined && (
+            <button aria-pressed={tab === "worktrees"}
+              disabled={running || worktreesBusy || workflowActive}
+              onClick={() => setTab("worktrees")}>Worktrees</button>
+          )}
           <button
             aria-pressed={tab === "branches"}
             disabled={running || worktreesBusy || workflowActive}
@@ -546,31 +578,26 @@ export function MaintenanceDialog({
           >
             Local branches
           </button>
-          {repoScope === undefined && (
-            <button
-              aria-pressed={tab === "worktrees"}
-              disabled={running || worktreesBusy || workflowActive}
-              onClick={() => {
-                if (tab === "worktrees") return;
-                setTab("worktrees");
-              }}
-            >
-              Worktrees
-            </button>
-          )}
+          <button aria-pressed={tab === "gc"} disabled={running || worktreesBusy || workflowActive}
+            onClick={() => { setTab("gc"); reset(); }}>Garbage collection</button>
         </div>
+        {tab === "combined" && workflowStep !== "setup" && workflowStep !== "done" &&
+          <MaintenanceSteps plan={plan} current={workflowStep} results={stepResults} branchMode={branchMode}
+            gcMode={mode} progress={workflowStep === "worktrees" ? worktreeCandidateCount === null ? "scanning" : `review · ${worktreeCandidateCount} finished` : running && workflowStep === "branches" ? `reviewing ${results.size} of ${repos.length}` : workflowStep === "branches" && scanComplete ? `review · ${candidates.length} in ${summary?.results.filter((row) => (row.candidates?.length ?? 0) > 0).length ?? 0} repos` : "running"} />}
         {tab === "combined" && workflowStep === "setup" ? (
           <>
             <MaintenancePlanForm plan={plan} onChange={setPlan}
               branchMode={branchMode} onBranchMode={changeBranchMode}
               options={combinedOptions()} onOptions={changeOptions}
-              gcMode={mode} onGcMode={setMode} />
+              gcMode={mode} onGcMode={setMode} protectRecent={protectRecent} protectionDays={protectionDays}
+              onProtectRecent={setProtectRecent} onProtectionDays={setProtectionDays} />
             {error !== null && <div className="modal__error">{error}</div>}
             <div className="modal__actions">
+              <span className="maintenance__footer-lead">{scopeRepoCount === null ? "This profile" : `${scopeRepoCount} ${scopeRepoCount === 1 ? "repository" : "repositories"}`} · {plan.worktrees && plan.branches && branchMode === "review" ? "stops twice for you" : plan.worktrees || plan.branches && branchMode === "review" ? "stops once for you" : "runs without stopping"}</span>
               <button className="modal__cancel" onClick={onClose}>Close</button>
               <button className="modal__create"
                 disabled={!optionsLoaded || !Object.values(plan).some(Boolean)}
-                onClick={analyze}>Analyze</button>
+                onClick={analyze}>Start</button>
             </div>
           </>
         ) : tab === "worktrees" || (tab === "combined" && workflowStep === "worktrees") ? (
@@ -579,16 +606,46 @@ export function MaintenanceDialog({
             onRemove={onRemoveWorktrees}
             onClose={onClose}
             onBusyChange={setWorktreesBusy}
+            onCandidateCount={setWorktreeCandidateCount}
             autoStart={tab === "combined"}
-            {...(tab === "combined" ? { onContinue: (count: number) => {
-              note(`${count} worktree${count === 1 ? "" : "s"} removed; continued after review.`);
+            step={tab === "combined"}
+            {...(tab === "combined" ? { protectRecent, protectionDays } : {})}
+            {...(tab === "combined" ? { onContinue: (count: number, size: string, items: { label: string; detail: string }[]) => {
+              recordStep("worktrees", { state: count > 0 ? "done" : "skipped", summary: count > 0 ? `${count} removed · ${size}` : "Skipped", items });
               void continueAfterWorktrees();
-            } } : {})}
+            }, onChangeRules: restartWorkflow } : {})}
           />
         ) : (
           <>
+        {tab === "combined" && workflowStep === "done" ? <>
+          <div className={`maintenance__done-status${workflowStopped ? " is-stopped" : ""}`}><span>✓</span><div><strong>{workflowStopped ? "Maintenance stopped" : "Maintenance finished"}</strong><small>{Object.values(stepResults).filter((result) => result?.state === "done").length} of {Object.values(plan).filter(Boolean).length} steps · {stepResults.worktrees?.items?.length ?? 0} {stepResults.worktrees?.items?.length === 1 ? "worktree" : "worktrees"}, {deletedCount} {deletedCount === 1 ? "branch" : "branches"}{collectedBefore > collectedAfter ? `, ${bytes(collectedBefore - collectedAfter)} of object storage` : ""}</small></div><time>took {workflowDurationMs >= 60_000 ? `${Math.floor(workflowDurationMs / 60_000)}m ` : ""}{Math.round(workflowDurationMs % 60_000 / 1000)}s</time></div>
+          <div className="maintenance__body">
+            <div className="maintenance__receipt-steps">
+              {(["worktrees", "branches", "gc"] as StepKey[]).map((key, index) => {
+                const result = stepResults[key];
+                const state = result?.state ?? (plan[key] ? "not-started" : "skipped");
+                const title = key === "gc" ? "Garbage collection" : key === "branches" ? "Local branches" : "Worktrees";
+                const expandedNow = receiptExpanded.has(key);
+                return <article key={key} className={`maintenance__receipt-step is-${state}`}>
+                  <div className="maintenance__receipt-head"><span className="maintenance__step-num">{index + 1}</span><strong>{title}</strong><span>{result?.summary ?? (state === "not-started" ? "Not started" : "Skipped")}</span>
+                    {result !== undefined && result.state === "done" && <button onClick={() => setReceiptExpanded((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })}>{expandedNow ? "Hide" : "Show"}</button>}
+                  </div>
+                  {expandedNow && key === "branches" && branchReceipt?.results.flatMap((row) => (row.branches ?? []).filter((branch) => branch.deleted).map((branch) => {
+                    const state = restores.get(`${row.repo.id}:${branch.branch}`);
+                    return <div className="maintenance__receipt-row" key={`${row.repo.id}:${branch.branch}`}><strong>{row.repo.name} · {branch.branch}</strong><code>{branch.head.slice(0, 8)}</code><button className="maintenance__restore" disabled={state === "restored" || state === "restoring"} onClick={() => void restore(row.repo.id, branch)}>{state ?? "Restore"}</button></div>;
+                  }))}
+                  {expandedNow && key === "gc" && gcReceipt?.results.map((row) => <div className="maintenance__receipt-row" key={row.repo.id}><strong>{row.repo.name}</strong><span>{row.beforeBytes !== undefined && row.afterBytes !== undefined ? `${bytes(row.beforeBytes)} → ${bytes(row.afterBytes)}` : row.message}</span></div>)}
+                  {expandedNow && key === "worktrees" && result?.items?.map((item) => <div className="maintenance__receipt-row" key={item.detail}><strong>{item.label}</strong><code className="selectable">{displayPath(item.detail, platform)}</code></div>)}
+                </article>;
+              })}
+            </div>
+            <p className="maintenance__help">Restore recreates a branch at the tip it had when it was deleted, for as long as Git still holds that commit. Removed worktrees cannot be restored.</p>
+          </div>
+          <div className="modal__actions"><button className="modal__cancel" onClick={onClose}>Close</button><button className="modal__cancel" onClick={restartWorkflow}>New plan</button></div>
+        </> : <>
         {(running || complete) && (
           <BulkSyncStatus
+            compactWhenFinished
             phase={
               running
                 ? cancelling
@@ -610,8 +667,8 @@ export function MaintenanceDialog({
                       : "Waiting for the next repository…"
                 : summary?.cancelled
                   ? "Cancelled"
-                  : tab === "combined" && workflowStep === "branches" && scanComplete
-                    ? "Review gone branches"
+                  : scanComplete
+                    ? `${candidates.length} finished ${candidates.length === 1 ? "branch" : "branches"} in ${summary?.results.filter((row) => (row.candidates?.length ?? 0) > 0).length ?? 0} of ${repos.length} ${repos.length === 1 ? "repository" : "repositories"}`
                     : "Finished"
             }
             detail={
@@ -630,7 +687,7 @@ export function MaintenanceDialog({
                   : null
                 : {
                     kind: "summary",
-                    text: `${counts.success} succeeded · ${counts.skipped} skipped · ${counts.failed + counts.partial} need attention${scanComplete ? ` · ${candidates.length} finished branch${candidates.length === 1 ? "" : "es"}` : ""}`
+                    text: scanComplete ? `${repos.length} reviewed · ${counts.failed + counts.partial} need attention · ${summary?.results.reduce((total, row) => total + (row.kept?.length ?? 0), 0) ?? 0} kept` : `${counts.success} succeeded · ${counts.skipped} skipped · ${counts.failed + counts.partial} need attention`
                   }
             }
             counts={counts}
@@ -645,31 +702,6 @@ export function MaintenanceDialog({
           />
         )}
         <div className="maintenance__body">
-          {tab === "combined" && (
-            <>
-              <p className="maintenance__help" role="status">
-                {workflowStep === "done" ? (workflowStopped ? "Maintenance stopped. Review the results below." : "Maintenance complete.") :
-                  workflowStep === "branches" ? "Step: gone local branches" : "Step: Git collection"}
-              </p>
-              <ul className="maintenance__workflow-receipts">
-                {receipts.map((receipt, index) => <li key={index}>{receipt}</li>)}
-              </ul>
-              {branchReceipt !== null && (
-                <ul className="maintenance__workflow-receipts">
-                  {branchReceipt.results.flatMap((row) => (row.branches ?? []).map((branch) => (
-                    <li key={`${row.repo.id}:${branch.branch}`}>
-                      {row.repo.name} · {branch.branch}: {branch.message}{" "}
-                      {branch.deleted && <button className="maintenance__restore"
-                        disabled={running || restores.get(`${row.repo.id}:${branch.branch}`) === "restored" || restores.get(`${row.repo.id}:${branch.branch}`) === "restoring"}
-                        onClick={() => void restore(row.repo.id, branch)}>
-                        {restores.get(`${row.repo.id}:${branch.branch}`) ?? "Restore branch"}
-                      </button>}
-                    </li>
-                  )))}
-                </ul>
-              )}
-            </>
-          )}
           {tab !== "combined" && <>
           {repoScope === undefined ? (
             <>
@@ -758,6 +790,7 @@ export function MaintenanceDialog({
               <fieldset
                 className="maintenance__options"
                 disabled={running}
+                hidden={action !== null}
               >
                 <legend>Finished branches</legend>
                 <label>
@@ -907,6 +940,11 @@ export function MaintenanceDialog({
               {error}
             </div>
           )}
+          {scanComplete && (
+            <MaintenanceRulesApplied kind="branches" branchOptions={tab === "combined" ? combinedOptions() : action.options ?? options} onChange={() => {
+              if (tab === "combined") restartWorkflow(); else reset();
+            }} />
+          )}
           {scanComplete && candidates.length > 0 && (
             <label className="maintenance__scope">
               <input
@@ -937,7 +975,7 @@ export function MaintenanceDialog({
             </p>
           )}
           <div className="maintenance__results" aria-label="Repository results">
-            {repos.map((repo) => {
+            {(showQuietRepos ? [...proposingRepos, ...quietRepos] : proposingRepos).map((repo) => {
               const result = results.get(repo.id);
               const status =
                 result?.outcome ??
@@ -961,9 +999,7 @@ export function MaintenanceDialog({
                         {displayPath(repo.path, platform)}
                       </small>
                     </div>
-                    <span className={`bulk-sync__repo-status is-${status}`}>
-                      {status}
-                    </span>
+                    {scanComplete && (result?.candidates?.length ?? 0) > 0 ? <span className="maintenance__repo-count">{(result?.candidates ?? []).filter((branch) => selected.has(branchKey(branch))).length} of {result?.candidates?.length ?? 0} selected</span> : <span className={`bulk-sync__repo-status is-${status}`}>{status}</span>}
                   </div>
                   <p className="selectable">
                     {result?.message ??
@@ -1050,6 +1086,7 @@ export function MaintenanceDialog({
                 </article>
               );
             })}
+            {branchScan && quietRepos.length > 0 && <div className="maintenance__quiet"><strong>{quietRepos.length}</strong> repositories with nothing to delete · <strong>{quietWithKept}</strong> of them keep branches <button onClick={() => setShowQuietRepos((old) => !old)}>{showQuietRepos ? "Hide" : "Show"}</button></div>}
           </div>
         </div>
         <div className="modal__actions">
@@ -1064,18 +1101,19 @@ export function MaintenanceDialog({
             </button>
           ) : tab === "combined" ? (
             <>
-              <button ref={footerFocus} className="modal__cancel" onClick={onClose}>Close</button>
+              {workflowStep === "branches" && scanComplete && <span className="maintenance__footer-lead">{selected.size} selected · {plan.gc ? "then garbage collection" : "last step"}</span>}
+              {!scanComplete && <button ref={footerFocus} className="modal__cancel" onClick={onClose}>Close</button>}
               {workflowStep === "branches" && scanComplete ? (
                 <>
                   <button className="modal__cancel" onClick={() => {
-                    note("Branch removal skipped after review.");
+                    recordStep("branches", { state: "skipped", summary: "Skipped" });
                     void finishWorkflow();
-                  }}>Continue without Removing Branches</button>
+                  }}>Skip branches</button>
                   <button className="modal__create" onClick={() => void removeBranchesAndContinue(
                     candidates.filter((branch) => selected.has(branchKey(branch)))
-                  )}>Remove {selected.size} {selected.size === 1 ? "Branch" : "Branches"} and Continue</button>
+                  )}>Delete {selected.size} {selected.size === 1 ? "branch" : "branches"} and continue</button>
                 </>
-              ) : <button className="modal__create" onClick={restartWorkflow}>New analysis</button>}
+              ) : null}
             </>
           ) : (
             <>
@@ -1131,6 +1169,7 @@ export function MaintenanceDialog({
             </>
           )}
         </div>
+        </>}
           </>
         )}
       </section>
