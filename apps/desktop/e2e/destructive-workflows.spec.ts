@@ -527,7 +527,7 @@ test("combined maintenance waits for Analyze, prunes, reviews gone branches, the
   await expect(dialog.locator(".prune__activity")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Analyze", exact: true })).toBeEnabled();
   if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
-    await dialog.screenshot({ path: "/tmp/pwrgit-combined-plan.png", animations: "disabled" });
+    await window.screenshot({ path: "/tmp/pwrgit-combined-plan.png", animations: "disabled" });
   }
   await dialog.getByRole("button", { name: "Analyze", exact: true }).click();
   await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished");
@@ -538,7 +538,7 @@ test("combined maintenance waits for Analyze, prunes, reviews gone branches, the
   await dialog.locator(".prune__row input").check();
   await expect(dialog.getByRole("button", { name: "Continue without Pruning", exact: true })).toBeVisible();
   if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
-    await dialog.screenshot({ path: "/tmp/pwrgit-combined-worktrees.png", animations: "disabled" });
+    await window.screenshot({ path: "/tmp/pwrgit-combined-worktrees.png", animations: "disabled" });
   }
   await dialog.getByRole("button", { name: "Start Pruning and Continue", exact: true }).click();
   await confirmDialogButton(window).click();
@@ -547,7 +547,7 @@ test("combined maintenance waits for Analyze, prunes, reviews gone branches, the
   expect(existsSync(worktreePath)).toBe(false);
   expect(box.git(repo.path, "rev-parse", "feat/finished").trim()).toBe(head);
   if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
-    await dialog.screenshot({ path: "/tmp/pwrgit-combined-branches.png", animations: "disabled" });
+    await window.screenshot({ path: "/tmp/pwrgit-combined-branches.png", animations: "disabled" });
     await expect(dialog.getByRole("heading", { name: "Repository maintenance" })).toBeInViewport({ ratio: 1 });
   }
   await dialog.getByRole("button", { name: "Remove 1 Branch and Continue", exact: true }).click();
