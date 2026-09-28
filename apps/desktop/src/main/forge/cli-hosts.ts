@@ -196,6 +196,7 @@ type ForgeHostEnumerator = (
 ) => Promise<DiscoveredForgeHost[]>;
 
 const HOST_ENUMERATORS: Readonly<Record<ForgeKind, ForgeHostEnumerator>> = {
+  gerrit: async () => [],
   gitcafe: async (runners) => {
     const status = parseCafeAuthStatus(await (runners.cafe ?? runCafe)(["auth", "status", "--json"]));
     return status === null ? [] : [{ kind: "gitcafe", host: status.host, account: status.account }];

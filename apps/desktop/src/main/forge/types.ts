@@ -19,6 +19,7 @@ export type { ForgeKind };
  */
 export type ForgeRepo = {
   kind: ForgeKind;
+  reviewUrl?: string | undefined;
   /** Hostname only, no scheme or port — `github.com`, `gitlab.example.com`. */
   host: string;
   /**
@@ -175,14 +176,15 @@ export type CliForgeProvider = ForgeConnection & {
   kind: ForgeKind;
   authentication: "cli";
 };
-export type ForgeProvider = TokenForgeProvider | CliForgeProvider;
+export type PublicForgeProvider = ForgeConnection & { kind: ForgeKind; authentication: "public" };
+export type ForgeProvider = TokenForgeProvider | CliForgeProvider | PublicForgeProvider;
 
 /** CLI providers authenticate each command internally; token providers stay unchanged. */
 export async function connectForge(
   provider: ForgeProvider,
   host: string
 ): Promise<ForgeConnection | null> {
-  if (provider.authentication === "cli") return provider;
+  if (provider.authentication === "cli" || provider.authentication === "public") return provider;
   const token = await provider.getToken(host);
   if (token === null) return null;
   return {

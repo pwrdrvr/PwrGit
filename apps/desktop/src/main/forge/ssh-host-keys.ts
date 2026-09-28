@@ -68,6 +68,7 @@ async function publicText(url: string, fetcher: typeof fetch): Promise<string> {
 
 export function createForgeSshHostKeyProviders(fetcher: typeof fetch = fetch): Record<ForgeKind, ForgeSshHostKeyProvider> {
   return {
+    gerrit: { lookup: async () => null },
     github: {
       async lookup(hostname, port) {
         if (hostname !== "github.com" || port !== 22) return null;

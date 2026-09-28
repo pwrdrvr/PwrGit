@@ -1,3 +1,4 @@
+import { safeGerritReviewUrl } from "@pwrgit/shared";
 import {
   DIAGNOSTICS_DEFAULTS,
   EXPERIMENTAL_DEFAULTS,
@@ -179,6 +180,11 @@ function sanitizeForgeHosts(
       continue;
     }
     const entry: ForgeHostConfig = {};
+    if (typeof value.reviewUrl === "string") {
+      const reviewUrl = value.reviewUrl === "" ? "" : safeGerritReviewUrl(value.reviewUrl);
+      if (reviewUrl === null) continue;
+      entry.reviewUrl = reviewUrl;
+    }
     if (isForgeKind(value.kind)) entry.kind = value.kind;
     if (typeof value.enabled === "boolean") entry.enabled = value.enabled;
     // The empty string survives on purpose: it is how the pane says "forget
@@ -194,7 +200,8 @@ function sanitizeForgeHosts(
     out[host] =
       entry.kind === undefined &&
       entry.enabled === undefined &&
-      entry.label === undefined
+      entry.label === undefined &&
+      entry.reviewUrl === undefined
         ? null
         : entry;
   }

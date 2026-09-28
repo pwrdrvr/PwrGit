@@ -189,7 +189,7 @@ export function exactRepository(
     /^[^\s/]+@[^\s:/]+:/.test(candidate);
   if (isUrl) {
     const remote = parseCloneRemote(candidate, hosts);
-    if (remote === null || !isSafeProjectPath(remote.nameWithOwner)) return null;
+    if (remote === null || !isSafeProjectPath(remote.nameWithOwner, remote.host)) return null;
     return {
       host: remote.host,
       hostname: remote.hostname,

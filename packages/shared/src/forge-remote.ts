@@ -1,3 +1,4 @@
+import { GERRIT_SITES } from "./gerrit";
 import {
   FORGE_PRODUCTS,
   forgeAllowsPathDepth,
@@ -86,6 +87,7 @@ export function forgeBlockAt(
 ): ForgeBlock | null {
   if (status === undefined || !status.installed) return "cli_missing";
   if (forgeHostStatus(status, hostname)?.enabled === false) return "host_off";
+  if (forgeProduct(status.kind).access === "public") return null;
   return forgeLoggedInAt(status, hostname) ? null : "signed_out";
 }
 
@@ -161,10 +163,10 @@ function splitPath(
   path: string
 ): { owner: string; repo: string; segments: number } | null {
   const segments = path.split("/").filter((segment) => segment !== "");
-  if (segments.length < 2) return null;
+  if (segments.length < 1) return null;
   const repo = segments[segments.length - 1]!;
   const owner = segments.slice(0, -1).join("/");
-  if (owner === "" || repo === "") return null;
+  if (repo === "") return null;
   return { owner, repo, segments: segments.length };
 }
 
@@ -231,6 +233,7 @@ export function classifyForgeHost(
     const override = overrides[normalized];
     if (isForgeKind(override)) return override;
   }
+  if (Object.hasOwn(GERRIT_SITES, normalized)) return "gerrit";
   // Each product's SaaS host, read off the registry rather than written out
   // twice. This is the ONLY thing a hostname is evidence of: anything else
   // self-managed must be enumerated or added by hand, which is what the
@@ -271,6 +274,7 @@ export function parseForgeRemote(
   const split = splitPath(path);
   if (split === null) return null;
   const host = classifyForgeHost(hostname, overrides);
+  if (host === "other" && split.segments < 2) return null;
   // A product with no subgroups has projects that are exactly `owner/repo`; a
   // deeper path there is a wiki, a gist, or a page URL that merely looks like a
   // repository (`.../repo/issues`), and reading it as a project would send a
@@ -290,7 +294,7 @@ export function parseForgeRemote(
     hostname: canonicalForgeHostname(hostname) ?? hostname.trim().toLowerCase(),
     owner: split.owner,
     repo: split.repo,
-    nameWithOwner: `${split.owner}/${split.repo}`
+    nameWithOwner: split.owner === "" ? split.repo : `${split.owner}/${split.repo}`
   };
 }
 
@@ -333,11 +337,10 @@ export function isSafeForgeHostname(hostname: string): boolean {
 /** Whether a project path is safe to interpolate into a git remote URL.
  *  GitLab subgroups make this more than `owner/name`, but every segment is
  *  still restricted to what both forges accept in a path. */
-export function isSafeProjectPath(nameWithOwner: string): boolean {
+export function isSafeProjectPath(nameWithOwner: string, host: ForgeHost = "other"): boolean {
   const segments = nameWithOwner.split("/");
   return (
-    segments.length >= 2 &&
-    segments.length <= 8 &&
+    (host === "other" ? segments.length >= 2 && segments.length <= 8 : forgeAllowsPathDepth(host, segments.length)) &&
     segments.every((segment) => /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(segment))
   );
 }
@@ -404,6 +407,6 @@ export function parseCloneRemote(
   }
   const remote = parseForgeRemote(sourceUrl, overrides);
   if (remote === null || !isSafeForgeHostname(remote.hostname) ||
-      !isSafeProjectPath(remote.nameWithOwner)) return null;
+      !isSafeProjectPath(remote.nameWithOwner, remote.host)) return null;
   return { ...remote, sourceUrl };
 }

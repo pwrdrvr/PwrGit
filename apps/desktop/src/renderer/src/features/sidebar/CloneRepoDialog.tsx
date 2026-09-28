@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
+  forgeProductOrAssumed,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -294,7 +295,7 @@ export function CloneRepoDialog({
   // toggle that leads straight to "install the CLI" is a dead end dressed up
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => forgeCanAnswerAnywhere(status))
+    .filter((status) => forgeProductOrAssumed(status.kind).workflows.repositorySearch && forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
   // Snap onto a forge that can actually answer. Without this a machine with
   // only GitLab signed in leaves `host` on its "github" default forever: the
@@ -320,7 +321,8 @@ export function CloneRepoDialog({
       (activeHost === "other" ? undefined : defaultHostname(activeHost)));
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
   const cliDisabled =
-    catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname);
+    !forgeProductOrAssumed(activeHost).workflows.cliClone ||
+    (catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname));
 
   // Nothing is asked of the forge until the box settles — and never on open.
   // The catalog this replaced listed every known owner's repositories up

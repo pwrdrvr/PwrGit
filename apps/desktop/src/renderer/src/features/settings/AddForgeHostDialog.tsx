@@ -115,9 +115,9 @@ export function AddForgeHostDialog(props: {
           />
         </label>
         <div className="modal__hint">
-          PwrGit will treat this host as {label} and talk to it through{" "}
-          <code>{cli}</code>. The hostname plays no
-          part in that — this choice does.
+          {forgeProduct(props.kind).access === "public"
+            ? "PwrGit will read public Gerrit projects and changes. You can set a separate Review URL on the host row after adding it."
+            : <>PwrGit will treat this host as {label} and talk to it through <code>{cli}</code>. This choice identifies the product.</>}
         </div>
         {error !== undefined && (
           <div className="modal__error" key={error.seq} role="alert">

@@ -282,7 +282,7 @@ export function repositoriesOnHost(
  */
 export function forkSeedFromRepo(repo: Repo | undefined): CloneRepository | null {
   const identity = repo?.identity;
-  if (identity === undefined) return null;
+  if (identity === undefined || !forgeProductOrAssumed(identity.host).workflows.forks) return null;
   return {
     name: identity.name,
     owner: identity.owner,
@@ -324,7 +324,7 @@ export function forkSeedFromOrigin(
   const origin = remotes.find((remote) => remote.name === "origin");
   if (origin === undefined) return null;
   const parsed = parseForgeRemote(origin.fetchUrl, hosts);
-  if (parsed === null || !isForgeKind(parsed.host)) return null;
+  if (parsed === null || !isForgeKind(parsed.host) || !forgeProductOrAssumed(parsed.host).workflows.forks) return null;
   return {
     name: parsed.repo,
     owner: parsed.owner,

@@ -63,10 +63,11 @@ export function remoteHostname(url: string): string | null {
  */
 export function remoteWebUrl(
   url: string,
-  overrides: ForgeHostMap = {}
+  overrides: ForgeHostMap = {},
+  reviewUrls: Readonly<Record<string, string>> = {}
 ): string | null {
   const parsed = parseForgeRemote(url, overrides);
-  return parsed === null ? null : repositoryBrowserUrl(parsed);
+  return parsed === null ? null : repositoryBrowserUrl(parsed, reviewUrls);
 }
 
 /**
@@ -91,6 +92,6 @@ export function remoteUrlLines(remote: {
 }
 
 /** Origin's repository page, independent of whether its integration is enabled. */
-export function repoWebUrl(identity: RepoIdentity | undefined): string | null {
-  return identity === undefined ? null : repositoryBrowserUrl(identity);
+export function repoWebUrl(identity: RepoIdentity | undefined, reviewUrls: Readonly<Record<string, string>> = {}): string | null {
+  return identity === undefined ? null : repositoryBrowserUrl(identity, reviewUrls);
 }

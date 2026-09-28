@@ -1,3 +1,4 @@
+import { forgeProduct, gerritPatchSet, gerritPatchBranch } from "@pwrgit/shared";
 import { createHash } from "node:crypto";
 import {
   openPrFromRow,
@@ -1150,7 +1151,8 @@ export class RepoIndexer {
       if (row === undefined || pr === undefined) continue;
       if (!changeRequestAnswersQuery(pr, row.repo_name, query)) continue;
       const fork = pr.headRepoPath !== undefined;
-      const branch = fork
+      const patchSet = pr.forge !== undefined && forgeProduct(pr.forge).reviewModel === "patchset" ? gerritPatchSet(pr.headRefName, pr.number) : null;
+      const branch = patchSet !== null ? gerritPatchBranch(pr.number, patchSet) : fork
         ? pr.forge === undefined
           ? null
           : changeRequestLocalBranch(pr.forge, pr.number)
@@ -1160,7 +1162,7 @@ export class RepoIndexer {
         const worktree = idOf(worktreeFor.get(repoId, branch));
         const local = worktree === null ? idOf(localFor.get(repoId, branch)) : null;
         const remote =
-          worktree === null && local === null && !fork
+          worktree === null && local === null && !fork && patchSet === null
             ? idOf(originFor.get(repoId, branch))
             : null;
         heldBy =

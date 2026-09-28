@@ -28,38 +28,58 @@ and [Change-Ids](https://gerrit-review.googlesource.com/Documentation/user-chang
 
 ## PwrGit support
 
-Paste **just the URL** into Clone and select **HTTPS**. PwrGit parses the host as
-`other`, with project path `v8/v8`; the existing plain Git HTTPS clone path
-constructs the documented URL without a forge login. It does not verify public
-visibility through an API. No full V8 clone was used to validate this change:
-small URL fixtures cover the coordinates and browser behavior.
+PwrGit identifies **Gerrit** as the review product. Google is the operator of
+Googlesource, not the name of the integration. Gerrit also runs outside Google;
+[Qt's contribution workflow](https://wiki.qt.io/Gerrit_Introduction) uses
+`codereview.qt-project.org`.
 
-The sidebar can open the repository page for `chromium.googlesource.com`.
-Remote chips say “Chromium Googlesource” and use no forge logo. The repository
-identity chip retains its hostname-derived label. Browser recognition is an
-explicit, renderer-only rule; it does not register a forge or infer support for
-other Googlesource instances, review hosts, or arbitrary Git servers.
+Desktop support includes:
 
-Current limits:
+- Clone a supplied URL, or a simple pasted `git clone URL` command, preserving
+  its transport, username, port and project path. PwrGit does not invent an SSH
+  alternative for the V8 HTTPS URL. Shell flags and compound commands are not
+  executed. A single-component project works on an identified Gerrit host.
+- Recognize the documented Chromium and Qt deployments. Other installations
+  require an explicit Gerrit host in Settings → Forges (or
+  `PWRGIT_GERRIT_HOSTS`). Unknown hosts remain unknown.
+- Configure a separate HTTPS **Review URL** for the Git host, including a
+  deployment path if needed. Chromium maps to
+  `https://chromium-review.googlesource.com`; an SSH port is not reused as a
+  review API port.
+- Read public repository identity and changes anonymously: open lists, lookup
+  by number and commit, draft/open/merged/abandoned status, and available size
+  and timestamps. Abandoned changes use the app's closed state. Reads do not
+  establish account access or push permission.
+- Fetch a validated current patch-set ref into `change/<number>/<patch-set>`
+  without force or an upstream. Each patch set has a separate local branch.
+  Gerrit's target branch is never treated as the contribution's source branch.
+- Show the Gerrit mark and open the appropriate browser: Chromium's Gitiles
+  repository page, or the Gerrit project's changes page elsewhere. Change
+  links use the review endpoint.
 
-- The Clone dialog rejects a pasted `git clone …` command and defaults to SSH.
-  Select HTTPS explicitly. Its generic SSH candidate is not evidence of SSH
-  support on this host; this change does not add or validate that transport.
-- Clone reconstructs SSH/HTTPS URLs from host and project coordinates; it does
-  not preserve arbitrary URL ports, credentials or special paths. Existing
-  project-path rules require at least two components. This change covers V8's
-  documented nested path, not every Gitiles project or URL form.
-- A plain clone is useful for browsing history but is not a build-ready V8
-  workspace. Follow V8's depot_tools checkout instructions (`fetch v8`) to
-  obtain dependencies and setup.
-- There is no PwrGit Gerrit sign-in, account enumeration, fork creation,
-  change upload, review status, patch-set checkout, or commit-queue support.
+The public adapter validates Gerrit's JSON prefix, bounds responses and
+requests, walks pagination up to the existing 500-change cap, and preserves
+cached data when a read fails. It does not send credentials or follow redirects.
+Host switches gate public reads, as they do other forge operations.
 
-`ForgeKind` currently enumerates GitHub, GitLab and GitCafe. Its product table,
-repository providers and review providers are coordinated integrations;
-`ForgeCapabilities` describes refinements such as batched lookups and fork
-options, not a complete set of independently optional features. Adding a Gerrit
-kind simply to display a logo would misrepresent these contracts. Future Gerrit
-support needs explicit capability boundaries for browsing, authentication,
-repository operations and review operations, plus Gerrit-specific change and
-patch-set semantics. The browser-only rule leaves that decision open.
+Not implemented: Gerrit authentication, private REST reads, account/owner
+listing, fork creation, repository search, change upload, review votes,
+checks/submit-readiness, submission or Chromium's commit queue. Git operations
+still use Git's own configured authentication. The standalone MCP server
+recognizes Gerrit remotes but does not provide Gerrit live review queries.
+
+A plain clone is useful for browsing history but is not a build-ready V8
+workspace. Follow [V8's checkout instructions](https://v8.dev/docs/source-code)
+to obtain dependencies and setup.
+
+## Validation
+
+Small synthetic REST fixtures cover Chromium, Qt and a separately configured
+review host, including pagination failures and patch-set validation. A real Git
+and SQLite fixture checks successive patch-set fetches and profile isolation.
+Public REST reads against Chromium and Qt confirmed their response and ref
+shapes; no full V8 checkout was needed.
+
+The adapter follows Gerrit's [REST conventions](https://gerrit-review.googlesource.com/Documentation/rest-api.html),
+[change queries and RevisionInfo](https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html),
+and [project identity](https://gerrit-review.googlesource.com/Documentation/rest-api-projects.html).

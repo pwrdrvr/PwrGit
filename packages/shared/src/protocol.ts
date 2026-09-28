@@ -644,6 +644,8 @@ export type ExperimentalSettings = {
  * and make a later sign-in unable to change anything.
  */
 export type ForgeHostConfig = {
+  /** Separate review endpoint for a Gerrit Git host. Empty restores the default. */
+  reviewUrl?: string | undefined;
   /** Which product runs here, when the hostname cannot say. */
   kind?: ForgeKind;
   /** Whether PwrGit may talk to this host at all. */
@@ -670,6 +672,7 @@ export type ForgeValueSource = "auto" | "config" | "env";
 
 /** One forge host, resolved, as Settings renders it. */
 export type ForgeHostRow = {
+  reviewUrl?: string | undefined;
   host: string;
   kind: ForgeKind;
   /** Where the PRODUCT came from. `config` is the only value that means a

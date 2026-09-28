@@ -140,7 +140,7 @@ export function RepoRefsSections({
     const chips = urls
       .map((url) => {
         const chip = remoteForgeChip(url, forgeNaming.overrides, forgeNaming.displays);
-        return chip === null ? null : { ...chip, url: remoteWebUrl(url, forgeNaming.overrides) };
+        return chip === null ? null : { ...chip, url: remoteWebUrl(url, forgeNaming.overrides, forgeNaming.reviewUrls) };
       })
       .filter((chip) => chip !== null);
     // Keep distinct repository destinations even when they share a forge.
@@ -825,7 +825,7 @@ export function RepoRefsSections({
               // URL and rendered as the OS tooltip, two styles away from every
               // other card in this column.
               const where = remoteWhere(remote.fetchUrl);
-              const webUrl = remoteWebUrl(remote.fetchUrl, forgeNaming.overrides);
+              const webUrl = remoteWebUrl(remote.fetchUrl, forgeNaming.overrides, forgeNaming.reviewUrls);
               const urlLines = remoteUrlLines(remote);
               const forkOffer =
                 remote.name === "origin"

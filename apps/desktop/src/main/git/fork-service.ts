@@ -189,11 +189,11 @@ export class ForkService {
         message: "Enter a repository as owner/name."
       });
     }
-    const provider = this.forges.get(input.host, input.hostname);
+    const provider = (forgeProductOrAssumed(input.host).workflows.forks ? this.forges.get(input.host, input.hostname) : null);
     if (provider === null) {
       return this.blocked(source, input.targetOwner, {
         code: "unsupported_host",
-        message: unsupportedHostMessage("fork")
+        message: unsupportedForkMessage(input.host)
       });
     }
     const status = (await this.forgeStatus.list()).find(
@@ -379,12 +379,12 @@ export class ForkService {
         message: `Not a usable fork name: ${input.targetOwner}/${input.targetName}`
       });
     }
-    const provider = this.forges.get(origin.value.host, hostname);
+    const provider = (forgeProductOrAssumed(origin.value.host).workflows.forks ? this.forges.get(origin.value.host, hostname) : null);
     if (provider === null) {
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: unsupportedHostMessage("fork")
+        message: unsupportedForkMessage(origin.value.host)
       });
     }
     // The same gate `fork` applies, for the same reason: this is the call that
@@ -590,7 +590,7 @@ export class ForkService {
     // A fork lands on the instance the source lives on, so the accounts
     // offered must come from that instance — the SaaS provider would list the
     // user's github.com/gitlab.com orgs for an Enterprise source.
-    const provider = this.forges.get(host, hostname);
+    const provider = (forgeProductOrAssumed(host).workflows.forks ? this.forges.get(host, hostname) : null);
     if (provider === null) return ok([]);
     const status = (await this.forgeStatus.list()).find(
       (candidate) => candidate.kind === host
@@ -639,12 +639,12 @@ export class ForkService {
     // used only to build remote URLs — so the fork itself was created on the
     // SaaS instance while the checkout's remotes pointed at the self-managed
     // one.
-    const provider = this.forges.get(input.host, input.hostname);
+    const provider = (forgeProductOrAssumed(input.host).workflows.forks ? this.forges.get(input.host, input.hostname) : null);
     if (provider === null) {
       return err({
         kind: "remote",
         code: "unsupported_host",
-        message: unsupportedHostMessage("fork")
+        message: unsupportedForkMessage(input.host)
       });
     }
     // `preflight` and `targets` both ask this, and this is the one that WRITES
@@ -972,4 +972,9 @@ export class ForkService {
       blocked
     });
   }
+}
+
+function unsupportedForkMessage(host: ForgeHost): string {
+  const product = forgeProductOrAssumed(host);
+  return product.workflows.forks ? unsupportedHostMessage("fork") : `${product.label} account-based forks are not supported.`;
 }

@@ -668,7 +668,7 @@ export function RepoRow({
         </span>
         {behind > 0 && <span className="badge badge--warn">↓{behind}</span>}
         {forgeChip !== null && (
-          <ForgeChip chip={forgeChip} url={repoWebUrl(repo.identity)} />
+          <ForgeChip chip={forgeChip} url={repoWebUrl(repo.identity, forgeNaming.reviewUrls)} />
         )}
         {/* Forge marks sit between the name and the counts: they qualify the
             repository (what it is), where the counts describe its contents.

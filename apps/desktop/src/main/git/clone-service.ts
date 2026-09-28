@@ -1,3 +1,4 @@
+import type { ForgeHostMap } from "@pwrgit/shared";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -127,9 +128,9 @@ function containingRoot(
 /** Accept a project path for either forge. GitLab nests subgroups, so this is
  *  no longer "exactly two segments" — `isSafeProjectPath` bounds the depth and
  *  the characters instead. */
-export function normalizeRepositoryPath(input: string): string | null {
+export function normalizeRepositoryPath(input: string, host: ForgeHost = "other"): string | null {
   const trimmed = input.trim().replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
-  return isSafeProjectPath(trimmed) ? trimmed : null;
+  return isSafeProjectPath(trimmed, host) ? trimmed : null;
 }
 
 function inferredRecency(path: string): number {
@@ -296,7 +297,8 @@ function inaccessibleRepositoryMessage(
   host: ForgeHost,
   nameWithOwner: string
 ): string {
-  const { label: forge, cli } = forgeProductOrAssumed(host);
+  const { label: forge, cli, access } = forgeProductOrAssumed(host);
+  if (access === "public") return `${forge} could not read this public project. Check its spelling and Review URL in Settings → Forges. Private API access is not supported.`;
   return `${forge} couldn't access ${nameWithOwner}. Check the repository spelling and confirm the active ${forge} CLI account has access by running ${cli} auth status. ${forge} also returns 404 for private repositories you cannot access.`;
 }
 
@@ -435,7 +437,8 @@ export class CloneService {
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
     private readonly forges: ForgeRepoRegistry,
-    private readonly forgeStatus: ForgeStatusService
+    private readonly forgeStatus: ForgeStatusService,
+    private readonly hostOverrides: () => ForgeHostMap = () => ({})
   ) {}
 
   /**
@@ -483,7 +486,7 @@ export class CloneService {
         message: `No profile "${profileId}"`
       });
     }
-    const provider = this.forges.get(host);
+    const provider = forgeProductOrAssumed(host).workflows.repositorySearch ? this.forges.get(host) : null;
     if (provider === null) {
       return err({
         kind: "remote",
@@ -577,7 +580,7 @@ export class CloneService {
         message: `No profile "${profileId}"`
       });
     }
-    const nameWithOwner = normalizeRepositoryPath(input);
+    const nameWithOwner = normalizeRepositoryPath(input, host);
     if (nameWithOwner === null) {
       return err({
         kind: "validation",
@@ -725,7 +728,7 @@ export class CloneService {
     }
     const explicit = input.sourceUrl === undefined
       ? null
-      : parseCloneRemote(input.sourceUrl);
+      : parseCloneRemote(input.sourceUrl, this.hostOverrides());
     if (input.sourceUrl !== undefined &&
         (explicit === null || input.sourcePath !== undefined)) {
       return err({
@@ -880,6 +883,10 @@ export class CloneService {
     // instance the source names, not the SaaS default. `source.hostname` is
     // right here and used below for the ssh/https URLs, so picking by kind
     // alone cloned a same-named stranger's repository from github.com/gitlab.com.
+    const product = forgeProductOrAssumed(source.host);
+    if (!product.workflows.cloneFromCoordinates || (source.protocol === "cli" && !product.workflows.cliClone)) {
+      return err({ kind: "validation", code: "clone_url_required", message: `Paste the repository’s clone URL for ${product.label}.` });
+    }
     const provider = this.forges.get(source.host, source.hostname);
 
     if (source.protocol === "cli") {
@@ -1097,7 +1104,7 @@ function localForgeState(repos: Repo[]): LocalForgeState {
   const addOwner = (host: ForgeHost, login: string): void => {
     // `other` hosts have no provider, so offering their owners would scope a
     // search to accounts nothing can search.
-    if (host === "other" || login === "") return;
+    if (host === "other" || login === "" || !forgeProductOrAssumed(host).workflows.repositorySearch) return;
     if (
       !owners.some(
         (owner) =>

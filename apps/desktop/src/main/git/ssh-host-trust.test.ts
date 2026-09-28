@@ -28,7 +28,7 @@ beforeEach(async () => {
     throw new Error("Unexpected command");
   });
   const provider = { lookup };
-  service = new SshHostTrustService({ home, run, now: () => now, env: {}, allowed: () => allowed, providers: { github: provider, gitlab: provider, gitcafe: provider } });
+  service = new SshHostTrustService({ home, run, now: () => now, env: {}, allowed: () => allowed, providers: { gerrit: provider, github: provider, gitlab: provider, gitcafe: provider } });
 });
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
 it("does not save during inspection and saves only the key approved by this window", async () => {

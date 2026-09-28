@@ -110,7 +110,7 @@ describe("repoWebUrl", () => {
     const identity = { host: "github" as const, hostname: "github.com", owner: "pwrdrvr", name: "PwrGit", nameWithOwner: "pwrdrvr/PwrGit", visibility: "public" as const };
     expect(repoWebUrl(identity)).toBe("https://github.com/pwrdrvr/PwrGit");
     expect(repoWebUrl({ ...identity, host: "gitlab", hostname: "gitlab.com" })).toBe("https://gitlab.com/pwrdrvr/PwrGit");
-    expect(repoWebUrl({ ...identity, hostname: "gitlab.example.com", nameWithOwner: "team/subgroup/PwrGit" })).toBe("https://gitlab.example.com/team/subgroup/PwrGit");
+    expect(repoWebUrl({ ...identity, host: "gitlab", hostname: "gitlab.example.com", nameWithOwner: "team/subgroup/PwrGit" })).toBe("https://gitlab.example.com/team/subgroup/PwrGit");
     expect(repoWebUrl(undefined)).toBeNull();
     expect(repoWebUrl({ ...identity, host: "other" })).toBeNull();
     expect(repoWebUrl({ ...identity, hostname: "evil.example/path" })).toBeNull();
@@ -120,11 +120,11 @@ describe("repoWebUrl", () => {
 
 
 describe("Chromium repository browsing", () => {
-  it("opens V8 without claiming a forge integration", () => {
+  it("opens the V8 repository browser separately from its reviews", () => {
     const url = "https://chromium.googlesource.com/v8/v8";
     expect(remoteWebUrl(`${url}.git`)).toBe(url);
     expect(repoWebUrl({
-      host: "other", hostname: "chromium.googlesource.com", owner: "v8",
+      host: "gerrit", hostname: "chromium.googlesource.com", owner: "v8",
       name: "v8", nameWithOwner: "v8/v8", visibility: "unknown"
     })).toBe(url);
   });

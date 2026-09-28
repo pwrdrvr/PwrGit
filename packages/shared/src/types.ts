@@ -726,7 +726,7 @@ export type RemoteActivity = {
  * stacks one section per member in this sequence, so a product is placed here
  * deliberately rather than wherever a sort happens to put it.
  */
-export const FORGE_KINDS = ["github", "gitlab", "gitcafe"] as const;
+export const FORGE_KINDS = ["github", "gitlab", "gitcafe", "gerrit"] as const;
 
 export type ForgeKind = (typeof FORGE_KINDS)[number];
 
@@ -861,7 +861,7 @@ export type PrSummary = {
   host?: string;
   /** Namespace path, e.g. `pwrdrvr/PwrGit` or `group/sub/project`. */
   repoPath?: string;
-  /** Branch holding the changes. */
+  /** Source branch, or the exact review ref on a patch-set forge. */
   headRefName?: string;
   /** Branch the changes are proposed into. */
   baseRefName?: string;
@@ -902,6 +902,7 @@ export type OpenChangeRequest = PrSummary & {
  * what decides the verbs its row can offer.
  */
 export type ChangeRequestLocation =
+  | { kind: "patchset"; branch: string; ref: string; patchSet: number }
   /** Checked out in a worktree: the only verb is to go there. */
   | { kind: "worktree"; branch: string; worktreeId: WorktreeId }
   /** A local branch nothing has checked out. */

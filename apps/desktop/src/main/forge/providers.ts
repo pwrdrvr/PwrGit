@@ -1,3 +1,4 @@
+import { gerritProvider } from "./gerrit/provider";
 import { gitcafeProvider } from "./gitcafe/provider";
 import { githubProvider } from "./github/provider";
 import { gitlabProvider } from "./gitlab/provider";
@@ -5,6 +6,7 @@ import { resolveForgeRepo, type ForgeHostOverrides } from "./resolve";
 import type { ForgeKind, ForgeProvider, ForgeRepo } from "./types";
 
 const PROVIDERS: Readonly<Record<ForgeKind, ForgeProvider>> = {
+  gerrit: gerritProvider,
   github: githubProvider,
   gitlab: gitlabProvider,
   gitcafe: gitcafeProvider

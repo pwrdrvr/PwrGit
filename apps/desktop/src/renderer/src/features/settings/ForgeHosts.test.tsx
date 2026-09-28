@@ -685,3 +685,21 @@ describe("Settings → Forges — one section per product", () => {
     expect(alertIn(dialog())).toContain("github.com is already on the list.");
   });
 });
+
+
+describe("Gerrit review endpoint", () => {
+  it("writes a separate review endpoint and rejects credentials", async () => {
+    rows = [added({ host: "git.example", kind: "gerrit", cli: "" })];
+    await render();
+    const field = container.querySelector<HTMLInputElement>('input[aria-label="Review URL for git.example"]')!;
+    expect(field).not.toBeNull();
+    await typeInto(field, "https://review.example/r/");
+    await blur(field);
+    expect(writes).toContainEqual({ forgeHosts: { "git.example": { reviewUrl: "https://review.example/r" } } });
+    const count = writes.length;
+    await typeInto(field, "https://user:secret@review.example/r");
+    await blur(field);
+    expect(writes).toHaveLength(count);
+    expect(container.textContent).toContain("without credentials");
+  });
+});

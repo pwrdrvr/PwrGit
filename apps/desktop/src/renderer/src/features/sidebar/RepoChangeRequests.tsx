@@ -5,6 +5,7 @@ import {
   changeRequestNoun,
   changeRequestNumberQuery,
   changeRequestPluralLabel,
+  forgeProduct,
   type ChangeRequestEntry,
   type ChangeRequestList,
   type ChangeRequestLocation,
@@ -167,6 +168,8 @@ function locationTag(location: ChangeRequestLocation): {
         className: "is-unfetched",
         hint: "On origin, not fetched yet. Switching fetches it first."
       };
+    case "patchset":
+      return { text: `patch set ${location.patchSet}`, className: "is-unfetched", hint: `Fetch ${location.ref} as ${location.branch}` };
     case "fork":
       return {
         text: "fork",
@@ -215,7 +218,7 @@ async function reachableLocation(
   entry: ChangeRequestEntry
 ): Promise<ChangeRequestLocation | null> {
   const { location } = entry;
-  if (location.kind !== "unfetched" && location.kind !== "fork") return location;
+  if (location.kind !== "unfetched" && location.kind !== "fork" && location.kind !== "patchset") return location;
   const result = await dispatch("pr:fetchHead", {
     repoId,
     number: entry.pr.number
@@ -346,6 +349,7 @@ export function ChangeRequestTable({
         const pending = fetching === pr.number;
         const switchingThis = switching === rowKey;
         const quiet = pr.state !== "open";
+        const headLabel = pr.forge !== undefined && forgeProduct(pr.forge).reviewModel === "patchset" ? "patch-set ref" : "branch name";
         const head = pr.headRefName ?? (location.kind === "fork" ? location.localBranch : "—");
         return (
           <div
@@ -369,11 +373,11 @@ export function ChangeRequestTable({
                       that is the one `git switch` accepts here. */}
                   <CopyTarget
                     value={location.kind === "fork" ? location.localBranch : head}
-                    label={`Copy branch name ${location.kind === "fork" ? location.localBranch : head}`}
+                    label={`Copy ${headLabel} ${location.kind === "fork" ? location.localBranch : head}`}
                     hint={
                       location.kind === "fork"
                         ? `${location.headRepoPath}:${head}\nClick to copy ${location.localBranch}`
-                        : `${head}\nClick to copy branch name`
+                        : `${head}\nClick to copy ${headLabel}`
                     }
                     className="refs-copyable-name copyable"
                   >
@@ -424,7 +428,7 @@ export function ChangeRequestTable({
                         ? `Unavailable: ${reason}`
                         : focusedWorktree === null
                           ? "Select a worktree in this repository first"
-                          : location.kind === "unfetched" || location.kind === "fork"
+                          : location.kind === "unfetched" || location.kind === "fork" || location.kind === "patchset"
                             ? `Fetch #${pr.number}, then switch ${lastSegment(focusedWorktree.path)} to it`
                             : `Switch ${lastSegment(focusedWorktree.path)} to ${location.branch ?? head}`
                     )}

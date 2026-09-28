@@ -199,7 +199,7 @@ const FORGE_REPROBE_DEBOUNCE_MS = 300;
 function forgeTargetSignature(hosts: ForgeHosts): string {
   return hosts
     .statusTargets()
-    .map((target) => `${target.kind} ${target.host} ${target.enabled}`)
+    .map((target) => `${target.kind} ${target.host} ${target.enabled} ${hosts.reviewUrl(target.host) ?? ""}`)
     .join("\n");
 }
 
@@ -495,7 +495,7 @@ if (!gotSingleInstanceLock) {
             () => forgeHosts.statusTargets()
           );
     const forges = fixtureServices?.forges ?? new ForgeRepoRegistry();
-    if (fixtureServices === null) registerRepoProviders(forges);
+    if (fixtureServices === null) registerRepoProviders(forges, (host) => settings.get().forges?.hosts[host]?.reviewUrl);
     // Which forge hosts exist, and whether we may read them. Enumeration costs
     // two subprocesses, so the directory caches and the resolvers below read it
     // synchronously — a PR refresh must never wait on `gh auth status`.
@@ -600,6 +600,7 @@ if (!gotSingleInstanceLock) {
     const resolveEnabledForge: typeof resolveForge = (url, overrides) => {
       const resolved = resolveForge(url, overrides ?? forgeHosts.overrides());
       if (resolved === null) return null;
+      resolved.repo.reviewUrl = forgeHosts.reviewUrl(resolved.repo.host);
       return forgeHosts.isEnabled(resolved.repo.host).enabled ? resolved : null;
     };
     const resolveEnabledForgeRepo: typeof resolveForgeRepo = (url, overrides) => {
@@ -687,7 +688,8 @@ if (!gotSingleInstanceLock) {
       indexer,
       profiles,
       forges,
-      forgeStatus
+      forgeStatus,
+      () => forgeHosts.overrides()
     );
     const forkService = new ForkService(
       execGit,

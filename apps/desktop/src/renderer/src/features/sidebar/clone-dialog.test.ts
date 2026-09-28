@@ -310,7 +310,7 @@ describe("explicit clone URLs", () => {
     "git://git.example/group/repo.git"
   ])("preserves %s without inventing endpoints", (sourceUrl) => {
     const exact = exactRepository(`git clone ${sourceUrl}`);
-    expect(exact).toMatchObject({ sourceUrl, host: "other" });
+    expect(exact).toMatchObject({ sourceUrl, host: sourceUrl.includes("chromium.googlesource.com") ? "gerrit" : "other" });
     expect(unverifiedCloneRepository(exact)).toMatchObject({ sourceUrl, sshUrl: "", httpsUrl: "", visibility: "unknown" });
   });
 });

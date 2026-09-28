@@ -213,12 +213,12 @@ describe("remoteForgeChip", () => {
 
 
 describe("repository browser chips", () => {
-  it("labels Chromium's browser without borrowing a supported forge logo", () => {
+  it("labels Chromium with the Gerrit product mark", () => {
     expect(remoteForgeChip("https://chromium.googlesource.com/v8/v8.git", {}, DISPLAYS)).toEqual({
-      kind: null,
-      name: "Chromium Googlesource",
+      kind: "gerrit",
+      name: null,
       others: 0,
-      title: "Browse repository on chromium.googlesource.com"
+      title: "On chromium.googlesource.com"
     });
   });
 

@@ -205,6 +205,10 @@ describe("forkCheckoutLead", () => {
 });
 
 describe("originForkOffer", () => {
+  it("does not offer account-based forks on Gerrit", () => {
+    expect(originForkOffer("https://chromium.googlesource.com/v8/v8.git", undefined, {})).toBeNull();
+    expect(originForkOffer("ssh://user@review.example:29418/project", undefined, { "review.example": "gerrit" })).toBeNull();
+  });
   const url = "git@github.com:tzarebczan/diskhound.git";
   const identity = {
     nameWithOwner: "tzarebczan/diskhound"

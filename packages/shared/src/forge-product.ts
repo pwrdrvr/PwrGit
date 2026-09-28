@@ -31,13 +31,24 @@ export type ForgeProduct = {
    * drifted would print a command naming a CLI the app never invokes.
    */
   readonly cli: string;
+  /** Public integrations never claim an authenticated account or require a CLI. */
+  readonly access: "cli" | "public";
+  readonly workflows: {
+    readonly forks: boolean;
+    readonly repositorySearch: boolean;
+    readonly cliClone: boolean;
+    readonly cloneFromCoordinates: boolean;
+    readonly branchReviews: boolean;
+  };
+  readonly reviewModel: "branch" | "patchset";
+  readonly minPathSegments: number;
   readonly installHint?: string;
   readonly signInHost: { readonly flag: string; readonly apiPath?: string };
   /**
    * The hosted instance.
    *
    * The ONE host resolution recognises without enumeration — a hostname is
-   * evidence of nothing else, so every self-managed instance must be
+   * evidence of nothing else, so unlisted self-managed instances must be
    * enumerated or added by hand. It is also the fallback the status probe uses
    * when no CLI reports an account, and the one host whose sign-in command
    * needs no `--hostname`.
@@ -74,8 +85,8 @@ export type ForgeProduct = {
    *
    * GitHub is exactly `owner/repo`; anything deeper is a tree, a gist or a page
    * URL that merely looks like a repository. GitLab nests groups arbitrarily,
-   * so `pwrdrvr/qa/forge/PwrGit-Test` is one project. Two is always the
-   * minimum — a project has an owner and a name on every product.
+   * so `pwrdrvr/qa/forge/PwrGit-Test` is one project. Gerrit also permits
+   * a single component, with no owner namespace.
    *
    * A finite ceiling, not `Infinity`: `JSON.stringify(Infinity)` is `null` and
    * `n <= null` is false, so one round trip through JSON — a diagnostics dump,
@@ -145,7 +156,23 @@ export type ForgeProduct = {
  * caller in that process.
  */
 export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze({
+  gerrit: {
+    label: "Gerrit", cli: "", access: "public",
+    workflows: { forks: false, repositorySearch: false, cliClone: false, cloneFromCoordinates: false, branchReviews: false },
+    reviewModel: "patchset", minPathSegments: 1,
+    signInHost: { flag: "" }, saasHost: "chromium.googlesource.com",
+    changeRequestLabel: "Change", changeRequestSigil: "#",
+    changeRequestBranchPrefix: "change", organizationNoun: "group",
+    maxPathSegments: 32, hostAllowlistEnv: "PWRGIT_GERRIT_HOSTS",
+    addHost: { button: "Add Gerrit host", sub: "Read public changes from a Gerrit instance.", title: "Add Gerrit host", placeholder: "review.example.com" },
+    forkCompletesAsynchronously: false,
+    capabilities: { batchedBranchLookup: false, batchedCommitAssociation: false, changeSizeAndTimeline: true, commitAuthorIdentity: false, forkDefaultBranchOnly: false }
+  },
   gitcafe: {
+    access: "cli",
+    workflows: { forks: true, repositorySearch: true, cliClone: true, cloneFromCoordinates: true, branchReviews: true },
+    reviewModel: "branch",
+    minPathSegments: 2,
     label: "GitCafe",
     cli: "cafe",
     installHint: "Install Bun, then run `bun i -g @gitcafe/cli` to install or update cafe (0.5.0 or newer). Both bun and cafe must be available.",
@@ -169,6 +196,10 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     }
   },
   github: {
+    access: "cli",
+    workflows: { forks: true, repositorySearch: true, cliClone: true, cloneFromCoordinates: true, branchReviews: true },
+    reviewModel: "branch",
+    minPathSegments: 2,
     label: "GitHub",
     cli: "gh",
     signInHost: { flag: "--hostname" },
@@ -197,6 +228,10 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     }
   },
   gitlab: {
+    access: "cli",
+    workflows: { forks: true, repositorySearch: true, cliClone: true, cloneFromCoordinates: true, branchReviews: true },
+    reviewModel: "branch",
+    minPathSegments: 2,
     label: "GitLab",
     cli: "glab",
     signInHost: { flag: "--hostname" },
@@ -364,6 +399,7 @@ export function forgeCapabilities(kind: ForgeKind): ForgeCapabilities {
  */
 export function forgeKindForCli(cli: string): ForgeKind | null {
   const normalized = cli.trim().toLowerCase();
+  if (normalized === "") return null;
   // Both sides normalized: the regex that produced `cli` carries the `i` flag,
   // so matching a table value verbatim would answer null for a command the
   // box had already accepted, and the paste would resolve against whichever
@@ -377,7 +413,7 @@ export function forgeKindForCli(cli: string): ForgeKind | null {
 
 /** Every product's CLI, in `FORGE_KINDS` order. */
 export function forgeCliNames(): string[] {
-  return FORGE_KINDS.map((kind) => FORGE_PRODUCTS[kind].cli);
+  return FORGE_KINDS.map((kind) => FORGE_PRODUCTS[kind].cli).filter(Boolean);
 }
 
 /**
@@ -394,12 +430,13 @@ export function forgeAllowsPathDepth(kind: ForgeKind, segments: number): boolean
   // must answer "no path fits" — the module's own null no-op — rather than
   // throwing out of a resolver whose callers treat it as total.
   const product = forgeProductFor(kind);
-  return product !== null && segments >= 2 && segments <= product.maxPathSegments;
+  return product !== null && segments >= product.minPathSegments && segments <= product.maxPathSegments;
 }
 
 /** Copyable CLI sign-in syntax, shared by both settings sections. */
 export function forgeSignInCommand(kind: ForgeKind, hostname?: string): string {
   const product = forgeProduct(kind);
+  if (product.access === "public") return "";
   const base = `${product.cli} auth login`;
   if (hostname === undefined) return base;
   const value = product.signInHost.apiPath === undefined
