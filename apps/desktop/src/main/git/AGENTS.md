@@ -253,7 +253,7 @@ could not be listed (an unmounted volume, a share not up yet at login), or one
 that resolved no repos at all while roots remain configured. Clearing every
 root is the one deliberate route to zero and still prunes.
 
-Two things follow that are easy to undo by accident:
+Three things follow that are easy to undo by accident:
 
 - **The scan clock and the prune answer different questions.** Pruning wants
   evidence the repos are gone; `profile_scan_state` only records that a pass
@@ -262,6 +262,12 @@ Two things follow that are easy to undo by accident:
   that saw nothing — and there is no manual rescan channel, only
   `profile:setRoots`, so the volume stays undiscovered for a day after it
   mounts.
+- **A repository whose own folder is gone asks for the rescan early.** When the
+  state probe finds a PRIMARY checkout missing, `missing-repo-rescan.ts` runs
+  the profile's rescan past the throttle, at most once per repo per ten
+  minutes. It changes when the scan runs, not what it may prune — every guard
+  above still decides — so a deleted repo leaves the sidebar within one poll,
+  and a hand-added one (never pruned) stays flagged missing.
 - **Readability is only observed at the root.** A mount point *below* a
   configured root that is unmounted still reads as an ordinary empty directory
   (or throws where discovery ignores it), so repos under it are pruned as long

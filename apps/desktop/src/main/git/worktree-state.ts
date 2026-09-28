@@ -51,6 +51,7 @@ type WorktreeRow = {
   repo_id: string;
   repo_path: string;
   missing: number;
+  is_primary: number;
 };
 type StateRow = {
   worktree_id: string;
@@ -131,6 +132,18 @@ export class WorktreeStateService {
     private readonly operations = new WorktreeOperationQueue()
   ) {}
 
+  private repoPathMissing: ((repoId: string) => void) | null = null;
+
+  /**
+   * Hear about a probe that finds a repository's OWN checkout gone — the
+   * primary, not a linked worktree. A linked worktree's row is the thing to
+   * flag; a missing primary usually means the whole repository was deleted
+   * or moved, and only a profile rescan can drop its row (see index.ts).
+   */
+  onRepoPathMissing(listener: (repoId: string) => void): void {
+    this.repoPathMissing = listener;
+  }
+
   getCached(worktreeId: string): WorktreeState | null {
     const row = this.db
       .prepare(
@@ -145,7 +158,7 @@ export class WorktreeStateService {
   private worktreeRow(worktreeId: string): WorktreeRow | null {
     const row = this.db
       .prepare(
-        `SELECT w.id, w.branch, w.path, w.repo_id, w.missing,
+        `SELECT w.id, w.branch, w.path, w.repo_id, w.missing, w.is_primary,
                 r.path AS repo_path
          FROM worktrees w JOIN repos r ON r.id = w.repo_id
          WHERE w.id = ?`
@@ -164,6 +177,7 @@ export class WorktreeStateService {
    * not a change it can see.
    */
   private markMissing(wt: WorktreeRow): WorktreeState | null {
+    if (wt.is_primary === 1) this.repoPathMissing?.(wt.repo_id);
     this.db.transaction(() => {
       this.db
         .prepare("UPDATE worktrees SET missing = 1 WHERE id = ?")
