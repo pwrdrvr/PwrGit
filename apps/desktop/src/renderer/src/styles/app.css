@@ -5028,7 +5028,9 @@ button.agent-menu__item:hover {
 
 /* Keep repository handoffs, result growth and tab changes from moving the
    dialog or its footer. Only the body scrolls; the status reserves both lines. */
-.modal.maintenance { height: min(720px, 82vh); }
+/* Only the task body scrolls. `hidden` still accepts programmatic scrolling
+   when focus moves during a stage swap, which can hide the header and tabs. */
+.modal.maintenance { height: min(720px, 82vh); overflow: clip; }
 .maintenance > .bulk-sync__status {
   height: 108px;
   box-sizing: border-box;
@@ -16999,3 +17001,28 @@ button.agent-auth-node:focus-visible,
 
 .prune__panel > .prune__head { padding: 12px 18px; }
 .prune__panel > .prune__head p { margin-top: 0; }
+
+.maintenance__workflow-options {
+  margin: 0 0 12px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.maintenance__workflow-options label {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.maintenance__workflow-options select {
+  font: inherit;
+  padding: 5px 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+}
+.maintenance__workflow-receipts {
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.maintenance__workflow-receipts li { margin-bottom: 6px; }

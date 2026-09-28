@@ -332,6 +332,7 @@ test("the pruner sweeps a never-browsed profile, then reclaims only ignored file
 
   await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
   await window.getByRole("button", { name: "Worktrees", exact: true }).click();
+  await window.getByRole("button", { name: "Analyze", exact: true }).click();
   const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
   await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
   await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
@@ -411,6 +412,7 @@ test("removing from the pruner confirms the count, deletes the checkout, and kee
 
   await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
   await window.getByRole("button", { name: "Worktrees", exact: true }).click();
+  await window.getByRole("button", { name: "Analyze", exact: true }).click();
   const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
   await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
   await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
@@ -488,6 +490,7 @@ test("the pruner never offers a dirty or unmerged worktree", async () => {
 
   await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
   await window.getByRole("button", { name: "Worktrees", exact: true }).click();
+  await window.getByRole("button", { name: "Analyze", exact: true }).click();
   const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
   await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
   await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
@@ -500,4 +503,60 @@ test("the pruner never offers a dirty or unmerged worktree", async () => {
   await expect(dialog.locator(".prune__rows")).not.toContainText("feat/dirty");
   await expect(dialog.locator(".prune__rows")).not.toContainText("feat/open");
   await expect(dialog.locator(".prune__rows")).not.toContainText("feat/held");
+});
+
+test("combined maintenance waits for Analyze, prunes, reviews gone branches, then collects", async () => {
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  const { repo, worktreePath } = makeFinishedWorktree(box, "combined-demo");
+  const remote = box.makeBareRemote("combined-origin");
+  box.git(repo.path, "remote", "add", "origin", remote);
+  box.git(repo.path, "push", "-u", "origin", "feat/finished");
+  box.git(repo.path, "push", "origin", "--delete", "feat/finished");
+  // This fixture represents an old checkout. Git's checkout/branch reflogs
+  // would otherwise correctly protect the branch created seconds ago.
+  box.git(repo.path, "reflog", "expire", "--expire=now", "--all");
+  const head = box.git(repo.path, "rev-parse", "feat/finished").trim();
+  handle = await launchApp({ identity: { name: "Demo Developer", email: "demo@example.test" } });
+  const { window } = handle;
+  await addRootUnexpanded(window, handle, box);
+  await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
+  const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
+  await expect(dialog.getByRole("button", { name: "Combined", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByRole("checkbox", { name: /Propose Worktrees/ })).toBeChecked();
+  await expect(dialog.locator(".prune__activity")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Analyze", exact: true })).toBeEnabled();
+  if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
+    await dialog.screenshot({ path: "/tmp/pwrgit-combined-plan.png", animations: "disabled" });
+  }
+  await dialog.getByRole("button", { name: "Analyze", exact: true }).click();
+  await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished");
+  await expect(dialog.getByRole("heading", { name: "Repository maintenance" })).toBeInViewport({ ratio: 1 });
+  // The newly written ignored fixtures are correctly protected until the
+  // operator chooses otherwise during review.
+  await dialog.getByLabel("Protect recently touched worktrees").uncheck();
+  await dialog.locator(".prune__row input").check();
+  await expect(dialog.getByRole("button", { name: "Continue without Pruning", exact: true })).toBeVisible();
+  if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
+    await dialog.screenshot({ path: "/tmp/pwrgit-combined-worktrees.png", animations: "disabled" });
+  }
+  await dialog.getByRole("button", { name: "Start Pruning and Continue", exact: true }).click();
+  await confirmDialogButton(window).click();
+  await expect(dialog.getByRole("button", { name: "Remove 1 Branch and Continue", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Repository maintenance" })).toBeInViewport({ ratio: 1 });
+  expect(existsSync(worktreePath)).toBe(false);
+  expect(box.git(repo.path, "rev-parse", "feat/finished").trim()).toBe(head);
+  if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
+    await dialog.screenshot({ path: "/tmp/pwrgit-combined-branches.png", animations: "disabled" });
+    await expect(dialog.getByRole("heading", { name: "Repository maintenance" })).toBeInViewport({ ratio: 1 });
+  }
+  await dialog.getByRole("button", { name: "Remove 1 Branch and Continue", exact: true }).click();
+  await expect(dialog).toContainText("Git collection completed.");
+  await expect(dialog).toContainText("1 worktree removed");
+  await expect(dialog).toContainText("1 local branch removed");
+  expect(box.git(repo.path, "branch", "--list", "feat/finished").trim()).toBe("");
+  expect(box.git(repo.path, "cat-file", "-t", head).trim()).toBe("commit");
+  await dialog.getByRole("button", { name: "Restore branch", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "restored", exact: true })).toBeDisabled();
+  expect(box.git(repo.path, "rev-parse", "feat/finished").trim()).toBe(head);
 });

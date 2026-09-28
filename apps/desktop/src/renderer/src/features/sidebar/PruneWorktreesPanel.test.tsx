@@ -122,6 +122,7 @@ async function render(
     root.render(
       <StrictMode>
         <PruneWorktreesPanel
+          autoStart
           profileId="profile-1"
           onRemove={onRemove}
           onClose={vi.fn()}
@@ -438,4 +439,12 @@ describe("PruneWorktreesPanel", () => {
     // Re-create so afterEach's unmount stays valid.
     root = createRoot(container);
   });
+});
+
+it("leaves the busy state and reports a rejected scan", async () => {
+  dispatch.mockImplementation((name: string) => name === "prune:scan"
+    ? Promise.reject(new Error("Disconnected")) : Promise.resolve({ ok: true, value: null }));
+  await render();
+  expect(container.querySelector(".prune__activity")).toBeNull();
+  expect(container.querySelector(".modal__error")?.textContent).toBe("Disconnected");
 });

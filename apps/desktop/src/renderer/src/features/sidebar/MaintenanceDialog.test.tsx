@@ -13,6 +13,11 @@ const { dispatch, subscribe } = vi.hoisted(() => ({
   subscribe: vi.fn()
 }));
 vi.mock("../../lib/pwrgit", () => ({ dispatch, subscribe }));
+vi.mock("../shell/dialogs", () => ({ confirmDialog: async () => true }));
+vi.mock("../../lib/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/platform")>()),
+  currentPlatform: () => "linux"
+}));
 import { MaintenanceDialog } from "./MaintenanceDialog";
 
 const repo: MaintenanceRepo = {
@@ -90,7 +95,7 @@ beforeEach(async () => {
   await act(async () =>
     root.render(
       <StrictMode>
-        <MaintenanceDialog onRemoveWorktrees={async () => undefined} profileId="one" platform="linux" onClose={onClose} />
+        <MaintenanceDialog initialTab="gc" onRemoveWorktrees={async () => undefined} profileId="one" platform="linux" onClose={onClose} />
       </StrictMode>
     )
   );
@@ -111,6 +116,8 @@ describe("maintenance dialog", () => {
     dispatch.mockImplementation((name: string) => name === "prune:scan"
       ? scan : Promise.resolve({ ok: true, value: null }));
     await click("Worktrees");
+    expect(dispatch.mock.calls.filter(([name]) => name === "prune:scan")).toHaveLength(0);
+    await click("Analyze");
     expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
     expect(container.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("Repository maintenance");
     expect(container.textContent).toContain("Protect recently touched worktrees");
@@ -525,5 +532,147 @@ describe("maintenance dialog opened from a repository's branch list", () => {
       "maintenance:run",
       expect.objectContaining({ allProfiles: true })
     );
+  });
+});
+
+
+describe("combined maintenance workflow", () => {
+  const events = new Map<string, (event: unknown) => void>();
+  const scannedWorktrees = {
+    operationId: "scan", cancelled: false,
+    startedAt: "2026-09-28T00:00:00Z", finishedAt: "2026-09-28T00:00:01Z",
+    counts: { repos: { scanned: 1, cached: 0, skipped: 0, failed: 0, cancelled: 0 },
+      worktreesConsidered: 1, candidates: 1, sizeBytes: 1024 },
+    results: [{ repoId: "repo", name: "example", path: "/fixtures/example", outcome: "scanned", computed: 1,
+      candidates: [{ worktreeId: "finished-wt", repoId: "repo", repoName: "example", branch: "finished",
+        path: "/fixtures/finished", reason: { kind: "merged_pr", prNumber: 42 }, sizeBytes: 1024,
+        activityComplete: true, lastActivityAt: "2026-08-01T00:00:00Z", lastTouchedAt: "2026-08-01T00:00:00Z" }] }]
+  };
+  const actions = () => runCalls().map(([, req]) => req.action.kind);
+  let remove: ReturnType<typeof vi.fn<(ids: string[]) => Promise<void>>>;
+  async function open(savedMode: "review" | "auto" = "review") {
+    events.clear();
+    remove = vi.fn(async (ids: string[]) => {
+      ids.forEach((worktreeId) => events.get("worktree:removed")?.({ worktreeId }));
+    });
+    subscribe.mockImplementation((name: string, handler: (event: unknown) => void) => {
+      events.set(name, handler);
+      return () => events.delete(name);
+    });
+    dispatch.mockImplementation(async (name: string, req: { action?: { kind: string } }) => {
+      if (name === "settings:read") return { ok: true, value: { general: {
+        branchCleanupPrProof: true, branchCleanupKeepDays: null, maintenanceBranchMode: savedMode
+      } } };
+      if (name === "prune:scan") return { ok: true, value: scannedWorktrees };
+      if (name === "maintenance:run") return { ok: true, value: summary([{
+        repo, outcome: "success", message: "Finished",
+        ...(req.action?.kind === "scan-branches" ? { candidates: [candidate], kept: [] } : {}),
+        ...(req.action?.kind === "delete-branches" ? { branches: [{ branch: "finished", head: "abc123", deleted: true, message: "Deleted." }] } : {})
+      }]) };
+      return { ok: true, value: null };
+    });
+    await act(async () => root.render(<MaintenanceDialog key="workflow" profileId="one" platform="linux"
+      onClose={onClose} onRemoveWorktrees={remove} />));
+    dispatch.mockClear();
+  }
+  async function task(index: number) {
+    const input = container.querySelectorAll<HTMLInputElement>(".maintenance__options > label > input[type=checkbox]")[index]!;
+    await act(async () => input.click());
+  }
+  it("defaults to a checked three-step plan and does no work before Analyze", async () => {
+    await open();
+    expect(button("Combined").getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelectorAll(".maintenance__options > label > input:checked")).toHaveLength(3);
+    expect(runCalls()).toHaveLength(0);
+    expect(dispatch.mock.calls.some(([name]) => name === "prune:scan")).toBe(false);
+    await task(0); await task(1); await task(2);
+    expect(button("Analyze").disabled).toBe(true);
+  });
+  it("pauses at both reviews and runs GC only after an explicit continuation", async () => {
+    await open();
+    await click("Analyze");
+    expect(container.querySelectorAll(".prune__row")).toHaveLength(1);
+    expect(actions()).toEqual([]);
+    await click("Continue without Pruning");
+    expect(actions()).toEqual(["scan-branches"]);
+    expect(button("Remove 1 Branch and Continue")).toBeTruthy();
+    await click("Continue without Removing Branches");
+    expect(actions()).toEqual(["scan-branches", "gc"]);
+    expect(remove).not.toHaveBeenCalled();
+  });
+  it("waits for successful pruning before branch analysis, and preserves branch receipts after GC", async () => {
+    await open();
+    let finish!: () => void;
+    remove.mockImplementation(async (ids) => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      ids.forEach((worktreeId) => events.get("worktree:removed")?.({ worktreeId }));
+    });
+    await click("Analyze");
+    await act(async () => container.querySelector<HTMLInputElement>(".prune__row input")!.click());
+    await click("Start Pruning and Continue");
+    expect(actions()).toEqual([]);
+    expect(button("Combined").disabled).toBe(true);
+    await act(async () => {
+      events.get("worktree:removed")?.({ worktreeId: "other-profile-worktree" });
+      finish();
+    });
+    expect(actions()).toEqual(["scan-branches"]);
+    await click("Remove 1 Branch and Continue");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    expect(container.textContent).toContain("1 worktree removed");
+    expect(container.textContent).toContain("1 local branch removed");
+    expect(button("Restore branch")).toBeTruthy();
+  });
+  it("stays on worktree review if a requested removal did not succeed", async () => {
+    await open();
+    remove.mockResolvedValue(undefined);
+    await click("Analyze");
+    await act(async () => container.querySelector<HTMLInputElement>(".prune__row input")!.click());
+    await click("Start Pruning and Continue");
+    expect(actions()).toEqual([]);
+    expect(container.textContent).toContain("Some worktrees were not removed");
+  });
+  it("restores Auto, enforces an age guard, and sequences scan → removal → GC", async () => {
+    await open("auto");
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Branch removal"]')!.value).toBe("auto");
+    await task(0);
+    await click("Analyze");
+    expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
+    for (const [, req] of runCalls().slice(0, 2)) {
+      expect(req.action.options.keepDays).toBe(7);
+      expect(req.allProfiles).toBe(false);
+    }
+    expect(dispatch.mock.calls.some(([name]) => name === "prune:scan")).toBe(false);
+  });
+  it("honors task opt-outs and saves the branch-review preference", async () => {
+    await open();
+    const mode = container.querySelector<HTMLSelectElement>('[aria-label="Branch removal"]')!;
+    await act(async () => { mode.value = "auto"; mode.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(dispatch).toHaveBeenCalledWith("settings:update", { patch: { general: { maintenanceBranchMode: "auto" } } });
+    await task(0); await task(1);
+    await click("Analyze");
+    expect(actions()).toEqual(["gc"]);
+  });
+  it.each(["cancelled", "failed", "partial"])("does not advance after a %s branch scan", async (outcome) => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run"
+      ? { ok: true, value: { ...summary([{ repo, outcome, message: "Stopped" } as MaintenanceRepoResult]), cancelled: outcome === "cancelled" } }
+      : previous(name, req));
+    await task(0);
+    await click("Analyze");
+    expect(actions()).toEqual(["scan-branches"]);
+    expect(container.textContent).toContain("Later tasks were not started");
+  });
+  it("does not garbage collect after a partial branch removal", async () => {
+    await open("auto");
+    const previous = dispatch.getMockImplementation()!;
+    dispatch.mockImplementation(async (name, req) => name === "maintenance:run" && req.action.kind === "delete-branches"
+      ? { ok: true, value: summary([{ repo, outcome: "partial", message: "Changed branch retained." }]) }
+      : previous(name, req));
+    await task(0);
+    await click("Analyze");
+    expect(actions()).toEqual(["scan-branches", "delete-branches"]);
+    expect(container.textContent).toContain("Later tasks were not started");
   });
 });
