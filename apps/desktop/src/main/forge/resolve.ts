@@ -1,4 +1,4 @@
-import { classifyForgeHost, forgeAllowsPathDepth } from "@pwrgit/shared";
+import { classifyForgeHost, forgeAllowsPathDepth, forgeProduct, gerritProjectPath } from "@pwrgit/shared";
 import type { ForgeKind, ForgeRepo } from "./types";
 
 /** Host → forge, for hosts whose name doesn't announce what they run. */
@@ -115,19 +115,24 @@ export function classifyHost(
  */
 export function resolveForgeRepo(
   url: string,
-  overrides: ForgeHostOverrides = {}
+  overrides: ForgeHostOverrides = {},
+  reviewUrlFor: (host: string) => string | undefined = () => undefined
 ): ForgeRepo | null {
   const parsed = parseRemoteUrl(url);
   if (parsed === null) return null;
   const kind = classifyHost(parsed.host, overrides);
   if (kind === null) return null;
-  const segments = parsed.path.split("/");
+  const reviewUrl = reviewUrlFor(parsed.host);
+  const path = forgeProduct(kind).reviewModel === "patchset"
+    ? gerritProjectPath(url, parsed.path, reviewUrl) : parsed.path;
+  const segments = path.split("/");
   if (!forgeAllowsPathDepth(kind, segments.length)) return null;
   return {
     kind,
     host: parsed.host,
     ...(parsed.port === undefined ? {} : { port: parsed.port }),
-    path: parsed.path
+    path,
+    ...(reviewUrl === undefined ? {} : { reviewUrl })
   };
 }
 

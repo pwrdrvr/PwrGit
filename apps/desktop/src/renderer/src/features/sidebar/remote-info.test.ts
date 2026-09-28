@@ -140,3 +140,15 @@ describe("Chromium repository browsing", () => {
     expect(remoteWebUrl(url)).toBeNull();
   });
 });
+
+
+it("opens mounted Gerrit projects with the same coordinates as API reads", () => {
+  const hosts = { "review.example": "gerrit" } as const;
+  const reviewUrls = { "review.example": "https://review.example/r" };
+  expect(remoteWebUrl("https://review.example/r/project.git", hosts, reviewUrls))
+    .toBe("https://review.example/r/q/project%3Aproject");
+  expect(remoteWebUrl("ssh://user@review.example:29418/r/project", hosts, reviewUrls))
+    .toBe("https://review.example/r/q/project%3Ar%2Fproject");
+  expect(repoWebUrl({ host: "gerrit", hostname: "review.example", owner: "", name: "project", nameWithOwner: "project", visibility: "public" }, reviewUrls))
+    .toBe("https://review.example/r/q/project%3Aproject");
+});

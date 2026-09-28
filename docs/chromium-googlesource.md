@@ -45,7 +45,10 @@ Desktop support includes:
 - Configure a separate HTTPS **Review URL** for the Git host, including a
   deployment path if needed. Chromium maps to
   `https://chromium-review.googlesource.com`; an SSH port is not reused as a
-  review API port.
+  review API port. For a Git URL on that same HTTP(S) endpoint, the configured
+  deployment prefix is removed from project coordinates: `/r/project` at
+  review base `/r` addresses project `project`. SSH project paths and paths
+  on a separate Git host are left intact.
 - Read public repository identity and changes anonymously: open lists, lookup
   by number and commit, draft/open/merged/abandoned status, and available size
   and timestamps. Abandoned changes use the app's closed state. Reads do not

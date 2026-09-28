@@ -26,8 +26,9 @@ export type ResolvedForge = { provider: ForgeProvider; repo: ForgeRepo };
  */
 export function resolveForge(
   remoteUrl: string,
-  overrides: ForgeHostOverrides = {}
+  overrides: ForgeHostOverrides = {},
+  reviewUrlFor: (host: string) => string | undefined = () => undefined
 ): ResolvedForge | null {
-  const repo = resolveForgeRepo(remoteUrl, overrides);
+  const repo = resolveForgeRepo(remoteUrl, overrides, reviewUrlFor);
   return repo === null ? null : { provider: providerFor(repo.kind), repo };
 }

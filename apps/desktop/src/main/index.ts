@@ -598,13 +598,12 @@ if (!gotSingleInstanceLock) {
     // Enumeration has landed: adopt whatever hosts it found.
     void forgeDirectoryPrimed.then(onForgeTargetsMaybeMoved, () => undefined);
     const resolveEnabledForge: typeof resolveForge = (url, overrides) => {
-      const resolved = resolveForge(url, overrides ?? forgeHosts.overrides());
+      const resolved = resolveForge(url, overrides ?? forgeHosts.overrides(), (host) => forgeHosts.reviewUrl(host));
       if (resolved === null) return null;
-      resolved.repo.reviewUrl = forgeHosts.reviewUrl(resolved.repo.host);
       return forgeHosts.isEnabled(resolved.repo.host).enabled ? resolved : null;
     };
     const resolveEnabledForgeRepo: typeof resolveForgeRepo = (url, overrides) => {
-      const repo = resolveForgeRepo(url, overrides ?? forgeHosts.overrides());
+      const repo = resolveForgeRepo(url, overrides ?? forgeHosts.overrides(), (host) => forgeHosts.reviewUrl(host));
       if (repo === null) return null;
       return forgeHosts.isEnabled(repo.host).enabled ? repo : null;
     };
@@ -632,7 +631,8 @@ if (!gotSingleInstanceLock) {
     // recognized yet, and `.enabled` alone cannot tell those apart.
     const identityService = new IdentityService(db, execGit, forges, {
       overrides: () => forgeHosts.overrides(),
-      isEnabled: (hostname) => forgeHosts.isEnabled(hostname)
+      isEnabled: (hostname) => forgeHosts.isEnabled(hostname),
+      reviewUrl: (hostname) => forgeHosts.reviewUrl(hostname)
     });
     /**
      * Re-ask for identities whose answer the gate may have just changed.

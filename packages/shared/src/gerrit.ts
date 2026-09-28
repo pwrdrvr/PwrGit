@@ -41,3 +41,17 @@ export function gerritPatchSet(ref: string | undefined, number: number): number 
 export function gerritPatchBranch(number: number, patchSet: number): string {
   return `change/${number}/${patchSet}`;
 }
+
+/** Strip a configured web deployment base only from that same HTTP endpoint.
+ * SSH project paths and paths on a separate Git server are already project
+ * coordinates; a matching group name there must not be removed. */
+export function gerritProjectPath(remoteUrl: string, path: string, reviewUrl?: string): string {
+  if (!reviewUrl) return path;
+  try {
+    const remote = new URL(remoteUrl);
+    const review = new URL(reviewUrl);
+    if (!/^https?:$/.test(remote.protocol) || remote.origin !== review.origin) return path;
+    const prefix = review.pathname.replace(/^\/+|\/+$/g, "");
+    return prefix !== "" && path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path;
+  } catch { return path; }
+}

@@ -1,5 +1,8 @@
 import {
   parseForgeRemote,
+  isForgeKind,
+  forgeProduct,
+  gerritProjectPath,
   type RepoIdentity,
   type ForgeHostMap
 } from "@pwrgit/shared";
@@ -67,7 +70,11 @@ export function remoteWebUrl(
   reviewUrls: Readonly<Record<string, string>> = {}
 ): string | null {
   const parsed = parseForgeRemote(url, overrides);
-  return parsed === null ? null : repositoryBrowserUrl(parsed, reviewUrls);
+  if (parsed === null) return null;
+  if (isForgeKind(parsed.host) && forgeProduct(parsed.host).reviewModel === "patchset") {
+    parsed.nameWithOwner = gerritProjectPath(url, parsed.nameWithOwner, reviewUrls[parsed.hostname]);
+  }
+  return repositoryBrowserUrl(parsed, reviewUrls);
 }
 
 /**

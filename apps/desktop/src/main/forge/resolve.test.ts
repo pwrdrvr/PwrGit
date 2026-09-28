@@ -151,3 +151,18 @@ describe("forgeOrigin", () => {
     );
   });
 });
+
+
+it.each([
+  ["https://review.example/r/project.git", "project"],
+  ["https://review.example/r/group/project", "group/project"],
+  ["https://review.example/r/r/project", "r/project"],
+  ["https://review.example/related/project", "related/project"],
+  ["ssh://user@review.example:29418/r/project", "r/project"],
+  ["user@review.example:r/project", "r/project"],
+  ["https://git.example/r/project", "r/project"],
+  ["https://review.example:8443/r/project", "r/project"]
+])("resolves a mounted Gerrit deployment without changing unrelated project prefixes: %s", (url, path) => {
+  expect(resolveForgeRepo(url, { "review.example": "gerrit", "git.example": "gerrit" }, () => "https://review.example/r/"))
+    .toMatchObject({ kind: "gerrit", path, reviewUrl: "https://review.example/r/" });
+});
