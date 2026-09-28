@@ -42,7 +42,8 @@ test("drops a repository from the sidebar when its folder is deleted", async () 
   await expect(row).toHaveClass(/is-selected/);
   await expect(window.locator(".wt-header")).toBeVisible();
 
-  rmSync(doomed.path, { recursive: true, force: true });
+  // Windows can briefly retain a Git child process's handle to the selected repo.
+  rmSync(doomed.path, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 });
   await triggerActiveRefresh(handle);
 
   await expect(repoGroup(window, "doomed")).toHaveCount(0);
