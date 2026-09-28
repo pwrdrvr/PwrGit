@@ -11,7 +11,8 @@
 // graph, and rebase entries.
 
 import type { ForgeHostMap } from "./forge-remote";
-import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress } from "./maintenance";
+import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
+import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
 import type {
   AgentChoice,
   AgentMessageDraft,
@@ -626,6 +627,14 @@ export type GeneralSettings = {
    * looking at is a surprise unless you asked for it.
    */
   searchAllProfiles: boolean;
+  /**
+   * Maintenance › Local branches: count a merged pull request whose head IS the
+   * local tip as proof a branch is finished (squash and rebase merges).
+   */
+  branchCleanupPrProof: boolean;
+  /** Maintenance › Local branches: keep branches touched within this many
+   *  days. Null switches the age guard off. */
+  branchCleanupKeepDays: BranchCleanupKeepDays | null;
 };
 
 export type ExperimentalSettings = {
@@ -711,7 +720,9 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   developerMode: false,
   sidebarTextSize: "md",
   sidebarDensity: "comfortable",
-  searchAllProfiles: false
+  searchAllProfiles: false,
+  branchCleanupPrProof: DEFAULT_BRANCH_CLEANUP_OPTIONS.prProof,
+  branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
@@ -1454,6 +1465,16 @@ export interface Commands {
   "maintenance:cancel": {
     req: { operationId: string };
     res: { cancelled: boolean };
+  };
+  /**
+   * Recreate a branch the finished-branch clean-up deleted, at the tip it had.
+   * Refused when the name is taken again, and fails plainly once Git has
+   * pruned the commit — a deleted branch's reflog goes with it, so the
+   * receipt's SHA is the one handle left.
+   */
+  "maintenance:restoreBranch": {
+    req: { repoId: string; branch: string; head: string };
+    res: null;
   };
   /**
    * Sweep a profile for worktrees that are safe to remove.

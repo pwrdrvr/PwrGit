@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  GarbageCollectionMode,
-  MaintenanceAction,
-  MaintenanceRepo,
-  MaintenanceRepoResult,
-  MaintenanceSummary,
-  StaleBranch
+import {
+  BRANCH_CLEANUP_KEEP_DAYS,
+  DEFAULT_BRANCH_CLEANUP_OPTIONS,
+  type BranchCleanupKeepDays,
+  type BranchCleanupOptions,
+  type DeletedBranchResult,
+  type GarbageCollectionMode,
+  type KeptBranch,
+  type KeptBranchReason,
+  type MaintenanceAction,
+  type MaintenanceRepo,
+  type MaintenanceRepoResult,
+  type MaintenanceSummary,
+  type StaleBranch
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { displayPath } from "../../lib/platform";
@@ -15,6 +22,57 @@ import { countOutcomes } from "./bulk-sync-progress";
 
 const branchKey = (branch: StaleBranch): string =>
   `${branch.repoId}:${branch.branch}`;
+/** How many Finished rows a repository shows before "Show all". One
+ *  repository with 200 finished branches must not push the others away. */
+const FINISHED_SLICE = 20;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** "today", "3 days ago", "5 weeks ago", "4 months ago". */
+function ago(at: number, now: number): string {
+  const days = Math.max(0, Math.floor((now - at) / DAY_MS));
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+  if (days < 730) return `${Math.round(days / 30)} months ago`;
+  return `${Math.round(days / 365)} years ago`;
+}
+
+/** The evidence line under a Finished row. */
+export function finishedEvidence(branch: StaleBranch, now: number): string {
+  const touched =
+    branch.touchedAt === undefined ? "" : ` · touched ${ago(branch.touchedAt, now)}`;
+  if (branch.evidence === "ancestry") return `Already in HEAD${touched}`;
+  const merged =
+    branch.pr?.mergedAt === undefined ? "" : ` ${ago(branch.pr.mergedAt, now)}`;
+  return `#${branch.pr?.number ?? "?"} merged${merged} · tip is its head${touched}`;
+}
+
+/** A Kept chip's words, per reason. `keepDays` names the guard that held. */
+function keptLabel(
+  reason: KeptBranchReason,
+  keepDays: BranchCleanupKeepDays | null
+): string {
+  switch (reason) {
+    case "worktree":
+      return "checked out in a worktree";
+    case "unmerged_commits":
+      return "commits not in their PR";
+    case "pr_closed":
+      return "closed without merging";
+    case "pr_open":
+      return "PR still open";
+    case "no_proof":
+      return "no merged PR";
+    case "pr_proof_off":
+      return "squash merges, PR proof off";
+    case "recent":
+      return keepDays === null
+        ? "touched recently"
+        : `touched in the last ${keepDays} ${keepDays === 1 ? "day" : "days"}`;
+  }
+}
+
 const bytes = (value: number): string => {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
   if (value < 1024 * 1024 * 1024)
@@ -25,13 +83,25 @@ const bytes = (value: number): string => {
 export function MaintenanceDialog({
   profileId,
   platform,
-  onClose
+  onClose,
+  initialTab = "gc",
+  repoScope,
+  autoReview = false,
+  now = Date.now
 }: {
   profileId: string;
   platform: string;
   onClose: () => void;
+  initialTab?: "gc" | "branches";
+  /** Review one repository only — the refs browser's "Clean up finished
+   *  branches…" opens the dialog on the repository it was showing. */
+  repoScope?: { id: string; name: string } | undefined;
+  /** Start the branch review on open, with the saved options. Set only by
+   *  that same hand-off: the reader already asked for exactly this. */
+  autoReview?: boolean;
+  now?: () => number;
 }) {
-  const [tab, setTab] = useState<"gc" | "branches">("gc");
+  const [tab, setTab] = useState<"gc" | "branches">(initialTab);
   const [mode, setMode] = useState<GarbageCollectionMode>("standard");
   const [allProfiles, setAllProfiles] = useState(false);
   const [action, setAction] = useState<MaintenanceAction | null>(null);
@@ -45,6 +115,21 @@ export function MaintenanceDialog({
   );
   const [summary, setSummary] = useState<MaintenanceSummary | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [options, setOptions] = useState<BranchCleanupOptions>(
+    DEFAULT_BRANCH_CLEANUP_OPTIONS
+  );
+  // The saved rules arrive after the first paint; a review started before
+  // they land would run on the defaults instead of what the reader chose.
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
+  /** The age guard's last notch, kept while the guard is switched off so
+   *  switching it back on restores it instead of the default. */
+  const [lastKeepDays, setLastKeepDays] = useState<BranchCleanupKeepDays>(
+    DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays ?? 7
+  );
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [restores, setRestores] = useState<
+    Map<string, "restoring" | "restored" | string>
+  >(new Map());
   const [error, setError] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState(0);
   const active = useRef<string | null>(null);
@@ -71,12 +156,53 @@ export function MaintenanceDialog({
     if (action !== null) footerFocus.current?.focus();
   }, [running, action]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void dispatch("settings:read", undefined)
+      .catch(() => null)
+      .then((result) => {
+        if (cancelled) return;
+        // Unreadable settings: review on the defaults rather than never.
+        if (result?.ok === true) {
+          const general = result.value.general;
+          setOptions({
+            prProof: general.branchCleanupPrProof,
+            keepDays: general.branchCleanupKeepDays
+          });
+          if (general.branchCleanupKeepDays !== null)
+            setLastKeepDays(general.branchCleanupKeepDays);
+        }
+        setOptionsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Change the rules, remember them, and drop a review they no longer
+   *  describe — a list reviewed under a 7-day guard is not a 30-day list. */
+  const changeOptions = (next: BranchCleanupOptions): void => {
+    setOptions(next);
+    if (next.keepDays !== null) setLastKeepDays(next.keepDays);
+    reset();
+    void dispatch("settings:update", {
+      patch: {
+        general: {
+          branchCleanupPrProof: next.prProof,
+          branchCleanupKeepDays: next.keepDays
+        }
+      }
+    });
+  };
+
   const reset = (): void => {
     setSummary(null);
     setResults(new Map());
     setDetails(new Map());
     setRepos([]);
     setSelected(new Set());
+    setExpanded(new Set());
+    setRestores(new Map());
     setError(null);
     setAction(null);
   };
@@ -95,6 +221,9 @@ export function MaintenanceDialog({
     setCurrent(new Set());
     setError(null);
     setSelected(new Set());
+    // Keyed by branch name, so a later receipt for the same name must not
+    // inherit this one's "Restored".
+    setRestores(new Map());
     setStartedAt(Date.now());
     offProgress.current = subscribe("maintenance:progress", (event) => {
       if (
@@ -127,6 +256,7 @@ export function MaintenanceDialog({
         operationId,
         profileId,
         allProfiles,
+        ...(repoScope === undefined ? {} : { repoIds: [repoScope.id] }),
         action: next
       });
       if (!live.current) return;
@@ -138,6 +268,16 @@ export function MaintenanceDialog({
             response.value.results.map((result) => [result.repo.id, result])
           )
         );
+        // Finished is checked by default: each row carries its proof, and
+        // the reader came here to clear them. Unticking is the exception.
+        if (next.kind === "scan-branches")
+          setSelected(
+            new Set(
+              response.value.results.flatMap((result) =>
+                (result.candidates ?? []).map(branchKey)
+              )
+            )
+          );
       } else setError(response.error.message);
     } catch (cause) {
       if (live.current)
@@ -170,10 +310,75 @@ export function MaintenanceDialog({
     }
   };
 
+  useEffect(() => {
+    // The refs browser's hand-off: review on open, once the saved rules are in.
+    if (!autoReview || !optionsLoaded || action !== null || running) return;
+    void run({ kind: "scan-branches", options });
+    // Only ever the first review: `action` is set from here on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReview, optionsLoaded]);
+
   const candidates =
     action?.kind === "scan-branches" && summary !== null
       ? summary.results.flatMap((result) => result.candidates ?? [])
       : [];
+  /** Garbage collection's hand-off: branches its per-repository review found. */
+  const collectedFinished =
+    action?.kind === "gc" && summary !== null
+      ? summary.results.reduce(
+          (total, result) => total + (result.candidates?.length ?? 0),
+          0
+        )
+      : 0;
+  const collectedRepos =
+    action?.kind === "gc" && summary !== null
+      ? summary.results.filter((result) => (result.candidates?.length ?? 0) > 0)
+          .length
+      : 0;
+  /** Open the Local branches tab on what the collection already reviewed —
+   *  no second scan, and nothing deleted until the reader chooses. */
+  const reviewCollected = (): void => {
+    if (summary === null) return;
+    const seeded = summary.results.map(
+      (result): MaintenanceRepoResult => ({
+        repo: result.repo,
+        outcome: result.outcome,
+        message: `${result.candidates?.length ?? 0} finished · ${result.kept?.length ?? 0} kept.`,
+        ...(result.candidates === undefined
+          ? {}
+          : { candidates: result.candidates }),
+        ...(result.kept === undefined ? {} : { kept: result.kept })
+      })
+    );
+    setTab("branches");
+    setAction({ kind: "scan-branches", options });
+    setSummary({ ...summary, results: seeded });
+    setResults(new Map(seeded.map((result) => [result.repo.id, result])));
+    setSelected(
+      new Set(seeded.flatMap((result) => (result.candidates ?? []).map(branchKey)))
+    );
+  };
+  const restore = async (
+    repoId: string,
+    deleted: DeletedBranchResult
+  ): Promise<void> => {
+    const key = `${repoId}:${deleted.branch}`;
+    if (restores.get(key) === "restoring") return;
+    setRestores((old) => new Map(old).set(key, "restoring"));
+    let outcome: string;
+    try {
+      const response = await dispatch("maintenance:restoreBranch", {
+        repoId,
+        branch: deleted.branch,
+        head: deleted.head
+      });
+      outcome = response.ok ? "restored" : response.error.message;
+    } catch (cause) {
+      outcome = cause instanceof Error ? cause.message : String(cause);
+    }
+    if (!live.current) return;
+    setRestores((old) => new Map(old).set(key, outcome));
+  };
   const counts = countOutcomes(
     [...results.values()].map((result) => result.outcome)
   );
@@ -283,7 +488,7 @@ export function MaintenanceDialog({
                   : null
                 : {
                     kind: "summary",
-                    text: `${counts.success} succeeded · ${counts.skipped} skipped · ${counts.failed + counts.partial} need attention${scanComplete ? ` · ${candidates.length} eligible branch${candidates.length === 1 ? "" : "es"}` : ""}`
+                    text: `${counts.success} succeeded · ${counts.skipped} skipped · ${counts.failed + counts.partial} need attention${scanComplete ? ` · ${candidates.length} finished branch${candidates.length === 1 ? "" : "es"}` : ""}`
                   }
             }
             counts={counts}
@@ -298,24 +503,32 @@ export function MaintenanceDialog({
           />
         )}
         <div className="maintenance__body">
-          <label className="maintenance__scope">
-            <input
-              type="checkbox"
-              checked={allProfiles}
-              disabled={running}
-              onChange={(event) => {
-                setAllProfiles(event.target.checked);
-                reset();
-              }}
-            />{" "}
-            Include all profiles
-          </label>
-          <p className="maintenance__help">
-            {allProfiles
-              ? "Every known repository across all profiles."
-              : "Every known repository in this window’s profile."}{" "}
-            Shared object stores are processed once per scan or collection.
-          </p>
+          {repoScope === undefined ? (
+            <>
+              <label className="maintenance__scope">
+                <input
+                  type="checkbox"
+                  checked={allProfiles}
+                  disabled={running}
+                  onChange={(event) => {
+                    setAllProfiles(event.target.checked);
+                    reset();
+                  }}
+                />{" "}
+                Include all profiles
+              </label>
+              <p className="maintenance__help">
+                {allProfiles
+                  ? "Every known repository across all profiles."
+                  : "Every known repository in this window’s profile."}{" "}
+                Shared object stores are processed once per scan or collection.
+              </p>
+            </>
+          ) : (
+            <p className="maintenance__help">
+              Only <strong>{repoScope.name}</strong>, from its branch list.
+            </p>
+          )}
           {tab === "gc" ? (
             <fieldset
               className="maintenance__options"
@@ -373,27 +586,97 @@ export function MaintenanceDialog({
               </label>
             </fieldset>
           ) : (
-            <div className="maintenance__help" hidden={action !== null}>
-              <p>
-                <strong>Fetch all repos first.</strong> PwrGit’s regular fetches
-                and Fetch all repos already use <code>--prune</code>, removing
-                stale remote-tracking references such as{" "}
-                <code>origin/feature</code>. Your local <code>feature</code>{" "}
-                branch remains.
-              </p>
-              <p>
-                Review finds local branches whose remote upstream is missing and
-                whose commits are already in the repository checkout’s current
-                HEAD. Checked-out branches, common main branches, and known
-                remote default branches are retained. Branches with no upstream,
-                unique commits, or unproven squash merges are also retained.
-              </p>
-              <p>
-                Choose the branches to delete after review. Each is checked
-                again before ordinary, non-force deletion. This does not delete
-                anything on a remote.
-              </p>
-            </div>
+            <>
+              <fieldset
+                className="maintenance__options"
+                disabled={running}
+              >
+                <legend>Finished branches</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={options.prProof}
+                    onChange={(event) =>
+                      changeOptions({ ...options, prProof: event.target.checked })
+                    }
+                  />
+                  <span>
+                    <strong>Count a merged pull request as proof</strong>
+                    <small>
+                      Finds squash and rebase merges. Offered only when the
+                      branch’s tip is the pull request’s final head commit, so
+                      nothing added after merging is lost.
+                    </small>
+                  </span>
+                </label>
+                <div className="maintenance__option">
+                  <input
+                    id="maintenance-keep-guard"
+                    type="checkbox"
+                    checked={options.keepDays !== null}
+                    onChange={(event) =>
+                      changeOptions({
+                        ...options,
+                        keepDays: event.target.checked ? lastKeepDays : null
+                      })
+                    }
+                  />
+                  <span>
+                    <span className="maintenance__inline">
+                      <label htmlFor="maintenance-keep-guard">
+                        <strong>Keep branches touched in the last</strong>
+                      </label>
+                      <select
+                        aria-label="Age guard"
+                        value={options.keepDays ?? lastKeepDays}
+                        disabled={running || options.keepDays === null}
+                        onChange={(event) =>
+                          changeOptions({
+                            ...options,
+                            keepDays: Number(
+                              event.target.value
+                            ) as BranchCleanupKeepDays
+                          })
+                        }
+                      >
+                        {BRANCH_CLEANUP_KEEP_DAYS.map((days) => (
+                          <option key={days} value={days}>
+                            {days} {days === 1 ? "day" : "days"}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                    <small>
+                      Touched is the newest of the last commit and the last
+                      checkout. Remembered for next time.
+                    </small>
+                  </span>
+                </div>
+              </fieldset>
+              {action === null && (
+                <div className="maintenance__never">
+                  <em>Never offered</em>
+                  <span>
+                    Branches that were never pushed, or have commits no merged
+                    pull request or HEAD contains
+                  </span>
+                  <span>Branches checked out in any worktree</span>
+                  <span>
+                    main, master, trunk, develop, and each remote’s default
+                    branch
+                  </span>
+                </div>
+              )}
+              {action === null && (
+                <p className="maintenance__help">
+                  Only local branch names are removed; nothing on a remote is
+                  deleted. Each branch is checked again at its reviewed tip just
+                  before deletion. Fetch all repos first if remote information
+                  is stale — PwrGit’s fetches prune deleted remote branches,
+                  which is what marks a branch gone.
+                </p>
+              )}
+            </>
           )}
           {tab === "gc" && action === null && (
             <details className="maintenance__help">
@@ -431,12 +714,24 @@ export function MaintenanceDialog({
               preserved. Sizes measure object storage, not free disk space.
             </p>
           )}
-          {action !== null && tab === "branches" && (
-            <p className="maintenance__help">
-              Only merged local branches with missing remote upstreams are
-              eligible. Deletion rechecks each selected branch; checked-out
-              branches and unique commits are retained.
-            </p>
+          {collectedFinished > 0 && !running && (
+            <div className="maintenance__offer">
+              <div>
+                <strong>
+                  {collectedFinished} finished local{" "}
+                  {collectedFinished === 1 ? "branch" : "branches"} across{" "}
+                  {collectedRepos}{" "}
+                  {collectedRepos === 1 ? "repository" : "repositories"}
+                </strong>
+                <small>
+                  Their pull requests merged or their commits are already in
+                  HEAD. Garbage collection never removes branch names.
+                </small>
+              </div>
+              <button className="modal__create" onClick={reviewCollected}>
+                Review…
+              </button>
+            </div>
           )}
           {error !== null && (
             <div className="modal__error" role="alert">
@@ -456,7 +751,7 @@ export function MaintenanceDialog({
                   )
                 }
               />{" "}
-              Select all {candidates.length} eligible{" "}
+              Select all {candidates.length} finished{" "}
               {candidates.length === 1 ? "branch" : "branches"}
             </label>
           )}
@@ -469,7 +764,7 @@ export function MaintenanceDialog({
             <p className="maintenance__help">
               {counts.failed > 0 || summary?.cancelled
                 ? "No eligible branches were reported by completed reviews. Resolve failures or cancellation and review again."
-                : "No eligible branches found. Fetch first if remote information is stale. Squash-merged branches may need individual review in the repository’s branch list."}
+                : "No finished branches found. Fetch first if remote information is stale; each kept branch says why it was kept."}
             </p>
           )}
           <div className="maintenance__results" aria-label="Repository results">
@@ -517,34 +812,70 @@ export function MaintenanceDialog({
                         {bytes(result.afterBytes)}
                       </p>
                     )}
-                  {scanComplete &&
-                    result?.candidates?.map((branch) => (
-                      <label
-                        className="maintenance__branch"
-                        key={branch.branch}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selected.has(branchKey(branch))}
-                          onChange={() => toggleBranch(branchKey(branch))}
-                        />
-                        <span>
-                          <strong>{branch.branch}</strong>
-                          <small>
-                            Missing upstream:{" "}
-                            {branch.upstream.replace(/^refs\/remotes\//, "")} ·
-                            tip {branch.expectedHead.slice(0, 8)}
-                          </small>
-                        </span>
-                      </label>
-                    ))}
+                  {scanComplete && result !== undefined && (
+                    <BranchReview
+                      result={result}
+                      now={now()}
+                      keepDays={options.keepDays}
+                      selected={selected}
+                      onToggle={toggleBranch}
+                      showAll={expanded.has(`finished:${repo.id}`)}
+                      showKept={expanded.has(`kept:${repo.id}`)}
+                      onExpand={(what) =>
+                        setExpanded((old) => {
+                          const next = new Set(old);
+                          const key = `${what}:${repo.id}`;
+                          if (next.has(key)) next.delete(key);
+                          else next.add(key);
+                          return next;
+                        })
+                      }
+                    />
+                  )}
                   {result?.branches !== undefined && (
-                    <ul className="bulk-sync__details">
-                      {result.branches.map((branch) => (
-                        <li key={branch.branch}>
-                          <strong>{branch.branch}</strong>: {branch.message}
-                        </li>
-                      ))}
+                    <ul className="bulk-sync__details maintenance__receipt">
+                      {result.branches.map((branch) => {
+                        const state = restores.get(`${repo.id}:${branch.branch}`);
+                        return (
+                          <li key={branch.branch}>
+                            <span>
+                              <strong>{branch.branch}</strong>: {branch.message}
+                              {branch.deleted && (
+                                <>
+                                  {" "}
+                                  <code className="selectable">
+                                    {branch.head.slice(0, 8)}
+                                  </code>
+                                </>
+                              )}
+                              {state !== undefined &&
+                                state !== "restoring" &&
+                                state !== "restored" && (
+                                  <span className="maintenance__restore-error">
+                                    {" "}
+                                    {state}
+                                  </span>
+                                )}
+                            </span>
+                            {branch.deleted && (
+                              <button
+                                className="maintenance__restore"
+                                disabled={
+                                  state === "restoring" || state === "restored"
+                                }
+                                aria-label={`Restore ${branch.branch} at ${branch.head.slice(0, 8)}`}
+                                onClick={() => void restore(repo.id, branch)}
+                              >
+                                {state === "restored"
+                                  ? "Restored"
+                                  : state === "restoring"
+                                    ? "Restoring…"
+                                    : "Restore"}
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </article>
@@ -579,7 +910,9 @@ export function MaintenanceDialog({
               {tab === "gc" ? (
                 <button
                   className="modal__create"
-                  onClick={() => void run({ kind: "gc", mode })}
+                  onClick={() =>
+                    void run({ kind: "gc", mode, branchOptions: options })
+                  }
                 >
                   Run garbage collection
                 </button>
@@ -587,7 +920,7 @@ export function MaintenanceDialog({
                 <>
                   <button
                     className="modal__cancel"
-                    onClick={() => void run({ kind: "scan-branches" })}
+                    onClick={() => void run({ kind: "scan-branches", options })}
                   >
                     {action === null ? "Review local branches" : "Review again"}
                   </button>
@@ -600,7 +933,8 @@ export function MaintenanceDialog({
                           kind: "delete-branches",
                           branches: candidates.filter((branch) =>
                             selected.has(branchKey(branch))
-                          )
+                          ),
+                          options
                         })
                       }
                     >
@@ -615,5 +949,101 @@ export function MaintenanceDialog({
         </div>
       </section>
     </div>
+  );
+}
+
+/**
+ * One repository's review: Finished rows, checked, each with its evidence,
+ * oldest-touched first; then Kept, counted by reason and collapsed.
+ */
+function BranchReview({
+  result,
+  now,
+  keepDays,
+  selected,
+  onToggle,
+  showAll,
+  showKept,
+  onExpand
+}: {
+  result: MaintenanceRepoResult;
+  now: number;
+  keepDays: BranchCleanupKeepDays | null;
+  selected: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+  showAll: boolean;
+  showKept: boolean;
+  onExpand: (what: "finished" | "kept") => void;
+}) {
+  const finished = [...(result.candidates ?? [])].sort(
+    (a, b) => (a.touchedAt ?? 0) - (b.touchedAt ?? 0)
+  );
+  const kept: KeptBranch[] = result.kept ?? [];
+  if (finished.length === 0 && kept.length === 0) return null;
+  const shown = showAll ? finished : finished.slice(0, FINISHED_SLICE);
+  const tally = new Map<KeptBranchReason, number>();
+  for (const branch of kept)
+    tally.set(branch.reason, (tally.get(branch.reason) ?? 0) + 1);
+  const reasons = [...tally].sort((a, b) => b[1] - a[1]);
+  return (
+    <>
+      {finished.length > 0 && (
+        <div className="maintenance__group">
+          <span>
+            Finished <b>{finished.length}</b>
+          </span>
+          {finished.length > FINISHED_SLICE && (
+            <button onClick={() => onExpand("finished")}>
+              {showAll ? "Show fewer" : `Show all ${finished.length}`}
+            </button>
+          )}
+        </div>
+      )}
+      {shown.map((branch) => (
+        <label className="maintenance__branch" key={branch.branch}>
+          <input
+            type="checkbox"
+            checked={selected.has(branchKey(branch))}
+            onChange={() => onToggle(branchKey(branch))}
+          />
+          <span>
+            <strong>{branch.branch}</strong>
+            <small>{finishedEvidence(branch, now)}</small>
+          </span>
+        </label>
+      ))}
+      {kept.length > 0 && (
+        <>
+          <div className="maintenance__group">
+            <span>
+              Kept <b>{kept.length}</b>
+            </span>
+            <button
+              aria-expanded={showKept}
+              onClick={() => onExpand("kept")}
+            >
+              {showKept ? "Hide" : "Show"}
+            </button>
+          </div>
+          <div className="maintenance__kept-reasons">
+            {reasons.map(([reason, n]) => (
+              <span key={reason}>
+                <b>{n}</b> {keptLabel(reason, keepDays)}
+              </span>
+            ))}
+          </div>
+          {showKept && (
+            <ul className="maintenance__kept">
+              {kept.map((branch) => (
+                <li key={branch.branch}>
+                  <strong>{branch.branch}</strong>
+                  <small>{branch.detail}</small>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </>
   );
 }

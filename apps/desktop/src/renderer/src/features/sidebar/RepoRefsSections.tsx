@@ -32,6 +32,7 @@ import {
   holderWorktreeId,
   visibleBranches as byRelevance
 } from "./branch-focus";
+import { branchStatusCounts, type BranchStatusFilter } from "./branch-status";
 import { remoteForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
 import { remoteUrlLines, remoteWebUrl, remoteWhere } from "./remote-info";
@@ -93,7 +94,8 @@ export function RepoRefsSections({
   onCreateWorktree,
   onFork,
   browserRequest = null,
-  onBrowserRequestHandled
+  onBrowserRequestHandled,
+  onCleanUpBranches
 }: {
   repo: Repo;
   now: number;
@@ -116,6 +118,9 @@ export function RepoRefsSections({
    *  `onBrowserRequestHandled` so a later remount does not open it again. */
   browserRequest?: RefSection | null;
   onBrowserRequestHandled?: () => void;
+  /** Open Maintenance › Local branches on this repository, already reviewing
+   *  — the refs browser's Gone view offers it. */
+  onCleanUpBranches?: (() => void) | undefined;
 }) {
   const forgeNaming = useForgeNaming();
   /** One card for every hover surface in this tree. Native `title` is what the
@@ -154,12 +159,22 @@ export function RepoRefsSections({
   const [error, setError] = useState<string | null>(null);
   const [openSections, setOpenSections] = useState<Set<RefSection>>(new Set());
   const [openRemotes, setOpenRemotes] = useState<Set<string>>(new Set());
-  const [browser, setBrowser] = useState<RefSection | null>(null);
+  const [browser, setBrowserState] = useState<{
+    tab: RefSection;
+    status: BranchStatusFilter;
+  } | null>(null);
+  /** Open the refs browser, optionally already filtered — the header's ↑n,
+   *  ↓n and gone counts each open it on their own status. */
+  const setBrowser = useCallback(
+    (tab: RefSection, status: BranchStatusFilter = "all") =>
+      setBrowserState({ tab, status }),
+    []
+  );
   useEffect(() => {
     if (browserRequest === null || refs === null) return;
     setBrowser(browserRequest);
     onBrowserRequestHandled?.();
-  }, [browserRequest, refs, onBrowserRequestHandled]);
+  }, [browserRequest, refs, onBrowserRequestHandled, setBrowser]);
   const [fetching, setFetching] = useState<string | null>(null);
   // Which branch row holds the group's single tab stop. A cursor, not a
   // selection: it carries no git meaning and no accent.
@@ -311,27 +326,40 @@ export function RepoRefsSections({
   );
   const summary = branchSectionSummary(focusedWorktree);
   /**
-   * The collapsed section's counts, in ONE pass rather than five filters.
-   *
-   * Assembled as parts and joined so the separators only appear between things
-   * that exist — the gone count used to carry its own leading " ·", which read
-   * as a dangling separator on a repository whose branches are all synced apart
-   * from a couple of finished ones.
+   * The collapsed section's counts, in ONE pass — the same pass the refs
+   * browser's status filter counts with, so a chip and the filter it opens
+   * cannot disagree about how many branches there are.
    */
-  const counts = useMemo(() => {
-    let ahead = 0;
-    let behind = 0;
-    let gone = 0;
-    for (const branch of refs?.branches ?? []) {
-      if (branch.ahead > 0) ahead += 1;
-      if (branch.behind > 0) behind += 1;
-      if (branch.tracking === "upstream_missing") gone += 1;
-    }
-    const parts: string[] = [];
-    if (ahead > 0) parts.push(`↑${ahead}`);
-    if (behind > 0) parts.push(`↓${behind}`);
-    return { parts, gone };
-  }, [refs?.branches]);
+  const counts = useMemo(
+    () => branchStatusCounts(refs?.branches ?? []),
+    [refs?.branches]
+  );
+  /**
+   * One header count, as a button that opens the refs browser filtered to it.
+   *
+   * These used to be spans inside the disclosure button, so a click on "↑2"
+   * only folded the section, and nothing in the app could list the two. A
+   * button cannot nest in a button, so they are the disclosure's siblings.
+   */
+  const countChip = (
+    status: "ahead" | "behind" | "gone",
+    text: string,
+    description: string
+  ): ReactElement => (
+    <button
+      className={`ref-section__chip is-${status}`}
+      aria-label={`Show ${description}`}
+      {...hoverTooltip(tip, `${description} — show them`)}
+      onClick={(event) => {
+        event.stopPropagation();
+        setBrowser("branches", status);
+      }}
+    >
+      {text}
+    </button>
+  );
+  const plural = (n: number, noun: string): string =>
+    `${n} ${noun}${n === 1 ? "" : "es"}`;
 
   /**
    * "Make this branch the one I am working on", by the cheapest safe route: a
@@ -468,39 +496,56 @@ export function RepoRefsSections({
             `aria-expanded`, so open and closed were indistinguishable to
             anything not looking at the pixels (SC 4.1.2). The Worktrees toggle
             in RepoRow already did this correctly; these two did not. */}
-        <button
-          className="ref-section__head"
-          aria-expanded={openSections.has("branches")}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleSection("branches");
-          }}
-        >
-          <SectionChevron open={openSections.has("branches")} />
-          <span className="ref-section__label">Branches</span>
-          <span className="ref-section__count">
-            {loading ? "…" : (branchCount ?? 0)}
-          </span>
-          {/* The pair, readable without expanding hundreds of rows — and the
-              thing that makes the sidebar agree with the title bar at rest. */}
-          {summary !== null && (
-            <span className="ref-section__on">· {summary}</span>
-          )}
-          {refs !== null && counts.parts.length > 0 && (
-            <span className="ref-section__summary">{counts.parts.join(" ")}</span>
-          )}
-          {/* Branches whose upstream was deleted. They rank last in the slice,
-              so without this a repository full of finished work would say
-              nothing about it at the one moment the reader could act — while
-              the section is still collapsed.
-
-              Its own element, not a third part of the summary above: that span
-              is --status-warning, the tier this change argues is wrong for a
-              state that means the work LANDED. Finished is not a warning. */}
-          {refs !== null && counts.gone > 0 && (
-            <span className="ref-section__gone">{counts.gone} gone</span>
-          )}
-        </button>
+        <div className="ref-section__head-wrap">
+          <button
+            className="ref-section__head"
+            aria-expanded={openSections.has("branches")}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleSection("branches");
+            }}
+          >
+            <SectionChevron open={openSections.has("branches")} />
+            <span className="ref-section__label">Branches</span>
+            <span className="ref-section__count">
+              {loading ? "…" : (branchCount ?? 0)}
+            </span>
+            {/* The pair, readable without expanding hundreds of rows — and the
+                thing that makes the sidebar agree with the title bar at rest. */}
+            {summary !== null && (
+              <span className="ref-section__on">· {summary}</span>
+            )}
+          </button>
+          {refs !== null &&
+            (counts.ahead > 0 || counts.behind > 0 || counts.gone > 0) && (
+              <span className="ref-section__chips">
+                {counts.ahead > 0 &&
+                  countChip(
+                    "ahead",
+                    `↑${counts.ahead}`,
+                    `${plural(counts.ahead, "branch")} with commits to push`
+                  )}
+                {counts.behind > 0 &&
+                  countChip(
+                    "behind",
+                    `↓${counts.behind}`,
+                    `${plural(counts.behind, "branch")} behind their upstream`
+                  )}
+                {/* Branches whose upstream was deleted. They rank last in the
+                    slice, so without this a repository full of finished work
+                    would say nothing about it at the one moment the reader
+                    could act — while the section is still collapsed. Not the
+                    warning tier ↑/↓ use: gone means the work LANDED, and
+                    finished is not a warning. */}
+                {counts.gone > 0 &&
+                  countChip(
+                    "gone",
+                    `${counts.gone} gone`,
+                    `${plural(counts.gone, "branch")} whose remote branch was deleted`
+                  )}
+              </span>
+            )}
+        </div>
         {openSections.has("branches") && (
           <div className="ref-section__body">
             {/* A nested group, not bare rows: RepoRow opens ONE `role="group"`
@@ -1129,11 +1174,21 @@ export function RepoRefsSections({
           refs={refs}
           focusedWorktree={focusedWorktree}
           now={now}
-          initialTab={browser}
+          initialTab={browser.tab}
+          initialStatus={browser.status}
+          onCleanUpBranches={
+            onCleanUpBranches === undefined
+              ? undefined
+              : () => {
+                  // The browser is a modal too; the dialog replaces it.
+                  setBrowserState(null);
+                  onCleanUpBranches();
+                }
+          }
           onRefresh={load}
           onRevealWorktree={onRevealWorktree}
           onCreateWorktree={onCreateWorktree}
-          onClose={() => setBrowser(null)}
+          onClose={() => setBrowserState(null)}
         />
       )}
       {tip.tooltipNode}

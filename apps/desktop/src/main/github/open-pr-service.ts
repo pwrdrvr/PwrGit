@@ -512,6 +512,7 @@ function storedFromOpen(pr: OpenChangeRequest): StoredRow {
     repo_path: pr.repoPath ?? null,
     head_ref: pr.headRefName ?? null,
     base_ref: pr.baseRefName ?? null,
+    head_oid: pr.headOid ?? null,
     additions: pr.additions ?? null,
     deletions: pr.deletions ?? null,
     changed_files: pr.changedFiles ?? null,

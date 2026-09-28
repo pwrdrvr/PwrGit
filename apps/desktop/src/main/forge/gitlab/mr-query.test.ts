@@ -252,6 +252,24 @@ describe("hover-card detail", () => {
     expect(best.get("feat-rest")?.summary.number).toBe(9);
   });
 
+  it("maps diffHeadSha, the MR's head commit, to headOid", () => {
+    const head = "0123456789abcdef0123456789abcdef01234567";
+    expect(toSummary(node({ state: "merged", diffHeadSha: head }))).toMatchObject({
+      headOid: head
+    });
+    // REST's merge request object calls the same commit plain `sha`.
+    expect(toSummary(node({ sha: head }))).toMatchObject({
+      headOid: head
+    });
+    expect(toSummary(node())).not.toHaveProperty("headOid");
+    expect(toSummary(node({ diffHeadSha: null }))).not.toHaveProperty("headOid");
+  });
+
+  it("asks every summary query for diffHeadSha", () => {
+    expect(buildMrBranchQuery("g/s/p", ["feat"]).query).toContain("diffHeadSha");
+    expect(buildMrNumberQuery("g/s/p", [7]).query).toContain("diffHeadSha");
+  });
+
   it("ignores an unparseable timestamp", () => {
     expect(toSummary(node({ createdAt: "not a date" }))).not.toHaveProperty(
       "createdAt"

@@ -114,6 +114,9 @@ export type GitExecOptions = {
   signal?: AbortSignal;
   /** Signal used when `signal` aborts. */
   killSignal?: ExecFileOptions["killSignal"];
+  /** Written to Git's stdin, which is then closed — for `--stdin` commands
+   *  such as a batched `update-ref`. */
+  input?: string;
 };
 
 const MAX_LOG_DETAIL_CHARS = 1_200;
@@ -384,6 +387,10 @@ export const execGit: GitExec = async (args, cwd, options) => {
         ? { killSignal: options.killSignal }
         : {}),
       processCallback: (child) => {
+        // Always closed: nothing here answers a prompt, and a `--stdin`
+        // command whose input went missing would otherwise wait for an EOF
+        // that never comes. The test double closes it the same way.
+        child.stdin?.end(options?.input);
         child.stdout?.on("data", () => options?.onActivity?.());
         child.stderr?.on("data", (chunk: Buffer | string) => {
           options?.onActivity?.();

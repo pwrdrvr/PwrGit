@@ -865,6 +865,13 @@ export type PrSummary = {
   headRefName?: string;
   /** Branch the changes are proposed into. */
   baseRefName?: string;
+  /**
+   * Full SHA of the change request's current head commit — for a merged one,
+   * the last commit it merged, which is what lets a local branch tip be proven
+   * to BE that change request after a squash merge left no ancestry behind.
+   * Absent when the forge did not report it, or the cached row predates it.
+   */
+  headOid?: string;
   additions?: number;
   deletions?: number;
   changedFiles?: number;

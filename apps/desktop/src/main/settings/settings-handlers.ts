@@ -4,6 +4,7 @@ import {
   GENERAL_DEFAULTS,
   HOT_CPU_HEAP_SNAPSHOT_LIMIT_MAX,
   isAppearanceTheme,
+  isBranchCleanupKeepDays,
   isHotCpuStartDelayMs,
   isHotCpuTriggerMode,
   isSidebarDensity,
@@ -87,6 +88,17 @@ function sanitizePatch(patch: AppSettingsPatch): {
     }
     if (typeof gen.searchAllProfiles === "boolean") {
       general.searchAllProfiles = gen.searchAllProfiles;
+    }
+    if (typeof gen.branchCleanupPrProof === "boolean") {
+      general.branchCleanupPrProof = gen.branchCleanupPrProof;
+    }
+    // Only the dropdown's notches, or null for "no age guard": the value
+    // decides which branches a bulk delete may offer.
+    if (
+      gen.branchCleanupKeepDays === null ||
+      isBranchCleanupKeepDays(gen.branchCleanupKeepDays)
+    ) {
+      general.branchCleanupKeepDays = gen.branchCleanupKeepDays;
     }
     // Narrow to the known notches: these cross IPC as plain strings and end up
     // stamped on <html>, so an unvalidated value would ship an attribute no

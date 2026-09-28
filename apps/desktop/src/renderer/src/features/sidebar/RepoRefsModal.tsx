@@ -43,6 +43,13 @@ import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { TagRemoteDialog } from "./TagRemoteDialog";
 import { PrChip } from "./PrChip";
 import {
+  BRANCH_STATUS_FILTERS,
+  branchMatchesStatus,
+  branchStatusCounts,
+  goneWithMergedPr,
+  type BranchStatusFilter
+} from "./branch-status";
+import {
   ChangeRequestTable,
   filterChangeRequests,
   useChangeRequestList,
@@ -68,6 +75,14 @@ export function trackingLabel(branch: LocalBranchSummary): string {
       return "Upstream gone";
   }
 }
+
+/** What an empty filtered Branches tab says, per status. */
+const EMPTY_STATUS: Record<Exclude<BranchStatusFilter, "all">, string> = {
+  ahead: "No branches have commits to push.",
+  behind: "No branches are behind their upstream.",
+  gone: "No branches have a deleted upstream.",
+  unpublished: "No branches are local only."
+};
 
 /** What a local branch row's own filter reads. */
 function localBranchText(branch: LocalBranchSummary): string {
@@ -280,6 +295,47 @@ function RefsPageFooter({
   );
 }
 
+/**
+ * The Gone view's lead: what the state means, and the way out of it.
+ *
+ * The count is a lead, not a verdict — a merged PR proves a branch finished
+ * only when its tip is the PR's head, which the clean-up review checks row by
+ * row before it offers anything.
+ */
+function GoneBanner({
+  merged,
+  noun,
+  onCleanUp
+}: {
+  merged: number;
+  noun: string;
+  onCleanUp: (() => void) | undefined;
+}) {
+  return (
+    <div className="refs-gone-banner">
+      <div>
+        <strong>
+          {merged > 0
+            ? `${merged} of these ${merged === 1 ? "has a" : "have a"} merged ${noun}.`
+            : "Their remote branches were deleted."}
+        </strong>
+        <small>
+          {merged > 0
+            ? "Their remote branches were deleted after merging. "
+            : ""}
+          Clean-up checks each branch and shows its evidence before anything
+          is deleted. Nothing on a remote is touched.
+        </small>
+      </div>
+      {onCleanUp !== undefined && (
+        <button className="refs-action" onClick={onCleanUp}>
+          Clean up finished branches…
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** One remote's branches, paged rather than listed whole. */
 function RemoteBranchList({
   repoId,
@@ -375,6 +431,8 @@ export function RepoRefsModal({
   focusedWorktree,
   now,
   initialTab,
+  initialStatus = "all",
+  onCleanUpBranches,
   onRefresh,
   onLocateTag,
   onRevealWorktree,
@@ -389,6 +447,12 @@ export function RepoRefsModal({
   focusedWorktree: Worktree | null;
   now: number;
   initialTab: RefsTab;
+  /** Which local branches the Branches tab starts on — the sidebar header's
+   *  counts open it already filtered. */
+  initialStatus?: BranchStatusFilter;
+  /** Where the Gone view's "Clean up finished branches…" goes. Absent, the
+   *  banner still explains the state but offers nothing to press. */
+  onCleanUpBranches?: (() => void) | undefined;
   onRefresh: () => void | Promise<void>;
   onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
@@ -401,6 +465,7 @@ export function RepoRefsModal({
 }) {
   const tip = useViewportTooltip();
   const [tab, setTab] = useState<RefsTab>(initialTab);
+  const [status, setStatus] = useState<BranchStatusFilter>(initialStatus);
   const [query, setQuery] = useState("");
   const [pushOpen, setPushOpen] = useState(false);
   const [createTagOpen, setCreateTagOpen] = useState(false);
@@ -425,12 +490,20 @@ export function RepoRefsModal({
   const localMatches = useMemo<BrowserBranch[]>(() => {
     const matched = refs.branches.filter(
       (branch) =>
-        q === "" ||
-        localBranchText(branch).toLowerCase().includes(q) ||
-        (branch.pr !== undefined && changeRequestMatch(branch.pr, q) !== null)
+        branchMatchesStatus(branch, status) &&
+        (q === "" ||
+          localBranchText(branch).toLowerCase().includes(q) ||
+          (branch.pr !== undefined && changeRequestMatch(branch.pr, q) !== null))
     );
     return matched.map((branch) => ({ kind: "local" as const, branch }));
-  }, [q, refs.branches]);
+  }, [q, refs.branches, status]);
+  const statusCounts = useMemo(
+    () => branchStatusCounts(refs.branches),
+    [refs.branches]
+  );
+  // Every status but All is a tracking state, and a remote-tracking branch has
+  // none — so a filtered view is local branches only, and says so by count.
+  const statusFiltered = status !== "all";
   const localNames = useMemo(
     () => new Set(refs.branches.map((branch) => branch.name)),
     [refs.branches]
@@ -473,10 +546,12 @@ export function RepoRefsModal({
   // so it is dropped — per page, since that is the scope we have.
   const remoteMatches = useMemo<BrowserBranch[]>(
     () =>
-      remoteSearch.rows
-        .filter((branch) => !localNames.has(branch.name))
-        .map((branch) => ({ kind: "remote" as const, branch })),
-    [localNames, remoteSearch.rows]
+      statusFiltered
+        ? []
+        : remoteSearch.rows
+            .filter((branch) => !localNames.has(branch.name))
+            .map((branch) => ({ kind: "remote" as const, branch })),
+    [localNames, remoteSearch.rows, statusFiltered]
   );
   // Locals list above remotes, except that the branch whose change request
   // the query names by number leads — `106` is asking for #106's branch, not
@@ -499,13 +574,14 @@ export function RepoRefsModal({
         // The footer's total, not the rows fetched so far — the two sit one
         // above the other, and a tab reading 47 over "Showing 47 of 140" is
         // the same search disagreeing with itself.
-        branches: localMatches.length + remoteSearch.total,
+        branches:
+          localMatches.length + (statusFiltered ? 0 : remoteSearch.total),
         tags: tagSearch.total,
         remotes: remoteSearch.total,
         changeRequests: changeRequestMatches.length + lookupHit
       }
     : {
-        branches: branchTabCount,
+        branches: statusFiltered ? localMatches.length : branchTabCount,
         tags: refs.tagCount,
         remotes: refs.remotes.length,
         changeRequests: changeRequests.list?.entries.length ?? 0
@@ -514,7 +590,7 @@ export function RepoRefsModal({
   // accent and an empty one dims, so nobody has to guess where to look.
   // Nothing is claimed while a count is still loading.
   const tabCountLoading: Record<RefsTab, boolean> = {
-    branches: remoteSearch.loading,
+    branches: !statusFiltered && remoteSearch.loading,
     tags: tagSearch.loading,
     remotes: remoteSearch.loading,
     changeRequests: changeRequests.list === null || lookup.state === "loading"
@@ -879,6 +955,35 @@ export function RepoRefsModal({
           )}
         </div>
 
+        {shownTab === "branches" && (
+          <div
+            className="refs-status-bar"
+            role="group"
+            aria-label="Filter local branches by status"
+          >
+            <span className="refs-status-bar__label" aria-hidden="true">
+              Status
+            </span>
+            {BRANCH_STATUS_FILTERS.map((filter) => (
+              <button
+                key={filter.value}
+                className={`refs-status-chip${status === filter.value ? " is-active" : ""}`}
+                aria-pressed={status === filter.value}
+                onClick={() => setStatus(filter.value)}
+              >
+                {filter.label} <span>{statusCounts[filter.value]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {shownTab === "branches" && status === "gone" && statusCounts.gone > 0 && (
+          <GoneBanner
+            merged={goneWithMergedPr(refs.branches)}
+            noun={forge === null ? "pull request" : changeRequestNoun(forge)}
+            onCleanUp={onCleanUpBranches}
+          />
+        )}
+
         <div className="refs-browser__body">
           {shownTab === "branches" && (
             <div className="refs-table">
@@ -1044,7 +1149,14 @@ export function RepoRefsModal({
                   </div>
                 );
               })}
-              {branches.length === 0 && !remoteSearch.loading && (
+              {branches.length === 0 && statusFiltered && q === "" && (
+                <div className="refs-browser__empty">
+                  {EMPTY_STATUS[status as Exclude<BranchStatusFilter, "all">]}
+                </div>
+              )}
+              {branches.length === 0 &&
+                !(statusFiltered && q === "") &&
+                (statusFiltered || !remoteSearch.loading) && (
                 <div className="refs-browser__empty">
                   No matching branches.
                   {/* A fork's PR, or one never fetched, has no branch here to
@@ -1067,16 +1179,20 @@ export function RepoRefsModal({
                   local row it was folded into. Counting rendered rows instead
                   would leave the footer permanently short of its total with no
                   "Load more" to close the gap. */}
-              <RefsPageFooter
-                shown={localMatches.length + remoteSearch.rows.length}
-                total={localMatches.length + remoteSearch.total}
-                search={remoteSearch}
-                note={
-                  branchesMatchedViaPr && forge !== null
-                    ? viaPrNote(forge, query)
-                    : undefined
-                }
-              />
+              {/* A status filter lists local branches only, all of them, so
+                  there is no remote page to extend. */}
+              {!statusFiltered && (
+                <RefsPageFooter
+                  shown={localMatches.length + remoteSearch.rows.length}
+                  total={localMatches.length + remoteSearch.total}
+                  search={remoteSearch}
+                  note={
+                    branchesMatchedViaPr && forge !== null
+                      ? viaPrNote(forge, query)
+                      : undefined
+                  }
+                />
+              )}
             </div>
           )}
 

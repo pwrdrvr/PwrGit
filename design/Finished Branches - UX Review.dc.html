@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 820px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code, .rule code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 740px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .find { width: 420px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+          .callout { position: absolute; display: flex; align-items: center; gap: 6px; }
+
+          /* ---- tables ---- */
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 230px 96px minmax(0, 1fr); gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr.build { grid-template-columns: 210px minmax(0, 1fr); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .verdict { display: inline-flex; justify-self: start; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verdict.del { background: rgba(95, 169, 105, 0.16); color: #9ce5b3; }
+          .verdict.keep { background: rgba(247, 243, 235, 0.06); color: var(--rv-t3); }
+          .verdict.never { background: rgba(185, 66, 50, 0.22); color: #ffb0a1; }
+
+          /* ---- theme scope: the app's own token names ---- */
+          .th-dark {
+            --bg-stage: #000000; --bg-panel: #0a0a0a; --bg-menu: #101010; --bg-panel-elevated: #101010; --bg-input: #080808;
+            --bg-panel-hover: #14110d; --bg-row-active: #120800; --bg-active-strong: #241000;
+            --border-faint: rgba(247, 243, 235, 0.06); --border-subtle: rgba(247, 243, 235, 0.1); --border-default: rgba(247, 243, 235, 0.14); --border-strong: rgba(247, 243, 235, 0.2);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c; --accent-on: #160a00;
+            --success-text: #9ce5b3; --danger-text: #ffb0a1; --danger-base: #b94232;
+            --status-ok: #5fa969; --status-warning: #d99a3d;
+            --shadow-overlay: 0 32px 80px rgba(0, 0, 0, 0.6);
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --danger-border: color-mix(in srgb, var(--danger-base) 28%, transparent);
+          }
+          .stage { position: relative; padding: 22px; border-radius: 10px; background: var(--bg-stage); }
+          .stage.tight { padding: 14px; }
+          .row2 { display: flex; gap: 22px; align-items: flex-start; }
+
+          /* ============================================================
+             Sidebar Branches section, true size from app.css
+             (.ref-section__head, __summary, __gone, .ref-branch-row …)
+             ============================================================ */
+          .side { width: 336px; padding: 6px; border: 1px solid var(--border-subtle); border-radius: 8px; background: #050505; }
+          .shead { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 6px 0 4px; border-radius: 6px; color: var(--text-muted); }
+          .shead.hov { background: var(--bg-panel-hover); color: var(--text-primary); }
+          .sdisc { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; height: 31px; padding: 0 4px; margin-left: -4px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+          .sdisc.hov { background: var(--bg-panel-hover); color: var(--text-primary); }
+          .chev { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: .82; }
+          .chev.open { transform: rotate(90deg); }
+          .slabel { font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); }
+          .scount { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .son { font: 600 10px/1 var(--font-mono); color: var(--accent); white-space: nowrap; }
+          .ssum { margin-left: auto; font: 600 10px/1 var(--font-mono); color: var(--status-warning); white-space: nowrap; }
+          .sgone { margin-left: 6px; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); white-space: nowrap; }
+          /* proposed: each count is its own button, a sibling of the disclosure */
+          .schips { display: flex; align-items: center; gap: 2px; flex: none; }
+          .schip { display: inline-flex; align-items: center; height: 20px; padding: 0 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; font: 600 10px/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
+          .schip.up { color: var(--status-warning); }
+          .schip.down { color: var(--status-warning); }
+          .schip.gone { color: var(--text-subtle); }
+          .schip.hov { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .schip.focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+          .tip { position: absolute; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-menu); color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+          .tip b { color: var(--text-primary); font-weight: 600; }
+          .rrow { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; height: 29px; padding: 0 4px 0 7px; border-radius: 6px; color: var(--text-secondary); }
+          .rrow.cur { background: var(--bg-row-active); box-shadow: inset 2px 0 0 0 var(--accent); }
+          .rrow.cur .nm { font-weight: 600; }
+          .rrow.cur .bico { color: var(--accent-bright); }
+          .bico { flex: none; color: var(--text-subtle); font: 600 12px/1 var(--font-mono); }
+          .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 500 11px/1 var(--font-mono); }
+          .rstat { flex: none; max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 8.5px/1 var(--font-mono); color: var(--text-muted); }
+          .rstat.warn { color: var(--status-warning); }
+          .rstat.ok { color: var(--success-text); }
+          .mini { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; margin: -2px; border: 1px solid transparent; border-radius: 5px; color: var(--text-muted); font: 600 12px/1 var(--font-mono); }
+          .wtchip { display: inline-flex; align-items: center; gap: 4px; flex: none; max-width: 116px; height: 17px; padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: 5px; color: var(--text-muted); font: 600 10px/1 var(--font-mono); overflow: hidden; white-space: nowrap; }
+          .wtchip.here { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .viewall { display: block; width: 100%; height: 26px; margin-top: 3px; border: 0; border-radius: 6px; background: transparent; color: var(--accent); text-align: left; font: 600 10px/1 var(--font-sans); padding: 0 7px; }
+
+          /* ============================================================
+             Refs browser, true size from app.css (.refs-browser …)
+             ============================================================ */
+          .browser { width: 920px; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--bg-menu); box-shadow: var(--shadow-overlay); }
+          .bhead { display: flex; align-items: center; gap: 18px; min-height: 67px; padding: 13px 17px; border-bottom: 1px solid var(--border-subtle); }
+          .bhead > div { flex: 1; min-width: 0; }
+          .beye { display: block; font: 700 9px/1 var(--font-sans); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+          .btitle { display: block; margin-top: 5px; font: 700 16px/1.1 var(--font-sans); color: var(--text-primary); }
+          .bpath { display: block; margin-top: 4px; font: 500 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .bx { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-default); border-radius: 7px; color: var(--text-muted); font: 500 14px/1 var(--font-sans); }
+          .btool { display: flex; align-items: center; gap: 10px; min-height: 55px; padding: 9px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-panel); }
+          .tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-input); }
+          .tab { display: inline-flex; align-items: center; height: 27px; padding: 0 10px; border-radius: 5px; color: var(--text-muted); font: 600 11px/1 var(--font-sans); white-space: nowrap; }
+          .tab span { margin-left: 4px; color: var(--text-subtle); font-family: var(--font-mono); }
+          .tab.on { background: var(--bg-row-active); color: var(--accent-bright); }
+          .search { display: flex; align-items: center; gap: 7px; flex: 1; max-width: 310px; height: 34px; padding: 0 10px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-input); color: var(--text-muted); font: 500 11.5px/1 var(--font-sans); }
+          .bact { height: 30px; display: inline-flex; align-items: center; padding: 0 11px; border: 1px solid var(--accent-border); border-radius: 7px; background: var(--accent-soft); color: var(--accent-bright); font: 600 10.5px/1 var(--font-sans); white-space: nowrap; }
+          .bact.quiet { border-color: var(--border-default); background: transparent; color: var(--text-secondary); }
+          .bact.danger { border-color: var(--danger-border); background: transparent; color: var(--danger-text); }
+          .grow { flex: 1; }
+          /* proposed: the status filter row */
+          .fbar { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-panel); }
+          .fbar > em { margin-right: 4px; font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .fchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 1px solid var(--border-subtle); border-radius: 999px; background: transparent; color: var(--text-secondary); font: 600 10.5px/1 var(--font-sans); white-space: nowrap; }
+          .fchip span { color: var(--text-subtle); font: 600 10px/1 var(--font-mono); }
+          .fchip.on { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .fchip.on span { color: var(--accent); }
+          .banner { display: flex; align-items: center; gap: 14px; margin: 10px 16px 0; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .banner > div { flex: 1; min-width: 0; }
+          .banner strong { display: block; color: var(--text-primary); font: 650 11.5px/1.3 var(--font-sans); }
+          .banner small { display: block; margin-top: 3px; color: var(--text-muted); font: 500 10.5px/1.4 var(--font-sans); }
+          .bbody { padding: 6px 16px 14px; }
+          .thd, .trw { display: grid; grid-template-columns: minmax(190px, 1.2fr) minmax(120px, 1fr) 105px 80px minmax(170px, auto); gap: 12px; align-items: center; }
+          .thd { height: 30px; padding: 0 9px; color: var(--text-subtle); font: 700 9px/1 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; }
+          .trw { min-height: 48px; padding: 6px 9px; border-top: 1px solid var(--border-subtle); }
+          .ident { display: flex; align-items: center; gap: 8px; min-width: 0; }
+          .ident > div { min-width: 0; }
+          .ident strong { display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; color: var(--text-primary); font: 600 11.5px/1.2 var(--font-mono); }
+          .ident small { display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-subtle); font: 500 10px/1.2 var(--font-sans); }
+          .prchip { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 4px; font: 600 9.5px/1 var(--font-mono); }
+          .prchip.merged { background: rgba(163, 113, 247, 0.16); color: #c9a8ff; }
+          .prchip.closed { background: rgba(185, 66, 50, 0.2); color: var(--danger-text); }
+          .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+          .stat { font: 600 10px/1 var(--font-mono); color: var(--text-muted); }
+          .stat.warn { color: var(--status-warning); }
+          .stat.ok { color: var(--success-text); }
+          .racts { display: flex; justify-content: flex-end; gap: 5px; }
+          .racts .bact { padding: 0 7px; }
+
+          /* ============================================================
+             Maintenance dialog, true size from app.css
+             (.modal.bulk-sync.maintenance, .maintenance__tabs …)
+             ============================================================ */
+          .bs { width: 720px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+          .bs-head { display: flex; align-items: flex-start; gap: 18px; padding: 18px; border-bottom: 1px solid var(--border-subtle); }
+          .bs-head > div { flex: 1; min-width: 0; }
+          .bs-head h2 { margin: 0; color: var(--text-primary); font: 700 14px/1.2 var(--font-sans); }
+          .bs-head p { margin: 7px 0 0; color: var(--text-muted); font: 500 11px/1.45 var(--font-sans); }
+          .bs-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); }
+          .mt-tabs { display: flex; gap: 8px; padding: 12px 18px 0; }
+          .mt-tab { padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel); color: var(--text-secondary); font: 600 12px/1 var(--font-sans); }
+          .mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+          .mt-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 18px; color: var(--text-primary); font: 400 12px/1.5 var(--font-sans); overflow: hidden; }
+          .mt-body.scroll { overflow-y: auto; }
+          .mt-help { margin: 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); text-wrap: pretty; }
+          .mt-help b { color: var(--text-secondary); font-weight: 600; }
+          .mt-help code { font: 500 10px/1.4 var(--font-mono); color: var(--text-secondary); }
+          .mt-scope { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 400 12px/1.4 var(--font-sans); }
+          .mt-opts { display: flex; flex-direction: column; gap: 12px; margin: 0; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; }
+          .mt-opts legend { padding: 0 4px; color: var(--text-secondary); font: 600 11px/1 var(--font-sans); }
+          .mt-opt { display: flex; align-items: flex-start; gap: 9px; }
+          .mt-opt > div { flex: 1; min-width: 0; }
+          .mt-opt strong { display: block; color: var(--text-primary); font: 600 12px/1.35 var(--font-sans); }
+          .mt-opt small { display: block; margin-top: 2px; color: var(--text-muted); font: 400 11px/1.45 var(--font-sans); text-wrap: pretty; }
+          .mt-opt small code { font: 500 10px/1.4 var(--font-mono); color: var(--text-secondary); }
+          .mt-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+          .box { position: relative; flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg-input); padding: 0; cursor: pointer; }
+          .box.on { border-color: var(--accent); background: var(--accent); }
+          .box.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid var(--accent-on); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+          .box.dis { opacity: .35; cursor: default; }
+          .sel { height: 26px; padding: 0 26px 0 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%); background-position: calc(100% - 13px) 11px, calc(100% - 9px) 11px; background-size: 4px 4px; background-repeat: no-repeat; }
+          .sel-static { display: inline-flex; align-items: center; }
+          .rcpt { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--border-faint); }
+          .rcpt strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 500 11px/1.3 var(--font-mono); }
+          .rcpt code { color: var(--text-subtle); font: 500 10px/1 var(--font-mono); }
+          .rcpt a { font: 600 10.5px/1 var(--font-sans); color: var(--accent); cursor: pointer; }
+          .fixed { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--bg-panel); }
+          .fixed > span { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); font: 500 11px/1.45 var(--font-sans); }
+          .fixed > span::before { content: ""; flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--danger-base); transform: translateY(-1px); }
+          .fixed > em { font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .bs-repo { flex: none; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .bs-repo.is-success { border-color: color-mix(in srgb, var(--success-text) 42%, transparent); }
+          .bs-rh { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+          .bs-rh > div { flex: 1; min-width: 0; }
+          .bs-rh strong, .bs-rh small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .bs-rh strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+          .bs-rh small { margin-top: 3px; color: var(--text-subtle); font: 500 9px/1.2 var(--font-mono); }
+          .bs-st { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--success-text); font: 600 9.5px/1 var(--font-mono); }
+          .bs-st::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; }
+          .bs-repo > p { margin: 5px 0 0; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .grp { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; padding-top: 8px; border-top: 1px solid var(--border-faint); font: 700 9px/1 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+          .grp b { color: var(--text-secondary); font-family: var(--font-mono); }
+          .grp .lnk { margin-left: auto; font: 600 10px/1 var(--font-sans); letter-spacing: 0; text-transform: none; color: var(--accent); }
+          .brow { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; }
+          .brow > div { flex: 1; min-width: 0; }
+          .brow strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+          .brow small { display: block; margin-top: 2px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+          .brow small i { font-style: normal; color: var(--success-text); }
+          .brow.kept strong { color: var(--text-secondary); font-weight: 500; }
+          .brow.kept small { color: var(--text-subtle); }
+          .kchips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+          .kchip { display: inline-flex; align-items: baseline; gap: 4px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 500 10px/1 var(--font-sans); white-space: nowrap; }
+          .kchip b { color: var(--text-secondary); font: 700 10px/1 var(--font-mono); }
+          .offer { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--accent-tint); }
+          .offer > div { flex: 1; min-width: 0; }
+          .offer strong { display: block; color: var(--text-primary); font: 650 11.5px/1.3 var(--font-sans); }
+          .offer small { display: block; margin-top: 3px; color: var(--text-muted); font: 500 10.5px/1.4 var(--font-sans); }
+          .rstatus { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .rstatus > div { flex: 1; min-width: 0; }
+          .rstatus strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+          .rstatus span { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); }
+          .rtime { flex: none; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+          .mark { flex: none; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--status-ok) 22%, transparent); color: var(--success-text); font: 700 10px/1 var(--font-sans); }
+          .bs-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--border-subtle); }
+          .bs-actions .lead { margin-right: auto; color: var(--text-muted); font: 500 10.5px/1.3 var(--font-sans); }
+          .bs-btn { height: 28px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--bg-panel-elevated); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); cursor: pointer; }
+          .bs-btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-on); }
+          .bs-btn:disabled { opacity: .5; cursor: default; }
+
+          /* ---- prototype controls ---- */
+          .ctl { display: flex; align-items: center; gap: 10px; font: 500 10.5px/1 var(--font-sans); color: var(--rv-t3); }
+          .ctl .go { height: 24px; padding: 0 10px; border: 1px solid rgba(255, 138, 31, 0.42); border-radius: 6px; background: rgba(255, 138, 31, 0.12); color: var(--rv-accb); font: 600 10.5px/1 var(--font-sans); cursor: pointer; }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Findings">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the sidebar counts finished branches, and nothing it shows can act on them</span>
+        </div>
+        <p class="dv-sub">Two reports from one screenshot. <b>&#8593;2</b> in the Branches header says two branches have commits to push, and clicking it only folds the section. <b>225 gone</b> survived a garbage collection. Garbage collection was never going to remove them: a branch name is a root of reachability, and <code>git gc</code> only collects what no ref reaches. <code>fetch --prune</code> does not remove them either. Every PwrGit fetch already passes it, and it is the step that <i>makes</i> a branch gone: it deletes <code>origin/feature</code> and leaves your <code>feature</code> pointing at an upstream that no longer exists. Removing these branches is the job of <b>Maintenance &#8250; Local branches</b>, and that review is built to decline squash merges. Repository and branch names are invented.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Sidebar as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Branches header, as built &#8212; one disclosure button</div>
+            <div class="stage th-dark">
+              <div class="side">
+                <div class="shead hov"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">214</span><span class="son">&#183; on main</span><span class="ssum">&#8593;2 &#8595;41</span><span class="sgone">163 gone</span></div>
+                <div class="rrow cur"><span class="bico">&#9282;</span><span class="nm">main</span><span class="rstat ok">Synced</span><span class="wtchip here">&#8962;</span></div>
+                <div class="rrow"><span class="bico">&#9282;</span><span class="nm">fix/tooltip-flicker</span><span class="rstat warn">Gone</span><span class="mini">+</span></div>
+                <div class="rrow"><span class="bico">&#9282;</span><span class="nm">feat/csv-export</span><span class="rstat warn">Gone</span><span class="wtchip">&#9282; calm-otter</span></div>
+                <div class="rrow"><span class="bico">&#9282;</span><span class="nm">spike/lazy-legend</span><span class="rstat warn">Gone</span><span class="mini">+</span></div>
+                <div class="rrow"><span class="bico">&#9282;</span><span class="nm">chore/bump-vite</span><span class="rstat warn">Gone</span><span class="mini">+</span></div>
+                <div class="rrow"><span class="bico">&#9282;</span><span class="nm">fix/axis-rounding</span><span class="rstat warn">Gone</span><span class="mini">+</span></div>
+                <button class="viewall">View all 214 branches&#8230;</button>
+              </div>
+              <div class="callout" style="left:246px; top:6px"><span class="pin">1</span></div>
+              <div class="callout" style="left:326px; top:6px"><span class="pin">3</span></div>
+              <div class="callout" style="left:6px; top:236px"><span class="pin">2</span></div>
+            </div>
+            <p class="note" style="max-width:380px">The whole header row is a single <code>button.ref-section__head</code>. <code>&#8593;2 &#8595;41</code> and <code>163 gone</code> are spans inside it, so a click anywhere on them only toggles <code>aria-expanded</code>.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Local branches as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Maintenance &#8250; Local branches after a review, as built &#8212; on a squash-merge repository</div>
+            <div class="stage th-dark">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Repository maintenance</h2>
+                    <p>Clean up Git storage and review leftover local branches across your repositories.</p>
+                  </div>
+                  <span class="bs-count">1 / 1</span>
+                </div>
+                <div class="mt-tabs"><span class="mt-tab">Garbage collection</span><span class="mt-tab on">Local branches</span></div>
+                <div class="rstatus"><span class="mark">&#10003;</span><div><strong>Finished</strong><span>1 succeeded &#183; 0 skipped &#183; 0 need attention</span></div><span class="rtime">took 1s</span></div>
+                <div class="mt-body">
+                  <p class="mt-help">Only merged local branches with missing remote upstreams are eligible. Deletion rechecks each selected branch; checked-out branches and unique commits are retained.</p>
+                  <p class="mt-help">No eligible branches found. Fetch first if remote information is stale. Squash-merged branches may need individual review in the repository&#8217;s branch list.</p>
+                  <article class="bs-repo is-success">
+                    <div class="bs-rh"><div><strong>orbit-deploy</strong><small>/Users/dana/src/orbit-deploy</small></div><span class="bs-st">Success</span></div>
+                    <p>0 eligible local branches. Other branches are retained.</p>
+                  </article>
+                </div>
+                <div class="bs-actions"><button class="bs-btn">Close</button><button class="bs-btn">Review again</button><button class="bs-btn primary" disabled="{{ true }}">Delete 0 selected local branches</button></div>
+              </section>
+              <div class="callout" style="left:6px; top:250px"><span class="pin">4</span></div>
+              <div class="callout" style="right:6px; top:326px"><span class="pin">5</span></div>
+              <div class="callout" style="left:6px; top:118px"><span class="pin">6</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Six findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>The counts are not controls</h4><p>They sit inside the disclosure button. A button inside a button is invalid, so the counts cannot become links where they stand. They have to move out and become siblings of the disclosure.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>No surface lists branches by state</h4><p>The six-row slice is ranked by relevance, and <b>View all</b> opens a refs browser that filters on text only. Nothing in the app answers &#8220;which two have something to push?&#8221;</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>&#8220;163 gone&#8221; leads nowhere</h4><p>The one place that deletes gone branches is a tab behind the sidebar&#8217;s <b>Garbage collection&#8230;</b> button. The collection tab hides <i>&#8220;does not remove local branch names&#8221;</i> in a collapsed <b>What gets cleaned up?</b>, so running gc and expecting the count to drop is a reasonable mistake.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>The review accepts ancestry only</h4><p><code>scanStaleBranches</code> requires the tip to be <code>--merged=HEAD</code>. A squash merge writes a new commit, so the branch&#8217;s own commits are never in <code>main</code>. On a repository that squash-merges, nearly every gone branch is declined, and the empty state sends you to delete them one at a time.</p></div></div>
+              <div class="fitem"><span class="pin">5</span><div><h4>The proof is already in the database</h4><p><code>branch_pr</code> caches each local branch&#8217;s pull request, including merged and closed ones (<code>state</code>, <code>merged_at</code>). The review never reads it. The one missing fact is the PR&#8217;s final head commit, which would show the local tip holds nothing the PR did not.</p></div></div>
+              <div class="fitem"><span class="pin">6</span><div><h4>No age guard and no stated &#8220;never&#8221; rules</h4><p>A branch finished an hour ago is offered the same as one from last spring, and the rules that protect work (never pushed, held by a worktree) are buried in prose rather than shown as rules.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Counts become filters">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The counts become filters &#8212; each one opens the refs browser on that state</span>
+        </div>
+        <p class="dv-sub">The disclosure keeps the chevron, label, count and <code>&#183; on main</code>. <b>&#8593;2</b>, <b>&#8595;41</b> and <b>163 gone</b> become three small buttons after it, each opening the refs browser on the Branches tab with a status filter already applied. The refs browser gains that filter as a row of chips under its toolbar. It composes with the text filter, so &#8220;gone&#8221; plus <code>fix/</code> works.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Header chips">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Header, proposed &#8212; three chip buttons beside the disclosure <b>recommended</b></div>
+            <div class="stage th-dark" style="padding-bottom:58px">
+              <div class="side">
+                <div class="shead"><button class="sdisc"><span class="chev open"></span><span class="slabel">Branches</span><span class="scount">214</span><span class="son">&#183; on main</span></button><span class="schips"><button class="schip up hov">&#8593;2</button><button class="schip down">&#8595;41</button><button class="schip gone">163 gone</button></span></div>
+                <div class="rrow cur"><span class="bico">&#9282;</span><span class="nm">main</span><span class="rstat ok">Synced</span><span class="wtchip here">&#8962;</span></div>
+                <div class="rrow"><span class="bico">&#9282;</span><span class="nm">fix/tooltip-flicker</span><span class="rstat warn">Gone</span><span class="mini">+</span></div>
+              </div>
+              <div class="tip" style="left:178px; top:56px"><b>2 branches</b> have commits to push &#8212; show them</div>
+            </div>
+            <p class="note"><b>Hover and focus</b> use the accent treatment of <code>.ref-mini-action</code>, so each count reads as a control. The chips are 20px tall, like <code>.ref-checkout-chip</code>. Each has an accessible name that says what it opens: &#8220;Show 2 branches with commits to push&#8221;. Tab order is disclosure, then &#8593;, &#8595;, gone. A count of 0 renders nothing, as today.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Browser filtered to push">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Clicking &#8593;2 &#8212; refs browser opens filtered to <b>To push</b></div>
+            <div class="stage th-dark tight">
+              <section class="browser">
+                <div class="bhead"><div><span class="beye">Repository refs</span><span class="btitle">orbit-deploy</span><span class="bpath">/Users/dana/src/orbit-deploy</span></div><span class="bx">&#215;</span></div>
+                <div class="btool"><div class="tabs"><span class="tab on">Branches<span>2</span></span><span class="tab">Tags<span>38</span></span><span class="tab">Remotes<span>2</span></span><span class="tab">Pull requests<span>4</span></span></div><div class="search">&#8981;&#160;&#160;Filter branches&#8230;</div><span class="grow"></span><span class="bact">Push to remotes&#8230;</span></div>
+                <div class="fbar"><em>Status</em><span class="fchip">All<span>214</span></span><span class="fchip on">To push<span>2</span></span><span class="fchip">Behind<span>41</span></span><span class="fchip">Gone<span>163</span></span><span class="fchip">Local only<span>6</span></span></div>
+                <div class="bbody">
+                  <div class="thd"><span>Branch</span><span>Upstream</span><span>Status</span><span>Last commit</span><span></span></div>
+                  <div class="trw"><div class="ident"><span class="bico">&#9282;</span><div><strong>feat/range-picker</strong><small>Clamp the end date to today</small></div></div><span class="muted">origin/feat/range-picker</span><span class="stat ok">&#8593;3</span><span class="muted">2h ago</span><div class="racts"><span class="bact">Push</span><span class="bact quiet">Switch here</span></div></div>
+                  <div class="trw"><div class="ident"><span class="bico">&#9282;</span><div><strong>fix/legend-overflow</strong><small>Wrap long series names</small></div></div><span class="muted">origin/fix/legend-overflow</span><span class="stat warn">&#8593;1 &#8595;4</span><span class="muted">yesterday</span><div class="racts"><span class="bact quiet">Show worktree</span></div></div>
+                </div>
+              </section>
+            </div>
+            <p class="note"><b>To push</b> means <code>ahead &gt; 0</code>, which is exactly what the header&#8217;s &#8593; counts, so diverged branches appear here with both arrows. <b>Behind</b> is <code>behind &gt; 0</code>. The two overlap, and that is honest: a diverged branch belongs in both. Tab counts follow the active status filter. A <b>Push</b> row action is new and only appears on rows that are ahead.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Browser filtered to gone">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Clicking <b>163 gone</b> &#8212; the Gone filter, with the way out stated on top</div>
+            <div class="stage th-dark tight">
+              <section class="browser">
+                <div class="bhead"><div><span class="beye">Repository refs</span><span class="btitle">orbit-deploy</span><span class="bpath">/Users/dana/src/orbit-deploy</span></div><span class="bx">&#215;</span></div>
+                <div class="btool"><div class="tabs"><span class="tab on">Branches<span>163</span></span><span class="tab">Tags<span>38</span></span><span class="tab">Remotes<span>2</span></span><span class="tab">Pull requests<span>4</span></span></div><div class="search">&#8981;&#160;&#160;Filter branches&#8230;</div><span class="grow"></span><span class="bact">Push to remotes&#8230;</span></div>
+                <div class="fbar"><em>Status</em><span class="fchip">All<span>214</span></span><span class="fchip">To push<span>2</span></span><span class="fchip">Behind<span>41</span></span><span class="fchip on">Gone<span>163</span></span><span class="fchip">Local only<span>6</span></span></div>
+                <div class="banner"><div><strong>131 of these are finished: their pull request merged, or their commits are already in main.</strong><small>Their remote branches were deleted after merging. Clean-up shows each branch and its evidence before anything is deleted.</small></div><span class="bact">Clean up finished branches&#8230;</span></div>
+                <div class="bbody">
+                  <div class="thd"><span>Branch</span><span>Upstream</span><span>Status</span><span>Last commit</span><span></span></div>
+                  <div class="trw"><div class="ident"><span class="bico">&#9282;</span><div><strong>fix/tooltip-flicker <span class="prchip merged">#412 merged</span></strong><small>Debounce the pointer leave</small></div></div><span class="muted">origin/fix/tooltip-flicker</span><span class="stat warn">Upstream gone</span><span class="muted">26d ago</span><div class="racts"><span class="bact quiet">Switch here</span><span class="bact danger">Delete</span></div></div>
+                  <div class="trw"><div class="ident"><span class="bico">&#9282;</span><div><strong>spike/lazy-legend <span class="prchip closed">#377 closed</span></strong><small>Try a virtualized legend</small></div></div><span class="muted">origin/spike/lazy-legend</span><span class="stat warn">Upstream gone</span><span class="muted">3mo ago</span><div class="racts"><span class="bact quiet">Switch here</span><span class="bact danger">Delete</span></div></div>
+                </div>
+              </section>
+            </div>
+            <p class="note">The banner&#8217;s count comes from the rules in turn 3, evaluated in the renderer from <code>repo:refs</code>, so no scan is needed to show it. <b>Clean up finished branches&#8230;</b> opens Maintenance on its Local branches tab, scoped to this repository and already reviewed (<a href="#4b">4b</a>). The merged and closed PR chips are already on <code>LocalBranchSummary.pr</code>.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Evidence rules">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Evidence &#8212; what makes a gone branch safe to delete</span>
+        </div>
+        <p class="dv-sub">The rule underneath all of this: <b>a branch is offered only when every commit on it is proven to exist somewhere else.</b> Ancestry proves it when the commits are in <code>HEAD</code>. For a squash merge, a merged PR whose final head commit <i>is</i> the local tip proves it: the PR held exactly these commits, and the forge merged them. That same proof covers &#8220;never pushed&#8221; by construction. A tip that was never pushed cannot be any PR&#8217;s head, and a branch with no upstream is never gone in the first place.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Rules table">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Every gone branch lands in exactly one row, checked top to bottom</div>
+            <div class="tbl" style="width:900px">
+              <div class="tr head"><span>Branch</span><span>Verdict</span><span>Why, and the line the review shows</span></div>
+              <div class="tr"><b>Protected name</b><span class="verdict never">Never</span><span><code>main master trunk develop development</code> and every remote&#8217;s HEAD target, as today. Not listed.</span></div>
+              <div class="tr"><b>No upstream (never pushed)</b><span class="verdict never">Never</span><span>Not gone, so never scanned. Stated in the dialog anyway, because it is the rule people worry about most.</span></div>
+              <div class="tr"><b>Checked out in a worktree</b><span class="verdict keep">Kept</span><span>&#8220;Checked out in calm-otter&#8221;, with <b>Prune worktrees&#8230;</b> as the way forward. Deleting it would orphan a checkout.</span></div>
+              <div class="tr"><b>Merged PR, local tip is not its head</b><span class="verdict keep">Kept</span><span>&#8220;2 local commits not in #398&#8221;. Work was added after the PR merged, or the PR head was rewritten. Deletion would lose it.</span></div>
+              <div class="tr"><b>PR closed without merging</b><span class="verdict keep">Kept</span><span>&#8220;#377 closed without merging&#8221;. Abandoned is not finished; delete it by hand from the refs browser.</span></div>
+              <div class="tr"><b>No PR, not in HEAD</b><span class="verdict keep">Kept</span><span>&#8220;No merged pull request found&#8221;. Nothing proves the commits exist elsewhere.</span></div>
+              <div class="tr"><b>Touched inside the age guard</b><span class="verdict keep">Kept</span><span>&#8220;Touched 2 days ago&#8221;. Touched means the newest of the tip&#8217;s commit date and the branch&#8217;s last checkout or reset in the reflog. Applied after the evidence checks, so it only ever holds back branches that would otherwise be offered.</span></div>
+              <div class="tr"><b>Commits already in HEAD</b><span class="verdict del">Offered</span><span>&#8220;In main by ancestry&#8221;. Today&#8217;s rule, unchanged. Deleted with plain <code>git branch -d</code>.</span></div>
+              <div class="tr"><b>Merged PR, local tip is its head</b><span class="verdict del">Offered</span><span>&#8220;#412 merged 3 weeks ago &#183; tip is the PR&#8217;s head&#8221;. Covers squash and rebase merges. <code>git branch -d</code> refuses these, so deletion uses the existing <code>forceDeleteExpectedRef</code> compare-and-swap on the reviewed tip, and only for rows that carry this proof.</span></div>
+            </div>
+            <p class="note"><b>Why tip-equals-head and not &#8220;has a merged PR&#8221;.</b> A merged PR alone proves the branch <i>was</i> finished once. It says nothing about the commit you made on it the next morning. The PR&#8217;s <code>headRefOid</code> (GitHub) or <code>diffHeadSha</code> (GitLab) closes that gap, and it is the one field PwrGit does not fetch today. A local tip that is an <i>ancestor</i> of the PR head also qualifies, because the PR contained everything local and more.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4" data-screen-label="Turn 4 Local branches redrawn">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Maintenance &#8250; Local branches, redrawn &#8212; and garbage collection hands off to it</span>
+        </div>
+        <p class="dv-sub">The dialog, tabs and bulk-sync cards stay; what changes is what the review knows. Before a review, the options become rules you can see, including the age guard as a dropdown. After a review, each repository card splits into <b>Finished</b> (checked, each with its evidence) and <b>Kept</b> (collapsed, counted by reason). A garbage-collection run now ends with an offer, because that is where people look for this.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Before review">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Before review &#8212; the rules, with the age guard as a dropdown</div>
+            <div class="stage th-dark">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Repository maintenance</h2>
+                    <p>Clean up Git storage and review leftover local branches across your repositories.</p>
+                  </div>
+                </div>
+                <div class="mt-tabs"><span class="mt-tab">Garbage collection</span><span class="mt-tab on">Local branches</span></div>
+                <div class="mt-body">
+                  <label class="mt-scope"><span class="box" style="margin-top:0"></span>Include all profiles</label>
+                  <p class="mt-help" style="margin-top:-6px">Every known repository in this window&#8217;s profile.</p>
+                  <fieldset class="mt-opts">
+                    <legend>Finished branches</legend>
+                    <div class="mt-opt"><span class="box on"></span><div><strong>Count a merged pull request as proof</strong><small>Finds squash and rebase merges. Offered only when the branch&#8217;s tip is the PR&#8217;s final head commit, so nothing added after merging is lost. Uses cached PR data; no forge request unless a row is missing.</small></div></div>
+                    <div class="mt-opt"><span class="box on"></span><div><div class="mt-inline"><strong>Keep branches touched in the last</strong><span class="sel sel-static">7 days</span></div><small>Touched is the newest of the last commit and the last checkout. Remembered for next time.</small></div></div>
+                  </fieldset>
+                  <div class="fixed">
+                    <em>Never offered</em>
+                    <span>Branches that were never pushed, or have commits no merged PR or HEAD contains</span>
+                    <span>Branches checked out in any worktree</span>
+                    <span>main, master, trunk, develop, and each remote&#8217;s default branch</span>
+                  </div>
+                  <p class="mt-help">Only local branch names are removed. Nothing on a remote is deleted, and each branch is checked again at its reviewed tip just before deletion.</p>
+                </div>
+                <div class="bs-actions"><button class="bs-btn">Close</button><button class="bs-btn primary">Review local branches</button></div>
+              </section>
+            </div>
+            <p class="note">The fetch reminder moves out of the lead paragraph: the review now fetches PR state for branches that have none cached, and <b>Fetch all repos</b> stays a link in the empty state. The dropdown&#8217;s options are 1, 3, 7, 14, 30 and 90 days, default 7. Unchecking the box turns the age guard off entirely; there is no &#8220;0 days&#8221; option.</p>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b After review">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>After review &#8212; Finished is checked, Kept is counted</div>
+            <div class="stage th-dark">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Repository maintenance</h2>
+                    <p>Clean up Git storage and review leftover local branches across your repositories.</p>
+                  </div>
+                  <span class="bs-count">1 / 1</span>
+                </div>
+                <div class="mt-tabs"><span class="mt-tab">Garbage collection</span><span class="mt-tab on">Local branches</span></div>
+                <div class="rstatus"><span class="mark">&#10003;</span><div><strong>Finished</strong><span>1 succeeded &#183; 124 finished branches &#183; 39 kept</span></div><span class="rtime">took 2s</span></div>
+                <div class="mt-body scroll" style="height:392px">
+                  <label class="mt-scope"><span class="box on" style="margin-top:0"></span>Select all 124 finished branches</label>
+                  <article class="bs-repo is-success">
+                    <div class="bs-rh"><div><strong>orbit-deploy</strong><small>/Users/dana/src/orbit-deploy</small></div><span class="bs-st">Success</span></div>
+                    <div class="grp">Finished <b>124</b><span class="lnk">Show all</span></div>
+                    <div class="brow"><span class="box on"></span><div><strong>fix/tooltip-flicker</strong><small><i>#412 merged 3 weeks ago</i> &#183; tip is the PR&#8217;s head &#183; touched 26 days ago</small></div></div>
+                    <div class="brow"><span class="box on"></span><div><strong>chore/bump-vite</strong><small><i>In main by ancestry</i> &#183; touched 41 days ago</small></div></div>
+                    <div class="brow"><span class="box on"></span><div><strong>fix/axis-rounding</strong><small><i>#405 merged 5 weeks ago</i> &#183; tip is the PR&#8217;s head &#183; touched 5 weeks ago</small></div></div>
+                    <div class="brow"><span class="box"></span><div><strong>feat/sparkline-theme</strong><small><i>#389 merged 2 months ago</i> &#183; tip is the PR&#8217;s head &#183; touched 2 months ago</small></div></div>
+                    <div class="grp">Kept <b>39</b><span class="lnk">Show</span></div>
+                    <div class="kchips"><span class="kchip"><b>14</b> no merged PR</span><span class="kchip"><b>9</b> closed without merging</span><span class="kchip"><b>7</b> touched in the last 7 days</span><span class="kchip"><b>5</b> local commits not in the PR</span><span class="kchip"><b>4</b> checked out in a worktree</span></div>
+                  </article>
+                </div>
+                <div class="bs-actions"><span class="lead">123 selected &#183; the receipt lists each tip for restore</span><button class="bs-btn">Close</button><button class="bs-btn">Review again</button><button class="bs-btn primary">Delete 123 local branches</button></div>
+              </section>
+            </div>
+            <p class="note">Rows are sorted oldest-touched first. A long list shows 20 rows and <b>Show all</b>, so one repository with 124 does not push the others off screen. Each Kept chip expands its own rows, each with its reason line from <a href="#3a">3a</a>. <b>The receipt is the undo.</b> Deleting a branch deletes its reflog too, and a squash-merged branch&#8217;s commits are unreachable, so Git keeps them only about two weeks (<code>gc.pruneExpire</code>) or 30 days if <code>HEAD</code> ever held them. The receipt therefore lists every deleted name with its tip SHA and a <b>Restore</b> action (<code>git branch &lt;name&gt; &lt;sha&gt;</code>) for as long as the object exists. PR-proven tips also stay fetchable from the forge as <code>refs/pull/&lt;n&gt;/head</code>.</p>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c GC hands off">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Garbage collection&#8217;s receipt offers the branch clean-up</div>
+            <div class="stage th-dark">
+              <section class="bs">
+                <div class="bs-head">
+                  <div>
+                    <h2>Repository maintenance</h2>
+                    <p>Clean up Git storage and review leftover local branches across your repositories.</p>
+                  </div>
+                  <span class="bs-count">18 / 18</span>
+                </div>
+                <div class="mt-tabs"><span class="mt-tab on">Garbage collection</span><span class="mt-tab">Local branches</span></div>
+                <div class="rstatus"><span class="mark">&#10003;</span><div><strong>Finished</strong><span>18 succeeded &#183; 0 skipped &#183; 0 need attention</span></div><span class="rtime">took 48s</span></div>
+                <div class="mt-body">
+                  <div class="offer"><div><strong>312 finished local branches across 7 repositories</strong><small>Their pull requests merged or their commits are in main. Garbage collection never removes branch names.</small></div><button class="bs-btn primary">Review&#8230;</button></div>
+                  <p class="mt-help">Standard collection. Git retention settings apply; missing-worktree registrations are preserved. Sizes measure object storage, not free disk space.</p>
+                  <article class="bs-repo is-success">
+                    <div class="bs-rh"><div><strong>orbit-deploy</strong><small>/Users/dana/src/orbit-deploy</small></div><span class="bs-st">Success</span></div>
+                    <p>Object storage: 148.2 MiB &#8594; 96.7 MiB &#183; 124 finished branches</p>
+                  </article>
+                  <article class="bs-repo is-success">
+                    <div class="bs-rh"><div><strong>ledger-web</strong><small>/Users/dana/src/ledger-web</small></div><span class="bs-st">Success</span></div>
+                    <p>Object storage: 61.0 MiB &#8594; 58.4 MiB</p>
+                  </article>
+                </div>
+                <div class="bs-actions"><button class="bs-btn">Close</button><button class="bs-btn">Change options</button></div>
+              </section>
+            </div>
+            <p class="note">The count is cheap: it runs the same local rules after each repository&#8217;s collection, against cached PR rows, with no forge request. <b>Review&#8230;</b> switches to the Local branches tab with those results already loaded, so there is no second scan. Collection never deletes a branch itself; the delete always happens after the review in <a href="#4b">4b</a>. With nothing finished, the offer is not drawn.</p>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ============================ TURN 5 ============================ -->
+      <section class="dv-turn" id="t5" data-screen-label="Turn 5 Live prototype">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">Live &#8212; the review, with the age guard and PR proof wired up</span>
+        </div>
+        <p class="dv-sub">Twenty invented gone branches, one repository. Change the dropdown and watch branches move between Finished and Kept. Uncheck <b>Count a merged pull request as proof</b> to see today&#8217;s ancestry-only review, where the squash merges drop out. Delete to see the receipt and the sidebar count update.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Local branches review, live</div>
+            <div class="ctl"><button class="go" onClick="{{ reset }}">Start over</button><span>Everything else is inside the dialog.</span></div>
+            <div class="stage th-dark">
+              <div class="row2">
+                <section class="bs">
+                  <div class="bs-head">
+                    <div>
+                      <h2>Repository maintenance</h2>
+                      <p>Clean up Git storage and review leftover local branches across your repositories.</p>
+                    </div>
+                    <span class="bs-count">1 / 1</span>
+                  </div>
+                  <div class="mt-tabs"><span class="mt-tab">Garbage collection</span><span class="mt-tab on">Local branches</span></div>
+                  <div class="rstatus"><span class="mark">&#10003;</span><div><strong>{{ statusTitle }}</strong><span>{{ statusLine }}</span></div><span class="rtime">{{ statusTime }}</span></div>
+                  <div class="mt-body scroll" style="height:440px">
+                    <fieldset class="mt-opts">
+                      <legend>Finished branches</legend>
+                      <div class="mt-opt"><button class="{{ proofBox }}" onClick="{{ toggleProof }}"></button><div><strong>Count a merged pull request as proof</strong><small>Squash and rebase merges, when the tip is the PR&#8217;s final head.</small></div></div>
+                      <div class="mt-opt"><button class="{{ ageBox }}" onClick="{{ toggleAge }}"></button><div><div class="mt-inline"><strong>Keep branches touched in the last</strong><select class="sel" value="{{ ageVal }}" onChange="{{ onAge }}"><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="90">90 days</option></select></div></div></div>
+                    </fieldset>
+                    <article class="bs-repo is-success">
+                      <div class="bs-rh"><div><strong>orbit-deploy</strong><small>/Users/dana/src/orbit-deploy</small></div><span class="bs-st">{{ repoStatus }}</span></div>
+                      <sc-if value="{{ isDone }}"><p>{{ doneLine }}</p><div class="grp">Deleted <b>{{ doneCount }}</b></div><sc-for list="{{ doneRows }}" as="d" hint-placeholder-count="3"><div class="rcpt"><strong>{{ d.name }}</strong><code>{{ d.sha }}</code><a onClick="{{ d.restore }}">Restore</a></div></sc-for></sc-if>
+                      <sc-if value="{{ isReview }}" hint-placeholder-val="{{ true }}">
+                        <div class="grp">Finished <b>{{ finCount }}</b></div>
+                        <sc-for list="{{ finRows }}" as="r" hint-placeholder-count="6">
+                          <div class="brow"><button class="{{ r.boxCls }}" onClick="{{ r.toggle }}"></button><div><strong>{{ r.name }}</strong><small><i>{{ r.lead }}</i>{{ r.tail }}</small></div></div>
+                        </sc-for>
+                        <div class="grp">Kept <b>{{ keptCount }}</b><span class="lnk" onClick="{{ toggleKept }}">{{ keptLink }}</span></div>
+                        <div class="kchips"><sc-for list="{{ keptChips }}" as="k" hint-placeholder-count="4"><span class="kchip"><b>{{ k.n }}</b> {{ k.label }}</span></sc-for></div>
+                        <sc-if value="{{ showKept }}">
+                          <sc-for list="{{ keptRows }}" as="r" hint-placeholder-count="4">
+                            <div class="brow kept"><span class="box dis"></span><div><strong>{{ r.name }}</strong><small>{{ r.why }}</small></div></div>
+                          </sc-for>
+                        </sc-if>
+                      </sc-if>
+                    </article>
+                  </div>
+                  <div class="bs-actions"><span class="lead">{{ footLead }}</span><button class="bs-btn" onClick="{{ reset }}">{{ secondLabel }}</button><button class="bs-btn primary" onClick="{{ doDelete }}" disabled="{{ deleteDisabled }}">{{ deleteLabel }}</button></div>
+                </section>
+                <div class="side" style="width:300px">
+                  <div class="shead"><button class="sdisc"><span class="chev"></span><span class="slabel">Branches</span><span class="scount">{{ sideTotal }}</span><span class="son">&#183; on main</span></button><span class="schips"><button class="schip up">&#8593;2</button><button class="schip down">&#8595;7</button><sc-if value="{{ hasGone }}"><button class="schip gone">{{ goneLabel }}</button></sc-if></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;set the guard to 90 days&#8221; &#183; &#8220;turn PR proof off and compare the Finished count&#8221; &#183; &#8220;uncheck two rows, then delete&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 6 ============================ -->
+      <section class="dv-turn" id="t6" data-screen-label="Turn 6 Build">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t6">6</a>
+          <span class="dv-tname">What gets built</span>
+        </div>
+        <p class="dv-sub">Two independent pieces. The counts-as-filters change is renderer-only and can ship first. The clean-up needs one new forge field and changes to the review.</p>
+        <div class="tbl" style="width:900px">
+          <div class="tr build head"><span>Piece</span><span>Change</span></div>
+          <div class="tr build"><b>Header chips</b><span><code>RepoRefsSections</code>: move <code>.ref-section__summary</code> and <code>.ref-section__gone</code> out of <code>button.ref-section__head</code> into sibling <code>button</code>s. They open the browser through the existing <code>browserRequest</code> path, extended from a tab to a tab plus a status filter.</span></div>
+          <div class="tr build"><b>Status filter</b><span><code>RepoRefsModal</code>: add a <code>status</code> filter (<code>all | ahead | behind | gone | unpublished</code>) applied before the text filter in <code>localMatches</code>, rendered as the chip row. On the Gone filter, show the banner once the renderer-side rules count at least one finished branch.</span></div>
+          <div class="tr build"><b>PR head commit</b><span>Add <code>headRefOid</code> to <code>PR_NODE_FIELDS</code> and <code>diffHeadSha</code> to the GitLab MR query. Add a migration with a <code>head_oid</code> column on <code>branch_pr</code>, and <code>headOid?</code> on <code>PrSummary</code>. Existing merged rows lack it; the review refetches those branches in one batched <code>fetchPrsForBranches</code> call.</span></div>
+          <div class="tr build"><b>Review rules</b><span><code>scanStaleBranches</code> takes <code>{ prProof, touchedWithinDays }</code> and returns every gone branch with a verdict and reason (turn 3), not only the eligible ones. <code>StaleBranch</code> gains <code>evidence: "ancestry" | "pr"</code>, <code>pr</code>, and <code>touchedAt</code>. Touched comes from <code>%(committerdate)</code> and the newest <code>git reflog refs/heads/&lt;b&gt;</code> entry.</span></div>
+          <div class="tr build"><b>Delete</b><span><code>deleteStaleBranch</code> rechecks the verdict. Ancestry rows use <code>deleteLocalBranch(…, false)</code> as today. PR rows use <code>forceDeleteExpectedRef</code> against the reviewed tip, which is a compare-and-swap, so a branch that moved since the review is refused as stale.</span></div>
+          <div class="tr build"><b>GC hand-off</b><span>After each repository&#8217;s <code>gc</code>, run the scan with the saved options and put the finished count on <code>MaintenanceRepoResult</code>. The dialog shows the offer and seeds the Local branches tab from those results.</span></div>
+          <div class="tr build"><b>Settings</b><span>Persist <code>prProof</code> and <code>touchedWithinDays</code> (default on, 7) with the other maintenance preferences.</span></div>
+        </div>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { proof: true, ageOn: true, age: 7, off: {}, showKept: false, done: null, gone: [] };
+        }
+        branches() {
+          // Invented. kind: pr = merged PR, tip is its head; anc = in HEAD by ancestry;
+          // prx = merged PR, local commits past its head; closed; none; wt = held by a worktree.
+          return [
+            { name: "fix/tooltip-flicker", kind: "pr", pr: 412, days: 26 },
+            { name: "chore/bump-vite", kind: "anc", days: 41 },
+            { name: "fix/axis-rounding", kind: "pr", pr: 405, days: 35 },
+            { name: "feat/sparkline-theme", kind: "pr", pr: 389, days: 62 },
+            { name: "fix/null-series", kind: "pr", pr: 431, days: 2 },
+            { name: "docs/readme-embed", kind: "anc", days: 5 },
+            { name: "feat/range-picker-v1", kind: "pr", pr: 420, days: 12 },
+            { name: "fix/grid-hairline", kind: "pr", pr: 399, days: 48 },
+            { name: "refactor/scale-types", kind: "pr", pr: 366, days: 110 },
+            { name: "fix/legend-wrap", kind: "prx", pr: 398, extra: 2, days: 20 },
+            { name: "spike/lazy-legend", kind: "closed", pr: 377, days: 94 },
+            { name: "try/canvas-renderer", kind: "none", days: 150 },
+            { name: "feat/csv-export", kind: "wt", wt: "calm-otter", pr: 427, days: 8 },
+            { name: "fix/dpi-blur", kind: "pr", pr: 433, days: 1 },
+            { name: "chore/lint-rules", kind: "anc", days: 75 },
+            { name: "feat/annotations", kind: "pr", pr: 414, days: 22 },
+            { name: "fix/tick-overlap", kind: "prx", pr: 402, extra: 1, days: 31 },
+            { name: "wip/animation", kind: "none", days: 17 },
+            { name: "fix/touch-pan", kind: "pr", pr: 425, days: 9 },
+            { name: "feat/zoom-reset", kind: "closed", pr: 380, days: 88 }
+          ];
+        }
+        sha(name) {
+          let h = 2166136261;
+          for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+          return ("0000000" + (h >>> 0).toString(16)).slice(-7);
+        }
+        ago(d) {
+          if (d < 1) return "today";
+          if (d === 1) return "yesterday";
+          if (d < 14) return d + " days ago";
+          if (d < 60) return Math.round(d / 7) + " weeks ago";
+          return Math.round(d / 30) + " months ago";
+        }
+        classify(b) {
+          const s = this.state;
+          if (b.kind === "wt") return { keep: "checked out in a worktree", why: "Checked out in " + b.wt };
+          if (b.kind === "prx") return { keep: "local commits not in the PR", why: b.extra + " local commit" + (b.extra === 1 ? "" : "s") + " not in #" + b.pr };
+          if (b.kind === "closed") return { keep: "closed without merging", why: "#" + b.pr + " closed without merging" };
+          if (b.kind === "none") return { keep: "no merged PR", why: "No merged pull request found, and not in main" };
+          if (b.kind === "pr" && !s.proof) return { keep: "squash merge, PR proof off", why: "#" + b.pr + " merged, but its commits are not in main by ancestry" };
+          if (s.ageOn && b.days < s.age) return { keep: "touched in the last " + s.age + (s.age === 1 ? " day" : " days"), why: "Touched " + this.ago(b.days) + ", inside the " + s.age + "-day guard" };
+          if (b.kind === "anc") return { lead: "In main by ancestry", tail: " · touched " + this.ago(b.days) };
+          return { lead: "#" + b.pr + " merged " + this.ago(b.days), tail: " · tip is the PR’s head · touched " + this.ago(b.days) };
+        }
+        renderVals() {
+          const s = this.state;
+          const all = this.branches();
+          const fin = [];
+          const kept = [];
+          all.forEach((b) => {
+            const c = this.classify(b);
+            if (c.keep) kept.push({ b: b, c: c });
+            else fin.push({ b: b, c: c });
+          });
+          fin.sort((x, y) => y.b.days - x.b.days);
+          const selected = fin.filter((f) => !s.off[f.b.name]);
+          const finRows = fin.map((f) => {
+            const on = !s.off[f.b.name];
+            return {
+              name: f.b.name,
+              lead: f.c.lead,
+              tail: f.c.tail,
+              boxCls: on ? "box on" : "box",
+              toggle: () => {
+                const off = Object.assign({}, this.state.off);
+                if (off[f.b.name]) delete off[f.b.name]; else off[f.b.name] = true;
+                this.setState({ off: off });
+              }
+            };
+          });
+          const tally = {};
+          const order = [];
+          kept.forEach((k) => {
+            if (!(k.c.keep in tally)) { tally[k.c.keep] = 0; order.push(k.c.keep); }
+            tally[k.c.keep] += 1;
+          });
+          const keptChips = order.sort((a, b) => tally[b] - tally[a]).map((label) => ({ n: tally[label], label: label }));
+          const keptRows = kept.map((k) => ({ name: k.b.name, why: k.c.why }));
+          const done = s.done;
+          const goneLeft = done ? all.length - done : all.length;
+          return {
+            reset: () => this.setState({ off: {}, done: null, gone: [], showKept: false }),
+            proofBox: s.proof ? "box on" : "box",
+            toggleProof: () => this.setState({ proof: !s.proof, off: {}, done: null, gone: [] }),
+            ageBox: s.ageOn ? "box on" : "box",
+            toggleAge: () => this.setState({ ageOn: !s.ageOn, off: {}, done: null, gone: [] }),
+            ageVal: String(s.age),
+            onAge: (e) => this.setState({ age: Number(e.target.value), ageOn: true, off: {}, done: null, gone: [] }),
+            statusTitle: "Finished",
+            statusLine: done ? done + " local branches deleted · " + (all.length - done) + " kept" : "1 succeeded · " + fin.length + " finished branches · " + kept.length + " kept",
+            statusTime: done ? "took 1s" : "took 2s",
+            repoStatus: "Success",
+            isDone: !!done,
+            isReview: !done,
+            doneLine: done ? done + " local branches deleted; " + (all.length - done) + " retained." : "",
+            doneCount: s.gone.length,
+            doneRows: s.gone.map((name) => ({
+              name: name,
+              sha: this.sha(name),
+              restore: () => {
+                const gone = this.state.gone.filter((n) => n !== name);
+                this.setState({ gone: gone, done: gone.length === 0 ? null : gone.length });
+              }
+            })),
+            finCount: fin.length,
+            finRows: finRows,
+            keptCount: kept.length,
+            keptChips: keptChips,
+            keptRows: keptRows,
+            showKept: s.showKept,
+            keptLink: s.showKept ? "Hide" : "Show",
+            toggleKept: () => this.setState({ showKept: !s.showKept }),
+            footLead: done ? "Each deleted tip is listed in the receipt" : selected.length + " selected · the receipt lists each tip for restore",
+            secondLabel: done ? "Review again" : "Close",
+            deleteLabel: done ? "Close" : "Delete " + selected.length + " local branch" + (selected.length === 1 ? "" : "es"),
+            deleteDisabled: !done && selected.length === 0,
+            doDelete: () => (done ? this.setState({ off: {}, done: null, gone: [] }) : this.setState({ done: selected.length, gone: selected.map((f) => f.b.name) })),
+            sideTotal: 26 - (done || 0),
+            hasGone: goneLeft > 0,
+            goneLabel: goneLeft + " gone"
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

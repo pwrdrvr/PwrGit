@@ -210,7 +210,7 @@ describe.each(THEMES)("sidebar contrast — %s theme", (_themeName, theme) => {
     it("--status-warning reads as a badge and as bare text", () => {
       // .badge--warn sits on --warn-soft, which is derived from this same
       // token — so the wash always tracks the ink and is the tighter of the
-      // two. .badge-text--warn and .ref-section__summary are the bare case.
+      // two. .badge-text--warn and .ref-section__chip are the bare case.
       expect(
         round(ratio(theme, "--status-warning", ["--bg-sidebar", "--warn-soft"]))
       ).toBeGreaterThanOrEqual(4.5);

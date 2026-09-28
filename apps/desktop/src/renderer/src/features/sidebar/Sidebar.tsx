@@ -342,7 +342,11 @@ export function Sidebar({
     "fetch" | "soft-pull" | null
   >(null);
   const [pruning, setPruning] = useState(false);
-  const [maintenance, setMaintenance] = useState(false);
+  /** The maintenance dialog, and — when the refs browser opened it — the one
+   *  repository it reviews. */
+  const [maintenance, setMaintenance] = useState<
+    { repo?: { id: string; name: string } } | null
+  >(null);
   const [sel, setSel] = useState<Selection>({
     repoId: "",
     ids: EMPTY_IDS,
@@ -978,6 +982,9 @@ export function Sidebar({
         }}
         onNewWorktree={() => setNewWorktree({ repo })}
         onForkRepo={() => onForkCheckout(repo)}
+        onCleanUpBranches={() =>
+          setMaintenance({ repo: { id: repo.id, name: repo.name } })
+        }
         onRevealWorktree={(worktreeId) => {
           const worktree = repo.worktrees.find(
             (candidate) => candidate.id === worktreeId
@@ -1206,7 +1213,7 @@ export function Sidebar({
           <div className="prune-actions" aria-label="Maintain repositories">
             <button className="bulk-sync-action" disabled={activeProfile === null}
               {...hoverTooltip(tip, "Collect Git garbage across repositories and review leftover local branches")}
-              onClick={() => setMaintenance(true)}>
+              onClick={() => setMaintenance({})}>
               <PruneGlyph /><span className="bulk-sync-action__label">Garbage collection…</span>
             </button>
           </div>
@@ -1382,7 +1389,20 @@ export function Sidebar({
           onClose={() => setBulkSyncMode(null)}
         />
       )}
-      {maintenance && activeProfile !== null && <MaintenanceDialog profileId={activeProfile.id} platform={platform} onClose={() => setMaintenance(false)} />}
+      {maintenance !== null && activeProfile !== null && (
+        <MaintenanceDialog
+          profileId={activeProfile.id}
+          platform={platform}
+          onClose={() => setMaintenance(null)}
+          {...(maintenance.repo === undefined
+            ? {}
+            : {
+                repoScope: maintenance.repo,
+                initialTab: "branches" as const,
+                autoReview: true
+              })}
+        />
+      )}
 
       {pruning && activeProfile !== null && (
         <PruneWorktreesDialog

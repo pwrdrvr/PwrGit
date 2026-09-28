@@ -248,3 +248,64 @@ describe("open pull request list", () => {
     expect(found.get(98)).not.toHaveProperty("headRepoPath");
   });
 });
+
+describe("head commit", () => {
+  const HEAD = "0123456789abcdef0123456789abcdef01234567";
+  const node = (extra: Record<string, unknown> = {}) => ({
+    number: 5,
+    title: "Squashed feature",
+    url: "https://github.com/octo/orbit/pull/5",
+    state: "MERGED",
+    isDraft: false,
+    headRefName: "feature",
+    ...extra
+  });
+
+  it("asks for headRefOid on every read that shares the node fields", () => {
+    for (const { query } of [
+      buildPrQuery("octo", "orbit", ["feature"]),
+      buildCommitPrQuery("octo", "orbit", [HEAD]),
+      buildPrNumberQuery("octo", "orbit", [5]),
+      buildOpenPrQuery("octo", "orbit", null)
+    ]) {
+      expect(query).toContain("headRefOid");
+    }
+  });
+
+  it("maps headRefOid to headOid on each parser", () => {
+    // A merged PR's final head is what later proves a local branch tip IS
+    // that PR after a squash merge, so every path that caches one keeps it.
+    expect(
+      parsePrResponse(["feature"], {
+        repository: { a0: { nodes: [node({ headRefOid: HEAD })] } }
+      }).get("feature")
+    ).toMatchObject({ headOid: HEAD });
+    expect(
+      parseCommitPrResponse([HEAD], {
+        repository: { c0: { associatedPullRequests: { nodes: [node({ headRefOid: HEAD })] } } }
+      }).get(HEAD)
+    ).toMatchObject({ headOid: HEAD });
+    expect(
+      parsePrNumberResponse([5], {
+        repository: { n0: node({ headRefOid: HEAD }) }
+      }).get(5)
+    ).toMatchObject({ headOid: HEAD });
+    expect(
+      parseOpenPrPage({
+        repository: {
+          pullRequests: { nodes: [node({ state: "OPEN", headRefOid: HEAD })] }
+        }
+      }).items[0]
+    ).toMatchObject({ headOid: HEAD });
+  });
+
+  it("leaves headOid absent when GitHub did not report one", () => {
+    for (const extra of [{}, { headRefOid: null }, { headRefOid: "" }]) {
+      expect(
+        parsePrResponse(["feature"], {
+          repository: { a0: { nodes: [node(extra)] } }
+        }).get("feature")
+      ).not.toHaveProperty("headOid");
+    }
+  });
+});

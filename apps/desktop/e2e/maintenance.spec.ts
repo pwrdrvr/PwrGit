@@ -66,13 +66,23 @@ test("collects all repositories and reviews stale local branches without touchin
   await dialog
     .getByRole("button", { name: "Review local branches", exact: true })
     .click();
-  await expect(dialog).toContainText("1 eligible branch");
+  // The branch was made seconds ago, so the default week-long age guard
+  // keeps it and says so rather than offering it.
+  await expect(dialog).toContainText("1 touched in the last 7 days");
   await expect(
     dialog.getByRole("button", { name: "Delete 0 selected local branches" })
   ).toBeDisabled();
   await dialog
-    .getByRole("checkbox", { name: /feature\/finished.*Missing upstream/ })
-    .check();
+    .getByRole("checkbox", { name: "Keep branches touched in the last" })
+    .uncheck();
+  await dialog
+    .getByRole("button", { name: /^Review (local branches|again)$/ })
+    .click();
+  await expect(dialog).toContainText("1 finished branch");
+  // Offered branches arrive selected; the review is the confirmation.
+  await expect(
+    dialog.getByRole("checkbox", { name: /feature\/finished.*Already in HEAD/ })
+  ).toBeChecked();
   await dialog.screenshot({
     animations: "disabled",
     path: testInfo.outputPath("maintenance-branches.png")
@@ -81,6 +91,9 @@ test("collects all repositories and reviews stale local branches without touchin
     .getByRole("button", { name: "Delete 1 selected local branch" })
     .click();
   await expect(dialog).toContainText("1 local branch deleted; 0 retained");
+  await expect(
+    dialog.getByRole("button", { name: /^Restore feature\/finished at / })
+  ).toBeVisible();
   expect(sandbox.git(repo.path, "branch", "--list", "feature/finished")).toBe(
     ""
   );
