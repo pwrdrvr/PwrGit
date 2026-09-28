@@ -164,7 +164,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     changeRequestLabel: "Change", changeRequestSigil: "#",
     changeRequestBranchPrefix: "change", organizationNoun: "group",
     maxPathSegments: 32, hostAllowlistEnv: "PWRGIT_GERRIT_HOSTS",
-    addHost: { button: "Add Gerrit host", sub: "Read public changes from a Gerrit instance.", title: "Add Gerrit host", placeholder: "review.example.com" },
+    addHost: { button: "Add Gerrit host…", sub: "Read public changes from a Gerrit instance.", title: "Add a Gerrit host", placeholder: "review.example.com" },
     forkCompletesAsynchronously: false,
     capabilities: { batchedBranchLookup: false, batchedCommitAssociation: false, changeSizeAndTimeline: true, commitAuthorIdentity: false, forkDefaultBranchOnly: false }
   },
@@ -272,6 +272,7 @@ function freeze(
 ): Readonly<Record<ForgeKind, ForgeProduct>> {
   for (const product of Object.values(products)) {
     Object.freeze(product.capabilities);
+    Object.freeze(product.workflows);
     Object.freeze(product.addHost);
     Object.freeze(product.signInHost);
     Object.freeze(product);

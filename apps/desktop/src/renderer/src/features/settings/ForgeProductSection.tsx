@@ -751,7 +751,24 @@ function ReviewEndpoint({ row, blocked, onCommit }: { row: ForgeHostRow; blocked
   };
   return <label className="settings-inline-field">
     <span className="settings-inline-field__label">Review URL</span>
-    <input className="settings-input" aria-label={`Review URL for ${row.host}`} placeholder={gerritReviewUrl(row.host)} value={value} aria-disabled={blocked} onChange={(event) => setValue(event.target.value)} onBlur={commit} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); commit(); } }} />
+    <input
+      className="settings-input"
+      aria-label={`Review URL for ${row.host}`}
+      placeholder={gerritReviewUrl(row.host)}
+      value={value}
+      size={36}
+      maxLength={2048}
+      autoComplete="off"
+      spellCheck={false}
+      aria-disabled={blocked}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") { event.preventDefault(); commit(); }
+        if (event.key === "Escape") { event.preventDefault(); setValue(stored); setError(""); }
+      }}
+    />
     {error && <span role="alert">{error}</span>}
   </label>;
 }
