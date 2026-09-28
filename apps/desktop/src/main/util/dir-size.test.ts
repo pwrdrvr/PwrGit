@@ -1,5 +1,6 @@
 import {
   linkSync,
+  utimesSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -24,6 +25,21 @@ describe("directorySize", () => {
     mkdirSync(join(at, ".."), { recursive: true });
     writeFileSync(at, "x".repeat(size));
   };
+
+  it("observes nested ignored files and empty directories", async () => {
+    file("node_modules/deep/build.js", 50);
+    const future = new Date(Date.now() + 86_400_000);
+    utimesSync(join(root, "node_modules/deep/build.js"), future, future);
+    const measured = await directorySize(root, { trackActivity: true });
+    expect(Date.parse(measured.lastTouchedAt!)).toBe(future.getTime());
+    expect(measured.bytes).toBe(50);
+    expect(measured.inaccessible).toBe(0);
+    const later = new Date(future.getTime() + 86_400_000);
+    mkdirSync(join(root, "empty"));
+    utimesSync(join(root, "empty"), later, later);
+    expect(Date.parse((await directorySize(root, { trackActivity: true })).lastTouchedAt!)).toBe(later.getTime());
+    expect((await directorySize(root)).lastTouchedAt).toBeUndefined();
+  });
 
   it("sums nested files and counts every entry it visits", async () => {
     file("a.txt", 100);
@@ -71,8 +87,11 @@ describe("directorySize", () => {
       writeFileSync(join(outside, "big.bin"), "x".repeat(5000));
       file("small.txt", 10);
       symlinkSync(outside, join(root, "linked"), "dir");
-      const result = await directorySize(root);
+      const future = new Date(Date.now() + 86_400_000);
+      utimesSync(join(outside, "big.bin"), future, future);
+      const result = await directorySize(root, { trackActivity: true });
       expect(result.bytes).toBe(10);
+      expect(Date.parse(result.lastTouchedAt!)).toBeLessThan(future.getTime());
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

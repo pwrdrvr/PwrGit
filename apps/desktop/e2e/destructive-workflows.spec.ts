@@ -332,6 +332,17 @@ test("the pruner sweeps a never-browsed profile, then reclaims only ignored file
 
   await window.getByRole("button", { name: /Prune worktrees/ }).click();
   const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
+  await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
+  await expect(dialog.locator(".prune__row")).toHaveCount(0);
+  if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
+    await dialog.screenshot({ path: "/tmp/pwrgit-prune-protected.png" });
+  }
+  await dialog.getByLabel("Protect recently touched worktrees").uncheck();
+  if (process.env.PWRGIT_PRUNE_SCREENSHOTS === "1") {
+    await expect(dialog.locator(".prune__row")).toHaveCount(1);
+    await dialog.screenshot({ path: "/tmp/pwrgit-prune-off.png" });
+  }
   await expect(dialog).toBeVisible({ timeout: 20_000 });
 
   const row = dialog.locator(".prune__row");
@@ -393,6 +404,10 @@ test("removing from the pruner confirms the count, deletes the checkout, and kee
 
   await window.getByRole("button", { name: /Prune worktrees/ }).click();
   const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
+  await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
+  await expect(dialog.locator(".prune__row")).toHaveCount(0);
+  await dialog.getByLabel("Protect recently touched worktrees").uncheck();
   await expect(dialog.locator(".prune__row")).toHaveCount(1, {
     timeout: 40_000
   });
@@ -465,6 +480,10 @@ test("the pruner never offers a dirty or unmerged worktree", async () => {
 
   await window.getByRole("button", { name: /Prune worktrees/ }).click();
   const dialog = window.getByRole("dialog", { name: "Prune worktrees" });
+  await expect(dialog.locator(".prune__summary")).toContainText("Sweep finished", { timeout: 30_000 });
+  await expect(dialog.getByLabel("Protect recently touched worktrees")).toBeChecked();
+  await expect(dialog.locator(".prune__row")).toHaveCount(0);
+  await dialog.getByLabel("Protect recently touched worktrees").uncheck();
   await expect(dialog.locator(".prune__row")).toHaveCount(1, {
     timeout: 40_000
   });

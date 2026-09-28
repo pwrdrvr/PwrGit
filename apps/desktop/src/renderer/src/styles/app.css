@@ -16959,3 +16959,34 @@ button.agent-auth-node:focus-visible,
   flex-shrink: 0;
   padding: 0;
 }
+
+.prune__protection {
+  flex: 0 0 auto;
+  margin: 12px 18px 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.prune__protection-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.prune__protection-controls label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.prune__protection-controls select {
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 4px;
+}
+.prune__protection p { margin: 8px 0 0; line-height: 1.45; }

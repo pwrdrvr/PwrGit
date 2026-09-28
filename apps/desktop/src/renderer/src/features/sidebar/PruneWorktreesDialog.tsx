@@ -19,6 +19,7 @@ import {
   describeBytes,
   emptyReviewCopy,
   reasonLabel,
+  protectedFromPruning,
   removalConfirmMessage,
   selectionTotals,
   sortCandidates
@@ -59,6 +60,8 @@ export function PruneWorktreesDialog({
   onRemove: (worktreeIds: string[]) => Promise<void>;
   onClose: () => void;
 }) {
+  const [protectRecent, setProtectRecent] = useState(true);
+  const [protectionDays, setProtectionDays] = useState(7);
   const [stage, setStage] = useState<Stage>({ kind: "sweeping" });
   const [summary, setSummary] = useState<PruneScanSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -168,9 +171,22 @@ export function PruneWorktreesDialog({
         : sortCandidates(summary.results.flatMap((repo) => repo.candidates)),
     [summary]
   );
-  const candidates = useMemo(
+  const remaining = useMemo(
     () => swept.filter((candidate) => !removed.has(candidate.worktreeId)),
     [removed, swept]
+  );
+  const candidates = useMemo(
+    () => remaining.filter((candidate) => !protectedFromPruning(
+      candidate,
+      protectRecent ? protectionDays : 0,
+      Date.parse(summary?.finishedAt ?? "")
+    )),
+    [remaining, protectRecent, protectionDays, summary]
+  );
+  const protectedCount = remaining.length - candidates.length;
+  const proposedTotals = selectionTotals(
+    candidates,
+    new Set(candidates.map((c) => c.worktreeId))
   );
   const totals = useMemo(
     () => selectionTotals(candidates, selected),
@@ -282,9 +298,9 @@ export function PruneWorktreesDialog({
                 <h2>Prune worktrees</h2>
                 <p>
                   Every repository is checked for worktrees that are clean, not
-                  the default branch, and finished — a merged pull request at
-                  any age, or merged into the default branch (or sharing no
-                  history with it) and untouched for {STALE_AGE_DAYS} days.
+                  the default branch, and finished — a merged pull request,
+                  or merged into the default branch (or sharing no history
+                  with it) with no commits for {STALE_AGE_DAYS} days.
                 </p>
               </div>
               <span className="prune__count" aria-live="polite">
@@ -294,6 +310,39 @@ export function PruneWorktreesDialog({
                     ? `${removedTotals.count} removed`
                     : `${candidates.length} found`}
               </span>
+            </div>
+
+            <div className="prune__protection">
+              <div className="prune__protection-controls">
+                <label>
+                  <input type="checkbox" checked={protectRecent} disabled={busy}
+                    onChange={(event) => {
+                      setProtectRecent(event.target.checked);
+                      setSelected(new Set());
+                    }} />
+                  Protect recently touched worktrees
+                </label>
+                <label>
+                  Within the last{" "}
+                  <select aria-label="Protection window" value={protectionDays}
+                    disabled={busy || !protectRecent}
+                    onChange={(event) => {
+                      setProtectionDays(Number(event.target.value));
+                      setSelected(new Set());
+                    }}>
+                    {[1, 7, 14, 30].map((days) => (
+                      <option key={days} value={days}>{days} {days === 1 ? "day" : "days"}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p>Uses commits and file or folder changes, including ignored files.
+                Incomplete activity checks stay protected. Resets to 7 days each time you open this dialog.</p>
+              <p role="status">
+                {summary === null ? "Checking activity during the sweep…" :
+                  `${candidates.length} proposed · ${describeBytes(proposedTotals)} · ${protectedCount} protected`}
+                {!protectRecent && " · Recent-worktree protection is off."}
+              </p>
             </div>
 
             {stage.kind === "sweeping" && (
@@ -332,7 +381,7 @@ export function PruneWorktreesDialog({
                   {summary.counts.repos.scanned} read ·{" "}
                   {summary.counts.repos.cached} reused ·{" "}
                   {summary.counts.worktreesConsidered} worktrees considered ·{" "}
-                  {formatBytes(summary.counts.sizeBytes)} in candidates
+                  {formatBytes(proposedTotals.bytes)} in proposed worktrees
                   {summary.counts.repos.failed > 0
                     ? ` · ${summary.counts.repos.failed} unreadable`
                     : ""}
@@ -374,7 +423,9 @@ export function PruneWorktreesDialog({
                       removedTotals.count > 0 ? " is-done" : ""
                     }`}
                   >
-                    {emptyReviewCopy(removedTotals)}
+                    {protectedCount > 0
+                      ? `No worktrees are proposed. ${protectedCount} finished worktree${protectedCount === 1 ? " is" : "s are"} protected by the activity check. Change the protection above to review them.`
+                      : emptyReviewCopy(removedTotals)}
                   </p>
                 )}
               {candidates.map((candidate) => (
@@ -486,7 +537,10 @@ function PruneRow({
         <span className="prune__row-facts">
           {candidate.lastActivityAt === undefined
             ? "no commits"
-            : relativeAge(candidate.lastActivityAt)}
+            : `commit ${relativeAge(candidate.lastActivityAt)}`}
+          {candidate.activityComplete !== true ? " · activity incomplete" :
+            candidate.lastTouchedAt === undefined ? " · activity unknown" :
+              ` · touched ${relativeAge(candidate.lastTouchedAt)}`}
           {" · "}
           {candidate.sizeBytes === null
             ? "size unknown"

@@ -364,3 +364,24 @@ describe("sweepPrunableWorktrees", () => {
     expect(completions.at(-1)?.completedRepos).toBe(2);
   });
 });
+
+it("carries measured activity onto candidates, and leaves cancelled checks unknown", async () => {
+  const result = await sweepPrunableWorktrees([input("r", ["old", "partial"])], {
+    operationId: "activity", now: () => new Date(NOW),
+    computeRepoState: async () => undefined,
+    readRepo: () => repo("r", [stale("old"), stale("partial")]),
+    sizeOf: async (path) => ({ bytes: 10, partial: path.endsWith("partial"),
+      lastTouchedAt: ago(2), activityComplete: !path.endsWith("partial") })
+  });
+  expect(result.results[0]!.candidates.map((c) => [c.lastTouchedAt, c.activityComplete])).toEqual([
+    [ago(2), true], [ago(2), false]
+  ]);
+  const controller = new AbortController();
+  const stopped = await sweepPrunableWorktrees([input("r", ["old"])], {
+    operationId: "cancelled-activity", signal: controller.signal,
+    computeRepoState: async () => { controller.abort(); },
+    readRepo: () => repo("r", [stale("old")]),
+    sizeOf: async () => { throw new Error("must not measure after cancellation"); }
+  });
+  expect(stopped.results[0]!.candidates[0]!.activityComplete).toBeUndefined();
+});
