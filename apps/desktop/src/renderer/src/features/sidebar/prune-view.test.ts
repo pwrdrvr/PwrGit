@@ -343,11 +343,12 @@ describe("recent activity protection", () => {
     expect(protectedFromPruning({ ...old, lastTouchedAt: "2026-09-21T00:00:00Z" }, 7, now)).toBe(true);
     expect(protectedFromPruning({ ...old, lastActivityAt: "2026-09-29T00:00:00Z" }, 7, now)).toBe(true);
   });
-  it("fails closed for unreadable, partial, cancelled and unknown activity; off is explicit", () => {
+  it("keeps unreadable activity protected even when the age guard is off", () => {
     for (const c of [candidate({ worktreeId: "unknown" }), { ...old, activityComplete: false },
       { ...old, lastTouchedAt: "invalid" }, { ...old, lastActivityAt: "invalid" }]) {
       expect(protectedFromPruning(c, 7, now)).toBe(true);
-      expect(protectedFromPruning(c, 0, now)).toBe(false);
+      expect(protectedFromPruning(c, 0, now)).toBe(true);
     }
+    expect(protectedFromPruning({ ...old, lastTouchedAt: "2026-09-27T00:00:00Z" }, 0, now)).toBe(false);
   });
 });

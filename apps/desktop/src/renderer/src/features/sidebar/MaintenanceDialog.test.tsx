@@ -117,10 +117,10 @@ describe("maintenance dialog", () => {
       ? scan : Promise.resolve({ ok: true, value: null }));
     await click("Worktrees");
     expect(dispatch.mock.calls.filter(([name]) => name === "prune:scan")).toHaveLength(0);
-    await click("Analyze");
+    await click("Find finished worktrees");
     expect(container.querySelectorAll('[role="dialog"]')).toHaveLength(1);
     expect(container.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("Repository maintenance");
-    expect(container.textContent).toContain("Protect recently touched worktrees");
+    expect(container.textContent).toContain("Reading Git state across every repository");
     expect(button("Garbage collection").disabled).toBe(true);
     expect(button("Local branches").disabled).toBe(true);
     await act(async () => {
@@ -384,6 +384,29 @@ describe("maintenance dialog", () => {
     expect(button("Restore").disabled).toBe(false);
   });
 
+  it("shows proposing repositories first and collapses the quiet results", async () => {
+    const two = { ...repo, id: "two", name: "beta-two" };
+    const one = { ...repo, id: "one", name: "gamma-one" };
+    const quiet = { ...repo, id: "quiet", name: "alpha-quiet" };
+    const quietKept = { ...repo, id: "kept", name: "delta-kept" };
+    dispatch.mockResolvedValue({ ok: true, value: summary([
+      { repo: quiet, outcome: "success", message: "No branches", candidates: [], kept: [] },
+      { repo: one, outcome: "success", message: "One", candidates: [{ ...candidate, repoId: one.id }] },
+      { repo: quietKept, outcome: "success", message: "Kept", candidates: [], kept },
+      { repo: two, outcome: "success", message: "Two", candidates: [
+        { ...candidate, repoId: two.id, branch: "first" },
+        { ...candidate, repoId: two.id, branch: "second" }
+      ] }
+    ]) });
+    await click("Local branches");
+    await click("Review local branches");
+    expect([...container.querySelectorAll(".maintenance__results article .bulk-sync__repo-head strong")].map((node) => node.textContent)).toEqual(["beta-two", "gamma-one"]);
+    expect(container.textContent).toContain("3 finished branches in 2 of 4 repositories");
+    expect(container.querySelector(".maintenance__quiet")?.textContent).toContain("2 repositories with nothing to delete · 1 of them keep branches");
+    await click("Show");
+    expect(container.querySelectorAll(".maintenance__results article")).toHaveLength(4);
+  });
+
   it("shows each finished branch's evidence and counts kept ones by reason", async () => {
     dispatch.mockResolvedValue({
       ok: true,
@@ -425,6 +448,7 @@ describe("maintenance dialog", () => {
     );
     await click("Local branches");
     await click("Review local branches");
+    await click("Change");
     const select = container.querySelector<HTMLSelectElement>(
       "select[aria-label='Age guard']"
     )!;
@@ -576,28 +600,32 @@ describe("combined maintenance workflow", () => {
     dispatch.mockClear();
   }
   async function task(index: number) {
-    const input = container.querySelectorAll<HTMLInputElement>(".maintenance__options > label > input[type=checkbox]")[index]!;
+    const input = container.querySelectorAll<HTMLInputElement>(".maintenance__plan-step > input[type=checkbox]")[index]!;
     await act(async () => input.click());
   }
   it("defaults to a checked three-step plan and does no work before Analyze", async () => {
     await open();
     expect(button("Combined").getAttribute("aria-pressed")).toBe("true");
-    expect(container.querySelectorAll(".maintenance__options > label > input:checked")).toHaveLength(3);
+    expect(container.querySelectorAll(".maintenance__plan-step > input:checked")).toHaveLength(3);
     expect(runCalls()).toHaveLength(0);
     expect(dispatch.mock.calls.some(([name]) => name === "prune:scan")).toBe(false);
     await task(0); await task(1); await task(2);
-    expect(button("Analyze").disabled).toBe(true);
+    expect(button("Start").disabled).toBe(true);
   });
   it("pauses at both reviews and runs GC only after an explicit continuation", async () => {
     await open();
-    await click("Analyze");
+    await click("Start");
+    expect(container.querySelectorAll(".maintenance__step")).toHaveLength(3);
+    expect(container.querySelector(".maintenance__step.is-on")?.textContent).toContain("Worktrees");
     expect(container.querySelectorAll(".prune__row")).toHaveLength(1);
     expect(actions()).toEqual([]);
-    await click("Continue without Pruning");
+    await click("Skip worktrees");
+    expect(container.querySelector(".maintenance__step.is-on")?.textContent).toContain("Local branches");
     expect(actions()).toEqual(["scan-branches"]);
-    expect(button("Remove 1 Branch and Continue")).toBeTruthy();
-    await click("Continue without Removing Branches");
+    expect(button("Delete 1 branch and continue")).toBeTruthy();
+    await click("Skip branches");
     expect(actions()).toEqual(["scan-branches", "gc"]);
+    expect(container.querySelectorAll(".maintenance__receipt-step")).toHaveLength(3);
     expect(remove).not.toHaveBeenCalled();
   });
   it("waits for successful pruning before branch analysis, and preserves branch receipts after GC", async () => {
@@ -607,9 +635,9 @@ describe("combined maintenance workflow", () => {
       await new Promise<void>((resolve) => { finish = resolve; });
       ids.forEach((worktreeId) => events.get("worktree:removed")?.({ worktreeId }));
     });
-    await click("Analyze");
+    await click("Start");
     await act(async () => container.querySelector<HTMLInputElement>(".prune__row input")!.click());
-    await click("Start Pruning and Continue");
+    await click("Remove 1 worktree and continue");
     expect(actions()).toEqual([]);
     expect(button("Combined").disabled).toBe(true);
     await act(async () => {
@@ -617,26 +645,27 @@ describe("combined maintenance workflow", () => {
       finish();
     });
     expect(actions()).toEqual(["scan-branches"]);
-    await click("Remove 1 Branch and Continue");
+    await click("Delete 1 branch and continue");
     expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
-    expect(container.textContent).toContain("1 worktree removed");
-    expect(container.textContent).toContain("1 local branch removed");
-    expect(button("Restore branch")).toBeTruthy();
+    expect(container.textContent).toContain("1 removed");
+    expect(container.textContent).toContain("1 deleted");
+    expect(button("Restore")).toBeTruthy();
   });
   it("stays on worktree review if a requested removal did not succeed", async () => {
     await open();
     remove.mockResolvedValue(undefined);
-    await click("Analyze");
+    await click("Start");
     await act(async () => container.querySelector<HTMLInputElement>(".prune__row input")!.click());
-    await click("Start Pruning and Continue");
+    await click("Remove 1 worktree and continue");
     expect(actions()).toEqual([]);
     expect(container.textContent).toContain("Some worktrees were not removed");
   });
   it("restores Auto, enforces an age guard, and sequences scan → removal → GC", async () => {
     await open("auto");
     expect(container.querySelector<HTMLSelectElement>('[aria-label="Branch removal"]')!.value).toBe("auto");
+    await act(async () => container.querySelector<HTMLInputElement>('.maintenance__plan-step:nth-child(2) .maintenance__plan-rule:nth-child(2) input')!.click());
     await task(0);
-    await click("Analyze");
+    await click("Start");
     expect(actions()).toEqual(["scan-branches", "delete-branches", "gc"]);
     for (const [, req] of runCalls().slice(0, 2)) {
       expect(req.action.options.keepDays).toBe(7);
@@ -650,7 +679,7 @@ describe("combined maintenance workflow", () => {
     await act(async () => { mode.value = "auto"; mode.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(dispatch).toHaveBeenCalledWith("settings:update", { patch: { general: { maintenanceBranchMode: "auto" } } });
     await task(0); await task(1);
-    await click("Analyze");
+    await click("Start");
     expect(actions()).toEqual(["gc"]);
   });
   it.each(["cancelled", "failed", "partial"])("does not advance after a %s branch scan", async (outcome) => {
@@ -660,9 +689,10 @@ describe("combined maintenance workflow", () => {
       ? { ok: true, value: { ...summary([{ repo, outcome, message: "Stopped" } as MaintenanceRepoResult]), cancelled: outcome === "cancelled" } }
       : previous(name, req));
     await task(0);
-    await click("Analyze");
+    await click("Start");
     expect(actions()).toEqual(["scan-branches"]);
-    expect(container.textContent).toContain("Later tasks were not started");
+    expect(container.textContent).toContain("Not started");
+    expect(container.querySelector(".maintenance__receipt-step.is-failed")?.textContent).toContain("Local branches");
   });
   it("does not garbage collect after a partial branch removal", async () => {
     await open("auto");
@@ -671,8 +701,8 @@ describe("combined maintenance workflow", () => {
       ? { ok: true, value: summary([{ repo, outcome: "partial", message: "Changed branch retained." }]) }
       : previous(name, req));
     await task(0);
-    await click("Analyze");
+    await click("Start");
     expect(actions()).toEqual(["scan-branches", "delete-branches"]);
-    expect(container.textContent).toContain("Later tasks were not started");
+    expect(container.textContent).toContain("Not started");
   });
 });

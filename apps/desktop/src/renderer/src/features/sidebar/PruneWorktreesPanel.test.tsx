@@ -156,25 +156,32 @@ describe("PruneWorktreesPanel", () => {
     const onRemove = vi.fn().mockResolvedValue(undefined);
     await render(onRemove);
     expect(rows()).toHaveLength(1);
-    expect(container.textContent).toContain("1 proposed · 1 KB · 2 protected");
-    const protection = container.querySelector<HTMLInputElement>(".prune__protection input")!;
+    expect(container.textContent).toContain("Kept 2");
+    await act(async () => buttonNamed("Change").click());
     const window = container.querySelector<HTMLSelectElement>(".prune__protection select")!;
     await act(async () => {
       window.value = "1";
       window.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    await act(async () => buttonNamed("Find finished worktrees").click());
     expect(rows()).toHaveLength(2);
-    await act(async () => protection.click());
-    expect(rows()).toHaveLength(3);
+    await act(async () => buttonNamed("Change").click());
+    const unguarded = container.querySelector<HTMLInputElement>(".prune__protection input")!;
+    await act(async () => unguarded.click());
+    await act(async () => buttonNamed("Find finished worktrees").click());
+    expect(rows()).toHaveLength(2);
+    expect(container.textContent).toContain("1 activity could not be read");
     await act(async () => container.querySelector<HTMLInputElement>(".prune__select input")!.click());
     expect(dangerButton()?.disabled).toBe(false);
-    await act(async () => protection.click());
+    await act(async () => buttonNamed("Change").click());
+    await act(async () => container.querySelector<HTMLInputElement>(".prune__protection input")!.click());
+    await act(async () => buttonNamed("Find finished worktrees").click());
     expect(rows()).toHaveLength(2);
     expect(dangerButton()?.disabled).toBe(true);
     await act(async () => rows()[0]!.querySelector<HTMLInputElement>("input")!.click());
     await act(async () => dangerButton()!.click());
     expect(onRemove).toHaveBeenCalledWith(["old"]);
-    expect(scanRequests()).toHaveLength(1);
+    expect(scanRequests()).toHaveLength(4);
   });
 
   it("starts exactly one sweep through the app's StrictMode mount cycle", async () => {
@@ -255,7 +262,7 @@ describe("PruneWorktreesPanel", () => {
     await act(async () => checkbox?.click());
     expect(dangerButton()?.disabled).toBe(false);
     expect(buttonNamed("Reclaim disk space").disabled).toBe(false);
-    expect(container.querySelector(".prune__select")?.textContent).toContain(
+    expect(container.querySelector(".maintenance__footer-lead")?.textContent).toContain(
       "1 selected · 1 KB"
     );
   });
