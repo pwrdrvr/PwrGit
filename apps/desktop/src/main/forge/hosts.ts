@@ -1,5 +1,6 @@
 import {
   canonicalForgeHostname,
+  classifyForgeHost,
   FORGE_KINDS,
   forgeProduct,
   isForgeKind,
@@ -178,7 +179,8 @@ export class ForgeHosts {
     if (found !== undefined) return { kind: found.kind, source: "auto" };
 
     // The SaaS hosts only. Everything else must be signed in to or added.
-    const saas = FORGE_KINDS.find((kind) => forgeProduct(kind).saasHost === key);
+    const classified = classifyForgeHost(key);
+    const saas = classified === "other" ? undefined : classified;
     return saas === undefined
       ? { kind: null, source: "auto" }
       : { kind: saas, source: "auto" };
@@ -218,6 +220,10 @@ export class ForgeHosts {
     }
     // Known forge, nobody decided otherwise: on.
     return { enabled: true, source: "auto" };
+  }
+
+  reviewUrl(host: string): string | undefined {
+    return this.configFor(host)?.reviewUrl;
   }
 
   /** Everything resolved, for one host. */
@@ -408,6 +414,7 @@ export class ForgeHostsView {
         ? []
         : [
             {
+              ...(this.hosts.reviewUrl(entry.host) === undefined ? {} : { reviewUrl: this.hosts.reviewUrl(entry.host) }),
               host: entry.host,
               kind: entry.kind,
               kindSource: entry.kindSource,

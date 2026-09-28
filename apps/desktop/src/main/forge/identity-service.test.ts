@@ -16,6 +16,7 @@ import { RepoIndexer } from "../git/repo-indexer";
 import type { GitExec, GitOutput } from "../git/dugite";
 import { GitHubRepoProvider } from "../forge/github/repo-provider";
 import { GitLabRepoProvider } from "../forge/gitlab/repo-provider";
+import { GerritRepoProvider } from "./gerrit/repo-provider";
 import { ForgeHosts } from "./hosts";
 import { ForgeRepoRegistry } from "./repo-provider";
 import {
@@ -71,6 +72,7 @@ async function fixture(
      *  a hostname alone classifies as `other` now that nothing guesses from a
      *  `gitlab.*` prefix. */
     overrides?: ForgeHostMap;
+    reviewUrl?: string;
   } = {}
 ) {
   const origin = options.origin ?? "git@github.com:huntharo/react.git";
@@ -101,12 +103,14 @@ async function fixture(
   );
   return {
     db,
+    registry,
     glab,
     indexer,
     profileId: profile.id,
     identities: new IdentityService(db, systemGit, registry, {
       overrides: () => overrides,
-      isEnabled: gate
+      isEnabled: gate,
+      reviewUrl: () => options.reviewUrl
     })
   };
 }
@@ -1009,4 +1013,44 @@ describe("IdentityService and the per-host switch", () => {
     expect(await identities.refresh(repos)).toEqual([]);
     expect(calls).toEqual([]);
   });
+});
+
+
+it("preserves an ownerless Gerrit identity in both persistence readers", async () => {
+  const { db, registry, identities, indexer, profileId } = await fixture(async () => "{}", {
+    origin: "https://codereview.qt-project.org/project"
+  });
+  try {
+    registry.register(new GerritRepoProvider("codereview.qt-project.org", () => undefined, async () => ({ id: "project" })));
+    const repo = indexer.listRepos(profileId)[0]!;
+    const changes = await identities.refresh([repo]);
+    expect(changes[0]?.identity.nameWithOwner).toBe("project");
+    expect(identities.read([repo.id]).get(repo.id)).toMatchObject({ owner: "", name: "project", nameWithOwner: "project" });
+    expect(indexer.listRepos(profileId)[0]?.identity).toMatchObject({ owner: "", name: "project", nameWithOwner: "project" });
+  } finally { db.close(); }
+});
+
+
+it.each([
+  ["https://review.example/r/project.git", "project"],
+  ["ssh://reviewer@review.example:29418/r/project", "r/project"],
+  ["https://git.example/r/project.git", "r/project"]
+])("normalizes mounted HTTP identity coordinates without changing other transports: %s", async (origin, project) => {
+  const reviewUrl = "https://review.example/r";
+  const { db, registry, identities, indexer, profileId } = await fixture(async () => "{}", {
+    origin, reviewUrl, overrides: { "review.example": "gerrit", "git.example": "gerrit" }
+  });
+  const get = vi.fn(async (_repo: unknown, path: string) => {
+    expect(path).toBe(`projects/${encodeURIComponent(project)}`);
+    return { id: encodeURIComponent(project) };
+  });
+  registry.register(new GerritRepoProvider("review.example", () => reviewUrl, get),
+    (host) => new GerritRepoProvider(host, () => reviewUrl, get));
+  try {
+    const repo = indexer.listRepos(profileId)[0]!;
+    await identities.refresh([repo]);
+    expect(get).toHaveBeenCalledOnce();
+    expect(identities.read([repo.id]).get(repo.id)?.nameWithOwner).toBe(project);
+    expect(indexer.listRepos(profileId)[0]?.identity?.nameWithOwner).toBe(project);
+  } finally { db.close(); }
 });

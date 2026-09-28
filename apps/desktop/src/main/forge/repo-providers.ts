@@ -1,3 +1,4 @@
+import { GerritRepoProvider } from "./gerrit/repo-provider";
 import { GitCafeRepoProvider } from "./gitcafe/repo-provider";
 import { FORGE_KINDS, forgeProduct, type ForgeKind } from "@pwrgit/shared";
 import { GitHubRepoProvider } from "./github/repo-provider";
@@ -27,8 +28,9 @@ import type { ForgeRepoProvider, ForgeRepoRegistry } from "./repo-provider";
  * omission. As a record, `tsc` asks for the entry.
  */
 const REPO_PROVIDERS: Readonly<{
-  [K in ForgeKind]: (hostname: string) => ForgeRepoProvider & { host: K };
+  [K in ForgeKind]: (hostname: string, reviewUrl: () => string | undefined) => ForgeRepoProvider & { host: K };
 }> = {
+  gerrit: (hostname, reviewUrl) => new GerritRepoProvider(hostname, reviewUrl),
   github: (hostname) => new GitHubRepoProvider(undefined, hostname),
   gitlab: (hostname) => new GitLabRepoProvider(undefined, hostname),
   gitcafe: (hostname) => new GitCafeRepoProvider(undefined, hostname)
@@ -36,9 +38,9 @@ const REPO_PROVIDERS: Readonly<{
 
 /** Register every product's real repository provider. Not called under the E2E
  *  forge fixture, which supplies its own registry. */
-export function registerRepoProviders(registry: ForgeRepoRegistry): void {
+export function registerRepoProviders(registry: ForgeRepoRegistry, reviewUrl: (host: string) => string | undefined = () => undefined): void {
   for (const kind of FORGE_KINDS) {
-    const build = REPO_PROVIDERS[kind];
+    const build = (hostname: string) => REPO_PROVIDERS[kind](hostname, () => reviewUrl(hostname));
     // The SaaS instance comes from the registry, not from each provider
     // module's private default, so the hostname `register` seeds `byHost`
     // under is the same one `ForgeHosts` probes and resolves.

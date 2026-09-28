@@ -4,7 +4,7 @@ import {
   forgeKindForCli,
   forgeSaasHost,
   isSafeProjectPath,
-  parseForgeRemote,
+  parseCloneRemote,
   type CloneDestination,
   type CloneRepository,
   type ForgeHost,
@@ -154,6 +154,7 @@ export type ExactRepository = {
   host: ForgeHost;
   hostname: string;
   nameWithOwner: string;
+  sourceUrl?: string;
 };
 
 /**
@@ -166,7 +167,7 @@ export type ExactRepository = {
  * `hosts` is the map `useForgeHostMap` reads over `forge:hosts`, and it is
  * what makes a self-managed instance resolve at all: a hostname is not
  * evidence of which forge runs on it, so without an entry `gitlab.acme.io` is
- * `other` — the same honest no-op `git.acme.com` has always been.
+ * `other`. Explicit URLs still clone through Git without a forge provider.
  */
 export function exactRepository(
   input: string,
@@ -176,7 +177,7 @@ export function exactRepository(
   const trimmed = input.trim();
   if (localRepositoryPath(trimmed) !== null) return null;
   const cliClone = CLI_CLONE.exec(trimmed);
-  const candidate = cliClone?.[2] ?? trimmed;
+  const candidate = cliClone?.[2] ?? /^git\s+clone\s+(\S+)$/.exec(trimmed)?.[1] ?? trimmed;
   const cliHost: ForgeHost | null =
     cliClone?.[1] === undefined ? null : forgeKindForCli(cliClone[1]);
 
@@ -187,12 +188,13 @@ export function exactRepository(
     /^(?:https?|ssh|git):\/\//i.test(candidate) ||
     /^[^\s/]+@[^\s:/]+:/.test(candidate);
   if (isUrl) {
-    const remote = parseForgeRemote(candidate, hosts);
-    if (remote === null || !isSafeProjectPath(remote.nameWithOwner)) return null;
+    const remote = parseCloneRemote(candidate, hosts);
+    if (remote === null || !isSafeProjectPath(remote.nameWithOwner, remote.host)) return null;
     return {
       host: remote.host,
       hostname: remote.hostname,
-      nameWithOwner: remote.nameWithOwner
+      nameWithOwner: remote.nameWithOwner,
+      sourceUrl: remote.sourceUrl
     };
   }
 
@@ -221,11 +223,15 @@ export function unverifiedCloneRepository(
     name: exact.nameWithOwner.slice(slash + 1),
     owner: exact.nameWithOwner.slice(0, slash),
     nameWithOwner: exact.nameWithOwner,
-    description: "Not verified — clone with SSH or HTTPS",
+    description: exact.sourceUrl === undefined
+      ? "Not verified — clone with SSH or HTTPS"
+      : "Clone the supplied Git URL",
     visibility: "unknown",
     host: exact.host,
     hostname: exact.hostname,
-    ...forgeCloneUrls(exact.hostname, exact.nameWithOwner),
+    ...(exact.sourceUrl === undefined
+      ? forgeCloneUrls(exact.hostname, exact.nameWithOwner)
+      : { sourceUrl: exact.sourceUrl, sshUrl: "", httpsUrl: "" }),
     localPaths: []
   };
 }

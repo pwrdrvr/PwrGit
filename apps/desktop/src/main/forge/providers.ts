@@ -1,3 +1,4 @@
+import { gerritProvider } from "./gerrit/provider";
 import { gitcafeProvider } from "./gitcafe/provider";
 import { githubProvider } from "./github/provider";
 import { gitlabProvider } from "./gitlab/provider";
@@ -5,6 +6,7 @@ import { resolveForgeRepo, type ForgeHostOverrides } from "./resolve";
 import type { ForgeKind, ForgeProvider, ForgeRepo } from "./types";
 
 const PROVIDERS: Readonly<Record<ForgeKind, ForgeProvider>> = {
+  gerrit: gerritProvider,
   github: githubProvider,
   gitlab: gitlabProvider,
   gitcafe: gitcafeProvider
@@ -24,8 +26,9 @@ export type ResolvedForge = { provider: ForgeProvider; repo: ForgeRepo };
  */
 export function resolveForge(
   remoteUrl: string,
-  overrides: ForgeHostOverrides = {}
+  overrides: ForgeHostOverrides = {},
+  reviewUrlFor: (host: string) => string | undefined = () => undefined
 ): ResolvedForge | null {
-  const repo = resolveForgeRepo(remoteUrl, overrides);
+  const repo = resolveForgeRepo(remoteUrl, overrides, reviewUrlFor);
   return repo === null ? null : { provider: providerFor(repo.kind), repo };
 }

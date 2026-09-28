@@ -1322,3 +1322,28 @@ describe("CloneService", () => {
     expect(gitExec).not.toHaveBeenCalled();
   });
 });
+
+
+describe("explicit network clone targets", () => {
+  it.each([
+    "https://chromium.googlesource.com/v8/v8.git",
+    "https://git.example:8443/group/nested/repo",
+    "ssh://reviewer@git.example:29418/group/nested/repo.git"
+  ])("passes %s unchanged to Git without consulting a forge", async (sourceUrl) => {
+    const root = temporaryRoot();
+    const db = openDatabase(":memory:");
+    try {
+      const profiles = new ProfileService(db);
+      const profile = profiles.create({ name: "Test", email: "test@example.com", roots: [root] });
+      const indexed = { id: "cloned", profileId: profile.id, name: "repo", path: root, pinned: false, worktrees: [] };
+      const indexer = { indexRepoAt: vi.fn(async () => ok(indexed)) } as unknown as RepoIndexer;
+      const calls: string[][] = [];
+      const gh = vi.fn(fakeGh());
+      const service = new CloneService(db, countingGit(calls), indexer, profiles, githubOnly(gh), fakeForgeStatus());
+      const result = await service.clone({ profileId: profile.id, sourceUrl, nameWithOwner: "ignored/wrong", protocol: "ssh", parentPath: root });
+      expect(result.ok).toBe(true);
+      expect(calls).toEqual([["clone", "--progress", "--", sourceUrl, join(root, sourceUrl.endsWith("v8.git") ? "v8" : "repo")]]);
+      expect(gh).not.toHaveBeenCalled();
+    } finally { db.close(); }
+  });
+});

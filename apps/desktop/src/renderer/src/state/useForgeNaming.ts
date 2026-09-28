@@ -23,6 +23,7 @@ import { dispatch, subscribe } from "../lib/pwrgit";
  * until something else re-rendered it.
  */
 export type ForgeNaming = {
+  reviewUrls?: Readonly<Record<string, string>>;
   /** Canonical hostname → the mark-and-name a chip should draw. Only hosts
    *  with a settings row appear; callers resolve anything else themselves. */
   displays: ReadonlyMap<string, ForgeHostDisplay>;
@@ -60,7 +61,8 @@ function notify(): void {
 function signature(value: ForgeNaming): string {
   return JSON.stringify([
     [...value.displays].sort(([a], [b]) => a.localeCompare(b)),
-    Object.entries(value.overrides).sort(([a], [b]) => a.localeCompare(b))
+    Object.entries(value.overrides).sort(([a], [b]) => a.localeCompare(b)),
+    Object.entries(value.reviewUrls ?? {}).sort(([a], [b]) => a.localeCompare(b))
   ]);
 }
 
@@ -102,7 +104,8 @@ function apply(rows: ForgeHostRow[], overrides: ForgeHostMap): void {
     // to the same word — or that share a product, and so a mark — have to be
     // told apart, and only the full set knows.
     displays: resolveForgeHostDisplays(namingSet(rows, overrides)),
-    overrides
+    overrides,
+    reviewUrls: Object.fromEntries(rows.filter((row) => row.reviewUrl).map((row) => [row.host, row.reviewUrl!]))
   };
   const nextSignature = signature(next);
   if (nextSignature === (namingSignature ??= signature(naming))) return;

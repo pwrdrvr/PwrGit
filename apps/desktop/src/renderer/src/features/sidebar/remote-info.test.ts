@@ -110,10 +110,45 @@ describe("repoWebUrl", () => {
     const identity = { host: "github" as const, hostname: "github.com", owner: "pwrdrvr", name: "PwrGit", nameWithOwner: "pwrdrvr/PwrGit", visibility: "public" as const };
     expect(repoWebUrl(identity)).toBe("https://github.com/pwrdrvr/PwrGit");
     expect(repoWebUrl({ ...identity, host: "gitlab", hostname: "gitlab.com" })).toBe("https://gitlab.com/pwrdrvr/PwrGit");
-    expect(repoWebUrl({ ...identity, hostname: "gitlab.example.com", nameWithOwner: "team/subgroup/PwrGit" })).toBe("https://gitlab.example.com/team/subgroup/PwrGit");
+    expect(repoWebUrl({ ...identity, host: "gitlab", hostname: "gitlab.example.com", nameWithOwner: "team/subgroup/PwrGit" })).toBe("https://gitlab.example.com/team/subgroup/PwrGit");
     expect(repoWebUrl(undefined)).toBeNull();
     expect(repoWebUrl({ ...identity, host: "other" })).toBeNull();
     expect(repoWebUrl({ ...identity, hostname: "evil.example/path" })).toBeNull();
     expect(repoWebUrl({ ...identity, nameWithOwner: "../PwrGit" })).toBeNull();
   });
+});
+
+
+describe("Chromium repository browsing", () => {
+  it("opens the V8 repository browser separately from its reviews", () => {
+    const url = "https://chromium.googlesource.com/v8/v8";
+    expect(remoteWebUrl(`${url}.git`)).toBe(url);
+    expect(repoWebUrl({
+      host: "gerrit", hostname: "chromium.googlesource.com", owner: "v8",
+      name: "v8", nameWithOwner: "v8/v8", visibility: "unknown"
+    })).toBe(url);
+  });
+
+  it.each([
+    "https://chromium.googlesource.com.evil.example/v8/v8.git",
+    "https://chromium-review.googlesource.com/v8/v8.git",
+    "https://unrecognized.googlesource.com/v8/v8.git",
+    "https://chromium.googlesource.com/../v8.git",
+    "https://chromium.googlesource.com/v8/v8/+/main",
+    "https://chromium.googlesource.com/v8/v8?format=JSON"
+  ])("does not invent a repository page for %s", (url) => {
+    expect(remoteWebUrl(url)).toBeNull();
+  });
+});
+
+
+it("opens mounted Gerrit projects with the same coordinates as API reads", () => {
+  const hosts = { "review.example": "gerrit" } as const;
+  const reviewUrls = { "review.example": "https://review.example/r" };
+  expect(remoteWebUrl("https://review.example/r/project.git", hosts, reviewUrls))
+    .toBe("https://review.example/r/q/project%3Aproject");
+  expect(remoteWebUrl("ssh://user@review.example:29418/r/project", hosts, reviewUrls))
+    .toBe("https://review.example/r/q/project%3Ar%2Fproject");
+  expect(repoWebUrl({ host: "gerrit", hostname: "review.example", owner: "", name: "project", nameWithOwner: "project", visibility: "public" }, reviewUrls))
+    .toBe("https://review.example/r/q/project%3Aproject");
 });

@@ -22,7 +22,8 @@ function envProviders(env: NodeJS.ProcessEnv): ReadonlyMap<string, ForgeProvider
   for (const [name, provider] of [
     [GITHUB_HOSTS_ENV, "github"],
     [GITLAB_HOSTS_ENV, "gitlab"],
-    [GITCAFE_HOSTS_ENV, "gitcafe"]
+    [GITCAFE_HOSTS_ENV, "gitcafe"],
+    ["PWRGIT_GERRIT_HOSTS", "gerrit"]
   ] as const) {
     for (const entry of (env[name] ?? "").split(",")) {
       const host = entry.trim().toLowerCase().replace(/^www\./, "");
@@ -53,13 +54,16 @@ export function classifyProvider(
   env: NodeJS.ProcessEnv = process.env
 ): ForgeProvider {
   const normalized = host.trim().toLowerCase().replace(/^www\./, "");
+  const explicit = envProviders(env).get(normalized);
+  if (explicit !== undefined) return explicit;
+  if (normalized === "chromium.googlesource.com" || normalized === "codereview.qt-project.org") return "gerrit";
   if (normalized === "github.com") return "github";
   if (normalized === "gitlab.com") return "gitlab";
   if (normalized === "git.cafe") return "gitcafe";
   return envProviders(env).get(normalized) ?? "other";
 }
 
-function normalizeProjectPath(pathname: string): string | null {
+function normalizeProjectPath(pathname: string, provider?: ForgeProvider): string | null {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
@@ -71,8 +75,8 @@ function normalizeProjectPath(pathname: string): string | null {
     .replace(/\.git$/i, "")
     .split("/");
   if (
-    segments.length < 2 ||
-    segments.length > 8 ||
+    segments.length < (provider === "gerrit" ? 1 : 2) ||
+    segments.length > (provider === "gerrit" ? 32 : 8) ||
     !segments.every((segment) => SAFE_SEGMENT.test(segment))
   ) {
     return null;
@@ -110,23 +114,23 @@ export function parseRemoteIdentity(
     pathname = matched[2] ?? null;
   }
   if (host === null || pathname === null || host.includes("\\")) return null;
-  const path = normalizeProjectPath(pathname);
-  if (path === null) return null;
   const normalizedHost = host.toLowerCase().replace(/^www\./, "");
   const provider = classifyProvider(normalizedHost, env);
+  const path = normalizeProjectPath(pathname, provider);
+  if (path === null) return null;
   if ((provider === "github" || provider === "gitcafe") && path.split("/").length !== 2) return null;
   return { provider, host: normalizedHost, path };
 }
 
 export type RepositoryTarget = {
-  provider: "github" | "gitlab" | "gitcafe" | null;
+  provider: "github" | "gitlab" | "gitcafe" | "gerrit" | null;
   host: string | null;
   path: string;
 };
 
 export function parseRepositoryTarget(
   value: string,
-  provider?: "github" | "gitlab" | "gitcafe",
+  provider?: "github" | "gitlab" | "gitcafe" | "gerrit",
   env: NodeJS.ProcessEnv = process.env
 ): RepositoryTarget | null {
   const fromRemote = parseRemoteIdentity(value, env);
@@ -160,7 +164,7 @@ export function parseRepositoryTarget(
     if (provider !== undefined && provider !== candidate.provider) return null;
     return { provider: candidate.provider, host: candidate.host, path: candidate.path };
   }
-  const path = normalizeProjectPath(trimmed);
+  const path = normalizeProjectPath(trimmed, provider);
   if (path === null) return null;
   if ((provider === "github" || provider === "gitcafe") && path.split("/").length !== 2) return null;
   return { provider: provider ?? null, host: null, path };

@@ -26,6 +26,17 @@ function harness() {
 }
 
 describe("forgeHosts patch path", () => {
+  it("stores a separate Gerrit endpoint, ignores invalid edits and allows reset", async () => {
+    const { settings, update } = harness();
+    await update({ forgeHosts: { "git.example": { kind: "gerrit", reviewUrl: "https://review.example/r/" } } });
+    expect(settings.get().forges?.hosts["git.example"]).toEqual({ kind: "gerrit", reviewUrl: "https://review.example/r" });
+    await update({ forgeHosts: { "git.example": { reviewUrl: "https://user:secret@review.example" } } });
+    expect(settings.get().forges?.hosts["git.example"]).toEqual({ kind: "gerrit", reviewUrl: "https://review.example/r" });
+    await update({ forgeHosts: { "git.example": { reviewUrl: "" } } });
+    expect(settings.get().forges?.hosts["git.example"]?.kind).toBe("gerrit");
+    expect(settings.get().forges?.hosts["git.example"]?.reviewUrl).toBe("");
+  });
+
   it("keeps a stored kind when only `enabled` is written", async () => {
     // The pane sends one field at a time. A wholesale write erased `kind`,
     // which is what makes a hand-added host resolve — the row then vanished

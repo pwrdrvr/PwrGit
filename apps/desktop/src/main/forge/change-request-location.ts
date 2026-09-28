@@ -1,5 +1,8 @@
 import {
   changeRequestHeadRef,
+  forgeProduct,
+  gerritPatchSet,
+  gerritPatchBranch,
   changeRequestLocalBranch,
   type ChangeRequestLocation,
   type ForgeKind,
@@ -40,6 +43,12 @@ export function locateChangeRequest(
     }
     return refs.local.has(branch) ? { kind: "local", branch } : null;
   };
+  if (forgeProduct(kind).reviewModel === "patchset") {
+    const patchSet = gerritPatchSet(pr.headRefName, pr.number);
+    if (patchSet === null || pr.headRefName === undefined) return { kind: "missing", branch: null };
+    const branch = gerritPatchBranch(pr.number, patchSet);
+    return held(branch) ?? { kind: "patchset", branch, ref: pr.headRefName, patchSet };
+  }
   const head = pr.headRefName ?? null;
   if (pr.headRepoPath !== undefined) {
     const localBranch = changeRequestLocalBranch(kind, pr.number);

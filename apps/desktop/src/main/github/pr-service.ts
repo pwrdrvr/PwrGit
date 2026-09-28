@@ -1,3 +1,4 @@
+import { forgeProduct } from "@pwrgit/shared";
 import { connectForge, type ForgeRepo } from "../forge/types";
 import type { PrSummary } from "@pwrgit/shared";
 import type { GitExec } from "../git/dugite";
@@ -517,6 +518,7 @@ export class PrService {
 
     const forge = await this.originForge(repo.path);
     if (forge === null || !this.isCurrent(generation)) return empty;
+    if (!forgeProduct(forge.repo.kind).workflows.branchReviews) return empty;
     const connection = await connectForge(forge.provider, forge.repo.host);
     if (connection === null || !this.isCurrent(generation)) return empty;
 

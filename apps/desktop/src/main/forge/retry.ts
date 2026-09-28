@@ -50,6 +50,7 @@ type RateLimitDialect = {
 const RATE_LIMIT_DIALECT: Readonly<Record<ForgeKind, RateLimitDialect>> = {
   // CLI-only: no HTTP response, so no rate-limit headers to spell. The row
   // exists to keep this table exhaustive over ForgeKind.
+  gerrit: { remaining: null, reset: null, exhaustedOn: [429] },
   gitcafe: { remaining: null, reset: null, exhaustedOn: [429] },
   github: {
     remaining: "x-ratelimit-remaining",

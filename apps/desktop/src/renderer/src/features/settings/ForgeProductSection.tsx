@@ -4,6 +4,8 @@ import {
   FORGE_HOST_LABEL_MAX,
   forgeAllHostsOff,
   forgeProduct,
+  gerritReviewUrl,
+  safeGerritReviewUrl,
   forgeSignInCommand,
   type ForgeCapabilities,
   type ForgeHostConfig,
@@ -43,11 +45,13 @@ const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
 export type ForgeProductState =
   | "unknown"
   | "missing"
+  | "public"
   | "connected"
   | "off"
   | "signedOut";
 
 const STATE_LABELS: Record<Exclude<ForgeProductState, "unknown">, string> = {
+  public: "Public access",
   missing: "Not installed",
   connected: "Connected",
   off: "Off",
@@ -69,6 +73,7 @@ const STATE_TONES: Record<
   Exclude<ForgeProductState, "unknown">,
   SettingsChipTone
 > = {
+  public: "default",
   missing: "warn",
   connected: "ok",
   off: "default",
@@ -98,6 +103,7 @@ export const FORGE_STATE_NAV: Record<
   Exclude<ForgeProductState, "unknown">,
   { dot: ForgeNavDot; chip?: string }
 > = {
+  public: { dot: "ok", chip: "public" },
   connected: { dot: "ok" },
   off: { dot: "off", chip: "off" },
   missing: { dot: "bad", chip: "missing" },
@@ -132,6 +138,7 @@ export function forgeProductState(
   status: ForgeStatus | undefined
 ): ForgeProductState {
   if (status === undefined) return "unknown";
+  if (forgeProduct(status.kind).access === "public") return forgeAllHostsOff(status) ? "off" : "public";
   if (!status.installed) return "missing";
   // `loggedIn` stays authoritative — main already derived it from the enabled
   // hosts, and re-deriving it here is how the two drift apart.
@@ -272,13 +279,18 @@ export function ForgeProductSection(props: {
                     Remove button on a host the user had merely switched off —
                     and removing it there cleared the `enabled:false`, turning
                     the host back ON and dropping the row that could undo it. */}
-                {row.origin === "config" ? (
+                {forgeProduct(row.kind).access === "public" ? (
+                  <span>Public reads only. PwrGit does not sign in, create forks, or upload changes.</span>
+                ) : row.origin === "config" ? (
                   <span>
                     <code>{row.cli}</code> holds no account for this host yet —
                     run <code>{signInCommand(row)}</code>
                   </span>
                 ) : (
                   <span>{sourceNote(row)}</span>
+                )}
+                {forgeProduct(row.kind).access === "public" && (
+                  <ReviewEndpoint row={row} blocked={props.blocked} onCommit={(reviewUrl) => props.onWrite(row, { reviewUrl })} />
                 )}
                 {/* An env-pinned or switched-off row still needs its
                     explanation; `sourceNote` used to be unreachable for every
@@ -289,7 +301,7 @@ export function ForgeProductSection(props: {
                 ) : null}
                 {row.origin === "config" || row.kindSource === "config" ? (
                   <span className="settings-field__actions">
-                    {row.origin === "config" ? (
+                    {row.origin === "config" && forgeProduct(row.kind).access === "cli" ? (
                       <button
                         className="settings-inline-button"
                         type="button"
@@ -464,6 +476,7 @@ export function signInCommand(row: ForgeHostRow): string {
  */
 function describeRow(row: ForgeHostRow): string {
   const parts: string[] = [];
+  if (forgeProduct(row.kind).access === "public") return "Public repository and change reads";
   if (row.account !== undefined) parts.push(`signed in as ${row.account}`);
   if (row.kindSource === "config") parts.push("added by you");
   if (parts.length === 0) {
@@ -513,6 +526,7 @@ function describeProduct(
 ): ReactNode {
   const noun = `${changeRequestNoun(kind)}s`;
   const { label, cli } = forgeProduct(kind);
+  if (forgeProduct(kind).access === "public") return "Public changes and patch sets. Git credentials remain managed by Git.";
   if (state === "unknown") {
     return (
       <>
@@ -589,6 +603,7 @@ function awaitingSignIn(status: ForgeStatus): string[] {
 /** The body a product with no rows of its own still owes the reader. */
 function emptyNote(kind: ForgeKind, state: ForgeProductState): ReactNode {
   const { label, cli } = forgeProduct(kind);
+  if (forgeProduct(kind).access === "public") return "Add a Gerrit Git host to read its public projects and changes. No account is required.";
   if (state === "missing") {
     return (
       <>
@@ -672,6 +687,7 @@ function remedy(status: ForgeStatus, state: ForgeProductState): ReactNode {
 
 /** Core workflows are available even when every optional capability is false. */
 function capabilities(status: ForgeStatus): ReactNode {
+  if (forgeProduct(status.kind).access === "public") return <p>Public project identity · Changes by number or commit · Open changes · Patch-set checkout. Sign-in, forks, uploads and review votes are not available.</p>;
   const keys = Object.keys(CAPABILITY_LABELS) as (keyof ForgeCapabilities)[];
   const supported = keys.filter((key) => status.capabilities[key]);
   const missing = keys.filter((key) => !status.capabilities[key]);
@@ -714,4 +730,45 @@ function signInCommandFor(status: ForgeStatus): string {
     return forgeSignInCommand(status.kind);
   }
   return forgeSignInCommand(status.kind, waiting[0]);
+}
+
+
+function ReviewEndpoint({ row, blocked, onCommit }: { row: ForgeHostRow; blocked: boolean; onCommit: (url: string) => void }) {
+  const stored = row.reviewUrl ?? "";
+  const [value, setValue] = useState(stored);
+  const lastStored = useRef(stored);
+  if (lastStored.current !== stored) {
+    lastStored.current = stored;
+    setValue(stored);
+  }
+  const [error, setError] = useState("");
+  const commit = () => {
+    if (blocked) return;
+    const normalized = value.trim() === "" ? "" : safeGerritReviewUrl(value.trim());
+    if (normalized === null) { setError("Use an HTTPS review URL without credentials, query, or fragment."); return; }
+    setError("");
+    if (normalized !== (row.reviewUrl ?? "")) onCommit(normalized);
+  };
+  return <label className="settings-inline-field">
+    <span className="settings-inline-field__label">Review URL</span>
+    <input
+      className="settings-input"
+      aria-label={`Review URL for ${row.host}`}
+      placeholder={gerritReviewUrl(row.host)}
+      value={value}
+      size={36}
+      maxLength={2048}
+      autoComplete="off"
+      spellCheck={false}
+      aria-disabled={blocked}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") { event.preventDefault(); commit(); }
+        if (event.key === "Escape") { event.preventDefault(); setValue(stored); setError(""); }
+      }}
+    />
+    {error && <span role="alert">{error}</span>}
+  </label>;
 }

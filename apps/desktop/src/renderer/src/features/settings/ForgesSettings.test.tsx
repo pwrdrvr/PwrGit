@@ -116,6 +116,14 @@ async function render(forges: ForgeStatus[]): Promise<void> {
 }
 
 describe("ForgesSettings", () => {
+  it("shows anonymous Gerrit access without a sign-in command", async () => {
+    await render([forge({ kind: "gerrit", loggedIn: false })]);
+    expect(container.textContent).toContain("Public access");
+    expect(container.textContent).toContain("Gerrit");
+    expect(container.textContent).not.toContain("auth login");
+    expect(container.textContent).not.toContain("Install CLI");
+  });
+
   it("reads status from main rather than probing a forge itself", async () => {
     await render([forge()]);
 

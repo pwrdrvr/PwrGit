@@ -1,5 +1,7 @@
 import {
   isForgeKind,
+  forgeProduct,
+  gerritProjectPath,
   parseForgeRemote,
   toForgeHost,
   type ForgeHost,
@@ -88,7 +90,8 @@ export type RepoRemotes = {
 export async function readRemotes(
   git: GitExec,
   repo: Repo,
-  hosts: ForgeHostMap = {}
+  hosts: ForgeHostMap = {},
+  reviewUrlFor: (host: string) => string | undefined = () => undefined
 ): Promise<RepoRemotes> {
   const empty: RepoRemotes = { origin: null, hostnames: [] };
   const result = await git(["remote", "-v"], repo.path);
@@ -110,7 +113,9 @@ export async function readRemotes(
         repoId: repo.id,
         host: parsed.host,
         hostname: parsed.hostname,
-        nameWithOwner: parsed.nameWithOwner
+        nameWithOwner: isForgeKind(parsed.host) && forgeProduct(parsed.host).reviewModel === "patchset"
+          ? gerritProjectPath(url, parsed.nameWithOwner, reviewUrlFor(parsed.hostname))
+          : parsed.nameWithOwner
       };
     }
   }
@@ -197,6 +202,7 @@ export class IdentityService {
     private readonly hosts: {
       overrides: () => ForgeHostMap;
       isEnabled: ForgeHostGate;
+      reviewUrl?: (host: string) => string | undefined;
     }
   ) {}
 
@@ -242,7 +248,7 @@ export class IdentityService {
           hostname: row.hostname,
           owner: row.owner,
           name: row.name,
-          nameWithOwner: `${row.owner}/${row.name}`,
+          nameWithOwner: row.owner === "" ? row.name : `${row.owner}/${row.name}`,
           visibility:
             row.visibility === "public" ||
             row.visibility === "private" ||
@@ -358,7 +364,7 @@ export class IdentityService {
       }
     };
     const { origin, hostnames } = await this.remoteSlots.run(() =>
-      readRemotes(this.git, repo, this.hosts.overrides())
+      readRemotes(this.git, repo, this.hosts.overrides(), (host) => this.hosts.reviewUrl?.(host))
     );
     // `isForgeKind`, not a comparison against `other`: the check is "did a
     // product claim this host", and the guard is the one the lint points at.

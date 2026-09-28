@@ -352,6 +352,7 @@ describe("ForgeHosts.statusTargets", () => {
     const hosts = make({ hosts: { "gitlab.acme-inc.com": { kind: "gitlab" } } });
 
     expect(hosts.statusTargets()).toEqual([
+      { kind: "gerrit", host: "chromium.googlesource.com", enabled: true, assumed: true },
       { kind: "gitcafe", host: "git.cafe", enabled: true, assumed: true },
       // `assumed`: nothing names these, so they are probed through the CLI's own
       // default host and kept out of the reported list.
@@ -368,6 +369,7 @@ describe("ForgeHosts.statusTargets", () => {
     const hosts = make({ hosts: { "gitlab.com": { kind: "github" } } });
 
     expect(hosts.statusTargets()).toEqual([
+      { kind: "gerrit", host: "chromium.googlesource.com", enabled: true, assumed: true },
       { kind: "gitcafe", host: "git.cafe", enabled: true, assumed: true },
       { kind: "github", host: "github.com", enabled: true, assumed: true },
       // The row, resolved to GitHub by the config entry …
@@ -381,6 +383,7 @@ describe("ForgeHosts.statusTargets", () => {
     const hosts = make({ discovered: [GH("github.com"), GL("gitlab.com")] });
 
     expect(hosts.statusTargets().map((target) => target.host)).toEqual([
+      "chromium.googlesource.com",
       "git.cafe",
       "github.com",
       "gitlab.com"
@@ -407,6 +410,7 @@ describe("ForgeHosts.statusTargets", () => {
     });
 
     expect(hosts.statusTargets()).toEqual([
+      { kind: "gerrit", host: "chromium.googlesource.com", enabled: true, assumed: true },
       { kind: "gitcafe", host: "git.cafe", enabled: true, assumed: true },
       { kind: "github", host: "github.acme-inc.com", enabled: true },
       { kind: "github", host: "github.com", enabled: false, assumed: true },
@@ -420,6 +424,7 @@ describe("ForgeHosts.statusTargets", () => {
     const hosts = make({ hosts: { "nas.local": { enabled: true } } });
 
     expect(hosts.statusTargets().map((target) => target.host)).toEqual([
+      "chromium.googlesource.com",
       "git.cafe",
       "github.com",
       "gitlab.com"

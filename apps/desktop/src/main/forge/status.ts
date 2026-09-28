@@ -76,6 +76,7 @@ export type ForgeProbeTarget = {
  * one of them probing the other's CLI, and the real one not at all.
  */
 const DEFAULT_PROBES: Readonly<{ [K in ForgeKind]: ForgeProbe & { kind: K } }> = {
+  gerrit: { kind: "gerrit", cli: "", installed: async () => true, loggedIn: async () => false },
   gitcafe: { kind: "gitcafe", cli: "cafe", installed: cafeInstalled, loggedIn: cafeLoggedIn },
   github: {
     kind: "github",

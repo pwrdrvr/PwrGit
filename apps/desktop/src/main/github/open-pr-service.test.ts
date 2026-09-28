@@ -8,6 +8,7 @@ import { openDatabase, type DB } from "../persistence/db";
 import type { ResolvedForge } from "../forge/providers";
 import type { ForgeRepo, OpenPrList, TokenForgeProvider } from "../forge/types";
 import { createSystemGit } from "../git/test-support/system-git";
+import { createGerritProvider } from "../forge/gerrit/provider";
 import { OpenPrService } from "./open-pr-service";
 
 const ORIGIN: ForgeRepo = { kind: "github", host: "github.com", path: "octo/orbit" };
@@ -123,6 +124,36 @@ describe("OpenPrService", () => {
       resolveForge: resolve,
       now: () => now
     });
+  });
+
+  it("persists and fetches immutable Gerrit patch sets without claiming main or another profile", async () => {
+    const head = git(work, ["rev-parse", "HEAD"]);
+    for (const n of [1, 2]) git(work, ["push", "origin", `HEAD:refs/changes/23/123/${n}`]);
+    db.prepare("INSERT INTO profiles (id, name, email) VALUES ('other', 'Other', 'other@example.com')").run();
+    db.prepare("INSERT INTO repos (id, profile_id, name, path) VALUES ('other-repo', 'other', 'orbit', '/contrived/other')").run();
+    let patchSet = 1;
+    const repo: ForgeRepo = { kind: "gerrit", host: "codereview.qt-project.org", path: "project" };
+    service = new OpenPrService(db, createSystemGit(), {
+      resolveForge: () => ({ repo, provider: createGerritProvider(async () => [{
+        _number: 123, project: "project", subject: "Contrived patch set", status: "NEW", branch: "main",
+        current_revision: head, revisions: { [head]: { ref: `refs/changes/23/123/${patchSet}` } }
+      }]) }), now: () => now
+    });
+    await service.refresh("repo", { force: true });
+    expect(service.branchPrs("repo").origin.size).toBe(0);
+    expect(service.branchPrs("repo").local.has("main")).toBe(false);
+    expect(service.branchPrs("other-repo").local.size).toBe(0);
+    const entries = (await service.list("repo")).entries;
+    expect(entries[0]?.location).toEqual({ kind: "patchset", patchSet: 1, branch: "change/123/1", ref: "refs/changes/23/123/1" });
+    expect(await service.fetchHead("repo", 123)).toEqual({ ok: true, value: { kind: "local", branch: "change/123/1" } });
+    expect(git(work, ["rev-parse", "change/123/1"])).toBe(head);
+    expect(git(work, ["config", "--get-regexp", "branch.main.remote"])).toBe("branch.main.remote origin");
+    patchSet = 2;
+    await service.refresh("repo", { force: true });
+    expect(await service.fetchHead("repo", 123)).toEqual({ ok: true, value: { kind: "local", branch: "change/123/2" } });
+    expect(git(work, ["rev-parse", "change/123/1"])).toBe(head);
+    expect(git(work, ["rev-parse", "main"])).toBe(head);
+    expect(() => git(work, ["config", "--get", "branch.change/123/2.merge"])).toThrow();
   });
 
   afterEach(() => db.close());

@@ -4,6 +4,7 @@ import { useBrandTheme, type BrandTheme } from "../../lib/brandTheme";
 import invertocatBlackUrl from "../../assets/github/invertocat-black.svg";
 import invertocatWhiteUrl from "../../assets/github/invertocat-white.svg";
 import tanukiUrl from "../../assets/gitlab/tanuki.svg";
+import gerritUrl from "../../assets/gerrit/gerrit-logo.svg";
 import cafeUrl from "../../assets/gitcafe/favicon.svg";
 
 /**
@@ -47,6 +48,7 @@ const MARKS: Record<ForgeKind, Mark> = {
    * altering the mark, so this picks between those two files rather than
    * recoloring one: black on light, white on dark.
    */
+  gerrit: { themed: false, url: () => gerritUrl },
   github: {
     themed: true,
     url: (theme) => (theme === "light" ? invertocatBlackUrl : invertocatWhiteUrl)

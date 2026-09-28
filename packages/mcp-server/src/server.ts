@@ -221,7 +221,7 @@ export async function createPwrGitMcpServer(
           .min(3)
           .max(1_000)
           .describe("owner/name, host/owner/name, or a GitHub/GitLab/GitCafe remote URL."),
-        provider: z.enum(["github", "gitlab", "gitcafe"]).optional(),
+        provider: z.enum(["github", "gitlab", "gitcafe", "gerrit"]).optional(),
         roots: z
           .array(z.string().trim().min(1).max(4_096))
           .max(32)

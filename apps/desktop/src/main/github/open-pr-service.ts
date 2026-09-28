@@ -1,5 +1,8 @@
 import {
   changeRequestHeadRef,
+  forgeProduct,
+  gerritPatchSet,
+  gerritPatchBranch,
   changeRequestLocalBranch,
   err,
   ok,
@@ -207,6 +210,15 @@ export class OpenPrService {
       kind,
       await this.checkoutRefs(repoId, path)
     );
+    if (location.kind === "patchset") {
+      const valid = await this.isBranchName(path, location.branch);
+      if (!valid) return invalidHead(location.branch);
+      // No force and no upstream: this is an immutable patch set, not a branch
+      // the user should publish to or pull into automatically.
+      const fetched = await fetchRefspec(this.git, path, "origin", `${location.ref}:refs/heads/${location.branch}`);
+      if (!fetched.ok) return fetched;
+      return ok({ kind: "local", branch: location.branch });
+    }
     if (location.kind === "unfetched") {
       const valid = await this.isBranchName(path, location.branch);
       if (!valid) return invalidHead(location.branch);
@@ -284,6 +296,11 @@ export class OpenPrService {
       if (!map.has(branch)) map.set(branch, pr);
     };
     for (const pr of this.cachedOpen(repoId)) {
+      if (pr.forge !== undefined && forgeProduct(pr.forge).reviewModel === "patchset") {
+        const patchSet = gerritPatchSet(pr.headRefName, pr.number);
+        if (patchSet !== null) claim(local, gerritPatchBranch(pr.number, patchSet), pr);
+        continue;
+      }
       if (pr.headRepoPath !== undefined) {
         if (pr.forge !== undefined) {
           claim(local, changeRequestLocalBranch(pr.forge, pr.number), pr);

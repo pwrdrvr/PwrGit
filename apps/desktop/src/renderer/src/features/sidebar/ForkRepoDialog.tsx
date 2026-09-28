@@ -201,7 +201,7 @@ export function ForkRepoDialog({
   // Only forges whose CLI is actually usable are offered — a host toggle that
   // leads straight to "install the CLI" is a dead end presented as a choice.
   const usableHosts = forges
-    .filter((status) => forgeCanAnswerAnywhere(status))
+    .filter((status) => forgeProductOrAssumed(status.kind).workflows.forks && forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
 
   useEffect(() => {

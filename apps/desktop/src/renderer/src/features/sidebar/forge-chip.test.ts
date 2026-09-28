@@ -210,3 +210,20 @@ describe("remoteForgeChip", () => {
     ).toMatchObject({ kind: "gitlab", title: "On gitlab.example.com" });
   });
 });
+
+
+describe("repository browser chips", () => {
+  it("labels Chromium with the Gerrit product mark", () => {
+    expect(remoteForgeChip("https://chromium.googlesource.com/v8/v8.git", {}, DISPLAYS)).toEqual({
+      kind: "gerrit",
+      name: null,
+      others: 0,
+      title: "On chromium.googlesource.com"
+    });
+  });
+
+  it("does not label an unknown host or a Gitiles revision as a repository", () => {
+    expect(remoteForgeChip("https://unrecognized.googlesource.com/v8/v8.git", {}, DISPLAYS)).toBeNull();
+    expect(remoteForgeChip("https://chromium.googlesource.com/v8/v8/+/main", {}, DISPLAYS)).toBeNull();
+  });
+});

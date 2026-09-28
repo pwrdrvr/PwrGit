@@ -4,6 +4,10 @@ Which hosting product a repo's `origin` points at, and how to ask it for
 change-request status. `PrService` and `OpenPrService` (in `../github/`) are
 the consumers; they speak `PrSummary` and never learn which forge answered.
 
+- **Gerrit is a public, read-only adapter**, with its own [guidance](gerrit/AGENTS.md).
+  Respect product `workflows` and `reviewModel`: not every forge has a CLI,
+  accounts, forks, repository search or source-branch reviews. Git and review
+  hosts may differ. `PublicForgeProvider` never extracts credentials.
 - **The seam is `ForgeProvider`** (`types.ts`): five methods — token, branches,
   commits, numbers, and the open list. The first four are exactly what
   `PrService` used to inject as four loose functions, which is why the service

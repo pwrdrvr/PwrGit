@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
+  forgeProductOrAssumed,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -269,6 +270,7 @@ export function CloneRepoDialog({
     const parsed = exactRepository(sourceQuery, host, forgeHosts);
     if (
       parsed !== null &&
+      parsed.sourceUrl === undefined &&
       picked !== null &&
       picked.host === parsed.host &&
       picked.nameWithOwner === parsed.nameWithOwner
@@ -277,12 +279,13 @@ export function CloneRepoDialog({
     }
     return parsed;
   }, [sourceQuery, host, forgeHosts, picked]);
-  // The three strings that ARE an `ExactRepository`, pulled out so the check
+  // The source coordinates, pulled out so the check
   // effect can depend on values rather than on the memo's object identity —
   // which changes on every keystroke.
   const exactNameWithOwner = exactRepo?.nameWithOwner ?? null;
   const exactHostname = exactRepo?.hostname ?? null;
   const exactHost = exactRepo?.host ?? null;
+  const exactSourceUrl = exactRepo?.sourceUrl;
   const localSourcePath = useMemo(
     () => localRepositoryPath(sourceQuery),
     [sourceQuery]
@@ -292,7 +295,7 @@ export function CloneRepoDialog({
   // toggle that leads straight to "install the CLI" is a dead end dressed up
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => forgeCanAnswerAnywhere(status))
+    .filter((status) => forgeProductOrAssumed(status.kind).workflows.repositorySearch && forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
   // Snap onto a forge that can actually answer. Without this a machine with
   // only GitLab signed in leaves `host` on its "github" default forever: the
@@ -305,6 +308,7 @@ export function CloneRepoDialog({
   }, [usableHosts.join(","), host]);
 
   const localSelected = selectedRepository?.localPath !== undefined;
+  const suppliedUrl = selectedRepository?.sourceUrl ?? exactSourceUrl;
   const activeHost = localSelected ? host : (selectedRepository?.host ?? host);
   // The instance the CLI would actually be pointed at. Asking about the SaaS
   // host instead greyed out `gh repo clone` for a user signed in only to their
@@ -317,7 +321,8 @@ export function CloneRepoDialog({
       (activeHost === "other" ? undefined : defaultHostname(activeHost)));
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
   const cliDisabled =
-    catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname);
+    !forgeProductOrAssumed(activeHost).workflows.cliClone ||
+    (catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname));
 
   // Nothing is asked of the forge until the box settles — and never on open.
   // The catalog this replaced listed every known owner's repositories up
@@ -326,7 +331,7 @@ export function CloneRepoDialog({
     profileId: profile.id,
     query: sourceQuery,
     host,
-    enabled: usableHosts.includes(host) && localSourcePath === null
+    enabled: usableHosts.includes(host) && localSourcePath === null && exactSourceUrl === undefined
   });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
@@ -334,6 +339,11 @@ export function CloneRepoDialog({
   useEffect(() => {
     setCheckedRepository(null);
     setCheckError(null);
+    if (exactSourceUrl !== undefined) {
+      setCheckedRepository(unverifiedCloneRepository(exactRepo));
+      setChecking(false);
+      return;
+    }
     if (exactNameWithOwner === null && localSourcePath === null) {
       setChecking(false);
       return;
@@ -381,13 +391,13 @@ export function CloneRepoDialog({
     };
     // Keyed on what the request actually carries. `sourceQuery` is
     // deliberately NOT a dependency: it changes for edits that resolve to the
-    // same repository (a trailing space, a `.git` suffix) and again when
+    // same target (a trailing space) and again when
     // `chooseRepository` rewrites it, each costing a redundant CLI round trip.
     // `host` is NOT a dependency: it is only read through `exactHost`, which
     // already moves with it. Keeping it re-dispatched an identical
     // `repo:checkLocalCloneSource` and blanked a confirmed local row every
     // time the forge toggle moved.
-  }, [exactNameWithOwner, exactHost, exactHostname, localSourcePath, profile.id]);
+  }, [exactNameWithOwner, exactHost, exactHostname, exactSourceUrl, localSourcePath, profile.id]);
 
   const sourceResults = useMemo(() => {
     // Filtered to the picked forge: a host switch keeps the previous results
@@ -451,9 +461,10 @@ export function CloneRepoDialog({
     setPicked({
       host: repository.host,
       hostname: repository.hostname,
-      nameWithOwner: repository.nameWithOwner
+      nameWithOwner: repository.nameWithOwner,
+      ...(repository.sourceUrl === undefined ? {} : { sourceUrl: repository.sourceUrl })
     });
-    setSourceQuery(repository.nameWithOwner);
+    setSourceQuery(repository.sourceUrl ?? repository.nameWithOwner);
     clearSubmitError();
     window.requestAnimationFrame(() => destinationInputRef.current?.focus());
   };
@@ -476,6 +487,7 @@ export function CloneRepoDialog({
       ...(selectedRepository.localPath === undefined
         ? {}
         : { sourcePath: selectedRepository.localPath }),
+      ...(selectedRepository.sourceUrl === undefined ? {} : { sourceUrl: selectedRepository.sourceUrl }),
       protocol,
       parentPath: destination.path,
       host: selectedRepository.host,
@@ -489,9 +501,10 @@ export function CloneRepoDialog({
       setCloneProgress(null);
       setSubmitError(result.error.message);
       setCommandCopied(false);
-      setHostVerificationCommand(protocol === "ssh"
-        ? sshHostVerificationCommand(result.error.message, selectedRepository.sshUrl)
-        : null);
+      setHostVerificationCommand(sshHostVerificationCommand(
+        result.error.message, selectedRepository.sourceUrl ??
+          (protocol === "ssh" ? selectedRepository.sshUrl : selectedRepository.httpsUrl)
+      ));
     }
   };
 
@@ -678,7 +691,13 @@ export function CloneRepoDialog({
           <section className="clone-section">
             <div className="clone-label">Clone with</div>
             <div className="clone-protocols">
-              {localSelected ? (
+              {suppliedUrl !== undefined ? (
+                <button type="button" disabled className="clone-protocol is-active"
+                  {...hoverTooltip(tip, suppliedUrl)}>
+                  <strong>Supplied URL</strong>
+                  <small>{suppliedUrl}</small>
+                </button>
+              ) : localSelected ? (
                 <button
                   type="button"
                   disabled
@@ -901,7 +920,7 @@ export function CloneRepoDialog({
                 <strong className="clone-submit-error__title" role="alert">
                   SSH could not verify the server’s identity.
                 </strong>
-                {selectedRepository !== null && selectedRepository.host !== "other" && <SshHostTrustPanel
+                {selectedRepository !== null && selectedRepository.sourceUrl === undefined && selectedRepository.host !== "other" && <SshHostTrustPanel
                   key={selectedRepository.hostname}
                   kind={selectedRepository.host}
                   hostname={selectedRepository.hostname}
@@ -920,7 +939,7 @@ export function CloneRepoDialog({
                       void copyText(hostVerificationCommand).then(() => setCommandCopied(true)).catch(() => setCommandCopied(false));
                     }}>{commandCopied ? "Copied" : "Copy command"}</button>
                   </p>
-                  {!cliDisabled && (
+                  {!cliDisabled && selectedRepository?.sourceUrl === undefined && (
                     <p>
                       <button type="button" className="ssh-trust__button ssh-trust__button--quiet" onClick={() => {
                         setProtocol("cli");

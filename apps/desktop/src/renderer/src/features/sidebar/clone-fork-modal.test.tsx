@@ -29,6 +29,7 @@ let root: Root;
 let opener: HTMLButtonElement;
 
 beforeEach(() => {
+  Object.defineProperty(window, "pwrgit", { configurable: true, value: { platform: "linux" } });
   dispatchMock.mockImplementation((channel: string) => {
     if (channel === "repo:cloneCatalog") return Promise.resolve(ok({ owners: [], forges: [] }));
     if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
@@ -118,4 +119,36 @@ describe.each([
     press(document.activeElement!, "Escape");
     expect(onClose).toHaveBeenCalledTimes(2);
   });
+});
+
+it.each([
+  "https://chromium.googlesource.com/v8/v8.git",
+  "https://github.com/example/project.git",
+  "ssh://reviewer@git.example:29418/group/nested/repo.git"
+])("submits the supplied URL unchanged without forge verification: %s", async (sourceUrl) => {
+  dispatchMock.mockImplementation((channel: string) => {
+    if (channel === "repo:cloneCatalog") return Promise.resolve(ok({ owners: [], forges: [] }));
+    if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
+    if (channel === "repo:cloneDestinations") return Promise.resolve(ok([
+      { path: "/fixtures", root: "/fixtures", relativePath: "", repoCount: 0 }
+    ]));
+    return Promise.resolve(ok([]));
+  });
+  await act(async () => root.render(createElement(CloneRepoDialog, {
+    profile, onCloned: () => undefined, onClose: () => undefined
+  })));
+  const input = document.getElementById("clone-source") as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, `git clone ${sourceUrl}`);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  press(input, "Enter");
+  expect(container.querySelector(".clone-protocols")?.textContent).toBe(`Supplied URL${sourceUrl}`);
+  expect(input.value).toBe(sourceUrl);
+  await act(async () => {
+    (container.querySelector(".clone-dialog__footer button[type=submit]") ??
+      [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Clone repository"))!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({ sourceUrl }));
+  expect(dispatchMock.mock.calls.some(([channel]) => channel === "repo:checkCloneSource")).toBe(false);
 });

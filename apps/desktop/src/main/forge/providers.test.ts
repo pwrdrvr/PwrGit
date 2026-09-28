@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { providerFor, resolveForge } from "./providers";
-import { stampForge, toPrLifecycle, withNullsForMissing } from "./types";
+import { connectForge, stampForge, toPrLifecycle, withNullsForMissing } from "./types";
 
 describe("resolveForge", () => {
   it("routes a GitHub origin to the GitHub provider", () => {
@@ -38,10 +38,10 @@ describe("resolveForge", () => {
 
 describe("providerFor", () => {
   it("exposes all providers under the ForgeProvider contract", () => {
-    for (const kind of ["github", "gitlab", "gitcafe"] as const) {
+    for (const kind of ["github", "gitlab", "gitcafe", "gerrit"] as const) {
       const provider = providerFor(kind);
       expect(provider.kind).toBe(kind);
-      if (provider.authentication !== "cli") expect(typeof provider.getToken).toBe("function");
+      if (provider.authentication !== "cli" && provider.authentication !== "public") expect(typeof provider.getToken).toBe("function");
       expect(typeof provider.fetchPrsForBranches).toBe("function");
       expect(typeof provider.fetchPrsForCommits).toBe("function");
       expect(typeof provider.fetchPrsByNumbers).toBe("function");
@@ -123,4 +123,18 @@ describe("stampForge", () => {
     expect(stamped.has("b")).toBe(true);
     expect(stamped.get("b")).toBeNull();
   });
+});
+
+
+it("queries the project below the configured Gerrit HTTP deployment", async () => {
+  const resolved = resolveForge("https://review.example/r/project.git", { "review.example": "gerrit" }, () => "https://review.example/r");
+  expect(resolved).not.toBeNull();
+  const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(")]}'\n[]"));
+  try {
+    const connection = await connectForge(resolved!.provider, resolved!.repo.host);
+    await connection!.fetchOpenPrs(resolved!.repo);
+    const url = new URL(String(fetcher.mock.calls[0]?.[0]));
+    expect(url.origin + url.pathname).toBe("https://review.example/r/changes/");
+    expect(url.searchParams.get("q")).toBe('project:"project" status:open');
+  } finally { fetcher.mockRestore(); }
 });

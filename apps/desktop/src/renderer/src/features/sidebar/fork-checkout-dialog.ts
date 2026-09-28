@@ -1,5 +1,6 @@
 import {
   forgeCloneUrls,
+  forgeProduct,
   forgeRemoteUrlLike,
   isForgeKind,
   parseForgeRemote,
@@ -162,7 +163,7 @@ export function originForkOffer(
   hosts: ForgeHostMap
 ): { nameWithOwner: string; urgent: boolean } | null {
   const parsed = parseForgeRemote(fetchUrl, hosts);
-  if (parsed === null || !isForgeKind(parsed.host)) return null;
+  if (parsed === null || !isForgeKind(parsed.host) || !forgeProduct(parsed.host).workflows.forks) return null;
   if (identity?.viewerCanPush === true && identity.parent !== undefined) {
     return null;
   }
