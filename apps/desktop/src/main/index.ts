@@ -742,10 +742,10 @@ if (!gotSingleInstanceLock) {
     const rescanInBackground = (
       profile: Profile,
       { force = false }: { force?: boolean } = {}
-    ): void => {
-      if (!force && !indexer.shouldRescanProfile(profile.id)) return;
+    ): boolean => {
+      if (!force && !indexer.shouldRescanProfile(profile.id)) return false;
       const signal = profileScans.begin(profile.id);
-      if (signal === null) return;
+      if (signal === null) return false;
       // Scan lists repos + worktrees (cheap). Per-worktree *state*
       // (dirty/ahead/behind/staleness) is computed lazily per repo when its row
       // is expanded (repo:computeState) — computing all 156 at launch storms git.
@@ -768,6 +768,7 @@ if (!gotSingleInstanceLock) {
           }
         })
         .finally(() => profileScans.finish(profile.id, signal));
+      return true;
     };
     // A repository's folder was deleted or moved: its row only leaves
     // through a rescan, so ask for one now (missing-repo-rescan.ts says why
@@ -782,13 +783,16 @@ if (!gotSingleInstanceLock) {
           )?.profileId ?? null,
         rescan: (profileId) => {
           const profile = profiles.get(profileId);
-          if (profile === null) return;
-          logMain(
-            "info",
-            "scan",
-            `a repository folder is gone; rescanning profile "${profile.name}"`
-          );
-          rescanInBackground(profile, { force: true });
+          if (profile === null) return false;
+          const started = rescanInBackground(profile, { force: true });
+          if (started) {
+            logMain(
+              "info",
+              "scan",
+              `a repository folder is gone; rescanning profile "${profile.name}"`
+            );
+          }
+          return started;
         }
       })
     );

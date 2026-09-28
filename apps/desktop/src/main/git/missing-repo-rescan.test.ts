@@ -7,7 +7,7 @@ import {
 describe("missing repository rescan", () => {
   it("rescans the repository's profile once per cooldown, not every poll", () => {
     let clock = 0;
-    const rescan = vi.fn();
+    const rescan = vi.fn(() => true);
     const onMissing = createMissingRepoRescan({
       profileOf: (repoId) => (repoId === "gone" ? "one" : null),
       rescan,
@@ -25,8 +25,22 @@ describe("missing repository rescan", () => {
     expect(rescan).toHaveBeenCalledTimes(2);
   });
 
+  it("asks again when its first ask found the profile already scanning", () => {
+    // That scan may have listed the folder before it was deleted.
+    const rescan = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
+    const onMissing = createMissingRepoRescan({
+      profileOf: () => "one",
+      rescan,
+      now: () => 0
+    });
+    onMissing("gone");
+    onMissing("gone");
+    onMissing("gone");
+    expect(rescan).toHaveBeenCalledTimes(2);
+  });
+
   it("does nothing for a repository whose row is already gone", () => {
-    const rescan = vi.fn();
+    const rescan = vi.fn(() => true);
     createMissingRepoRescan({ profileOf: () => null, rescan })("pruned");
     expect(rescan).not.toHaveBeenCalled();
   });
