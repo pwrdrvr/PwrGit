@@ -131,13 +131,17 @@ async function gitDirectory(
   return ok(isAbsolute(path) ? path : resolve(worktree.path, path));
 }
 
-async function guardWorktrees(
+/**
+ * Refuse while any worktree is mid-operation, and name who holds each
+ * checked-out branch. One worktree listing serves a whole batch.
+ */
+async function worktreeHolders(
   git: GitExec,
-  cwd: string,
-  branches: readonly string[]
-): Promise<Result<void>> {
+  cwd: string
+): Promise<Result<Map<string, string>>> {
   const listed = await listWorktrees(git, cwd);
   if (!listed.ok) return listed;
+  const holders = new Map<string, string>();
   for (const worktree of listed.value) {
     // A prunable entry has no checkout to be mid-operation in, and running
     // git inside its missing directory fails — which used to refuse every
@@ -159,18 +163,29 @@ async function guardWorktrees(
         );
       }
     }
-    if (
-      !worktree.detached &&
-      !worktree.bare &&
-      branches.includes(worktree.branch)
-    ) {
-      return err(
-        lifecycleError(
-          "branch_checked_out",
-          `${worktree.branch} is checked out in ${worktree.path}. Switch that worktree to another branch before renaming or deleting it.`
-        )
-      );
-    }
+    if (!worktree.detached && !worktree.bare)
+      holders.set(worktree.branch, worktree.path);
+  }
+  return ok(holders);
+}
+
+function checkedOutError(branch: string, path: string): PwrGitError {
+  return lifecycleError(
+    "branch_checked_out",
+    `${branch} is checked out in ${path}. Switch that worktree to another branch before renaming or deleting it.`
+  );
+}
+
+async function guardWorktrees(
+  git: GitExec,
+  cwd: string,
+  branches: readonly string[]
+): Promise<Result<void>> {
+  const holders = await worktreeHolders(git, cwd);
+  if (!holders.ok) return holders;
+  for (const branch of branches) {
+    const path = holders.value.get(branch);
+    if (path !== undefined) return err(checkedOutError(branch, path));
   }
   return ok(undefined);
 }
@@ -257,14 +272,20 @@ async function forceDeleteExpectedRef(
 
   // `git branch -D` also removes branch.<name> metadata. update-ref gives us
   // the required atomic old-value check, so perform that cleanup explicitly.
+  return removeBranchConfig(git, cwd, reviewed.branch);
+}
+
+async function removeBranchConfig(
+  git: GitExec,
+  cwd: string,
+  branch: string
+): Promise<Result<void>> {
   const configured = await git(
-    ["config", "--remove-section", `branch.${reviewed.branch}`],
+    ["config", "--remove-section", `branch.${branch}`],
     cwd
   );
   if (!configured.ok) {
-    return err(
-      partialMutationFailure("delete", reviewed.branch, configured.error)
-    );
+    return err(partialMutationFailure("delete", branch, configured.error));
   }
   // Depending on Git version, a missing section is exit 5 or a fatal
   // "no such section" response. Both mean the desired cleanup is complete.
@@ -277,8 +298,8 @@ async function forceDeleteExpectedRef(
     return err(
       partialMutationFailure(
         "delete",
-        reviewed.branch,
-        mutationFailure("delete", reviewed.branch, configured.value.stderr)
+        branch,
+        mutationFailure("delete", branch, configured.value.stderr)
       )
     );
   }
@@ -381,4 +402,110 @@ export async function deleteLocalBranch(
     return err(mutationFailure("delete", reviewed.branch, raw.value.stderr));
   }
   return ok(undefined);
+}
+
+/** How many refs one `update-ref --stdin` transaction deletes. Bounded so a
+ *  chunk refused over one moved branch costs at most this many retries. */
+const DELETE_CHUNK = 100;
+
+/** Local branches that have a `branch.<name>.*` config section, from one
+ *  read. Null when the read fails: then every branch is cleaned up. */
+async function branchConfigSections(
+  git: GitExec,
+  cwd: string
+): Promise<Set<string> | null> {
+  const raw = await git(
+    ["config", "--name-only", "--get-regexp", "^branch\\."],
+    cwd
+  );
+  if (!raw.ok) return null;
+  // Exit 1: no branch section at all.
+  if (raw.value.exitCode === 1) return new Set();
+  if (raw.value.exitCode !== 0) return null;
+  const sections = new Set<string>();
+  for (const name of raw.value.stdout.split(/\r?\n/)) {
+    // branch.<subsection>.<key> — a subsection may itself contain dots.
+    const last = name.lastIndexOf(".");
+    if (name.startsWith("branch.") && last > "branch.".length)
+      sections.add(name.slice("branch.".length, last));
+  }
+  return sections;
+}
+
+/**
+ * Delete many reviewed branches: one worktree guard for the batch, then one
+ * compare-and-swap transaction per chunk — instead of five-plus Git processes,
+ * plus one per worktree, for every branch.
+ *
+ * Each ref still goes only at its reviewed tip: `update-ref --stdin` verifies
+ * every old value under the ref locks. A transaction is all-or-nothing, so a
+ * chunk refused because one branch moved is retried one ref at a time; the
+ * moved branch fails alone and the rest still go.
+ *
+ * The caller proves each tip safe to lose. This checks only that it is still
+ * the reviewed tip and that no worktree holds it. Results are per branch;
+ * one the signal stopped before reaching is absent.
+ */
+export async function deleteReviewedBranches(
+  git: GitExec,
+  cwd: string,
+  reviewed: readonly ReviewedBranch[],
+  {
+    onProgress,
+    signal
+  }: { onProgress?: (done: number) => void; signal?: AbortSignal } = {}
+): Promise<Result<Map<string, Result<void>>>> {
+  const results = new Map<string, Result<void>>();
+  if (reviewed.length === 0) return ok(results);
+  const holders = await worktreeHolders(git, cwd);
+  if (!holders.ok) return holders;
+  const deletable: ReviewedBranch[] = [];
+  for (const branch of reviewed) {
+    const path = holders.value.get(branch.branch);
+    if (path !== undefined)
+      results.set(branch.branch, err(checkedOutError(branch.branch, path)));
+    else if (
+      branch.branch === "" ||
+      branch.branch !== branch.branch.trim() ||
+      branch.branch.startsWith("refs/") ||
+      /\s/.test(branch.branch)
+    )
+      results.set(
+        branch.branch,
+        err(
+          lifecycleError(
+            "invalid_branch",
+            `“${branch.branch}” is not a valid local branch name.`
+          )
+        )
+      );
+    else deletable.push(branch);
+  }
+  const sections = await branchConfigSections(git, cwd);
+  let done = reviewed.length - deletable.length;
+  for (let start = 0; start < deletable.length; start += DELETE_CHUNK) {
+    // Between chunks, never inside one: a transaction either lands whole or
+    // is retried whole, so cancelling cannot split one.
+    if (signal?.aborted === true) break;
+    const chunk = deletable.slice(start, start + DELETE_CHUNK);
+    const input = chunk
+      .map((branch) => `delete refs/heads/${branch.branch} ${branch.expectedHead}\n`)
+      .join("");
+    const raw = await git(["update-ref", "--stdin"], cwd, { input });
+    if (raw.ok && raw.value.exitCode === 0) {
+      for (const branch of chunk)
+        results.set(
+          branch.branch,
+          sections === null || sections.has(branch.branch)
+            ? await removeBranchConfig(git, cwd, branch.branch)
+            : ok(undefined)
+        );
+    } else {
+      for (const branch of chunk)
+        results.set(branch.branch, await forceDeleteExpectedRef(git, cwd, branch));
+    }
+    done += chunk.length;
+    onProgress?.(done);
+  }
+  return ok(results);
 }

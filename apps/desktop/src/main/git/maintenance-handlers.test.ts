@@ -356,11 +356,80 @@ describe("maintenance lifecycle and profile scope", () => {
     );
   });
 
+  it.each([
+    // With workers to spare, which repository reaches Git first is an I/O
+    // race, so only a single worker can show the order.
+    ["one worker starts where the most branches are", 2, false, 1, true],
+    ["separate object stores run together", 8, false, 2, false],
+    ["rows sharing an object store take turns", 8, true, 1, false]
+  ] as const)(
+    "deletes across repositories: %s",
+    async (_title, cores, shared, peakExpected, ordered) => {
+      vi.mocked(availableParallelism).mockReturnValue(cores);
+      if (shared) {
+        const original = git.getMockImplementation()!;
+        git.mockImplementation(async (args, cwd, opts) =>
+          args[0] === "rev-parse"
+            ? output(join(root, "a", ".git"))
+            : original(args, cwd, opts)
+        );
+      }
+      const started: string[] = [];
+      const releases: Array<() => void> = [];
+      let inFlight = 0;
+      let peak = 0;
+      vi.spyOn(maintenance, "deleteStaleBranches").mockImplementation(
+        async (_git, cwd, candidates) => {
+          started.push(cwd);
+          peak = Math.max(peak, ++inFlight);
+          await new Promise<void>((resolve) => releases.push(resolve));
+          inFlight--;
+          return ok(
+            new Map(candidates.map((branch) => [branch.branch, ok(undefined)]))
+          );
+        }
+      );
+      const branch = (repoId: string, name: string) => ({
+        repoId,
+        branch: name,
+        expectedHead: "a".repeat(40),
+        upstream: `refs/remotes/origin/${name}`,
+        evidence: "ancestry" as const
+      });
+      const pending = bus.dispatch("maintenance:run", {
+        profileId: "one",
+        operationId: "delete-many",
+        action: {
+          kind: "delete-branches",
+          branches: [branch("a", "one"), branch("b", "two"), branch("b", "three")]
+        }
+      });
+      await vi.waitFor(() => expect(releases).toHaveLength(peakExpected));
+      // b has more to delete, so it goes first rather than last.
+      if (ordered) expect(started[0]).toBe(join(root, "b"));
+      while (releases.length > 0 || started.length < 2) {
+        await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
+        releases.shift()!();
+      }
+      const summary = value(await pending);
+      expect(peak).toBe(peakExpected);
+      expect(
+        summary.results
+          .flatMap((result) => result.branches ?? [])
+          .map((branch) => [branch.branch, branch.deleted])
+      ).toEqual([
+        ["one", true],
+        ["two", true],
+        ["three", true]
+      ]);
+    }
+  );
+
   it.each(["error result", "exception"])(
     "reports partial success after deletion when refresh fails with an %s",
     async (failure) => {
-      vi.spyOn(maintenance, "deleteStaleBranch").mockResolvedValue(
-        ok(undefined)
+      vi.spyOn(maintenance, "deleteStaleBranches").mockResolvedValue(
+        ok(new Map([["finished", ok(undefined)]]))
       );
       const message = "Could not list worktrees";
       if (failure === "error result") {
@@ -392,11 +461,12 @@ describe("maintenance lifecycle and profile scope", () => {
         })
       );
       // Against one fresh review for the batch, not a review per branch.
-      expect(maintenance.deleteStaleBranch).toHaveBeenCalledWith(
+      expect(maintenance.deleteStaleBranches).toHaveBeenCalledWith(
         git,
         join(root, "a"),
-        branch,
-        { candidates: [], kept: [] }
+        [branch],
+        { candidates: [], kept: [] },
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       );
       expect(refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith("a");
       expect(summary.results).toHaveLength(1);

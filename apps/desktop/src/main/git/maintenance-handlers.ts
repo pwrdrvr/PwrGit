@@ -23,7 +23,7 @@ import type { WorktreeOperationQueue } from "./worktree-operation-queue";
 import type { PrService } from "../github/pr-service";
 import {
   collectGarbage,
-  deleteStaleBranch,
+  deleteStaleBranches,
   maintenanceCommonDirectory,
   objectStorageBytes,
   restoreStaleBranch,
@@ -221,6 +221,22 @@ export function registerMaintenanceHandlers(
     const startedAt = new Date().toISOString();
     const results = new Map<string, MaintenanceRepoResult>();
     const commonDirectories = new Set<string>();
+    const storeTurns = new Map<string, Promise<unknown>>();
+    /** Run `work` after every earlier turn on the same object store. */
+    const inStoreTurn = <T>(
+      directory: string,
+      work: () => Promise<T>
+    ): Promise<T> => {
+      const turn = (storeTurns.get(directory) ?? Promise.resolve()).then(
+        work,
+        work
+      );
+      storeTurns.set(
+        directory,
+        turn.catch(() => undefined)
+      );
+      return turn;
+    };
     const progress = (
       event: Omit<MaintenanceProgress, "operationId" | "profileId">
     ): void =>
@@ -232,13 +248,23 @@ export function registerMaintenanceHandlers(
 
     try {
       progress({ phase: "starting", repos });
-      // Deletion stays serial because separate repo rows can name one shared
-      // object store. GC and review claim each common directory before work.
-      const concurrency =
+      // GC and review claim each common directory before work; deletion
+      // takes turns per directory instead (`inStoreTurn`).
+      const concurrency = Math.max(
+        1,
+        Math.min(4, Math.floor(availableParallelism() / 2))
+      );
+      // The longest deletion starts first, so it is not the one left running
+      // alone at the end. The rows keep their reviewed order on screen.
+      const order =
         action.kind === "delete-branches"
-          ? 1
-          : Math.max(1, Math.min(4, Math.floor(availableParallelism() / 2)));
-      await mapLimit(repos, concurrency, async (repo) => {
+          ? [...repos].sort(
+              (a, b) =>
+                selected.filter((branch) => branch.repoId === b.id).length -
+                selected.filter((branch) => branch.repoId === a.id).length
+            )
+          : repos;
+      await mapLimit(order, concurrency, async (repo) => {
         const report = (detail: string): void =>
           progress({ phase: "repo_progress", repo, detail });
         let result: MaintenanceRepoResult;
@@ -367,64 +393,74 @@ export function registerMaintenanceHandlers(
                         message: sanitizeGitLogDetail(scanned.error.message)
                       };
                 }
-                const branches: DeletedBranchResult[] = [];
                 const repoCandidates = selected.filter(
                   (branch) => branch.repoId === repo.id
                 );
-                // One fresh review for the batch, not one per branch: each
-                // delete below still rechecks the tip and worktrees itself,
-                // and a review per branch made a 200-branch clean-up
-                // quadratic in Git processes.
-                report("Checking the reviewed branches again…");
-                const fresh = await review(cleanupOptions(action.options));
-                for (const candidate of repoCandidates) {
-                  const entry = {
-                    branch: candidate.branch,
-                    head: candidate.expectedHead
-                  };
-                  if (controller.signal.aborted) {
-                    branches.push({
-                      ...entry,
-                      deleted: false,
-                      message: "Cancelled; retained."
-                    });
-                    continue;
-                  }
-                  report(
-                    `Deleting branch ${branches.length + 1} of ${repoCandidates.length}: ${candidate.branch}`
-                  );
-                  const deleted = fresh.ok
-                    ? await deleteStaleBranch(
+                // Two rows can name one object store, and concurrent ref
+                // transactions on it fight over packed-refs.lock. Rows that
+                // share a store take turns; every other repository runs.
+                return inStoreTurn(directory.value, async () => {
+                  // One fresh review for the batch, not one per branch, and
+                  // one batched delete: per branch, the old path cost five
+                  // Git processes plus one per worktree.
+                  report("Checking the reviewed branches again…");
+                  const fresh = await review(cleanupOptions(action.options));
+                  const total = repoCandidates.length;
+                  report(`Deleting ${plural(total, "branch", "branches")}…`);
+                  const outcome = fresh.ok
+                    ? await deleteStaleBranches(
                         git,
                         repo.path,
-                        candidate,
-                        fresh.value
+                        repoCandidates,
+                        fresh.value,
+                        {
+                          signal: controller.signal,
+                          onProgress: (done) =>
+                            report(`Deleted ${done} of ${total} branches…`)
+                        }
                       )
                     : fresh;
-                  branches.push({
-                    ...entry,
-                    deleted: deleted.ok,
-                    message: deleted.ok
-                      ? "Deleted local branch."
-                      : sanitizeGitLogDetail(deleted.error.message)
-                  });
-                }
-                const deleted = branches.filter(
-                  (branch) => branch.deleted
-                ).length;
-                return {
-                  repo,
-                  branches,
-                  outcome:
-                    deleted === branches.length
-                      ? "success"
-                      : controller.signal.aborted
-                        ? "cancelled"
-                        : deleted > 0
-                          ? "partial"
-                          : "failed",
-                  message: `${deleted} local branch${deleted === 1 ? "" : "es"} deleted; ${branches.length - deleted} retained.`
-                };
+                  const branches: DeletedBranchResult[] = repoCandidates.map(
+                    (candidate) => {
+                      const entry = {
+                        branch: candidate.branch,
+                        head: candidate.expectedHead
+                      };
+                      const deleted = outcome.ok
+                        ? outcome.value.get(candidate.branch)
+                        : outcome;
+                      if (deleted === undefined)
+                        return {
+                          ...entry,
+                          deleted: false,
+                          message: "Cancelled; retained."
+                        };
+                      return {
+                        ...entry,
+                        deleted: deleted.ok,
+                        message: deleted.ok
+                          ? "Deleted local branch."
+                          : sanitizeGitLogDetail(deleted.error.message)
+                      };
+                    }
+                  );
+                  const deleted = branches.filter(
+                    (branch) => branch.deleted
+                  ).length;
+                  return {
+                    repo,
+                    branches,
+                    outcome:
+                      deleted === branches.length
+                        ? "success"
+                        : controller.signal.aborted
+                          ? "cancelled"
+                          : deleted > 0
+                            ? "partial"
+                            : "failed",
+                    message: `${deleted} local branch${deleted === 1 ? "" : "es"} deleted; ${branches.length - deleted} retained.`
+                  };
+                });
               }
             );
             if (action.kind === "delete-branches") {

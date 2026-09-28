@@ -11,7 +11,7 @@ import {
   type StaleBranch,
   type StaleBranchPr
 } from "@pwrgit/shared";
-import { deleteLocalBranch } from "./branch-lifecycle";
+import { deleteReviewedBranches } from "./branch-lifecycle";
 import { requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
 
@@ -410,43 +410,75 @@ function reflogTime(selector: string): number {
 }
 
 /**
- * Delete one reviewed branch, against a review taken just before the batch.
+ * Delete reviewed branches, against a review taken just before the batch.
  *
- * The branch must still be a candidate, at the same tip and upstream and on
- * the same evidence. Ancestry reuses the ordinary non-force path, including
- * Git's own merge check. PR evidence cannot — `git branch -d` refuses a
- * squash merge — so it takes the compare-and-swap on the reviewed tip, which
- * refuses a branch that moved after the review as stale. Both paths recheck
- * worktrees and the tip themselves.
+ * Each must still be a candidate in `fresh`, at the same tip and upstream and
+ * on the same evidence. Ancestry is asked of Git once more right before the
+ * delete — the check `git branch -d` makes per branch, made here once for the
+ * batch — and every deletion is a compare-and-swap on the reviewed tip
+ * (`deleteReviewedBranches`), so a branch that moved after the review is
+ * refused as stale. That CAS is also what PR evidence needs: `git branch -d`
+ * refuses a squash merge.
+ *
+ * Results are per branch. A branch missing from them was never attempted:
+ * the signal stopped the batch first.
  */
-export async function deleteStaleBranch(
+export async function deleteStaleBranches(
   git: GitExec,
   cwd: string,
-  candidate: StaleBranch,
-  fresh: StaleBranchReview
-): Promise<Result<void>> {
-  if (
-    !fresh.candidates.some(
+  candidates: readonly StaleBranch[],
+  fresh: StaleBranchReview,
+  progress: { onProgress?: (done: number) => void; signal?: AbortSignal } = {}
+): Promise<Result<Map<string, Result<void>>>> {
+  const results = new Map<string, Result<void>>();
+  const stale = (message: string): Result<void> =>
+    err({ kind: "repo", code: "stale_branch_review", message });
+  const eligible = candidates.filter((candidate) => {
+    const current = fresh.candidates.some(
       (branch) =>
         branch.branch === candidate.branch &&
         branch.expectedHead === candidate.expectedHead &&
         branch.upstream === candidate.upstream &&
         branch.evidence === candidate.evidence
-    )
-  ) {
-    return err({
-      kind: "repo",
-      code: "stale_branch_review",
-      message:
-        "The branch changed or is no longer eligible. Review it again; nothing was deleted."
+    );
+    if (!current)
+      results.set(
+        candidate.branch,
+        stale(
+          "The branch changed or is no longer eligible. Review it again; nothing was deleted."
+        )
+      );
+    return current;
+  });
+  let proven = eligible;
+  if (eligible.some((candidate) => candidate.evidence === "ancestry")) {
+    const merged = await output(git, cwd, [
+      "for-each-ref",
+      "--merged=HEAD",
+      "--format=%(refname)",
+      "refs/heads/"
+    ]);
+    if (!merged.ok) return merged;
+    const inHead = new Set(merged.value.split(/\r?\n/));
+    proven = eligible.filter((candidate) => {
+      if (
+        candidate.evidence !== "ancestry" ||
+        inHead.has(`refs/heads/${candidate.branch}`)
+      )
+        return true;
+      results.set(
+        candidate.branch,
+        stale(
+          "The branch is no longer in HEAD. Review it again; nothing was deleted."
+        )
+      );
+      return false;
     });
   }
-  return deleteLocalBranch(
-    git,
-    cwd,
-    candidate,
-    candidate.evidence === "pr"
-  );
+  const deleted = await deleteReviewedBranches(git, cwd, proven, progress);
+  if (!deleted.ok) return deleted;
+  for (const [branch, result] of deleted.value) results.set(branch, result);
+  return ok(results);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,7 +20,7 @@ import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 import {
   collectGarbage,
-  deleteStaleBranch,
+  deleteStaleBranches,
   garbageCollectionArgs,
   maintenanceCommonDirectory,
   objectStorageBytes,
@@ -88,8 +89,17 @@ async function reviewed(
 async function review(repo: string): Promise<StaleBranch[]> {
   return (await reviewed(repo)).candidates;
 }
+/** Delete one branch through the batch path, answering its own result. */
+async function deleteOne(
+  repo: string,
+  candidate: StaleBranch,
+  fresh: StaleBranchReview
+) {
+  const results = await deleteStaleBranches(systemGit, repo, [candidate], fresh);
+  return results.ok ? results.value.get(candidate.branch)! : results;
+}
 async function remove(repo: string, candidate: StaleBranch) {
-  return deleteStaleBranch(systemGit, repo, candidate, await reviewed(repo));
+  return deleteOne(repo, candidate, await reviewed(repo));
 }
 /** A gone branch with one commit of its own, squash-merged into main — the
  *  shape GitHub's squash button leaves behind. Returns the branch's tip. */
@@ -339,7 +349,7 @@ describe("repository maintenance with real Git", () => {
     // `git branch -d` refuses this branch — its commits are not in HEAD —
     // so the PR-proven path must be the compare-and-swap, not the merge check.
     expect(
-      await deleteStaleBranch(systemGit, repo, result.candidates[0]!, result)
+      await deleteOne(repo, result.candidates[0]!, result)
     ).toEqual({ ok: true, value: undefined });
     expect(git(repo, "branch", "--list", "squashed")).toBe("");
     expect(git(repo, "config", "--list")).not.toContain("branch.squashed.");
@@ -435,7 +445,7 @@ describe("repository maintenance with real Git", () => {
     const result = await reviewed(repo, {
       prs: new Map([["squashed", merged(tip)]])
     });
-    await deleteStaleBranch(systemGit, repo, result.candidates[0]!, result);
+    await deleteOne(repo, result.candidates[0]!, result);
     expect(await restoreStaleBranch(systemGit, repo, "squashed", tip)).toEqual({
       ok: true,
       value: undefined
@@ -446,6 +456,63 @@ describe("repository maintenance with real Git", () => {
     expect(
       await restoreStaleBranch(systemGit, repo, "squashed", tip)
     ).toMatchObject({ ok: false, error: { code: "branch_exists" } });
+  });
+
+  it("deletes a batch larger than one transaction; a moved or checked-out branch fails alone", async () => {
+    const { root, repo } = fixture();
+    git(repo, "commit", "--allow-empty", "-m", "Second");
+    const head = git(repo, "rev-parse", "HEAD");
+    const names = Array.from(
+      { length: 130 },
+      (_, index) => `done/${String(index).padStart(3, "0")}`
+    );
+    // Gone branches in bulk: local refs whose configured upstream was never
+    // fetched — what a pruning fetch leaves once the remote branch is deleted.
+    execFileSync("git", ["-C", repo, "update-ref", "--stdin"], {
+      input: names.map((name) => `create refs/heads/${name} ${head}\n`).join("")
+    });
+    appendFileSync(
+      join(repo, ".git", "config"),
+      names
+        .map(
+          (name) =>
+            `[branch "${name}"]\n\tremote = origin\n\tmerge = refs/heads/${name}\n`
+        )
+        .join("")
+    );
+    const fresh = await reviewed(repo);
+    expect(fresh.candidates).toHaveLength(130);
+    // After the review: one branch moves (still in HEAD, so only the
+    // compare-and-swap can catch it) and one is checked out.
+    git(repo, "update-ref", "refs/heads/done/005", `${head}~1`);
+    git(repo, "worktree", "add", join(root, "held"), "done/120");
+    const progress: number[] = [];
+    const results = await deleteStaleBranches(
+      systemGit,
+      repo,
+      fresh.candidates,
+      fresh,
+      { onProgress: (done) => progress.push(done) }
+    );
+    if (!results.ok) throw new Error(results.error.message);
+    expect(results.value.get("done/005")).toMatchObject({
+      ok: false,
+      error: { code: "stale_branch" }
+    });
+    expect(results.value.get("done/120")).toMatchObject({
+      ok: false,
+      error: { code: "branch_checked_out" }
+    });
+    expect(
+      [...results.value.values()].filter((result) => result.ok)
+    ).toHaveLength(128);
+    expect(progress.at(-1)).toBe(130);
+    expect(
+      git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/done/")
+    ).toBe("done/005\ndone/120");
+    expect(
+      git(repo, "config", "--get-regexp", "^branch\\.done/.*\\.remote$")
+    ).toBe("branch.done/005.remote origin\nbranch.done/120.remote origin");
   });
 
   it("refuses to delete a branch reviewed on different evidence", async () => {
@@ -460,7 +527,7 @@ describe("repository maintenance with real Git", () => {
       options: { prProof: false, keepDays: null }
     });
     expect(
-      await deleteStaleBranch(systemGit, repo, result.candidates[0]!, fresh)
+      await deleteOne(repo, result.candidates[0]!, fresh)
     ).toMatchObject({ ok: false, error: { code: "stale_branch_review" } });
     expect(git(repo, "rev-parse", "refs/heads/squashed")).toBe(tip);
   });

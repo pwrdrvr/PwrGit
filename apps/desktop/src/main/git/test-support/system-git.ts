@@ -59,8 +59,9 @@ function runGit(
         cwd: invocation.processCwd,
         env,
         // Nothing here answers a prompt, and an inherited stdin lets a git
-        // that decides to read one block until the suite's timeout.
-        stdio: ["ignore", "pipe", "pipe"],
+        // that decides to read one block until the suite's timeout. A pipe
+        // closed at once reads as EOF, and carries `input` when there is one.
+        stdio: ["pipe", "pipe", "pipe"],
         // Cancellation is part of the GitExec contract: production's execGit
         // honours it, so a test double that quietly ignored it would let an
         // un-aborted git run to the suite timeout — the very failure this
@@ -79,6 +80,9 @@ function runGit(
       return;
     }
     const child = proc;
+    // Git can close stdin before the write lands; its exit code says why.
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(options?.input);
 
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
