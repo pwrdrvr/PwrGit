@@ -49,6 +49,14 @@ test("collects all repositories and reviews stale local branches without touchin
     timeout: 30_000
   });
   await expect(dialog).toContainText("2 succeeded");
+  // Fixture repositories reclaim kilobytes, so both fold into the quiet line.
+  await expect(dialog.locator(".maintenance__quiet")).toContainText(
+    "2 repositories with less than 1 MiB to reclaim"
+  );
+  await dialog
+    .locator(".maintenance__quiet")
+    .getByRole("button", { name: "Show", exact: true })
+    .click();
   await expect(dialog.locator(".bulk-sync__repo")).toHaveCount(2);
   await expect(dialog.locator(".bulk-sync__repo").first()).toContainText(
     "Object storage:"
@@ -69,10 +77,12 @@ test("collects all repositories and reviews stale local branches without touchin
     .click();
   // The branch was made seconds ago, so the default week-long age guard
   // keeps it and says so rather than offering it.
+  await dialog.locator(".maintenance__quiet").getByRole("button", { name: "Show" }).click();
   await expect(dialog).toContainText("1 touched in the last 7 days");
   await expect(
     dialog.getByRole("button", { name: "Delete 0 selected local branches" })
   ).toBeDisabled();
+  await dialog.getByRole("button", { name: "Change", exact: true }).click();
   await dialog
     .getByRole("checkbox", { name: "Keep branches touched in the last" })
     .uncheck();
@@ -222,7 +232,9 @@ for (const [width, height] of [
       animations: "disabled",
       path: testInfo.outputPath("maintenance-waiting.png")
     });
-    expect(await geometry()).toEqual(running);
+    const finished = await geometry();
+    expect(finished.dialog).toEqual(running.dialog);
+    expect(finished.footer).toEqual(running.footer);
     expect(running.dialog).toEqual(initial.dialog);
     expect(running.footer).toEqual(initial.footer);
 
@@ -246,7 +258,8 @@ for (const [width, height] of [
     expect(await geometry()).toEqual(running);
     await fixture.evaluate((f) => f.finish());
     await expect(dialog.getByRole("status")).toContainText("Cancelled");
-    expect(await geometry()).toEqual(running);
+    expect((await geometry()).dialog).toEqual(running.dialog);
+    expect((await geometry()).footer).toEqual(running.footer);
     await dialog
       .getByRole("button", { name: "Local branches", exact: true })
       .click();

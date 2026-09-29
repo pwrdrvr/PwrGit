@@ -14,6 +14,8 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
+import { MaintenanceRulesApplied } from "./MaintenancePlan";
+import { StatusMark } from "./BulkSyncStatus";
 import {
   describeBytes,
   emptyReviewCopy,
@@ -51,8 +53,13 @@ export function PruneWorktreesPanel({
   onRemove,
   onClose,
   onBusyChange,
+  onCandidateCount,
   autoStart = false,
-  onContinue
+  onContinue,
+  step = false,
+  onChangeRules,
+  protectRecent: initialProtectRecent = true,
+  protectionDays: initialProtectionDays = 7
 }: {
   profileId: string;
   /**
@@ -63,12 +70,17 @@ export function PruneWorktreesPanel({
   onRemove: (worktreeIds: string[]) => Promise<void>;
   onClose: () => void;
   onBusyChange?: (busy: boolean) => void;
+  onCandidateCount?: (count: number) => void;
   /** Only the combined workflow sets this, after an explicit Analyze. */
   autoStart?: boolean;
-  onContinue?: (removedCount: number) => void;
+  onContinue?: (removedCount: number, size: string, items: { label: string; detail: string }[]) => void;
+  step?: boolean;
+  onChangeRules?: () => void;
+  protectRecent?: boolean;
+  protectionDays?: number;
 }) {
-  const [protectRecent, setProtectRecent] = useState(true);
-  const [protectionDays, setProtectionDays] = useState(7);
+  const [protectRecent, setProtectRecent] = useState(initialProtectRecent);
+  const [protectionDays, setProtectionDays] = useState(initialProtectionDays);
   const [stage, setStage] = useState<Stage>({ kind: autoStart ? "sweeping" : "idle" });
   const [summary, setSummary] = useState<PruneScanSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +94,8 @@ export function PruneWorktreesPanel({
     sizing: { done: number; total: number } | null;
   }>({ completedRepos: 0, totalRepos: 0, repoName: null, sizing: null });
   const [cancelling, setCancelling] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [showKept, setShowKept] = useState(false);
   const footerRef = useRef<HTMLDivElement>(null);
   const operationIdRef = useRef("");
   const sweepRunRef = useRef(0);
@@ -198,7 +212,16 @@ export function PruneWorktreesPanel({
     )),
     [remaining, protectRecent, protectionDays, summary]
   );
-  const protectedCount = remaining.length - candidates.length;
+  useEffect(() => {
+    // A failed sweep still ends in review, so the rail must leave "scanning".
+    if (stage.kind === "review") onCandidateCount?.(candidates.length);
+  }, [stage.kind, candidates.length, onCandidateCount]);
+  const protectedCandidates = remaining.filter((candidate) => !candidates.includes(candidate));
+  const protectedCount = protectedCandidates.length;
+  const unreadableCount = protectedCandidates.filter((candidate) => candidate.activityComplete !== true ||
+    !Number.isFinite(Date.parse(candidate.lastTouchedAt ?? "")) ||
+    !Number.isFinite(Date.parse(candidate.lastActivityAt ?? ""))).length;
+  const recentCount = protectedCount - unreadableCount;
   const proposedTotals = selectionTotals(
     candidates,
     new Set(candidates.map((c) => c.worktreeId))
@@ -235,6 +258,19 @@ export function PruneWorktreesPanel({
     });
   };
 
+  const continueWithRemoved = (): void => {
+    const removedCandidates = swept.filter((candidate) => removedRef.current.has(candidate.worktreeId));
+    const removedIds = new Set(removedCandidates.map((candidate) => candidate.worktreeId));
+    onContinue?.(
+      removedCandidates.length,
+      describeBytes(selectionTotals(removedCandidates, removedIds)),
+      removedCandidates.map((candidate) => ({
+        label: `${candidate.repoName} · ${candidate.branch}`,
+        detail: candidate.path
+      }))
+    );
+  };
+
   const remove = async (): Promise<void> => {
     const picked = candidates.filter((candidate) =>
       selected.has(candidate.worktreeId)
@@ -254,7 +290,7 @@ export function PruneWorktreesPanel({
       setSelected(new Set());
       if (onContinue !== undefined) {
         if (ids.every((id) => removedRef.current.has(id))) {
-          onContinue(swept.filter((candidate) => removedRef.current.has(candidate.worktreeId)).length);
+          continueWithRemoved();
         } else {
           setError("Some worktrees were not removed. Review the remaining worktrees or continue without further pruning.");
         }
@@ -286,6 +322,7 @@ export function PruneWorktreesPanel({
 
   return (
     <div className="prune__panel">
+        <span className="prune__count" aria-live="polite">{stage.kind === "sweeping" ? `${sweep.completedRepos} / ${sweep.totalRepos}` : removedTotals.count > 0 ? `${removedTotals.count} removed` : `${candidates.length} found`}</span>
         {stage.kind === "reclaiming" ? (
           <ReclaimDiskPanel
             candidates={selectedCandidates}
@@ -308,25 +345,15 @@ export function PruneWorktreesPanel({
           />
         ) : (
           <>
-            <div className="prune__head">
+            {!step && stage.kind === "idle" && <div className="prune__head">
               <div>
-                <p>
-                  Every repository in this window’s profile is checked for worktrees that are clean, not
-                  the default branch, and finished — a merged pull request,
-                  or merged into the default branch (or sharing no history
-                  with it) with no commits for {STALE_AGE_DAYS} days.
-                </p>
+                <p>Every repository in this window’s profile.</p>
               </div>
-              <span className="prune__count" aria-live="polite">
-                {stage.kind === "sweeping"
-                  ? `${sweep.completedRepos} / ${sweep.totalRepos}`
-                  : removedTotals.count > 0
-                    ? `${removedTotals.count} removed`
-                    : `${candidates.length} found`}
-              </span>
-            </div>
+            </div>}
 
-            <div className="prune__protection">
+            {!step && stage.kind === "idle" && <fieldset className="prune__protection">
+              <legend>Finished worktrees</legend>
+              <div className="prune__fixed"><span className="prune__fixed-mark" aria-hidden="true" /><strong>Finished means merged</strong><p>A merged pull request, or merged into the default branch with no commits for {STALE_AGE_DAYS} days. Worktrees that share no history with the default branch count too.</p></div>
               <div className="prune__protection-controls">
                 <label>
                   <input type="checkbox" checked={protectRecent} disabled={busy}
@@ -334,30 +361,23 @@ export function PruneWorktreesPanel({
                       setProtectRecent(event.target.checked);
                       setSelected(new Set());
                     }} />
-                  Protect recently touched worktrees
+                  Keep worktrees touched in the last
                 </label>
-                <label>
-                  Within the last{" "}
                   <select aria-label="Protection window" value={protectionDays}
                     disabled={busy || !protectRecent}
                     onChange={(event) => {
                       setProtectionDays(Number(event.target.value));
                       setSelected(new Set());
                     }}>
-                    {[1, 7, 14, 30].map((days) => (
+                    {[1, 3, 7, 14, 30, 90].map((days) => (
                       <option key={days} value={days}>{days} {days === 1 ? "day" : "days"}</option>
                     ))}
                   </select>
-                </label>
               </div>
-              <p>Uses commits and file or folder changes, including ignored files.
-                Incomplete activity checks stay protected. Resets to 7 days each time you open this tab.</p>
-              <p role="status">
-                {summary === null ? (stage.kind === "idle" ? "Click Analyze to find finished worktrees. Nothing runs until you start." : "Checking activity during the sweep…") :
-                  `${candidates.length} proposed · ${describeBytes(proposedTotals)} · ${protectedCount} protected`}
-                {!protectRecent && " · Recent-worktree protection is off."}
-              </p>
-            </div>
+              <p>Touched is the newest commit or file change, ignored files included. Resets to 7 days each time you open this tab.</p>
+            </fieldset>}
+            {!step && stage.kind === "idle" && <div className="maintenance__never prune__never"><em>Never offered</em><span>Worktrees with uncommitted or untracked changes</span><span>The repository’s main checkout, and worktrees on the default branch</span><span>Worktrees whose activity could not be fully read</span></div>}
+            {!step && stage.kind === "idle" && <p className="prune__intro-note">Removing a worktree deletes its folder. Its branch is kept, and so are the commits.</p>}
 
             {stage.kind === "sweeping" && (
               <div
@@ -388,6 +408,7 @@ export function PruneWorktreesPanel({
 
             {summary !== null && (
               <div className="prune__summary" role="status">
+                <StatusMark mark={summary.cancelled ? "cancelled" : "ok"} /><div>
                 <strong>
                   {summary.cancelled ? "Stopped early" : "Sweep finished"}
                 </strong>
@@ -395,14 +416,17 @@ export function PruneWorktreesPanel({
                   {summary.counts.repos.scanned} read ·{" "}
                   {summary.counts.repos.cached} reused ·{" "}
                   {summary.counts.worktreesConsidered} worktrees considered ·{" "}
-                  {formatBytes(proposedTotals.bytes)} in proposed worktrees
+                  {candidates.length} finished · {formatBytes(proposedTotals.bytes)}
                   {summary.counts.repos.failed > 0
                     ? ` · ${summary.counts.repos.failed} unreadable`
                     : ""}
                 </span>
+                </div><time>took {Math.max(0, Math.round((Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)) / 1000))}s</time>
               </div>
             )}
             {error !== null && <div className="modal__error">{error}</div>}
+            {summary !== null && stage.kind === "review" && <MaintenanceRulesApplied kind="worktrees" protectRecent={protectRecent} protectionDays={protectionDays}
+              onChange={() => { if (step) onChangeRules?.(); else { setSummary(null); setStage({ kind: "idle" }); setSelected(new Set()); } }} />}
 
             {stage.kind === "review" && candidates.length > 0 && (
               <div className="prune__select">
@@ -418,13 +442,8 @@ export function PruneWorktreesPanel({
                       )
                     }
                   />
-                  Select all {candidates.length}
+                  Select all {candidates.length} finished worktree{candidates.length === 1 ? "" : "s"}
                 </label>
-                <span aria-live="polite">
-                  {totals.count === 0
-                    ? "Nothing selected."
-                    : `${totals.count} selected · ${describeBytes(totals)}`}
-                </span>
               </div>
             )}
 
@@ -438,11 +457,12 @@ export function PruneWorktreesPanel({
                     }`}
                   >
                     {protectedCount > 0
-                      ? `No worktrees are proposed. ${protectedCount} finished worktree${protectedCount === 1 ? " is" : "s are"} protected by the activity check. Change the protection above to review them.`
+                      ? `No worktrees are proposed. ${protectedCount} finished worktree${protectedCount === 1 ? " is" : "s are"} protected. Recent worktrees can be reviewed by changing the age guard; unreadable activity stays protected.`
                       : emptyReviewCopy(removedTotals)}
                   </p>
                 )}
-              {candidates.map((candidate) => (
+              {candidates.length > 0 && <div className="prune__list-card"><div className="maintenance__group"><span>Finished <b>{candidates.length}</b></span>{candidates.length > 20 && <button onClick={() => setShowAll((old) => !old)}>{showAll ? "Show fewer" : "Show all"}</button>}</div>
+              {(showAll ? candidates : candidates.slice(0, 20)).map((candidate) => (
                 <PruneRow
                   key={candidate.worktreeId}
                   candidate={candidate}
@@ -451,6 +471,10 @@ export function PruneWorktreesPanel({
                   onToggle={() => toggle(candidate.worktreeId)}
                 />
               ))}
+              {protectedCount > 0 && <><div className="maintenance__group"><span>Kept <b>{protectedCount}</b></span><button onClick={() => setShowKept((old) => !old)}>{showKept ? "Hide" : "Show"}</button></div>
+                <div className="maintenance__kept-reasons">{recentCount > 0 && <span><b>{recentCount}</b> touched in the last {protectionDays} {protectionDays === 1 ? "day" : "days"}</span>}{unreadableCount > 0 && <span><b>{unreadableCount}</b> activity could not be read</span>}</div>
+                {showKept && protectedCandidates.map((candidate) => <p className="prune__kept-row" key={candidate.worktreeId}>{candidate.repoName} · {candidate.branch}</p>)}
+              </>}</div>}
               {failedRepos.length > 0 && (
                 <ul className="prune__failures">
                   {failedRepos.map((repo) => (
@@ -463,10 +487,11 @@ export function PruneWorktreesPanel({
             </div>
 
             <div className="modal__actions" ref={footerRef}>
+              {stage.kind === "review" && <span className="maintenance__footer-lead">{totals.count === 0 ? "Nothing selected" : `${totals.count} selected · ${describeBytes(totals)}`}{step && " · then local branches"}</span>}
               {stage.kind === "idle" ? (
                 <>
                   <button className="modal__cancel" onClick={onClose}>Close</button>
-                  <button className="modal__create" onClick={() => runSweep(false)}>Analyze</button>
+                  <button className="modal__create" onClick={() => runSweep(false)}>Find finished worktrees</button>
                 </>
               ) : stage.kind === "sweeping" ? (
                 <button
@@ -478,9 +503,9 @@ export function PruneWorktreesPanel({
                 </button>
               ) : (
                 <>
-                  <button className="modal__cancel" disabled={busy} onClick={onClose}>
+                  {!step && <button className="modal__cancel" disabled={busy} onClick={onClose}>
                     Close
-                  </button>
+                  </button>}
                   <button
                     className="prune__ghost"
                     disabled={stage.kind === "removing"}
@@ -496,8 +521,8 @@ export function PruneWorktreesPanel({
                     >Reclaim disk space…</button>
                   ) : (
                     <button className="modal__cancel" disabled={busy}
-                      onClick={() => onContinue(swept.filter((candidate) => removedRef.current.has(candidate.worktreeId)).length)}>
-                      Continue without Pruning
+                      onClick={continueWithRemoved}>
+                      Skip worktrees
                     </button>
                   )}
                   <button
@@ -507,7 +532,7 @@ export function PruneWorktreesPanel({
                   >
                     {stage.kind === "removing"
                       ? "Removing…"
-                      : onContinue !== undefined ? "Start Pruning and Continue"
+                      : onContinue !== undefined ? totals.count === 0 ? "Remove worktrees and continue" : `Remove ${totals.count} worktree${totals.count === 1 ? "" : "s"} and continue`
                       : `Remove ${totals.count === 0 ? "" : totals.count} worktree${
                           totals.count === 1 ? "" : "s"
                         }…`}
@@ -534,7 +559,7 @@ function PruneRow({
 }) {
   const tip = useViewportTooltip();
   return (
-    <label className={`prune__row${checked ? " is-selected" : ""}`}>
+    <label className="prune__row">
       <input
         type="checkbox"
         checked={checked}
@@ -546,6 +571,10 @@ function PruneRow({
           {candidate.repoName} <span aria-hidden="true">·</span>{" "}
           {candidate.branch}
         </strong>
+        <span className="prune__row-evidence"><span className={`prune__reason is-${candidate.reason.kind}`}>
+          {reasonLabel(candidate.reason)}
+        </span> · {candidate.lastActivityAt === undefined ? "no commits" : `commit ${relativeAge(candidate.lastActivityAt)}`}
+          {candidate.activityComplete !== true ? " · activity incomplete" : candidate.lastTouchedAt === undefined ? " · activity unknown" : ` · touched ${relativeAge(candidate.lastTouchedAt)}`}</span>
         <small
           className="selectable"
           {...hoverTooltip(tip, candidate.path)}
@@ -553,23 +582,7 @@ function PruneRow({
           {candidate.path}
         </small>
       </span>
-      <span className="prune__row-meta">
-        <span className={`prune__reason is-${candidate.reason.kind}`}>
-          {reasonLabel(candidate.reason)}
-        </span>
-        <span className="prune__row-facts">
-          {candidate.lastActivityAt === undefined
-            ? "no commits"
-            : `commit ${relativeAge(candidate.lastActivityAt)}`}
-          {candidate.activityComplete !== true ? " · activity incomplete" :
-            candidate.lastTouchedAt === undefined ? " · activity unknown" :
-              ` · touched ${relativeAge(candidate.lastTouchedAt)}`}
-          {" · "}
-          {candidate.sizeBytes === null
-            ? "size unknown"
-            : `${candidate.sizePartial === true ? "≥ " : ""}${formatBytes(candidate.sizeBytes)}`}
-        </span>
-      </span>
+      <span className="prune__row-size">{candidate.sizeBytes === null ? "size unknown" : `${candidate.sizePartial === true ? "≥ " : ""}${formatBytes(candidate.sizeBytes)}`}</span>
       {tip.tooltipNode}
     </label>
   );

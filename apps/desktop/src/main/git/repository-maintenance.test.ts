@@ -458,6 +458,8 @@ describe("repository maintenance with real Git", () => {
     ).toMatchObject({ ok: false, error: { code: "branch_exists" } });
   });
 
+  // This 130-branch fixture also removes each branch's Git config. Windows CI
+  // has completed it in 14s and once hit the suite's 20s limit mid-cleanup.
   it("deletes a batch larger than one transaction; a moved or checked-out branch fails alone", async () => {
     const { root, repo } = fixture();
     git(repo, "commit", "--allow-empty", "-m", "Second");
@@ -536,7 +538,7 @@ describe("repository maintenance with real Git", () => {
     ).toBe(
       "branch.done/005.remote origin\nbranch.done/110.remote origin\nbranch.done/120.remote origin"
     );
-  });
+  }, 60_000);
 
   it("refuses to delete a branch reviewed on different evidence", async () => {
     const { repo } = fixture();

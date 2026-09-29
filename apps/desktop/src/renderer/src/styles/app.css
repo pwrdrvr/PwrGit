@@ -5274,7 +5274,18 @@ button.agent-menu__item:hover {
   align-items: baseline;
   gap: 8px;
 }
-.maintenance__receipt li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A deleted branch is one line: name, reviewed tip, Restore. The "Deleted
+   local branch." message only appears when deletion failed. */
+.maintenance__receipt li > strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font: 500 11px/1.3 var(--font-mono);
+}
+.maintenance__receipt li > span { min-width: 0; overflow-wrap: anywhere; }
 .maintenance__receipt code {
   color: var(--text-subtle);
   font: 500 10px/1 var(--font-mono);
@@ -5746,7 +5757,9 @@ button.agent-menu__item:hover {
   padding: 11px 12px;
   border: 1px solid var(--accent-border);
   border-radius: 8px;
-  background: var(--accent-soft);
+  /* The live status card's shape: neutral fill, accent border. A filled
+     accent bar read as a warning. */
+  background: var(--bg-panel);
 }
 .prune__spinner {
   width: 15px;
@@ -16982,9 +16995,6 @@ button.agent-auth-node:focus-visible,
 }
 .prune__protection p { margin: 8px 0 0; line-height: 1.45; }
 
-.maintenance.maintenance--worktrees {
-  width: min(860px, 95vw);
-}
 .prune__panel {
   flex: 1;
   display: flex;
@@ -17026,3 +17036,136 @@ button.agent-auth-node:focus-visible,
   color: var(--text-secondary);
 }
 .maintenance__workflow-receipts li { margin-bottom: 6px; }
+
+/* Repository maintenance: shared step and review anatomy. */
+.modal.maintenance { width: min(820px, 95vw); }
+.maintenance__tabs button:disabled { opacity: .45; cursor: default; }
+.maintenance__footer-lead { margin-right: auto; color: var(--text-muted); font: 500 10.5px/1.3 var(--font-sans); }
+.maintenance__steps { flex: 0 0 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 12px 18px 0; }
+.maintenance__step { min-width: 0; display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.maintenance__step > div { min-width: 0; }
+.maintenance__step strong, .maintenance__step small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.maintenance__step strong { color: var(--text-secondary); font: 650 11.5px/1.2 var(--font-sans); }
+.maintenance__step small { margin-top: 3px; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+.maintenance__step-num { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid var(--border-default); border-radius: 50%; background: var(--bg-input); color: var(--text-muted); font: 700 10px/1 var(--font-mono); }
+.maintenance__step.is-on { border-color: var(--accent-border); background: var(--accent-tint); box-shadow: inset 0 -2px var(--accent); }
+.maintenance__step.is-on .maintenance__step-num, .maintenance__plan-step:not(.is-off) > .maintenance__step-num { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+.maintenance__step.is-on strong { color: var(--text-primary); }
+.maintenance__step.is-on small { color: var(--accent-bright); }
+.maintenance__step.is-done .maintenance__step-num { border-color: transparent; background: var(--success-soft); color: var(--success-text); }
+.maintenance__step.is-done strong { color: var(--text-primary); }
+.maintenance__step.is-done small { color: var(--success-text); }
+.maintenance__step.is-off { border-style: dashed; background: transparent; }
+.maintenance__step.is-stop { border-color: var(--danger-border); }
+.maintenance__step.is-stop .maintenance__step-num { border: 0; background: var(--danger-soft); color: var(--danger-text); }
+.maintenance__step.is-stop small { color: var(--danger-text); }
+.maintenance__step-num svg { width: 10px; height: 10px; }
+/* A Finished row's proof, in the success colour a worktree row's reason uses. */
+.maintenance__branch small i { font-style: normal; color: var(--success-text); }
+.maintenance__receipt-more { padding: 6px 0 0 27px; }
+.maintenance__receipt li.maintenance__receipt-more { padding-left: 0; }
+.maintenance__receipt-more button { border: 0; padding: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
+.maintenance__plan { display: flex; flex-direction: column; gap: 8px; }
+.maintenance__plan-step { display: grid; grid-template-columns: 14px 20px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.maintenance__plan-step > input { margin: 2px 0 0; }
+.maintenance__plan-step > div { min-width: 0; }
+.maintenance__plan-step.is-off { border-style: dashed; background: transparent; }
+.maintenance__plan-step.is-off :is(h3, p) { color: var(--text-subtle); }
+.maintenance__plan-head { display: flex; align-items: baseline; gap: 8px; }
+.maintenance__plan-head h3 { margin: 0; color: var(--text-primary); font: 650 12.5px/1.3 var(--font-sans); }
+.maintenance__plan-step p { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.maintenance__pause { flex: none; margin-left: auto; padding: 3px 7px; border: 1px solid var(--accent-border); border-radius: 999px; background: var(--accent-tint); color: var(--accent-bright); font: 600 9.5px/1.2 var(--font-sans); }
+.maintenance__pause.is-auto { border-color: color-mix(in srgb, var(--status-warning) 44%, transparent); color: var(--status-warning); background: transparent; }
+.maintenance__pause.is-last { border-color: var(--border-subtle); color: var(--text-muted); background: var(--bg-input); }
+.maintenance__plan-rules { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-faint); color: var(--text-secondary); font: 500 11.5px/1.3 var(--font-sans); }
+.maintenance__plan-rules label { display: inline-flex; align-items: center; gap: 8px; }
+.maintenance__plan-rules label > input { margin: 0; }
+.maintenance__plan-rules select { height: 26px; padding: 0 8px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-input); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); }
+.maintenance__plan-rules small { color: var(--text-subtle); font: 400 10.5px/1.3 var(--font-sans); }
+.maintenance__plan-mode { flex-basis: 100%; }
+.maintenance__never { border: 1px solid var(--border-faint); }
+.maintenance__never code { width: 74px; flex: 0 0 auto; color: var(--text-subtle); font: 600 10px/1.45 var(--font-mono); }
+.maintenance__applied { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.maintenance__applied > div { display: flex; align-items: baseline; gap: 10px; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+.maintenance__applied em { flex: 0 0 56px; color: var(--text-subtle); font: 700 9px/1.4 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; }
+.maintenance__applied b { color: var(--text-primary); font-weight: 600; }
+.maintenance__applied-never b { color: var(--danger-text); }
+.maintenance__separator { margin: 0 9px; color: var(--text-subtle); }
+.maintenance__applied button { margin-left: auto; border: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
+.maintenance__quiet { display: flex; align-items: center; gap: 7px; padding: 8px 12px; border: 1px dashed var(--border-default); border-radius: 8px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+.maintenance__quiet strong { color: var(--text-secondary); font-family: var(--font-mono); }
+.maintenance__quiet button { margin-left: auto; border: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
+.maintenance .bulk-sync__repo-status:has(+ *) { white-space: nowrap; }
+.maintenance__done-status { display: flex; align-items: center; gap: 11px; margin: 12px 18px 0; padding: 11px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.maintenance__done-status > .bulk-sync__mark { width: 16px; height: 16px; }
+.maintenance__done-status strong, .maintenance__done-status small { display: block; }
+.maintenance__done-status time { margin-left: auto; flex: 0 0 auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+.maintenance__done-status strong { font: 650 11.5px/1.25 var(--font-sans); }
+.maintenance__done-status small { margin-top: 3px; color: var(--text-secondary); font-size: 10.5px; }
+.maintenance__receipt-steps { display: flex; flex-direction: column; gap: 8px; }
+.maintenance__receipt-step { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.maintenance__receipt-step.is-skipped, .maintenance__receipt-step.is-not-started { border-style: dashed; background: transparent; }
+.maintenance__receipt-step.is-failed { border-color: var(--danger-border); }
+.maintenance__receipt-head { display: flex; align-items: center; gap: 9px; }
+.maintenance__receipt-head strong { color: var(--text-primary); font: 650 12px/1.2 var(--font-sans); }
+.maintenance__receipt-head > span:nth-last-child(2), .maintenance__receipt-head > span:last-child { margin-left: auto; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+.maintenance__receipt-head button { margin-left: 10px; border: 0; background: transparent; color: var(--accent); font: 600 10.5px var(--font-sans); cursor: pointer; }
+.maintenance__receipt-step.is-done .maintenance__step-num { border: 0; background: var(--success-soft); color: var(--success-text); }
+.maintenance__receipt-row { display: flex; align-items: baseline; gap: 10px; padding: 5px 0 0 27px; }
+.maintenance__receipt-row strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font: 500 11px/1.3 var(--font-mono); }
+.maintenance__receipt-row code { color: var(--text-subtle); font: 500 10px/1 var(--font-mono); }
+.prune__panel > .prune__head { padding: 12px 18px 0; border: 0; }
+.prune__protection { margin: 12px 18px 0; }
+.prune__protection legend { padding: 0 4px; color: var(--text-secondary); font: 600 11px var(--font-sans); }
+.prune__fixed { margin-bottom: 12px; }
+.prune__fixed { position: relative; padding-left: 30px; }
+.prune__fixed-mark { position: absolute; top: 1px; left: 0; width: 17px; height: 17px; border: 1px solid var(--accent); border-radius: 50%; }
+.prune__fixed-mark::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--accent); }
+.prune__fixed strong { color: var(--text-primary); font: 600 12px var(--font-sans); }
+.prune__fixed p { margin: 3px 0 0; color: var(--text-muted); }
+.prune__protection-controls { justify-content: flex-start; }
+.prune__protection-controls label { color: var(--text-primary); font: 600 12px var(--font-sans); }
+.prune__protection-controls input { accent-color: var(--accent); }
+.prune__never { flex: 0 0 auto; margin: 12px 18px 0; }
+.prune__intro-note { margin: 12px 18px 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); }
+.prune__summary { align-items: center; border-color: var(--border-subtle); background: var(--bg-panel); }
+.prune__summary > div { flex: 1; }
+.prune__summary > div > strong, .prune__summary > div > span { display: block; }
+.prune__summary strong { color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+.prune__summary > div > span { margin-top: 3px; font-size: 10.5px; }
+.prune__summary > .bulk-sync__mark { width: 16px; height: 16px; }
+.prune__summary time { color: var(--text-muted); font: 500 10px var(--font-mono); }
+.prune__panel > .maintenance__applied { flex: 0 0 auto; margin: 12px 18px 0; }
+.prune__select { justify-content: flex-start; padding: 0; border: 0; background: transparent; }
+.prune__select label { color: var(--text-primary); font: 400 12px/1.4 var(--font-sans); }
+.prune__rows { gap: 8px; }
+.prune__list-card { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.prune__list-card .maintenance__group:first-child { margin-top: 0; padding-top: 0; border: 0; }
+.prune__row { align-items: flex-start; gap: 9px; padding: 5px 0; border: 0; border-radius: 0; background: transparent; }
+.prune__row:hover { border: 0; background: transparent; }
+.prune__row.is-selected { border: 0; background: transparent; }
+.prune__row-main strong { color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+.prune__row-main strong:first-letter { font-family: var(--font-sans); }
+.prune__row-evidence { display: block; margin-top: 2px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+.prune__reason { display: inline; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--success-text); font: 600 10.5px var(--font-sans); }
+.prune__reason.is-merged_pr { border: 0; }
+.prune__reason.is-diverged { border: 0; color: var(--status-warning); }
+.prune__row-main small { margin-top: 2px; }
+.prune__row-size { flex: none; color: var(--text-secondary); font: 600 10.5px/1.3 var(--font-mono); }
+.prune__kept-row { margin: 4px 0; color: var(--text-muted); font: 500 10.5px var(--font-mono); }
+.maintenance { position: relative; }
+.maintenance .prune__panel > .prune__count { position: absolute; top: 18px; right: 18px; z-index: 1; }
+.maintenance__repo-count { flex: 0 0 auto; padding-top: 2px; color: var(--text-secondary); font: 600 10.5px/1 var(--font-mono); }
+.maintenance__done-status.is-stopped { border-color: var(--danger-border); }
+.maintenance__done-status.is-stopped > span { background: var(--danger-soft); color: var(--danger-text); }
+.maintenance__plan-rules { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.maintenance__plan-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.maintenance__plan-mode { flex-basis: auto; }
+.modal.maintenance { height: auto; max-height: min(790px, 92vh); }
+.maintenance > .bulk-sync__status:not(.is-live) { height: auto; min-height: 54px; }
+/* Standalone task handoffs retain the stable shell; the plan and combined steps size to their content. */
+.modal.maintenance { height: min(720px, 82vh); max-height: 82vh; }
+.modal.maintenance:has(.maintenance__plan),
+.modal.maintenance:has(.maintenance__steps),
+.modal.maintenance:has(.maintenance__receipt-steps),
+.modal.maintenance:has(.prune__panel) { height: auto; max-height: min(790px, 92vh); }

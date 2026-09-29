@@ -17,7 +17,7 @@ export type BulkSyncStatusPhase =
   | "finished"
   | "cancelled";
 
-type StatusMarkKind = "ok" | "failed" | "cancelled";
+export type StatusMarkKind = "ok" | "failed" | "cancelled";
 
 /**
  * The run status card: one element from the first repository to the receipt.
@@ -36,7 +36,8 @@ export function BulkSyncStatus({
   inFlight,
   queued,
   startedAt,
-  durationMs
+  durationMs,
+  compactWhenFinished = false
 }: {
   phase: BulkSyncStatusPhase;
   /** Whether the ended run failed anywhere; picks the mark that replaces the spinner. */
@@ -51,6 +52,8 @@ export function BulkSyncStatus({
   startedAt: number;
   /** Main's own measure of the finished run; read only once it has ended. */
   durationMs: number | null;
+  /** Maintenance reviews use the same neutral card without the completed progress bar. */
+  compactWhenFinished?: boolean;
 }): ReactElement {
   const live = phase === "running" || phase === "cancelling";
   const finished = finishedCount(counts);
@@ -107,7 +110,7 @@ export function BulkSyncStatus({
         )}
       </div>
 
-      {total > 0 && (
+      {total > 0 && (live || !compactWhenFinished) && (
         <>
           <div
             className="bulk-sync__bar"
@@ -207,26 +210,36 @@ function LiveClock({
   );
 }
 
-function StatusMark({ mark }: { mark: StatusMarkKind }): ReactElement {
+/** The mark's glyph alone, for a caller that supplies its own circle (the
+ *  maintenance step rail). An SVG, not a "✓" character: a text glyph sits on
+ *  the font's baseline and never centres in a round badge. */
+export function StatusGlyph({ mark }: { mark: StatusMarkKind }): ReactElement {
+  return (
+    <svg
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {mark === "ok" && <path d="M2.4 5.3l1.8 1.8 3.5-3.9" />}
+      {mark === "failed" && (
+        <>
+          <path d="M5 2.2v3.4" />
+          <path d="M5 7.8v.01" />
+        </>
+      )}
+      {mark === "cancelled" && <path d="M2.6 5h4.8" />}
+    </svg>
+  );
+}
+
+export function StatusMark({ mark }: { mark: StatusMarkKind }): ReactElement {
   return (
     <span className={`bulk-sync__mark is-${mark}`} aria-hidden="true">
-      <svg
-        viewBox="0 0 10 10"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {mark === "ok" && <path d="M2.4 5.3l1.8 1.8 3.5-3.9" />}
-        {mark === "failed" && (
-          <>
-            <path d="M5 2.2v3.4" />
-            <path d="M5 7.8v.01" />
-          </>
-        )}
-        {mark === "cancelled" && <path d="M2.6 5h4.8" />}
-      </svg>
+      <StatusGlyph mark={mark} />
     </span>
   );
 }
