@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.25.0 - 2026-09-28
+
+- Maintenance - Added a guided flow to review and prune eligible worktrees, safely remove gone branches, and run Git cleanup in sequence. Recent worktrees are protected by default, and deleted branches can be restored from the results.
+- Maintenance review - Improved the combined flow with a step-by-step progress rail, visible rules and exclusions, clear skipped or failed results, and a consistent worktree review.
+- Commits - Fixed Git-hook rejections failing silently. PwrGit now shows the error and keeps your commit message so you can retry.
+
 ## v0.24.0 - 2026-09-28
 
 - Branches - Added a reviewed cleanup for local branches whose upstream is gone. PwrGit offers a branch only when its commits are reachable from the current branch or a merged pull request, keeps recent or unproven work, and provides a Restore action after deletion. Sidebar branch counts now open matching filtered views.
