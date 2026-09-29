@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -56,7 +56,8 @@ describe("commit flow", () => {
 
   it("rejects a commit with nothing staged", async () => {
     const result = await commitChanges(systemGit, repo, "empty", {
-      email: "x@y.com"
+      email: "x@y.com",
+      name: "PwrGit Test"
     });
     expect(result.ok).toBe(false);
   });
@@ -68,25 +69,16 @@ describe("commit flow", () => {
     writeFileSync(hook, "#!/bin/sh\necho 'test hook rejected' >&2\nexit 1\n");
     chmodSync(hook, 0o755);
 
-    let capturedTrace = "Git did not pass a trace path to the executor";
-    const tracedGit: GitExec = async (args, cwd, options) => {
-      const result = await systemGit(args, cwd, options);
-      const path = options?.env?.GIT_TRACE2_EVENT;
-      if (path !== undefined) {
-        capturedTrace = existsSync(path) ? readFileSync(path, "utf8") : `No trace file at ${path}`;
-      }
-      return result;
-    };
-    const refused = await commitChanges(tracedGit, repo, "feat: hooked", { email: "x@y.com" });
+    const identity = { email: "x@y.com", name: "PwrGit Test" };
+    const refused = await commitChanges(systemGit, repo, "feat: hooked", identity);
     expect(refused.ok).toBe(false);
     if (refused.ok) throw new Error("expected a refusal");
-    if (refused.error.hook === undefined) throw new Error(`Git ran the refusing hook without a parsed receipt: ${capturedTrace}`);
     expect(refused.error.hook).toMatchObject({ name: "pre-commit", exitCode: 1 });
     expect(refused.error.hook?.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(refused.error.detail).toContain("test hook rejected");
     expect(gitOut(repo, ["status", "--porcelain"])).toContain("A  hooked.txt");
 
-    const retry = await commitChanges(systemGit, repo, "feat: hooked", { email: "x@y.com" }, { noVerify: true });
+    const retry = await commitChanges(systemGit, repo, "feat: hooked", identity, { noVerify: true });
     expect(retry.ok).toBe(true);
     if (!retry.ok) throw new Error(retry.error.message);
     expect(retry.value.hooks).toEqual([]);
