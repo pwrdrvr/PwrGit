@@ -1051,7 +1051,7 @@ describe("remote handlers", () => {
 
     finishWorktreeFetch();
     await expect(Promise.all([fromWorktree, fromRepo])).resolves.toEqual([
-      ok(null),
+      ok({ remotes: [] }),
       ok(null)
     ]);
     expect(started).toEqual(["worktree", "repo"]);
@@ -1118,7 +1118,7 @@ describe("remote handlers", () => {
 
     finishFirstRefresh();
     await expect(Promise.all([fromWorktree, fromRepo])).resolves.toEqual([
-      ok(null),
+      ok({ remotes: [] }),
       ok(null)
     ]);
     expect(started).toEqual([

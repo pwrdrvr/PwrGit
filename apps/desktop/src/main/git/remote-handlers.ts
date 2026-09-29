@@ -367,6 +367,9 @@ export function registerRemoteHandlers(
     const worktree = live.value;
     const repo = repoOf(worktree.repoId);
     const startedAt = Date.now();
+    // The remotes asked, for the receipt ("Fetched origin + upstream"). Empty
+    // when a bare fetch let Git choose its own remote.
+    let asked: string[] = [];
     const result = await tracked(
       {
         kind: "fetch",
@@ -388,6 +391,7 @@ export function registerRemoteHandlers(
             forkParentOf(worktree.repoId)
           )) ??
           undefined;
+        asked = remotes ?? [];
         const fetched = await (remotes === undefined
           ? fetchRemote(git, worktree.path, true)
           : fetchNamedRemotes(git, worktree.path, remotes, true));
@@ -418,7 +422,7 @@ export function registerRemoteHandlers(
     );
     refreshIdentity?.(worktree.repoId);
     refresher.refreshWorktree(req.worktreeId);
-    return ok(null);
+    return ok({ remotes: asked });
   });
 
   bus.register("remote:fetchRepo", async (req) => {

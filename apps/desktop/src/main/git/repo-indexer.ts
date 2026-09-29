@@ -45,6 +45,7 @@ import {
 } from "./git-service";
 import { claimWorktreeOwnership } from "./repo-ownership";
 import { checkoutExists } from "./worktree-liveness";
+import { forkSourceFromRow } from "./worktree-state";
 
 const MAX_SCAN_DEPTH = 5;
 const GIT_CONCURRENCY = 12;
@@ -156,6 +157,12 @@ type WorktreeRow = {
   diverged_from_default: number | null;
   is_default_branch: number | null;
   last_activity_at: string | null;
+  upstream_gone: number | null;
+  source_remote: string | null;
+  source_label: string | null;
+  source_parent: string | null;
+  source_ahead: number | null;
+  source_behind: number | null;
   custom_order: number | null;
   pr_number: number | null;
   pr_url: string | null;
@@ -167,7 +174,7 @@ type WorktreeRow = {
 function trackingFromWorktreeState(
   worktree: Pick<
     WorktreeRow,
-    "branch" | "has_upstream" | "ahead" | "behind"
+    "branch" | "has_upstream" | "ahead" | "behind" | "upstream_gone"
   >
 ): BranchTrackingStatus | undefined {
   // A null marks an uncomputed LEFT JOIN, not "no upstream". Keeping it
@@ -176,6 +183,9 @@ function trackingFromWorktreeState(
   // Detached HEAD is not a local branch waiting to be published.
   if (worktree.branch.startsWith("detached@")) return undefined;
   if (worktree.has_upstream === 0) return "unpublished";
+  // Git names the upstream but has nothing to count against: the remote
+  // branch was deleted, which is finished work rather than "up to date".
+  if (worktree.upstream_gone === 1) return "upstream_missing";
   const ahead = worktree.ahead ?? 0;
   const behind = worktree.behind ?? 0;
   if (ahead > 0 && behind > 0) return "diverged";
@@ -1255,6 +1265,12 @@ export class RepoIndexer {
                   s.diverged_from_default AS diverged_from_default,
                   s.is_default_branch AS is_default_branch,
                   s.last_activity_at AS last_activity_at,
+                  s.upstream_gone AS upstream_gone,
+                  s.source_remote AS source_remote,
+                  s.source_label AS source_label,
+                  s.source_parent AS source_parent,
+                  s.source_ahead AS source_ahead,
+                  s.source_behind AS source_behind,
                   ${prSummarySelect("p")}
            FROM worktrees w
            LEFT JOIN worktree_state s ON s.worktree_id = w.id
@@ -1293,6 +1309,8 @@ export class RepoIndexer {
       const tracking = missing ? undefined : trackingFromWorktreeState(w);
       if (tracking !== undefined) wt.tracking = tracking;
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
+      const source = missing ? undefined : forkSourceFromRow(w);
+      if (source !== undefined) wt.source = source;
       if (w.custom_order !== null) wt.order = w.custom_order;
       const pr = prSummaryFromRow(w as unknown as Record<string, unknown>);
       if (pr !== undefined) {

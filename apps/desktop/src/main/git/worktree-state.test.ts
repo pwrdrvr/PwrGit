@@ -33,7 +33,8 @@ describe("parseStatus", () => {
       hasUpstream: false,
       ahead: 0,
       behind: 0,
-      dirty: 0
+      dirty: 0,
+      upstreamGone: false
     });
   });
 
@@ -50,6 +51,33 @@ describe("parseStatus", () => {
     expect(s.hasUpstream).toBe(true);
     expect(s.ahead).toBe(2);
     expect(s.behind).toBe(3);
+  });
+
+  // Git names an upstream whose remote branch was pruned but prints no
+  // `branch.ab` line for it. Read as counts, that was 0/0 — "up to date" —
+  // for a branch whose work had landed and whose remote was deleted.
+  it("flags an upstream that names a branch the remote no longer has", () => {
+    const gone = parseStatus(
+      [
+        "# branch.oid abc123",
+        "# branch.head feat/x",
+        "# branch.upstream origin/feat/x",
+        ""
+      ].join("\n")
+    );
+    expect(gone.hasUpstream).toBe(true);
+    expect(gone.upstreamGone).toBe(true);
+
+    const current = parseStatus(
+      [
+        "# branch.oid abc123",
+        "# branch.head feat/x",
+        "# branch.upstream origin/feat/x",
+        "# branch.ab +0 -0",
+        ""
+      ].join("\n")
+    );
+    expect(current.upstreamGone).toBe(false);
   });
 
   it("counts changed + untracked entries as dirty", () => {
@@ -129,6 +157,46 @@ describe("WorktreeStateService (system git)", () => {
       indexed?.worktrees.find((worktree) => worktree.id === worktreeId)
         ?.tracking
     ).toBe("unpublished");
+  });
+
+  // On a fork `main` tracks the user's own copy, so its counts read 0/0 while
+  // the source moves on. The source counts ride in the same snapshot, so the
+  // sidebar (which reads only the stored row) says what the header says.
+  it("stores the fork source beside the tracked counts, for the sidebar too", async () => {
+    service.setForkSourceProbe(() =>
+      Promise.resolve({
+        remote: "upstream",
+        label: "upstream/main",
+        parent: "octo/repo",
+        ahead: 0,
+        behind: 25
+      })
+    );
+    try {
+      const state = await service.compute(worktreeId);
+      expect(state?.source).toEqual({
+        remote: "upstream",
+        label: "upstream/main",
+        parent: "octo/repo",
+        ahead: 0,
+        behind: 25
+      });
+      expect(service.getCached(worktreeId)?.source?.behind).toBe(25);
+      const repoId = (
+        db.prepare("SELECT repo_id FROM worktrees WHERE id = ?").get(worktreeId) as {
+          repo_id: string;
+        }
+      ).repo_id;
+      const indexed = new RepoIndexer(db, systemGit)
+        .getRepo(repoId)
+        ?.worktrees.find((worktree) => worktree.id === worktreeId);
+      expect(indexed?.source?.behind).toBe(25);
+      expect(indexed?.behind).toBe(0);
+    } finally {
+      service.setForkSourceProbe(() => Promise.resolve(null));
+    }
+    // A probe that stops finding a source clears it rather than keeping it.
+    expect((await service.compute(worktreeId))?.source).toBeUndefined();
   });
 
   it("reflects a working-tree edit as dirty, and caches it", async () => {

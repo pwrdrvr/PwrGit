@@ -1,4 +1,4 @@
-import { err, ok, type WorktreeState } from "@pwrgit/shared";
+import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import { logMain } from "../logs";
@@ -7,26 +7,7 @@ import type { GitExec } from "./dugite";
 import { inspectGitLfs } from "./git-lfs";
 import { recordLfsOutcome } from "./git-lfs-notice";
 import { missingWorktreeError } from "./worktree-liveness";
-import type { WorktreeStateService } from "./worktree-state";
-
-function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
-  return (
-    a.hasUpstream !== b.hasUpstream ||
-    a.dirty !== b.dirty ||
-    a.hasUpstream !== b.hasUpstream ||
-    a.ahead !== b.ahead ||
-    a.behind !== b.behind ||
-    a.head !== b.head ||
-    a.branch !== b.branch ||
-    a.behindDefault !== b.behindDefault ||
-    a.defaultBranch !== b.defaultBranch ||
-    a.mergedIntoDefault !== b.mergedIntoDefault ||
-    a.divergedFromDefault !== b.divergedFromDefault ||
-    a.isDefaultBranch !== b.isDefaultBranch ||
-    a.lastActivityAt !== b.lastActivityAt ||
-    a.missing !== b.missing
-  );
-}
+import { stateChanged, type WorktreeStateService } from "./worktree-state";
 
 export type WorktreeRefresher = {
   /** Recompute one worktree; emit worktree:changed only if it actually moved. */
