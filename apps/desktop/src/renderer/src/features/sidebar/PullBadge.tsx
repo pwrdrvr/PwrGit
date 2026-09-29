@@ -54,7 +54,10 @@ export function PullBadge({
       if (badge.offsetParent === null) return true;
       return Math.abs(badge.offsetTop - name.offsetTop) < name.offsetHeight;
     },
-    placement === "row" ? ROW_FIT_STEPS : [],
+    // Only the source badge steps (and holds `ref`). Keying the steps on it
+    // re-runs the ladder's observer effect when a tracked badge becomes a
+    // source one in place; otherwise it would never watch the row.
+    placement === "row" && pull.kind === "source" ? ROW_FIT_STEPS : [],
     row
   );
   const sentence = pullSentence(pull, branch);

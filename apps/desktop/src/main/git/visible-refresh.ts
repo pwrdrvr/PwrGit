@@ -139,12 +139,16 @@ export class VisibleWorktreeRefresher {
     const staleAfter =
       VISIBLE_STALE_MS * (this.deps.isFocused() ? 1 : UNFOCUSED_STALE_FACTOR);
     const at = now();
+    // The newer of this refresher's own read and the stored snapshot: the
+    // selected worktree's poll and every header operation re-read too, and a
+    // row one of them just refreshed is not due again here.
     const lastOf = (id: string): number => {
-      const seen = this.lastRead.get(id);
-      if (seen !== undefined) return seen;
       const updated = this.deps.state.getCached(id)?.updatedAt;
       const parsed = updated === undefined ? Number.NaN : Date.parse(updated);
-      return Number.isNaN(parsed) ? 0 : parsed;
+      return Math.max(
+        this.lastRead.get(id) ?? 0,
+        Number.isNaN(parsed) ? 0 : parsed
+      );
     };
     const due = rows
       .filter(

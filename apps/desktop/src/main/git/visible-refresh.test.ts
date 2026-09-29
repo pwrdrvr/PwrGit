@@ -100,6 +100,22 @@ describe("VisibleWorktreeRefresher", () => {
     expect(computed).toEqual(["a1"]);
   });
 
+  // The selected worktree's own poll re-reads it too; that fresh snapshot
+  // must count, or the row is read twice per stale window.
+  it("counts a snapshot another refresher just took", async () => {
+    addRepo("p", "a", ["a1"]);
+    refresher.report(1, ["a1"]);
+    clock += VISIBLE_STALE_MS;
+    await refresher.tick();
+    expect(computed).toEqual(["a1"]);
+
+    clock += VISIBLE_STALE_MS - 1_000;
+    cache.set("a1", state("a1", 0, clock));
+    clock += 1_000;
+    await refresher.tick();
+    expect(computed).toEqual(["a1"]);
+  });
+
   it("waits longer while no PwrGit window is focused", async () => {
     addRepo("p", "a", ["a1"]);
     refresher.report(1, ["a1"]);
