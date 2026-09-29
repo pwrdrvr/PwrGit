@@ -222,7 +222,7 @@ describe("WorktreeHeader sync buttons stay focusable while busy", () => {
     let settle!: () => void;
     bridge.dispatch.mockReturnValueOnce(
       new Promise((resolve) => {
-        settle = () => resolve(ok(undefined));
+        settle = () => resolve(ok({ remotes: [] }));
       })
     );
 
