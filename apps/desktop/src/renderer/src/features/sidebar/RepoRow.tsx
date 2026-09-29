@@ -33,11 +33,13 @@ import {
   partitionFocusedWorktrees,
   reorder,
   repoPinSource,
-  repoPrimaryBehind,
+  repoPrimaryPull,
   SORT_LABEL,
   type DropPosition,
   type SelectionModifiers
 } from "./repo-view";
+import { PullBadge, pullSentence } from "./PullBadge";
+import { useReportVisible } from "../../lib/visibleWorktrees";
 import { repoForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
 import { repoWebUrl } from "./remote-info";
@@ -343,7 +345,13 @@ export function RepoRow({
     setWorktreesOpen(true);
   }, [remaining, selectedWorktreeId]);
 
-  const behind = repoPrimaryBehind(repo);
+  // What Pull would bring into the primary checkout: on a fork, from the
+  // source (Fork Sync, 3e). The same stored count the header chip reads.
+  const primaryPull = repoPrimaryPull(repo);
+  useReportVisible(
+    rowRef,
+    (repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0])?.id ?? null
+  );
   // Linked worktrees only — the primary is the repo's own checkout, not one of
   // them. A repo with none shows no count at all rather than "0 wts" on what is
   // typically most of the list.
@@ -558,7 +566,9 @@ export function RepoRow({
       : wtCount === 1
         ? "1 linked worktree"
         : `${wtCount} linked worktrees`,
-    behind > 0 ? `primary branch ${behind} behind upstream` : null,
+    primaryPull === null
+      ? null
+      : pullSentence(primaryPull.pull, primaryPull.branch),
     // Include the identity facts in the row description, independently of
     // the visibility button that refreshes them.
     repo.identity === undefined ? null : identityDescription(repo.identity),
@@ -673,7 +683,14 @@ export function RepoRow({
         >
           {repo.name}
         </span>
-        {behind > 0 && <span className="badge badge--warn">↓{behind}</span>}
+        {primaryPull !== null && (
+          <PullBadge
+            pull={primaryPull.pull}
+            branch={primaryPull.branch}
+            tip={tip}
+            placement="repo"
+          />
+        )}
         {forgeChip !== null && (
           <ForgeChip chip={forgeChip} url={repoWebUrl(repo.identity)} />
         )}

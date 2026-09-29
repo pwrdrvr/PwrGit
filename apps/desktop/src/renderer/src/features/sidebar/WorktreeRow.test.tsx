@@ -84,6 +84,47 @@ const hoverCard = async (
   return text;
 };
 
+describe("WorktreeRow — what Pull would bring in", () => {
+  const source = {
+    remote: "upstream",
+    label: "upstream/main",
+    ahead: 0,
+    behind: 25
+  };
+
+  // Two facts, two looks (Fork Sync 3e): the warn text is the user's own
+  // remote having commits; the accent outline is the fork's source.
+  it("draws a fork's source count in the source style, naming the remote", () => {
+    const markup = render(
+      worktree({ branch: "main", isPrimary: true, isDefaultBranch: true, source })
+    );
+    expect(markup).toContain("badge badge--source badge--source-row");
+    expect(markup).toContain("↓25");
+    expect(markup).toContain('<span class="badge--source__word"> upstream</span>');
+    expect(markup).toContain(
+      "main is 25 commits behind upstream/main, the source of this fork"
+    );
+    expect(markup).not.toContain("badge-text--warn");
+  });
+
+  it("keeps the tracked count's own look when there is no source to show", () => {
+    const markup = render(worktree({ behind: 2 }));
+    expect(markup).toContain("badge-text badge-text--warn");
+    expect(markup).toContain("2 behind upstream");
+    expect(markup).not.toContain("badge--source");
+  });
+
+  it("explains the source badge on its card", async () => {
+    const card = await hoverCard(
+      worktree({ branch: "main", isPrimary: true, source }),
+      ".badge--source"
+    );
+    expect(card).toBe(
+      "main is 25 commits behind upstream/main, the source of this fork"
+    );
+  });
+});
+
 describe("WorktreeRow — a checkout that is gone", () => {
   // The directory was deleted outside PwrGit (an agent cleaning up its
   // worktrees). The row used to keep its last green badges and every action

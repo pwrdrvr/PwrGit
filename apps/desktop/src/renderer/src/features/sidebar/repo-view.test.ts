@@ -22,6 +22,8 @@ import {
   reorder,
   repoPinSource,
   repoPrimaryBehind,
+  repoPrimaryPull,
+  worktreePull,
   selectableLenses,
   SORT_CYCLE,
   worktreeFolderLabel
@@ -705,6 +707,41 @@ describe("repoPrimaryBehind", () => {
   it("falls back to the first worktree when none is flagged primary", () => {
     const r = repo({ id: "svc", worktrees: [wt({ id: "a", branch: "x", behind: 2 })] });
     expect(repoPrimaryBehind(r)).toBe(2);
+  });
+});
+
+describe("repoPrimaryPull", () => {
+  const source = (behind: number) => ({
+    remote: "upstream",
+    label: "upstream/main",
+    ahead: 0,
+    behind
+  });
+
+  // On a fork `main` tracks the user's own copy, so `behind` reads 0 while
+  // the source moves on. The sidebar says what Pull would bring in.
+  it("counts a fork's primary against its source", () => {
+    const r = repo({
+      id: "svc",
+      worktrees: [
+        wt({ id: "p", branch: "main", isPrimary: true, behind: 0, source: source(25) })
+      ]
+    });
+    expect(repoPrimaryPull(r)).toEqual({
+      branch: "main",
+      pull: { kind: "source", behind: 25, label: "upstream/main" }
+    });
+  });
+
+  it("shows the source when both are behind, since that is what Pull fetches", () => {
+    const w = wt({ id: "p", branch: "main", isPrimary: true, behind: 2, source: source(25) });
+    expect(worktreePull(w)).toEqual({ kind: "source", behind: 25, label: "upstream/main" });
+  });
+
+  it("falls back to the tracked count when the source has nothing new", () => {
+    const w = wt({ id: "p", branch: "main", isPrimary: true, behind: 2, source: source(0) });
+    expect(worktreePull(w)).toEqual({ kind: "tracked", behind: 2 });
+    expect(worktreePull(wt({ id: "q", branch: "x" }))).toBeNull();
   });
 });
 

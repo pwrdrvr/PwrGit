@@ -1497,6 +1497,26 @@ a.forge-chip:focus-visible {
   background: var(--warn-soft);
   color: var(--status-warning);
 }
+/* The fork's source has commits for this branch (PullBadge, Fork Sync 3e).
+   An accent outline with the fork glyph, where `.badge--warn`'s fill means
+   the user's own remote has them: two facts, two looks. */
+.badge--source {
+  gap: 3px;
+  border: 1px solid var(--accent-border);
+  background: transparent;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.badge--source__glyph {
+  display: inline-flex;
+}
+/* A worktree row spells the remote out first, then trades it for the glyph,
+   then drops the badge, each only while the branch name would be cut. */
+.badge--source-row:not(.fit-glyph) .badge--source__glyph,
+.badge--source-row.fit-glyph .badge--source__word,
+.badge--source.fit-gone {
+  display: none;
+}
 .badge-text {
   font: 600 var(--sidebar-chip-size)/1 var(--font-mono);
   flex: 0 0 auto;
@@ -7244,28 +7264,70 @@ button.agent-menu__item:hover {
      padding read as an empty band. Sized to the 26px buttons instead. */
   padding: 8px 20px;
   border-bottom: 1px solid var(--border-subtle);
-  /* Container queries drive the header's own degrade ladder — the buttons
-     give up their labels before any name gets chopped. */
   container-type: inline-size;
 }
-@container (max-width: 720px) {
-  .wt-btn__label {
-    display: none;
-  }
+/* The header's degrade ladder is measured, not queried: `useFitLadder` adds
+   the `fit-*` classes below one at a time, in HEADER_FIT_STEPS order, until
+   the row's last control lands inside it. The fixed cuts this replaced (720px
+   labels, 680px chip) hid the fork chip at the stock 696px pane with room to
+   spare, because a constant is right for exactly one width of chip text. */
+.wt-header.fit-icons .wt-btn__label {
+  display: none;
 }
-/* Measured against the header's CONTENT box, not its border box: at the stock
-   1360px window this pane is 696px, which is 656px inside the 20px padding — so
-   the sync chip is already gone out of the box. The drift chip opts out (it
-   collapses at 540px with the buttons) because nothing else in the header
-   carries its signal, whereas ↓behind survives here as the Pull button's
-   `.is-behind` accent. */
-@container (max-width: 680px) {
+.wt-header.fit-icons .wt-btn:not(.wt-split__caret) {
+  padding: 0;
+  width: 32px;
+  justify-content: center;
+}
+/* The chip's shorter forms come from data attributes, so its DOM text stays
+   the whole sentence — what assertions and the tooltip read. */
+.wt-header.fit-chip-mid .sync-chip[data-mid] > .sync-chip__text,
+.wt-header.fit-chip-short .sync-chip[data-short] > .sync-chip__text {
+  display: none;
+}
+.wt-header.fit-chip-mid .sync-chip[data-mid]::after {
+  content: attr(data-mid);
+}
+.wt-header.fit-chip-short .sync-chip[data-short]::after {
+  content: attr(data-short);
+}
+/* On a fork the glyph stands in for the remote's name. Lucide git-fork, fully
+   percent-encoded: a partly encoded data URI drew only part of a glyph. */
+.wt-header.fit-chip-short .sync-chip[data-short][data-fork]::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  margin-right: 5px;
+  flex: 0 0 auto;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272.4%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2718%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2718%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M18%209v2c0%20.6-.4%201-1%201H7c-.6%200-1-.4-1-1V9%27%2F%3E%3Cpath%20d%3D%27M12%2012v3%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272.4%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2718%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2718%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M18%209v2c0%20.6-.4%201-1%201H7c-.6%200-1-.4-1-1V9%27%2F%3E%3Cpath%20d%3D%27M12%2012v3%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+}
+/* The LFS chip cannot shrink, and while it is hidden the sticky toast still
+   carries a broken setup at any width. */
+.wt-header.fit-no-lfs .wt-header__state .lfs-chip {
+  display: none;
+}
+/* ↓behind survives this step as the Pull button's `.is-behind` accent. The
+   progress chip never goes: it is what an operation says while it runs, and
+   it ellipsizes into whatever width is left instead. */
+.wt-header.fit-no-chip
   .wt-header__state
-    .sync-chip:not(.sync-chip--progress):not(.sync-chip--drift):not(
-      .sync-chip--readonly
-    ) {
-    display: none;
-  }
+  .sync-chip:not(.sync-chip--progress):not(.sync-chip--drift):not(
+    .sync-chip--readonly
+  ) {
+  display: none;
+}
+.wt-header.fit-no-drift .wt-header__state .sync-chip--drift,
+.wt-header.fit-no-readonly .wt-header__state .sync-chip--readonly {
+  display: none;
+}
+/* A zero-width marker after the row's last control; `useFitLadder` measures
+   where it lands. The negative margin cancels the row's gap before it. */
+.wt-header__fit-end {
+  flex: 0 0 0;
+  width: 0;
+  margin-left: -8px;
 }
 .wt-header__state {
   display: flex;
@@ -7512,11 +7574,17 @@ button.agent-menu__item:hover {
   color: var(--status-warning);
 }
 .sync-chip--progress {
-  min-width: 0;
+  /* Shrinks, so it is the one chip the fit steps cannot see overflow; the
+     floor makes the labels go before the phase is ellipsized to nothing. */
+  min-width: 80px;
   flex-shrink: 1;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sync-chip--progress > .sync-chip__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* "read-only": this account may not push here. A button, because unlike every
    other chip in this row it has somewhere to go — the fork prompt. It rides
@@ -7639,27 +7707,12 @@ button.agent-menu__item:hover {
   color: var(--accent-bright);
 }
 
-/* Collapse button labels + every chip when the main pane is tight. Below this
-   the buttons are bare icons, so the row has nothing left to give. The LFS
-   chip goes too — it cannot shrink, and while it is hidden the sticky toast
-   still carries a broken setup at any width. */
-@container (max-width: 540px) {
-  .wt-header__state .sync-chip--drift,
-  .wt-header__state .sync-chip--readonly,
-  .wt-header__state .lfs-chip {
-    display: none;
-  }
-  .wt-btn {
-    padding: 0;
-    width: 32px;
-    justify-content: center;
-  }
-  .wt-btn__label {
-    display: none;
-  }
-  .wt-header__state .sync-chip:not(.sync-chip--progress) {
-    display: none;
-  }
+/* The panel's reopen button, when it is collapsed: the row's last control,
+   an icon button like the ones before it. */
+.wt-rail-reopen {
+  padding: 0;
+  width: 32px;
+  justify-content: center;
 }
 
 /* ---- Lineage graph ---- */
@@ -7672,6 +7725,8 @@ button.agent-menu__item:hover {
   padding: 12px 20px 10px;
 }
 .graph-toolbar__label {
+  flex: 0 0 auto;
+  white-space: nowrap;
   font: 600 11px/1 var(--font-sans);
   /* A section header is generic metadata — the doc's own example of what the
      accent is NOT for. The uppercase + letter-spacing already carry it. */
@@ -7710,6 +7765,47 @@ button.agent-menu__item:hover {
 .only-me.is-on .only-me__dot {
   background: var(--accent);
   border-color: var(--accent);
+}
+
+/* The lineage toolbar never wraps; it steps down (TOOLBAR_FIT_STEPS in
+   LineageGraph.tsx, measured by `useFitLadder`). Every pill is rigid, or the
+   row would read as fitting while a pill squeezed. A shortened wording is
+   drawn from its `data-*` attribute, so the DOM keeps the full sentence. */
+.graph-toolbar .graph-branches-wrap,
+.graph-toolbar .graph-branches,
+.graph-toolbar .graph-locate,
+.graph-toolbar .only-me {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.graph-toolbar.fit-locate-icon .graph-locate {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+}
+.graph-toolbar.fit-locate-icon .graph-locate > .fit-text,
+.graph-toolbar.fit-count-mid .graph-branches > .fit-text,
+.graph-toolbar.fit-scope-short .only-me > .fit-text {
+  display: none;
+}
+.graph-toolbar.fit-count-mid .graph-branches::before {
+  content: attr(data-mid);
+}
+.graph-toolbar.fit-count-short .graph-branches::before {
+  content: attr(data-short);
+}
+.graph-toolbar.fit-scope-short .only-me::after {
+  content: attr(data-short);
+}
+.graph-toolbar.fit-no-label .graph-toolbar__label {
+  display: none;
+}
+/* A zero-width marker after the last pill; the negative margin cancels the
+   row's gap before it. */
+.graph-toolbar__fit-end {
+  flex: 0 0 0;
+  width: 0;
+  margin-left: -12px;
 }
 
 /* Wraps the lineage toolbar + scroll so the whole graph can be hidden (kept
