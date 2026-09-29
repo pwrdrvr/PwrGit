@@ -42,6 +42,10 @@ import { forkParentOffer } from "./fork-parent-offer";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { TagRemoteDialog } from "./TagRemoteDialog";
 import { PrChip } from "./PrChip";
+import { RefRowActions, RefRowMenu } from "./RefRowMenu";
+import { PinIcon } from "./WorktreeRow";
+import { focusFirstRefsRow, handleRefsRowKey } from "../../lib/refsRowKeys";
+import { copyText } from "../../lib/copyText";
 import {
   BRANCH_STATUS_FILTERS,
   branchMatchesStatus,
@@ -139,7 +143,8 @@ function BranchIdentity({
   subject,
   pr,
   matchedText,
-  query
+  query,
+  pin
 }: {
   name: string;
   hint: string;
@@ -148,11 +153,30 @@ function BranchIdentity({
   /** The text the row's own filter matches, to tell a PR match apart. */
   matchedText: string;
   query: string;
+  /** The star. Local branches only: a remote-tracking ref has no name of its
+   *  own to pin, and its row keeps the empty slot so names stay aligned. */
+  pin?: { pinned: boolean; onToggle: () => void };
 }) {
+  const tip = useViewportTooltip();
   const viaPr = matchedViaChangeRequest(matchedText, pr, query);
   const second = viaPr && pr !== undefined ? pr.title : subject;
   return (
     <div className="refs-table__identity">
+      <span className="refs-pin-slot">
+        {pin !== undefined && (
+          <button
+            type="button"
+            data-refs-pin=""
+            className={`pin refs-pin${pin.pinned ? " is-pinned" : ""}`}
+            aria-label={`${pin.pinned ? "Unpin" : "Pin"} branch ${name}`}
+            aria-pressed={pin.pinned}
+            {...hoverTooltip(tip, pin.pinned ? "Unpin branch" : "Pin branch")}
+            onClick={pin.onToggle}
+          >
+            <PinIcon filled={pin.pinned} size={11} />
+          </button>
+        )}
+      </span>
       <span className="refs-branch-icon" aria-hidden="true">⑂</span>
       <div>
         <span className="refs-branch-name-line">
@@ -172,9 +196,14 @@ function BranchIdentity({
           </small>
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }
+
+/** Why Rename and Delete are greyed on a branch a worktree holds. */
+const RENAME_DELETE_HOLD =
+  "Switch every worktree away from this branch first";
 
 /**
  * "Move the working target onto this branch" — the verb this browser was
@@ -842,6 +871,34 @@ export function RepoRefsModal({
     await onRefresh();
   };
 
+  // A pin shows at once and settles when the refreshed snapshot arrives; the
+  // override is dropped then, so a pin changed elsewhere is not shadowed.
+  const [pinOverride, setPinOverride] = useState<Record<string, boolean>>({});
+  const isPinned = (branch: LocalBranchSummary): boolean =>
+    pinOverride[branch.name] ?? branch.pinned === true;
+  const toggleBranchPin = async (branch: LocalBranchSummary): Promise<void> => {
+    const next = !isPinned(branch);
+    setPinOverride((current) => ({ ...current, [branch.name]: next }));
+    const result = await dispatch("branch:setPin", {
+      repoId: repo.id,
+      branch: branch.name,
+      pinned: next
+    });
+    if (!result.ok) {
+      showErrorToast({
+        title: next ? "Pin failed" : "Unpin failed",
+        message: result.error.message,
+        subject: { repoId: repo.id }
+      });
+    } else {
+      await onRefresh();
+    }
+    setPinOverride((current) => {
+      const { [branch.name]: _settled, ...rest } = current;
+      return rest;
+    });
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -865,6 +922,7 @@ export function RepoRefsModal({
   // focus.
   const dialogRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useFocusTrap({ open: true, containerRef: dialogRef, initialFocusRef: searchRef });
 
   return (
@@ -931,6 +989,10 @@ export function RepoRefsModal({
               ref={searchRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowDown") return;
+                if (focusFirstRefsRow(bodyRef.current)) event.preventDefault();
+              }}
               placeholder={
                 shownTab === "changeRequests" && forge !== null
                   ? "Filter by number, title, branch, author…"
@@ -984,7 +1046,16 @@ export function RepoRefsModal({
           />
         )}
 
-        <div className="refs-browser__body">
+        <div
+          className="refs-browser__body"
+          ref={bodyRef}
+          onKeyDown={(event) => {
+            if (bodyRef.current === null) return;
+            handleRefsRowKey(event, bodyRef.current, () =>
+              searchRef.current?.focus()
+            );
+          }}
+        >
           {shownTab === "branches" && (
             <div className="refs-table">
               <div className="refs-table__header">
@@ -998,7 +1069,12 @@ export function RepoRefsModal({
                 if (item.kind === "remote") {
                   const branch = item.branch;
                   return (
-                    <div className="refs-table__row" key={branch.fullName}>
+                    <div
+                      className="refs-table__row"
+                      key={branch.fullName}
+                      data-refs-row=""
+                      tabIndex={-1}
+                    >
                       <BranchIdentity
                         name={branch.name}
                         hint={`${branch.qualifiedName}\nClick to copy branch name`}
@@ -1021,29 +1097,50 @@ export function RepoRefsModal({
                           ? "—"
                           : shortWhen(branch.lastCommitAt, now)}
                       </span>
-                      <div className="refs-row-actions">
-                        <SwitchHereButton
-                          branch={branch.name}
-                          worktree={focusedWorktree}
-                          rowKey={branch.fullName}
-                          inFlight={switching}
-                          onSwitch={() =>
-                            void switchHere(branch.fullName, branch.name)
-                          }
-                        />
-                        <button
-                          className="refs-row-action refs-row-action--quiet"
-                          onClick={() => createRemoteWorktree(branch)}
-                        >
-                          New worktree
-                        </button>
-                      </div>
+                      <RefRowActions
+                        primary={
+                          <SwitchHereButton
+                            branch={branch.name}
+                            worktree={focusedWorktree}
+                            rowKey={branch.fullName}
+                            inFlight={switching}
+                            onSwitch={() =>
+                              void switchHere(branch.fullName, branch.name)
+                            }
+                          />
+                        }
+                        secondary={
+                          <button
+                            className="refs-row-action refs-row-action--quiet"
+                            onClick={() => createRemoteWorktree(branch)}
+                          >
+                            New worktree
+                          </button>
+                        }
+                        menu={
+                          <RefRowMenu
+                            label={`Actions for ${branch.qualifiedName}`}
+                            items={[
+                              {
+                                type: "item",
+                                label: "Copy branch name",
+                                onSelect: () => void copyText(branch.qualifiedName)
+                              }
+                            ]}
+                          />
+                        }
+                      />
                     </div>
                   );
                 }
                 const branch = item.branch;
                 return (
-                  <div className="refs-table__row" key={branch.fullName}>
+                  <div
+                    className="refs-table__row"
+                    key={branch.fullName}
+                    data-refs-row=""
+                    tabIndex={-1}
+                  >
                     <BranchIdentity
                       name={branch.name}
                       hint={`${branch.name}\nClick to copy branch name`}
@@ -1051,6 +1148,10 @@ export function RepoRefsModal({
                       pr={branch.pr}
                       matchedText={localBranchText(branch)}
                       query={query}
+                      pin={{
+                        pinned: isPinned(branch),
+                        onToggle: () => void toggleBranchPin(branch)
+                      }}
                     />
                     {branch.upstream === undefined ? (
                       <span className="refs-table__muted">—</span>
@@ -1072,20 +1173,20 @@ export function RepoRefsModal({
                         ? "—"
                         : shortWhen(branch.lastCommitAt, now)}
                     </span>
-                    <div className="refs-row-actions">
-                      {branch.checkedOutWorktreeIds.length > 0 ? (
-                        <button
-                          className="refs-row-action"
-                          onClick={() => {
-                            const id = branch.checkedOutWorktreeIds[0];
-                            if (id !== undefined) onRevealWorktree(id);
-                            onClose();
-                          }}
-                        >
-                          Show worktree
-                        </button>
-                      ) : (
-                        <>
+                    <RefRowActions
+                      primary={
+                        branch.checkedOutWorktreeIds.length > 0 ? (
+                          <button
+                            className="refs-row-action"
+                            onClick={() => {
+                              const id = branch.checkedOutWorktreeIds[0];
+                              if (id !== undefined) onRevealWorktree(id);
+                              onClose();
+                            }}
+                          >
+                            Show worktree
+                          </button>
+                        ) : (
                           <SwitchHereButton
                             branch={branch.name}
                             worktree={focusedWorktree}
@@ -1095,6 +1196,10 @@ export function RepoRefsModal({
                               void switchHere(branch.fullName, branch.name)
                             }
                           />
+                        )
+                      }
+                      secondary={
+                        branch.checkedOutWorktreeIds.length > 0 ? undefined : (
                           <button
                             className="refs-row-action refs-row-action--quiet"
                             onClick={() => {
@@ -1104,48 +1209,51 @@ export function RepoRefsModal({
                           >
                             New worktree
                           </button>
-                        </>
-                      )}
-                      <button
-                        className="refs-row-action refs-row-action--quiet"
-                        aria-label={
-                          branch.checkedOutWorktreeIds.length > 0
-                            ? `Rename local branch ${branch.name} — unavailable, switch every worktree away from this branch first`
-                            : `Rename local branch ${branch.name}`
-                        }
-                        {...hoverTooltip(
-                          tip,
-                          branch.checkedOutWorktreeIds.length > 0
-                            ? "Switch every worktree away from this branch before renaming it"
-                            : "Rename local branch"
-                        )}
-                        disabled={branch.checkedOutWorktreeIds.length > 0}
-                        onClick={() => setRenaming(branch)}
-                      >
-                        Rename
-                      </button>
-                      <button
-                        className="refs-row-action refs-row-action--quiet is-danger"
-                        aria-label={
-                          branch.checkedOutWorktreeIds.length > 0
-                            ? `Delete local branch ${branch.name} — unavailable, switch every worktree away from this branch first`
-                            : `Delete local branch ${branch.name}`
-                        }
-                        {...hoverTooltip(
-                          tip,
-                          branch.checkedOutWorktreeIds.length > 0
-                            ? "Switch every worktree away from this branch before deleting it"
-                            : "Delete local branch"
-                        )}
-                        disabled={
-                          branch.checkedOutWorktreeIds.length > 0 ||
-                          deleting !== null
-                        }
-                        onClick={() => void deleteBranch(branch)}
-                      >
-                        {deleting === branch.name ? "Deleting…" : "Delete"}
-                      </button>
-                    </div>
+                        )
+                      }
+                      menu={
+                        <RefRowMenu
+                          label={`Actions for ${branch.name}`}
+                          items={[
+                            {
+                              type: "item",
+                              label: isPinned(branch)
+                                ? "Unpin branch"
+                                : "Pin branch",
+                              onSelect: () => void toggleBranchPin(branch)
+                            },
+                            {
+                              type: "item",
+                              label: "Copy branch name",
+                              onSelect: () => void copyText(branch.name)
+                            },
+                            { type: "sep" },
+                            {
+                              type: "item",
+                              label: "Rename…",
+                              disabled: branch.checkedOutWorktreeIds.length > 0,
+                              ...(branch.checkedOutWorktreeIds.length > 0
+                                ? { hint: RENAME_DELETE_HOLD }
+                                : {}),
+                              onSelect: () => setRenaming(branch)
+                            },
+                            {
+                              type: "item",
+                              label:
+                                deleting === branch.name ? "Deleting…" : "Delete…",
+                              danger: true,
+                              disabled:
+                                branch.checkedOutWorktreeIds.length > 0 ||
+                                deleting !== null,
+                              ...(branch.checkedOutWorktreeIds.length > 0
+                                ? { hint: RENAME_DELETE_HOLD }
+                                : {}),
+                              onSelect: () => void deleteBranch(branch)
+                            }
+                          ]}
+                        />
+                      }
+                    />
                   </div>
                 );
               })}
@@ -1236,6 +1344,8 @@ export function RepoRefsModal({
                 <div
                   className="refs-table__row refs-tag-table__row"
                   key={tag.fullName}
+                  data-refs-row=""
+                  tabIndex={-1}
                 >
                   <div className="refs-table__identity">
                     <span className="refs-tag-icon" aria-hidden="true">
@@ -1301,59 +1411,77 @@ export function RepoRefsModal({
                       </>
                     )}
                   </div>
-                  <div className="refs-tag-actions">
-                    {/* Only when there is somewhere to locate into. The
-                        disabled spelling below is reserved for the one reason
-                        a reader can act on — the tag does not name a commit. */}
-                    {onLocateTag !== undefined && (
+                  <RefRowActions
+                    /* Locate is only offered when there is somewhere to locate
+                       into. Its disabled spelling is reserved for the one
+                       reason a reader can act on — the tag does not name a
+                       commit. */
+                    primary={
+                      onLocateTag !== undefined && (
+                        <button
+                          className="refs-row-action refs-row-action--icon"
+                          /* The reason rides on the name: `title` is hover-only,
+                             and assistive tech reads the label instead of it. */
+                          aria-label={
+                            tag.targetType === "commit"
+                              ? `Locate tag ${tag.name} in lineage`
+                              : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
+                          }
+                          disabled={tag.targetType !== "commit"}
+                          {...hoverTooltip(
+                            tip,
+                            tag.targetType === "commit"
+                              ? "Locate tag in lineage"
+                              : `This tag points at a ${tag.targetType}, not a commit`
+                          )}
+                          onClick={() => {
+                            onLocateTag(repo.id, tag);
+                            onClose();
+                          }}
+                        >
+                          <LocateGlyph />
+                          Locate
+                        </button>
+                      )
+                    }
+                    secondary={
                       <button
-                        className="refs-row-action refs-row-action--icon"
-                        /* The reason rides on the name: `title` is hover-only,
-                           and assistive tech reads the label instead of it. */
-                        aria-label={
-                          tag.targetType === "commit"
-                            ? `Locate tag ${tag.name} in lineage`
-                            : `Locate tag ${tag.name} in lineage — unavailable, this tag points at a ${tag.targetType}, not a commit`
-                        }
-                        disabled={tag.targetType !== "commit"}
-                        {...hoverTooltip(
-                          tip,
-                          tag.targetType === "commit"
-                            ? "Locate tag in lineage"
-                            : `This tag points at a ${tag.targetType}, not a commit`
-                        )}
-                        onClick={() => {
-                          onLocateTag(repo.id, tag);
-                          onClose();
-                        }}
+                        className="refs-row-action refs-row-action--quiet"
+                        disabled={refs.remotes.length === 0}
+                        onClick={() => setRemoteTag(tag)}
                       >
-                        <LocateGlyph />
-                        Locate
+                        Remote…
                       </button>
-                    )}
-                    <button
-                      className="refs-row-action"
-                      disabled={refs.remotes.length === 0}
-                      onClick={() => setRemoteTag(tag)}
-                    >
-                      Remote…
-                    </button>
-                    <button
-                      className="refs-row-action is-danger"
-                      aria-label={`Delete local tag ${tag.name}`}
-                      /* Busy, not unavailable: Chromium blurs an element the
-                         moment it becomes disabled, so a delete started from
-                         the keyboard would throw focus to <body> until it
-                         returned (SC 2.4.3). aria-disabled says the same thing
-                         and keeps the button focusable — the same rule
-                         RepoRefsSections states for .ref-fetch-all. The
-                         in-flight guard lives in deleteLocalTag. */
-                      aria-disabled={deletingTag !== null}
-                      onClick={() => void deleteLocalTag(tag)}
-                    >
-                      {deletingTag === tag.name ? "Deleting…" : "Delete local"}
-                    </button>
-                  </div>
+                    }
+                    menu={
+                      <RefRowMenu
+                        label={`Actions for tag ${tag.name}`}
+                        items={[
+                          {
+                            type: "item",
+                            label: "Copy tag name",
+                            onSelect: () => void copyText(tag.name)
+                          },
+                          { type: "sep" },
+                          /* Busy, not unavailable: a disabled control would
+                             blur focus mid-operation (SC 2.4.3), but a menu
+                             item is gone from view once picked, so `disabled`
+                             is right here. The in-flight guard still lives in
+                             deleteLocalTag. */
+                          {
+                            type: "item",
+                            label:
+                              deletingTag === tag.name
+                                ? "Deleting…"
+                                : "Delete local tag…",
+                            danger: true,
+                            disabled: deletingTag !== null,
+                            onSelect: () => void deleteLocalTag(tag)
+                          }
+                        ]}
+                      />
+                    }
+                  />
                 </div>
               ))}
               {/* "No matching" is only true when something was filtered out.

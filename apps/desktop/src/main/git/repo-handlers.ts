@@ -77,6 +77,16 @@ export function registerRepoHandlers(
     return ok(null);
   });
 
+  bus.register("branch:setPin", (req) => {
+    indexer.setBranchPinned(req.repoId, req.branch, req.pinned);
+    // The repo's own profile: the globally active one is "last used", not the
+    // window that asked, and the renderer filters this event by profile.
+    const profileId =
+      indexer.getRepo(req.repoId)?.profileId ?? profiles.getActiveId();
+    if (profileId !== null) emitEvent("repo:changed", { profileId });
+    return ok(null);
+  });
+
   // The asking window names its own profile; `repo:list`'s fallback covers a
   // request that did not. Both null only when no profile exists at all, and
   // then there is nothing indexed to scope to either.
@@ -84,7 +94,10 @@ export function registerRepoHandlers(
     ok(
       indexer.searchAll(req.query, {
         profileId: req.profileId ?? profiles.getActiveId(),
-        allProfiles: req.allProfiles ?? searchAllProfiles()
+        allProfiles: req.allProfiles ?? searchAllProfiles(),
+        ...(req.focusedRepoId === undefined
+          ? {}
+          : { focusedRepoId: req.focusedRepoId })
       })
     )
   );

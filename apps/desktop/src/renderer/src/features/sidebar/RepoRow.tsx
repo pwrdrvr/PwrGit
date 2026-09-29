@@ -47,6 +47,7 @@ import {
 } from "./RepoIdentityMarks";
 import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
+import { PinnedBranchRow, pinnedBranchRowId } from "./PinnedBranchRow";
 import { RepoRefsSections } from "./RepoRefsSections";
 
 /** Distinguishes worktree drags from repo drags (see useListReorder). */
@@ -100,6 +101,7 @@ export function RepoRow({
   onSelectWorktree,
   onContextWorktree,
   onToggleWorktreePin,
+  onToggleBranchPin,
   onRemoveWorktree,
   onRefreshPullRequest,
   onRemoveSelected,
@@ -156,6 +158,9 @@ export function RepoRow({
     orderedIds: string[]
   ) => void;
   onToggleWorktreePin: (worktreeId: string, pinned: boolean) => void;
+  /** Pin or unpin a branch by name — for the pinned branches no worktree holds,
+   *  which list beside the pinned worktrees. */
+  onToggleBranchPin: (branch: string, pinned: boolean) => void;
   onRemoveWorktree: (worktreeId: string) => void;
   onRefreshPullRequest: (branch: string) => void;
   onRemoveSelected: () => void;
@@ -301,9 +306,13 @@ export function RepoRow({
   const orderedIds = [...pinned, ...focusedWorktrees, ...remaining].map(
     (worktree) => worktree.id
   );
+  // Pinned branches nothing has checked out, after the pinned worktrees: same
+  // shelf, and they take a place in the same arrow-key walk.
+  const pinnedBranches = repo.pinnedBranches ?? [];
   const displayIds = [
     ...(primary === undefined ? [] : [primary.id]),
     ...pinned.map((worktree) => worktree.id),
+    ...pinnedBranches.map(pinnedBranchRowId),
     ...focusedWorktrees.map((worktree) => worktree.id),
     ...remaining.map((worktree) => worktree.id)
   ];
@@ -401,8 +410,32 @@ export function RepoRow({
     const id = displayIds[index];
     if (id === undefined) return;
     setFocusedWtId(id);
-    const el = document.querySelector<HTMLElement>(`[data-wt-id="${id}"]`);
+    // Compared, not interpolated into a selector: a branch id carries whatever
+    // characters the branch name does.
+    const el = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-wt-id]")
+    ).find((row) => row.dataset["wtId"] === id);
     el?.focus();
+  };
+
+  const handleBranchKeyDown = (
+    branch: string,
+    event: ReactKeyboardEvent
+  ): void => {
+    // The pin inside the row keeps its own activation (SC 2.1.1).
+    if (event.target !== event.currentTarget) return;
+    const index = displayIds.indexOf(pinnedBranchRowId(branch));
+    if (index === -1) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusWorktreeAt(Math.min(index + 1, displayIds.length - 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusWorktreeAt(Math.max(index - 1, 0));
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onCreateWorktreeFromRef(branch, false);
+    }
   };
 
   const handleWorktreeKeyDown = (
@@ -452,11 +485,15 @@ export function RepoRow({
       // [primary?, ...pinned, ...remaining], so the primary is the whole
       // difference.
       const primaryOffset = primary === undefined ? 0 : 1;
+      // Pinned branches sit between the pinned worktrees and the rest, so they
+      // count for every row that lands after them.
+      const at = moved.indexOf(worktree.id);
+      const branchOffset = at >= pinned.length ? pinnedBranches.length : 0;
       announce(
         movedMessage(
           worktree.branch,
-          moved.indexOf(worktree.id) + 1 + primaryOffset,
-          moved.length + primaryOffset
+          at + 1 + primaryOffset + branchOffset,
+          displayIds.length
         )
       );
       return;
@@ -517,11 +554,26 @@ export function RepoRow({
   );
 
   const pinSource = repoPinSource(repo);
+  // Why the repo is in Pinned when its own star is unlit.
+  const pinVia =
+    pinSource === "worktree"
+      ? {
+          badge: "via wt",
+          description: "In Pinned because one of its worktrees is pinned"
+        }
+      : pinSource === "branch"
+        ? {
+            badge: "via branch",
+            description: "In Pinned because one of its branches is pinned"
+          }
+        : null;
   const pinLabel = repo.pinned
     ? "Unpin repo"
     : pinSource === "worktree"
       ? "Pin repo (currently listed because a worktree is pinned)"
-      : "Pin repo";
+      : pinSource === "branch"
+        ? "Pin repo (currently listed because a branch is pinned)"
+        : "Pin repo";
 
   // A treeitem owns its children by DOM nesting, but the worktree section is a
   // SIBLING of the repo row (the row is a sticky flex line; nesting the section
@@ -562,9 +614,7 @@ export function RepoRow({
     // Include the identity facts in the row description, independently of
     // the visibility button that refreshes them.
     repo.identity === undefined ? null : identityDescription(repo.identity),
-    arrangeable && pinSource === "worktree"
-      ? "in Pinned because one of its worktrees is pinned"
-      : null,
+    arrangeable && pinVia !== null ? pinVia.description : null,
     focusReason === undefined
       ? null
       : FOCUS_REASON_COPY[focusReason].description
@@ -707,15 +757,12 @@ export function RepoRow({
         {/* Present only via a pinned worktree: the repo's own star is unlit, so
             without this marker the row looks like it doesn't belong in the
             Pinned lens it's sitting in. */}
-        {arrangeable && pinSource === "worktree" && (
+        {arrangeable && pinVia !== null && (
           <span
             className="repo-row__pin-via"
-            {...hoverTooltip(
-              tip,
-              "In Pinned because one of its worktrees is pinned"
-            )}
+            {...hoverTooltip(tip, pinVia.description)}
           >
-            via wt
+            {pinVia.badge}
           </span>
         )}
         {focusReason !== undefined && (
@@ -808,13 +855,28 @@ export function RepoRow({
                 `role="group"`, and a bare text node lands in the middle of the
                 level-2 rows. Each pinned row already announces its state
                 through its own "Unpin worktree" button. */}
-            {pinned.length > 0 && (
+            {pinned.length + pinnedBranches.length > 0 && (
               <div className="wt-subhead" aria-hidden="true">
                 <span className="wt-section__label">Pinned</span>
-                <span className="ref-section__count">{pinned.length}</span>
+                <span className="ref-section__count">
+                  {pinned.length + pinnedBranches.length}
+                </span>
               </div>
             )}
             {pinned.map(renderWorktree)}
+            {pinnedBranches.map((branch) => (
+              <PinnedBranchRow
+                key={pinnedBranchRowId(branch)}
+                branch={branch}
+                posinset={displayIds.indexOf(pinnedBranchRowId(branch)) + 1}
+                setsize={displayIds.length}
+                focusable={tabStopId === pinnedBranchRowId(branch)}
+                onOpen={() => onCreateWorktreeFromRef(branch, false)}
+                onUnpin={() => onToggleBranchPin(branch, false)}
+                onKeyDown={(event) => handleBranchKeyDown(branch, event)}
+                onFocus={() => setFocusedWtId(pinnedBranchRowId(branch))}
+              />
+            ))}
             {focusedWorktrees.length > 0 && (
               <div className="wt-subhead" aria-hidden="true">
                 <span className="wt-section__label">Working</span>

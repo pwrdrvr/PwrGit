@@ -193,11 +193,13 @@ test("⌘F finds a local branch with no worktree and checks it out", async () =>
   await expect(hit.locator(".overlay-result__name")).toHaveText(
     "spike/no-checkout"
   );
-  // Owning repo plus why it isn't in the sidebar. Nothing to pin, and no lazy
-  // status either — there is no working tree to report dirty/ahead/behind.
+  // Owning repo plus why it isn't in the sidebar. The branch itself can be
+  // pinned (`pinned_branches`) though no worktree holds it, but there is no
+  // lazy status — no working tree to report dirty/ahead/behind.
   await expect(hit).toContainText("localonly · no worktree");
-  await expect(hit.locator(".pin")).toHaveCount(0);
-  await expect(window.locator(".overlay-foot")).not.toContainText("pin");
+  await expect(hit.locator(".pin")).toHaveCount(1);
+  await expect(hit.locator(".pin")).toHaveAttribute("aria-label", "Pin branch");
+  await expect(window.locator(".overlay-foot")).toContainText("pin");
 
   await window.keyboard.press("Enter");
 

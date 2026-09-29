@@ -1034,7 +1034,14 @@ export interface Commands {
    * omitted, main reads General → Search all profiles.
    */
   "repo:search": {
-    req: { query: string; profileId?: ProfileId; allProfiles?: boolean };
+    req: {
+      query: string;
+      profileId?: ProfileId;
+      allProfiles?: boolean;
+      /** The repository the asking window has focused. Its exact-name
+       *  branches survive the result cap ahead of other repos' twins. */
+      focusedRepoId?: RepoId;
+    };
     res: RepoSearchHit[];
   };
   /** Verify a visible local-branch hit using a short-lived, shared worktree
@@ -1210,6 +1217,15 @@ export interface Commands {
     res: Record<string, CommitAuthorPerson>;
   };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
+  /**
+   * Pin or unpin a local branch, whether or not a worktree holds it. With one,
+   * that worktree is pinned; without, the branch itself is, and the sidebar's
+   * Pinned group lists it as a branch.
+   */
+  "branch:setPin": {
+    req: { repoId: string; branch: string; pinned: boolean };
+    res: null;
+  };
 
   // Worktree state (U8)
   "worktree:getState": {

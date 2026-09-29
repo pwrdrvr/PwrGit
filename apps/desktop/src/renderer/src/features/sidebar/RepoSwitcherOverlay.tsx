@@ -68,6 +68,20 @@ const isWorktreelessBranch = (hit: RepoSearchHit): boolean =>
 const hasNoCheckout = (hit: RepoSearchHit): boolean =>
   isWorktreelessBranch(hit) || hit.kind === "change_request";
 
+/** What pinning a hit pins. A local branch can be pinned though no worktree
+ *  holds it (`pinned_branches`); a remote-tracking one has no local name to pin,
+ *  and a change request neither. */
+const canPin = (hit: RepoSearchHit): boolean =>
+  !hasNoCheckout(hit) || hit.kind === "local_branch";
+
+/** The noun the pin control names. */
+const pinNoun = (hit: RepoSearchHit): string =>
+  hit.kind === "worktree"
+    ? "worktree"
+    : hit.kind === "local_branch"
+      ? "branch"
+      : "repo";
+
 /** The forge's own word for a hit's change request ("Pull request"). */
 const changeRequestWord = (hit: RepoSearchHit): string =>
   changeRequestLabel(hit.pr?.forge ?? ASSUMED_FORGE_KIND);
@@ -175,17 +189,31 @@ export function buildPaletteItems(
   commits: Commit[],
   results: RepoSearchHit[],
   query: string,
-  files: FileSearchHit[] = []
+  files: FileSearchHit[] = [],
+  focusedRepoId: string | null = null
 ): PaletteItem[] {
   const exactName = query.trim().normalize("NFC").toLowerCase();
   // `106` names change request #106 as surely as a repo's full name names the
   // repo, and a bare number also looks like a commit hash prefix and a path —
   // so whatever holds #106 leads, above both.
   const prNumber = changeRequestNumberQuery(query);
+  const focusedBranches: RepoSearchHit[] = [];
   const exactRepos: RepoSearchHit[] = [];
   const otherResults: RepoSearchHit[] = [];
   for (const hit of results) {
+    // Typing `main` in a focused repo means that repo's `main`. It leads
+    // everything — `main.rs` files included — so type, Enter, and you are on
+    // it; the same rows in other repos stay where the ranking put them.
     if (
+      focusedRepoId !== null &&
+      hit.repoId === focusedRepoId &&
+      hit.kind !== "repo" &&
+      hit.kind !== "change_request" &&
+      exactName !== "" &&
+      hit.name.normalize("NFC").toLowerCase() === exactName
+    ) {
+      focusedBranches.push(hit);
+    } else if (
       (hit.kind === "repo" &&
         hit.name.normalize("NFC").toLowerCase() === exactName) ||
       (prNumber !== null && hit.pr?.number === prNumber)
@@ -200,6 +228,7 @@ export function buildPaletteItems(
   // substring, so a hit is a strong signal, and the main process caps the list
   // short enough that it cannot crowd the other kinds out.
   return [
+    ...focusedBranches.map((hit) => ({ kind: "repo" as const, hit })),
     ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
     ...files.map((hit) => ({ kind: "file" as const, hit })),
     ...commits.map((commit) => ({ kind: "commit" as const, commit })),
@@ -347,6 +376,7 @@ export function RepoSwitcherOverlay({
 }: {
   commits: Commit[];
   commitContext: {
+    repoId: string;
     repoName: string;
     branch: string;
     worktreeId: string;
@@ -423,6 +453,7 @@ export function RepoSwitcherOverlay({
   const resultsId = `${idPrefix}-results`;
   const rowId = (index: number): string => `${idPrefix}-result-${index}`;
   const commitWorktreeId = commitContext?.worktreeId ?? null;
+  const focusedRepoId = commitContext?.repoId ?? null;
   const commitResults = useMemo(
     () => searchCommits(commits, query),
     [commits, query]
@@ -441,8 +472,9 @@ export function RepoSwitcherOverlay({
     [commitResults, directCommit]
   );
   const items = useMemo<PaletteItem[]>(
-    () => buildPaletteItems(allCommitResults, results, query, files),
-    [allCommitResults, results, query, files]
+    () =>
+      buildPaletteItems(allCommitResults, results, query, files, focusedRepoId),
+    [allCommitResults, results, query, files, focusedRepoId]
   );
   const sel = selectedPaletteItemIndex(items, selectedItemKey);
   const selectedResult = (index: number): boolean => index === sel && (!showSetupCommand || selectedItemKey !== null);
@@ -519,13 +551,19 @@ export function RepoSwitcherOverlay({
   // the handler's repo:changed event, and our copy keeps results stable (no
   // re-query, so rows don't jump while the overlay is open).
   const togglePin = (hit: RepoSearchHit) => {
-    if (hasNoCheckout(hit)) return;
+    if (!canPin(hit)) return;
     const pinned = !hit.pinned;
     setResults((prev) =>
       prev.map((h) => (hitKey(h) === hitKey(hit) ? { ...h, pinned } : h))
     );
     if (hit.kind === "worktree" && hit.worktreeId !== undefined) {
       void dispatch("worktree:setPin", { worktreeId: hit.worktreeId, pinned });
+    } else if (hit.kind === "local_branch") {
+      void dispatch("branch:setPin", {
+        repoId: hit.repoId,
+        branch: hit.name,
+        pinned
+      });
     } else {
       void dispatch("repo:setPin", { repoId: hit.repoId, pinned });
     }
@@ -565,7 +603,8 @@ export function RepoSwitcherOverlay({
     void dispatch("repo:search", {
       query,
       ...(profileId === null ? {} : { profileId }),
-      ...(allProfiles === null ? {} : { allProfiles })
+      ...(allProfiles === null ? {} : { allProfiles }),
+      ...(focusedRepoId === null ? {} : { focusedRepoId })
     }).then((r) => {
       if (active && r.ok) {
         setResults(resolvePaletteHits(r.value, resolvedBranches.current));
@@ -574,7 +613,7 @@ export function RepoSwitcherOverlay({
     return () => {
       active = false;
     };
-  }, [query, allProfiles]);
+  }, [query, allProfiles, focusedRepoId]);
 
   // Tracked files in the selected worktree. This is the only way into a file
   // that has not changed recently: the app has no file browser, so history and
@@ -1103,21 +1142,15 @@ export function RepoSwitcherOverlay({
                   </>
                 );
               })()}
-              {!hasNoCheckout(r) && (
+              {canPin(r) && (
                 <button
                   type="button"
                   className={`pin${r.pinned ? " is-pinned" : ""}`}
                   {...hoverTooltip(
                     tip,
-                    r.pinned
-                      ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                      : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
+                    `${r.pinned ? "Unpin" : "Pin"} ${pinNoun(r)}`
                   )}
-                  aria-label={
-                    r.pinned
-                      ? `Unpin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                      : `Pin ${r.kind === "worktree" ? "worktree" : "repo"}`
-                  }
+                  aria-label={`${r.pinned ? "Unpin" : "Pin"} ${pinNoun(r)}`}
                   tabIndex={-1}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1191,7 +1224,7 @@ export function RepoSwitcherOverlay({
           <span>↵ open</span>
           {items.length > 0 && <span>tab actions</span>}
           {items[sel]?.kind === "repo" &&
-            !hasNoCheckout(items[sel].hit) && (
+            canPin(items[sel].hit) && (
               <span>{shortcutLabel({ key: "P" }, platform)} pin</span>
             )}
           <span style={{ flex: 1 }} />

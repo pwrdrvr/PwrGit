@@ -42,6 +42,8 @@ export type UseRepoTree = {
   refreshingRepoIds: Set<string>;
   setRepoPin: (repoId: string, pinned: boolean) => void;
   setWorktreePin: (worktreeId: string, pinned: boolean) => void;
+  /** Pin a local branch, held by a worktree or not. */
+  setBranchPin: (repoId: string, branch: string, pinned: boolean) => void;
   createWorktree: (
     repoId: string,
     branch: string,
@@ -247,6 +249,33 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     void dispatch("worktree:setPin", { worktreeId, pinned });
   }, []);
 
+  const setBranchPin = useCallback(
+    (repoId: string, branch: string, pinned: boolean) => {
+      setRepos((rs) =>
+        rs.map((r) => {
+          if (r.id !== repoId) return r;
+          // Mirror RepoIndexer.setBranchPinned: a holding worktree is pinned
+          // directly; with none, the branch joins (or leaves) the list.
+          const held = r.worktrees.some((w) => w.branch === branch);
+          const worktrees = r.worktrees.map((w) =>
+            w.branch === branch ? { ...w, pinned } : w
+          );
+          const rest = (r.pinnedBranches ?? []).filter((b) => b !== branch);
+          const pinnedBranches =
+            pinned && !held ? [...rest, branch].sort() : rest;
+          const { pinnedBranches: _old, ...without } = r;
+          return {
+            ...without,
+            worktrees,
+            ...(pinnedBranches.length > 0 ? { pinnedBranches } : {})
+          };
+        })
+      );
+      void dispatch("branch:setPin", { repoId, branch, pinned });
+    },
+    []
+  );
+
   const createWorktree = useCallback(
     async (
       repoId: string,
@@ -449,6 +478,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     refreshingRepoIds,
     setRepoPin,
     setWorktreePin,
+    setBranchPin,
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,

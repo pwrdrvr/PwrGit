@@ -133,6 +133,9 @@ export type LocalBranchSummary = {
   tracking: BranchTrackingStatus;
   /** Worktrees currently holding this branch. Empty means it can be switched to. */
   checkedOutWorktreeIds: WorktreeId[];
+  /** Pinned, by its own pin or through a pinned worktree holding it. Absent
+   *  means not pinned. */
+  pinned?: boolean;
   lastCommitAt?: string;
   subject?: string;
   /** The branch's change request when one is known: `branch_pr`, else the
@@ -962,6 +965,10 @@ export type Repo = {
    */
   order?: number;
   worktrees: Worktree[];
+  /** Branches the user pinned that no worktree holds, so the Pinned group can
+   *  list them. A pinned branch a worktree holds is that worktree, pinned.
+   *  Absent means none. */
+  pinnedBranches?: string[];
   /** Forge identity for the repo's `origin`, when one has been read. Absent
    *  means "not looked up yet", which the marks render distinctly from
    *  `visibility: "unknown"` ("looked up, forge would not say"). */

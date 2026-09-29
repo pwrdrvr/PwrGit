@@ -211,3 +211,26 @@ describe("exact project navigation", () => {
     }
   );
 });
+
+// ⌘K in a focused repo: `main` must reach that repo's own branch even when a
+// pile of other repos hold an identical one and the index's row cap is 60.
+describe("searchAll focused repository", () => {
+  it("keeps the focused repo's exact branch inside the row cap", () => {
+    for (let i = 0; i < 80; i++) {
+      const repoId = `crowd-${i}`;
+      db.prepare(
+        "INSERT INTO repos (id, profile_id, name, path) VALUES (?, ?, ?, ?)"
+      ).run(repoId, mine, `crowd-${i}`, `/crowd/${i}`);
+      db.prepare(
+        "INSERT INTO local_branches (id, repo_id, name, full_name) VALUES (?, ?, 'main', 'refs/heads/main')"
+      ).run(`crowd-lb-${i}`, repoId);
+    }
+    const focused = "crowd-79";
+    const hits = indexer.searchAll("main", {
+      profileId: mine,
+      allProfiles: false,
+      focusedRepoId: focused
+    });
+    expect(hits[0]).toMatchObject({ kind: "local_branch", repoId: focused });
+  });
+});
