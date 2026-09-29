@@ -6130,8 +6130,12 @@ button.agent-menu__item:hover {
      per row: a local branch with four buttons came out 73px wider than a remote
      row with two, and its Upstream started 43px left of the header and of every
      row around it. A constant is the same for the header and every row, on
-     every tab. Sized for the widest row today (four buttons, 283px). */
-  --refs-actions-w: 290px;
+     every tab.
+
+     It is the three `.refs-row-slot` widths (108 + 104 + 30) plus the two 5px
+     gaps between them. A row fills a slot or leaves it empty; either way it
+     holds its width. Change a slot, change this. */
+  --refs-actions-w: 252px;
   display: flex;
   flex-direction: column;
   width: min(920px, 94vw);
@@ -6628,6 +6632,33 @@ button.agent-menu__item:hover {
 .refs-row-actions .refs-row-action {
   min-width: 0;
   padding: 0 7px;
+}
+/* Fixed slots: primary, secondary, ⋮. See `RefRowActions`. */
+.refs-row-slot {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+.refs-row-slot--primary {
+  width: 108px;
+}
+.refs-row-slot--secondary {
+  width: 104px;
+}
+.refs-row-slot--menu {
+  width: 30px;
+}
+.refs-row-slot > .refs-row-action {
+  width: 100%;
+  white-space: nowrap;
+}
+/* The kebab stands at the row buttons' own 30px height, not the sidebar row's
+   24px, or it reads as a smaller class of control beside them. */
+.kebab__btn.refs-row-menu {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  border-color: var(--border-default);
 }
 .refs-row-action:disabled {
   cursor: not-allowed;
@@ -9889,6 +9920,18 @@ body.is-col-resizing {
 .pop-menu__item:disabled {
   color: var(--text-subtle);
   cursor: default;
+}
+.pop-menu__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pop-menu__hint {
+  max-width: 220px;
+  color: var(--text-subtle);
+  font: 500 10.5px/1.3 var(--font-sans);
+  white-space: normal;
 }
 .pop-menu__item--danger {
   color: var(--danger-text);

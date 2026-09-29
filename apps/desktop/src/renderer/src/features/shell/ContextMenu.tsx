@@ -15,6 +15,10 @@ export type MenuItem =
       label: string;
       danger?: boolean;
       disabled?: boolean;
+      /** A second, muted line. A disabled entry carries the reason it is
+       *  disabled here: a disabled button takes no hover, so a tooltip would
+       *  never show, and the reason is what a reader can act on. */
+      hint?: string;
       onSelect: () => void;
     }
   | { type: "sep" };
@@ -128,7 +132,14 @@ export function ContextMenu({
               onClose();
             }}
           >
-            {it.label}
+            {it.hint === undefined ? (
+              it.label
+            ) : (
+              <span className="pop-menu__stack">
+                <span>{it.label}</span>
+                <span className="pop-menu__hint">{it.hint}</span>
+              </span>
+            )}
           </button>
         )
       )}

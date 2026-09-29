@@ -18,6 +18,8 @@ import { showErrorToast } from "../../lib/toast";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { CopyTarget } from "../shell/CopyTarget";
 import { PrChip } from "./PrChip";
+import { RefRowActions, RefRowMenu } from "./RefRowMenu";
+import { copyText } from "../../lib/copyText";
 import { lastSegment } from "./repo-view";
 
 /**
@@ -396,19 +398,19 @@ export function ChangeRequestTable({
             <span className="refs-table__muted">
               {updated === null ? "—" : shortWhen(updated, now)}
             </span>
-            <div className="refs-row-actions">
-              {location.kind === "worktree" ? (
-                <button
-                  className="refs-row-action"
-                  onClick={() => {
-                    onRevealWorktree(location.worktreeId);
-                    onClose();
-                  }}
-                >
-                  Show worktree
-                </button>
-              ) : (
-                <>
+            <RefRowActions
+              primary={
+                location.kind === "worktree" ? (
+                  <button
+                    className="refs-row-action"
+                    onClick={() => {
+                      onRevealWorktree(location.worktreeId);
+                      onClose();
+                    }}
+                  >
+                    Show worktree
+                  </button>
+                ) : (
                   <button
                     className={`refs-row-action${quiet ? " refs-row-action--quiet" : ""}`}
                     aria-label={
@@ -434,6 +436,10 @@ export function ChangeRequestTable({
                   >
                     {pending ? "Fetching…" : switchingThis ? "Switching…" : "Switch here"}
                   </button>
+                )
+              }
+              secondary={
+                location.kind === "worktree" ? undefined : (
                   <button
                     className="refs-row-action refs-row-action--quiet"
                     aria-label={
@@ -447,17 +453,27 @@ export function ChangeRequestTable({
                   >
                     New worktree
                   </button>
-                </>
-              )}
-              <button
-                className="refs-row-action refs-row-action--quiet refs-row-action--icon"
-                aria-label={`Open ${noun} #${pr.number} in the browser`}
-                {...hoverTooltip(tip, `Open ${noun} #${pr.number} in the browser`)}
-                onClick={() => void dispatch("shell:openExternal", { url: pr.url })}
-              >
-                ↗
-              </button>
-            </div>
+                )
+              }
+              menu={
+                <RefRowMenu
+                  label={`Actions for #${pr.number}`}
+                  items={[
+                    {
+                      type: "item",
+                      label: `Open ${noun} in browser`,
+                      onSelect: () =>
+                        void dispatch("shell:openExternal", { url: pr.url })
+                    },
+                    {
+                      type: "item",
+                      label: `Copy ${noun} link`,
+                      onSelect: () => void copyText(pr.url)
+                    }
+                  ]}
+                />
+              }
+            />
           </div>
         );
       })}
