@@ -111,6 +111,7 @@ export function RepoRow({
   onRevealWorktree,
   onCreateWorktreeFromRef,
   onForkRepo,
+  onOpenSetup,
   onCleanUpBranches,
   arrangeable,
   dragProps,
@@ -172,6 +173,7 @@ export function RepoRow({
   /** Open the fork prompt for this repository — raised by the read-only mark,
    *  the `origin` row under REMOTES, and the row's own actions menu. */
   onForkRepo: () => void;
+  onOpenSetup?: () => void;
   /** Open Maintenance › Local branches on this repository, already reviewing
    *  — the refs browser's Gone view offers it. */
   onCleanUpBranches?: (() => void) | undefined;
@@ -256,6 +258,7 @@ export function RepoRow({
         setRefsBrowserRequest("remotes");
       }
     },
+    { type: "item", label: "Repository setup…", onSelect: () => onOpenSetup?.() },
     { type: "sep" },
     { type: "item", label: "Copy path", onSelect: () => void copyText(repo.path) },
     {

@@ -25,6 +25,7 @@ import { applyPartialSelection, partialFileDiff } from "./partial-staging";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { liveWorktreePath, worktreeMissingError } from "./worktree-liveness";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { recordHookReceipts } from "./repository-setup";
 
 const notFound = {
   kind: "repo" as const,
@@ -226,9 +227,11 @@ export function registerChangesHandlers(
       })
     );
     if (!result.ok) {
+      if (result.error.hook !== undefined) await recordHookReceipts(execGit, row.path, [result.error.hook]);
       notifyChanged(req.worktreeId);
       return result;
     }
+    await recordHookReceipts(execGit, row.path, result.value.hooks);
     logMain(
       "info",
       "commit",

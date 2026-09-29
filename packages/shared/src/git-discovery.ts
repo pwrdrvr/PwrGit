@@ -38,3 +38,41 @@ export type IgnoredRule = {
 };
 
 export type IgnoredSummary = { count: number; rules: IgnoredRule[]; worktreeCount: number };
+
+export type SetupHook = {
+  name: string;
+  path: string;
+  displayPath: string;
+  calls: string;
+  lastRun?: HookRun & { at: number };
+};
+
+export type SetupIgnoreLine = { number: number; text: string };
+export type SetupIgnoreLayer = IgnoreDestinationOption & {
+  lines: SetupIgnoreLine[];
+  content: string;
+};
+
+export type RepositorySetup = {
+  hooks: {
+    directory: string;
+    displayDirectory: string;
+    configuredPath: string | null;
+    origin: string | null;
+    manager: string | null;
+    active: SetupHook[];
+    shadowed: SetupHook[];
+    sampleCount: number;
+    lfsShadowed: boolean;
+    worktreeCount: number;
+  };
+  ignore: SetupIgnoreLayer[];
+};
+
+export type SetupIgnoreTest = {
+  path: string;
+  ignored: boolean;
+  source: string | null;
+  line: number | null;
+  pattern: string | null;
+};
