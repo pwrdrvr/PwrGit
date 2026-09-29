@@ -71,6 +71,22 @@ describe("commit flow", () => {
     const refused = await commitChanges(systemGit, repo, "feat: hooked", { email: "x@y.com" });
     expect(refused.ok).toBe(false);
     if (refused.ok) throw new Error("expected a refusal");
+    if (refused.error.hook === undefined) {
+      const tracePath = join(mkdtempSync(join(tmpdir(), "pwrgit-hook-diagnostic-")), "trace.jsonl");
+      try {
+        execFileSync("git", ["-c", "user.email=x@y.com", "-c", "user.name=Test", "commit", "-m", "feat: hooked"], {
+          cwd: repo,
+          env: { ...process.env, GIT_TRACE2_EVENT: tracePath }
+        });
+      } catch { /* A hook refusal is expected. */ }
+      const events = readFileSync(tracePath, "utf8").split("\n").flatMap((line) => {
+        try {
+          const event = JSON.parse(line) as { event?: string };
+          return event.event === "child_start" || event.event === "child_exit" ? [event] : [];
+        } catch { return []; }
+      });
+      throw new Error(`Git ran the refusing hook without a parsed receipt: ${JSON.stringify(events)}`);
+    }
     expect(refused.error.hook).toMatchObject({ name: "pre-commit", exitCode: 1 });
     expect(refused.error.hook?.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(refused.error.detail).toContain("test hook rejected");
