@@ -6,19 +6,16 @@ import {
   useRef,
   useState
 } from "react";
-import type {
-  ChangeSet,
-  FileChange,
-  PwrGitError,
-  Worktree
-} from "@pwrgit/shared";
+import type { ChangeSet, FileChange, HookRun, IgnoredSummary, PwrGitError, Worktree } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { fileStatusChipProps } from "../../lib/fileStatus";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { showErrorToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
-import { confirmDialog } from "../shell/dialogs";
+import { confirmDialog, notifyDialog } from "../shell/dialogs";
 import { SubmodulePanel } from "./SubmodulePanel";
+import { DiscoveryExplainPopover } from "./DiscoveryExplainPopover";
+import { IgnoreDialog } from "./IgnoreDialog";
 import { AgentSaw } from "../agent/AgentSaw";
 import { DraftFooter } from "../agent/DraftFooter";
 import { openAiSettings, useAgent } from "../agent/agent-store";
@@ -374,7 +371,12 @@ export function ChangesTab({
   ) => void;
 }) {
   const tip = useViewportTooltip();
+  const explainTip = useViewportTooltip("viewport-tooltip discovery-explain-popover", { interactive: true, label: "Git discovery" });
   const [changes, setChanges] = useState<ChangeSet | null>(null);
+  const [ignored, setIgnored] = useState<IgnoredSummary | null>(null);
+  const [ignoreTarget, setIgnoreTarget] = useState<{ path: string; directory: boolean } | null>(null);
+  const [commitOutcome, setCommitOutcome] = useState<{ hooks: HookRun[] } | { error: PwrGitError; amend: boolean } | null>(null);
+  const [committing, setCommitting] = useState(false);
   const agent = useAgent("commitMessage");
   const messageRef = useRef<HTMLTextAreaElement>(null);
   /**
@@ -429,6 +431,9 @@ export function ChangesTab({
   useEffect(() => {
     setFolderOpen({});
     setMenu(null);
+    setIgnoreTarget(null);
+    setCommitOutcome(null);
+    setIgnored(null);
     setHasSubmoduleConcern(false);
     if (wtId === null) {
       setChanges(null);
@@ -441,6 +446,9 @@ export function ChangesTab({
         // A refusal (the checkout is gone) must not leave the previous
         // selection's files on screen under this worktree's name.
         setChanges(r.ok ? r.value : null);
+      });
+      void dispatch("changes:ignoredSummary", { worktreeId: wtId }).then((r) => {
+        if (active) setIgnored(r.ok ? r.value : null);
       });
     };
     load();
@@ -481,6 +489,7 @@ export function ChangesTab({
     paths: string[]
   ): void => {
     if (wtId === null) return;
+    setCommitOutcome(null);
     void (async () => {
       // Staging a file that still has conflict markers is the classic way to
       // commit `<<<<<<<` into history. Warn, but do not refuse: a file can
@@ -519,29 +528,37 @@ export function ChangesTab({
     })();
   };
 
-  const commit = (amend: boolean): void => {
-    if (wtId === null || message.trim() === "") return;
-    void dispatch("changes:commit", { worktreeId: wtId, message, amend }).then(
-      (r) => {
-        if (r.ok) {
-          draft.reset("");
-          return;
-        }
-        // The draft stays put: a hook refusal is fixed and retried, and the
-        // message should survive the round trip.
-        showErrorToast({
-          title: commitFailureTitle(r.error),
-          message: r.error.message,
-          detail: `changes:commit${amend ? " --amend" : ""}`,
-          subject: { worktreeId: wtId }
-        });
+  const commit = (amend: boolean, noVerify = false): void => {
+    if (wtId === null || message.trim() === "" || committing) return;
+    setCommitting(true);
+    void dispatch("changes:commit", { worktreeId: wtId, message, amend, noVerify }).then((r) => {
+      setCommitting(false);
+      if (r.ok) {
+        draft.reset("");
+        setCommitOutcome({ hooks: r.value.hooks });
+        return;
       }
-    );
+      setCommitOutcome({ error: r.error, amend });
+      if (r.error.hook === undefined) {
+        showErrorToast({ title: commitFailureTitle(r.error), message: r.error.message, detail: `changes:commit${amend ? " --amend" : ""}`, subject: { worktreeId: wtId } });
+      }
+    });
+  };
+
+  const commitWithoutHooks = async (amend: boolean): Promise<void> => {
+    const yes = await confirmDialog({
+      title: "Skip hooks for this one commit?",
+      message: "PwrGit will run git commit --no-verify. That skips pre-commit and commit-msg; post-commit still runs. Your team's CI may run the same checks again.",
+      confirmLabel: "Commit without hooks",
+      danger: true
+    });
+    if (yes) commit(amend, true);
   };
 
   /** Discard one row's worth of work — a file, or a whole folder group. */
   const discardTarget = async (target: ChangesRowTarget): Promise<void> => {
     if (wtId === null) return;
+    setCommitOutcome(null);
     const paths = targetPaths(target);
     if (paths.length === 0) return;
     const yes = await confirmDialog({
@@ -565,36 +582,11 @@ export function ChangesTab({
     });
   };
 
-  /** Write the row's `.gitignore` line. Only offered for untracked rows. */
-  const ignoreTarget = (target: ChangesRowTarget): void => {
+  /** Open the pattern and destination decision for an untracked row. */
+  const openIgnore = (target: ChangesRowTarget): void => {
     if (wtId === null || !canIgnore(target)) return;
-    const { path, directory } = ignorePathFor(target);
-    void dispatch("changes:ignore", {
-      worktreeId: wtId,
-      entries: [{ path, directory }]
-    }).then((r) => {
-      if (!r.ok) {
-        showErrorToast({
-          title: "Could not update .gitignore",
-          message: r.error.message,
-          detail: path,
-          subject: { worktreeId: wtId }
-        });
-        return;
-      }
-      showInfoToast({
-        ...(r.value.added.length === 0
-          ? {
-              title: "Already ignored",
-              message: `${path} was already covered by .gitignore.`
-            }
-          : {
-              title: "Added to .gitignore",
-              message: r.value.added.join(", ")
-            }),
-        subject: { worktreeId: wtId }
-      });
-    });
+    setCommitOutcome(null);
+    setIgnoreTarget(ignorePathFor(target));
   };
 
   const discardAll = async (): Promise<void> => {
@@ -611,6 +603,35 @@ export function ChangesTab({
   const unstagedTotal = truncated?.unstaged ?? unstaged.length;
   const hasChanges = staged.length > 0 || unstaged.length > 0;
   const canCommit = message.trim() !== "" && staged.length > 0;
+  const ignoredFooter = ignored !== null && ignored.count > 0 ? (
+    <div className="discovery-ignored-footer">
+      <span>{ignored.count} untracked file{ignored.count === 1 ? "" : "s"} hidden by ignore rules</span>
+      <button {...hoverTooltip(explainTip, <DiscoveryExplainPopover
+        title="Hidden by ignore rules"
+        sentence="Git hid these untracked files using personal rules outside the team's .gitignore."
+        where={<div className="discovery-explain__rules">{ignored.rules.map((rule) => <div key={`${rule.source}:${rule.line}:${rule.pattern}`}><code>{rule.source}:{rule.line}</code><code>{rule.pattern}</code><span>{rule.count} file{rule.count === 1 ? "" : "s"}</span></div>)}</div>}
+        scope={[...new Set(ignored.rules.map((rule) => rule.destination === "exclude" ? `this clone · ${ignored.worktreeCount} worktree${ignored.worktreeCount === 1 ? "" : "s"}` : "this Mac"))]}
+        command="git check-ignore -v --stdin"
+        actions={[{ label: "Copy rule details", onClick: () => void copyText(ignored.rules.map((rule) => `${rule.source}:${rule.line} ${rule.pattern} (${rule.count})`).join("\n")) }]}
+        manual={{ label: "gitignore(5)", onClick: () => void dispatch("shell:openExternal", { url: "https://git-scm.com/docs/gitignore" }) }}
+      />)}>Why?</button>
+    </div>
+  ) : null;
+  const hookReceipts = commitOutcome !== null && "hooks" in commitOutcome && commitOutcome.hooks.length > 0 ? (
+    <div className="discovery-commit-receipts" aria-label="Hooks run by the commit">
+      {commitOutcome.hooks.map((hook, index) => (
+        <button key={`${hook.name}:${index}`} className="discovery-receipt" {...hoverTooltip(explainTip, <DiscoveryExplainPopover
+          title={`${hook.name} ${hook.exitCode === 0 ? "passed" : "finished"}`}
+          sentence={`Git ran this hook before or after recording the commit. It exited ${hook.exitCode} in ${(hook.elapsedMs / 1000).toFixed(1)} s.`}
+          where={<code>{hook.path}</code>}
+          scope={hook.path.startsWith(".git/") ? `this clone · ${ignored?.worktreeCount ?? 1} worktree${(ignored?.worktreeCount ?? 1) === 1 ? "" : "s"}` : "committed · team"}
+          command="git commit"
+          actions={[{ label: "Copy hook path", onClick: () => void copyText(hook.path) }]}
+          manual={{ label: "githooks(5)", onClick: () => void dispatch("shell:openExternal", { url: "https://git-scm.com/docs/githooks" }) }}
+        />)}><span className="discovery-receipt__dot" />{hook.name} <i>{(hook.elapsedMs / 1000).toFixed(1)} s</i></button>
+      ))}
+    </div>
+  ) : null;
 
   if (!hasChanges) {
     return (
@@ -639,7 +660,10 @@ export function ChangesTab({
                 : "Nothing to commit."}
             </div>
           </div>
+          {hookReceipts}
+          {ignoredFooter}
         </div>
+        {explainTip.tooltipNode}
       </div>
     );
   }
@@ -824,6 +848,7 @@ export function ChangesTab({
             )}
           </>
         )}
+        {ignoredFooter}
       </div>
 
       {menu !== null && (
@@ -841,7 +866,7 @@ export function ChangesTab({
                 targetPaths(menu.target)
               ),
             onDiscard: () => void discardTarget(menu.target),
-            onIgnore: () => ignoreTarget(menu.target),
+            onIgnore: () => openIgnore(menu.target),
             onCopyPath: () => void copyText(targetPaths(menu.target).join("\n")),
             onHistory: () => openInsight(menu.target, "history"),
             onBlame: () => openInsight(menu.target, "blame")
@@ -857,7 +882,7 @@ export function ChangesTab({
             ref={messageRef}
             className={`commit-input${draft.status.kind === "drafting" ? " msg-box__input--scan" : ""}`}
             value={message}
-            onChange={(e) => draft.setText(e.target.value)}
+            onChange={(e) => { setCommitOutcome(null); draft.setText(e.target.value); }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) {
                 e.preventDefault();
@@ -897,7 +922,7 @@ export function ChangesTab({
         <div className="commit-actions">
           <button
             className="commit-btn"
-            disabled={!canCommit}
+            disabled={!canCommit || committing}
             onClick={() => commit(false)}
           >
             Commit{" "}
@@ -907,15 +932,30 @@ export function ChangesTab({
           </button>
           <button
             className="amend-btn"
-            disabled={message.trim() === ""}
+            disabled={message.trim() === "" || committing}
             onClick={() => commit(true)}
           >
             Amend
           </button>
         </div>
+        {hookReceipts}
+        {commitOutcome !== null && "error" in commitOutcome && commitOutcome.error.hook !== undefined && (
+          <div className="discovery-hook-failure" role="alert">
+            <div className="discovery-hook-failure__title"><strong>{commitOutcome.error.hook.name} refused the commit</strong><code>exit {commitOutcome.error.hook.exitCode} · {(commitOutcome.error.hook.elapsedMs / 1000).toFixed(1)} s</code></div>
+            <p>Nothing was committed. Your message and staged files are unchanged.</p>
+            <pre>{commitOutcome.error.hook.path}{"\n"}{(commitOutcome.error.detail ?? commitOutcome.error.message).split("\n").slice(-8).join("\n")}</pre>
+            <div className="discovery-hook-failure__actions">
+              <button className="commit-btn" disabled={committing} onClick={() => commit(commitOutcome.amend)}>Retry commit</button>
+              <button onClick={() => void notifyDialog({ title: "Full Git output", message: commitOutcome.error.detail ?? commitOutcome.error.message })}>Full output</button>
+              <button className="discovery-hook-failure__skip" onClick={() => void commitWithoutHooks(commitOutcome.amend)}>Commit without hooks…</button>
+            </div>
+          </div>
+        )}
         <div className="commit-as">as {activeEmail !== "" ? activeEmail : "—"}</div>
       </div>
+      {ignoreTarget !== null && wtId !== null && <IgnoreDialog worktreeId={wtId} path={ignoreTarget.path} directory={ignoreTarget.directory} onClose={() => setIgnoreTarget(null)} />}
       {tip.tooltipNode}
+      {explainTip.tooltipNode}
     </div>
   );
 }

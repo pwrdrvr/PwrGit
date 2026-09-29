@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type { ForgeHostMap } from "./forge-remote";
+import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
 import type {
@@ -1848,26 +1849,32 @@ export interface Commands {
   /** Discard uncommitted changes to the named paths (revert to HEAD, or delete
    *  if new). A folder row sends every file it lists. */
   "changes:discard": { req: { worktreeId: string; paths: string[] }; res: null };
-  /**
-   * Ignore these paths in the worktree's root `.gitignore`, creating the file
-   * if absent and skipping any line already present. The renderer sends paths
-   * rather than patterns: anchoring and glob-escaping are git's rules, so they
-   * belong beside the code that writes the file. Returns the patterns actually
-   * written, so the UI can say "already ignored" instead of claiming work it
-   * did not do.
-   */
+  /** Write one Git-derived pattern to a selected ignore layer. The renderer
+   * sends the source path and choice, while main resolves the destination and
+   * escapes the exact line. */
   "changes:ignore": {
     req: {
       worktreeId: string;
-      entries: { path: string; directory: boolean }[];
+      path: string;
+      directory: boolean;
+      pattern: IgnorePatternChoice;
+      destination: IgnoreDestination;
     };
-    res: { added: string[]; gitignorePath: string };
+    res: { added: string[]; targetPath: string };
+  };
+  "changes:ignoreOptions": {
+    req: { worktreeId: string; path: string; directory: boolean };
+    res: IgnoreOptions;
+  };
+  "changes:ignoredSummary": {
+    req: { worktreeId: string };
+    res: IgnoredSummary;
   };
   /** Discard every uncommitted change while preserving ignored files. */
   "changes:discardAll": { req: { worktreeId: string }; res: null };
   "changes:commit": {
-    req: { worktreeId: string; message: string; amend?: boolean };
-    res: null;
+    req: { worktreeId: string; message: string; amend?: boolean; noVerify?: boolean };
+    res: { hooks: HookRun[] };
   };
   /** What Git is mid-operation on, plus how many paths are still unmerged. */
   "operation:state": { req: { worktreeId: string }; res: OperationState };

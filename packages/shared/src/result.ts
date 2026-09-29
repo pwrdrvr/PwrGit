@@ -7,6 +7,8 @@
 // carries the typed error envelope directly. Nothing throws across the
 // process boundary.
 
+import type { HookRun } from "./git-discovery";
+
 export type Ok<T> = { ok: true; value: T };
 export type Err<E> = { ok: false; error: E };
 export type Result<T, E = PwrGitError> = Ok<T> | Err<E>;
@@ -43,6 +45,8 @@ export type PwrGitError = {
    * what the tool actually wrote. Absent means `message` IS the output.
    */
   detail?: string;
+  /** Present only when trace2 proves a hook refused this Git operation. */
+  hook?: HookRun;
   cause?: unknown;
 };
 

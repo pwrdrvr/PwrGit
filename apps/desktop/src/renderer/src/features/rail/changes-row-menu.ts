@@ -23,7 +23,7 @@ export function targetPaths(target: ChangesRowTarget): string[] {
 }
 
 /**
- * `.gitignore` only has an effect on files git is not already tracking, so the
+ * Ignore rules only affect files Git is not already tracking, so the
  * action is offered only when *everything* the row stands for is untracked.
  * Offering it on a tracked file would write a line that changes nothing and
  * leave the user believing the file is now ignored.
@@ -35,7 +35,7 @@ export function canIgnore(target: ChangesRowTarget): boolean {
         target.files.every((file) => file.status === "?");
 }
 
-/** The `.gitignore` pattern a row implies — a folder ignores the folder. */
+/** The initial path a row sends to the Ignore dialog. */
 export function ignorePathFor(target: ChangesRowTarget): {
   path: string;
   directory: boolean;
@@ -79,10 +79,7 @@ export function changesRowMenuItems(
   if (canIgnore(target)) {
     items.push({
       type: "item",
-      label:
-        target.kind === "file"
-          ? "Add to .gitignore"
-          : "Add folder to .gitignore",
+      label: "Ignore…",
       onSelect: actions.onIgnore
     });
   }

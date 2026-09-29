@@ -20,7 +20,7 @@ vi.mock("../../lib/pwrgit", () => ({
   // No profile: the agent store never asks, so no agent footer appears.
   windowProfileId: () => null
 }));
-vi.mock("../shell/dialogs", () => ({ confirmDialog: mocks.confirmDialog }));
+vi.mock("../shell/dialogs", () => ({ confirmDialog: mocks.confirmDialog, notifyDialog: vi.fn() }));
 vi.mock("../../lib/toast", () => ({
   showErrorToast: mocks.showErrorToast,
   showInfoToast: mocks.showInfoToast
@@ -553,8 +553,14 @@ describe("ChangesTab folder actions", () => {
     mocks.dispatch.mockImplementation(async (command: string) =>
       command === "changes:list"
         ? ok(listed)
+        : command === "changes:ignoreOptions"
+          ? ok({ patterns: [{ choice: "folder", pattern: "/dist/", count: 2 }], destinations: [
+              { destination: "gitignore", path: "/repo/.gitignore", displayPath: ".gitignore", scope: "committed · team" },
+              { destination: "exclude", path: "/repo/.git/info/exclude", displayPath: ".git/info/exclude", scope: "this clone · 1 worktree" },
+              { destination: "global", path: "/home/.config/git/ignore", displayPath: "~/.config/git/ignore", scope: "this Mac" }
+            ], suggested: "gitignore", worktreeCount: 1 })
         : command === "changes:ignore"
-          ? ok({ added: ["/dist/"], gitignorePath: "/repo/.gitignore" })
+          ? ok({ added: ["/dist/"], targetPath: "/repo/.gitignore" })
           : ok(null)
     );
     container = document.createElement("div");
@@ -614,13 +620,21 @@ describe("ChangesTab folder actions", () => {
     await rightClick(folderRow);
 
     await act(async () => {
-      menuItem("Add folder to .gitignore").click();
+      menuItem("Ignore…").click();
     });
 
-    // A directory entry, so main writes "/dist/" rather than a file pattern.
+    expect(document.querySelector(".discovery-ignore")).not.toBeNull();
+    await act(async () => {
+      const add = [...document.querySelectorAll(".discovery-ignore button")].find((button) => button.textContent === "Add ignore rule");
+      if (!(add instanceof HTMLButtonElement)) throw new Error("no add button");
+      add.click();
+    });
     expect(mocks.dispatch).toHaveBeenCalledWith("changes:ignore", {
       worktreeId: "worktree-1",
-      entries: [{ path: "dist", directory: true }]
+      path: "dist",
+      directory: true,
+      pattern: "folder",
+      destination: "gitignore"
     });
   });
 
@@ -713,7 +727,7 @@ describe("ChangesTab folder actions", () => {
       command === "changes:list"
         ? ok(listed)
         : command === "changes:ignore"
-          ? ok({ added: [], gitignorePath: "/repo/.gitignore" })
+          ? ok({ added: [], targetPath: "/repo/.gitignore" })
           : ok(null)
     );
     const folderRow = container.querySelector(".folder-row");
@@ -721,12 +735,9 @@ describe("ChangesTab folder actions", () => {
     await rightClick(folderRow);
 
     await act(async () => {
-      menuItem("Add folder to .gitignore").click();
+      menuItem("Ignore…").click();
     });
-
-    expect(mocks.showInfoToast).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "Already ignored" })
-    );
+    expect(document.querySelector(".discovery-ignore")).not.toBeNull();
   });
 
   it("copies every path a folder stands for", async () => {
@@ -900,4 +911,3 @@ describe("ChangesTab conflict marker guard", () => {
     });
   });
 });
-

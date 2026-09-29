@@ -18,7 +18,8 @@ import {
   stagePaths,
   unstagePaths
 } from "./git-service";
-import { appendToGitignore, toGitignorePattern } from "./gitignore";
+import { appendToIgnoreFile } from "./gitignore";
+import { ignoreDestinations, patternForChoice, readIgnoredSummary, readIgnoreOptions, validIgnorePath } from "./ignore-discovery";
 import { readImagePreview } from "./image-preview";
 import { applyPartialSelection, partialFileDiff } from "./partial-staging";
 import type { WorktreeRefresher } from "./worktree-handlers";
@@ -127,29 +128,45 @@ export function registerChangesHandlers(
     return ok(null);
   });
 
+  bus.register("changes:ignoreOptions", async (req) => {
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    return operations.run(req.worktreeId, () => readIgnoreOptions(execGit, live.value, req.path, req.directory));
+  });
+
+  bus.register("changes:ignoredSummary", async (req) => {
+    const live = pathOf(req.worktreeId);
+    if (!live.ok) return live;
+    return operations.run(req.worktreeId, () => readIgnoredSummary(execGit, live.value));
+  });
+
   bus.register("changes:ignore", async (req) => {
     const live = pathOf(req.worktreeId);
     if (!live.ok) return live;
-    const path = live.value;
-    if (req.entries.length === 0) {
+    if (!validIgnorePath(req.path)) {
       return err({
         kind: "validation",
-        code: "no_patterns",
-        message: "Nothing to ignore"
+        code: "invalid_path",
+        message: "Choose a path inside this worktree."
       });
     }
-    const result = appendToGitignore(
-      path,
-      req.entries.map((entry) =>
-        toGitignorePattern(entry.path, { directory: entry.directory })
-      )
-    );
+    const pattern = patternForChoice(req.path, req.directory, req.pattern);
+    if (pattern === null) return err({ kind: "validation", code: "invalid_pattern", message: "That pattern is not available for this path." });
+    const row = db.prepare("SELECT repo_id AS repoId FROM worktrees WHERE id = ?").get(req.worktreeId) as { repoId: string } | undefined;
+    if (row === undefined) return err(notFound);
+    const result = await operations.runRepository(row.repoId, async () => {
+      const locations = await ignoreDestinations(execGit, live.value);
+      if (!locations.ok) return locations;
+      const target = locations.value.destinations.find((item) => item.destination === req.destination);
+      if (target === undefined) return err({ kind: "validation" as const, code: "invalid_destination", message: "Choose an ignore destination." });
+      return appendToIgnoreFile(target.path, [pattern]);
+    });
     if (!result.ok) return result;
     if (result.value.added.length > 0) {
       logMain(
         "info",
         "changes",
-        `ignored in ${path}:`,
+        `ignored in ${result.value.targetPath}:`,
         result.value.added.join(", ")
       );
       // The ignored files leave the change set, which the coarse worktree
@@ -204,10 +221,14 @@ export function registerChangesHandlers(
 
     const result = await operations.run(req.worktreeId, () =>
       commitChanges(execGit, row.path, req.message, identity, {
-        amend: req.amend ?? false
+        amend: req.amend ?? false,
+        noVerify: req.noVerify ?? false
       })
     );
-    if (!result.ok) return result;
+    if (!result.ok) {
+      notifyChanged(req.worktreeId);
+      return result;
+    }
     logMain(
       "info",
       "commit",
@@ -215,7 +236,7 @@ export function registerChangesHandlers(
       req.message.split("\n")[0]
     );
     notifyChanged(req.worktreeId);
-    return ok(null);
+    return ok(result.value);
   });
 
   bus.register("diff:fileSelection", async (req) => {
