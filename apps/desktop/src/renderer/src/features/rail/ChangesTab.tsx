@@ -531,8 +531,8 @@ export function ChangesTab({
   const commit = (amend: boolean, noVerify = false): void => {
     if (wtId === null || message.trim() === "" || committing) return;
     setCommitting(true);
-    void dispatch("changes:commit", { worktreeId: wtId, message, amend, noVerify }).then((r) => {
-      setCommitting(false);
+    // A rejected dispatch must not leave Commit and Amend disabled for good.
+    void dispatch("changes:commit", { worktreeId: wtId, message, amend, noVerify }).finally(() => setCommitting(false)).then((r) => {
       if (r.ok) {
         draft.reset("");
         setCommitOutcome({ hooks: r.value.hooks });
@@ -624,7 +624,7 @@ export function ChangesTab({
           title={`${hook.name} ${hook.exitCode === 0 ? "passed" : "finished"}`}
           sentence={`Git ran this hook before or after recording the commit. It exited ${hook.exitCode} in ${(hook.elapsedMs / 1000).toFixed(1)} s.`}
           where={<code>{hook.path}</code>}
-          scope={hook.path.startsWith(".git/") ? `this clone · ${ignored?.worktreeCount ?? 1} worktree${(ignored?.worktreeCount ?? 1) === 1 ? "" : "s"}` : "committed · team"}
+          scope={/(^|[\\/])\.git[\\/]hooks[\\/]/.test(hook.path) ? `this clone · ${ignored?.worktreeCount ?? 1} worktree${(ignored?.worktreeCount ?? 1) === 1 ? "" : "s"}` : "committed · team"}
           command="git commit"
           actions={[{ label: "Copy hook path", onClick: () => void copyText(hook.path) }]}
           manual={{ label: "githooks(5)", onClick: () => void dispatch("shell:openExternal", { url: "https://git-scm.com/docs/githooks" }) }}

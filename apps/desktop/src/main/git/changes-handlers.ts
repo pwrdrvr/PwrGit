@@ -174,6 +174,17 @@ export function registerChangesHandlers(
       // state can miss entirely — an untracked folder is one status line
       // before, and .gitignore is one status line after.
       notifyChanged(req.worktreeId);
+      // info/exclude and the global file are not per-worktree: every sibling
+      // checkout of this clone (and, for global, every checkout) just lost
+      // the same untracked files, and none of their watchers saw it happen.
+      if (req.destination !== "gitignore") {
+        const siblings = (req.destination === "exclude"
+          ? db.prepare("SELECT id FROM worktrees WHERE repo_id = ? AND missing = 0").all(row.repoId)
+          : db.prepare("SELECT id FROM worktrees WHERE missing = 0").all()) as { id: string }[];
+        for (const sibling of siblings) {
+          if (sibling.id !== req.worktreeId) emitEvent("changes:changed", { worktreeId: sibling.id });
+        }
+      }
     }
     return ok(result.value);
   });

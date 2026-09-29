@@ -59,7 +59,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose }: {
   const scope = `this clone · ${setup?.hooks.worktreeCount ?? 1} worktree${setup?.hooks.worktreeCount === 1 ? "" : "s"}`;
   const winner = useMemo(() => {
     if (testResult?.source === null || testResult?.source === undefined) return null;
-    return setup?.ignore.find((layer) => layer.path === testResult.source || layer.displayPath === testResult.source || (layer.destination === "gitignore" && testResult.source?.endsWith(".gitignore")))?.destination ?? null;
+    return setup?.ignore.find((layer) => layer.path === testResult.source || layer.displayPath === testResult.source || (layer.destination === "gitignore" && testResult.source === ".gitignore"))?.destination ?? null;
   }, [testResult, setup]);
 
   const saveExclude = async (): Promise<void> => {

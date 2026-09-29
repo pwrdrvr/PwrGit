@@ -110,7 +110,15 @@ export async function readRepositorySetup(git: GitExec, cwd: string): Promise<Re
   const configuredPath = pair[1] ?? null;
   const origin = pair[0] ?? null;
   const defaultDir = join(common.value, "hooks");
-  const activeDir = configuredPath === null ? defaultDir : resolve(cwd, configuredPath);
+  // `common` is a native realpath, so compare against one too: an explicit
+  // `core.hooksPath = .git/hooks`, or a checkout reached through a symlink
+  // (/tmp on macOS), names the default directory by a different spelling and
+  // would otherwise list every hook as both active and shadowed.
+  const configuredDir = configuredPath === null ? null : resolve(cwd, configuredPath);
+  let activeDir = configuredDir ?? defaultDir;
+  if (configuredDir !== null) {
+    try { activeDir = realpathSync.native(configuredDir); } catch { /* A missing hooks dir keeps its configured spelling. */ }
+  }
   const lastRuns = receipts.get(common.value);
   const active = listHooks(activeDir, cwd, common.value, lastRuns);
   const shadowed = activeDir === defaultDir ? { hooks: [], sampleCount: 0 } : listHooks(defaultDir, cwd, common.value, undefined);

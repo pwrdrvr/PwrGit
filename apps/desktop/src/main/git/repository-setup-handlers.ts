@@ -13,13 +13,16 @@ export function registerRepositorySetupHandlers(bus: CommandBus, db: DB, operati
     return row?.path ?? null;
   };
   const missing = () => err({ kind: "repo" as const, code: "not_found", message: "Repository checkout not found" });
+  // Both reads are read-only and must not wait on the repository lock: fetch
+  // and bulk sync hold it for the whole network round trip, and the worktree
+  // header re-reads setup on every change event.
   bus.register("repo:setup", async ({ repoId }) => {
     const path = pathOf(repoId);
-    return path === null ? missing() : operations.runRepository(repoId, () => readRepositorySetup(execGit, path));
+    return path === null ? missing() : readRepositorySetup(execGit, path);
   });
   bus.register("repo:testIgnorePath", async ({ repoId, path: testPath }) => {
     const path = pathOf(repoId);
-    return path === null ? missing() : operations.runRepository(repoId, () => testSetupIgnorePath(execGit, path, testPath));
+    return path === null ? missing() : testSetupIgnorePath(execGit, path, testPath);
   });
   bus.register("repo:saveExclude", async ({ repoId, previous, content }) => {
     const path = pathOf(repoId);
