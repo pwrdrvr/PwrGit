@@ -38,7 +38,50 @@ const file = (path: string): FileSearchHit => {
   };
 };
 
+const branch = (
+  repoId: string,
+  name: string,
+  kind: RepoSearchHit["kind"] = "local_branch"
+): RepoSearchHit => ({ ...repo(repoId), kind, name, repoName: repoId });
+
 describe("buildPaletteItems", () => {
+  it("leads with the focused repo's exact branch, above files and commits", () => {
+    const items = buildPaletteItems(
+      [commit],
+      [branch("other", "main"), branch("codex", "main"), branch("codex", "main-2")],
+      "main",
+      [file("codex-rs/cli/src/main.rs")],
+      "codex"
+    );
+
+    expect(items.map((item) => item.kind)).toEqual([
+      "repo", "file", "commit", "repo", "repo"
+    ]);
+    expect(items[0]).toMatchObject({ hit: { repoId: "codex", name: "main" } });
+    expect(items[3]).toMatchObject({ hit: { repoId: "other", name: "main" } });
+  });
+
+  it("does not lift a focused-repo branch the query only prefixes", () => {
+    const items = buildPaletteItems(
+      [],
+      [branch("codex", "main-2")],
+      "main",
+      [file("src/main.rs")],
+      "codex"
+    );
+    expect(items.map((item) => item.kind)).toEqual(["file", "repo"]);
+  });
+
+  it("leaves ordering alone when no repo is focused", () => {
+    const items = buildPaletteItems(
+      [],
+      [branch("codex", "main")],
+      "main",
+      [file("src/main.rs")]
+    );
+    expect(items.map((item) => item.kind)).toEqual(["file", "repo"]);
+  });
+
   it("puts file matches above commits but below an exact repo name", () => {
     const items = buildPaletteItems(
       [commit],

@@ -175,17 +175,31 @@ export function buildPaletteItems(
   commits: Commit[],
   results: RepoSearchHit[],
   query: string,
-  files: FileSearchHit[] = []
+  files: FileSearchHit[] = [],
+  focusedRepoId: string | null = null
 ): PaletteItem[] {
   const exactName = query.trim().normalize("NFC").toLowerCase();
   // `106` names change request #106 as surely as a repo's full name names the
   // repo, and a bare number also looks like a commit hash prefix and a path —
   // so whatever holds #106 leads, above both.
   const prNumber = changeRequestNumberQuery(query);
+  const focusedBranches: RepoSearchHit[] = [];
   const exactRepos: RepoSearchHit[] = [];
   const otherResults: RepoSearchHit[] = [];
   for (const hit of results) {
+    // Typing `main` in a focused repo means that repo's `main`. It leads
+    // everything — `main.rs` files included — so type, Enter, and you are on
+    // it; the same rows in other repos stay where the ranking put them.
     if (
+      focusedRepoId !== null &&
+      hit.repoId === focusedRepoId &&
+      hit.kind !== "repo" &&
+      hit.kind !== "change_request" &&
+      exactName !== "" &&
+      hit.name.normalize("NFC").toLowerCase() === exactName
+    ) {
+      focusedBranches.push(hit);
+    } else if (
       (hit.kind === "repo" &&
         hit.name.normalize("NFC").toLowerCase() === exactName) ||
       (prNumber !== null && hit.pr?.number === prNumber)
@@ -200,6 +214,7 @@ export function buildPaletteItems(
   // substring, so a hit is a strong signal, and the main process caps the list
   // short enough that it cannot crowd the other kinds out.
   return [
+    ...focusedBranches.map((hit) => ({ kind: "repo" as const, hit })),
     ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
     ...files.map((hit) => ({ kind: "file" as const, hit })),
     ...commits.map((commit) => ({ kind: "commit" as const, commit })),
@@ -347,6 +362,7 @@ export function RepoSwitcherOverlay({
 }: {
   commits: Commit[];
   commitContext: {
+    repoId: string;
     repoName: string;
     branch: string;
     worktreeId: string;
@@ -423,6 +439,7 @@ export function RepoSwitcherOverlay({
   const resultsId = `${idPrefix}-results`;
   const rowId = (index: number): string => `${idPrefix}-result-${index}`;
   const commitWorktreeId = commitContext?.worktreeId ?? null;
+  const focusedRepoId = commitContext?.repoId ?? null;
   const commitResults = useMemo(
     () => searchCommits(commits, query),
     [commits, query]
@@ -441,8 +458,9 @@ export function RepoSwitcherOverlay({
     [commitResults, directCommit]
   );
   const items = useMemo<PaletteItem[]>(
-    () => buildPaletteItems(allCommitResults, results, query, files),
-    [allCommitResults, results, query, files]
+    () =>
+      buildPaletteItems(allCommitResults, results, query, files, focusedRepoId),
+    [allCommitResults, results, query, files, focusedRepoId]
   );
   const sel = selectedPaletteItemIndex(items, selectedItemKey);
   const selectedResult = (index: number): boolean => index === sel && (!showSetupCommand || selectedItemKey !== null);
@@ -565,7 +583,8 @@ export function RepoSwitcherOverlay({
     void dispatch("repo:search", {
       query,
       ...(profileId === null ? {} : { profileId }),
-      ...(allProfiles === null ? {} : { allProfiles })
+      ...(allProfiles === null ? {} : { allProfiles }),
+      ...(focusedRepoId === null ? {} : { focusedRepoId })
     }).then((r) => {
       if (active && r.ok) {
         setResults(resolvePaletteHits(r.value, resolvedBranches.current));
@@ -574,7 +593,7 @@ export function RepoSwitcherOverlay({
     return () => {
       active = false;
     };
-  }, [query, allProfiles]);
+  }, [query, allProfiles, focusedRepoId]);
 
   // Tracked files in the selected worktree. This is the only way into a file
   // that has not changed recently: the app has no file browser, so history and

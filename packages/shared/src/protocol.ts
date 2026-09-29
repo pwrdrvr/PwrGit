@@ -1034,7 +1034,14 @@ export interface Commands {
    * omitted, main reads General → Search all profiles.
    */
   "repo:search": {
-    req: { query: string; profileId?: ProfileId; allProfiles?: boolean };
+    req: {
+      query: string;
+      profileId?: ProfileId;
+      allProfiles?: boolean;
+      /** The repository the asking window has focused. Its exact-name
+       *  branches survive the result cap ahead of other repos' twins. */
+      focusedRepoId?: RepoId;
+    };
     res: RepoSearchHit[];
   };
   /** Verify a visible local-branch hit using a short-lived, shared worktree

@@ -998,6 +998,7 @@ export function App() {
             selectedRepo === null || selectedWorktree === null
               ? null
               : {
+                  repoId: selectedRepo.id,
                   repoName: selectedRepo.name,
                   branch: selectedWorktree.branch,
                   worktreeId: selectedWorktree.id

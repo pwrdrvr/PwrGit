@@ -20,6 +20,7 @@ import {
   type Profile,
   type ProfileId,
   type Repo,
+  type RepoId,
   type RepoIdentity,
   type RepoSearchHit,
   type RepoVisibility,
@@ -236,6 +237,8 @@ const CHANGE_REQUEST_SEARCH_LIMIT = 15;
 export type SearchScope = {
   profileId: ProfileId | null;
   allProfiles: boolean;
+  /** The repository the asking window has focused, if any. */
+  focusedRepoId?: RepoId | null;
 };
 
 /** No window in particular, every profile — the default for tests and tools. */
@@ -806,13 +809,14 @@ export class RepoIndexer {
                                   OR path LIKE ? ESCAPE '\\'))
                          OR pr LIKE ?
                        THEN 0 ELSE 1 END,
+                  repo_name = (SELECT name FROM repos WHERE id = ?) COLLATE NOCASE DESC,
                   profile_id = ? DESC,
                   bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT 60`
       )
       .all(
         fts, only, only, query.trim(), query.trim(),
-        leafPosix, leafWindows, prLike, mine
+        leafPosix, leafWindows, prLike, scope.focusedRepoId ?? null, mine
       ) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];

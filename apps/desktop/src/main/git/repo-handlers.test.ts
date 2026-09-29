@@ -320,4 +320,24 @@ describe("repo handlers", () => {
       });
     }
   );
+
+  it("passes the focused repository through to the index", async () => {
+    const searchAll = vi.fn(() => []);
+    const indexer = { searchAll } as unknown as RepoIndexer;
+    const profiles = { getActiveId: () => null } as unknown as ProfileService;
+    const bus = new CommandBus();
+    registerRepoHandlers(bus, indexer, profiles, refresher, () => false);
+
+    await bus.dispatch("repo:search", {
+      query: "main",
+      profileId: "window-profile",
+      focusedRepoId: "repo-7"
+    });
+
+    expect(searchAll).toHaveBeenCalledExactlyOnceWith("main", {
+      profileId: "window-profile",
+      allProfiles: false,
+      focusedRepoId: "repo-7"
+    });
+  });
 });
