@@ -633,11 +633,15 @@ export class RepoIndexer {
   setBranchPinned(repoId: string, branch: string, pinned: boolean): void {
     if (branch === "") return;
     this.db.transaction(() => {
-      this.db
+      const held = this.db
         .prepare(
           "UPDATE worktrees SET pinned = ? WHERE repo_id = ? AND branch = ?"
         )
-        .run(pinned ? 1 : 0, repoId, branch);
+        .run(pinned ? 1 : 0, repoId, branch).changes;
+      if (pinned && held > 0) return;
+      // Unpinning always clears the row (it may pre-date the worktree); pinning
+      // writes one only for a branch nothing holds, so a pin taken through a
+      // worktree goes away with it, as a worktree pin always has.
       this.db
         .prepare(
           pinned

@@ -79,7 +79,10 @@ export function registerRepoHandlers(
 
   bus.register("branch:setPin", (req) => {
     indexer.setBranchPinned(req.repoId, req.branch, req.pinned);
-    const profileId = profiles.getActiveId();
+    // The repo's own profile: the globally active one is "last used", not the
+    // window that asked, and the renderer filters this event by profile.
+    const profileId =
+      indexer.getRepo(req.repoId)?.profileId ?? profiles.getActiveId();
     if (profileId !== null) emitEvent("repo:changed", { profileId });
     return ok(null);
   });

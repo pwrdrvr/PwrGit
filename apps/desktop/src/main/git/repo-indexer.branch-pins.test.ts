@@ -68,6 +68,16 @@ describe("branch pins", () => {
     expect(repo().worktrees.find((w) => w.id === "wt-feat")?.pinned).toBe(false);
   });
 
+  it("writes no branch row for a branch a worktree holds, so the pin leaves with it", () => {
+    indexer.setBranchPinned(repoId, "feat/x", true);
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM pinned_branches").get()
+    ).toEqual({ n: 0 });
+
+    db.prepare("DELETE FROM worktrees WHERE id = 'wt-feat'").run();
+    expect(repo().pinnedBranches).toBeUndefined();
+  });
+
   it("keeps the pin when the branch gains a worktree", () => {
     indexer.setBranchPinned(repoId, "main", true);
     db.prepare(
