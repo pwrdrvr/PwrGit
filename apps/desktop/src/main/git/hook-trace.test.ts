@@ -18,4 +18,16 @@ describe("parseHookTrace", () => {
       { name: "commit-msg", path: ".husky/_/commit-msg", exitCode: 0, elapsedMs: 120 }
     ]);
   });
+
+  it("uses Git's hook child class and invoked path when hook_name is absent", () => {
+    const trace = [
+      JSON.stringify({ event: "child_start", sid: "outer", child_id: 0, child_class: "hook", argv: [".git/hooks/pre-commit"] }),
+      JSON.stringify({ event: "child_start", sid: "outer", child_id: 1, child_class: "shell", argv: [".git/hooks/not-a-hook"] }),
+      JSON.stringify({ event: "child_exit", sid: "outer", child_id: 1, code: 0, t_rel: 0.01 }),
+      JSON.stringify({ event: "child_exit", sid: "outer", child_id: 0, code: 1, t_rel: 0.125 })
+    ].join("\n");
+    expect(parseHookTrace(trace)).toEqual([
+      { name: "pre-commit", path: ".git/hooks/pre-commit", exitCode: 1, elapsedMs: 125 }
+    ]);
+  });
 });

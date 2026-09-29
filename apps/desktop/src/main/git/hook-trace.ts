@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import type { HookRun } from "@pwrgit/shared";
 
 type TraceEvent = {
@@ -26,10 +27,15 @@ export function parseHookTrace(trace: string): HookRun[] {
     }
     if (typeof event.sid !== "string" || typeof event.child_id !== "number") continue;
     const key = `${event.sid}:${event.child_id}`;
-    if (event.event === "child_start" && event.child_class === "hook" && typeof event.hook_name === "string") {
+    if (event.event === "child_start" && (event.child_class === "hook" || typeof event.hook_name === "string")) {
+      // Older bundled Git builds mark the child as a hook but omit hook_name.
+      // Its argv[0] is the exact executable Git invoked, so the basename is
+      // still evidence from Git rather than a guess from files on disk.
+      const name = event.hook_name || (event.argv?.[0] === undefined ? null : basename(event.argv[0]));
+      if (name === null) continue;
       starts.set(key, {
-        name: event.hook_name,
-        path: event.argv?.[0] ?? event.hook_name
+        name,
+        path: event.argv?.[0] ?? name
       });
     } else if (event.event === "child_exit") {
       const start = starts.get(key);
