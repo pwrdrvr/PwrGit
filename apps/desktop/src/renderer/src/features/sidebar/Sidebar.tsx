@@ -52,7 +52,6 @@ import { RepoRow } from "./RepoRow";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import { MaintenanceDialog } from "./MaintenanceDialog";
-import { PruneWorktreesDialog } from "./PruneWorktreesDialog";
 import {
   DEFAULT_LENS,
   filterReposByLens,
@@ -341,7 +340,6 @@ export function Sidebar({
   const [bulkSyncMode, setBulkSyncMode] = useState<
     "fetch" | "soft-pull" | null
   >(null);
-  const [pruning, setPruning] = useState(false);
   /** The maintenance dialog, and — when the refs browser opened it — the one
    *  repository it reviews. */
   const [maintenance, setMaintenance] = useState<
@@ -1193,28 +1191,11 @@ export function Sidebar({
               <span className="bulk-sync-action__label">Try pull all</span>
             </button>
           </div>
-          {/* Its own row, for the reason recorded on .clone-repo-row: three
-              labels do not fit one row at the 240px resize floor, and this
-              one is the longest of the three. Kept next to the bulk-sync pair
-              rather than beside the lens chips — the Stale lens filters the
-              rows it can already see, while this sweeps every repository
-              whether or not it has ever been expanded. */}
-          <div className="prune-actions" aria-label="Reclaim worktrees">
-            <button
-              className="bulk-sync-action"
-              disabled={activeProfile === null || repos.length === 0}
-              {...hoverTooltip(tip, "Find worktrees that are safe to remove, across every repository")}
-              onClick={() => setPruning(true)}
-            >
-              <PruneGlyph />
-              <span className="bulk-sync-action__label">Prune worktrees…</span>
-            </button>
-          </div>
           <div className="prune-actions" aria-label="Maintain repositories">
             <button className="bulk-sync-action" disabled={activeProfile === null}
-              {...hoverTooltip(tip, "Collect Git garbage across repositories and review leftover local branches")}
+              {...hoverTooltip(tip, "Collect Git garbage, prune finished worktrees, and review leftover local branches")}
               onClick={() => setMaintenance({})}>
-              <PruneGlyph /><span className="bulk-sync-action__label">Garbage collection…</span>
+              <PruneGlyph /><span className="bulk-sync-action__label">Repository maintenance…</span>
             </button>
           </div>
           {activeProfile !== null && activeProfile.roots.length === 0 && (
@@ -1394,6 +1375,7 @@ export function Sidebar({
           profileId={activeProfile.id}
           platform={platform}
           onClose={() => setMaintenance(null)}
+          onRemoveWorktrees={(ids) => onRemoveWorktrees(ids, { confirmed: true })}
           {...(maintenance.repo === undefined
             ? {}
             : {
@@ -1401,14 +1383,6 @@ export function Sidebar({
                 initialTab: "branches" as const,
                 autoReview: true
               })}
-        />
-      )}
-
-      {pruning && activeProfile !== null && (
-        <PruneWorktreesDialog
-          profileId={activeProfile.id}
-          onRemove={(ids) => onRemoveWorktrees(ids, { confirmed: true })}
-          onClose={() => setPruning(false)}
         />
       )}
 

@@ -253,9 +253,14 @@ export function registerPruneHandlers(
         sizeOf: async (path, signal) => {
           const measured = await directorySize(
             path,
-            signal === undefined ? {} : { signal }
+            { trackActivity: true, ...(signal === undefined ? {} : { signal }) }
           );
-          return { bytes: measured.bytes, partial: measured.partial };
+          return {
+            bytes: measured.bytes,
+            partial: measured.partial,
+            ...(measured.lastTouchedAt === undefined ? {} : { lastTouchedAt: measured.lastTouchedAt }),
+            activityComplete: !measured.partial && measured.inaccessible === 0
+          };
         },
         onProgress: (progress) => emitEvent("prune:scanProgress", progress),
         runRepository: (repoId, operation) =>

@@ -1790,6 +1790,10 @@ export type PruneCandidate = {
   reason: PrunableReason;
   /** ISO-8601 time of the branch's last commit, when git could report one. */
   lastActivityAt?: string;
+  /** Latest observed filesystem change in this checkout (not access time). */
+  lastTouchedAt?: string;
+  /** True only when the filesystem activity walk completed without unreadable entries. */
+  activityComplete?: boolean;
   /** Bytes on disk, or null when sizing was cancelled or never ran. */
   sizeBytes: number | null;
   /** The size walk hit its entry ceiling: `sizeBytes` is a lower bound. */

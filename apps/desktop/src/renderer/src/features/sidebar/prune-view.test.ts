@@ -7,6 +7,7 @@ import {
   emptyReviewCopy,
   formatExcludeLines,
   parseExcludeLines,
+  protectedFromPruning,
   reasonDetail,
   reasonLabel,
   reclaimConfirmMessage,
@@ -329,5 +330,24 @@ describe("emptyReviewCopy", () => {
       new Set(["a"])
     );
     expect(emptyReviewCopy(floored)).toContain("deleting at least 2 KB");
+  });
+});
+
+describe("recent activity protection", () => {
+  const now = Date.parse("2026-09-28T00:00:00Z");
+  const old = candidate({ worktreeId: "done", activityComplete: true,
+    lastActivityAt: "2026-08-01T00:00:00Z", lastTouchedAt: "2026-08-01T00:00:00Z",
+    reason: { kind: "merged_pr", prNumber: 42 } });
+  it("protects merged PRs at the exact boundary and with future commits", () => {
+    expect(protectedFromPruning(old, 7, now)).toBe(false);
+    expect(protectedFromPruning({ ...old, lastTouchedAt: "2026-09-21T00:00:00Z" }, 7, now)).toBe(true);
+    expect(protectedFromPruning({ ...old, lastActivityAt: "2026-09-29T00:00:00Z" }, 7, now)).toBe(true);
+  });
+  it("fails closed for unreadable, partial, cancelled and unknown activity; off is explicit", () => {
+    for (const c of [candidate({ worktreeId: "unknown" }), { ...old, activityComplete: false },
+      { ...old, lastTouchedAt: "invalid" }, { ...old, lastActivityAt: "invalid" }]) {
+      expect(protectedFromPruning(c, 7, now)).toBe(true);
+      expect(protectedFromPruning(c, 0, now)).toBe(false);
+    }
   });
 });

@@ -417,3 +417,18 @@ describe("update train and track", () => {
     });
   });
 });
+
+describe("combined maintenance preference", () => {
+  it("defaults to review, remembers auto, and rejects unknown modes", async () => {
+    const service = freshService();
+    const bus = new CommandBus();
+    registerSettingsHandlers(bus, service, { diagnosticsOutputRoot: "/diag", onChanged: () => undefined });
+    const initial = await bus.dispatch("settings:read", undefined);
+    expect(initial.ok && initial.value.general.maintenanceBranchMode).toBe("review");
+    await bus.dispatch("settings:update", { patch: { general: { maintenanceBranchMode: "auto" } } });
+    expect(service.get().general?.maintenanceBranchMode).toBe("auto");
+    await bus.dispatch("settings:update", { patch: { general: { maintenanceBranchMode: "unsafe" as never } } });
+    const saved = await bus.dispatch("settings:read", undefined);
+    expect(saved.ok && saved.value.general.maintenanceBranchMode).toBe("auto");
+  });
+});

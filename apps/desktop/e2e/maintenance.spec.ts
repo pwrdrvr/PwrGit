@@ -33,9 +33,10 @@ test("collects all repositories and reviews stale local branches without touchin
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "atlas-client");
   await window
-    .getByRole("button", { name: "Garbage collection…", exact: true })
+    .getByRole("button", { name: "Repository maintenance…", exact: true })
     .click();
   const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
+  await dialog.getByRole("button", { name: "Garbage collection", exact: true }).click();
   await expect(dialog.getByRole("radio", { name: /Standard/ })).toBeChecked();
   await dialog.screenshot({
     animations: "disabled",
@@ -117,11 +118,12 @@ for (const [width, height] of [
       [width!, height!]
     );
     await window
-      .getByRole("button", { name: "Garbage collection…", exact: true })
+      .getByRole("button", { name: "Repository maintenance…", exact: true })
       .click();
     const dialog = window.getByRole("dialog", {
       name: "Repository maintenance"
     });
+    await dialog.getByRole("button", { name: "Garbage collection", exact: true }).click();
     // Script IPC progress at the real renderer boundary so both the brief
     // between-repo gap and overlapping workers are deterministic on every CPU.
     const fixture = await app.evaluateHandle(({ ipcMain }) => {

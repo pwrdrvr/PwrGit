@@ -47,11 +47,14 @@ export type DirSizeResult = {
   inaccessible: number;
   /** Multiply-linked files seen more than once, and so counted only once. */
   hardLinks: number;
+  /** Latest filesystem change, populated only when trackActivity is requested. */
+  lastTouchedAt?: string;
 };
 
 export type DirSizeOptions = {
   signal?: AbortSignal;
   entryCap?: number;
+  trackActivity?: boolean;
 };
 
 const yieldToEventLoop = (): Promise<void> =>
@@ -84,6 +87,16 @@ export async function directorySize(
   // a later `=== true` reads as dead code — while the value really does flip
   // underneath us, which is the whole point of the check.
   const aborted = (): boolean => options.signal?.aborted === true;
+  const observe = (stats: { mtimeMs: number; ctimeMs: number; birthtimeMs: number }): void => {
+    if (!options.trackActivity) return;
+    // Reads/atime do not count. Metadata changes and creation do, including
+    // checkouts of old commits and edits restored to their committed contents.
+    const at = Math.max(stats.mtimeMs, stats.ctimeMs, stats.birthtimeMs);
+    if (Number.isFinite(at) &&
+        (result.lastTouchedAt === undefined || at > Date.parse(result.lastTouchedAt))) {
+      result.lastTouchedAt = new Date(at).toISOString();
+    }
+  };
   const stack: string[] = [root];
   let dirsRead = 0;
 
@@ -99,6 +112,7 @@ export async function directorySize(
     const dir = stack.pop() as string;
     let dirents;
     try {
+      if (options.trackActivity) observe(await lstat(dir));
       dirents = await readdir(dir, { withFileTypes: true });
     } catch {
       result.inaccessible += 1;
@@ -118,7 +132,10 @@ export async function directorySize(
       }
       result.entries += 1;
       // A symlink is counted as an entry and nothing more — see the note above.
-      if (dirent.isSymbolicLink()) continue;
+      if (dirent.isSymbolicLink()) {
+        if (options.trackActivity) files.push(join(dir, dirent.name));
+        continue;
+      }
       if (dirent.isDirectory()) stack.push(join(dir, dirent.name));
       else if (dirent.isFile()) files.push(join(dir, dirent.name));
     }
@@ -132,6 +149,8 @@ export async function directorySize(
         files.slice(at, at + STAT_BATCH).map(async (file) => {
           try {
             const stats = await lstat(file);
+            observe(stats);
+            if (!stats.isFile()) return { size: 0, key: null };
             if (stats.nlink <= 1) return { size: stats.size, key: null };
             return { size: stats.size, key: `${stats.dev}:${stats.ino}` };
           } catch {

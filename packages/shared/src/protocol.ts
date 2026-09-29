@@ -632,6 +632,8 @@ export type GeneralSettings = {
    * local tip as proof a branch is finished (squash and rebase merges).
    */
   branchCleanupPrProof: boolean;
+  /** Combined maintenance: pause for branch review or remove proven candidates automatically. */
+  maintenanceBranchMode: "review" | "auto";
   /** Maintenance › Local branches: keep branches touched within this many
    *  days. Null switches the age guard off. */
   branchCleanupKeepDays: BranchCleanupKeepDays | null;
@@ -722,6 +724,7 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   sidebarDensity: "comfortable",
   searchAllProfiles: false,
   branchCleanupPrProof: DEFAULT_BRANCH_CLEANUP_OPTIONS.prProof,
+  maintenanceBranchMode: "review",
   branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays
 };
 

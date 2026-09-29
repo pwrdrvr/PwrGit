@@ -27,7 +27,7 @@ vi.mock("../../lib/platform", async (importOriginal) => ({
 }));
 
 
-import { PruneWorktreesDialog } from "./PruneWorktreesDialog";
+import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 
 function candidate(
   partial: Partial<PruneCandidate> & { worktreeId: string }
@@ -39,6 +39,9 @@ function candidate(
     path: `/w/${partial.worktreeId}`,
     reason: { kind: "merged_into_default", defaultBranch: "main" },
     sizeBytes: 1024,
+    lastActivityAt: "2026-08-01T00:00:00Z",
+    lastTouchedAt: "2026-08-01T00:00:00Z",
+    activityComplete: true,
     ...partial
   };
 }
@@ -118,7 +121,8 @@ async function render(
   await act(async () => {
     root.render(
       <StrictMode>
-        <PruneWorktreesDialog
+        <PruneWorktreesPanel
+          autoStart
           profileId="profile-1"
           onRemove={onRemove}
           onClose={vi.fn()}
@@ -142,7 +146,37 @@ const buttonNamed = (label: string): HTMLButtonElement => {
   return found;
 };
 
-describe("PruneWorktreesDialog", () => {
+describe("PruneWorktreesPanel", () => {
+  it("protects recent and unknown activity, updates totals instantly, and clears selections", async () => {
+    dispatch.mockResolvedValue({ ok: true, value: summary([
+      candidate({ worktreeId: "old" }),
+      candidate({ worktreeId: "recent", lastTouchedAt: "2026-09-10T00:00:00Z" }),
+      candidate({ worktreeId: "unknown", activityComplete: false })
+    ]) });
+    const onRemove = vi.fn().mockResolvedValue(undefined);
+    await render(onRemove);
+    expect(rows()).toHaveLength(1);
+    expect(container.textContent).toContain("1 proposed · 1 KB · 2 protected");
+    const protection = container.querySelector<HTMLInputElement>(".prune__protection input")!;
+    const window = container.querySelector<HTMLSelectElement>(".prune__protection select")!;
+    await act(async () => {
+      window.value = "1";
+      window.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(rows()).toHaveLength(2);
+    await act(async () => protection.click());
+    expect(rows()).toHaveLength(3);
+    await act(async () => container.querySelector<HTMLInputElement>(".prune__select input")!.click());
+    expect(dangerButton()?.disabled).toBe(false);
+    await act(async () => protection.click());
+    expect(rows()).toHaveLength(2);
+    expect(dangerButton()?.disabled).toBe(true);
+    await act(async () => rows()[0]!.querySelector<HTMLInputElement>("input")!.click());
+    await act(async () => dangerButton()!.click());
+    expect(onRemove).toHaveBeenCalledWith(["old"]);
+    expect(scanRequests()).toHaveLength(1);
+  });
+
   it("starts exactly one sweep through the app's StrictMode mount cycle", async () => {
     dispatch.mockReturnValue(deferred<unknown>().promise);
     await render();
@@ -405,4 +439,12 @@ describe("PruneWorktreesDialog", () => {
     // Re-create so afterEach's unmount stays valid.
     root = createRoot(container);
   });
+});
+
+it("leaves the busy state and reports a rejected scan", async () => {
+  dispatch.mockImplementation((name: string) => name === "prune:scan"
+    ? Promise.reject(new Error("Disconnected")) : Promise.resolve({ ok: true, value: null }));
+  await render();
+  expect(container.querySelector(".prune__activity")).toBeNull();
+  expect(container.querySelector(".modal__error")?.textContent).toBe("Disconnected");
 });

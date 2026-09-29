@@ -274,3 +274,17 @@ export function reclaimConfirmMessage(
     diskSpaceNote(platform)
   ].join("\n");
 }
+
+/** An additional review guard; the shared Git eligibility rule still applies. */
+export function protectedFromPruning(
+  candidate: PruneCandidate,
+  days: number,
+  now: number
+): boolean {
+  if (days === 0) return false;
+  if (candidate.activityComplete !== true) return true;
+  const touched = Date.parse(candidate.lastTouchedAt ?? "");
+  const committed = Date.parse(candidate.lastActivityAt ?? "");
+  if (!Number.isFinite(touched) || !Number.isFinite(committed)) return true;
+  return now - Math.max(touched, committed) <= days * 86_400_000;
+}

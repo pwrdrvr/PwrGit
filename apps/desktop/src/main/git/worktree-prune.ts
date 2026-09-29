@@ -78,7 +78,12 @@ export type PruneScanOptions = {
   sizeOf?: (
     path: string,
     signal?: AbortSignal
-  ) => Promise<{ bytes: number; partial: boolean }>;
+  ) => Promise<{
+    bytes: number;
+    partial: boolean;
+    lastTouchedAt?: string;
+    activityComplete?: boolean;
+  }>;
   onProgress?: (progress: PruneScanProgress) => void;
   /** Serialize per-repository git through the app's repository lock. */
   runRepository?: LockRunner;
@@ -325,6 +330,12 @@ export async function sweepPrunableWorktrees(
         try {
           const measured = await sizeOf(candidate.path, options.signal);
           candidate.sizeBytes = measured.bytes;
+          if (measured.lastTouchedAt !== undefined) {
+            candidate.lastTouchedAt = measured.lastTouchedAt;
+          }
+          if (measured.activityComplete !== undefined) {
+            candidate.activityComplete = measured.activityComplete;
+          }
           if (measured.partial) candidate.sizePartial = true;
         } catch {
           candidate.sizeBytes = null;
