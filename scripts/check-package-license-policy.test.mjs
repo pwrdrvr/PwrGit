@@ -128,6 +128,25 @@ describe("first-party name policy", () => {
     }
   });
 
+  it("ignores chance matches inside opaque lockfile integrity values", () => {
+    const root = createValidRoot();
+    runGit(root, ["init", "--quiet"]);
+    const prohibited = ["ss", "tk"].join("");
+    const lockfile = join(root, "pnpm-lock.yaml");
+    write(
+      lockfile,
+      `package@1.0.0:\n  resolution: {integrity: sha512-aa${prohibited}bb==}\n`,
+    );
+    runGit(root, ["add", "."]);
+
+    expect(checkFirstPartyNamePolicy(root)).toEqual([]);
+
+    write(lockfile, `${prohibited}-package@1.0.0:\n`);
+    expect(checkFirstPartyNamePolicy(root)).toEqual([
+      expect.stringContaining("pnpm-lock.yaml:1"),
+    ]);
+  });
+
   it("limits the public dependency vendor name when Git color is forced", () => {
     const root = createValidRoot();
     runGit(root, ["init", "--quiet"]);

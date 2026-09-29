@@ -202,6 +202,9 @@ afterEach(async () => {
   // Ahead of the teardown below, so unmounting is never waiting on a clock
   // that no longer runs on its own.
   vi.useRealTimers();
+  // jsdom carries focus state across removed portal content. Release it before
+  // tearing down this root so the next test's focus handoff is isolated.
+  (document.activeElement as HTMLElement | null)?.blur();
   await emitActivities([]);
   await act(async () => root.unmount());
   container.remove();
