@@ -48,6 +48,27 @@ export const TITLE_BAR_OVERLAY_SYMBOL =
  * Windows caption buttons instead of disappearing under the overlay. */
 export const TITLE_BAR_OVERLAY_HEIGHT = 31;
 
+/**
+ * Where macOS draws the stoplights inside our `hiddenInset` windows. The main
+ * window and every auxiliary window share it; their title strips are the
+ * same `.titlebar`.
+ *
+ * - **x = 12** is the strip's own `padding-left` (`.titlebar` in app.css),
+ *   so the stoplights start on the same inset as the wordmark on the other
+ *   platforms.
+ * - **y = 9** centres the 14px button (measured on macOS 26; Electron's y is
+ *   the top of the button) on y=16, which is the strip's content centreline.
+ *   A 14px button in the 31px strip above the border would need 8.5, and
+ *   Electron takes whole points only, so app.css gives the macOS strip one
+ *   extra pixel of top padding to put its centre on 16 too. The wordmark's
+ *   capitals, the breadcrumb chevron and the branch and path chips all
+ *   centre on that line.
+ *
+ * This was `{ x: 12, y: 10 }`, which put the stoplights' centre 1.5px below
+ * the chips and 2.75px below the wordmark's capitals.
+ */
+export const MACOS_TRAFFIC_LIGHT_POSITION = { x: 12, y: 9 } as const;
+
 export function windowChrome(theme: WindowChromeTheme) {
   return WINDOW_CHROME_BY_THEME[theme];
 }

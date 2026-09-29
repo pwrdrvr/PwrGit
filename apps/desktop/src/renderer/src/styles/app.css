@@ -226,6 +226,42 @@ textarea,
   width: 68px;
 }
 
+/* One centreline for the whole strip, stoplights included. The border-box
+   bar is 32px with a 1px bottom border, so its content box centres on
+   y=15.5 — but Electron places the stoplights on whole points only
+   (MACOS_TRAFFIC_LIGHT_POSITION in main/window-chrome.ts), and a 14px
+   button can centre on 15 or 16, never 15.5. The extra top pixel moves the
+   content centre to y=16, the same line the stoplights sit on. Windows and
+   Linux centre against a 31px caption strip, so they keep 15.5. */
+:root[data-platform="darwin"] .titlebar {
+  padding-top: 1px;
+}
+
+/* Strip text centres by its cap height, so the wordmark's capitals, the
+   stoplights and the chips share one centreline. Without the trim, flex
+   centres the font's line box, and Geist's ascent/descent put its capitals
+   about 1.25px above the middle of the strip. The crumbs that clip their
+   overflow for an ellipsis get padding back, because trimming shrinks the
+   box to the cap height and descenders would be clipped. */
+.titlebar__brand,
+.titlebar__repo,
+.auxiliary-titlebar__section,
+.auxiliary-titlebar__title {
+  text-box: trim-both cap alphabetic;
+}
+
+.titlebar__repo,
+.auxiliary-titlebar__title {
+  padding-block: 4px;
+}
+
+/* The breadcrumb chevron is drawn on the x-height, not up to the cap line,
+   so it centres by that band instead. */
+.titlebar__sep,
+.auxiliary-titlebar__separator {
+  text-box: trim-both ex alphabetic;
+}
+
 /* Windows caption buttons overlay the right edge instead: reserve the native
    min/max/close strip on that side. */
 :root[data-platform="win32"] .titlebar {
