@@ -1217,6 +1217,15 @@ export interface Commands {
     res: Record<string, CommitAuthorPerson>;
   };
   "worktree:setPin": { req: { worktreeId: string; pinned: boolean }; res: null };
+  /**
+   * Pin or unpin a local branch, whether or not a worktree holds it. With one,
+   * that worktree is pinned; without, the branch itself is, and the sidebar's
+   * Pinned group lists it as a branch.
+   */
+  "branch:setPin": {
+    req: { repoId: string; branch: string; pinned: boolean };
+    res: null;
+  };
 
   // Worktree state (U8)
   "worktree:getState": {
