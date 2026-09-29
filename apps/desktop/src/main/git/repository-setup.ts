@@ -18,7 +18,9 @@ async function commonDirectory(git: GitExec, cwd: string): Promise<Result<string
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["rev-parse", "--git-common-dir"]);
   if (!checked.ok) return checked;
-  try { return ok(realpathSync(resolve(cwd, checked.value.stdout.trim()))); }
+  // Windows may name the same checkout by an 8.3 temp path or its long path.
+  // Key receipts by the native final path so linked worktrees share them.
+  try { return ok(realpathSync.native(resolve(cwd, checked.value.stdout.trim()))); }
   catch (cause) { return err({ kind: "repo", code: "common_dir_missing", message: "Git’s common directory is unavailable", cause }); }
 }
 

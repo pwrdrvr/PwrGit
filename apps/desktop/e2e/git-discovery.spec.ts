@@ -107,6 +107,9 @@ test("repository setup shows hook provenance, shadowed LFS and editable ignore l
 
   handle = await launchApp();
   const { window } = handle;
+  await handle.app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, width: 1600, height: 900 });
+  });
   await addRootAndExpand(window, handle, sandbox, "discovery-setup");
   await expect(window.getByText("Loading history...")).toBeHidden();
   await window.locator(".commit-input").fill("test: run fixture hook");
