@@ -163,6 +163,14 @@ function trackedMatches(root, name) {
         line,
         path: separator === -1 ? line : line.slice(0, separator),
       };
+    })
+    .filter(({ line, path }) => {
+      if (path !== "pnpm-lock.yaml") return true;
+      const content = line.slice(line.indexOf(":", path.length + 1) + 1);
+      // Integrity values are opaque base64, so an arbitrary name fragment can
+      // occur there by chance. Package keys and all other lockfile metadata
+      // remain covered by the first-party name policy.
+      return !/^\s*resolution: \{integrity: [^}]+\}\s*$/.test(content);
     });
 }
 
