@@ -94,3 +94,35 @@ though `.pane--sidebar` carries `container-type: inline-size`. That reads as
 though it would confine a fixed child — layout containment does — but Chromium
 does not confine one here, measured at 1000×700 with the pane at 300px. Don't
 portal a sidebar overlay to `<body>` on that theory.
+
+## Three things pin, and a branch pin follows the branch
+
+`repos.pinned`, `worktrees.pinned` and `pinned_branches` (migration 0036). The
+last exists because `local_branches` is a derived search table — its rows are
+dropped and re-synced whenever a branch gains a worktree or a ref listing
+changes — so a pin cannot live there, and `worktrees.pinned` cannot pin a branch
+nobody has checked out.
+
+The rules that keep the three from disagreeing (all in `RepoIndexer`):
+
+- **A worktree reads as pinned when its branch is** (`PINNED_WORKTREE_SQL`).
+  Pin `main`, create a worktree on it later, and the Pinned group still shows it.
+- **`worktree:setPin(false)` also deletes the branch's row**, or unpinning a
+  worktree whose pin came from its branch would change nothing.
+- **`branch:setPin` pins a holding worktree directly** and writes a row only
+  for a branch nothing holds; `Repo.pinnedBranches` lists just those, so a
+  branch never shows twice.
+- **A rename moves the pin** (`renamePinnedBranch`, called before the refresh),
+  and the ref listing prunes pins on branches git no longer has.
+
+Only local branches pin. A remote-tracking ref has no local name of its own and a
+change request no checkout; the ⌘K star and the refs browser's star both skip
+them, and the refs browser keeps an empty slot so names stay aligned.
+
+## The refs browser's rows are focus stops
+
+`lib/refsRowKeys.ts`: ↓ from the filter enters the rows, ↑/↓ walk them, Space
+pins, Enter runs the primary action. Space is a **row** key on purpose — in the
+filter it types a space. The actions column is three fixed slots
+(`RefRowActions`), and `--refs-actions-w` in `app.css` is their widths plus
+gaps: change a slot, change the token, or the columns drift again.
