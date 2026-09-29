@@ -7,8 +7,8 @@
  * clicked a file called `report [final].pdf`.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { err, ok, type Result } from "@pwrgit/shared";
 
 /**
@@ -70,17 +70,16 @@ export function addPatterns(
   };
 }
 
-export type GitignoreWrite = { added: string[]; gitignorePath: string };
+export type GitignoreWrite = { added: string[]; targetPath: string };
 
-/** Append patterns to `<cwd>/.gitignore`, creating the file when absent. */
-export function appendToGitignore(
-  cwd: string,
+/** Append patterns to an ignore file, creating it and its parent when absent. */
+export function appendToIgnoreFile(
+  targetPath: string,
   patterns: string[]
 ): Result<GitignoreWrite> {
-  const gitignorePath = join(cwd, ".gitignore");
   let existing = "";
   try {
-    existing = readFileSync(gitignorePath, "utf8");
+    existing = readFileSync(targetPath, "utf8");
   } catch (cause) {
     // Absent is the normal first-use case; anything else is a real failure and
     // must not be papered over by writing a fresh file on top of it.
@@ -88,22 +87,28 @@ export function appendToGitignore(
       return err({
         kind: "persistence",
         code: "read_failed",
-        message: `Could not read ${gitignorePath}: ${(cause as Error).message}`
+        message: `Could not read ${targetPath}: ${(cause as Error).message}`
       });
     }
   }
 
   const { text, added } = addPatterns(existing, patterns);
-  if (added.length === 0) return ok({ added, gitignorePath });
+  if (added.length === 0) return ok({ added, targetPath });
 
   try {
-    writeFileSync(gitignorePath, text, "utf8");
+    mkdirSync(dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, text, "utf8");
   } catch (cause) {
     return err({
       kind: "persistence",
       code: "write_failed",
-      message: `Could not write ${gitignorePath}: ${(cause as Error).message}`
+      message: `Could not write ${targetPath}: ${(cause as Error).message}`
     });
   }
-  return ok({ added, gitignorePath });
+  return ok({ added, targetPath });
+}
+
+/** Compatibility entry point for the team file at the worktree root. */
+export function appendToGitignore(cwd: string, patterns: string[]): Result<GitignoreWrite> {
+  return appendToIgnoreFile(join(cwd, ".gitignore"), patterns);
 }

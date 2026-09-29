@@ -104,6 +104,7 @@ first.
 | `Person Card - UX Review.dc.html` | Who wrote this commit? The lineage byline that had a hand cursor and no action, four answers to it (the card from what PwrGit already knows, one with a GitHub profile section, one that filters the graph to one author, and a live prototype of all three), and the recommended card in every state it can be in: proven, proven with no photo, no linked account, yours, and a forge that cannot link commits to accounts. Then the wiring it borrows from the PR and SHA chips, and main's people store, the only thing that asks a forge about an author. Interactive. |
 | `Finished Branches - UX Review.dc.html` | Why the sidebar's `↑2` and `225 gone` could not be clicked, why garbage collection and `fetch --prune` never remove a gone branch, and why Maintenance › Local branches declined every squash merge. Then the counts as filter chips, a status filter in the refs browser, the evidence rules (a merged PR whose final head *is* the local tip), the redrawn review with an age guard, and garbage collection's hand-off to it. Interactive. |
 | `Maintenance Combined - UX Review.dc.html` | Repository maintenance's Combined tab: why a run could not say which step it was on, why the branch review listed all 82 repositories, and why it stopped showing the rules it had applied. Then one anatomy for all four tabs, the plan as numbered step cards that become a step rail during the run, a rules-in-force strip above every review, cards only for repositories that propose something, a per-step receipt, and the Worktrees tab brought in line with its siblings. Written here and pushed up; all data is invented. |
+| `Git Discovery - UX Review.dc.html` | Git features PwrGit runs or could use but never mentions &mdash; hooks, `.git/info/exclude` and the global excludes file, and fifteen more &mdash; and one discovery system for all of them: a receipt only when Git has acted, one explain popover, a per-repo Repository setup sheet reached from a hooks chip beside LFS, and Settings &rsaquo; Git defaults that show the `git config` line they write. The rejected-commit panel, the hook map, the three-destination Ignore&hellip; dialog, and an ignore-rule path tester. A proposal; nothing in it is built. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -320,6 +321,19 @@ columns &mdash; were measured in headless Chromium against the real
 from the artboard. Its version strings are invented; the Git LFS build tail is the
 real shape of `git lfs version` output. Turn **1** is the card as #296 builds it;
 turns **2&ndash;3**, the redraw and the state table, are a proposal.
+
+`Git Discovery - UX Review.dc.html` went the other way from most files here: it
+was drafted from Claude Code straight into the project through the
+`claude-design` MCP server's `write_files`, then mirrored down unchanged. The
+project copy and this one are both 96,946 bytes. It is a proposal: nothing in it
+is built. Turn **1** is the diagnosis, read against `main @ 3301600`. Its finding
+1, a commit refused by a hook showing nothing in the rail, is a real bug and is
+fixed separately from the proposal. Turns **2&ndash;5** are the discovery system,
+hooks, ignore rules, and the catalog of other Git features. Cards **3b**, **4a**
+and **4d** are live `DCLogic` prototypes. Its fixture (`orbit-deploy`, its
+worktrees, `dana@northwind.example`, the lint output) is invented. It carries no
+`assets/`; the PNG exports made for handing it off live in an untracked
+`.local/` and are not part of the mirror.
 
 `Reset to Remote - Forks - UX Review.dc.html` was written here and pushed up
 through the `claude-design` MCP, in the same change that builds what it draws;

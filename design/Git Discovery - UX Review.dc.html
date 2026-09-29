@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-side: #050505; --bg-panel: #0a0a0a; --bg-elev: #101010; --bg-input: #080808;
+            --bg-hover: #14110d; --row-active: #120800;
+            --line-faint: rgba(247, 243, 235, 0.06); --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a; --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42); --abord2: rgba(255, 138, 31, 0.24);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnt: #e8c890; --warnsoft: rgba(217, 154, 61, 0.14); --warnbord: rgba(217, 154, 61, 0.32);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badbord: rgba(185, 66, 50, 0.45); --badt: #ffb0a1;
+            --info: #5689c4; --infot: #9fc8ff; --infosoft: rgba(86, 137, 196, 0.16); --infobord: rgba(86, 137, 196, 0.28);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); color: var(--t1); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+          button, input { font-family: inherit; }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 760px; }
+          .dv-olabel b { color: var(--accb); font-weight: 600; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .dv-hero { padding: 44px 44px 8px; background: #050505; }
+          .dv-eyebrow { font: 600 10px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--t3); }
+          .dv-h1 { margin: 8px 0 0; font: 700 24px/1.2 var(--sans); letter-spacing: -0.01em; color: var(--t1); }
+          .dv-lede { margin: 8px 0 0; font: 400 12.5px/1.6 var(--sans); color: var(--t3); max-width: 820px; text-wrap: pretty; }
+          .dv-lede b { color: var(--t2); font-weight: 600; }
+
+          /* ---- specimen stage ---- */
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: center; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 760px; }
+          .note b { color: var(--t2); font-weight: 600; }
+          code, .mono { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .pair { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+
+          /* ---- pins + findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .pin.q { background: var(--t3); color: #050505; }
+          .find { width: 560px; display: flex; flex-direction: column; gap: 14px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem b { color: var(--t2); font-weight: 600; }
+
+          /* ---- tables ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--t1); font-weight: 600; }
+          .tr .dim { color: var(--t3); }
+          .tr.inv { grid-template-columns: 210px 220px minmax(0, 1fr); }
+          .tr.cat { grid-template-columns: 150px 200px 210px 230px 76px; }
+          .tr.heur { grid-template-columns: 170px 140px minmax(0, 1fr); }
+          .st { display: inline-flex; align-self: start; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+          .st.none { background: var(--badsoft); color: var(--badt); }
+          .st.part { background: var(--warnsoft); color: var(--warnt); }
+          .st.zero { background: var(--oksoft); color: var(--okt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          /* ---- shared app atoms ---- */
+          .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg-elev); color: var(--t1); font: 600 11px/1 var(--sans); white-space: nowrap; }
+          .btn.pri { background: var(--acc); border-color: var(--acc); color: var(--accon); font-weight: 700; }
+          .btn.ghost { background: transparent; color: var(--t2); }
+          .btn.dang { background: transparent; border-color: var(--badbord); color: var(--badt); }
+          .btn.sm { height: 22px; padding: 0 8px; font-size: 10.5px; }
+          .chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--tsub); font: 600 9.5px/1 var(--mono); white-space: nowrap; }
+          .chip.dirty { background: var(--warnsoft); border-color: transparent; color: var(--warn); font-size: 10.5px; }
+          .chip.new { border-color: var(--abord); color: var(--accb); background: var(--asoft); }
+          .chip.warn { border-color: var(--warnbord); color: var(--warnt); background: var(--warnsoft); }
+          .dot { width: 6px; height: 6px; border-radius: 999px; flex: none; background: var(--t3); }
+          .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.acc { background: var(--acc); } .dot.warn { background: var(--warn); }
+          .eyebrow { font: 600 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t3); }
+          .muted { color: var(--t3); } .sub { color: var(--tsub); }
+
+          /* scope badges: every surface says who a rule reaches */
+          .sc { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 4px; font: 600 9px/1 var(--mono); white-space: nowrap; }
+          .sc.team { background: var(--infosoft); color: var(--infot); }
+          .sc.clone { background: var(--asoft); color: var(--accb); }
+          .sc.mach { background: rgba(247, 243, 235, 0.07); color: var(--t2); }
+
+          /* receipt chip: L0 of the ladder */
+          .rc { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--t2); font: 550 9.5px/1 var(--mono); white-space: nowrap; }
+          .rc i { font-style: normal; color: var(--tsub); }
+          .rc.bad { border-color: var(--badbord); background: var(--badsoft); color: var(--badt); }
+          .rc.warn { border-color: var(--warnbord); background: var(--warnsoft); color: var(--warnt); }
+          .rc.hot { border-color: var(--abord); }
+
+          /* explain popover: L1 of the ladder */
+          .pop { width: 344px; display: flex; flex-direction: column; gap: 10px; padding: 12px 13px; background: var(--bg-elev); border: 1px solid var(--line2); border-radius: 8px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42); }
+          .pop-t { display: flex; align-items: center; gap: 7px; font: 650 12px/1.2 var(--sans); color: var(--t1); }
+          .pop-p { margin: 0; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .pop-kv { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 5px 8px; align-items: baseline; font: 400 10.5px/1.45 var(--sans); color: var(--t3); }
+          .pop-kv .mono { font-size: 10.5px; color: var(--t1); overflow-wrap: anywhere; }
+          .pop-a { display: flex; gap: 6px; align-items: center; padding-top: 2px; }
+          .pop-a .lnk { margin-left: auto; font: 500 10.5px/1 var(--sans); color: var(--accb); }
+          .anno { font: 600 9px/1 var(--mono); color: var(--accb); }
+
+          /* output tail */
+          .out { margin: 0; padding: 8px 10px; background: #050505; border: 1px solid var(--line); border-radius: 6px; font: 400 10.5px/1.55 var(--mono); color: var(--t2); overflow: hidden; }
+          .out > div { white-space: pre; }
+          .out .l { display: inline-block; }
+          .out .e { color: var(--badt); } .out .d { color: var(--tsub); } .out .l { color: var(--accb); text-decoration: underline; text-decoration-color: var(--abord); }
+
+          /* ---- rail specimen ---- */
+          .rail { width: 380px; display: flex; flex-direction: column; background: var(--bg-side); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+          .rail-tabs { display: flex; align-items: center; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+          .rtab { height: 24px; padding: 0 10px; display: inline-flex; align-items: center; border-radius: 6px; font: 600 11px/1 var(--sans); color: var(--t3); }
+          .rtab.on { background: var(--row-active); color: var(--accb); border: 1px solid var(--abord); }
+          .rail-b { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+          .frow { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-radius: 6px; font: 500 11px/1 var(--mono); color: var(--t2); }
+          .frow .s { width: 14px; font: 700 10px/1 var(--mono); color: var(--okt); }
+          .frow .s.u { color: var(--tsub); }
+          .frow.hot { background: var(--bg-hover); outline: 1px solid var(--abord2); }
+          .msg { min-height: 54px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--line2); border-radius: 8px; font: 400 11.5px/1.45 var(--sans); color: var(--t1); }
+          .msg.err { border-color: var(--badbord); }
+          .cbar { display: flex; gap: 6px; align-items: center; }
+          .fail { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--badbord); border-radius: 8px; background: rgba(185, 66, 50, 0.08); }
+          .fail-t { display: flex; align-items: center; gap: 7px; font: 650 11.5px/1.3 var(--sans); color: var(--badt); }
+          .fail-p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t2); }
+          .ffoot { display: flex; align-items: center; gap: 7px; padding: 8px 12px; border-top: 1px solid var(--line-faint); font: 500 10.5px/1.3 var(--sans); color: var(--tsub); }
+
+          /* ---- menus ---- */
+          .menu { width: 250px; padding: 5px; background: var(--bg-elev); border: 1px solid var(--line2); border-radius: 8px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42); display: flex; flex-direction: column; gap: 1px; }
+          .mi { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 5px 9px; border-radius: 5px; font: 500 12px/1.2 var(--sans); color: var(--t1); }
+          .mi.on { background: var(--bg-hover); }
+          .mi .r { margin-left: auto; font: 500 10.5px/1 var(--mono); color: var(--tsub); }
+          .mi small { display: block; margin-top: 2px; font: 400 10.5px/1.35 var(--sans); color: var(--t3); }
+          .msep { height: 1px; margin: 4px 4px; background: var(--line); }
+          .mnew { outline: 1px dashed var(--abord); outline-offset: -1px; }
+
+          /* ---- worktree header specimen ---- */
+          .wh { width: 700px; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; background: var(--bg-app); border: 1px solid var(--line); border-radius: 8px; }
+          .wh .sp { flex: 1; }
+
+          /* ---- repository setup sheet ---- */
+          .sheet { width: 780px; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42); overflow: hidden; }
+          .sheet-h { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); background: var(--bg-elev); }
+          .sheet-h h3 { margin: 0; font: 700 14px/1.2 var(--sans); color: var(--t1); }
+          .sheet-h .path { font: 500 10.5px/1 var(--mono); color: var(--tsub); }
+          .sheet-g { display: grid; grid-template-columns: 170px minmax(0, 1fr); min-height: 420px; }
+          .snav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border-right: 1px solid var(--line); background: var(--bg-side); }
+          .snav-i { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 9px; border-radius: 6px; font: 550 11.5px/1 var(--sans); color: var(--t2); }
+          .snav-i.on { background: var(--row-active); color: var(--accb); box-shadow: inset 3px 0 0 var(--acc); }
+          .snav-i .r { margin-left: auto; font: 600 9.5px/1 var(--mono); color: var(--tsub); }
+          .sbody { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+          .sh { display: flex; align-items: baseline; gap: 8px; }
+          .sh h4 { margin: 0; font: 650 13px/1.2 var(--sans); color: var(--t1); }
+          .sdesc { margin: 0; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 64ch; text-wrap: pretty; }
+          .sdesc b { color: var(--t2); font-weight: 600; }
+          .res { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-input); font: 500 10.5px/1.4 var(--mono); color: var(--t2); }
+          .res .k { color: var(--tsub); }
+          .hrow { display: grid; grid-template-columns: 128px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+          .hrow .n { font: 600 11.5px/1.2 var(--mono); color: var(--t1); }
+          .hrow .d { font: 400 10.5px/1.45 var(--sans); color: var(--t3); min-width: 0; }
+          .hrow .d .mono { color: var(--t2); }
+          .banner { display: grid; grid-template-columns: 15px minmax(0, 1fr) auto; gap: 9px; align-items: start; padding: 9px 11px; border: 1px solid var(--warnbord); border-radius: 8px; background: var(--warnsoft); }
+          .banner h5 { margin: 0 0 2px; font: 650 11.5px/1.3 var(--sans); color: var(--warnt); }
+          .banner p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .banner.info { border-color: var(--infobord); background: rgba(86, 137, 196, 0.08); }
+          .banner.info h5 { color: var(--infot); }
+          .gl { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 999px; font: 700 9px/1 var(--mono); background: var(--warn); color: #050505; }
+          .gl.i { background: var(--info); color: #050505; }
+          .fold { display: flex; align-items: center; gap: 7px; padding: 8px 0 0; border-top: 1px solid var(--line); font: 500 10.5px/1.3 var(--sans); color: var(--tsub); }
+
+          /* ---- hook map (interactive) ---- */
+          .hmap { display: flex; flex-direction: column; gap: 8px; }
+          .lane { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; }
+          .lane-n { font: 600 10.5px/1.2 var(--sans); color: var(--t2); }
+          .lane-n small { display: block; margin-top: 2px; font: 500 9.5px/1 var(--mono); color: var(--tsub); }
+          .lane-s { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+          .arrow { font: 500 10px/1 var(--mono); color: var(--tsub); }
+          .gitop { height: 26px; padding: 0 9px; display: inline-flex; align-items: center; border-radius: 6px; background: rgba(247, 243, 235, 0.04); font: 500 10.5px/1 var(--mono); color: var(--t3); }
+          .hk { height: 26px; padding: 0 9px; display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; border: 1px dashed var(--line2); background: transparent; color: var(--tsub); font: 550 10.5px/1 var(--mono); cursor: pointer; }
+          .hk.act { border: 1px solid var(--abord); background: var(--asoft); color: var(--accb); }
+          .hk.shd { border: 1px dashed var(--warnbord); background: var(--warnsoft); color: var(--warnt); text-decoration: line-through; text-decoration-color: rgba(232, 200, 144, 0.7); }
+          .hk.sel { outline: 2px solid var(--acc); outline-offset: 1px; }
+          .hkd { display: flex; flex-direction: column; gap: 8px; padding: 12px 13px; border: 1px solid var(--line2); border-radius: 8px; background: var(--bg-elev); }
+          .hkd-t { display: flex; align-items: center; gap: 8px; font: 650 12.5px/1.2 var(--mono); color: var(--t1); }
+          .hkd-g { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 6px 10px; font: 400 10.5px/1.5 var(--sans); color: var(--t2); }
+          .hkd-g .k { color: var(--t3); }
+          .legend { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font: 500 10px/1 var(--sans); color: var(--t3); }
+          .legend span { display: inline-flex; align-items: center; gap: 6px; }
+          .sw { width: 18px; height: 12px; border-radius: 3px; border: 1px dashed var(--line2); }
+          .sw.act { border: 1px solid var(--abord); background: var(--asoft); }
+          .sw.shd { border: 1px dashed var(--warnbord); background: var(--warnsoft); }
+
+          /* ---- ignore dialog (interactive) ---- */
+          .dlg { width: 470px; display: flex; flex-direction: column; background: var(--bg-elev); border: 1px solid var(--line2); border-radius: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42); overflow: hidden; }
+          .dlg-h { padding: 14px 16px 4px; }
+          .dlg-h h3 { margin: 0; font: 700 14px/1.25 var(--sans); color: var(--t1); }
+          .dlg-h p { margin: 4px 0 0; font: 400 11px/1.45 var(--sans); color: var(--t3); }
+          .dlg-b { padding: 10px 16px 14px; display: flex; flex-direction: column; gap: 12px; }
+          .dlg-f { display: flex; justify-content: flex-end; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--line); background: var(--bg-panel); }
+          .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+          .segb { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg-input); color: var(--t2); font: 500 10.5px/1 var(--mono); cursor: pointer; }
+          .segb i { font-style: normal; font-family: var(--sans); color: var(--tsub); }
+          .segb.on { border-color: var(--abord); background: var(--row-active); color: var(--accb); }
+          .dest { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-panel); cursor: pointer; text-align: left; color: inherit; width: 100%; }
+          .dest.on { border-color: var(--abord); background: var(--row-active); }
+          .rd { width: 14px; height: 14px; margin-top: 1px; border-radius: 999px; border: 1px solid var(--line2); }
+          .dest.on .rd { border: 4px solid var(--acc); }
+          .dest-t { font: 600 11.5px/1.25 var(--mono); color: var(--t1); }
+          .dest-p { display: block; margin-top: 3px; font: 400 10.5px/1.45 var(--sans); color: var(--t3); }
+          .sugg { font: 600 9px/1 var(--mono); padding: 3px 5px; border-radius: 4px; color: var(--accb); border: 1px solid var(--abord); }
+          .prev { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #050505; }
+          .prev-l { font: 500 10px/1.3 var(--mono); color: var(--tsub); }
+          .prev-c { font: 600 11.5px/1.3 var(--mono); color: var(--okt); }
+          .prev-s { font: 400 10.5px/1.45 var(--sans); color: var(--t2); }
+
+          /* ---- ignore layers + tester (interactive) ---- */
+          .layer { display: flex; flex-direction: column; gap: 6px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-input); }
+          .layer.win { border-color: var(--abord); background: var(--row-active); }
+          .layer-h { display: flex; align-items: center; gap: 8px; }
+          .layer-n { font: 650 11px/1 var(--mono); color: var(--tsub); }
+          .layer-f { font: 600 11.5px/1.2 var(--mono); color: var(--t1); }
+          .layer-h .r { margin-left: auto; font: 500 10px/1 var(--sans); color: var(--tsub); }
+          .pats { display: flex; flex-wrap: wrap; gap: 4px; }
+          .pat { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 4px; background: rgba(247, 243, 235, 0.05); font: 500 10.5px/1 var(--mono); color: var(--t2); }
+          .pat i { font-style: normal; color: var(--tsub); font-size: 9.5px; }
+          .pat.hit { background: var(--acc); color: var(--accon); }
+          .pat.hit i { color: var(--accon); }
+          .tester { display: flex; flex-direction: column; gap: 7px; padding: 10px 11px; border: 1px solid var(--line2); border-radius: 8px; background: var(--bg-elev); }
+          .tin { width: 100%; height: 28px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg-input); color: var(--t1); font: 500 11.5px/1 var(--mono); outline: none; }
+          .tin:focus { outline: 2px solid var(--acc); outline-offset: 0; }
+          .verdict { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 500 11px/1.4 var(--sans); color: var(--t2); }
+          .verdict .mono { font-size: 10.5px; color: var(--t1); }
+
+          /* ---- ladder ---- */
+          .ladder { width: 560px; display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .rung { display: grid; grid-template-columns: 38px 150px minmax(0, 1fr) 84px; gap: 12px; align-items: start; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+          .rung:last-child { border-bottom: 0; }
+          .rung .lv { font: 700 11px/1 var(--mono); color: var(--accb); padding-top: 1px; }
+          .rung .nm { font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .rung .nm small { display: block; margin-top: 3px; font: 400 10px/1.4 var(--sans); color: var(--tsub); }
+          .rung .ds { font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .rung .ds b { color: var(--t2); font-weight: 600; }
+          .rung .fp { font: 600 10px/1.3 var(--mono); color: var(--t2); text-align: right; }
+          .rules { width: 560px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+          .rule { display: flex; flex-direction: column; gap: 7px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .rule h5 { margin: 0; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .rule p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .rule .ex { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+
+          /* ---- moment cards ---- */
+          .moment { width: 400px; display: flex; flex-direction: column; gap: 9px; }
+          .ob { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--row-active); }
+          .ob-t { font: 700 11.5px/1.3 var(--sans); color: var(--accb); }
+          .ob-s { font: 500 10.5px/1.5 var(--mono); color: var(--t3); }
+          .tipline { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px dashed var(--abord2); border-radius: 7px; font: 400 10.5px/1.4 var(--sans); color: var(--t2); }
+          .tipline .act { margin-left: auto; display: flex; gap: 8px; font: 600 10.5px/1 var(--sans); white-space: nowrap; }
+          .tipline .x { color: var(--tsub); font-weight: 500; }
+          .card { display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-panel); }
+          .card-t { font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+
+          /* ---- settings (as app.css) ---- */
+          .spn { width: 760px; background: var(--bg-panel); border: 1px solid var(--line); border-radius: 10px; }
+          .spn-h { display: flex; align-items: flex-start; gap: 10px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); background: var(--bg-elev); border-radius: 10px 10px 0 0; }
+          .spn-hm { flex: 1; min-width: 0; }
+          .spn-eb { margin: 0 0 4px; font: 650 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--acc); }
+          .spn-t { margin: 0; font: 700 15px/1.2 var(--sans); color: var(--t1); }
+          .spn-d { margin: 5px 0 0; font: 400 12px/1.5 var(--sans); color: var(--t3); max-width: 62ch; }
+          .spn-b { padding: 4px 16px 12px; }
+          .srow { display: grid; grid-template-columns: 200px minmax(0, 1fr) 96px; gap: 14px; align-items: start; padding: 11px 0; border-top: 1px solid var(--line); }
+          .srow:first-child { border-top: 0; }
+          .srow .l { font: 550 12.5px/1.35 var(--sans); color: var(--t1); }
+          .srow .l small { display: block; margin-top: 3px; font: 400 11px/1.45 var(--sans); color: var(--t3); }
+          .srow .c { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+          .srow .v { font: 550 11.5px/1.45 var(--mono); color: var(--t1); }
+          .srow .v.rec { color: var(--okt); }
+          .srow .h { font: 400 11px/1.45 var(--mono); color: var(--tsub); overflow-wrap: anywhere; }
+          .srow .a { display: flex; justify-content: flex-end; }
+        </style>
+      </helmet>
+
+      <!-- ============================ HERO ============================ -->
+      <header class="dv-hero">
+        <div class="dv-eyebrow">PwrGit &#183; UX review &#183; proposal</div>
+        <h1 class="dv-h1">Git discovery &#8212; hooks, excludes, and the rest of the iceberg</h1>
+        <p class="dv-lede">Git already has answers to problems PwrGit users hit every week &#8212; a personal folder that keeps showing up as untracked, a commit that silently will not land, a conflict resolved for the third time. Most people never learn those answers exist, because Git keeps them in files nobody opens. This board designs <b>one discovery system</b>: Git speaks up only at the moment it has done something, every surface names the file and the scope, and the inventory lives one click away instead of in the main path. Turns 1&#8211;2 are the diagnosis and the system; <b>3</b> is hooks, <b>4</b> is ignore rules and <code>.git/info/exclude</code>, <b>5</b> is everything else Git can do that people should use and do not. Nothing here is built. Repository names, paths and output are invented.</p>
+      </header>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; Git does things PwrGit never mentions</span>
+        </div>
+        <p class="dv-sub">Read against <code>main @ 3301600</code>. PwrGit runs real <code>git commit</code> and <code>git push</code> through dugite with no <code>--no-verify</code>, so every hook a repository carries fires on every commit and push. It writes exactly one kind of ignore rule. It reads a dozen config keys and suggests none. None of that is wrong &#8212; it is just <b>invisible</b>, and the one place it surfaces is when it breaks.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Six findings</div>
+            <div class="stage find">
+              <div class="fitem">
+                <span class="pin">1</span>
+                <div>
+                  <h4>A hook that rejects a commit makes the Commit button do nothing</h4>
+                  <p><code>commitChanges</code> returns <code>commit_failed</code> carrying the hook's stderr (<code>git-service.ts:421</code>), and <code>ChangesTab.commit</code> only handles <code>r.ok</code> (<code>ChangesTab.tsx:506</code>). A failing <code>pre-commit</code> or <code>commit-msg</code> therefore produces <b>no toast, no message, no output</b> &#8212; the draft stays, the files stay staged, and the only trace is the Logs window. This is the most common hook interaction there is. Every other rail action in the same file toasts its failure.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">2</span>
+                <div>
+                  <h4>Hooks run on every commit and push, and nothing says they exist</h4>
+                  <p>The only mention anywhere is the confirm before <code>--continue</code> in <code>OperationBanner.tsx:47</code> &#8212; "Git hooks may run" &#8212; which warns without saying <i>which</i>. A 40&#8239;s <code>pre-push</code> test suite reads as a hung push.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">3</span>
+                <div>
+                  <h4>A shadowed hooks directory fails silently, and it is common</h4>
+                  <p>When <code>core.hooksPath</code> is set &#8212; Husky v9 sets it to <code>.husky/_</code> &#8212; Git stops reading <code>.git/hooks</code> entirely. Git&#8239;LFS installed its <code>pre-push</code> there, so <b>LFS objects stop uploading on push</b>, with no error from anyone. PwrGit already checks <code>filter.lfs.*</code> for its LFS chip; it never checks whether LFS's hooks can run.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">4</span>
+                <div>
+                  <h4>Ignore has one destination, and it is the shared one</h4>
+                  <p>The untracked-row menu offers <b>Add to .gitignore</b> and nothing else (<code>changes-row-menu.ts:82</code>). That file is committed. The personal cases &#8212; <code>.local/</code>, scratch notes, an editor or agent folder &#8212; belong in <code>.git/info/exclude</code> (this clone, every worktree, never committed) or the global <code>core.excludesFile</code>. Offered one door, people either commit their personal patterns into the team's file or live with a permanently dirty worktree.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">5</span>
+                <div>
+                  <h4>Nothing explains why a file is missing</h4>
+                  <p>A file matched by the global excludes file never appears in Changes, and there is no way to ask why. <code>git check-ignore -v</code> answers exactly that &#8212; source file, line, pattern &#8212; and nothing calls it.</p>
+                </div>
+              </div>
+              <div class="fitem">
+                <span class="pin">6</span>
+                <div>
+                  <h4>There is no help primitive to build discovery from</h4>
+                  <p>The renderer has twelve bespoke empty states, two notices and a keyboard-help panel, and no generic tip, receipt or explain popover. Discovery built surface-by-surface would be twenty inventions. <a class="dv-oid" href="#2b">2b</a> is one.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Invisible events">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Things Git does behind the UI, and what PwrGit shows for each</div>
+            <div class="stage" style="width:720px">
+              <div class="tbl">
+                <div class="tr inv head"><span>Git did this</span><span>PwrGit shows today</span><span>What the moment should teach</span></div>
+                <div class="tr inv"><span><b>pre-commit exited 1</b></span><span><span class="st none">nothing</span></span><span>Which hook, its output, and that the draft is safe. <a class="dv-oid" href="#3a">3a</a></span></div>
+                <div class="tr inv"><span><b>pre-commit passed in 1.8&#8239;s</b></span><span><span class="st none">nothing</span></span><span>That a hook exists at all &#8212; the only moment a person learns it before it fails. <a class="dv-oid" href="#3a">3a</a></span></div>
+                <div class="tr inv"><span><b>pre-push ran the test suite</b></span><span><span class="st part">spinner &#183; output tail</span></span><span>A named phase in the push receipt, so 40&#8239;s reads as "tests", not "hung".</span></div>
+                <div class="tr inv"><span><b>.git/hooks shadowed by core.hooksPath</b></span><span><span class="st none">nothing</span></span><span>That LFS's hooks are not running, and the one-line fix. <a class="dv-oid" href="#3c">3c</a></span></div>
+                <div class="tr inv"><span><b>File matched a global exclude</b></span><span><span class="st none">absent from Changes</span></span><span>Which file and line hid it. <a class="dv-oid" href="#4c">4c</a></span></div>
+                <div class="tr inv"><span><b>Rebase assistant replayed with hooks off</b></span><span><span class="st part">one line in the Rebase tab</span></span><span>Correct, and worth saying at the commit that follows: "your pre-commit did not see these".</span></div>
+                <div class="tr inv"><span><b>Same conflict, second time</b></span><span><span class="st none">nothing &#8212; rerere is off</span></span><span>That Git can remember a resolution. <a class="dv-oid" href="#5b">5b</a></span></div>
+                <div class="tr inv"><span><b>Remote branch deleted upstream</b></span><span><span class="st part">"2 gone" count</span></span><span>That <code>fetch.prune</code> would keep it tidy. <a class="dv-oid" href="#5b">5b</a></span></div>
+              </div>
+              <p class="note">The left column is the design brief. Each row is a moment when Git has <b>already acted</b> &#8212; so saying something is not an interruption, it is a receipt. The discovery system in turn 2 is built entirely from rows like these, which is how it stays out of the resting UI.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Next &#8212; <a class="dv-oid" href="#2a">2a</a> the four rules &#183; <a class="dv-oid" href="#2b">2b</a> the ladder and its one primitive &#183; <a class="dv-oid" href="#2c">2c</a>&#8211;<a class="dv-oid" href="#2e">2e</a> where the inventory lives</p>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The system &#8212; speak when Git acts, name the file, stay out of the way</span>
+        </div>
+        <p class="dv-sub">Self-documenting means the UI teaches Git while you use it: the words on screen are Git's own words, pointed at Git's own files. The goal is not a tutorial or a tips carousel. It is that someone who uses PwrGit for a month could open a terminal and <b>do the same thing by hand</b>, because every surface showed them the file and the command.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Four rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Four rules every discovery surface follows</div>
+            <div class="rules">
+              <div class="rule">
+                <h5>1 &#183; Name the file</h5>
+                <p>Never "your ignore settings". Always the literal path, in mono, clickable to open or reveal.</p>
+                <div class="ex"><code>.git/info/exclude</code><code>.husky/_/pre-commit</code></div>
+              </div>
+              <div class="rule">
+                <h5>2 &#183; Say the scope</h5>
+                <p>Who does this rule reach? Three answers, three badge colours, used identically everywhere.</p>
+                <div class="ex"><span class="sc team">committed &#183; team</span><span class="sc clone">this clone &#183; 3 worktrees</span><span class="sc mach">this Mac</span></div>
+              </div>
+              <div class="rule">
+                <h5>3 &#183; Leave a receipt</h5>
+                <p>When Git did something invisible, leave a small trace where it happened. The receipt is the discovery.</p>
+                <div class="ex"><span class="rc"><span class="dot ok"></span>pre-commit <i>1.8&#8239;s</i></span><span class="rc">rerere <i>replayed 2</i></span></div>
+              </div>
+              <div class="rule">
+                <h5>4 &#183; Zero pixels until relevant</h5>
+                <p>A repository with no hooks and no excludes looks exactly like PwrGit does today. Nothing is advertised to someone it cannot help.</p>
+                <div class="ex"><span class="chip">LFS</span><span class="chip new">hooks 2</span><span class="anno">&#8592; only when present</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b The ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Four levels of disclosure &#8212; and the one explain popover all of them open</div>
+            <div class="pair">
+              <div class="ladder">
+                <div class="rung"><span class="lv">L0</span><span class="nm">Receipt<small>inline, after Git acts</small></span><span class="ds">An 18&#8239;px chip on the surface where it happened: under the Commit button, in the push popover, on the conflict banner. <b>Exists only for the operation that produced it.</b></span><span class="fp">0&#8239;px resting</span></div>
+                <div class="rung"><span class="lv">L1</span><span class="nm">Explain<small>hover or click a receipt</small></span><span class="ds">One popover template: what Git did, where the rule lives, the scope badge, the command, and one or two actions. Links to the Git manual page.</span><span class="fp">on demand</span></div>
+                <div class="rung"><span class="lv">L2</span><span class="nm">Repository setup<small>per repo, one sheet</small></span><span class="ds">The inventory: hooks, ignore rules, identity and signing, suggestions. Reached from every L1 and from the repo menu. <a class="dv-oid" href="#2d">2d</a></span><span class="fp">modal</span></div>
+                <div class="rung"><span class="lv">L3</span><span class="nm">Settings &#8250; Git<small>this Mac</small></span><span class="ds">Global excludes, global hooks path, recommended defaults &#8212; each showing the <code>git config --global</code> line it would write. <a class="dv-oid" href="#5c">5c</a></span><span class="fp">window</span></div>
+              </div>
+              <div class="stage" style="width:380px">
+                <div class="stage-h">L1 anatomy <em>the only new component</em></div>
+                <div class="pop">
+                  <div class="pop-t"><span class="dot ok"></span>pre-commit passed</div>
+                  <p class="pop-p">Git ran this repository's pre-commit hook before recording the commit. It exited 0 in 1.8&#8239;s, so the commit went through.</p>
+                  <div class="pop-kv">
+                    <span>Hook</span><span class="mono">.husky/_/pre-commit &#8594; lint-staged</span>
+                    <span>Scope</span><span><span class="sc team">committed &#183; team</span></span>
+                    <span>Command</span><span class="mono">git commit</span>
+                    <span>Skip once</span><span class="mono">git commit --no-verify</span>
+                  </div>
+                  <div class="pop-a"><span class="btn sm">Open hook</span><span class="btn sm ghost">All hooks&#8230;</span><span class="lnk">githooks(5) &#8599;</span></div>
+                </div>
+                <p class="note">Five slots, always in this order: <b>title</b> (what happened, past tense), <b>one sentence</b> in plain English, <b>where it lives</b> with its scope badge, <b>the command</b> PwrGit ran or would run, and <b>actions</b>. The last action always climbs one level of the ladder. Sits on <code>useViewportTooltip</code>'s positioning; replaces nothing.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Entry: menu only">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Where L2 lives &#8212; option A, menus only</div>
+            <div class="stage" style="width:330px">
+              <div class="stage-h">Repo row context menu <em>RepoRow.tsx:248</em></div>
+              <div class="menu">
+                <div class="mi">Fork&#8230;</div>
+                <div class="mi">Manage remotes&#8230;</div>
+                <div class="mi on mnew">Repository setup&#8230;<span class="r">hooks &#183; ignore</span></div>
+                <div class="msep"></div>
+                <div class="mi">Copy path</div>
+                <div class="mi">Reveal in Finder</div>
+                <div class="mi">Refresh forge info</div>
+              </div>
+              <p class="note"><b>0&#8239;px.</b> Reliable and findable by anyone who looks &#8212; and nobody looks for a thing they do not know exists. Necessary as the dependable route, not sufficient as discovery. Also reachable as a <code>&#8984;K</code> command.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Entry: header chip">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a><b>Recommended</b> &#8212; option B, one header chip beside LFS, only when there is something to say</div>
+            <div class="stage" style="width:740px">
+              <div class="stage-h">Worktree header &#183; repository has hooks <em>WorktreeHeader.tsx</em></div>
+              <div class="wh"><span class="chip dirty">3 changed</span><span class="chip">LFS</span><span class="chip new">hooks 2</span><span class="sp"></span><span class="chip">&#8593;1</span><span class="btn sm ghost">Fetch</span><span class="btn sm ghost">Pull</span><span class="btn sm ghost">Push</span></div>
+              <div class="stage-h">Same header &#183; a hook cannot run <em>chip escalates</em></div>
+              <div class="wh"><span class="chip dirty">3 changed</span><span class="chip warn">LFS &#183; hooks off</span><span class="chip new">hooks 2</span><span class="sp"></span><span class="chip">&#8593;1</span><span class="btn sm ghost">Fetch</span><span class="btn sm ghost">Pull</span><span class="btn sm ghost">Push</span></div>
+              <div class="stage-h">Same header &#183; no hooks, nothing unusual <em>today's header, unchanged</em></div>
+              <div class="wh"><span class="chip dirty">3 changed</span><span class="chip">LFS</span><span class="sp"></span><span class="chip">&#8593;1</span><span class="btn sm ghost">Fetch</span><span class="btn sm ghost">Pull</span><span class="btn sm ghost">Push</span></div>
+              <p class="note">The LFS chip is the precedent: it already says "this repository has a Git mechanism in play". One more chip, in the same 20&#8239;px pill, appears <b>only when the repository runs hooks</b>, opens the L1 list of them, and climbs to the sheet. When something is broken, the existing LFS chip escalates instead of adding a third. Excludes deliberately get no header chip: they are quiet by nature, and their moment is the Changes list (<a class="dv-oid" href="#4a">4a</a>, <a class="dv-oid" href="#4c">4c</a>).</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2e" data-screen-label="2e Entry: rail tab">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Option C, a fourth rail tab &#8212; not recommended</div>
+            <div class="stage" style="width:410px">
+              <div class="rail" style="width:380px">
+                <div class="rail-tabs"><span class="rtab">Changes</span><span class="rtab">Stashes</span><span class="rtab">Rebase</span><span class="rtab on mnew">Setup</span></div>
+                <div class="rail-b"><p class="note">Hooks, ignore rules, identity&#8230;</p></div>
+              </div>
+              <p class="note">Costs a permanent tab in the most-used strip in the app to hold something opened a few times per repository, ever. It also reads per-worktree when hooks and <code>info/exclude</code> are per-clone. B plus A gives the same reach at no resting cost.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Next &#8212; <a class="dv-oid" href="#3a">3a</a> the commit receipt and the rejected commit &#183; <a class="dv-oid" href="#3b">3b</a> the hook map &#183; <a class="dv-oid" href="#3c">3c</a> hooks in the setup sheet</p>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Hooks &#8212; say which ran, say why one refused, draw where they fire</span>
+        </div>
+        <p class="dv-sub">PwrGit does not need to guess which hooks ran. Running the commit with <code>GIT_TRACE2_EVENT</code> pointed at a pipe yields a <code>child_start</code> event with <code>"child_class":"hook"</code> and <code>hook_name</code> for each hook, and a <code>child_exit</code> with its exit code and elapsed time. That is the whole data source for <a class="dv-oid" href="#3a">3a</a>. Fixture: <code>orbit-deploy</code>, three worktrees, Husky for <code>pre-commit</code> and <code>commit-msg</code>, Git&#8239;LFS installed.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Commit receipt and rejection">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>The Changes rail after a commit &#8212; passed, and refused</div>
+            <div class="pair">
+              <div class="rail">
+                <div class="rail-tabs"><span class="rtab on">Changes</span><span class="rtab">Stashes</span><span class="rtab">Rebase</span></div>
+                <div class="rail-b">
+                  <span class="eyebrow">Staged &#183; 0</span>
+                  <p class="note">Nothing staged.</p>
+                  <div class="msg" style="color:var(--tsub)">Commit message</div>
+                  <div class="cbar"><span class="btn" style="flex:1">Commit</span><span class="btn ghost">Amend</span></div>
+                  <div style="display:flex; flex-wrap:wrap; gap:5px; align-items:center">
+                    <span class="mono" style="color:var(--okt)">&#10003; 7c1e0a2</span>
+                    <span class="rc hot"><span class="dot ok"></span>pre-commit <i>1.8&#8239;s</i></span>
+                    <span class="rc"><span class="dot ok"></span>commit-msg <i>0.2&#8239;s</i></span>
+                  </div>
+                </div>
+              </div>
+              <div class="rail">
+                <div class="rail-tabs"><span class="rtab on">Changes</span><span class="rtab">Stashes</span><span class="rtab">Rebase</span></div>
+                <div class="rail-b">
+                  <span class="eyebrow">Staged &#183; 2</span>
+                  <div class="frow"><span class="s">M</span>src/rollout/gates.ts</div>
+                  <div class="frow"><span class="s">M</span>src/rollout/canary.ts</div>
+                  <div class="msg err">Add rollout gate for canary threshold</div>
+                  <div class="fail">
+                    <div class="fail-t"><span class="dot bad"></span>pre-commit refused the commit <span class="mono" style="margin-left:auto; color:var(--tsub)">exit 1 &#183; 2.3&#8239;s</span></div>
+                    <p class="fail-p">Nothing was committed. Your message and staged files are unchanged.</p>
+<div class="out"><div class="d">.husky/_/pre-commit &#8594; lint-staged</div><div>&#10006; eslint --fix:</div><div class="l">src/rollout/gates.ts:41:7</div><div>&#160;&#160;<span class="e">error</span>&#160;&#160;'threshold' is assigned a</div><div>&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;value but never used</div></div>
+                    <div class="cbar"><span class="btn pri">Retry commit</span><span class="btn ghost">Full output</span><span class="btn dang" style="margin-left:auto">Commit without hooks&#8230;</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="stage" style="width:330px">
+                <div class="stage-h">Commit without hooks&#8230; <em>confirmDialog</em></div>
+                <div class="pop" style="width:300px">
+                  <div class="pop-t">Skip hooks for this one commit?</div>
+                  <p class="pop-p">PwrGit will run <code>git commit --no-verify</code>. That skips <b>pre-commit</b> and <b>commit-msg</b>. <b>post-commit</b> still runs. Your team's CI will usually run the same checks again.</p>
+                  <div class="pop-a"><span class="btn sm ghost">Cancel</span><span class="btn sm dang">Commit without hooks</span></div>
+                </div>
+                <p class="note">Once, never a setting. The dialog itself teaches the flag and its exact reach, which is the difference between a bypass and a lesson.</p>
+              </div>
+            </div>
+            <p class="note" style="max-width:1120px"><b>Left:</b> the L0 receipt. It exists until the next edit in the rail, then goes &#8212; a person sees their hooks run a few times and learns the repository has them, without a single permanent pixel. Hovering it opens the <a class="dv-oid" href="#2b">2b</a> popover. <b>Middle:</b> finding 1's fix. The hook name, the exit, the elapsed time and the last lines of output, in the rail where the button was pressed; <code>path:line:col</code> in the output becomes a link into the diff. <b>Retry</b> is primary because the common fix is "edit, then press it again". The same receipt vocabulary becomes a named <code>pre-push</code> phase in the push popover from <i>Fetch Status Popover</i> turn&#8239;4.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Hook map">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Interactive &#8212; the hook map: where each hook fires, and whether this repository has it</div>
+            <div class="stage" style="width:880px">
+              <div class="legend">
+                <span><span class="sw act"></span>runs in this repository</span>
+                <span><span class="sw shd"></span><s>exists</s>, but Git will not run it</span>
+                <span><span class="sw"></span>not installed</span>
+                <span style="margin-left:auto; color:var(--tsub)">Click any hook</span>
+              </div>
+              <div class="hmap">
+                <sc-for list="{{hookLanes}}" as="lane" hint-placeholder-count="5">
+                  <div class="lane">
+                    <span class="lane-n">{{lane.name}}<small>{{lane.cmd}}</small></span>
+                    <div class="lane-s">
+                      <sc-for list="{{lane.steps}}" as="s" hint-placeholder-count="4">
+                        <sc-if value="{{s.isOp}}"><span class="gitop">{{s.label}}</span></sc-if>
+                        <sc-if value="{{s.isHook}}"><button class="{{s.cls}}" onClick="{{s.onClick}}">{{s.label}}</button></sc-if>
+                        <sc-if value="{{s.arrow}}"><span class="arrow">&#8594;</span></sc-if>
+                      </sc-for>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div class="hkd">
+                <div class="hkd-t">{{hk.name}}<span class="{{hk.stateCls}}">{{hk.state}}</span></div>
+                <div class="hkd-g">
+                  <span class="k">Runs</span><span>{{hk.when}}</span>
+                  <span class="k">Can stop it</span><span>{{hk.block}}</span>
+                  <span class="k">Skip once</span><span class="mono">{{hk.skip}}</span>
+                  <span class="k">Here</span><span class="mono">{{hk.file}}</span>
+                </div>
+              </div>
+              <p class="note">This is the self-documenting centre of the hooks work: <b>githooks(5) drawn as the operations people already do</b>, with this repository's hooks lit. Every fact in the panel is Git's documented behaviour; only "Here" is read from disk. It is the Hooks page of the setup sheet (<a class="dv-oid" href="#3c">3c</a>) in its expanded form, and it is what "All hooks&#8230;" in the L1 popover opens to. Try <code>pre-push</code>: it exists, and Git will not run it.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Setup sheet hooks">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Repository setup &#8250; Hooks</div>
+            <div class="sheet">
+              <div class="sheet-h"><h3>Repository setup</h3><span class="path">orbit-deploy &#183; ~/src/orbit-deploy</span><span style="flex:1"></span><span class="btn sm ghost">Done</span></div>
+              <div class="sheet-g">
+                <div class="snav">
+                  <div class="snav-i on">Hooks<span class="r">2</span></div>
+                  <div class="snav-i">Ignore rules<span class="r">9</span></div>
+                  <div class="snav-i">Identity &amp; signing</div>
+                  <div class="snav-i">Suggestions<span class="r">3</span></div>
+                </div>
+                <div class="sbody">
+                  <div class="sh"><h4>Hooks</h4><span class="sc clone">this clone &#183; 3 worktrees</span></div>
+                  <p class="sdesc">Scripts Git runs itself at fixed points &#8212; before a commit, before a push, after a checkout. A non-zero exit from a <b>pre-</b> hook stops the operation. There is one hooks directory per clone, so <b>every worktree of this repository runs the same hooks</b>.</p>
+                  <div class="res"><span class="k">Git reads hooks from</span><span>.husky/_</span><span class="k">because</span><span>core.hooksPath = .husky/_</span><span class="sc clone">.git/config</span><span class="k">set by Husky</span></div>
+                  <div class="banner">
+                    <span class="gl">!</span>
+                    <div>
+                      <h5>4 hooks in .git/hooks are not running</h5>
+                      <p>Git&#8239;LFS installed <code>pre-push</code>, <code>post-checkout</code>, <code>post-commit</code> and <code>post-merge</code> into <code>.git/hooks</code>. Because <code>core.hooksPath</code> points elsewhere, Git never runs them &#8212; so <b>LFS files are not uploaded when you push</b>. The usual fix is to call <code>git lfs</code> from the Husky hooks.</p>
+                    </div>
+                    <span class="btn sm">Show fix</span>
+                  </div>
+                  <div>
+                    <div class="hrow"><span class="n">pre-commit</span><span class="d"><span class="mono">.husky/_/pre-commit</span> &#8594; <span class="mono">lint-staged</span> &#183; last ran 4&#8239;min ago, 1.8&#8239;s</span><span class="rc"><span class="dot ok"></span>passed</span></div>
+                    <div class="hrow"><span class="n">commit-msg</span><span class="d"><span class="mono">.husky/_/commit-msg</span> &#8594; <span class="mono">commitlint --edit</span> &#183; last ran 4&#8239;min ago, 0.2&#8239;s</span><span class="rc"><span class="dot ok"></span>passed</span></div>
+                    <div class="hrow"><span class="n" style="color:var(--warnt)">pre-push</span><span class="d"><span class="mono">.git/hooks/pre-push</span> &#8594; <span class="mono">git lfs pre-push</span> &#183; shadowed</span><span class="rc warn">not run</span></div>
+                  </div>
+                  <div class="fold"><span>&#9656;</span>14 <code>.sample</code> files in <code>.git/hooks</code> &#8212; examples Git ships disabled; they never run</div>
+                  <div class="cbar"><span class="btn sm">Open in editor</span><span class="btn sm ghost">Reveal .husky</span><span class="btn sm ghost">Hook map&#8230;</span><span class="note" style="margin-left:auto">Managed by Husky &#183; <code>package.json</code></span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:780px">Every rule from <a class="dv-oid" href="#2a">2a</a> in one page: the resolved directory <b>and why</b> (the config key and the file it came from), the scope badge, each hook's file and what it actually calls, and the last-run receipt. Manager detection is file-based &#8212; <code>.husky/</code>, <code>lefthook.yml</code>, <code>.pre-commit-config.yaml</code> &#8212; and only ever labels; PwrGit does not edit hooks it did not write. Samples fold away because they are Git's documentation, not this repository's behaviour.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Next &#8212; <a class="dv-oid" href="#4a">4a</a> three places to ignore a file &#183; <a class="dv-oid" href="#4c">4c</a> why is this ignored &#183; <a class="dv-oid" href="#4d">4d</a> the ignore layers, with a path tester</p>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Ignore rules &#8212; three files, three audiences, one decision at the moment you make it</span>
+        </div>
+        <p class="dv-sub">Git reads ignore patterns from three places, in this precedence: every <code>.gitignore</code> in the tree (committed, shared), then <code>$GIT_COMMON_DIR/info/exclude</code> (this clone, <b>shared by all its worktrees</b>, never committed), then the file named by <code>core.excludesFile</code>, default <code>~/.config/git/ignore</code> (every repository on this machine). The second one is the answer to "stop showing me my <code>.local/</code> folder in every worktree" &#8212; and almost nobody knows it is there.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Ignore dialog">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Interactive &#8212; "Ignore&#8230;" replaces "Add to .gitignore"</div>
+            <div class="pair">
+              <div class="stage" style="width:290px">
+                <div class="stage-h">Untracked row menu <em>changes-row-menu.ts</em></div>
+                <div class="menu" style="width:250px">
+                  <div class="mi">Stage</div>
+                  <div class="mi on mnew">Ignore&#8230;<span class="r">&#8997;I</span></div>
+                  <div class="mi">Reveal in Finder</div>
+                  <div class="msep"></div>
+                  <div class="mi" style="color:var(--badt)">Delete file</div>
+                </div>
+                <p class="note">One item instead of two (file / folder); the choice of pattern and destination moves into the dialog, where there is room to say what each means.</p>
+              </div>
+              <div class="dlg">
+                <div class="dlg-h">
+                  <h3>Ignore .local/shots/after.png</h3>
+                  <p>Ignoring only hides untracked files. Files already committed are never affected.</p>
+                </div>
+                <div class="dlg-b">
+                  <div style="display:flex; flex-direction:column; gap:6px">
+                    <span class="eyebrow">Pattern</span>
+                    <div class="seg">
+                      <sc-for list="{{ignPats}}" as="p" hint-placeholder-count="3">
+                        <button class="{{p.cls}}" onClick="{{p.onClick}}">{{p.pat}}<i>{{p.count}}</i></button>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div style="display:flex; flex-direction:column; gap:6px">
+                    <span class="eyebrow">Write it to</span>
+                    <sc-for list="{{ignDests}}" as="d" hint-placeholder-count="3">
+                      <button class="{{d.cls}}" onClick="{{d.onClick}}">
+                        <span class="rd"></span>
+                        <span>
+                          <span class="dest-t">{{d.file}}</span>
+                          <span class="dest-p">{{d.desc}}</span>
+                        </span>
+                        <span style="display:flex; flex-direction:column; align-items:flex-end; gap:5px">
+                          <span class="{{d.scCls}}">{{d.scope}}</span>
+                          <sc-if value="{{d.suggested}}"><span class="sugg">suggested</span></sc-if>
+                        </span>
+                      </button>
+                    </sc-for>
+                  </div>
+                  <div class="prev">
+                    <span class="prev-l">{{ignPrevFile}}</span>
+                    <span class="prev-c">+ {{ignPrevLine}}</span>
+                    <span class="prev-s">{{ignPrevScope}}</span>
+                  </div>
+                </div>
+                <div class="dlg-f"><span class="btn ghost">Cancel</span><span class="btn pri">{{ignCta}}</span></div>
+              </div>
+            </div>
+            <p class="note" style="max-width:790px">The destination is pre-selected by the heuristic in <a class="dv-oid" href="#4b">4b</a> and labelled "suggested" &#8212; never silently chosen. The preview shows the <b>exact line and the exact file</b> that will change, and the scope sentence says who it reaches. The match counts on the pattern buttons come from <code>git ls-files --others --exclude-standard</code> filtered by the pattern, so "*.png &#183; 14 files" is a real warning before it hides eight screenshots you did not mean to. The toast that follows keeps the path: "Added <code>.local/</code> to <code>.git/info/exclude</code> &#183; all 3 worktrees".</p>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Suggestion heuristic">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Which destination to suggest</div>
+            <div class="stage" style="width:600px">
+              <div class="tbl">
+                <div class="tr heur head"><span>The path looks like</span><span>Suggest</span><span>Why</span></div>
+                <div class="tr heur"><span><code>.DS_Store</code>, <code>*.swp</code>, <code>Thumbs.db</code></span><span><span class="sc mach">global</span></span><span>Made by your OS or editor, in every repository you will ever open.</span></div>
+                <div class="tr heur"><span><code>.idea/</code>, <code>.vscode/</code>, <code>*.code-workspace</code></span><span><span class="sc mach">global</span></span><span>Your tools, not the project's &#8212; unless the repo already commits one, then <span class="sc team">.gitignore</span>.</span></div>
+                <div class="tr heur"><span>Root-level dot folder not in any template: <code>.local/</code>, <code>.scratch/</code></span><span><span class="sc clone">info/exclude</span></span><span>Personal to this checkout, and wanted in every worktree of it.</span></div>
+                <div class="tr heur"><span>Agent and tool worktree folders: <code>.claude/worktrees/</code></span><span><span class="sc clone">info/exclude</span></span><span>Local machinery. Committing it to the team file is the common mistake.</span></div>
+                <div class="tr heur"><span>Build output, deps, logs: <code>dist/</code>, <code>node_modules/</code>, <code>*.log</code></span><span><span class="sc team">.gitignore</span></span><span>Everyone who builds the project makes these.</span></div>
+                <div class="tr heur"><span>Anything else</span><span><span class="sc team">.gitignore</span></span><span>Today's behaviour, so nothing changes for people who never read the dialog.</span></div>
+              </div>
+              <p class="note">A suggestion, never an auto-choice. The fallback is today's destination on purpose: someone who presses Return without reading gets exactly what PwrGit does now.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Why is this ignored">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>"Why is this ignored?" &#8212; the Changes footer and <code>git check-ignore -v</code></div>
+            <div class="pair">
+              <div class="rail">
+                <div class="rail-tabs"><span class="rtab on">Changes</span><span class="rtab">Stashes</span><span class="rtab">Rebase</span></div>
+                <div class="rail-b">
+                  <span class="eyebrow">Changes &#183; 2</span>
+                  <div class="frow"><span class="s">M</span>src/rollout/gates.ts</div>
+                  <div class="frow"><span class="s u">?</span>docs/rollout.md</div>
+                </div>
+                <div class="ffoot"><span>8 untracked files hidden by ignore rules</span><span style="margin-left:auto; color:var(--accb); font-weight:600">Why?</span></div>
+              </div>
+              <div class="pop">
+                <div class="pop-t">Hidden by ignore rules <span class="mono" style="margin-left:auto; color:var(--tsub)">8 files</span></div>
+                <div class="pop-kv" style="grid-template-columns:minmax(0,1fr) auto">
+                  <span class="mono">.local/ &#183; 6 files</span><span><span class="sc clone">info/exclude:1</span></span>
+                  <span class="mono">notes.md</span><span><span class="sc clone">info/exclude:2</span></span>
+                  <span class="mono">.DS_Store</span><span><span class="sc mach">~/.config/git/ignore:1</span></span>
+                </div>
+                <p class="pop-p" style="color:var(--t3)">Only rules outside <code>.gitignore</code> are listed &#8212; those are the ones your teammates do not have, and the ones that surprise you.</p>
+                <div class="pop-a"><span class="btn sm">Open info/exclude</span><span class="btn sm ghost">All rules&#8230;</span><span class="lnk">gitignore(5) &#8599;</span></div>
+              </div>
+            </div>
+            <p class="note" style="max-width:740px">The footer line is L0: it exists only when a <b>personal</b> rule (info/exclude or global) is hiding something, because <code>.gitignore</code> hiding <code>node_modules/</code> surprises no one. Its count is the untracked-and-ignored set from <code>git status --ignored</code>, attributed per file with one batched <code>git check-ignore -v --stdin</code>. The same popover answers from the <code>&#8984;K</code> file search when a query matches an ignored path.</p>
+          </div>
+
+          <div class="dv-opt" id="4d" data-screen-label="4d Ignore layers">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Interactive &#8212; Repository setup &#8250; Ignore rules, with a path tester</div>
+            <div class="sheet">
+              <div class="sheet-h"><h3>Repository setup</h3><span class="path">orbit-deploy &#183; ~/src/orbit-deploy</span><span style="flex:1"></span><span class="btn sm ghost">Done</span></div>
+              <div class="sheet-g">
+                <div class="snav">
+                  <div class="snav-i">Hooks<span class="r">2</span></div>
+                  <div class="snav-i on">Ignore rules<span class="r">9</span></div>
+                  <div class="snav-i">Identity &amp; signing</div>
+                  <div class="snav-i">Suggestions<span class="r">3</span></div>
+                </div>
+                <div class="sbody">
+                  <div class="sh"><h4>Ignore rules</h4></div>
+                  <p class="sdesc">Git checks these three places, top first; the first place with a matching pattern decides, and an ignored folder hides everything inside it. They only hide <b>untracked</b> files.</p>
+                  <div class="tester">
+                    <span class="eyebrow">Test a path</span>
+                    <input class="tin" value="{{testPath}}" onChange="{{onTestChange}}" spellcheck="false" />
+                    <div class="seg">
+                      <sc-for list="{{samples}}" as="s" hint-placeholder-count="5">
+                        <button class="{{s.cls}}" onClick="{{s.onClick}}">{{s.path}}</button>
+                      </sc-for>
+                    </div>
+                    <div class="verdict"><span class="{{verdict.dotCls}}"></span><span>{{verdict.text}}</span><sc-if value="{{verdict.hit}}"><span class="{{verdict.scCls}}">{{verdict.where}}</span><span class="mono">{{verdict.pattern}}</span></sc-if></div>
+                  </div>
+                  <sc-for list="{{layers}}" as="L" hint-placeholder-count="3">
+                    <div class="{{L.cls}}">
+                      <div class="layer-h"><span class="layer-n">{{L.n}}</span><span class="layer-f">{{L.file}}</span><span class="{{L.scCls}}">{{L.scope}}</span><span class="r">{{L.action}}</span></div>
+                      <div class="pats">
+                        <sc-for list="{{L.pats}}" as="p" hint-placeholder-count="3">
+                          <span class="{{p.cls}}"><i>{{p.line}}</i>{{p.text}}</span>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:780px">The tester is <code>git check-ignore -v --no-index</code> behind a text field, and it is the fastest way to learn precedence: pick <code>notes.md</code> and the answer is a personal rule only you have; pick <code>build/debug.log</code> and it is the team's <code>*.log</code>. The winning pattern lights up in its layer, with its line number &#8212; exactly what <code>-v</code> prints. The middle layer is editable inline &#8212; it is a personal file with no review, so PwrGit treats it like a notes field. <code>.gitignore</code> opens in the editor instead, because a change there is a commit. The prototype's matcher is a simplified glob; the real one is Git's.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Next &#8212; <a class="dv-oid" href="#5a">5a</a> the rest of the catalog &#183; <a class="dv-oid" href="#5b">5b</a> four of its moments drawn &#183; <a class="dv-oid" href="#5c">5c</a> Settings &#8250; Git</p>
+      </section>
+
+      <!-- ============================ TURN 5 ============================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">Everything else &#8212; Git features people should use, each tied to the moment it helps</span>
+        </div>
+        <p class="dv-sub">The test for every row: is there a moment when Git has <b>just done the expensive thing the feature would have saved</b>? If yes, that moment gets an L0 line, and the feature's switch lives in the setup sheet or Settings. If there is no such moment, it does not get a surface &#8212; which is why <code>git notes</code> and <code>sparse-checkout</code> are near the bottom.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="5a" data-screen-label="5a Catalog">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>The catalog, ordered by how often the moment happens</div>
+            <div class="stage" style="width:920px">
+              <div class="tbl">
+                <div class="tr cat head"><span>Feature</span><span>What it saves</span><span>The moment</span><span>Where PwrGit says it</span><span>Resting</span></div>
+                <div class="tr cat"><span><b>fetch.prune</b></span><span>Stale <code>origin/*</code> refs for branches deleted on the server</span><span>A fetch reports branches gone upstream</span><span>The "2 gone" count in the branch summary gains "Prune on every fetch"</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>push.autoSetupRemote</b></span><span>The "no upstream branch" error on a new branch's first push</span><span>First push of a branch with no upstream</span><span>Push receipt: "Set up tracking automatically from now on"</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>rerere</b></span><span>Resolving the same conflict again on every rebase of a long branch</span><span>Resolving a conflict mid-rebase; seeing it again</span><span>Operation banner, <a class="dv-oid" href="#5b">5b</a></span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>rebase.updateRefs</b></span><span>Hand-moving every branch in a stack after rebasing the bottom one</span><span>Rebasing a branch that has local branches on top of it</span><span>Rebase tab: "3 branches above this one will move with it"</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>merge.conflictStyle zdiff3</b></span><span>Guessing what the base looked like in a conflict</span><span>Any conflict</span><span>Conflict view: "Show base" toggle; the setting is its default</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>reflog</b></span><span>The belief that a reset or deleted branch is gone forever</span><span>After Discard all, reset, or a branch delete</span><span>Toast gains "Recover" for commits; a "Recently moved" list in the sheet</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>includeIf identity</b></span><span>Committing to a work repo as your personal email</span><span>Repo identity differs from the profile's</span><span>Commit receipt + Identity page, <a class="dv-oid" href="#5b">5b</a>. PwrGit already parses <code>includeIf</code></span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>commit signing (SSH)</b></span><span>"Unverified" on every commit in the forge</span><span>The forge marks this profile's commits unverified</span><span>Identity &amp; signing page; one-line setup with an existing SSH key</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>blame.ignoreRevsFile</b></span><span>Blame pointing at the formatting commit</span><span>Repo has <code>.git-blame-ignore-revs</code>; or blame lands on a mass reformat</span><span>Blame header: "Skipping 2 reformat commits" / "Ignore this commit in blame"</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>fixup + autosquash</b></span><span>Interactive rebase to fold a review fix into the right commit</span><span>Staged changes touch lines from a commit on this branch</span><span>Commit button menu: "Fixup into 3c8e1f0 &#8230;"</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>maintenance &#183; fsmonitor &#183; commit-graph</b></span><span>Slow status and log in big repositories</span><span>Status regularly takes over a second</span><span>Maintenance dialog, <a class="dv-oid" href="#5b">5b</a></span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>bisect</b></span><span>Hunting the commit that broke something by hand</span><span>Two commits selected in the graph</span><span>Selection bar: "Find the first bad commit between these"</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>range-diff</b></span><span>Not knowing what a rebase actually changed</span><span>After a rebase or a Tidy apply</span><span>Receipt: "Compare with before"</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span><b>.gitattributes</b></span><span>Mystery "binary" diffs, line-ending churn, lockfile conflicts</span><span>A diff renders as binary or as all-lines-changed</span><span>Diff empty state names the attribute and its file line</span><span><span class="st zero">0 px</span></span></div>
+                <div class="tr cat"><span class="dim"><b>partial clone &#183; sparse-checkout</b></span><span class="dim">Hours cloning a monorepo</span><span class="dim">Clone of a repository the forge reports as very large</span><span class="dim">Clone dialog option, only above a size threshold</span><span><span class="st q">dialog</span></span></div>
+                <div class="tr cat"><span class="dim"><b>git notes</b></span><span class="dim">&#8212;</span><span class="dim">No moment that is not already a PR comment</span><span class="dim">No surface</span><span><span class="st q">none</span></span></div>
+              </div>
+              <p class="note">Every row's resting cost is zero: the one new header chip (<a class="dv-oid" href="#2d">2d</a>) is the only permanent addition this whole board asks for. The switch for every row lives in two places only &#8212; the setup sheet's <b>Suggestions</b> page for per-repo settings, and Settings&#8239;&#8250;&#8239;Git (<a class="dv-oid" href="#5c">5c</a>) for global ones.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="5b" data-screen-label="5b Moments">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Four moments, drawn</div>
+            <div class="pair">
+              <div class="moment">
+                <div class="stage-h">rerere &#183; conflict resolved mid-rebase</div>
+                <div class="ob">
+                  <span class="ob-t">Rebase in progress &#183; step 3 of 7</span>
+                  <span class="ob-s">Conflicts resolved in src/rollout/gates.ts</span>
+                  <div class="tipline"><span>Git can remember this resolution and reuse it the next time this conflict appears.</span><span class="act"><a>Remember</a><span class="x">Not now</span></span></div>
+                  <div class="cbar"><span class="btn sm pri">Continue</span><span class="btn sm dang">Abort</span></div>
+                </div>
+                <div class="ob">
+                  <span class="ob-t">Rebase in progress &#183; step 5 of 7</span>
+                  <span class="ob-s" style="display:flex; gap:6px; align-items:center"><span class="rc hot">rerere <i>replayed 2</i></span>Resolved the way you did at step 3. Review, then continue.</span>
+                </div>
+                <p class="note">Offer after the first resolution, when the cost is fresh; receipt when it pays off. Turning it on writes <code>rerere.enabled=true</code> to this repo's config. PwrGit's own Rebase assistant forces rerere off for its isolated replay and keeps doing so.</p>
+              </div>
+              <div class="moment">
+                <div class="stage-h">fetch.prune &#183; the branch summary</div>
+                <div class="card">
+                  <div style="display:flex; align-items:center; gap:8px"><span class="card-t">Branches</span><span class="mono">14</span><span class="chip" style="margin-left:auto">2 gone</span></div>
+                  <div class="tipline"><span>2 remote branches were deleted on origin. Git can drop these every time it fetches.</span><span class="act"><a>Prune on fetch</a><span class="x">Dismiss</span></span></div>
+                </div>
+                <div class="stage-h" style="margin-top:6px">Identity &#183; commit receipt</div>
+                <div class="card">
+                  <div style="display:flex; flex-wrap:wrap; gap:5px; align-items:center"><span class="mono" style="color:var(--okt)">&#10003; 7c1e0a2</span><span class="rc warn">as dana@personal.example</span></div>
+                  <p class="note">This profile commits as <code>dana@northwind.example</code>, but <code>~/work/orbit-deploy</code> has its own <code>user.email</code>. <a>Fix with includeIf&#8230;</a></p>
+                </div>
+                <p class="note">Only the dismiss is permanent; the action writes one config line and says which. Identity reuses what <code>git-identity-read.ts</code> already parses.</p>
+              </div>
+              <div class="moment">
+                <div class="stage-h">fsmonitor &#183; Maintenance dialog</div>
+                <div class="card">
+                  <div class="card-t">Faster status for this repository</div>
+                  <p class="note"><code>git status</code> has taken 1.4&#8211;2.6&#8239;s for the last 20 refreshes. Git can watch the folder instead of scanning it, and keep its commit graph precomputed.</p>
+                  <div class="res" style="flex-direction:column; align-items:flex-start; gap:3px"><span>git config core.fsmonitor true</span><span>git config core.untrackedCache true</span><span>git maintenance start</span></div>
+                  <div class="cbar"><span class="btn sm pri">Turn on</span><span class="btn sm ghost">Not for this repo</span><span class="sc clone" style="margin-left:auto">this clone</span></div>
+                </div>
+                <p class="note">Belongs beside the existing gc and branch cleanup in <code>MaintenanceDialog</code>, and only appears when PwrGit has measured the slowness itself &#8212; it already times every status refresh.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="5c" data-screen-label="5c Settings Git">
+            <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>Settings &#8250; General &#8250; Git defaults &#8212; beside Git runtime</div>
+            <div class="spn">
+              <div class="spn-h">
+                <div class="spn-hm">
+                  <p class="spn-eb">Git</p>
+                  <h3 class="spn-t">Git defaults on this Mac</h3>
+                  <p class="spn-d">Settings from your global Git config, <code>~/.gitconfig</code>. They apply to Git everywhere &#8212; your terminal too, not just PwrGit. Nothing here is written until you press a button, and each button shows the line it writes.</p>
+                </div>
+                <span class="sc mach">this Mac</span>
+              </div>
+              <div class="spn-b">
+                <div class="srow"><div class="l">Global ignore file<small>Patterns hidden in every repository.</small></div><div class="c"><span class="v">~/.config/git/ignore &#183; 3 patterns</span><span class="h">core.excludesFile unset &#8594; Git's default path</span></div><div class="a"><span class="btn sm">Edit</span></div></div>
+                <div class="srow"><div class="l">Prune on fetch<small>Drop remote branches deleted on the server.</small></div><div class="c"><span class="v">off</span><span class="h">git config --global fetch.prune true</span></div><div class="a"><span class="btn sm">Turn on</span></div></div>
+                <div class="srow"><div class="l">Track new branches on push<small>No more "no upstream branch" on a first push.</small></div><div class="c"><span class="v rec">on</span><span class="h">push.autoSetupRemote = true</span></div><div class="a"><span class="btn sm ghost">Turn off</span></div></div>
+                <div class="srow"><div class="l">Conflict markers show the base<small>Adds the common ancestor to every conflict.</small></div><div class="c"><span class="v">merge (Git default)</span><span class="h">git config --global merge.conflictstyle zdiff3</span></div><div class="a"><span class="btn sm">Use zdiff3</span></div></div>
+                <div class="srow"><div class="l">Move stacked branches on rebase<small>Keeps branches built on top in step.</small></div><div class="c"><span class="v">off</span><span class="h">git config --global rebase.updateRefs true</span></div><div class="a"><span class="btn sm">Turn on</span></div></div>
+                <div class="srow"><div class="l">Global hooks path<small>Hooks every repository would run.</small></div><div class="c"><span class="v" style="color:var(--tsub)">not set</span><span class="h">core.hooksPath &#183; per-repo hooks are on each repository's setup page</span></div><div class="a"></div></div>
+              </div>
+            </div>
+            <p class="note" style="max-width:760px">The value column is what Git will actually do, read with <code>git config --show-origin</code>; the grey line under it is either the key and its source, or the exact command a button would run. That grey line is the self-documentation &#8212; it is what someone copies into a terminal on their next machine. Rows are the global counterparts of the <a class="dv-oid" href="#5a">5a</a> moments; a repo-level override shows its origin instead ("overridden in <code>orbit-deploy/.git/config</code>").</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next &#8212; "build <a class="dv-oid" href="#3a">3a</a>'s rejected-commit panel first; it fixes a real bug" &#183; "draft the Identity &amp; signing page" &#183; "draw the push popover with a <code>pre-push</code> phase"</p>
+      </section>
+    </x-dc>
+    <script type="text/x-dc" data-dc-script data-props='{}'>
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { hook: "pre-push", pat: "dir", dest: "exclude", testPath: ".local/shots/after.png" };
+        }
+
+        hookFacts() {
+          return {
+            "pre-commit": { when: "Before Git records a commit, before the message is final.", block: "Yes — a non-zero exit cancels the commit.", skip: "git commit --no-verify", st: "act", file: ".husky/_/pre-commit → lint-staged" },
+            "prepare-commit-msg": { when: "After the default message is built, before you see it. Templates and ticket prefixes live here.", block: "Yes, but --no-verify does not skip it.", skip: "—", st: "none", file: "not installed" },
+            "commit-msg": { when: "After the message is written. Checks its format.", block: "Yes — a non-zero exit cancels the commit.", skip: "git commit --no-verify", st: "act", file: ".husky/_/commit-msg → commitlint --edit" },
+            "post-commit": { when: "After the commit exists.", block: "No — the commit is already made.", skip: "—", st: "shd", file: ".git/hooks/post-commit (git lfs) — shadowed by core.hooksPath" },
+            "pre-push": { when: "After Git knows what it will push, before anything is sent.", block: "Yes — a non-zero exit cancels the whole push.", skip: "git push --no-verify", st: "shd", file: ".git/hooks/pre-push (git lfs pre-push) — shadowed by core.hooksPath, so LFS files are not uploaded" },
+            "post-checkout": { when: "After switching branches, and after clone and worktree add.", block: "No.", skip: "—", st: "shd", file: ".git/hooks/post-checkout (git lfs) — shadowed by core.hooksPath" },
+            "pre-merge-commit": { when: "Before a merge commit is recorded.", block: "Yes.", skip: "git merge --no-verify", st: "none", file: "not installed" },
+            "post-merge": { when: "After a merge or a pull that merged.", block: "No.", skip: "—", st: "shd", file: ".git/hooks/post-merge (git lfs) — shadowed by core.hooksPath" },
+            "pre-rebase": { when: "Before a rebase starts.", block: "Yes — a non-zero exit refuses the rebase.", skip: "git rebase --no-verify", st: "none", file: "not installed" },
+            "post-rewrite": { when: "After amend or rebase rewrites commits.", block: "No.", skip: "—", st: "none", file: "not installed" }
+          };
+        }
+
+        hookVals() {
+          const facts = this.hookFacts();
+          const sel = this.state.hook;
+          const lanes = [
+            { name: "Commit", cmd: "git commit", seq: ["pre-commit", "prepare-commit-msg", "commit-msg", "@record", "post-commit"] },
+            { name: "Push", cmd: "git push", seq: ["pre-push", "@send"] },
+            { name: "Switch", cmd: "git switch", seq: ["@checkout", "post-checkout"] },
+            { name: "Pull / merge", cmd: "git merge", seq: ["pre-merge-commit", "@merge", "post-merge"] },
+            { name: "Rebase / amend", cmd: "git rebase", seq: ["pre-rebase", "@replay", "post-rewrite"] }
+          ];
+          const opLabel = { "@record": "commit recorded", "@send": "objects sent", "@checkout": "files updated", "@merge": "merge recorded", "@replay": "commits replayed" };
+          const hookLanes = lanes.map((lane) => ({
+            name: lane.name,
+            cmd: lane.cmd,
+            steps: lane.seq.map((id, i) => {
+              const isOp = id.charAt(0) === "@";
+              const f = facts[id];
+              let cls = "hk";
+              if (!isOp) {
+                if (f.st === "act") cls += " act";
+                if (f.st === "shd") cls += " shd";
+                if (id === sel) cls += " sel";
+              }
+              return {
+                isOp: isOp,
+                isHook: !isOp,
+                arrow: i < lane.seq.length - 1,
+                label: isOp ? opLabel[id] : id,
+                cls: cls,
+                onClick: () => this.setState({ hook: id })
+              };
+            })
+          }));
+          const f = facts[sel];
+          const stateMap = { act: ["runs here", "rc"], shd: ["exists · not run", "rc warn"], none: ["not installed", "rc"] };
+          const s = stateMap[f.st];
+          return {
+            hookLanes: hookLanes,
+            hk: { name: sel, when: f.when, block: f.block, skip: f.skip, file: f.file, state: s[0], stateCls: s[1] }
+          };
+        }
+
+        ignoreVals() {
+          const pats = [
+            { id: "file", pat: ".local/shots/after.png", count: "1 file" },
+            { id: "dir", pat: ".local/", count: "6 files" },
+            { id: "ext", pat: "*.png", count: "14 files" }
+          ];
+          const dests = [
+            { id: "gitignore", file: ".gitignore", desc: "Committed with the project. Everyone who clones it gets this rule.", scope: "committed · team", scCls: "sc team", sentence: "Becomes a change to commit. Every clone and every teammate will ignore it." },
+            { id: "exclude", file: ".git/info/exclude", desc: "This clone only, never committed — and shared by all 3 worktrees of orbit-deploy.", scope: "this clone · 3 worktrees", scCls: "sc clone", sentence: "Takes effect now in main, feat/rollout-gates and fix/canary-timeout. Nothing to commit; teammates are unaffected." },
+            { id: "global", file: "~/.config/git/ignore", desc: "Every repository on this Mac, in PwrGit and in your terminal.", scope: "this Mac", scCls: "sc mach", sentence: "Every repository on this Mac will ignore it from now on. Nothing to commit." }
+          ];
+          const p = pats.find((x) => x.id === this.state.pat);
+          const d = dests.find((x) => x.id === this.state.dest);
+          return {
+            ignPats: pats.map((x) => ({ pat: x.pat, count: x.count, cls: "segb" + (x.id === this.state.pat ? " on" : ""), onClick: () => this.setState({ pat: x.id }) })),
+            ignDests: dests.map((x) => ({ file: x.file, desc: x.desc, scope: x.scope, scCls: x.scCls, suggested: x.id === "exclude", cls: "dest" + (x.id === this.state.dest ? " on" : ""), onClick: () => this.setState({ dest: x.id }) })),
+            ignPrevFile: d.file,
+            ignPrevLine: p.pat,
+            ignPrevScope: d.sentence,
+            ignCta: d.id === "gitignore" ? "Add to .gitignore" : d.id === "exclude" ? "Add to info/exclude" : "Add to global ignore"
+          };
+        }
+
+        matches(pattern, path) {
+          const base = path.split("/").pop();
+          if (pattern.charAt(pattern.length - 1) === "/") {
+            const dir = pattern.slice(0, -1);
+            return path.indexOf(dir + "/") === 0 || path.indexOf("/" + dir + "/") !== -1;
+          }
+          if (pattern.indexOf("*.") === 0) return base.slice(-(pattern.length - 1)) === pattern.slice(1);
+          return base === pattern || path === pattern;
+        }
+
+        testerVals() {
+          const sources = [
+            { n: "1", file: ".gitignore", scope: "committed · team", scCls: "sc team", action: "Open in editor", pats: ["node_modules/", "dist/", "*.log", ".env"] },
+            { n: "2", file: ".git/info/exclude", scope: "this clone · 3 worktrees", scCls: "sc clone", action: "Edit here", pats: [".local/", "notes.md"] },
+            { n: "3", file: "~/.config/git/ignore", scope: "this Mac", scCls: "sc mach", action: "Settings › Git", pats: [".DS_Store", "*.swp", ".idea/"] }
+          ];
+          const path = (this.state.testPath || "").trim();
+          let win = null;
+          if (path !== "") {
+            for (let si = 0; si < sources.length && win === null; si++) {
+              const ps = sources[si].pats;
+              for (let pi = ps.length - 1; pi >= 0; pi--) {
+                if (this.matches(ps[pi], path)) { win = { si: si, pi: pi }; break; }
+              }
+            }
+          }
+          const layers = sources.map((s, si) => ({
+            n: s.n, file: s.file, scope: s.scope, scCls: s.scCls, action: s.action,
+            cls: "layer" + (win && win.si === si ? " win" : ""),
+            pats: s.pats.map((t, pi) => ({ text: t, line: String(pi + 1), cls: "pat" + (win && win.si === si && win.pi === pi ? " hit" : "") }))
+          }));
+          let verdict;
+          if (path === "") verdict = { text: "Type a path relative to the repository root.", dotCls: "dot", hit: false };
+          else if (win === null) verdict = { text: "Not ignored — it would show in Changes.", dotCls: "dot ok", hit: false };
+          else {
+            const s = sources[win.si];
+            verdict = { text: "Ignored by", dotCls: "dot acc", hit: true, where: s.file + ":" + (win.pi + 1), scCls: s.scCls, pattern: s.pats[win.pi] };
+          }
+          const sampleList = [".local/shots/after.png", "build/debug.log", "notes.md", ".DS_Store", "src/app.ts", ".idea/workspace.xml"];
+          return {
+            testPath: this.state.testPath,
+            onTestChange: (e) => this.setState({ testPath: e.target.value }),
+            samples: sampleList.map((x) => ({ path: x, cls: "segb" + (x === path ? " on" : ""), onClick: () => this.setState({ testPath: x }) })),
+            verdict: verdict,
+            layers: layers
+          };
+        }
+
+        renderVals() {
+          return Object.assign({}, this.hookVals(), this.ignoreVals(), this.testerVals());
+        }
+      }
+    </script>
+  </body>
+</html>

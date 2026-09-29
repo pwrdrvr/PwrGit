@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type BranchRef,
@@ -16,6 +17,7 @@ import {
   type ForkPushBack,
   type ForkSourceTarget,
   type ForkStatus,
+  type HookRun,
   type LocalBranchSummary,
   type OpenChangeRequest,
   type PushPublishTarget,
@@ -55,6 +57,7 @@ import {
 import { parseRemoteUrl } from "../forge/resolve";
 import { delay } from "../util/timing";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
+import { parseHookTrace } from "./hook-trace";
 
 /** A symbolic HEAD whose branch ref does not exist is a valid unborn branch.
  * Keep this stricter than a failed `rev-parse HEAD`: that can also mean a
@@ -402,30 +405,60 @@ export async function commitChanges(
   cwd: string,
   message: string,
   identity: CommitIdentity,
-  options: { amend?: boolean } = {}
-): Promise<Result<void>> {
+  options: { amend?: boolean; noVerify?: boolean } = {}
+): Promise<Result<{ hooks: HookRun[] }>> {
   const args = ["-c", `user.email=${identity.email}`];
   if (identity.name !== undefined && identity.name !== "") {
     args.push("-c", `user.name=${identity.name}`);
   }
   args.push("commit");
   if (options.amend === true) args.push("--amend");
+  if (options.noVerify === true) args.push("--no-verify");
   args.push("-m", message);
 
-  const raw = await git(args, cwd);
+  // Tracing is observational. A temp-file or read failure must never turn a
+  // successful commit into an error or prevent the commit from being tried.
+  let traceDir: string | null = null;
+  try {
+    traceDir = mkdtempSync(join(tmpdir(), "pwrgit-hook-trace-"));
+  } catch {
+    // The commit can still proceed without a receipt.
+  }
+  const tracePath = traceDir === null ? null : join(traceDir, "events.jsonl");
+  let raw: Awaited<ReturnType<GitExec>>;
+  let hooks: HookRun[] = [];
+  try {
+    raw = await git(args, cwd, tracePath === null ? undefined : { env: { GIT_TRACE2_EVENT: tracePath } });
+    if (tracePath !== null && existsSync(tracePath)) {
+      try {
+        hooks = parseHookTrace(readFileSync(tracePath, "utf8"));
+      } catch {
+        // Git completed; a missing receipt is better than a false failure.
+      }
+    }
+  } finally {
+    if (traceDir !== null) {
+      try { rmSync(traceDir, { recursive: true, force: true }); } catch { /* Observational cleanup. */ }
+    }
+  }
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
     const combined = `${raw.value.stdout}\n${raw.value.stderr}`;
     const code = /nothing to commit/i.test(combined)
       ? "nothing_to_commit"
       : "commit_failed";
+    const failedHook = hooks.find((hook) => hook.exitCode !== 0);
     return err({
       kind: "git",
       code,
-      message: raw.value.stderr.trim() || "commit failed"
+      message: failedHook !== undefined
+        ? `${failedHook.name} refused the commit`
+        : raw.value.stderr.trim() || "commit failed",
+      detail: combined.trim(),
+      ...(failedHook === undefined ? {} : { hook: failedHook })
     });
   }
-  return ok(undefined);
+  return ok({ hooks });
 }
 
 const LOG_FORMAT = ["%H", "%P", "%an", "%ae", "%cI", "%s"].join("%x1f") + "%x1e";

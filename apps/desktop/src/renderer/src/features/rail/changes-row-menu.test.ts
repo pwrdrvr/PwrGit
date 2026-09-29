@@ -112,7 +112,7 @@ describe("changesRowMenuItems", () => {
       })
     ).toEqual([
       "Stage (2 files)",
-      "Add folder to .gitignore",
+      "Ignore…",
       "Copy path",
       "Discard (2 files)…"
     ]);

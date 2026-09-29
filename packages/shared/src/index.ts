@@ -1,4 +1,5 @@
 export * from "./result";
+export * from "./git-discovery";
 export * from "./types";
 export * from "./forge-host-name";
 export * from "./forge-product";

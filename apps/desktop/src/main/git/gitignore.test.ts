@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addPatterns, appendToGitignore, toGitignorePattern } from "./gitignore";
+import { addPatterns, appendToGitignore, appendToIgnoreFile, toGitignorePattern } from "./gitignore";
 
 describe("toGitignorePattern", () => {
   it("anchors to the repo root", () => {
@@ -176,5 +176,16 @@ describe("appendToGitignore (real files + git check-ignore)", () => {
     const result = appendToGitignore(root, ["/dist/"]);
 
     expect(result.ok).toBe(false);
+  });
+
+  it("writes to a clone exclude file and creates a missing global parent", () => {
+    const exclude = join(root, ".git", "info", "exclude");
+    const global = join(root, "personal", "config", "git", "ignore");
+    const first = appendToIgnoreFile(exclude, ["/.local/"]);
+    const second = appendToIgnoreFile(global, [".DS_Store"]);
+    expect(first.ok && first.value.targetPath).toBe(exclude);
+    expect(second.ok && second.value.added).toEqual([".DS_Store"]);
+    expect(readFileSync(exclude, "utf8")).toContain("/.local/");
+    expect(readFileSync(global, "utf8")).toBe(".DS_Store\n");
   });
 });
