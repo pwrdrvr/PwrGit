@@ -144,6 +144,7 @@ export function App() {
     refreshingRepoIds,
     setRepoPin,
     setWorktreePin,
+    setBranchPin,
     createWorktree,
     removeWorktrees,
     persistWorktreeOrder,
@@ -755,6 +756,7 @@ export function App() {
           onSelectWorktree={selectWorktree}
           onSetRepoPin={setRepoPin}
           onSetWorktreePin={setWorktreePin}
+          onSetBranchPin={setBranchPin}
           onRemoveWorktree={(id) => void removeWorktrees([id])}
           onRemoveWorktrees={removeWorktrees}
           onCreateWorktree={createAndRevealWorktree}

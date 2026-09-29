@@ -146,7 +146,7 @@ export function focusReasonForRepo(
   ) {
     return "current";
   }
-  if (repo.pinned || repo.worktrees.some((worktree) => worktree.pinned)) {
+  if (repoIsPinned(repo)) {
     return "pinned";
   }
   if (newestVisit(repo.worktrees, context.visits) >= focusThreshold(now)) {
@@ -369,7 +369,11 @@ export function groupReposByRoot(repos: Repo[], roots: string[]): RepoGroup[] {
 export { isPrunableWorktree, STALE_AGE_DAYS } from "@pwrgit/shared";
 
 function repoIsPinned(r: Repo): boolean {
-  return r.pinned || r.worktrees.some((w) => w.pinned);
+  return (
+    r.pinned ||
+    r.worktrees.some((w) => w.pinned) ||
+    (r.pinnedBranches?.length ?? 0) > 0
+  );
 }
 
 /**
@@ -378,11 +382,12 @@ function repoIsPinned(r: Repo): boolean {
  * so a row can otherwise look like it doesn't belong in the list it's in. The
  * row uses this to say which it is instead of leaving the star ambiguous.
  */
-export type RepoPinSource = "repo" | "worktree" | "none";
+export type RepoPinSource = "repo" | "worktree" | "branch" | "none";
 
 export function repoPinSource(r: Repo): RepoPinSource {
   if (r.pinned) return "repo";
   if (r.worktrees.some((w) => w.pinned)) return "worktree";
+  if ((r.pinnedBranches?.length ?? 0) > 0) return "branch";
   return "none";
 }
 

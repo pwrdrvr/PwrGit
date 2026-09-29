@@ -2324,6 +2324,15 @@ a.forge-chip:focus-visible {
 .wt-row.is-missing .wt-row__branch {
   color: var(--text-muted);
 }
+/* A pinned branch nothing has checked out. Quiet like "locked": it is a fact
+   about what the row is, not a state to act on. */
+.wt-tag--branch {
+  background: transparent;
+  color: var(--text-subtle);
+  padding: 0 2px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
 .wt-tag--locked {
   background: transparent;
   color: var(--text-subtle);

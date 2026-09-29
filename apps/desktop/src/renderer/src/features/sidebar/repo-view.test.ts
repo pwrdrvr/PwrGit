@@ -504,6 +504,27 @@ describe("dropPositionWithin", () => {
   });
 });
 
+describe("a pinned branch no worktree holds", () => {
+  const branchOnly = repo({ id: "bo", pinnedBranches: ["main"] });
+  it("puts its repo in the Pinned lens and counts it", () => {
+    const repos = [branchOnly, repo({ id: "plain" })];
+    expect(filterReposByLens(repos, "Pinned").map((r) => r.id)).toEqual(["bo"]);
+    expect(lensCounts(repos).Pinned).toBe(1);
+  });
+  it("names the branch, not a worktree, as the reason", () => {
+    expect(repoPinSource(branchOnly)).toBe("branch");
+    expect(
+      repoPinSource(
+        repo({
+          id: "both",
+          pinnedBranches: ["main"],
+          worktrees: [wt({ id: "w", branch: "x", pinned: true })]
+        })
+      )
+    ).toBe("worktree");
+  });
+});
+
 describe("repoPinSource", () => {
   it("reports the repo's own pin", () => {
     expect(repoPinSource(repo({ id: "a", pinned: true }))).toBe("repo");
