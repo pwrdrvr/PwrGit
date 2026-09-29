@@ -6633,6 +6633,24 @@ button.agent-menu__item:hover {
   min-width: 0;
   padding: 0 7px;
 }
+/* The star's slot. Held on every branch row, remote ones included, so names
+   line up down the column whether or not a row can be pinned. 16px is the
+   `.pin` footprint (24px target pulled back by its negative margin). */
+.refs-pin-slot {
+  display: flex;
+  flex: 0 0 16px;
+  width: 16px;
+  align-items: center;
+  justify-content: center;
+}
+/* A row is a focus stop (↑/↓ walks them, Space pins, Enter runs the primary
+   action — lib/refsRowKeys.ts). Inset, because the body scrolls and clips an
+   outline drawn outside the row. */
+.refs-table__row[data-refs-row]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  scroll-margin: 4px;
+}
 /* Fixed slots: primary, secondary, ⋮. See `RefRowActions`. */
 .refs-row-slot {
   display: flex;

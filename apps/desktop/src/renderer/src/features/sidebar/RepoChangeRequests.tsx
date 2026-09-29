@@ -353,6 +353,8 @@ export function ChangeRequestTable({
           <div
             className={`refs-table__row refs-pr-table__row${isLookup ? " is-lookup" : ""}`}
             key={`${isLookup ? "lookup" : "open"}:${pr.number}`}
+            data-refs-row=""
+            tabIndex={-1}
           >
             <div className="refs-table__identity refs-pr-identity">
               <PrChip pr={pr} />

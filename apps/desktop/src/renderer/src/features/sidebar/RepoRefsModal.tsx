@@ -43,6 +43,8 @@ import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { TagRemoteDialog } from "./TagRemoteDialog";
 import { PrChip } from "./PrChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
+import { PinIcon } from "./WorktreeRow";
+import { focusFirstRefsRow, handleRefsRowKey } from "../../lib/refsRowKeys";
 import { copyText } from "../../lib/copyText";
 import {
   BRANCH_STATUS_FILTERS,
@@ -141,7 +143,8 @@ function BranchIdentity({
   subject,
   pr,
   matchedText,
-  query
+  query,
+  pin
 }: {
   name: string;
   hint: string;
@@ -150,11 +153,30 @@ function BranchIdentity({
   /** The text the row's own filter matches, to tell a PR match apart. */
   matchedText: string;
   query: string;
+  /** The star. Local branches only: a remote-tracking ref has no name of its
+   *  own to pin, and its row keeps the empty slot so names stay aligned. */
+  pin?: { pinned: boolean; onToggle: () => void };
 }) {
+  const tip = useViewportTooltip();
   const viaPr = matchedViaChangeRequest(matchedText, pr, query);
   const second = viaPr && pr !== undefined ? pr.title : subject;
   return (
     <div className="refs-table__identity">
+      <span className="refs-pin-slot">
+        {pin !== undefined && (
+          <button
+            type="button"
+            data-refs-pin=""
+            className={`pin refs-pin${pin.pinned ? " is-pinned" : ""}`}
+            aria-label={`${pin.pinned ? "Unpin" : "Pin"} branch ${name}`}
+            aria-pressed={pin.pinned}
+            {...hoverTooltip(tip, pin.pinned ? "Unpin branch" : "Pin branch")}
+            onClick={pin.onToggle}
+          >
+            <PinIcon filled={pin.pinned} size={11} />
+          </button>
+        )}
+      </span>
       <span className="refs-branch-icon" aria-hidden="true">⑂</span>
       <div>
         <span className="refs-branch-name-line">
@@ -174,6 +196,7 @@ function BranchIdentity({
           </small>
         )}
       </div>
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -848,6 +871,34 @@ export function RepoRefsModal({
     await onRefresh();
   };
 
+  // A pin shows at once and settles when the refreshed snapshot arrives; the
+  // override is dropped then, so a pin changed elsewhere is not shadowed.
+  const [pinOverride, setPinOverride] = useState<Record<string, boolean>>({});
+  const isPinned = (branch: LocalBranchSummary): boolean =>
+    pinOverride[branch.name] ?? branch.pinned === true;
+  const toggleBranchPin = async (branch: LocalBranchSummary): Promise<void> => {
+    const next = !isPinned(branch);
+    setPinOverride((current) => ({ ...current, [branch.name]: next }));
+    const result = await dispatch("branch:setPin", {
+      repoId: repo.id,
+      branch: branch.name,
+      pinned: next
+    });
+    if (!result.ok) {
+      showErrorToast({
+        title: next ? "Pin failed" : "Unpin failed",
+        message: result.error.message,
+        subject: { repoId: repo.id }
+      });
+    } else {
+      await onRefresh();
+    }
+    setPinOverride((current) => {
+      const { [branch.name]: _settled, ...rest } = current;
+      return rest;
+    });
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
@@ -871,6 +922,7 @@ export function RepoRefsModal({
   // focus.
   const dialogRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useFocusTrap({ open: true, containerRef: dialogRef, initialFocusRef: searchRef });
 
   return (
@@ -937,6 +989,10 @@ export function RepoRefsModal({
               ref={searchRef}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowDown") return;
+                if (focusFirstRefsRow(bodyRef.current)) event.preventDefault();
+              }}
               placeholder={
                 shownTab === "changeRequests" && forge !== null
                   ? "Filter by number, title, branch, author…"
@@ -990,7 +1046,16 @@ export function RepoRefsModal({
           />
         )}
 
-        <div className="refs-browser__body">
+        <div
+          className="refs-browser__body"
+          ref={bodyRef}
+          onKeyDown={(event) => {
+            if (bodyRef.current === null) return;
+            handleRefsRowKey(event, bodyRef.current, () =>
+              searchRef.current?.focus()
+            );
+          }}
+        >
           {shownTab === "branches" && (
             <div className="refs-table">
               <div className="refs-table__header">
@@ -1004,7 +1069,12 @@ export function RepoRefsModal({
                 if (item.kind === "remote") {
                   const branch = item.branch;
                   return (
-                    <div className="refs-table__row" key={branch.fullName}>
+                    <div
+                      className="refs-table__row"
+                      key={branch.fullName}
+                      data-refs-row=""
+                      tabIndex={-1}
+                    >
                       <BranchIdentity
                         name={branch.name}
                         hint={`${branch.qualifiedName}\nClick to copy branch name`}
@@ -1065,7 +1135,12 @@ export function RepoRefsModal({
                 }
                 const branch = item.branch;
                 return (
-                  <div className="refs-table__row" key={branch.fullName}>
+                  <div
+                    className="refs-table__row"
+                    key={branch.fullName}
+                    data-refs-row=""
+                    tabIndex={-1}
+                  >
                     <BranchIdentity
                       name={branch.name}
                       hint={`${branch.name}\nClick to copy branch name`}
@@ -1073,6 +1148,10 @@ export function RepoRefsModal({
                       pr={branch.pr}
                       matchedText={localBranchText(branch)}
                       query={query}
+                      pin={{
+                        pinned: isPinned(branch),
+                        onToggle: () => void toggleBranchPin(branch)
+                      }}
                     />
                     {branch.upstream === undefined ? (
                       <span className="refs-table__muted">—</span>
@@ -1136,6 +1215,13 @@ export function RepoRefsModal({
                         <RefRowMenu
                           label={`Actions for ${branch.name}`}
                           items={[
+                            {
+                              type: "item",
+                              label: isPinned(branch)
+                                ? "Unpin branch"
+                                : "Pin branch",
+                              onSelect: () => void toggleBranchPin(branch)
+                            },
                             {
                               type: "item",
                               label: "Copy branch name",
@@ -1258,6 +1344,8 @@ export function RepoRefsModal({
                 <div
                   className="refs-table__row refs-tag-table__row"
                   key={tag.fullName}
+                  data-refs-row=""
+                  tabIndex={-1}
                 >
                   <div className="refs-table__identity">
                     <span className="refs-tag-icon" aria-hidden="true">
