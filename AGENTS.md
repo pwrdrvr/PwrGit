@@ -69,7 +69,8 @@ pnpm typecheck  # tsc across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
-`pnpm lint` chains `lint:forge-kinds` → `lint:colors` → `deps:maturity` →
+`pnpm lint` chains `lint:forge-kinds` → `lint:colors` →
+`package:reservation:check` → `deps:maturity` →
 `licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
 doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
 so **add new repo-wide checks to the chain in the root `package.json`**, not as
