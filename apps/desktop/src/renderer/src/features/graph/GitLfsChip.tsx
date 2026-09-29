@@ -151,12 +151,16 @@ export function GitLfsChip({
   repoName,
   repoPath,
   worktreeId,
+  hooksShadowed = false,
+  onOpenSetup,
   platform
 }: {
   repoId: string;
   repoName: string;
   repoPath: string;
   worktreeId: string;
+  hooksShadowed?: boolean;
+  onOpenSetup?: () => void;
   /** Explicit only in deterministic platform tests. Resolved lazily at the
    *  one place it matters (toast repair commands), so rendering never
    *  touches the preload bridge. */
@@ -174,7 +178,7 @@ export function GitLfsChip({
       repoId,
       worktreeId
     });
-    if (result.ok) {
+    if (result.ok && !hooksShadowed) {
       raiseToasts(
         result.value,
         repoId,
@@ -182,13 +186,19 @@ export function GitLfsChip({
         toastKey(repoPath),
         platform ?? currentPlatform()
       );
+    } else if (hooksShadowed) {
+      dismissToastKey(toastKey(repoPath));
     }
     // Superseded: the newer request owns the component's state. The toasts
     // above were handled regardless — they are window-level, not ours.
     if (request !== requestId.current) return;
     setChecking(false);
     if (result.ok) setStatus(result.value.status);
-  }, [platform, repoId, repoName, repoPath, worktreeId]);
+  }, [hooksShadowed, platform, repoId, repoName, repoPath, worktreeId]);
+
+  useEffect(() => {
+    if (hooksShadowed) dismissToastKey(toastKey(repoPath));
+  }, [hooksShadowed, repoPath]);
 
   // The chip is a repo-level fact, so the previous answer stays on screen
   // while a sibling worktree's re-check is in flight; only a repo change
@@ -205,6 +215,8 @@ export function GitLfsChip({
   }, [check]);
 
   if (status === null || !status.required) return null;
+
+  if (hooksShadowed) return <button type="button" className="lfs-chip lfs-chip--shadowed" title="Git LFS hooks are shadowed by core.hooksPath. Open Repository setup to inspect them." onClick={onOpenSetup}>LFS · hooks off</button>;
 
   if (isGitLfsReady(status)) {
     return (

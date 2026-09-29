@@ -115,6 +115,20 @@ describe("GitLfsChip", () => {
     expect(toast.showErrorToast).not.toHaveBeenCalled();
   });
 
+  it("warns about shadowed LFS hooks without announcing the setup as ready", async () => {
+    const openSetup = vi.fn();
+    dispatchMock.mockResolvedValue(ok({ status: READY, announceReady: true }));
+    await act(async () => {
+      root.render(<GitLfsChip repoId="repo-1" repoName="proj" repoPath="/repos/proj" worktreeId="wt-1" hooksShadowed onOpenSetup={openSetup} platform="darwin" />);
+    });
+    expect(chip()?.classList.contains("lfs-chip--shadowed")).toBe(true);
+    expect(chip()?.textContent).toContain("hooks off");
+    expect(toast.showInfoToast).not.toHaveBeenCalled();
+    expect(toast.dismissToastKey).toHaveBeenCalledWith(KEY);
+    await act(async () => chip()?.click());
+    expect(openSetup).toHaveBeenCalledOnce();
+  });
+
   it("quietly clears a standing complaint when ready is old news", async () => {
     await render({ status: READY, announceReady: false });
 

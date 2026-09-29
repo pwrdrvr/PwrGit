@@ -11,7 +11,7 @@
 // graph, and rebase entries.
 
 import type { ForgeHostMap } from "./forge-remote";
-import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary } from "./git-discovery";
+import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
 import type {
@@ -1059,6 +1059,12 @@ export interface Commands {
   "repo:getGitLfsStatus": {
     req: { repoId: string; worktreeId: string };
     res: GitLfsReport;
+  };
+  "repo:setup": { req: { repoId: string }; res: RepositorySetup };
+  "repo:testIgnorePath": { req: { repoId: string; path: string }; res: SetupIgnoreTest };
+  "repo:saveExclude": {
+    req: { repoId: string; previous: string; content: string };
+    res: { content: string };
   };
   /** Read-only, bounded inspection of the gitlinks/config/checkouts beneath one
    *  selected worktree. Per-child failures are returned on their row. */
@@ -2127,6 +2133,7 @@ export interface Commands {
 
   // Reveal a path in the OS file manager (Finder / Explorer / …).
   "shell:revealPath": { req: { path: string }; res: null };
+  "shell:openPath": { req: { path: string }; res: null };
   // Open a URL in the default browser (e.g. a PR link).
   "shell:openExternal": { req: { url: string }; res: null };
 }

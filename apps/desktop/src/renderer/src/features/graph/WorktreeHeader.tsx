@@ -6,6 +6,7 @@ import {
   type RefObject
 } from "react";
 import type {
+  RepositorySetup,
   ForkSourceTarget,
   ForkStatus,
   ForkSyncOutcome,
@@ -19,7 +20,7 @@ import type {
   Worktree,
   WorktreeState
 } from "@pwrgit/shared";
-import { dispatch } from "../../lib/pwrgit";
+import { dispatch, subscribe } from "../../lib/pwrgit";
 import { PullGlyph } from "../../lib/PullGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { showErrorToast } from "../../lib/toast";
@@ -372,7 +373,8 @@ type RecoveryBusy = "rebase" | "reset" | null;
 export function WorktreeHeader({
   repo,
   worktree,
-  state
+  state,
+  onOpenSetup
 }: {
   /** `profileId` and `identity` are here for the fork prompt: the first is
    *  what the fork command is scoped to, the second is what says this checkout
@@ -380,7 +382,21 @@ export function WorktreeHeader({
   repo: Pick<Repo, "id" | "name" | "path" | "profileId" | "identity">;
   worktree: Worktree;
   state: WorktreeState | null;
+  onOpenSetup?: () => void;
 }) {
+  const [repositorySetup, setRepositorySetup] = useState<RepositorySetup | null>(null);
+  useEffect(() => {
+    let active = true;
+    const refresh = (): void => {
+      void dispatch("repo:setup", { repoId: repo.id }).then((result) => {
+        if (active && result.ok) setRepositorySetup(result.value);
+      });
+    };
+    setRepositorySetup(null);
+    refresh();
+    const off = subscribe("changes:changed", (event) => { if (event.worktreeId === worktree.id) refresh(); });
+    return () => { active = false; off(); };
+  }, [repo.id, worktree.id]);
   const [busy, setBusy] = useState<Busy>(null);
   const [divergence, setDivergence] = useState<RemoteDivergence | null>(null);
   /** Set while the divergence on screen is against the fork's source rather
@@ -1197,7 +1213,10 @@ export function WorktreeHeader({
           repoName={repo.name}
           repoPath={repo.path}
           worktreeId={worktree.id}
+          hooksShadowed={repositorySetup?.hooks.lfsShadowed ?? false}
+          {...(onOpenSetup === undefined ? {} : { onOpenSetup })}
         />
+        {(repositorySetup?.hooks.active.length ?? 0) > 0 && <button type="button" className="discovery-hooks-chip" title={`${repositorySetup?.hooks.displayDirectory} · ${repositorySetup?.hooks.worktreeCount} worktrees`} onClick={onOpenSetup}>hooks {repositorySetup?.hooks.active.length}</button>}
         {/* The one repo-level fact the action buttons cannot act on: this
             account may not push here. A button, unlike the sidebar's mark,
             because this is where the push it is about lives. Hidden while an

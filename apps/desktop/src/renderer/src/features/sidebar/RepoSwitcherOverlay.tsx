@@ -341,6 +341,7 @@ export function RepoSwitcherOverlay({
   onPick,
   onPickCommit,
   onPickFile,
+  onOpenSetup,
   profileCount,
   platform = currentPlatform()
 }: {
@@ -354,6 +355,7 @@ export function RepoSwitcherOverlay({
   onPick: (hit: RepoSearchHit) => void;
   onPickCommit: (commit: Commit) => void;
   onPickFile: (path: string) => void;
+  onOpenSetup?: () => void;
   /** How many profiles exist. The scope toggle only appears with two or more:
    *  with one, "this profile" and "all profiles" are the same search. */
   profileCount: number;
@@ -365,6 +367,7 @@ export function RepoSwitcherOverlay({
   const [menu, setMenu] = useState<{ item: PaletteItem; x: number; y: number } | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [query, setQuery] = useState("");
+  const showSetupCommand = onOpenSetup !== undefined && /^(repository\s+setup|setup)(?:\s|$)/i.test(query.trim());
   const [results, setResults] = useState<RepoSearchHit[]>([]);
   // General → Search all profiles; null until the first read lands. The scope
   // toggle writes that same setting rather than keeping its own, so the
@@ -380,6 +383,7 @@ export function RepoSwitcherOverlay({
     commit: Commit | null;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const setupCommandRef = useRef<HTMLButtonElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const mounted = useRef(false);
   useEffect(() => {
@@ -441,6 +445,7 @@ export function RepoSwitcherOverlay({
     [allCommitResults, results, query, files]
   );
   const sel = selectedPaletteItemIndex(items, selectedItemKey);
+  const selectedResult = (index: number): boolean => index === sel && (!showSetupCommand || selectedItemKey !== null);
   useEffect(() => {
     setCopyStatus(null);
     setMenu(null);
@@ -723,6 +728,7 @@ export function RepoSwitcherOverlay({
     if (event.key === "Tab") {
       event.preventDefault();
       if (event.target === inputRef.current) {
+        if (showSetupCommand) { setupCommandRef.current?.focus(); return; }
         const button = resultsRef.current?.querySelector<HTMLButtonElement>(
           ".overlay-result.is-selected .overlay-result__actions"
         );
@@ -735,16 +741,19 @@ export function RepoSwitcherOverlay({
     if ((event.target as HTMLElement).closest("button") !== null) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
+      if (showSetupCommand && selectedItemKey === null && items.length > 0) { selectItem(0); return; }
       selectItem(Math.min(sel + 1, Math.max(0, items.length - 1)));
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
+      if (showSetupCommand && sel === 0) { setSelectedItemKey(null); return; }
       selectItem(Math.max(sel - 1, 0));
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
+      if (showSetupCommand && selectedItemKey === null) { onOpenSetup?.(); return; }
       pickItem(items[sel]);
       return;
     }
@@ -852,7 +861,7 @@ export function RepoSwitcherOverlay({
             aria-label="Jump to repo, branch, commit, or file"
             aria-controls={items.length > 0 ? resultsId : undefined}
             aria-activedescendant={
-              items.length > 0 ? rowId(sel) : undefined
+              items.length > 0 && (!showSetupCommand || selectedItemKey !== null) ? rowId(sel) : undefined
             }
             autoComplete="off"
             spellCheck={false}
@@ -904,6 +913,7 @@ export function RepoSwitcherOverlay({
         {branchError !== null && (
           <div className="modal__error" role="alert">{branchError}</div>
         )}
+        {showSetupCommand && <button ref={setupCommandRef} type="button" className="repository-setup__command" onClick={onOpenSetup}>Repository setup… <span>Hooks and ignore rules for this repository</span></button>}
         <div
           className="overlay-results"
           id={resultsId}
@@ -925,9 +935,9 @@ export function RepoSwitcherOverlay({
                   key={`commit:${commit.hash}`}
                   id={rowId(i)}
                   role="option"
-                  aria-selected={i === sel}
+                  aria-selected={selectedResult(i)}
                   tabIndex={-1}
-                  className={`overlay-result${i === sel ? " is-selected" : ""}`}
+                  className={`overlay-result${selectedResult(i) ? " is-selected" : ""}`}
                   {...rowTip}
                   // The row already moves the selection on enter, so the card's
                   // own handler is called rather than spread over it.
@@ -961,9 +971,9 @@ export function RepoSwitcherOverlay({
                   key={`file:${file.path}`}
                   id={rowId(i)}
                   role="option"
-                  aria-selected={i === sel}
+                  aria-selected={selectedResult(i)}
                   tabIndex={-1}
-                  className={`overlay-result${i === sel ? " is-selected" : ""}`}
+                  className={`overlay-result${selectedResult(i) ? " is-selected" : ""}`}
                   {...rowTip}
                   onMouseEnter={(event) => {
                     selectItem(i);
@@ -996,9 +1006,9 @@ export function RepoSwitcherOverlay({
                 id={rowId(i)}
                 data-hit-key={hitKey(r)}
                 role="option"
-                aria-selected={i === sel}
+                aria-selected={selectedResult(i)}
                 tabIndex={-1}
-                className={`overlay-result${i === sel ? " is-selected" : ""}`}
+                className={`overlay-result${selectedResult(i) ? " is-selected" : ""}`}
                 onMouseEnter={() => selectItem(i)}
                 onClick={() => pickItem(item)}
               >
@@ -1167,7 +1177,7 @@ export function RepoSwitcherOverlay({
               </div>
             );
           })}
-          {items.length === 0 && (
+          {items.length === 0 && !showSetupCommand && (
             <div className="overlay-empty">
               {query.trim() === ""
                 ? "No repos indexed yet"
@@ -1186,7 +1196,7 @@ export function RepoSwitcherOverlay({
             )}
           <span style={{ flex: 1 }} />
           <span>
-            {items.length} {items.length === 1 ? "result" : "results"}
+            {items.length + (showSetupCommand ? 1 : 0)} {items.length + (showSetupCommand ? 1 : 0) === 1 ? "result" : "results"}
           </span>
         </div>
       </div>

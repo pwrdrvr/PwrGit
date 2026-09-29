@@ -193,6 +193,7 @@ export function Sidebar({
   onCloneRepo,
   onForkRepo,
   onForkCheckout,
+  onOpenRepoSetup,
   onAddFolder,
   onOpenSearch,
   onExpandRepo,
@@ -241,6 +242,7 @@ export function Sidebar({
    *  fork. Distinct from `onForkRepo`, which starts from a search and ends in
    *  a new clone: this one starts from a repo already on disk. */
   onForkCheckout: (repo: Repo) => void;
+  onOpenRepoSetup?: (repo: Repo) => void;
   onAddFolder: () => void;
   onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
@@ -980,6 +982,7 @@ export function Sidebar({
         }}
         onNewWorktree={() => setNewWorktree({ repo })}
         onForkRepo={() => onForkCheckout(repo)}
+        onOpenSetup={() => onOpenRepoSetup?.(repo)}
         onCleanUpBranches={() =>
           setMaintenance({ repo: { id: repo.id, name: repo.name } })
         }

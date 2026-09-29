@@ -12,4 +12,12 @@ export function registerShellHandlers(bus: CommandBus): void {
   });
 
   bus.register("shell:openExternal", (req) => openExternalUrl(req.url));
+  bus.register("shell:openPath", async (req) => {
+    try {
+      const failure = await shell.openPath(req.path);
+      return failure === "" ? ok(null) : { ok: false as const, error: { kind: "unknown" as const, code: "open_failed", message: failure } };
+    } catch (cause) {
+      return { ok: false as const, error: { kind: "unknown" as const, code: "open_failed", message: `Could not open ${req.path}`, cause } };
+    }
+  });
 }

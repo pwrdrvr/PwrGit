@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   openExternal: vi.fn(),
+  openPath: vi.fn(),
   showItemInFolder: vi.fn(),
   logMain: vi.fn()
 }));
@@ -10,6 +11,7 @@ vi.mock("electron", () => ({
   dialog: { showMessageBox: vi.fn() },
   shell: {
     openExternal: mocks.openExternal,
+    openPath: mocks.openPath,
     showItemInFolder: mocks.showItemInFolder
   }
 }));
@@ -28,6 +30,7 @@ function bus() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.openExternal.mockResolvedValue(undefined);
+  mocks.openPath.mockResolvedValue("");
 });
 
 describe("shell handlers", () => {
@@ -70,5 +73,13 @@ describe("shell handlers", () => {
       bus().dispatch("shell:revealPath", { path: "/tmp/pwrgit.log" })
     ).resolves.toEqual({ ok: true, value: null });
     expect(mocks.showItemInFolder).toHaveBeenCalledWith("/tmp/pwrgit.log");
+  });
+
+  it("opens a local setup file through the OS and reports association failures", async () => {
+    const path = "/tmp/repo/.gitignore";
+    await expect(bus().dispatch("shell:openPath", { path })).resolves.toEqual({ ok: true, value: null });
+    expect(mocks.openPath).toHaveBeenCalledWith(path);
+    mocks.openPath.mockResolvedValueOnce("No application handles this file");
+    await expect(bus().dispatch("shell:openPath", { path })).resolves.toMatchObject({ ok: false, error: { code: "open_failed" } });
   });
 });

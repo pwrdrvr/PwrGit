@@ -35,6 +35,7 @@ import { ForkRepoDialog } from "./features/sidebar/ForkRepoDialog";
 import { ForkCheckoutDialog } from "./features/sidebar/ForkCheckoutDialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
+import { RepositorySetupSheet } from "./features/sidebar/RepositorySetupSheet";
 import {
   branchRevealForSearchHit,
   pendingRevealForCreatedWorktree,
@@ -62,6 +63,7 @@ export function App() {
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const [setupRepo, setSetupRepo] = useState<Repo | null>(null);
   const [cloneOpen, setCloneOpen] = useState(false);
   /** null = closed. Open carries a `seed`: a CloneRepository opens the dialog
    *  on the repository the sidebar had selected, and `seed: null` opens it
@@ -767,6 +769,7 @@ export function App() {
           onCloneRepo={() => setCloneOpen(true)}
           onForkRepo={(seed, checkout) => setForkOpen({ seed, checkout })}
           onForkCheckout={openForkCheckout}
+          onOpenRepoSetup={setSetupRepo}
           onAddFolder={() => void addFolders()}
           onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
@@ -795,6 +798,7 @@ export function App() {
                 repo={selectedRepo}
                 worktree={selectedWorktree}
                 state={worktreeState}
+                onOpenSetup={() => setSetupRepo(selectedRepo)}
               />
               {/* Keep the lineage graph mounted while a diff is shown — hidden,
                   not unmounted — so returning to it is instant (its multi-branch
@@ -1003,9 +1007,12 @@ export function App() {
           onPick={onPickSearch}
           onPickCommit={onPickCommitSearch}
           onPickFile={onPickFileSearch}
+          {...(selectedRepo === null ? {} : { onOpenSetup: () => { setOverlayOpen(false); setSetupRepo(selectedRepo); } })}
           profileCount={profiles.length}
         />
       )}
+
+      {setupRepo !== null && <RepositorySetupSheet repo={setupRepo} onClose={() => setSetupRepo(null)} />}
 
       {searchNewWorktree !== null && (
         <NewWorktreeModal

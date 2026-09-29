@@ -66,6 +66,7 @@ import { resolveForge } from "./forge/providers";
 import { resolveForgeRepo } from "./forge/resolve";
 import { registerRepoProviders } from "./forge/repo-providers";
 import { registerChangesHandlers } from "./git/changes-handlers";
+import { registerRepositorySetupHandlers } from "./git/repository-setup-handlers";
 import { registerOperationHandlers } from "./git/operation-handlers";
 import {
   ChangeSetWatch,
@@ -1045,6 +1046,7 @@ if (!gotSingleInstanceLock) {
     const maintenanceHandlers = registerMaintenanceHandlers(bus, db, execGit, worktreeOperations, indexer, prService);
     registerGraphHandlers(bus, db, stateService);
     registerChangesHandlers(bus, db, refresher, worktreeOperations);
+    registerRepositorySetupHandlers(bus, db, worktreeOperations);
     registerOperationHandlers(bus, db, refresher, worktreeOperations);
     registerSubmoduleHandlers(bus, db);
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
