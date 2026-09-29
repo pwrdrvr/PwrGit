@@ -366,7 +366,8 @@ describe("ChangesTab partially staged files", () => {
     expect(mocks.dispatch).toHaveBeenCalledWith("changes:commit", {
       worktreeId: "worktree-1",
       message: "feat: add thing",
-      amend: false
+      amend: false,
+      noVerify: false
     });
     expect(mocks.showErrorToast).toHaveBeenCalledWith({
       title: "A Git hook refused the commit",

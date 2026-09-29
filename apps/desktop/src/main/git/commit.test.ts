@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -68,25 +68,19 @@ describe("commit flow", () => {
     writeFileSync(hook, "#!/bin/sh\necho 'test hook rejected' >&2\nexit 1\n");
     chmodSync(hook, 0o755);
 
-    const refused = await commitChanges(systemGit, repo, "feat: hooked", { email: "x@y.com" });
+    let capturedTrace = "Git did not pass a trace path to the executor";
+    const tracedGit: GitExec = async (args, cwd, options) => {
+      const result = await systemGit(args, cwd, options);
+      const path = options?.env?.GIT_TRACE2_EVENT;
+      if (path !== undefined) {
+        capturedTrace = existsSync(path) ? readFileSync(path, "utf8") : `No trace file at ${path}`;
+      }
+      return result;
+    };
+    const refused = await commitChanges(tracedGit, repo, "feat: hooked", { email: "x@y.com" });
     expect(refused.ok).toBe(false);
     if (refused.ok) throw new Error("expected a refusal");
-    if (refused.error.hook === undefined) {
-      const tracePath = join(mkdtempSync(join(tmpdir(), "pwrgit-hook-diagnostic-")), "trace.jsonl");
-      try {
-        execFileSync("git", ["-c", "user.email=x@y.com", "-c", "user.name=Test", "commit", "-m", "feat: hooked"], {
-          cwd: repo,
-          env: { ...process.env, GIT_TRACE2_EVENT: tracePath }
-        });
-      } catch { /* A hook refusal is expected. */ }
-      const events = readFileSync(tracePath, "utf8").split("\n").flatMap((line) => {
-        try {
-          const event = JSON.parse(line) as { event?: string };
-          return event.event === "child_start" || event.event === "child_exit" ? [event] : [];
-        } catch { return []; }
-      });
-      throw new Error(`Git ran the refusing hook without a parsed receipt: ${JSON.stringify(events)}`);
-    }
+    if (refused.error.hook === undefined) throw new Error(`Git ran the refusing hook without a parsed receipt: ${capturedTrace}`);
     expect(refused.error.hook).toMatchObject({ name: "pre-commit", exitCode: 1 });
     expect(refused.error.hook?.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(refused.error.detail).toContain("test hook rejected");

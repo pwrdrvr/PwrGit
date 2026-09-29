@@ -50,7 +50,9 @@ describe("ignore discovery with linked worktrees", () => {
       { choice: "folder", pattern: "/.local/", count: 2 },
       { choice: "extension", pattern: "*.png", count: 3 }
     ]);
-    expect(result.value.destinations.find((item) => item.destination === "exclude")?.path).toBe(join(realpathSync(root), ".git", "info", "exclude"));
+    const exclude = result.value.destinations.find((item) => item.destination === "exclude")?.path;
+    if (exclude === undefined) throw new Error("missing common exclude path");
+    expect(realpathSync.native(exclude)).toBe(realpathSync.native(join(root, ".git", "info", "exclude")));
     expect(result.value.destinations.find((item) => item.destination === "global")?.path).toBe(global);
   });
 
