@@ -312,9 +312,12 @@ carries no `assets/`.
 
 `Branch Row Actions - UX Review.dc.html` was written here and pushed up through
 the `claude-design` MCP server's `write_files` (after `finalize_plan`, which the
-server refuses to skip); the project copy is 101,712 bytes and `cmp`-identical to
-this one once the injected serve block (lines 4-6) is stripped. It is a
-proposal, not a record of what is built. Turn **1** reproduces the drift with
+server refuses to skip); the project copy is 101,712 bytes and was `cmp`-identical to
+this one until the pins were built: this copy is now 102,308 bytes, ahead of the
+project by three text edits in turn 6 (storage is a `pinned_branches` table, not
+a column on `local_branches`; the Space-to-pin keyboard model; the rename and
+delete answers marked as built), so a later re-export must not drop them. It is
+a proposal, not a record of what is built. Turn **1** reproduces the drift with
 the shipped CSS and measures it (a four-button local row resolves its actions
 column to 283 px against 210 px for the rest, so its Upstream starts 43 px
 early at 940 px), and audits all four tabs. Turn **2** draws three row-action
