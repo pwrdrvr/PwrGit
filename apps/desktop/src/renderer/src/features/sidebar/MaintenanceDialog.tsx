@@ -534,6 +534,9 @@ export function MaintenanceDialog({
     branchScan ? results.get(id)?.candidates?.length ?? 0 : saved(id);
   const proposingRepos = branchScan || collecting ? [...repos].filter((repo) => current.has(repo.id) ||
     ["failed", "partial", "cancelled"].includes(results.get(repo.id)?.outcome ?? "") ||
+    // A run that ended (cancelled or failed) without reaching a repository
+    // still shows it, as incomplete, rather than dropping it from both lists.
+    (!running && !results.has(repo.id)) ||
     (branchScan ? weight(repo.id) > 0 : weight(repo.id) >= GC_QUIET_BYTES)).sort((a, b) =>
       weight(b.id) - weight(a.id)) : repos;
   const quietRepos = branchScan || collecting ? repos.filter((repo) => !proposingRepos.some((shown) => shown.id === repo.id) && results.has(repo.id)) : [];
@@ -636,7 +639,7 @@ export function MaintenanceDialog({
               branchMode={branchMode} onBranchMode={changeBranchMode}
               options={combinedOptions()} onOptions={changeOptions}
               gcMode={mode} onGcMode={setMode} protectRecent={protectRecent} protectionDays={protectionDays}
-              onProtectRecent={setProtectRecent} onProtectionDays={setProtectionDays} />
+              onProtectRecent={setProtectRecent} onProtectionDays={setProtectionDays} lastKeepDays={lastKeepDays} />
             {error !== null && <div className="modal__error">{error}</div>}
             <div className="modal__actions">
               <span className="maintenance__footer-lead">{scopeRepoCount === null ? "This profile" : `${scopeRepoCount} ${scopeRepoCount === 1 ? "repository" : "repositories"}`} · {plan.worktrees && plan.branches && branchMode === "review" ? "stops twice for you" : plan.worktrees || plan.branches && branchMode === "review" ? "stops once for you" : "runs without stopping"}</span>

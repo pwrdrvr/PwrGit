@@ -74,7 +74,7 @@ export function MaintenanceRulesApplied({ kind, branchOptions, protectRecent, pr
 
 export function MaintenancePlanForm({
   plan, onChange, branchMode, onBranchMode, options, onOptions, gcMode, onGcMode,
-  protectRecent, protectionDays, onProtectRecent, onProtectionDays
+  protectRecent, protectionDays, onProtectRecent, onProtectionDays, lastKeepDays
 }: {
   plan: MaintenancePlan;
   onChange: (plan: MaintenancePlan) => void;
@@ -88,6 +88,8 @@ export function MaintenancePlanForm({
   protectionDays: number;
   onProtectRecent: (enabled: boolean) => void;
   onProtectionDays: (days: number) => void;
+  /** The branch age guard's last notch, restored when the guard is switched back on. */
+  lastKeepDays: BranchCleanupKeepDays;
 }) {
   return <div className="maintenance__body">
     <p className="maintenance__help">Runs top to bottom in this window’s profile. Each step works on what the step before it left.</p>
@@ -112,8 +114,8 @@ export function MaintenancePlanForm({
             <div className="maintenance__plan-rule">
             <label><input type="checkbox" checked={options.prProof} onChange={(event) => onOptions({ ...options, prProof: event.target.checked })} />Count a merged pull request as proof</label><small>when the tip is the PR’s final head</small>
             </div><div className="maintenance__plan-rule">
-            <label><input type="checkbox" checked={options.keepDays !== null} onChange={(event) => onOptions({ ...options, keepDays: event.target.checked ? 7 : null })} />Keep branches touched in the last</label>
-            <select aria-label="Combined branch age guard" disabled={options.keepDays === null} value={options.keepDays ?? 7} onChange={(event) => onOptions({ ...options, keepDays: Number(event.target.value) as BranchCleanupKeepDays })}>
+            <label><input type="checkbox" checked={options.keepDays !== null} onChange={(event) => onOptions({ ...options, keepDays: event.target.checked ? lastKeepDays : null })} />Keep branches touched in the last</label>
+            <select aria-label="Combined branch age guard" disabled={options.keepDays === null} value={options.keepDays ?? lastKeepDays} onChange={(event) => onOptions({ ...options, keepDays: Number(event.target.value) as BranchCleanupKeepDays })}>
               {BRANCH_CLEANUP_KEEP_DAYS.map((days) => <option key={days} value={days}>{daysLabel(days)}</option>)}
             </select>
             </div><div className="maintenance__plan-rule">

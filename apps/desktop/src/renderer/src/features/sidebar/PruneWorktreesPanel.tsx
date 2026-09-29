@@ -213,8 +213,9 @@ export function PruneWorktreesPanel({
     [remaining, protectRecent, protectionDays, summary]
   );
   useEffect(() => {
-    if (summary !== null) onCandidateCount?.(candidates.length);
-  }, [summary, candidates.length, onCandidateCount]);
+    // A failed sweep still ends in review, so the rail must leave "scanning".
+    if (stage.kind === "review") onCandidateCount?.(candidates.length);
+  }, [stage.kind, candidates.length, onCandidateCount]);
   const protectedCandidates = remaining.filter((candidate) => !candidates.includes(candidate));
   const protectedCount = protectedCandidates.length;
   const unreadableCount = protectedCandidates.filter((candidate) => candidate.activityComplete !== true ||
@@ -471,7 +472,7 @@ export function PruneWorktreesPanel({
                 />
               ))}
               {protectedCount > 0 && <><div className="maintenance__group"><span>Kept <b>{protectedCount}</b></span><button onClick={() => setShowKept((old) => !old)}>{showKept ? "Hide" : "Show"}</button></div>
-                <div className="maintenance__kept-reasons">{recentCount > 0 && <span><b>{recentCount}</b> touched in the last {protectionDays} days</span>}{unreadableCount > 0 && <span><b>{unreadableCount}</b> activity could not be read</span>}</div>
+                <div className="maintenance__kept-reasons">{recentCount > 0 && <span><b>{recentCount}</b> touched in the last {protectionDays} {protectionDays === 1 ? "day" : "days"}</span>}{unreadableCount > 0 && <span><b>{unreadableCount}</b> activity could not be read</span>}</div>
                 {showKept && protectedCandidates.map((candidate) => <p className="prune__kept-row" key={candidate.worktreeId}>{candidate.repoName} · {candidate.branch}</p>)}
               </>}</div>}
               {failedRepos.length > 0 && (
