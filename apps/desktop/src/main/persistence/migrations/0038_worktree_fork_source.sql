@@ -1,4 +1,4 @@
--- 0036_worktree_fork_source — the branch against its fork's source, and a
+-- 0038_worktree_fork_source — the branch against its fork's source, and a
 -- pruned upstream, kept with the rest of the worktree snapshot.
 --
 -- On a fork, `main` tracks `origin/main` (the user's own copy), so the stored
