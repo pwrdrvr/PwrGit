@@ -286,11 +286,12 @@ describe("RepoRefsSections branch counts", () => {
     ].find((node) => node.textContent?.includes("Branches"))!;
     // The counts left the disclosure: clicking them no longer folds it.
     expect(head.textContent).not.toContain("↑");
+    // Words, not arrows: these count branches, and the arrows are commits.
     expect(button("Show 2 branches with commits to push")?.textContent).toBe(
-      "↑2"
+      "2 ahead"
     );
     expect(button("Show 1 branch behind their upstream")?.textContent).toBe(
-      "↓1"
+      "1 behind"
     );
     expect(
       button("Show 2 branches whose remote branch was deleted")?.textContent

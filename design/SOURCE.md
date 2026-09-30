@@ -85,7 +85,7 @@ first.
 | `Image Diff Lightbox.dc.html` | Binary image diff — inline layout rule, lightbox, pixel compare. |
 | `Reset to Remote - UX Review.dc.html` | Reset-to-remote findings and redesign. |
 | `Reset to Remote - Forks - UX Review.dc.html` | The same dialog on a fork: why it opened on `origin/main` when that was identical to `main`, why "Last fetched moments ago" was true only of `origin` while `upstream/main` was 19 minutes stale, and the fork-source card, per-remote fetch coverage and leased push back to the fork that fix it. Interactive. |
-| `Fork Sync - UX Review.dc.html` | Why a fork's `main` read "up to date" while its source was 10 commits ahead &mdash; the header measured it against the fork itself, and Fetch never asked `upstream` &mdash; and where a one-click catch-up belongs: a separate chip, a split Pull whose default syncs, a Pull that only pulls, or a button that reads Sync. Then the recommended split Pull through its states: the arrow menu, syncing, the receipt, a refused push, a `main` with commits of its own, where no arrow appears, and the narrow header. Interactive. |
+| `Fork Sync - UX Review.dc.html` | Why a fork's `main` read "up to date" while its source was 10 commits ahead &mdash; the header measured it against the fork itself, and Fetch never asked `upstream` &mdash; and where a one-click catch-up belongs: a separate chip, a split Pull whose default syncs, a Pull that only pulls, or a button that reads Sync. Then the recommended split Pull through its states: the arrow menu, syncing, the receipt, a refused push, a `main` with commits of its own, where no arrow appears, and the narrow header. Turn 3 reviews the build against the running app: a numbered defect list, a measured fit ladder that keeps the upstream chip down to a 298px pane, tooltips on Pull, its arrow and the chip, the collapsed panel's button moved into the row, a lineage toolbar that steps down instead of wrapping, the fork count in the sidebar, and what re-reads each count. Turn 3 is redrawn as shipped in #359, with measured widths. Interactive. |
 | `Refresh Affordances - Normalization.dc.html` | The six refresh/fetch controls, why they diverged, and the one busy language that replaced them. |
 | `Settings Updates.dc.html` | Settings › Updates — the four-slot release matrix, and the two-control layout it replaced. |
 | `Settings Forges - UX Review.dc.html` | Settings › Forges — the pane's measured layout defects, and the per-product sections that replace the one interleaved host list. |
@@ -404,7 +404,7 @@ run, **4a** is a live `DCLogic` prototype of it, and turn **5** is the build
 list, which shipped with the artboard.
 
 `Fork Sync - UX Review.dc.html` was written here and pushed up through the
-`claude-design` MCP; the project copy was verified at the same 53,797 bytes.
+`claude-design` MCP; the project copy was verified at the same 53,797 bytes (turn 1–2 version).
 It follows on from `Reset to Remote - Forks`. After that reset the fork's
 source moved on 10 commits and nothing in the app noticed, because the header
 measured `main` against `origin/main`, the fork, and Fetch never asked
@@ -419,6 +419,24 @@ names are contrived (`sparkline`, `octo-labs`, `demo-dev`), and so are the
 counts and the SHA `8f3c2a9`. The design thread that produced it is in the
 project's chat panel as "Fork behind its source — detect and sync". It carries
 no `assets/`.
+
+Turn **3** was added on 2026-09-29 after the build shipped and was reviewed
+against a real fork. It supersedes **2h**: 2h's 680px cut is what hid the
+chip at the stock window width. **3-list** is the defect table, **3a**–**3e**
+are the fixes, **3f** records which counts go stale and why (drawn from
+`worktree-state.ts`, `worktree-handlers.ts` and PwrAgnt's working-state
+refresh policy), and **3g** is a second `DCLogic` prototype, bound through
+`p3*` values merged into the same `renderVals()`.
+
+Once pwrdrvr/PwrGit#359 built 3a–3f, turn 3 was redrawn to match what
+shipped. Each card now draws the build, and its note says where the build
+departs from the proposal. The widths in the captions and in 3g's ladder were
+measured by building the real header, toolbar and sidebar row against the
+app's stylesheets with the bundled Geist Sans, so a specimen on the artboard,
+which loads Google's Geist, can differ by a few pixels. The 3g toggle now
+reads "Before" and "Shipped". The artboard is 100,243 bytes, and the project
+copy was verified byte-identical to this file, apart from the three lines the
+server injects into `<head>`.
 
 `Person Card - UX Review.dc.html` was written here and pushed up through the
 `claude-design` MCP, in the same change that builds its **1b**; the project

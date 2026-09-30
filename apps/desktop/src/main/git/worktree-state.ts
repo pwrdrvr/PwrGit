@@ -1,4 +1,4 @@
-import type { WorktreeState } from "@pwrgit/shared";
+import type { WorktreeForkSource, WorktreeState } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
@@ -12,11 +12,18 @@ export type ParsedStatus = {
   ahead: number;
   behind: number;
   dirty: number;
+  /** An upstream is configured but its ref is gone (see below). */
+  upstreamGone: boolean;
 };
 
 /**
  * Parse `git status --porcelain=v2 --branch`. Header lines start with `#`;
  * every non-header line is a changed/renamed/unmerged/untracked entry.
+ *
+ * A configured upstream whose remote branch was pruned still prints
+ * `# branch.upstream`, but Git omits `# branch.ab` because there is nothing
+ * to count against. Reading that as 0/0 reported a finished branch as "up to
+ * date"; `upstreamGone` says what actually happened.
  */
 export function parseStatus(stdout: string): ParsedStatus {
   let head = "";
@@ -25,12 +32,14 @@ export function parseStatus(stdout: string): ParsedStatus {
   let ahead = 0;
   let behind = 0;
   let dirty = 0;
+  let sawCounts = false;
 
   for (const line of stdout.split("\n")) {
     if (line.startsWith("# branch.oid ")) head = line.slice(13).trim();
     else if (line.startsWith("# branch.head ")) branch = line.slice(14).trim();
     else if (line.startsWith("# branch.upstream ")) hasUpstream = true;
     else if (line.startsWith("# branch.ab ")) {
+      sawCounts = true;
       const m = /\+(-?\d+)\s+-(-?\d+)/.exec(line);
       if (m !== null) {
         ahead = Number(m[1]);
@@ -41,7 +50,15 @@ export function parseStatus(stdout: string): ParsedStatus {
     }
   }
 
-  return { head, branch, hasUpstream, ahead, behind, dirty };
+  return {
+    head,
+    branch,
+    hasUpstream,
+    ahead,
+    behind,
+    dirty,
+    upstreamGone: hasUpstream && !sawCounts
+  };
 }
 
 type WorktreeRow = {
@@ -70,6 +87,12 @@ type StateRow = {
   is_default_branch: number;
   last_activity_at: string | null;
   updated_at: string;
+  upstream_gone: number;
+  source_remote: string | null;
+  source_label: string | null;
+  source_parent: string | null;
+  source_ahead: number | null;
+  source_behind: number | null;
 };
 type ResolvedDefaultBranch = { ref: string; name: string };
 type CachedDefaultBranch = {
@@ -102,7 +125,67 @@ function rowToState(r: StateRow): WorktreeState {
   };
   if (r.last_activity_at !== null) s.lastActivityAt = r.last_activity_at;
   if (missing) s.missing = true;
+  if (!missing && r.upstream_gone === 1) s.upstreamGone = true;
+  const source = missing ? undefined : forkSourceFromRow(r);
+  if (source !== undefined) s.source = source;
   return s;
+}
+
+/** The stored fork-source columns (0038), or undefined when there is none. */
+export function forkSourceFromRow(r: {
+  source_remote: string | null;
+  source_label: string | null;
+  source_parent: string | null;
+  source_ahead: number | null;
+  source_behind: number | null;
+}): WorktreeForkSource | undefined {
+  if (r.source_remote === null || r.source_label === null) return undefined;
+  const source: WorktreeForkSource = {
+    remote: r.source_remote,
+    label: r.source_label,
+    ahead: r.source_ahead ?? 0,
+    behind: r.source_behind ?? 0
+  };
+  if (r.source_parent !== null) source.parent = r.source_parent;
+  return source;
+}
+
+/**
+ * Answers the branch's counterpart on the fork's source for one checkout, or
+ * null when there is none. Injected so this service needs no forge identity
+ * of its own (`fork-source-probe.ts`).
+ */
+export type ForkSourceProbe = (
+  repoId: string,
+  repoPath: string,
+  worktreePath: string
+) => Promise<WorktreeForkSource | null>;
+
+/** Did anything a surface draws move between two snapshots? */
+export function stateChanged(a: WorktreeState, b: WorktreeState): boolean {
+  return (
+    a.hasUpstream !== b.hasUpstream ||
+    a.dirty !== b.dirty ||
+    a.upstreamGone !== b.upstreamGone ||
+    // The fork source moves on its own — an agent fetching `upstream` changes
+    // nothing else here — so it has to count as a move by itself.
+    a.source?.remote !== b.source?.remote ||
+    a.source?.label !== b.source?.label ||
+    a.source?.parent !== b.source?.parent ||
+    a.source?.ahead !== b.source?.ahead ||
+    a.source?.behind !== b.source?.behind ||
+    a.ahead !== b.ahead ||
+    a.behind !== b.behind ||
+    a.head !== b.head ||
+    a.branch !== b.branch ||
+    a.behindDefault !== b.behindDefault ||
+    a.defaultBranch !== b.defaultBranch ||
+    a.mergedIntoDefault !== b.mergedIntoDefault ||
+    a.divergedFromDefault !== b.divergedFromDefault ||
+    a.isDefaultBranch !== b.isDefaultBranch ||
+    a.lastActivityAt !== b.lastActivityAt ||
+    a.missing !== b.missing
+  );
 }
 
 /**
@@ -133,6 +216,12 @@ export class WorktreeStateService {
   ) {}
 
   private repoPathMissing: ((repoId: string) => void) | null = null;
+  private forkSource: ForkSourceProbe | null = null;
+
+  /** Count each branch against its fork's source as part of every probe. */
+  setForkSourceProbe(probe: ForkSourceProbe): void {
+    this.forkSource = probe;
+  }
 
   /**
    * Hear about a probe that finds a repository's OWN checkout gone — the
@@ -447,6 +536,15 @@ export class WorktreeStateService {
       }
     }
 
+    // Best-effort: a fork probe that fails leaves the branch without a source
+    // count rather than failing the snapshot the rest of the row needs.
+    const source =
+      this.forkSource === null
+        ? null
+        : await this.forkSource(wt.repo_id, wt.repo_path, wt.path).catch(
+            () => null
+          );
+
     const state: WorktreeState = {
       worktreeId,
       branch: branchName,
@@ -463,6 +561,8 @@ export class WorktreeStateService {
       updatedAt: new Date().toISOString()
     };
     if (lastActivityAt !== undefined) state.lastActivityAt = lastActivityAt;
+    if (parsed.upstreamGone) state.upstreamGone = true;
+    if (source !== null) state.source = source;
 
     this.upsert(state);
     return state;
@@ -481,10 +581,12 @@ export class WorktreeStateService {
         `INSERT INTO worktree_state
            (worktree_id, branch, head, has_upstream, ahead, behind, dirty,
             behind_default, default_branch, merged_into_default, diverged_from_default,
-            is_default_branch, last_activity_at, updated_at)
+            is_default_branch, last_activity_at, updated_at, upstream_gone,
+            source_remote, source_label, source_parent, source_ahead, source_behind)
          VALUES (@worktree_id, @branch, @head, @has_upstream, @ahead, @behind, @dirty,
                  @behind_default, @default_branch, @merged_into_default, @diverged_from_default,
-                 @is_default_branch, @last_activity_at, @updated_at)
+                 @is_default_branch, @last_activity_at, @updated_at, @upstream_gone,
+                 @source_remote, @source_label, @source_parent, @source_ahead, @source_behind)
          ON CONFLICT(worktree_id) DO UPDATE SET
            branch = excluded.branch, head = excluded.head,
            has_upstream = excluded.has_upstream, ahead = excluded.ahead,
@@ -494,7 +596,11 @@ export class WorktreeStateService {
            merged_into_default = excluded.merged_into_default,
            diverged_from_default = excluded.diverged_from_default,
            is_default_branch = excluded.is_default_branch,
-           last_activity_at = excluded.last_activity_at, updated_at = excluded.updated_at`
+           last_activity_at = excluded.last_activity_at, updated_at = excluded.updated_at,
+           upstream_gone = excluded.upstream_gone,
+           source_remote = excluded.source_remote, source_label = excluded.source_label,
+           source_parent = excluded.source_parent, source_ahead = excluded.source_ahead,
+           source_behind = excluded.source_behind`
       )
       .run({
         worktree_id: s.worktreeId,
@@ -510,7 +616,13 @@ export class WorktreeStateService {
         diverged_from_default: s.divergedFromDefault ? 1 : 0,
         is_default_branch: s.isDefaultBranch ? 1 : 0,
         last_activity_at: s.lastActivityAt ?? null,
-        updated_at: s.updatedAt
+        updated_at: s.updatedAt,
+        upstream_gone: s.upstreamGone === true ? 1 : 0,
+        source_remote: s.source?.remote ?? null,
+        source_label: s.source?.label ?? null,
+        source_parent: s.source?.parent ?? null,
+        source_ahead: s.source?.ahead ?? null,
+        source_behind: s.source?.behind ?? null
       });
   }
 }

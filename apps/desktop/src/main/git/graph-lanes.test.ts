@@ -1,8 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  cpSync,
+  ftruncateSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  writeSync
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { basename, join } from "node:path";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { LaneGraph } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
@@ -71,11 +82,12 @@ let repoSeq = 0;
  * A repo whose `releases/1.0` worktree has diverged from its upstream: one
  * commit of ours that is not pushed, one of theirs that we fetched but never
  * applied. The shape a release branch takes mid-backport.
+ *
+ * Built once per file into `template`, and never handed to a test: most of
+ * them go on to commit, push or merge, so sharing one repo would make each
+ * test's graph depend on which ran before it. `divergedRelease()` copies it.
  */
-function makeDivergedRelease(): Fixture {
-  repoSeq += 1;
-  const repoId = `repo-${repoSeq}`;
-  const root = mkdtempSync(join(tmpdir(), "pwrgit-lanes-"));
+function buildDivergedRelease(root: string): void {
   const repo = join(root, "repo");
   const remote = join(root, "remote.git");
   mkdirSync(repo, { recursive: true });
@@ -108,6 +120,64 @@ function makeDivergedRelease(): Fixture {
   commit(repo, "main-1.txt", "main: later work");
   git(repo, "push", "origin", "main");
   git(repo, "fetch", "origin");
+}
+
+let template = "";
+
+// About 25 git spawns, and spawns are what this suite costs on Windows: built
+// per test, three tests in a row once ran 5x slow there and one of them hit
+// the 20s timeout.
+beforeAll(() => {
+  template = mkdtempSync(join(tmpdir(), "pwrgit-lanes-"));
+  buildDivergedRelease(template);
+});
+
+/**
+ * A private copy of the template, re-pointed at itself without spawning git.
+ *
+ * Git records three absolute paths in it: `origin`'s URL, the linked
+ * worktree's `.git` file, and the main repo's back-link to that worktree.
+ * All three sit under the template's temp dir, so swapping that one path
+ * segment is exactly what `git worktree repair` plus `remote set-url` would
+ * write — whatever slash style or long/short name git used for the rest —
+ * without the two spawns this helper exists to avoid.
+ */
+function divergedRelease(): Fixture {
+  repoSeq += 1;
+  const repoId = `repo-${repoSeq}`;
+  const root = mkdtempSync(join(tmpdir(), "pwrgit-lanes-"));
+  cpSync(template, root, { recursive: true });
+  const repo = join(root, "repo");
+  const release = join(root, "wt-releases-1.0");
+  const adminDirs = join(repo, ".git", "worktrees");
+  const linked = [
+    join(repo, ".git", "config"),
+    join(release, ".git"),
+    ...readdirSync(adminDirs).map((id) => join(adminDirs, id, "gitdir"))
+  ];
+  const from = basename(template);
+  const to = basename(root);
+  for (const file of linked) {
+    const text = readFileSync(file, "utf8").replaceAll(from, to);
+    // A copy still pointing at the template would pass every assertion while
+    // committing into the template, which every later test then reads. Check
+    // both halves: a path git wrote in a form that never named the template's
+    // dir (an 8.3 short name, say) matches nothing and would slip past a
+    // check for the old name alone.
+    if (text.includes(from) || !text.includes(to)) {
+      throw new Error(`${file} was not re-pointed at its copy`);
+    }
+    // "r+", not writeFileSync's "w": Git for Windows hides the worktree's
+    // `.git` file (core.hideDotFiles), and Windows refuses "w" on an existing
+    // hidden file with EPERM. "r+" does not truncate, so do that ourselves.
+    const fd = openSync(file, "r+");
+    try {
+      ftruncateSync(fd);
+      writeSync(fd, text, 0, "utf8");
+    } finally {
+      closeSync(fd);
+    }
+  }
 
   return {
     repo,
@@ -221,7 +291,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   it.each(["active", "all"] as const)(
     "draws the upstream's unapplied commits for a diverged release branch (%s scope)",
     async (scope) => {
-      const fixture = makeDivergedRelease();
+      const fixture = divergedRelease();
       const graph = await lanes(harness(fixture), scope);
 
       // The commit only origin/releases/1.0 reaches must be in the window —
@@ -235,7 +305,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   );
 
   it("keeps the local-only commit too, so the divergence reads as a fork", async () => {
-    const fixture = makeDivergedRelease();
+    const fixture = divergedRelease();
     const graph = await lanes(harness(fixture), "active");
 
     expect(subjects(graph)).toEqual(
@@ -248,7 +318,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   });
 
   it("walks both legs of a rewritten divergence, down to the merge base", async () => {
-    const fixture = makeDivergedRelease();
+    const fixture = divergedRelease();
     // The same two changes on each side with different SHAs — what a rebase or
     // a cherry-pick onto another base leaves behind. Subjects match; nothing
     // else does. Git sees a genuine fork, so both legs have to be walked or
@@ -286,7 +356,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   });
 
   it("covers the focused worktree's branch even when the active cap hides it", async () => {
-    const fixture = makeDivergedRelease();
+    const fixture = divergedRelease();
     // 31 branches newer than releases/1.0 push it past ACTIVE_DRAW_CAP (30).
     // The branch the user is actually looking at must survive that cull.
     const extra: WorktreeRow[] = [];
@@ -306,7 +376,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   });
 
   it("never re-adds the trunk's own ref via a branch that tracks it", async () => {
-    const fixture = makeDivergedRelease();
+    const fixture = divergedRelease();
     // Branches cut from main and never pushed keep origin/main as upstream, so
     // most of them read as behind. Handing origin/main to a feature branch's
     // lane would let it claim the spine — the trunk walk already draws it.
@@ -328,7 +398,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   });
 
   it("draws a ref once when it is already shown as a branch of its own", async () => {
-    const fixture = makeDivergedRelease();
+    const fixture = divergedRelease();
     // Merge the release branch into main and push: the local branch now fails
     // `--no-merged`, so "all" scope never sees it and keeps the *remote* as a
     // branch in its own right. The focused worktree still tracks that remote
@@ -345,7 +415,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   });
 
   it("keeps upstream refs out of the branch count the toolbar reports", async () => {
-    const fixture = makeDivergedRelease();
+    const fixture = divergedRelease();
     const graph = await lanes(harness(fixture), "active");
 
     // "N of M active branches" reads shownBranches.length. An upstream ref is
@@ -356,7 +426,7 @@ describe("graph:lanes — unapplied upstream work on non-default branches", () =
   });
 
   it("does not pull in upstream refs for branches that are not behind", async () => {
-    const fixture = makeDivergedRelease();
+    const fixture = divergedRelease();
     // A branch level with its upstream has nothing unapplied to show; drawing
     // its remote ref would double the lane for no information.
     git(fixture.repo, "checkout", "-q", "-b", "in-sync", "main");

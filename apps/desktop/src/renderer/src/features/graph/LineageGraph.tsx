@@ -21,6 +21,7 @@ import {
 import { announce } from "../../lib/announce";
 import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { useDismissable } from "../../lib/useDismissable";
+import { useFitLadder } from "../../lib/useFitLadder";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
 import { useHoverIntent } from "../../lib/hoverIntent";
 import { dispatch, subscribe } from "../../lib/pwrgit";
@@ -55,6 +56,20 @@ import { findPrLandingLinks, layoutPrLandingLinks } from "./pr-landings";
 
 type Scope = "active" | "all";
 const VISIBLE_COMMIT_PR_IDLE_MS = 500;
+
+/**
+ * What the lineage toolbar gives up as its pane narrows, in order (Fork Sync,
+ * turn 3d). It never wraps: "You are here" goes to its crosshair, the count to
+ * "32 in flight", "All branches" to "All", the count to "32", and last the
+ * section label. `useFitLadder` measures; the CSS says what each step does.
+ */
+const TOOLBAR_FIT_STEPS = [
+  "fit-locate-icon",
+  "fit-count-mid",
+  "fit-scope-short",
+  "fit-count-short",
+  "fit-no-label"
+] as const;
 
 export function consumeBranchPrInvalidation(
   scope: Scope,
@@ -255,6 +270,9 @@ export function LineageGraph({
   const [branchesOpen, setBranchesOpen] = useState(false);
   const branchesBtnRef = useRef<HTMLButtonElement>(null);
   const branchesPopRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolbarFitEndRef = useRef<HTMLSpanElement>(null);
+  useFitLadder(toolbarRef, toolbarRef, toolbarFitEndRef, TOOLBAR_FIT_STEPS);
   const closeBranches = useCallback(() => setBranchesOpen(false), []);
   const [hoveredCommit, setHoveredCommit] = useState<string | null>(null);
   const [commitMenu, setCommitMenu] = useState<CommitMenuState | null>(null);
@@ -1039,6 +1057,13 @@ export function LineageGraph({
       : `${shown}${matched > shown ? ` of ${matched}` : ""} branch${
           matched === 1 ? "" : "es"
         } in flight`;
+  // The toolbar's narrower wordings (see TOOLBAR_FIT_STEPS). Each keeps the
+  // number; the full sentence stays in the DOM and in the tooltip.
+  const countMid =
+    scope === "active"
+      ? `${shown}${matched > shown ? ` of ${matched}` : ""} active`
+      : `${shown}${matched > shown ? ` of ${matched}` : ""} in flight`;
+  const countShort = `${shown}`;
 
   // The branch navigator could not be closed from the keyboard at all before
   // this — backdrop click was its only dismissal (WCAG 2.1 SC 2.1.1).
@@ -1056,7 +1081,7 @@ export function LineageGraph({
 
   return (
     <>
-      <div className="graph-toolbar">
+      <div className="graph-toolbar" ref={toolbarRef}>
         <span className="graph-toolbar__label">Lineage</span>
         <span style={{ flex: 1 }} />
         <span className="graph-branches-wrap">
@@ -1067,8 +1092,10 @@ export function LineageGraph({
             aria-expanded={branchesOpen}
             {...hoverTooltip(tip, "Branches drawn in this graph — click one to jump to its tip")}
             onClick={() => setBranchesOpen((v) => !v)}
+            data-mid={countMid}
+            data-short={countShort}
           >
-            {countLabel}
+            <span className="fit-text">{countLabel}</span>
             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="m6 9 6 6 6-6" />
             </svg>
@@ -1149,15 +1176,17 @@ export function LineageGraph({
         {head !== "" && (
           <button
             className="graph-locate"
+            aria-label="You are here"
             onClick={() => locateHash(head)}
             {...hoverTooltip(tip, "Scroll to this worktree's current commit (HEAD)")}
           >
             <LocateGlyph />
-            You are here
+            <span className="fit-text">You are here</span>
           </button>
         )}
         <button
           className={`only-me${scope === "active" ? " is-on" : ""}`}
+          data-short={scope === "active" ? "Active" : "All"}
           {...hoverTooltip(
             tip,
             scope === "active"
@@ -1170,8 +1199,11 @@ export function LineageGraph({
           }}
         >
           <span className="only-me__dot" />
-          {scope === "active" ? "Active" : "All branches"}
+          <span className="fit-text">
+            {scope === "active" ? "Active" : "All branches"}
+          </span>
         </button>
+        <span ref={toolbarFitEndRef} className="graph-toolbar__fit-end" aria-hidden="true" />
       </div>
 
       {laneOverflow && vms.length > 0 && (

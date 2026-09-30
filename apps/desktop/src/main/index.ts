@@ -87,6 +87,8 @@ import {
   registerWorktreeHandlers
 } from "./git/worktree-handlers";
 import { WorktreeOperationQueue } from "./git/worktree-operation-queue";
+import { createForkSourceProbe } from "./git/fork-source-probe";
+import { VisibleWorktreeRefresher } from "./git/visible-refresh";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { createMissingRepoRescan } from "./git/missing-repo-rescan";
 import { WorktreeStateService } from "./git/worktree-state";
@@ -981,6 +983,37 @@ if (!gotSingleInstanceLock) {
     registerWorktreeHandlers(bus, stateService, db, refresher, execGit, (id) => {
       activeWorktreeId = id;
     });
+    // Every probe also counts the branch against its fork's source, from the
+    // stored forge identity — never a forge call — so the sidebar, the header
+    // chip and Pull's accent share one number (worktree_state, 0038).
+    stateService.setForkSourceProbe(
+      createForkSourceProbe(execGit, (repoId) => {
+        const identity = identityService.read([repoId]).get(repoId);
+        return identity?.parent === undefined
+          ? null
+          : {
+              hostname: identity.hostname,
+              nameWithOwner: identity.parent.nameWithOwner
+            };
+      })
+    );
+    const visibleRefresher = new VisibleWorktreeRefresher({
+      db,
+      state: stateService,
+      emit: {
+        worktreeChanged: (worktreeId) =>
+          emitEvent("worktree:changed", { worktreeId }),
+        graphChanged: (repoId) => emitEvent("graph:changed", { repoId }),
+        repoChanged: (profileId) => emitEvent("repo:changed", { profileId })
+      },
+      isFocused: () => BrowserWindow.getFocusedWindow() !== null
+    });
+    bus.register("worktree:reportVisible", (req, ctx) => {
+      if (ctx.webContentsId !== undefined) {
+        visibleRefresher.report(ctx.webContentsId, req.worktreeIds);
+      }
+      return ok(null);
+    });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
     registerBranchHandlers(
       bus,
@@ -1168,6 +1201,7 @@ if (!gotSingleInstanceLock) {
         maintenanceHandlers.releaseWebContents(webContentsId);
         pruneHandlers.releaseWebContents(webContentsId);
         fileInsightHandlers.releaseWebContents(webContentsId);
+        visibleRefresher.releaseWebContents(webContentsId);
         agentHandlers.releaseWebContents(webContentsId);
       }
     });
@@ -1254,8 +1288,16 @@ if (!gotSingleInstanceLock) {
     const activeStatePoll = setInterval(() => {
       if (BrowserWindow.getFocusedWindow() !== null) refreshActive();
     }, 15_000);
+    // The rows on screen, not just the selected one: a round every 5s decides
+    // what is due (see VisibleWorktreeRefresher) and is usually a few stats.
+    const visibleStatePoll = setInterval(() => {
+      void visibleRefresher.tick().catch((cause: unknown) =>
+        logMain("warn", "state", "visible-row refresh failed:", cause)
+      );
+    }, 5_000);
     app.on("before-quit", () => {
       clearInterval(activeStatePoll);
+      clearInterval(visibleStatePoll);
       githubHandlers.stop();
       appearance.dispose();
     });

@@ -519,16 +519,19 @@ export function RepoRefsSections({
           {refs !== null &&
             (counts.ahead > 0 || counts.behind > 0 || counts.gone > 0) && (
               <span className="ref-section__chips">
+                {/* Words, not arrows: these count BRANCHES, and "on main ↓7"
+                    read as "main is 7 commits behind" — the arrows are the
+                    commit counts everywhere else (Fork Sync, 3e). */}
                 {counts.ahead > 0 &&
                   countChip(
                     "ahead",
-                    `↑${counts.ahead}`,
+                    `${counts.ahead} ahead`,
                     `${plural(counts.ahead, "branch")} with commits to push`
                   )}
                 {counts.behind > 0 &&
                   countChip(
                     "behind",
-                    `↓${counts.behind}`,
+                    `${counts.behind} behind`,
                     `${plural(counts.behind, "branch")} behind their upstream`
                   )}
                 {/* Branches whose upstream was deleted. They rank last in the

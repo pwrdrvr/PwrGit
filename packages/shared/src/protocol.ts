@@ -1238,6 +1238,13 @@ export interface Commands {
     res: { dirty: number };
   };
   "worktree:activate": { req: { worktreeId: string }; res: null };
+  /**
+   * The worktree rows this window has on screen. Main re-reads visible rows
+   * on its own schedule (stale after 30s, sooner when a repository's refs
+   * move) so work done outside the app — an agent's fetch or pull — reaches
+   * the badges without a click. Replaces the window's previous report.
+   */
+  "worktree:reportVisible": { req: { worktreeIds: string[] }; res: null };
 
   // Worktree lifecycle (U14)
   "worktree:create": {
@@ -1464,7 +1471,12 @@ export interface Commands {
    * The reset dialog passes every remote a target card came from, since a bare
    * fetch leaves a fork's source untouched.
    */
-  "remote:fetch": { req: { worktreeId: string; remotes?: string[] }; res: null };
+  "remote:fetch": {
+    req: { worktreeId: string; remotes?: string[] };
+    /** The remotes the fetch asked, so the receipt can name them; empty when
+     *  a bare fetch let Git choose. */
+    res: { remotes: string[] };
+  };
   /** Fetch one named remote, or every non-skipped remote when omitted. */
   "remote:fetchRepo": {
     req: { repoId: string; remote?: string };

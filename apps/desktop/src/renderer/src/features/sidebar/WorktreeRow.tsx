@@ -22,8 +22,11 @@ import { PrChip } from "./PrChip";
 import {
   isPrunableWorktree,
   worktreeFolderLabel,
+  worktreePull,
   type DropPosition
 } from "./repo-view";
+import { PullBadge } from "./PullBadge";
+import { useReportVisible } from "../../lib/visibleWorktrees";
 
 const PR_HOVER_PREFETCH_DELAY_MS = 750;
 
@@ -114,6 +117,9 @@ export function WorktreeRow({
    *  the folder line. The PR chip keeps its own gated card — see the sidebar's
    *  `PrChip`, which is a different surface with a different dwell rule. */
   const tip = useViewportTooltip();
+  const pull = worktreePull(worktree);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useReportVisible(rowRef, worktree.id);
   // `role="treeitem"`, not `option`: these rows live inside the sidebar's
   // `role="tree"`, and `option` is only meaningful inside a listbox. Level 2
   // puts them under their repo, which the flat DOM can't otherwise convey.
@@ -126,6 +132,7 @@ export function WorktreeRow({
       }${
         dropPosition === null ? "" : ` is-drop-${dropPosition}`
       }`}
+      ref={rowRef}
       data-wt-id={worktree.id}
       role="treeitem"
       aria-selected={selected}
@@ -274,15 +281,13 @@ export function WorktreeRow({
           </span>
         </>
       )}
-      {!missing && worktree.behind > 0 && (
-        <>
-          <span className="badge-text badge-text--warn" aria-hidden="true">
-            ↓{worktree.behind}
-          </span>
-          <span className="a11y-sr-only">
-            {worktree.behind} behind upstream
-          </span>
-        </>
+      {!missing && pull !== null && (
+        <PullBadge
+          pull={pull}
+          branch={worktree.branch}
+          tip={tip}
+          placement="row"
+        />
       )}
       {worktree.pr !== undefined && !worktree.isDefaultBranch ? (
         <PrChip pr={worktree.pr} />

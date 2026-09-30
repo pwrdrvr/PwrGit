@@ -98,6 +98,30 @@ export type Worktree = {
   missing?: boolean;
   /** `git worktree lock`ed (removable media); removal needs `--force`. */
   locked?: boolean;
+  /** On a fork, the branch against its counterpart on the fork's source —
+   *  what Pull's default would bring in. See `WorktreeForkSource`. */
+  source?: WorktreeForkSource;
+};
+
+/**
+ * The checked-out branch against its counterpart on the repository a fork
+ * came from (`upstream/main` for a `main` tracking `origin/main`). Stored with
+ * the rest of the worktree snapshot so the sidebar, the header chip and the
+ * Pull accent read one number, and so a change to it alone — an agent fetching
+ * `upstream` — is a change the refresher announces. Absent when the repository
+ * has no fork source or the source does not carry the branch.
+ */
+export type WorktreeForkSource = {
+  /** The source's remote, e.g. `upstream`. */
+  remote: string;
+  /** Display-qualified ref, e.g. `upstream/main`. */
+  label: string;
+  /** The forge's `owner/name` for the source, when identity confirmed it. */
+  parent?: string;
+  /** Commits on the branch the source lacks. */
+  ahead: number;
+  /** Commits on the source the branch lacks — what a sync brings in. */
+  behind: number;
 };
 
 /** A branch a worktree can switch to (a local head or a remote-tracking ref). */
@@ -1669,6 +1693,12 @@ export type WorktreeState = {
   /** The checkout's directory is gone (see `Worktree.missing`); the counts
    *  above read as zero while it is set. */
   missing?: boolean;
+  /** The branch names an upstream that no longer exists (a pruned remote
+   *  branch). Git then reports no ahead/behind at all, so `ahead`/`behind`
+   *  read 0 without meaning "up to date". */
+  upstreamGone?: boolean;
+  /** See `Worktree.source`. */
+  source?: WorktreeForkSource;
 };
 
 /** Profile-wide repository synchronization without destructive recovery. */

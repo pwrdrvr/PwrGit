@@ -222,7 +222,7 @@ describe("WorktreeHeader sync buttons stay focusable while busy", () => {
     let settle!: () => void;
     bridge.dispatch.mockReturnValueOnce(
       new Promise((resolve) => {
-        settle = () => resolve(ok(undefined));
+        settle = () => resolve(ok({ remotes: [] }));
       })
     );
 
@@ -702,34 +702,44 @@ describe("WorktreeHeader pull progress", () => {
     expect(document.querySelector(".remote-activity-popover")).toBeNull();
   });
 
-  // The native title and the card must never be on screen together, and the
-  // pin removes the gap the title used to cover: a click puts a card up before
-  // main has registered anything, so the button that was pressed drops its
-  // title in the same breath — as do the idle buttons beside it, whose tooltip
-  // would otherwise open over a card they have nothing to do with.
-  it("drops every native tooltip while a card is on screen", async () => {
+  // The tooltip and the card must never be on screen together, and the pin
+  // removes the gap the tooltip used to cover: a click puts a card up before
+  // main has registered anything, so the pressed button's tooltip goes in the
+  // same breath — and the idle buttons beside it stop offering theirs, which
+  // would otherwise open over a card they have nothing to do with. The
+  // tooltips are the house card now (Fork Sync 3b), never a native `title`.
+  it("drops every tooltip while a card is on screen", async () => {
+    const tooltip = (): string | null =>
+      document.querySelector('[role="tooltip"]')?.textContent ?? null;
+    const hover = async (el: Element | null | undefined): Promise<void> => {
+      await act(async () => {
+        el?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      });
+    };
+    const leave = async (el: Element | null | undefined): Promise<void> => {
+      await act(async () => {
+        el?.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+      });
+    };
     const pull = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Pull"]'
     );
-    expect(pull?.getAttribute("title")).toBe("Pull · fetch + fast-forward");
+    expect(pull?.hasAttribute("title")).toBe(false);
+    await hover(pull);
+    expect(tooltip()).toBe("Pull · fetch + fast-forward");
 
     await act(async () => pull?.click());
     expect(document.querySelector(".remote-activity-popover")).not.toBeNull();
-    for (const label of ["Fetch", "Pull", "Push"]) {
-      expect(
-        container
-          .querySelector(`button[aria-label^="${label}"], button[aria-label="Pulling…"]`)
-          ?.hasAttribute("title"),
-        `${label} must not open a native tooltip over the card`
-      ).toBe(false);
-    }
+    expect(tooltip()).toBeNull();
+    await leave(pull);
 
-    await emitActivities([{ phase: "fetch" }]);
-    expect(
-      container
-        .querySelector('button[aria-busy="true"]')
-        ?.hasAttribute("title")
-    ).toBe(false);
+    const fetch = container.querySelector('button[aria-label="Fetch"]');
+    await hover(fetch);
+    expect(tooltip(), "Fetch must not open a tooltip over the card").toBeNull();
+    await leave(fetch);
+    for (const el of container.querySelectorAll("button")) {
+      expect(el.hasAttribute("title")).toBe(false);
+    }
   });
 
   it("offers user-approved SSH recovery after a Git LFS HTTPS authentication failure", async () => {
@@ -1009,13 +1019,22 @@ describe("WorktreeHeader settled status card", () => {
     });
   };
 
+  // On a fork a plain Fetch asks the source too; a receipt reading the same
+  // either way could not tell the user their upstream was brought in.
+  it("names the remotes a Fetch asked on its receipt", async () => {
+    await press("Fetch", ok({ remotes: ["origin", "upstream"] }));
+    expect(card()?.textContent).toContain(
+      "Fetched origin + upstream — refs and tags are up to date"
+    );
+  });
+
   // Escape latches the trigger inside `useViewportTooltip` so that restoring
   // focus to it cannot reopen what was just dismissed. Pressing that same
   // button is a fresh ask, not a focus restore — and the failure mode is
   // silent twice over: `show` refuses the card, and `settle` still reports the
   // outcome as carried, so the toast that should have caught it never fires.
   it("reopens for the next press after Escape took the last one away", async () => {
-    await press("Fetch", ok(null));
+    await press("Fetch", ok({ remotes: [] }));
     expect(card()).not.toBeNull();
 
     // Tab in first, because that is the Escape the latch exists for: leaving
@@ -1055,7 +1074,7 @@ describe("WorktreeHeader settled status card", () => {
     let finish!: () => void;
     bridge.dispatch.mockReturnValueOnce(
       new Promise((resolve) => {
-        finish = () => resolve(ok(null));
+        finish = () => resolve(ok({ remotes: [] }));
       })
     );
     await act(async () => {
@@ -1095,7 +1114,7 @@ describe("WorktreeHeader settled status card", () => {
     let finish!: () => void;
     bridge.dispatch.mockReturnValueOnce(
       new Promise((resolve) => {
-        finish = () => resolve(ok(null));
+        finish = () => resolve(ok({ remotes: [] }));
       })
     );
     await act(async () => {
@@ -1576,7 +1595,7 @@ describe("WorktreeHeader settled status card", () => {
 
   it("keeps the card as the receipt, and counts it down", async () => {
     freezeClock();
-    await press("Fetch", ok(null));
+    await press("Fetch", ok({ remotes: [] }));
 
     expect(card()?.textContent).toContain("Fetched");
     // Cancel goes with the operation it addressed; the way out does not.
@@ -1668,7 +1687,7 @@ describe("WorktreeHeader settled status card", () => {
   });
 
   it("closes on a click elsewhere, and the click is not swallowed", async () => {
-    await press("Fetch", ok(null));
+    await press("Fetch", ok({ remotes: [] }));
     expect(card()).not.toBeNull();
 
     const down = new MouseEvent("mousedown", {
@@ -1688,7 +1707,7 @@ describe("WorktreeHeader settled status card", () => {
   // operation or is inert because one is running, and neither should take the
   // status away.
   it("survives a mousedown on its own trigger", async () => {
-    await press("Fetch", ok(null));
+    await press("Fetch", ok({ remotes: [] }));
     await act(async () => {
       container
         .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
@@ -1699,7 +1718,7 @@ describe("WorktreeHeader settled status card", () => {
 
   it("stops the countdown when the user clicks the card, and keeps it stopped", async () => {
     freezeClock();
-    await press("Fetch", ok(null));
+    await press("Fetch", ok({ remotes: [] }));
 
     // The status line, not the Git-output block: a successful card has no
     // output block at all, because an empty one under "Fetched" reports
@@ -1751,7 +1770,7 @@ describe("WorktreeHeader settled status card", () => {
   // user looked down to read the outcome — and "Git produced no output" is a
   // sentence, not an empty block.
   it("keeps the Git-output block on the receipt it stood under", async () => {
-    await press("Fetch", ok(null));
+    await press("Fetch", ok({ remotes: [] }));
     expect(card()?.textContent).toContain("Fetched");
     expect(card()?.querySelector(".remote-activity__output")?.textContent).toBe(
       "Git produced no output."
@@ -1767,7 +1786,7 @@ describe("WorktreeHeader settled status card", () => {
   });
 
   it("replaces one receipt with the next operation's card", async () => {
-    await press("Fetch", ok(null));
+    await press("Fetch", ok({ remotes: [] }));
     expect(card()?.textContent).toContain("Fetched");
 
     await press("Pull", ok({ fastForwarded: true, stashed: false, reappliedWithConflicts: false }));
@@ -2679,7 +2698,7 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     // Nothing of the question's is pinned while it loads, so a card still up
     // is some earlier operation's — settling would rewrite it as this failure.
     await mount({
-      fetch: Promise.resolve(ok(null)),
+      fetch: Promise.resolve(ok({ remotes: [] })),
       remotes: Promise.resolve(
         err({ kind: "git", code: "git_failed", message: "fatal: not a git repository" })
       )

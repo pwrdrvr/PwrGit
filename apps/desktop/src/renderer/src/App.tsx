@@ -62,6 +62,7 @@ export function App() {
   const sidebar = useColumnResize("pwrgit.sidebarWidth", 320, 240, 520, "left");
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const showRail = useCallback(() => setRailCollapsed(false), []);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [setupRepo, setSetupRepo] = useState<Repo | null>(null);
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -801,6 +802,7 @@ export function App() {
                 worktree={selectedWorktree}
                 state={worktreeState}
                 onOpenSetup={() => setSetupRepo(selectedRepo)}
+                {...(railCollapsed ? { onShowRail: showRail } : {})}
               />
               {/* Keep the lineage graph mounted while a diff is shown — hidden,
                   not unmounted — so returning to it is instant (its multi-branch
@@ -986,8 +988,10 @@ export function App() {
           />
         )}
 
-        {railCollapsed && (
-          <button className="rail-reopen" onClick={() => setRailCollapsed(false)}>
+        {/* With a worktree open the header carries the reopen control in its
+            own row (Fork Sync 3c); floating it here covered Pull and Push. */}
+        {railCollapsed && (selectedRepo === null || selectedWorktree === null) && (
+          <button className="rail-reopen" onClick={showRail}>
             ‹ Panel
           </button>
         )}

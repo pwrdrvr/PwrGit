@@ -45,8 +45,41 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { useFitLadder } from "../../lib/useFitLadder";
 
-type Chip = { text: string; tone: "muted" | "ok" | "warn" };
+/**
+ * The sync chip. `mid` and `short` are what it says once the header has
+ * stepped down (see `HEADER_FIT_STEPS`); they are drawn by CSS from data
+ * attributes, so the chip's text in the DOM stays the whole sentence. `fork`
+ * puts the fork glyph in front of `short`, standing in for the remote's name.
+ */
+type Chip = {
+  text: string;
+  tone: "muted" | "ok" | "warn";
+  mid?: string;
+  short?: string;
+  fork?: boolean;
+};
+
+/**
+ * What the header gives up, in order, as it runs out of width. Measured, not
+ * fixed: the chip's width depends on the count and the remote's name, and a
+ * container-query constant hid `↓25 behind upstream` at the stock window width
+ * with room to spare (Fork Sync turn 3, 3a). Labels go first because the
+ * buttons keep their icons and tooltips; the sync chip is information and
+ * outlasts them, shortening before it goes. Once it goes, Pull's accent is
+ * what is left of it. The drift and read-only chips come after it, as they
+ * did before: nothing else in the header carries their signal.
+ */
+const HEADER_FIT_STEPS = [
+  "fit-icons",
+  "fit-chip-mid",
+  "fit-chip-short",
+  "fit-no-lfs",
+  "fit-no-chip",
+  "fit-no-drift",
+  "fit-no-readonly"
+] as const;
 
 function baseChip(
   state: WorktreeState | null,
@@ -64,11 +97,63 @@ function baseChip(
   if (fromSource !== null) return fromSource;
   if (state.behind > 0) {
     const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
-    return { text: `↓${state.behind} behind${ahead}`, tone: "warn" };
+    return {
+      text: `↓${state.behind} behind${ahead}`,
+      tone: "warn",
+      mid: `↓${state.behind}${ahead}`
+    };
   }
-  if (state.ahead > 0) return { text: `↑${state.ahead} ahead`, tone: "ok" };
+  if (state.ahead > 0) {
+    return { text: `↑${state.ahead} ahead`, tone: "ok", mid: `↑${state.ahead}` };
+  }
   if (!state.hasUpstream) return { text: "no upstream", tone: "muted" };
+  // Git names the upstream but has nothing to count against: its remote
+  // branch was deleted. "up to date" was what this used to say.
+  if (state.upstreamGone === true) {
+    return { text: "upstream gone", tone: "muted" };
+  }
   return { text: "up to date", tone: "muted" };
+}
+
+/**
+ * The chip's tooltip at rest: the state in words, and on a fork, which
+ * repository `upstream` is — the chip alone never said.
+ */
+function chipExplanation(
+  state: WorktreeState | null,
+  fork: ForkStatus | null,
+  branch: string
+): string | undefined {
+  const source = fork?.source ?? null;
+  if (source !== null && source.behind > 0) {
+    const who =
+      source.parent === undefined
+        ? `${source.remote} is the remote PwrGit takes to be this fork's source.`
+        : `${source.remote} is ${source.parent}, the repository this fork came from.`;
+    const own =
+      source.ahead > 0
+        ? ` ${branch} also has ${commits(source.ahead)} ${source.label} doesn't.`
+        : "";
+    const tracked = fork?.tracked ?? null;
+    const trackedLine =
+      tracked === null
+        ? ""
+        : tracked.ahead === 0 && tracked.behind === 0
+          ? ` ${tracked.label}, your fork, matches ${branch}.`
+          : ` ${tracked.label}, your fork: ↓${tracked.behind} ↑${tracked.ahead}.`;
+    return `${who} ${branch} is ${commits(source.behind)} behind ${source.label}.${own}${trackedLine}`;
+  }
+  if (state === null) return undefined;
+  if (state.behind > 0) {
+    return `${commits(state.behind)} to pull from the branch ${branch} tracks` +
+      (state.ahead > 0 ? `, and ${commits(state.ahead)} to push` : "");
+  }
+  if (state.ahead > 0) return `${commits(state.ahead)} to push`;
+  if (!state.hasUpstream) return `${branch} tracks nothing yet — Push publishes it`;
+  if (state.upstreamGone === true) {
+    return `The remote branch ${branch} tracked was deleted, usually because the work landed`;
+  }
+  return `${branch} matches the branch it tracks`;
 }
 
 /**
@@ -118,8 +203,19 @@ function commits(count: number): string {
 function forkSourceChip(source: ForkSourceTarget): Chip | null {
   if (source.behind <= 0) return null;
   return source.ahead > 0
-    ? { text: `↓${source.behind} ${source.remote} · ↑${source.ahead}`, tone: "warn" }
-    : { text: `↓${source.behind} behind ${source.remote}`, tone: "warn" };
+    ? {
+        text: `↓${source.behind} ${source.remote} · ↑${source.ahead}`,
+        tone: "warn",
+        short: `↓${source.behind} · ↑${source.ahead}`,
+        fork: true
+      }
+    : {
+        text: `↓${source.behind} behind ${source.remote}`,
+        tone: "warn",
+        mid: `↓${source.behind} ${source.remote}`,
+        short: `↓${source.behind}`,
+        fork: true
+      };
 }
 
 /** A fork branch with somewhere on the source to pull from, and a branch of
@@ -374,7 +470,8 @@ export function WorktreeHeader({
   repo,
   worktree,
   state,
-  onOpenSetup
+  onOpenSetup,
+  onShowRail
 }: {
   /** `profileId` and `identity` are here for the fork prompt: the first is
    *  what the fork command is scoped to, the second is what says this checkout
@@ -383,6 +480,10 @@ export function WorktreeHeader({
   worktree: Worktree;
   state: WorktreeState | null;
   onOpenSetup?: () => void;
+  /** Set while the right-hand panel is collapsed: its reopen button is the
+   *  last control in this row, where it takes its own width, rather than a
+   *  floating button laid over Push and the kebab (Fork Sync 3c). */
+  onShowRail?: () => void;
 }) {
   const [repositorySetup, setRepositorySetup] = useState<RepositorySetup | null>(null);
   useEffect(() => {
@@ -430,6 +531,10 @@ export function WorktreeHeader({
    *  itself superseded even when the user has come back to the same one. */
   const askingWhere = useRef<symbol | null>(null);
   const tip = useViewportTooltip();
+  const headerRef = useRef<HTMLDivElement>(null);
+  const stateRowRef = useRef<HTMLDivElement>(null);
+  const fitEndRef = useRef<HTMLSpanElement>(null);
+  useFitLadder(headerRef, stateRowRef, fitEndRef, HEADER_FIT_STEPS);
   const [flash, setFlash] = useState<Chip | null>(null);
   const activeWorktreeId = useRef(worktree.id);
   /** Bumped by every Fetch, Pull and Push this header starts, and by every
@@ -483,6 +588,15 @@ export function WorktreeHeader({
   // enter event announces the trigger, so the popover reads these instead.
   // Button first: it is the thing the user aimed at.
   const status = useRemoteActivityPopover(activity, [cardButton, cardChip]);
+  // The card and a tooltip must never share the screen. A click leaves the
+  // pointer on the button whose tooltip is open, and the card it pins opens
+  // right over it.
+  const cardShowing = status.showing;
+  useEffect(() => {
+    if (cardShowing) tip.hide();
+    // `tip.hide` is stable for the hook's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardShowing]);
 
   // The selection changed under a pinned card. That card reports an operation
   // belonging to a checkout that is no longer on screen, and its dispatch will
@@ -622,11 +736,11 @@ export function WorktreeHeader({
     return true;
   };
 
-  const run = async (
+  const run = async <T,>(
     kind: Exclude<Busy, null>,
-    fn: () => Promise<Result<unknown, PwrGitError>>,
+    fn: () => Promise<Result<T, PwrGitError>>,
     okChip: Chip,
-    okSummary: string,
+    okSummary: string | ((value: T) => string),
     label: string
   ): Promise<void> => {
     const worktreeId = worktree.id;
@@ -648,7 +762,11 @@ export function WorktreeHeader({
     setBusy(null);
     if (result.ok) {
       showFlash(okChip, 1600);
-      status.settle({ status: "ok", summary: okSummary });
+      status.settle({
+        status: "ok",
+        summary:
+          typeof okSummary === "string" ? okSummary : okSummary(result.value)
+      });
       return;
     }
     flashError(label, result.error);
@@ -660,7 +778,12 @@ export function WorktreeHeader({
       "fetch",
       () => dispatch("remote:fetch", { worktreeId: id }),
       { text: "fetched", tone: "muted" },
-      "Fetched — refs and tags are up to date",
+      // Name what was asked: on a fork a plain Fetch asks the source too, and
+      // a receipt that read the same either way could not say so.
+      ({ remotes }) =>
+        remotes.length === 0
+          ? "Fetched — refs and tags are up to date"
+          : `Fetched ${remotes.join(" + ")} — refs and tags are up to date`,
       "Fetch"
     );
   };
@@ -1090,14 +1213,19 @@ export function WorktreeHeader({
     };
   };
   /**
-   * A native tooltip everywhere the status card is NOT coming — the two must
-   * never both appear, but a button with neither is worse than either.
+   * A tooltip everywhere the status card is NOT coming — the two must never
+   * both appear, but a button with neither is worse than either. The house
+   * tooltip rather than a native `title`: a native one waits a second and
+   * more, and on a split Pull it was the only way to learn, before pressing,
+   * that the button also pushes to the fork (Fork Sync 3b).
    *
    * That is `carriesCard`, not `couldCarryCard`: in the gap before the record
    * arrives the button is already listening for the hover that will summon a
-   * card, and the title is what covers exactly that gap. The two cannot
+   * card, and the tooltip is what covers exactly that gap — its handlers run
+   * alongside the card's there, rather than replacing them. The two cannot
    * overlap on screen because the record that lets the card open is the same
-   * record that drops this attribute, in one render.
+   * record that drops the tooltip, in one render (and the effect below takes
+   * down one already open).
    *
    * `status.showing` covers the pinned card, which has no such gap — it is on
    * screen from the click, before any record exists — and covers the idle
@@ -1109,13 +1237,33 @@ export function WorktreeHeader({
    * for the gap before main registers the operation, left a spinning button
    * that explained nothing.
    */
-  const busyTitle = (
+  const buttonTriggers = (
     kind: Exclude<Busy, null>,
     idle: string
-  ): { title?: string } =>
-    status.showing || carriesCard(kind)
-      ? {}
-      : { title: running === kind ? busyLabel(kind) : idle };
+  ): StatusTriggerProps => {
+    const trigger = statusTrigger(kind);
+    if (status.showing || carriesCard(kind)) return trigger;
+    const own = hoverTooltip(tip, running === kind ? busyLabel(kind) : idle);
+    return {
+      ...trigger,
+      onMouseEnter: (event) => {
+        own.onMouseEnter(event as Parameters<typeof own.onMouseEnter>[0]);
+        trigger.onMouseEnter?.(event);
+      },
+      onMouseLeave: () => {
+        tip.hide();
+        trigger.onMouseLeave?.();
+      },
+      onFocus: (event) => {
+        own.onFocus(event as Parameters<typeof own.onFocus>[0]);
+        trigger.onFocus?.(event);
+      },
+      onBlur: () => {
+        own.onBlur();
+        trigger.onBlur?.();
+      }
+    };
+  };
   const dirty = state?.dirty ?? worktree.dirty;
   // The same fact the chip beside the button reads as "no upstream". The live
   // snapshot when it is this checkout's; the indexed row until one arrives.
@@ -1161,7 +1309,7 @@ export function WorktreeHeader({
     forkChoice === null || runs === "tracked"
       ? behind > 0
       : forkChoice.source.behind > 0;
-  const pullTrigger = statusTrigger("pull");
+  const pullTrigger = buttonTriggers("pull", pullTitle(runs, forkChoice));
 
   /** Run what Pull does, from the button or from a row of its menu. */
   const runPull = (run: PullChoice, from: HTMLElement | null): void => {
@@ -1199,12 +1347,12 @@ export function WorktreeHeader({
         });
 
   return (
-    <div className="wt-header">
+    <div className="wt-header" ref={headerRef}>
       {/* Repo › branch › path moved up into the window strip (features/chrome/
           TitleBar.tsx). What's left is live worktree state and the git actions
           — hence __state, not __id — keeping this row's container-query
           degrade ladder. */}
-      <div className="wt-header__state">
+      <div className="wt-header__state" ref={stateRowRef}>
         {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
         {/* Repo fact, not sync state, so it sits with the dirty badge on the
             left rather than among the chips the action buttons act on. */}
@@ -1253,18 +1401,35 @@ export function WorktreeHeader({
             running !== null ? " sync-chip--progress" : ""
           }`}
           role={running !== null ? "status" : undefined}
+          // The shorter forms the fit steps switch to, drawn by CSS so the
+          // chip's own text stays the whole sentence.
+          {...(chip.mid === undefined ? {} : { "data-mid": chip.mid })}
+          {...(chip.short === undefined ? {} : { "data-short": chip.short })}
+          {...(chip.fork === true ? { "data-fork": "" } : {})}
           // Pointer only: the chip is not focusable, and making a live status
           // a tab stop would buy the keyboard nothing the working button below
-          // does not already offer.
-          {...(running === null || !couldCarryCard(running)
-            ? {}
-            : {
-                onMouseEnter: (event: { currentTarget: HTMLElement }) =>
-                  status.open(event.currentTarget),
-                onMouseLeave: status.close
-              })}
+          // does not already offer. At rest it explains itself — on a fork,
+          // which repository `upstream` is, which the chip alone never said.
+          {...(running === null
+            ? flash === null
+              ? hoverTooltip(
+                  tip,
+                  chipExplanation(
+                    state?.worktreeId === worktree.id ? state : null,
+                    forkStatus,
+                    forkStatus?.branch ?? worktree.branch
+                  )
+                )
+              : {}
+            : !couldCarryCard(running)
+              ? {}
+              : {
+                  onMouseEnter: (event: { currentTarget: HTMLElement }) =>
+                    status.open(event.currentTarget),
+                  onMouseLeave: status.close
+                })}
         >
-          {chip.text}
+          <span className="sync-chip__text">{chip.text}</span>
         </span>
 
         <div className="wt-actions">
@@ -1297,11 +1462,10 @@ export function WorktreeHeader({
             aria-disabled={running !== null}
             aria-label={running === "fetch" ? busyLabel("fetch") : "Fetch"}
             aria-busy={running === "fetch"}
-            /* Title comes from busyTitle: a button that carries the status
+            /* The tooltip comes from buttonTriggers: a button that carries the status
                card gets none, because a native tooltip would cover the card
                it summons. */
-            {...busyTitle("fetch", "Fetch")}
-            {...statusTrigger("fetch")}
+            {...buttonTriggers("fetch", "Fetch")}
           >
             <RefreshGlyph />
             <span className="wt-btn__label">
@@ -1323,7 +1487,6 @@ export function WorktreeHeader({
                 aria-disabled={running !== null}
                 aria-label={running === "pull" ? busyLabel("pull") : "Pull"}
                 aria-busy={running === "pull"}
-                {...busyTitle("pull", pullTitle(runs, forkChoice))}
                 {...pullTrigger}
                 ref={(element) => {
                   pullButton.current = element;
@@ -1375,13 +1538,12 @@ export function WorktreeHeader({
             aria-disabled={running !== null}
             aria-label={running === "push" ? busyLabel("push") : "Push"}
             aria-busy={running === "push"}
-            {...busyTitle(
+            {...buttonTriggers(
               "push",
               // The label stays "Push" — a button that renamed itself would
               // shift the toolbar — and the tooltip says what it will ask.
               unpublished ? "Push · publish this branch to a remote…" : "Push"
             )}
-            {...statusTrigger("push")}
           >
             {running === "push" ? (
               <span className="wt-btn__spinner" />
@@ -1421,6 +1583,38 @@ export function WorktreeHeader({
             })
           }
         />
+        {onShowRail !== undefined && (
+          <button
+            type="button"
+            className="wt-btn wt-rail-reopen"
+            aria-label="Show panel"
+            {...hoverTooltip(tip, "Show the Changes panel")}
+            onClick={() => {
+              tip.hide();
+              onShowRail();
+            }}
+          >
+            {/* Lucide panel-right-open: the panel, and the way it comes back. */}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect width="18" height="18" x="3" y="3" rx="2" />
+              <path d="M15 3v18" />
+              <path d="m10 15-3-3 3-3" />
+            </svg>
+          </button>
+        )}
+        {/* Where the row's in-flow content ends: the fit steps (useFitLadder)
+            take the first step at which this lands inside the row. */}
+        <span ref={fitEndRef} className="wt-header__fit-end" aria-hidden="true" />
       </div>
       {sshRecovery !== null && (
         <SshRemoteRecoveryDialog

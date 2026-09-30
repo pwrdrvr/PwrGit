@@ -279,6 +279,38 @@ export function repoPrimaryBehind(repo: Repo): number {
 }
 
 /**
+ * What Pull would bring into a checkout, as the sidebar should say it
+ * (Fork Sync, turn 3e). On a fork the branch tracks the user's own copy, so
+ * `behind` reads 0 while the source moves on; the source count is the one the
+ * header chip and Pull's accent use, and when both are behind the source wins,
+ * because that is what Pull's default fetches. `null` means nothing to bring.
+ */
+export type PullSummary =
+  | { kind: "source"; behind: number; label: string }
+  | { kind: "tracked"; behind: number };
+
+export function worktreePull(worktree: Worktree): PullSummary | null {
+  const source = worktree.source;
+  if (source !== undefined && source.behind > 0) {
+    return { kind: "source", behind: source.behind, label: source.label };
+  }
+  return worktree.behind > 0
+    ? { kind: "tracked", behind: worktree.behind }
+    : null;
+}
+
+/** `worktreePull` for the repo row: its primary checkout, as `repoPrimaryBehind`. */
+export function repoPrimaryPull(repo: Repo): {
+  pull: PullSummary;
+  branch: string;
+} | null {
+  const primary = repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
+  if (primary === undefined) return null;
+  const pull = worktreePull(primary);
+  return pull === null ? null : { pull, branch: primary.branch };
+}
+
+/**
  * How many **linked worktrees** a repo has. The primary checkout is the repo's
  * own directory, not a worktree you added — counting it made every repo claim
  * one more than it has, and a repo with nothing but a local checkout read
