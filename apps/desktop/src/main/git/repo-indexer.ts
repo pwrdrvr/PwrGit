@@ -838,7 +838,7 @@ export class RepoIndexer {
   /** ⌘F search: repos, worktrees (by branch/path), and branches with no
    *  worktree — remote-only (0019) and local-only (0022) —
    *  through the FTS5 index over `search_fts` (0008, and `search_fts_index`
-   *  since 0036_search_rows_indexed) — prefix matching per token,
+   *  since 0037_search_rows_indexed) — prefix matching per token,
    *  any token order, diacritic/punctuation-insensitive, one bm25-ranked
    *  mixed list with names weighted above paths. Empty/junk queries fall
    *  back to browsing repos by name (the overlay's initial state).

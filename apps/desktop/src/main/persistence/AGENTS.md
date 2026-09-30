@@ -12,12 +12,12 @@ trigger addressed `search_fts` by `entity_id`, an `UNINDEXED` fts5 column,
 which fts5 answers by scanning the whole table. At 29k search rows that was
 ~3.7ms per written row — a fetch's 100-branch chunk held the loop ~400ms, and
 deleting a repo with 6,672 remote branches took 21.8s in one statement.
-`0036_search_rows_indexed.sql` has the fix; check a new trigger's statements
+`0037_search_rows_indexed.sql` has the fix; check a new trigger's statements
 with `EXPLAIN QUERY PLAN` and look for `SCAN` over a large table.
 
 ## The ⌘K index: write `search_fts`, never `search_fts_index`
 
-Since 0036, `search_fts` is an ordinary table of search rows (indexed on
+Since 0037, `search_fts` is an ordinary table of search rows (indexed on
 `kind, entity_id`), and `search_fts_index` is an external-content fts5 index
 over it, kept current by three triggers on `search_fts`. A new kind of search
 row is written to `search_fts` and is indexed for free. Writing

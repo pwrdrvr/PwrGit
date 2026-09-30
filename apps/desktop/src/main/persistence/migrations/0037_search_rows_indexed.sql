@@ -1,4 +1,4 @@
--- 0036_search_rows_indexed — the ⌘K index finds its rows by an index.
+-- 0037_search_rows_indexed — the ⌘K index finds its rows by an index.
 --
 -- Every trigger that keeps the index current (0008 onward: repos, worktrees,
 -- local and remote branches, branch_pr, repo_open_pr) addresses its row as

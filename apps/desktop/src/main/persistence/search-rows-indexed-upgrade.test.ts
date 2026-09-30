@@ -7,14 +7,14 @@ import { ProfileService } from "../profiles/profile-service";
 import { RepoIndexer } from "../git/repo-indexer";
 import { createSystemGit } from "../git/test-support/system-git";
 
-// 0036 moves the search rows out of the fts5 table into an ordinary indexed
+// 0037 moves the search rows out of the fts5 table into an ordinary indexed
 // table, and turns the fts5 table into an external-content index over it.
 // Two things can go wrong that no `:memory:` suite can see: rows present
 // before the upgrade not surviving it, and the index drifting from its rows
 // once the old triggers start writing the new table. Both are staged here.
 
 const MIGRATIONS = join(__dirname, "migrations");
-const UPGRADE = "0036_search_rows_indexed.sql";
+const UPGRADE = "0037_search_rows_indexed.sql";
 const container = mkdtempSync(join(tmpdir(), "pwrgit-search-rows-"));
 
 afterAll(() => rmSync(container, { recursive: true, force: true }));

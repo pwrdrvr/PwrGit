@@ -22,7 +22,7 @@ it("carries every indexed row through the profile-scope rebuild", () => {
   const dir = join(container, "migrations");
   mkdirSync(dir, { recursive: true });
   // Only what came before: a later migration that reshapes search_fts
-  // (0036) must run after this one, as it does in every real install.
+  // (0037) must run after this one, as it does in every real install.
   for (const file of readdirSync(MIGRATIONS)) {
     if (file < UPGRADE) cpSync(join(MIGRATIONS, file), join(dir, file));
   }
