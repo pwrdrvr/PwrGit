@@ -28,9 +28,12 @@ const INDEXED_ROWS = 24_000;
 /** Remote branches the churned repository carries. */
 const REPO_BRANCHES = 1_000;
 
+// Address the repo with `-C` from a directory nobody removes: on Windows a
+// descendant git.exe can still hold its native cwd after the launcher exits,
+// and afterAll's rmSync then fails (see this directory's AGENTS.md).
 function git(dir: string, args: string[], input?: string): void {
-  execFileSync("git", args, {
-    cwd: dir,
+  execFileSync("git", ["-C", dir, ...args], {
+    cwd: tmpdir(),
     stdio: [input === undefined ? "ignore" : "pipe", "ignore", "ignore"],
     ...(input === undefined ? {} : { input })
   });
@@ -38,7 +41,7 @@ function git(dir: string, args: string[], input?: string): void {
 
 /** Point `count` remote-tracking refs, starting at `from`, at HEAD. */
 function remoteRefs(dir: string, from: number, count: number, verb: string): void {
-  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir })
+  const head = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { cwd: tmpdir() })
     .toString()
     .trim();
   const lines: string[] = [];
@@ -96,7 +99,7 @@ describe("search index writes against a large index", () => {
 
   it("keeps a fetch's branch-index refresh from holding the main process", async () => {
     const repo = join(root, "large-repo");
-    git(root, ["init", "-q", "-b", "main", repo]);
+    git(tmpdir(), ["init", "-q", "-b", "main", repo]);
     git(repo, ["config", "user.email", "t@t.com"]);
     git(repo, ["config", "user.name", "Tester"]);
     writeFileSync(join(repo, "README.md"), "# repo\n");
@@ -131,11 +134,13 @@ describe("search index writes against a large index", () => {
   }, 60_000);
 
   it("removes a repository and its index rows in one short statement", () => {
-    const repoId = (
-      db.prepare("SELECT id FROM repos WHERE name = 'large-repo'").get() as {
-        id: string;
-      }
-    ).id;
+    const row = db
+      .prepare("SELECT id FROM repos WHERE name = 'large-repo'")
+      .get() as { id: string } | undefined;
+    // Indexed by the refresh test above; without it there is nothing to time.
+    expect(row, "the refresh test did not index large-repo").toBeDefined();
+    if (row === undefined) return;
+    const repoId = row.id;
     const started = performance.now();
     db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
     const elapsed = performance.now() - started;
