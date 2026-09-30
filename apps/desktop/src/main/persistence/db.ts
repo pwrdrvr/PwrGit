@@ -30,19 +30,6 @@ export function openDatabase(
   return db;
 }
 
-/**
- * Migrations renumbered after a database may already have run them, keyed by
- * the current name. A migration is recorded by file name, so a database that
- * applied the old name would otherwise run it again under the new one — and
- * SQLite has no `ADD COLUMN IF NOT EXISTS`, so the duplicate column throws and
- * the database never opens. The old name in `schema_migrations` is the
- * evidence it already ran: record the new name and skip the SQL.
- */
-const RENAMED_MIGRATIONS: Readonly<Record<string, readonly string[]>> = {
-  // Built on a branch as 0036, which main then shipped as 0036_pinned_branches.
-  "0038_worktree_fork_source.sql": ["0036_worktree_fork_source.sql"]
-};
-
 function runMigrations(db: DB, migrationsDir: string): void {
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -64,10 +51,6 @@ function runMigrations(db: DB, migrationsDir: string): void {
   const record = db.prepare("INSERT INTO schema_migrations (name) VALUES (?)");
   for (const file of files) {
     if (applied.has(file)) continue;
-    if (RENAMED_MIGRATIONS[file]?.some((old) => applied.has(old)) === true) {
-      record.run(file);
-      continue;
-    }
     const sql = readFileSync(join(migrationsDir, file), "utf8");
     db.transaction(() => {
       db.exec(sql);
