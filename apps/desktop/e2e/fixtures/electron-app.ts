@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -237,15 +237,13 @@ export async function launchApp(
     setPickDirectories([dir]);
 
   const cleanup = async (): Promise<void> => {
+    await app.close();
     try {
-      const attempts = await app.evaluate(() =>
-        (globalThis as unknown as {
-          __githubNetworkGuard: { attempts: string[] };
-        }).__githubNetworkGuard.attempts
-      );
-      if (attempts.length) throw new Error(attempts.join("\n"));
+      // close() also tolerates an app that a quit test already closed. Read
+      // after shutdown so violations during quit cannot escape the assertion.
+      const attempts = readFileSync(join(userData, "github-network-attempts.log"), "utf8");
+      if (attempts.length) throw new Error(attempts);
     } finally {
-      await app.close();
       rmSync(userData, { recursive: true, force: true });
     }
   };

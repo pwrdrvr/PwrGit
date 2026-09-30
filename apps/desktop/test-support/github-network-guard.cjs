@@ -1,7 +1,7 @@
 // Test-only transport boundary. Install before importing application code so
 // startup checks are covered too. Tests may replace a transport with a stub,
 // but forwarding to the original still reaches this guard.
-function installGitHubNetworkGuard(targets) {
+function installGitHubNetworkGuard(targets, onAttempt = () => {}) {
   const attempts = [];
   const restorers = [];
   for (const [target, method] of targets) {
@@ -16,6 +16,7 @@ function installGitHubNetworkGuard(targets) {
       )) {
         const message = `Unstubbed GitHub request in test: ${method} ${value}`;
         attempts.push(message);
+        onAttempt(message);
         throw new Error(message);
       }
       return original.call(this, input, ...args);

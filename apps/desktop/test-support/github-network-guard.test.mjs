@@ -13,11 +13,13 @@ describe("GitHub test network guard", () => {
   ])("blocks before invoking any transport: %s", input => {
     const transport = vi.fn();
     const target = { request: transport };
-    const installed = guard.installGitHubNetworkGuard([[target, "request"]]);
+    const persist = vi.fn();
+    const installed = guard.installGitHubNetworkGuard([[target, "request"]], persist);
     expect(() => target.request(input)).toThrow("Unstubbed GitHub request");
     expect(transport).not.toHaveBeenCalled();
     // A caller catching the exception cannot hide it from suite teardown.
     expect(installed.attempts).toHaveLength(1);
+    expect(persist).toHaveBeenCalledExactlyOnceWith(installed.attempts[0]);
     installed.restore();
     expect(target.request).toBe(transport);
   });
