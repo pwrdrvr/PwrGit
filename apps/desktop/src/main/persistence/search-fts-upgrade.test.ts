@@ -21,8 +21,10 @@ const container = mkdtempSync(join(tmpdir(), "pwrgit-fts-upgrade-"));
 it("carries every indexed row through the profile-scope rebuild", () => {
   const dir = join(container, "migrations");
   mkdirSync(dir, { recursive: true });
+  // Only what came before: a later migration that reshapes search_fts
+  // (0037) must run after this one, as it does in every real install.
   for (const file of readdirSync(MIGRATIONS)) {
-    if (file !== UPGRADE) cpSync(join(MIGRATIONS, file), join(dir, file));
+    if (file < UPGRADE) cpSync(join(MIGRATIONS, file), join(dir, file));
   }
   const dbPath = join(container, "app.db");
 
@@ -64,7 +66,9 @@ it("carries every indexed row through the profile-scope rebuild", () => {
   expect(kindsBefore).toHaveLength(5);
   before.close();
 
-  cpSync(join(MIGRATIONS, UPGRADE), join(dir, UPGRADE));
+  for (const file of readdirSync(MIGRATIONS)) {
+    if (file >= UPGRADE) cpSync(join(MIGRATIONS, file), join(dir, file));
+  }
   const after = openDatabase(dbPath, dir);
   try {
     // Every row came back, under the profile that owns it.
