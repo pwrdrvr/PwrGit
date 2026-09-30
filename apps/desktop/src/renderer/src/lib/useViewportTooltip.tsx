@@ -34,11 +34,16 @@ type TooltipState = {
 };
 
 export type ViewportTooltip = {
+  /**
+   * Open a card on `target`. Returns whether one opened: it refuses a trigger
+   * that has left the document, and a caller that tracks its own session (the
+   * pinned remote card) has to know, or it believes in a card that is not there.
+   */
   show: (
     target: HTMLElement,
     content: ReactNode,
     anchor?: TooltipAnchor
-  ) => void;
+  ) => boolean;
   /** Replace an open tooltip's content without making it blink. */
   update: (content: ReactNode) => void;
   hide: () => void;
@@ -362,17 +367,17 @@ export function useViewportTooltip(
     target: HTMLElement,
     content: ReactNode,
     anchor?: TooltipAnchor
-  ): void => {
+  ): boolean => {
     // Escape dismissed this exact trigger and the user has not left it yet.
     // Returning focus to the trigger re-fires its focus handler, which would
     // otherwise reopen what they just dismissed.
-    if (dismissedTargetRef.current === target) return;
+    if (dismissedTargetRef.current === target) return false;
     // A gated open (`hoverIntent`) captures its trigger and shows it a dwell
     // later, by which time a graph row can have unmounted. A detached
     // element's rect is all zeros, which would place the card at the viewport
     // origin beside nothing — and, with no trigger left to fire `mouseleave`,
     // leave it there. There is nothing to anchor to, so there is nothing to show.
-    if (!target.isConnected) return;
+    if (!target.isConnected) return false;
     cancelScheduledHide();
     pointerInInteractiveTooltipRef.current = false;
     targetRef.current = target;
@@ -382,6 +387,7 @@ export function useViewportTooltip(
       targetRect: rectOf(target.getBoundingClientRect()),
       ...(anchor === undefined ? {} : { anchor })
     });
+    return true;
   }, [cancelScheduledHide]);
 
   const hideFrom = useCallback((event: {

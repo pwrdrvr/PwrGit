@@ -703,7 +703,10 @@ export function useRemoteActivityPopover(
       return;
     }
     shownFor.current = pin.id;
-    show(pin.target, content);
+    // Refused when the trigger has already left the document. There is then no
+    // card and never will be, so end the session: left standing it would go on
+    // reporting its outcome as carried by a card nobody can see.
+    if (!show(pin.target, content)) dismiss();
     // `pinView` and `railLeft()` are rebuilt every render and derive from
     // exactly `pin`, `activity` and `now`, all listed — naming them here would
     // re-run this for every render and buy nothing.

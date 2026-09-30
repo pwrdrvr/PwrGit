@@ -63,7 +63,9 @@ export function PrChip({
     if (altKey) void copyText(pr.url);
     else open();
   };
-  const show = (target: HTMLElement): void => showTooltip(target, card);
+  const show = (target: HTMLElement): void => {
+    showTooltip(target, card);
+  };
   const hide = (): void => hideTooltip();
   // Sweeping the pointer past a row of chips must not leave popups in its
   // wake; keyboard focus still acts at once, and a click takes its tooltip
