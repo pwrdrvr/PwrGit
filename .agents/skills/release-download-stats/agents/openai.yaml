@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Download Stats"
+  short_description: "Summarize PwrGit release asset downloads"
+  default_prompt: "Use $release-download-stats to check PwrGit release download stats."
