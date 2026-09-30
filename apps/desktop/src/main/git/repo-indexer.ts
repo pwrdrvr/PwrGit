@@ -760,7 +760,8 @@ export class RepoIndexer {
 
   /** ⌘F search: repos, worktrees (by branch/path), and branches with no
    *  worktree — remote-only (0019) and local-only (0022) —
-   *  through the FTS5 index (0008_search_fts) — prefix matching per token,
+   *  through the FTS5 index over `search_fts` (0008, and `search_fts_index`
+   *  since 0036_search_rows_indexed) — prefix matching per token,
    *  any token order, diacritic/punctuation-insensitive, one bm25-ranked
    *  mixed list with names weighted above paths. Empty/junk queries fall
    *  back to browsing repos by name (the overlay's initial state).
@@ -795,8 +796,8 @@ export class RepoIndexer {
       .prepare(
         // One statement for both scopes: a null `profileId` satisfies the
         // first test and leaves every profile in.
-        `SELECT entity_id, kind FROM search_fts
-         WHERE search_fts MATCH ? AND kind <> 'change_request'
+        `SELECT entity_id, kind FROM search_fts_index
+         WHERE search_fts_index MATCH ? AND kind <> 'change_request'
            AND (? IS NULL OR profile_id = ?)
          ORDER BY CASE WHEN kind = 'repo' AND name = ? COLLATE NOCASE
                        THEN -1
@@ -807,7 +808,7 @@ export class RepoIndexer {
                          OR pr LIKE ?
                        THEN 0 ELSE 1 END,
                   profile_id = ? DESC,
-                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
+                  bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT 60`
       )
       .all(
@@ -825,12 +826,12 @@ export class RepoIndexer {
     // looking for off the list entirely.
     const changeRequestRows = this.db
       .prepare(
-        `SELECT entity_id, kind FROM search_fts
-         WHERE search_fts MATCH ? AND kind = 'change_request'
+        `SELECT entity_id, kind FROM search_fts_index
+         WHERE search_fts_index MATCH ? AND kind = 'change_request'
            AND (? IS NULL OR profile_id = ?)
          ORDER BY CASE WHEN pr LIKE ? THEN 0 ELSE 1 END,
                   profile_id = ? DESC,
-                  bm25(search_fts, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
+                  bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT ${CHANGE_REQUEST_SEARCH_LIMIT}`
       )
       .all(fts, only, only, prLike, mine) as {
