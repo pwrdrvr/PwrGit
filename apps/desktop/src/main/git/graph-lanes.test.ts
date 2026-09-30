@@ -1,11 +1,15 @@
 import { execFileSync } from "node:child_process";
 import {
+  closeSync,
   cpSync,
+  ftruncateSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
-  writeFileSync
+  writeFileSync,
+  writeSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -158,7 +162,16 @@ function divergedRelease(): Fixture {
     // A copy still naming the template would pass every assertion while
     // committing into the template, which every later test then reads.
     if (text.includes(from)) throw new Error(`${file} still names the template`);
-    writeFileSync(file, text);
+    // "r+", not writeFileSync's "w": Git for Windows hides the worktree's
+    // `.git` file (core.hideDotFiles), and Windows refuses "w" on an existing
+    // hidden file with EPERM. "r+" does not truncate, so do that ourselves.
+    const fd = openSync(file, "r+");
+    try {
+      ftruncateSync(fd);
+      writeSync(fd, text, 0, "utf8");
+    } finally {
+      closeSync(fd);
+    }
   }
 
   return {
