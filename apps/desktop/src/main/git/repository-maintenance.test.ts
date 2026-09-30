@@ -246,6 +246,11 @@ describe("repository maintenance with real Git", () => {
       const target = `refs/remotes/${remote}/${branch}`;
       git(repo, "symbolic-ref", remoteHead, target);
       git(join(root, "remote.git"), "update-ref", "-d", `refs/heads/${branch}`);
+      // Git 2.48–2.51 treat a dangling remote HEAD as missing under the
+      // default followRemoteHEAD=create and re-point it at the remote's HEAD
+      // (fixed in 2.52; older Git never touches it). Pin the one behavior
+      // every version shares so the fetch leaves the symref dangling.
+      git(repo, "config", `remote.${remote}.followRemoteHEAD`, "never");
       git(repo, "fetch", "--prune", remote);
       expect(git(repo, "symbolic-ref", remoteHead)).toBe(target);
       const refs = git(repo, "for-each-ref", "--format=%(refname)").split("\n");
