@@ -10,7 +10,7 @@ import {
 import type { Profile, ProfileList, PwrGitError, Result } from "@pwrgit/shared";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const MAIN = join(HERE, "..", "..", "out", "main", "index.js");
+const MAIN = join(HERE, "bootstrap.cjs");
 
 export type AppHandle = {
   app: ElectronApplication;
@@ -32,6 +32,9 @@ function cleanEnv(extra: Record<string, string>): Record<string, string> {
   // electron-vite's renderer URL belongs to that parent app; allowing it into
   // the built PwrGit process makes PwrGit main load the other app's renderer.
   delete env.ELECTRON_RENDERER_URL;
+  delete env.ELECTRON_EXEC_PATH;
+  delete env.ELECTRON_CLI_ARGS;
+  delete env.ELECTRON_MAJOR_VER;
   return { ...env, NODE_ENV: "production", ...extra };
 }
 
@@ -234,8 +237,17 @@ export async function launchApp(
     setPickDirectories([dir]);
 
   const cleanup = async (): Promise<void> => {
-    await app.close();
-    rmSync(userData, { recursive: true, force: true });
+    try {
+      const attempts = await app.evaluate(() =>
+        (globalThis as unknown as {
+          __githubNetworkGuard: { attempts: string[] };
+        }).__githubNetworkGuard.attempts
+      );
+      if (attempts.length) throw new Error(attempts.join("\n"));
+    } finally {
+      await app.close();
+      rmSync(userData, { recursive: true, force: true });
+    }
   };
 
   return { app, window, setPickDirectory, setPickDirectories, cleanup };

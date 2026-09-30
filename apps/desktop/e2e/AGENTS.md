@@ -17,6 +17,12 @@ the Electron build.
 
 ## How a test is isolated
 
+- **Release network**: every `launchApp` starts through `fixtures/bootstrap.cjs`,
+  which blocks GitHub on main's fetch, Node HTTP(S), and Electron net transports
+  before importing the app. Cleanup fails even if application code caught the
+  blocked request. Updater UI specs use the unpackaged simulation; tests of
+  production release checks must stub the transports, never forward to GitHub.
+  Vitest installs the same guard for fetch and Node HTTP(S) in its setup file.
 - **Data**: `PWRGIT_USER_DATA_DIR` (honored early in `src/main/index.ts`) points
   the db / settings / profiles at a fresh temp dir per launch, so every run
   starts from the seeded default profile — see `fixtures/electron-app.ts`. It

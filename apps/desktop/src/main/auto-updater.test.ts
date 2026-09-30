@@ -426,6 +426,32 @@ describe("auto updater", () => {
       electronMock.app.isPackaged = false;
     });
 
+    afterEach(() => {
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(checkForUpdatesMock).not.toHaveBeenCalled();
+      expect(setFeedURLMock).not.toHaveBeenCalled();
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    });
+
+    it.each(["darwin", "win32", "linux"] as const)(
+      "keeps startup, hourly checks, settings and selection changes offline on %s",
+      async platform => {
+        setPlatform(platform);
+        const updater = await startUpdater();
+        await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1_000);
+        for (const trigger of ["startup", "periodic", "settings"] as const) {
+          await updater.checkForAppUpdatesNow(trigger);
+        }
+        await updater.readAppUpdateReleaseVersions();
+        resolveTrain = "beta";
+        resolveChannel = "prerelease";
+        updater.handleUpdateSelectionChange();
+        await updater.readAppUpdateReleaseVersions();
+        await runDevCheck(updater, "manual");
+        await updater.installDownloadedAppUpdate();
+      }
+    );
+
     it("offers a fake download to a user-initiated check", async () => {
       const updater = await importAutoUpdater();
 
