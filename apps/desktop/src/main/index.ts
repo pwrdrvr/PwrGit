@@ -985,7 +985,7 @@ if (!gotSingleInstanceLock) {
     });
     // Every probe also counts the branch against its fork's source, from the
     // stored forge identity — never a forge call — so the sidebar, the header
-    // chip and Pull's accent share one number (worktree_state, 0036).
+    // chip and Pull's accent share one number (worktree_state, 0038).
     stateService.setForkSourceProbe(
       createForkSourceProbe(execGit, (repoId) => {
         const identity = identityService.read([repoId]).get(repoId);

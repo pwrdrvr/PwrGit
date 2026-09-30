@@ -131,7 +131,7 @@ function rowToState(r: StateRow): WorktreeState {
   return s;
 }
 
-/** The stored fork-source columns (0036), or undefined when there is none. */
+/** The stored fork-source columns (0038), or undefined when there is none. */
 export function forkSourceFromRow(r: {
   source_remote: string | null;
   source_label: string | null;
