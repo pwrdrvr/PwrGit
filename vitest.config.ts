@@ -29,12 +29,14 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: [
+      "apps/desktop/test-support/github-network-setup.mjs",
       "apps/desktop/src/main/git/test-support/tripwire-setup.ts",
       "apps/desktop/src/renderer/src/test-support/react-act-setup.ts"
     ],
     testTimeout: REAL_GIT_TIMEOUT_MS,
     hookTimeout: REAL_GIT_TIMEOUT_MS,
     include: [
+      "apps/desktop/test-support/**/*.test.mjs",
       "packages/*/src/**/*.test.ts",
       "apps/desktop/src/**/*.test.{ts,tsx}",
       "scripts/**/*.test.mjs",

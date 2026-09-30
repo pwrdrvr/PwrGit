@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { APP_UPDATE_FIRST_CHECK_DELAY_MS, type UpdateReleaseState } from "./update-release-state";
 
 type UpdateEventHandler = (info?: {
   version?: string;
@@ -33,7 +37,7 @@ const autoUpdaterMock = {
 
 // Mutable so a test can take the unpackaged path — dev and e2e launches run
 // unpackaged, and must not reach GitHub.
-const electronMock = vi.hoisted(() => ({ app: { isPackaged: true } }));
+const electronMock = vi.hoisted(() => ({ app: { isPackaged: true, getPath: vi.fn() } }));
 
 vi.mock("electron", () => electronMock);
 
@@ -149,6 +153,7 @@ describe("auto updater", () => {
   const originalGithubToken = process.env.GITHUB_TOKEN;
   let resolveChannel: "latest" | "prerelease" = "latest";
   let resolveTrain: "stable" | "beta" = "stable";
+  let userData: string;
 
   function setPlatform(platform: NodeJS.Platform): void {
     Object.defineProperty(process, "platform", {
@@ -172,6 +177,13 @@ describe("auto updater", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.useFakeTimers();
+    userData = mkdtempSync(join(tmpdir(), "pwrgit-updater-test-"));
+    electronMock.app.getPath.mockReturnValue(userData);
+    // Existing behavior tests model an installation already due for a check.
+    // Restart/fresh-config tests below remove or reuse this real disk state.
+    writeFileSync(join(userData, "update-release-state.json"), JSON.stringify({
+      version: 1, firstSeenAt: Date.now() - APP_UPDATE_FIRST_CHECK_DELAY_MS, failures: 0
+    }));
     electronMock.app.isPackaged = true;
     setPlatform("darwin");
     process.env.NODE_ENV = "production";
@@ -205,7 +217,9 @@ describe("auto updater", () => {
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
+    rmSync(userData, { recursive: true, force: true });
     process.env.NODE_ENV = originalNodeEnv;
     if (originalGhToken === undefined) delete process.env.GH_TOKEN;
     else process.env.GH_TOKEN = originalGhToken;
@@ -233,13 +247,190 @@ describe("auto updater", () => {
     expect(checkForUpdatesMock).toHaveBeenCalledTimes(2);
   });
 
+  describe("durable production request budget", () => {
+    function savedState(): UpdateReleaseState {
+      return JSON.parse(readFileSync(join(electronMock.app.getPath(), "update-release-state.json"), "utf8"));
+    }
+
+    async function restart() {
+      // Let the old process finish its fire-and-forget bookkeeping, then
+      // discard all its timers. Only wall time and the JSON file survive.
+      await delayTicks(10);
+      const now = Date.now();
+      vi.clearAllTimers();
+      vi.setSystemTime(now);
+      vi.resetModules();
+      updateEventHandlers.clear();
+      const updater = await startUpdater();
+      await updater.checkForAppUpdatesNow("startup").catch(() => {});
+      return updater;
+    }
+
+    it("makes one release and download check across 20 launches/minute, versions and channels", async () => {
+      const start = Date.now();
+      for (let launch = 0; launch < 20; launch++) {
+        vi.setSystemTime(start + launch * 3_000);
+        resolveTrain = launch % 2 ? "stable" : "beta";
+        resolveChannel = launch % 2 ? "latest" : "prerelease";
+        autoUpdaterMock.currentVersion.version = `0.25.${launch}`;
+        const updater = await restart();
+        await Promise.all(Array.from({ length: 4 }, () => updater.readAppUpdateReleaseVersions()));
+        updater.handleUpdateSelectionChange();
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "https://api.github.com/repos/pwrdrvr/PwrGit/releases?per_page=30"
+      );
+      expect(savedState()).toMatchObject({ lastAttemptAt: start, lastSuccessAt: start, lastCheckAt: start });
+    });
+
+    it("keeps the first ten-minute deadline across rapid restarts, then checks hourly", async () => {
+      rmSync(join(userData, "update-release-state.json"));
+      mockGitHubReleases([]);
+      const firstSeen = Date.now();
+      for (let launch = 0; launch < 20; launch++) {
+        vi.setSystemTime(firstSeen + launch * 3_000);
+        const updater = await restart();
+        await updater.readAppUpdateReleaseVersions();
+        resolveTrain = launch % 2 ? "beta" : "stable";
+        updater.handleUpdateSelectionChange();
+      }
+      expect(savedState().firstSeenAt).toBe(firstSeen);
+      expect(fetchMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(APP_UPDATE_FIRST_CHECK_DELAY_MS - 57_000 - 1);
+      expect(fetchMock).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1_000);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("gives each fresh userData profile a delay; opening windows cannot bypass it", async () => {
+      for (let profile = 0; profile < 20; profile++) {
+        electronMock.app.getPath.mockReturnValue(join(userData, `profile-${profile}`));
+        const updater = await restart();
+        updater.initAutoUpdater({ resolveSelection: () => ({ train: "beta", channel: "prerelease" }) });
+        await Promise.all(Array.from({ length: 4 }, () => updater.readAppUpdateReleaseVersions()));
+        await vi.advanceTimersByTimeAsync(3_000);
+      }
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(checkForUpdatesMock).not.toHaveBeenCalled();
+    });
+
+    it.each(["manual", "menu"] as const)("%s bypasses the new-profile delay and restart cooldown", async trigger => {
+      rmSync(join(userData, "update-release-state.json"));
+      let updater = await restart();
+      expect(fetchMock).not.toHaveBeenCalled();
+      await updater.checkForAppUpdatesNow(trigger);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(Date.now() + 3_000);
+      updater = await restart();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      fetchMock.mockResolvedValueOnce(githubResponse(undefined, { status: 304 }));
+      await updater.checkForAppUpdatesNow(trigger);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(requestHeader(1, "If-None-Match")).toBe('W/"releases"');
+      expect(savedState().cache?.releases[0]?.tag_name).toBe("v1.0.0-beta.8");
+      expect(savedState().cache?.fetchedAt).toBe(Date.now());
+      expect(savedState().lastSuccessAt).toBe(Date.now());
+    });
+
+    it("honors a manual check racing the first deferred startup check", async () => {
+      rmSync(join(userData, "update-release-state.json"));
+      const updater = await importAutoUpdater();
+      updater.initAutoUpdater({ resolveSelection: () => ({ train: "stable", channel: "latest" }) });
+      const result = await updater.checkForAppUpdatesNow("manual");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe("available");
+    });
+
+    it("persists an exhausted budget reported by a successful response without storing credentials", async () => {
+      process.env.GH_TOKEN = "test-secret-never-persist";
+      const reset = Math.floor((Date.now() + 90_000) / 1_000);
+      fetchMock.mockResolvedValue(githubResponse([githubRelease("v1.0.0")], {
+        headers: { etag: 'W/"last-request"', "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) }
+      }));
+      await restart();
+      const updater = await restart();
+      await expect(updater.checkForAppUpdatesNow("manual")).rejects.toThrow("GitHub rate limit reached");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(savedState().rateLimitResetAt).toBe(reset * 1_000);
+      expect(readFileSync(join(userData, "update-release-state.json"), "utf8")).not.toContain(process.env.GH_TOKEN);
+    });
+
+    it("retains a server reset across restarts, including explicit checks", async () => {
+      const resetAt = Date.now() + 2 * 60 * 60 * 1_000;
+      fetchMock.mockResolvedValue(rateLimitedResponse(resetAt));
+      await restart();
+      expect(savedState().rateLimitResetAt).toBe(Math.floor(resetAt / 1_000) * 1_000);
+      for (let launch = 0; launch < 20; launch++) {
+        const updater = await restart();
+        await expect(updater.checkForAppUpdatesNow("manual")).rejects.toThrow("GitHub rate limit reached");
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(resetAt + 1);
+      mockGitHubReleases();
+      await restart();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(savedState().rateLimitResetAt).toBeUndefined();
+    });
+
+    it("retains Retry-After, failure count and exponential backoff across restarts", async () => {
+      fetchMock.mockResolvedValue(githubResponse({}, { status: 429, headers: { "retry-after": "90" } }));
+      await restart();
+      let updater = await restart();
+      await expect(updater.checkForAppUpdatesNow("manual")).rejects.toThrow("GitHub rate limit reached");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.setSystemTime(Date.now() + 90_001);
+      fetchMock.mockRejectedValue(new Error("offline"));
+      await expect(updater.checkForAppUpdatesNow("manual")).rejects.toThrow("offline");
+      expect(savedState().failures).toBe(2);
+      updater = await restart();
+      await expect(updater.checkForAppUpdatesNow("manual")).rejects.toThrow("backing off");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      vi.setSystemTime(Date.now() + 120_001);
+      mockGitHubReleases();
+      await updater.checkForAppUpdatesNow("manual");
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(savedState()).toMatchObject({ failures: 0, lastSuccessAt: Date.now() });
+      expect(savedState().retryNotBefore).toBeUndefined();
+    });
+
+    it("records an attempt before a response so a killed process cannot retry on restart", async () => {
+      const updater = await importAutoUpdater();
+      fetchMock.mockReturnValue(new Promise(() => {}));
+      void updater.readAppUpdateReleaseVersions();
+      expect(savedState().lastAttemptAt).toBe(Date.now());
+      expect(savedState().lastSuccessAt).toBeUndefined();
+      const restarted = await restart();
+      await restarted.readAppUpdateReleaseVersions();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("defers corrupt state and refuses unrecorded requests when persistence fails", async () => {
+      writeFileSync(join(userData, "update-release-state.json"), "broken JSON");
+      let updater = await restart();
+      await updater.readAppUpdateReleaseVersions();
+      expect(fetchMock).not.toHaveBeenCalled();
+      const notDirectory = join(userData, "not-a-directory");
+      writeFileSync(notDirectory, "file");
+      electronMock.app.getPath.mockReturnValue(notDirectory);
+      vi.clearAllTimers();
+      vi.resetModules();
+      updater = await importAutoUpdater();
+      await expect(updater.checkForAppUpdatesNow("manual")).rejects.toThrow();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
   it("downloads and offers restart when Settings discovers a release after startup", async () => {
     mockGitHubReleases([]);
     const updater = await startUpdater();
     await updater.checkForAppUpdatesNow("startup");
     expect(checkForUpdatesMock).not.toHaveBeenCalled();
     mockGitHubReleases();
-    await vi.advanceTimersByTimeAsync(updater.APP_UPDATE_RELEASE_CACHE_TTL_MS);
+    vi.setSystemTime(Date.now() + updater.APP_UPDATE_CHECK_INTERVAL_MS);
     checkForUpdatesMock.mockImplementation(async () => ({
       isUpdateAvailable: true,
       updateInfo: { version: "1.0.0-beta.8" },
@@ -264,7 +455,7 @@ describe("auto updater", () => {
     });
   });
 
-  it("checks a changed track immediately but ignores unrelated settings writes", async () => {
+  it("defers a changed track within the budget but an explicit check sees it immediately", async () => {
     mockGitHubReleases([]);
     const updater = await startUpdater();
     await updater.checkForAppUpdatesNow("startup");
@@ -283,6 +474,10 @@ describe("auto updater", () => {
     }));
     resolveChannel = "prerelease";
     updater.handleUpdateSelectionChange();
+    await delayTicks();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(checkForUpdatesMock).not.toHaveBeenCalled();
+    await updater.checkForAppUpdatesNow("manual");
     await vi.waitFor(() => expect(checkForUpdatesMock).toHaveBeenCalledTimes(1));
     expect(setFeedURLMock).toHaveBeenCalledWith(expect.objectContaining({
       url: expect.stringContaining("v1.1.0-prerelease")
@@ -425,6 +620,32 @@ describe("auto updater", () => {
     beforeEach(() => {
       electronMock.app.isPackaged = false;
     });
+
+    afterEach(() => {
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(checkForUpdatesMock).not.toHaveBeenCalled();
+      expect(setFeedURLMock).not.toHaveBeenCalled();
+      expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
+    });
+
+    it.each(["darwin", "win32", "linux"] as const)(
+      "keeps startup, hourly checks, settings and selection changes offline on %s",
+      async platform => {
+        setPlatform(platform);
+        const updater = await startUpdater();
+        await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1_000);
+        for (const trigger of ["startup", "periodic", "settings"] as const) {
+          await updater.checkForAppUpdatesNow(trigger);
+        }
+        await updater.readAppUpdateReleaseVersions();
+        resolveTrain = "beta";
+        resolveChannel = "prerelease";
+        updater.handleUpdateSelectionChange();
+        await updater.readAppUpdateReleaseVersions();
+        await runDevCheck(updater, "manual");
+        await updater.installDownloadedAppUpdate();
+      }
+    );
 
     it("offers a fake download to a user-initiated check", async () => {
       const updater = await importAutoUpdater();
@@ -1023,7 +1244,7 @@ describe("auto updater", () => {
     expect(release.status).not.toBe("error");
   });
 
-  it("refetches once the cache entry expires", async () => {
+  it("keeps stale cache reads within the hourly request budget", async () => {
     const updater = await importAutoUpdater();
 
     await updater.readAppUpdateReleaseVersions();
@@ -1031,7 +1252,11 @@ describe("auto updater", () => {
       updater.APP_UPDATE_RELEASE_CACHE_TTL_MS + 1
     );
     await updater.readAppUpdateReleaseVersions();
-
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(
+      updater.APP_UPDATE_CHECK_INTERVAL_MS - updater.APP_UPDATE_RELEASE_CACHE_TTL_MS
+    );
+    await updater.readAppUpdateReleaseVersions();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -1132,10 +1357,11 @@ describe("auto updater", () => {
   it("stops requesting while rate limited and serves the last good list", async () => {
     const updater = await importAutoUpdater();
     await updater.readAppUpdateReleaseVersions();
-    fetchMock.mockResolvedValue(rateLimitedResponse(Date.now() + 30 * 60 * 1_000));
     await vi.advanceTimersByTimeAsync(
-      updater.APP_UPDATE_RELEASE_CACHE_TTL_MS + 1
+      updater.APP_UPDATE_CHECK_INTERVAL_MS + 1
     );
+
+    fetchMock.mockResolvedValue(rateLimitedResponse(Date.now() + 30 * 60 * 1_000));
 
     // One request discovers the limit; later reads must not spend another.
     await updater.readAppUpdateReleaseVersions();
@@ -1157,6 +1383,7 @@ describe("auto updater", () => {
 
     await vi.advanceTimersByTimeAsync(31 * 60 * 1_000);
     mockGitHubReleases();
+    await updater.checkForAppUpdatesNow("manual");
     const recovered = await updater.readAppUpdateReleaseVersions();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);

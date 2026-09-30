@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { appendFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 
 /**
@@ -13,6 +15,12 @@ test("boots a single window with #root mounted", async () => {
     // One window per profile: the title carries the booted profile's name.
     expect(await handle.window.title()).toMatch(/^PwrGit( — .+)?$/);
     expect(handle.app.windows().length).toBe(1);
+    expect(await handle.app.evaluate(({ app }) => ({
+      packaged: app.isPackaged,
+      attempts: (globalThis as unknown as {
+        __githubNetworkGuard: { attempts: string[] };
+      }).__githubNetworkGuard.attempts
+    }))).toEqual({ packaged: false, attempts: [] });
     // `ping` is deliberately transport-only: prove the exposed preload API,
     // IPC dispatcher, command bus, and main handler complete one round trip.
     expect(
@@ -74,5 +82,25 @@ test("isolates built-app identity and single-instance locks", async () => {
     } else {
       process.env.ELECTRON_RENDERER_URL = inheritedRendererUrl;
     }
+  }
+});
+
+test("cleanup reports persisted network violations after Electron has quit", async () => {
+  const handle = await launchApp();
+  let cleaned = false;
+  try {
+    const userData = await handle.app.evaluate(({ app }) => app.getPath("userData"));
+    // A synthetic record exercises the failure path without attempting any
+    // real request. Guard unit tests verify the transport invokes this sink.
+    const violation = "Unstubbed GitHub request in test: synthetic shutdown violation";
+    appendFileSync(join(userData, "github-network-attempts.log"), `${violation}\n`);
+    const closed = handle.app.waitForEvent("close");
+    await handle.app.evaluate(({ app }) => { setImmediate(() => app.quit()); });
+    await closed;
+    cleaned = true;
+    await expect(handle.cleanup()).rejects.toThrow(violation);
+    expect(existsSync(userData)).toBe(false);
+  } finally {
+    if (!cleaned) await handle.cleanup();
   }
 });
