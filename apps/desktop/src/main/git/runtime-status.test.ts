@@ -117,16 +117,29 @@ describe("bundled Git runtime", () => {
 });
 
 describe.skipIf(!posix)("an installed Git chosen in Settings", () => {
-  it("runs that Git for text, binary and streaming commands, with none of the bundle's environment", async () => {
+  it.each(["unset", "custom", "bundled", "generated"] as const)("runs the chosen Git with %s system config and none of the bundle's environment", async (configKind) => {
     const git = await fakeGit();
-    configureBundledGitConfig(await temporary("pwrgit-gitconfig-"));
+    const generated = await temporary("pwrgit-gitconfig-");
+    configureBundledGitConfig(generated);
+    const systemConfig = {
+      unset: undefined,
+      custom: join(dirname(git), "custom-gitconfig"),
+      bundled: join(dugite.resolveEmbeddedGitDir(), "etc", "gitconfig"),
+      generated: join(generated, "gitconfig-fixture")
+    }[configKind];
+    // The installed runtime intentionally preserves a user's custom config.
+    // Model each case explicitly instead of assuming the parent shell has none.
+    vi.stubEnv("GIT_CONFIG_SYSTEM", systemConfig);
+    vi.stubEnv("GIT_EXEC_PATH", dugite.resolveGitExecPath(dugite.resolveEmbeddedGitDir(), ""));
+    vi.stubEnv("LOCAL_GIT_DIRECTORY", dugite.resolveEmbeddedGitDir());
     useInstalledGit(git);
     const text = await execGit(["status"], tmpdir(), { env: { GIT_TERMINAL_PROMPT: "1" } });
     if (!text.ok) throw new Error(text.error.message);
     const lines = text.value.stdout.split("\n");
     expect(lines).toContain(`args=-C ${tmpdir()} status`);
     expect(lines).toContain("GIT_EXEC_PATH=unset");
-    expect(lines).toContain("GIT_CONFIG_SYSTEM=unset");
+    const expectedConfig = `GIT_CONFIG_SYSTEM=${configKind === "custom" ? systemConfig : "unset"}`;
+    expect(lines).toContain(expectedConfig);
     expect(lines).toContain("LOCAL_GIT_DIRECTORY=unset");
     // A caller still cannot re-enable prompts.
     expect(lines).toContain("GIT_TERMINAL_PROMPT=0");
@@ -136,8 +149,10 @@ describe.skipIf(!posix)("an installed Git chosen in Settings", () => {
 
     const binary = await execGitBinary(["status"], tmpdir());
     expect(binary.ok && binary.value.stdout.toString()).toContain(`args=-C ${tmpdir()} status`);
+    expect(binary.ok && binary.value.stdout.toString().split("\n")).toContain(expectedConfig);
     const stream = await execGitRecords(["ls-files", "-z"], tmpdir(), { matches: () => true, maxRecords: 10, maxChars: 10_000 });
     expect(stream.ok && stream.value.records).toEqual(["installed-fixture"]);
+    expect(process.env.GIT_CONFIG_SYSTEM).toBe(systemConfig);
   });
 
   it("fails naming the choice when it breaks, and never falls back to the bundle", async () => {
