@@ -1,4 +1,5 @@
 import { app } from "electron";
+import { join } from "node:path";
 // electron-updater is CommonJS; import the default and destructure so the
 // strict-ESM main bundle can load it (named ESM imports fail at runtime).
 import electronUpdater from "electron-updater";
@@ -18,17 +19,23 @@ import type { CommandBus } from "./command-bus";
 import { emitEvent } from "./ipc";
 import { logMain } from "./logs";
 import { delay } from "./util/timing";
+import {
+  APP_UPDATE_CHECK_INTERVAL_MS,
+  UpdateReleaseStateStore,
+  parseGitHubReleases,
+  type GitHubRelease
+} from "./update-release-state";
+export { APP_UPDATE_CHECK_INTERVAL_MS } from "./update-release-state";
 
 const { autoUpdater } = electronUpdater;
 
 const GITHUB_RELEASES_URL =
   "https://api.github.com/repos/pwrdrvr/PwrGit/releases?per_page=30";
 const RELEASE_FETCH_TIMEOUT_MS = 5_000;
-export const APP_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1_000;
 // The GitHub REST API allows 60 anonymous requests per hour per IP, shared by
 // every process on the machine. The renderer reads release versions on every
-// Settings mount, so main caches the release list and serves those reads from
-// memory instead of spending a request each time.
+// Settings mount. Main persists the list and enforces an hourly automatic
+// request budget even after this freshness window expires or the app restarts.
 export const APP_UPDATE_RELEASE_CACHE_TTL_MS = 15 * 60 * 1_000;
 const RATE_LIMIT_FALLBACK_BACKOFF_MS = 15 * 60 * 1_000;
 
@@ -69,27 +76,6 @@ type AppUpdateCheckTrigger =
   | "selection"
   | "settings";
 
-type GitHubRelease = {
-  assets?: GitHubReleaseAsset[];
-  draft?: boolean;
-  html_url?: string;
-  name?: string;
-  prerelease?: boolean;
-  published_at?: string;
-  tag_name?: string;
-};
-
-type GitHubReleaseAsset = {
-  name?: string;
-  state?: string;
-};
-
-type ReleaseCacheEntry = {
-  releases: GitHubRelease[];
-  etag?: string;
-  fetchedAt: number;
-};
-
 type ParsedSemver = {
   core: [number, number, number];
   pre: Array<string | number>;
@@ -108,7 +94,7 @@ let resolveSelection: () => UpdatesSettings = () => ({
   channel: "latest"
 });
 let updateStatus: AppUpdateStatus = { status: "idle" };
-let periodicUpdateCheckTimer: ReturnType<typeof setInterval> | undefined;
+let periodicUpdateCheckTimer: ReturnType<typeof setTimeout> | undefined;
 let updateCheckInFlight: Promise<AppUpdateCheckResult> | undefined;
 let updateCheckInFlightSelection: UpdateSelectionKey | undefined;
 let updateCheckChannelInFlight: UpdateSelectionKey | undefined;
@@ -157,9 +143,16 @@ function applyPendingCancel(download: ActiveDownload): boolean {
   }
   return true;
 }
-let releaseCache: ReleaseCacheEntry | undefined;
 let releaseFetchInFlight: Promise<GitHubRelease[]> | undefined;
-let rateLimitResetAt: number | undefined;
+let releaseStore: UpdateReleaseStateStore | undefined;
+
+function getReleaseStore(): UpdateReleaseStateStore {
+  return releaseStore ??= new UpdateReleaseStateStore(
+    join(app.getPath("userData"), "update-release-state.json")
+  );
+}
+
+class DeferredReleaseCheck extends Error {}
 
 function currentSelection(): UpdatesSettings {
   try {
@@ -353,7 +346,15 @@ export async function checkForAppUpdatesNow(
   if (updateCheckInFlight) {
     if (wanted === updateCheckInFlightSelection) {
       logMain("info", "updater", `joining in-flight update check (${trigger})`);
-      return updateCheckInFlight;
+      const result = await updateCheckInFlight;
+      // An explicit click racing the initial deferred check must still work.
+      if (
+        result.status === "skipped" &&
+        (trigger === "manual" || trigger === "menu")
+      ) {
+        return checkForAppUpdatesNow(trigger);
+      }
+      return result;
     }
     logMain(
       "info",
@@ -397,22 +398,30 @@ async function runUpdateCheck(
     );
     return downloadedResult;
   }
+  const store = getReleaseStore();
+  const manual = trigger === "manual" || trigger === "menu";
+  if (!manual && Date.now() < store.automaticCheckAt()) {
+    return {
+      status: "skipped",
+      reason: "Automatic update check deferred; use Check for Update to check now."
+    };
+  }
+  // Reserve the whole check before network work, including metadata/download
+  // requests through electron-updater. Restarting cannot replay a cached offer.
+  store.state.lastCheckAt = Date.now();
+  store.save();
   logMain(
     "info",
     "updater",
     `checking for updates (${trigger}) train=${selected.train} track=${selected.channel}`
   );
   configureAutoUpdaterChannel(selected);
-  // A user-initiated check should see what shipped a minute ago, so it
-  // revalidates the cache instead of reading it. The conditional request
-  // answers 304 while nothing has changed, which GitHub does not charge
-  // against the rate limit.
+  // Explicit checks revalidate immediately. A 304 saves primary quota only
+  // when authenticated; anonymous conditional requests still need a budget.
   const release = await readAppUpdateReleaseForChannel(
     selected.channel,
     selected.train,
-    trigger === "manual" || trigger === "menu" || trigger === "selection"
-      ? 0
-      : undefined
+    manual ? 0 : undefined
   );
   const currentVersion = autoUpdater.currentVersion?.version ?? "unknown";
   if (!release?.tag_name) {
@@ -521,14 +530,17 @@ async function runAvailableUpdateDownload(
 function runBackgroundUpdateCheck(
   trigger: "startup" | "periodic" | "selection" | "settings"
 ): void {
-  void checkForAppUpdatesNow(trigger).catch((err: unknown) => {
-    logMain(
-      "warn",
-      "updater",
-      `${trigger} update check failed`,
-      err instanceof Error ? err.message : String(err)
-    );
-  });
+  void checkForAppUpdatesNow(trigger)
+    .catch((err: unknown) => {
+      if (err instanceof DeferredReleaseCheck) return;
+      logMain(
+        "warn",
+        "updater",
+        `${trigger} update check failed`,
+        err instanceof Error ? err.message : String(err)
+      );
+    })
+    .finally(() => scheduleNextUpdateCheck());
 }
 
 /** Dev/QA stand-in for a real update check.
@@ -625,11 +637,22 @@ async function simulateDevUpdateCheck(
   }
 }
 
-function startPeriodicUpdateChecks(): void {
-  if (periodicUpdateCheckTimer) return;
-  periodicUpdateCheckTimer = setInterval(() => {
+function scheduleNextUpdateCheck(): void {
+  if (
+    !initialized || !productionUpdatesEnabled() || linuxManualPackageUpdatesEnabled()
+  ) return;
+  if (periodicUpdateCheckTimer) clearTimeout(periodicUpdateCheckTimer);
+  let wait = APP_UPDATE_CHECK_INTERVAL_MS;
+  try {
+    const due = getReleaseStore().automaticCheckAt() - Date.now();
+    if (due > 0) wait = due;
+  } catch {
+    // Persistence failures already surface on the check. Retry next hour;
+    // never make an unrecorded request or spin on a broken state directory.
+  }
+  periodicUpdateCheckTimer = setTimeout(() => {
     runBackgroundUpdateCheck("periodic");
-  }, APP_UPDATE_CHECK_INTERVAL_MS);
+  }, Math.min(wait, 2_147_483_647));
   periodicUpdateCheckTimer.unref?.();
 }
 
@@ -901,8 +924,8 @@ function githubReleaseHeaders(etag?: string): HeadersInit {
     Accept: "application/vnd.github+json",
     "User-Agent": "PwrGit",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    // A conditional request that answers 304 is not charged against the
-    // GitHub rate limit, so revalidation stays free while nothing ships.
+    // GitHub only exempts correctly authenticated 304s from primary quota.
+    // Anonymous conditional requests remain subject to the shared-IP limit.
     ...(etag ? { "If-None-Match": etag } : {})
   };
 }
@@ -957,7 +980,7 @@ function releaseRequestError(response: Response): Error {
   if (resetAt === undefined) {
     return new Error(`GitHub releases request failed with ${status}`);
   }
-  rateLimitResetAt = resetAt;
+  getReleaseStore().state.rateLimitResetAt = resetAt;
   logMain(
     "warn",
     "updater",
@@ -967,64 +990,75 @@ function releaseRequestError(response: Response): Error {
 }
 
 async function fetchGitHubReleases(): Promise<GitHubRelease[]> {
+  const store = getReleaseStore();
+  const state = store.state;
+  // Write ahead: even a killed process or a lost response consumes its slot.
+  state.lastAttemptAt = Date.now();
+  store.save();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RELEASE_FETCH_TIMEOUT_MS);
   try {
     const response = await fetch(GITHUB_RELEASES_URL, {
-      headers: githubReleaseHeaders(releaseCache?.etag),
+      headers: githubReleaseHeaders(state.cache?.etag),
       signal: controller.signal
     });
-    if (response.status === 304 && releaseCache) {
-      releaseCache = { ...releaseCache, fetchedAt: Date.now() };
-      rateLimitResetAt = undefined;
-      return releaseCache.releases;
+    if (response.status === 304 && state.cache) {
+      state.cache = { ...state.cache, fetchedAt: Date.now() };
+    } else {
+      if (!response.ok) throw releaseRequestError(response);
+      const releases = parseGitHubReleases(await response.json());
+      const etag = readResponseHeader(response, "etag");
+      state.cache = { ...(etag ? { etag } : {}), fetchedAt: Date.now(), releases };
     }
-    if (!response.ok) {
-      throw releaseRequestError(response);
-    }
-    const payload = await response.json();
-    const releases = Array.isArray(payload)
-      ? payload.filter(
-          (release): release is GitHubRelease =>
-            typeof release === "object" && release !== null
-        )
-      : [];
-    const etag = readResponseHeader(response, "etag");
-    releaseCache = {
-      ...(etag ? { etag } : {}),
-      fetchedAt: Date.now(),
-      releases
-    };
-    rateLimitResetAt = undefined;
-    return releases;
+    state.lastSuccessAt = Date.now();
+    // A successful response can spend the last available request, too.
+    state.rateLimitResetAt = rateLimitResetFromResponse(response);
+    state.retryNotBefore = undefined;
+    state.failures = 0;
+    store.save();
+    return state.cache.releases;
+  } catch (error) {
+    state.failures = Math.min(state.failures + 1, 10);
+    // All errors get durable backoff, not just 403. Explicit checks bypass
+    // normal cadence, but must respect failures and server reset instructions.
+    state.retryNotBefore = Date.now() + Math.min(
+      60_000 * 2 ** (state.failures - 1), APP_UPDATE_CHECK_INTERVAL_MS
+    );
+    store.save();
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-/**
- * Single owner of the GitHub release list. Every caller in main goes through
- * this cache, and the renderer only ever reads it over IPC, so a Settings
- * mount costs no network request.
- */
+/** One release-list budget for all windows, versions and channels in userData. */
 async function readGitHubReleases(
   maxAgeMs = APP_UPDATE_RELEASE_CACHE_TTL_MS
 ): Promise<GitHubRelease[]> {
+  const store = getReleaseStore();
+  const state = store.state;
   const now = Date.now();
-  if (releaseCache && now - releaseCache.fetchedAt < maxAgeMs) {
-    return releaseCache.releases;
+  if (releaseFetchInFlight) return await releaseFetchInFlight;
+  if (state.cache && now - state.cache.fetchedAt < maxAgeMs) return state.cache.releases;
+  if (state.rateLimitResetAt !== undefined && now < state.rateLimitResetAt) {
+    if (maxAgeMs > 0 && state.cache) return state.cache.releases;
+    throw rateLimitedError(state.rateLimitResetAt);
   }
-  if (rateLimitResetAt !== undefined && now < rateLimitResetAt) {
-    // Spending a request that GitHub will reject only deepens the hole. Serve
-    // the last good list when we have one.
-    if (releaseCache) return releaseCache.releases;
-    throw rateLimitedError(rateLimitResetAt);
+  if (state.retryNotBefore !== undefined && now < state.retryNotBefore) {
+    if (maxAgeMs > 0 && state.cache) return state.cache.releases;
+    throw new Error("Update checks are backing off after a failed request. Try again shortly.");
   }
-  if (!releaseFetchInFlight) {
-    releaseFetchInFlight = fetchGitHubReleases().finally(() => {
-      releaseFetchInFlight = undefined;
-    });
+  if (maxAgeMs > 0 && now < store.automaticFetchAt()) {
+    if (state.cache) return state.cache.releases;
+    const resumesAt = new Date(store.automaticFetchAt()).toLocaleTimeString();
+    throw new DeferredReleaseCheck(
+      `Automatic release checks are deferred until ${resumesAt}.` +
+      (linuxManualPackageUpdatesEnabled() ? "" : " Use Check for Update to check now.")
+    );
   }
+  releaseFetchInFlight = fetchGitHubReleases().finally(() => {
+    releaseFetchInFlight = undefined;
+  });
   return await releaseFetchInFlight;
 }
 
@@ -1076,7 +1110,7 @@ export async function readAppUpdateReleaseVersions(): Promise<AppUpdateReleaseVe
       runBackgroundUpdateCheck("settings");
     }
     return {
-      fetchedAt: releaseCache?.fetchedAt ?? Date.now(),
+      fetchedAt: getReleaseStore().state.cache?.fetchedAt ?? Date.now(),
       stable: {
         latest: releaseInfoFromGitHubRelease(
           selected.stableLatest,
@@ -1195,7 +1229,6 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
     setUpdateStatusUnlessDownloaded({ status: "error", message: err.message });
   });
 
-  startPeriodicUpdateChecks();
   runBackgroundUpdateCheck("startup");
 }
 
