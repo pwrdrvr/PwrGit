@@ -45,6 +45,8 @@
           .dv-olabel strong { font-weight: 650; color: var(--t1); }
           .dv-next { margin: 24px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); max-width: 980px; text-wrap: pretty; }
           .note { margin: 0; max-width: 696px; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .shipped { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--oksoft); color: var(--okt); font: 700 9px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; }
+          .dv-sub .ship-note { display: block; margin-top: 8px; color: var(--t2); }
           .rec { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--acc); color: var(--accon); font: 700 9px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; }
           .prop { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border: 1px solid var(--abord); border-radius: 999px; color: var(--accb); font: 700 9px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; }
 
@@ -164,7 +166,7 @@
           .sev.lo { background: rgba(0,0,0,.06); color: var(--t3); }
 
           /* pane widths for specimens and the live prototype */
-          .w760 { width: 760px; } .w620 { width: 620px; } .w500 { width: 500px; } .w400 { width: 400px; } .w340 { width: 340px; } .w290 { width: 290px; }
+          .w760 { width: 760px; } .w620 { width: 620px; } .w500 { width: 500px; } .w400 { width: 400px; } .w340 { width: 340px; } .w290 { width: 290px; } .w300 { width: 300px; } .w260 { width: 260px; }
           .spec { display: flex; flex-direction: column; gap: 4px; }
           .bad-x { outline: 2px dashed var(--dt); outline-offset: 2px; border-radius: 8px; }
 
@@ -176,7 +178,7 @@
           .gi-s { width: 11px; height: 11px; }
 
           /* lineage toolbar (.graph-toolbar, .only-me, .graph-locate) */
-          .ltb { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 12px 20px; }
+          .ltb { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 52px; padding: 12px 20px; }
           .ltb .lbl { flex: none; margin-right: auto; padding-right: 12px; font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
           .lp { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px; border-radius: 7px; border: 1px solid var(--line2); background: var(--elev); color: var(--t2); font: 600 11.5px/1 var(--sans); white-space: nowrap; }
           .lp.icon { width: 28px; padding: 0; justify-content: center; }
@@ -222,14 +224,16 @@
         <div class="dv-thd">
           <a class="dv-tid" href="#t3">3</a>
           <span class="dv-tname">Review of the build: the sync works, and almost nobody can see it</span>
+          <span class="shipped">Shipped &#183; #359</span>
         </div>
-        <p class="dv-sub">On a real fork the build detected the source, fetched it, and counted <code>main</code> 25 commits behind <code>upstream/main</code>. It lit Pull and grew the arrow, and Pull's default would have synced. None of that reached the user. The chip that says so is hidden at the stock window width, Pull has no tooltip, the collapsed panel's button covers the toolbar, and the sidebar still counts against the fork alone. <a class="dv-oid" href="#2h">2h</a> specified the 680px cut, so part of this is the artboard's fault; this turn supersedes it. Same contrived fork as turn 2: <code>origin</code> is <code>demo-dev/sparkline</code>, <code>upstream</code> is <code>octo-labs/sparkline</code>.</p>
+        <p class="dv-sub">On a real fork the build detected the source, fetched it, and counted <code>main</code> 25 commits behind <code>upstream/main</code>. It lit Pull and grew the arrow, and Pull's default would have synced. None of that reached the user. The chip that says so is hidden at the stock window width, Pull has no tooltip, the collapsed panel's button covers the toolbar, and the sidebar still counts against the fork alone. <a class="dv-oid" href="#2h">2h</a> specified the 680px cut, so part of this is the artboard's fault; this turn supersedes it. Same contrived fork as turn 2: <code>origin</code> is <code>demo-dev/sparkline</code>, <code>upstream</code> is <code>octo-labs/sparkline</code>.
+          <span class="ship-note"><strong>Updated to what shipped</strong> in pwrdrvr/PwrGit#359 (2026-09-29). Items 1&#8211;12 are fixed; 13 is still open. Each card now draws the build, and its note says where the build departs from the proposal. The widths are the build's own, measured on the real components and stylesheets with the app's bundled Geist Sans. This page loads Google's Geist, so a specimen here can differ from them by a few pixels. &#8220;Before&#8221; captions are the app as reviewed.</span></p>
 
         <div class="dv-opts">
           <div class="dv-opt" id="3-list" data-screen-label="What the build gets wrong">
-            <div class="dv-olabel"><strong>What the running app gets wrong</strong><span>Checked against the app and the code on 2026-09-29.</span></div>
+            <div class="dv-olabel"><strong>What the running app got wrong</strong><span>Checked against the app and the code on 2026-09-29. Fixed in #359, except 13.</span></div>
             <div class="rv">
-              <div class="rh">#</div><div class="rh">Defect</div><div class="rh">Cause</div><div class="rh go">Fix</div>
+              <div class="rh">#</div><div class="rh">Defect</div><div class="rh">Cause</div><div class="rh go">Fixed in</div>
               <div class="n">1</div><div><span class="sev hi">High</span><strong>The upstream chip is hidden at the stock window width.</strong> At 1360px the pane is 696px, so <code>&#8595;25 behind upstream</code> never appears. The only sign left is an unlabelled accent on an icon.</div><div>A 680px container query, taken from <a class="dv-oid" href="#2h">2h</a>. A 400px pane still has room for the whole chip.</div><div class="go"><a class="dv-oid" href="#3a">3a</a></div>
               <div class="n">2</div><div><span class="sev hi">High</span><strong>Fetch, Pull and Push lose their labels while half the row is empty.</strong> A 725px pane shows three bare icons and about 300px of nothing.</div><div>A fixed 720px cut. The row only needs about 460px for the labels plus the chip.</div><div class="go"><a class="dv-oid" href="#3a">3a</a></div>
               <div class="n">3</div><div><span class="sev hi">High</span><strong>Pull has no tooltip.</strong> The only way to learn that it syncs from <code>upstream</code> and pushes to <code>origin</code> is to open the arrow.</div><div>A native <code>title</code>, withheld while the status card claims the button. Every other header control uses <code>hoverTooltip</code>.</div><div class="go"><a class="dv-oid" href="#3b">3b</a></div>
@@ -250,20 +254,20 @@
         <div class="dv-opts" style="margin-top:30px;">
 
           <div class="dv-opt" id="3a" data-screen-label="3a Header fit ladder">
-            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><span class="rec">Recommended</span><span><strong>The header steps down by what fits, and the chip outlasts the labels.</strong> Each step is taken only when the next item would not fit. The order is: labels, then the word &#8220;behind&#8221;, then &#8220;upstream&#8221; (the fork glyph stands in for it), then the chip itself.</span></div>
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><span class="shipped">Shipped</span><span><strong>The header steps down by what fits, and the chip outlasts the labels.</strong> Each step is taken only when the row would otherwise overflow. The order is: labels, then the word &#8220;behind&#8221;, then &#8220;upstream&#8221; (the fork glyph stands in for it), then the chip itself.</span></div>
             <div class="wins">
-              <p class="cap">As built &#183; 620px pane &#183; icons only, no chip</p>
+              <p class="cap">Before &#183; 620px pane &#183; icons only, no chip</p>
               <div class="win w620"><div class="hdr"><span class="spacer"></span><span class="acts"><button class="wtb icon"><span class="gi gi-fetch"></span></button><span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb icon"><span class="gi gi-push"></span></button><span class="keb"><i></i><i></i><i></i></span></span></div></div>
-              <p class="cap">620px &#183; labels and the whole chip (needs &#8805; 498px)</p>
+              <p class="cap">620px &#183; labels and the whole chip (from 512px; the stock 696px pane shows all of it)</p>
               <div class="win w620"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 behind upstream</span><span class="acts"><button class="wtb"><span class="gi gi-fetch"></span>Fetch</button><span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb"><span class="gi gi-push"></span>Push</button><span class="keb"><i></i><i></i><i></i></span></span></div></div>
-              <p class="cap">400px &#183; icons, whole chip (needs &#8805; 382px)</p>
+              <p class="cap">400px &#183; icons, whole chip (from 388px)</p>
               <div class="win w400"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 behind upstream</span><span class="acts"><button class="wtb icon"><span class="gi gi-fetch"></span></button><span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb icon"><span class="gi gi-push"></span></button><span class="keb"><i></i><i></i><i></i></span></span></div></div>
-              <p class="cap">340px &#183; drops &#8220;behind&#8221;</p>
-              <div class="win w340"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 upstream</span><span class="acts"><button class="wtb icon"><span class="gi gi-fetch"></span></button><span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb icon"><span class="gi gi-push"></span></button><span class="keb"><i></i><i></i><i></i></span></span></div></div>
-              <p class="cap">290px &#183; the fork glyph stands in for &#8220;upstream&#8221;</p>
-              <div class="win w290"><div class="hdr"><span class="spacer"></span><span class="chip warn"><span class="gi gi-fork gi-s"></span>&#8595;25</span><span class="acts"><button class="wtb icon"><span class="gi gi-fetch"></span></button><span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb icon"><span class="gi gi-push"></span></button><span class="keb"><i></i><i></i><i></i></span></span></div></div>
+              <p class="cap">360px &#183; drops &#8220;behind&#8221; (from 342px)</p>
+              <div class="win" style="width:360px;"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 upstream</span><span class="acts"><button class="wtb icon"><span class="gi gi-fetch"></span></button><span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb icon"><span class="gi gi-push"></span></button><span class="keb"><i></i><i></i><i></i></span></span></div></div>
+              <p class="cap">300px &#183; the fork glyph stands in for &#8220;upstream&#8221; (from 298px; below that the chip goes)</p>
+              <div class="win" style="width:300px;"><div class="hdr"><span class="spacer"></span><span class="chip warn"><span class="gi gi-fork gi-s"></span>&#8595;25</span><span class="acts"><button class="wtb icon"><span class="gi gi-fetch"></span></button><span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb icon"><span class="gi gi-push"></span></button><span class="keb"><i></i><i></i><i></i></span></span></div></div>
             </div>
-            <p class="note">Measure the steps; don't hard-code them. The chip's width depends on the count and the remote's name (<code>&#8595;125 behind upstream-octo</code>), so a container-query constant is wrong for some repository by construction. That's how 680px got in. Step on measured natural widths with a ResizeObserver, and keep the chip rigid rather than letting flex shave it, since even a sub-pixel shrink draws an ellipsis. The numbers above are for this chip: labels 302px, icons 186px, whole chip 148px, then 108px and 48px. A plain branch uses the same order with <code>&#8595;3 behind</code> as its whole chip.</p>
+            <p class="note">Measure the steps; don't hard-code them. The chip's width depends on the count and the remote's name (<code>&#8595;125 behind upstream-octo</code>), so a container-query constant is wrong for some repository by construction. That's how 680px got in. <strong>As shipped:</strong> <code>useFitLadder</code> adds one class per step until a zero-width marker after the row's last control lands inside the row. It re-measures after every render and on a ResizeObserver, and touches only <code>classList</code>, so it never re-renders React. The shorter wordings come from <code>data-mid</code> / <code>data-short</code> through CSS, so the chip's DOM text stays the whole sentence. The steps, with the pane width each needs for this chip: labels and whole chip 512px, icons and whole chip 388px, <code>&#8595;25 upstream</code> 342px, glyph and <code>&#8595;25</code> 298px, then no chip; Pull's accent carries it. The collapsed panel's button adds 40px to each. Two steps the proposal didn't draw: the LFS chip goes before the sync chip, and the drift and read-only chips go after it. A plain branch uses the same order: <code>&#8595;3 behind</code>, then <code>&#8595;3</code>.</p>
           </div>
 
           <div class="dv-opt" id="3b" data-screen-label="3b Tooltips at rest">
@@ -271,102 +275,102 @@
             <div class="wins">
               <p class="cap">Hover Pull</p>
               <div class="win w620"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 behind upstream</span><span class="acts"><button class="wtb"><span class="gi gi-fetch"></span>Fetch</button><span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb"><span class="gi gi-push"></span>Push</button><span class="keb"><i></i><i></i><i></i></span></span></div><div class="graph">lineage graph</div>
-                <div class="ov tip" style="top:46px; right:60px; max-width:360px;">Pull &#183; fast-forward <code>main</code> to <code>upstream/main</code> (25 commits), then push them to <code>origin/main</code></div></div>
-              <p class="cap">Hover the arrow</p>
+                <div class="ov tip" style="top:46px; right:60px; max-width:360px;">Pull &#183; fast-forward <code>main</code> to <code>upstream/main</code>, then push to <code>origin/main</code></div></div>
+              <p class="cap">Hover the arrow &#183; kept its existing tooltip</p>
               <div class="win w620"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 behind upstream</span><span class="acts"><button class="wtb"><span class="gi gi-fetch"></span>Fetch</button><span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb"><span class="gi gi-push"></span>Push</button><span class="keb"><i></i><i></i><i></i></span></span></div><div class="graph">lineage graph</div>
-                <div class="ov tip" style="top:46px; right:64px;">Pull options &#183; sync, or pull one side only</div></div>
+                <div class="ov tip" style="top:46px; right:64px;">Choose what Pull does</div></div>
               <p class="cap">Hover the chip</p>
               <div class="win w620"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 behind upstream</span><span class="acts"><button class="wtb"><span class="gi gi-fetch"></span>Fetch</button><span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb"><span class="gi gi-push"></span>Push</button><span class="keb"><i></i><i></i><i></i></span></span></div><div class="graph tall" style="height:96px;">lineage graph</div>
                 <div class="ov tip" style="top:46px; left:150px; max-width:340px;"><code>upstream</code> is <code>octo-labs/sparkline</code>, the repository this fork came from. <code>main</code> is 25 commits behind <code>upstream/main</code>. <code>origin/main</code>, your fork, matches <code>main</code>.</div></div>
               <p class="cap">Fetch's receipt names what it asked</p>
-              <div class="win w620"><div class="hdr"><span class="spacer"></span><span class="chip ok">fetched origin + upstream</span><span class="acts"><button class="wtb"><span class="gi gi-fetch"></span>Fetch</button><span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb"><span class="gi gi-push"></span>Push</button><span class="keb"><i></i><i></i><i></i></span></span></div><div class="graph" style="height:96px;">lineage graph</div>
-                <div class="ov card" style="top:46px; right:60px;"><div class="ra-h"><span class="ra-title">Fetch &#183; sparkline &#183; main</span><span class="ra-right">0:02 &#10005;</span></div><p class="sum ok">Fetched origin + upstream &#183; upstream/main moved 25 commits</p><div class="rail"></div></div></div>
+              <div class="win w620"><div class="hdr"><span class="spacer"></span><span class="chip mut">fetched</span><span class="acts"><button class="wtb"><span class="gi gi-fetch"></span>Fetch</button><span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb"><span class="gi gi-push"></span>Push</button><span class="keb"><i></i><i></i><i></i></span></span></div><div class="graph" style="height:96px;">lineage graph</div>
+                <div class="ov card" style="top:46px; right:60px;"><div class="ra-h"><span class="ra-title">Fetch &#183; sparkline &#183; main</span><span class="ra-right">0:02 &#10005;</span></div><p class="sum ok">Fetched origin + upstream &#8212; refs and tags are up to date</p><div class="rail"></div></div></div>
             </div>
-            <p class="note">The chip stays a status, not a second Pull (<a class="dv-oid" href="#1a">1a</a> already ruled that out), so its tooltip explains the state rather than offering an action. Its text is the plain-English version of the Pull menu's header.</p>
+            <p class="note">The chip stays a status, not a second Pull (<a class="dv-oid" href="#1a">1a</a> already ruled that out), so its tooltip explains the state rather than offering an action. Its text is the plain-English version of the Pull menu's header. <strong>As shipped:</strong> Fetch, Pull and Push use <code>hoverTooltip</code> on hover and focus. In the gap before main registers an operation, the tooltip's handlers run alongside the status card's, and any open tooltip closes the moment the card appears. Pull's sentence follows the arrow's choice: a pull-only choice reads &#8220;<code>origin/main</code> waits for Push&#8221;, and a <code>main</code> with its own commits says it stops for a rebase review. The arrow kept &#8220;Choose what Pull does&#8221;. The Fetch receipt names the remotes it asked, and the flash chip still just says &#8220;fetched&#8221;. It doesn't count what moved, because Fetch doesn't read that.</p>
           </div>
 
           <div class="dv-opt" id="3c" data-screen-label="3c Collapsed panel">
             <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a><span><strong>With the panel collapsed, its reopen button joins the row.</strong> It's the last button in the header, so it takes up its own width and covers nothing.</span></div>
             <div class="wins">
-              <p class="cap">As built &#183; 560px pane, panel collapsed</p>
+              <p class="cap">Before &#183; 560px pane, panel collapsed</p>
               <div class="win" style="width:560px;"><div class="hdr"><span class="spacer"></span><span class="acts"><button class="wtb icon"><span class="gi gi-fetch"></span></button><span class="sb"><button class="wtb icon pull lit"><span class="gi gi-pull"></span></button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb icon"><span class="gi gi-push"></span></button><span class="keb"><i></i><i></i><i></i></span></span></div><div class="graph">lineage graph</div>
                 <button class="reopen-ov bad-x">&#8249; Panel</button></div>
-              <p class="cap">Proposed &#183; same pane</p>
+              <p class="cap">Shipped &#183; same pane</p>
               <div class="win" style="width:560px;"><div class="hdr"><span class="spacer"></span><span class="chip warn">&#8595;25 behind upstream</span><span class="acts"><button class="wtb"><span class="gi gi-fetch"></span>Fetch</button><span class="sb"><button class="wtb pull lit"><span class="gi gi-pull"></span>Pull</button><button class="wtb lit car"><span class="gi gi-car"></span></button></span><button class="wtb"><span class="gi gi-push"></span>Push</button><span class="keb"><i></i><i></i><i></i></span><button class="wtb icon"><span class="gi gi-panel"></span></button></span></div><div class="graph">lineage graph</div>
                 <div class="ov tip" style="top:46px; right:8px;">Show the Changes panel</div></div>
             </div>
-            <p class="note">The reopen button sits where the panel's own collapse chevron was, so a click undoes itself in place. It counts toward <a class="dv-oid" href="#3a">3a</a>'s measurements: collapsing the panel adds 40px to the row and about 280px to the pane, so the net effect is that the chip gains room.</p>
+            <p class="note">The reopen button sits where the panel's own collapse chevron was, so a click undoes itself in place. It counts toward <a class="dv-oid" href="#3a">3a</a>'s measurements: collapsing the panel adds 40px to the row and about 280px to the pane, so the net effect is that the chip gains room. <strong>As shipped:</strong> the glyph is Lucide <code>panel-right-open</code>, with the aria-label &#8220;Show panel&#8221;. The floating <code>&#8249; Panel</code> remains only when no worktree is open, because then there's no header row for it to join.</p>
           </div>
 
           <div class="dv-opt" id="3d" data-screen-label="3d Lineage toolbar">
             <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a><span><strong>The lineage toolbar never wraps. It steps down instead.</strong> &#8220;You are here&#8221; goes to its crosshair first, then &#8220;32 branches in flight&#8221; to &#8220;32 in flight&#8221;, &#8220;All branches&#8221; to &#8220;All&#8221;, and the count to <code>32</code>.</span></div>
             <div class="wins">
-              <p class="cap">As built &#183; 400px pane</p>
+              <p class="cap">Before &#183; 400px pane</p>
               <div class="win w400"><div class="ltb"><span class="lbl">Lineage</span><span class="lp wrap">32 branches in flight <span class="gi gi-car"></span></span><span class="lp wrap"><span class="gi gi-loc"></span>You are here</span><span class="lp wrap"><span class="cbx"></span>All branches</span></div></div>
-              <p class="cap">696px &#183; everything whole (needs &#8805; 522px)</p>
+              <p class="cap">696px &#183; everything whole (from 493px)</p>
               <div class="win"><div class="ltb"><span class="lbl">Lineage</span><span class="lp">32 branches in flight <span class="gi gi-car"></span></span><span class="lp"><span class="gi gi-loc"></span>You are here</span><span class="lp"><span class="cbx"></span>All branches</span></div></div>
-              <p class="cap">400px &#183; crosshair, and the count shortens</p>
+              <p class="cap">400px &#183; crosshair (below 493px), and the count shortens (below 417px)</p>
               <div class="win w400"><div class="ltb"><span class="lbl">Lineage</span><span class="lp">32 in flight <span class="gi gi-car"></span></span><span class="lp icon"><span class="gi gi-loc"></span></span><span class="lp"><span class="cbx"></span>All branches</span></div></div>
-              <p class="cap">300px &#183; the tightest step</p>
+              <p class="cap">300px &#183; &#8220;All&#8221; below 367px, <code>32</code> below 312px</p>
               <div class="win" style="width:300px;"><div class="ltb"><span class="lbl">Lineage</span><span class="lp">32 <span class="gi gi-car"></span></span><span class="lp icon"><span class="gi gi-loc"></span></span><span class="lp"><span class="cbx"></span>All</span></div></div>
             </div>
-            <p class="note">&#8220;You are here&#8221; already has a tooltip (&#8220;Scroll to this worktree's current commit&#8221;), so its crosshair can stand alone. The scope toggle keeps its checkbox and a word, because a two-state control needs to show its state. The count is the last to shorten: it's the only one of the three that is information rather than a control.</p>
+            <p class="note"><strong>As shipped</strong>, on the same <code>useFitLadder</code> as <a class="dv-oid" href="#3a">3a</a>. One step past the proposal: below 271px the &#8220;Lineage&#8221; label goes too, and the pills fit down to 207px. The pills are rigid and <code>nowrap</code>, and the short wordings are drawn from <code>data-*</code> attributes, so the DOM keeps the full text. &#8220;You are here&#8221; already has a tooltip (&#8220;Scroll to this worktree's current commit&#8221;), so its crosshair can stand alone. The scope toggle keeps its checkbox and a word, because a two-state control needs to show its state. The count is the last to shorten: it's the only one of the three that is information rather than a control.</p>
           </div>
 
           <div class="dv-opt" id="3e" data-screen-label="3e Sidebar knows the fork">
-            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a><span class="rec">Recommended</span><span><strong>The sidebar asks the header's question: what would Pull bring in?</strong> On a fork's default branch the answer comes from the source, so the repo row and its <code>main</code> row say <code>&#8595;25</code> in the source's outline style, not the fork's warn fill.</span></div>
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a><span class="shipped">Shipped</span><span><strong>The sidebar asks the header's question: what would Pull bring in?</strong> On a fork's default branch the answer comes from the source, so the repo row and its <code>main</code> row say <code>&#8595;25</code> in the source's outline style, not the fork's warn fill.</span></div>
             <div class="wins">
-              <p class="cap">As built &#183; the fork reads clean</p>
+              <p class="cap">Before &#183; the fork reads clean</p>
               <div class="side">
                 <div class="srow"><span class="tw">&#9660;</span><span class="nm acc">sparkline</span><span class="gl"></span><span class="gi gi-fork gi-s" style="color:var(--t3)"></span><span class="gl"></span><span class="ct">4 wts</span><span class="star">&#9733;</span></div>
                 <div class="wrow"><span class="nm">&#8962; main</span><span class="pri">PRIMARY</span><span class="age">1d</span></div>
                 <div class="secrow">&#9656; Branches 93 &#183; <span class="on">on main</span><span class="sp"></span><span class="bdg cnt">&#8595;7</span></div>
               </div>
-              <p class="cap">Proposed &#183; 360px sidebar</p>
+              <p class="cap">Shipped &#183; 360px sidebar &#183; <code>&#8595;25 upstream</code> from 296px</p>
               <div class="side">
                 <div class="srow"><span class="tw">&#9660;</span><span class="nm acc">sparkline</span><span class="bdg src"><span class="gi gi-fork gi-s"></span>&#8595;25</span><span class="gl"></span><span class="gi gi-fork gi-s" style="color:var(--t3)"></span><span class="gl"></span><span class="ct">4 wts</span><span class="star">&#9733;</span></div>
                 <div class="wrow"><span class="nm">&#8962; main</span><span class="pri">PRIMARY</span><span class="bdg src">&#8595;25 upstream</span><span class="age">1d</span></div>
                 <div class="secrow">&#9656; Branches 93 &#183; <span class="on">on main</span><span class="sp"></span><span class="bdg cnt word">7 behind</span></div>
               </div>
-              <p class="cap">Proposed &#183; 290px sidebar</p>
+              <p class="cap">Shipped &#183; 290px sidebar &#183; glyph from 252px, then gone</p>
               <div class="side narrow">
                 <div class="srow"><span class="tw">&#9660;</span><span class="nm acc">sparkline</span><span class="bdg src"><span class="gi gi-fork gi-s"></span>&#8595;25</span><span class="ct">4 wts</span><span class="star">&#9733;</span></div>
                 <div class="wrow"><span class="nm">&#8962; main</span><span class="pri">PRIMARY</span><span class="bdg src"><span class="gi gi-fork gi-s"></span>&#8595;25</span><span class="age">1d</span></div>
-                <div class="secrow">&#9656; Branches 93<span class="sp"></span><span class="bdg cnt word">7 behind</span></div>
+                <div class="secrow">&#9656; Branches 93 &#183; <span class="on">on main</span><span class="sp"></span><span class="bdg cnt word">7 behind</span></div>
               </div>
             </div>
-            <p class="note">Rules. (1) The repo row's badge, the <code>main</code> row's chip and the Pull accent must agree. All three use the same fork status, never <code>@{u}</code> alone on a fork. (2) The warn fill means your own remote has commits for you, and the accent outline with the fork glyph means the source does. When both are behind, show the source, since that's what Pull's default fetches. (3) The Branches heading counts branches, so it uses a word (&#8220;7 behind&#8221;, tooltip &#8220;7 branches are behind their upstreams&#8221;) and keeps the arrows for commits. (4) The row chip steps down the same way as <a class="dv-oid" href="#3a">3a</a>: <code>&#8595;25 upstream</code>, then the glyph and <code>&#8595;25</code>, then gone. PRIMARY and the age stay whole.</p>
+            <p class="note">Rules. (1) The repo row's badge, the <code>main</code> row's chip and the Pull accent must agree. All three use the same fork status, never <code>@{u}</code> alone on a fork. (2) The warn fill means your own remote has commits for you, and the accent outline with the fork glyph means the source does. When both are behind, show the source, since that's what Pull's default fetches. (3) The Branches heading counts branches, so it uses a word (&#8220;7 behind&#8221;, &#8220;2 ahead&#8221;) and keeps the arrows for commits. (4) The row chip steps down the same way as <a class="dv-oid" href="#3a">3a</a>: <code>&#8595;25 upstream</code>, then the glyph and <code>&#8595;25</code>, then gone. PRIMARY and the age stay whole. <strong>As shipped:</strong> the row badge takes a step only while the branch name beside it would otherwise be cut or the badge would wrap. In this fixture that means 296px and 252px; the repo row always draws the compact glyph and <code>&#8595;25</code>. Both badges explain themselves on hover: &#8220;main is 25 commits behind upstream/main, the source of this fork&#8221;. The Branches counts kept their existing tooltip, &#8220;7 branches behind their upstream &#8212; show them&#8221;, and &#8220;on main&#8221; ellipsizes rather than dropping when the sidebar is tight.</p>
           </div>
 
           <div class="dv-opt" id="3f" data-screen-label="3f Freshness">
             <div class="dv-olabel"><a class="dv-oid" href="#3f">3f</a><span><strong>What moves the numbers.</strong> Agents fetch, pull and push in these repositories all day. PwrGit re-reads the selected worktree on its own, but every other count waits for something to happen in the app.</span></div>
             <div class="fr">
-              <div class="rh">Number on screen</div><div class="rh">Re-read today</div><div class="rh">Proposed</div>
+              <div class="rh">Number on screen</div><div class="rh">Re-read before #359</div><div class="rh">Shipped</div>
               <div><strong>Repo row &#8595;N and its <code>main</code> row &#8595;N.</strong> These are one number: the primary worktree against <code>@{u}</code>, read from the stored <code>worktree_state</code> row.</div>
               <div>When the repo row expands (once), when <code>main</code> is selected, and on focus plus every 15s <em>only while <code>main</code> is the active worktree</em>. At launch it shows last session's value. <span class="stale">A header Fetch from a linked worktree re-reads only that worktree, so the primary, and with it the repo row, keeps its old count.</span></div>
-              <div>Visible rows are re-read while a window is focused: stale after 30s, 8 per round, oldest first, one round at a time (PwrAgnt's working-state policy). Hidden windows wait 4&#215; longer.</div>
+              <div>Every visible row, including a collapsed repo row's primary checkout, is due after 30s, or 4&#215; that with no PwrGit window focused. A round runs every 5s, never overlapping the last. It re-reads at most 8 rows, 4 Git processes at a time, and a repository whose refs moved goes first. A read by another refresher counts, so the selected worktree isn't read twice.</div>
               <div><strong>The header chip and Pull's accent on a fork.</strong> The count against <code>upstream</code>.</div>
               <div>Only after something inside the app. The fork status reloads on <code>worktree:changed</code>, which fires only when the <em>tracked</em> count moves. An agent's fetch of <code>upstream</code> never moves it. <span class="stale">A stale Pull accent sits beside a fresh <code>up to date</code>.</span></div>
-              <div>Make the source counts part of the worktree state, so the same change check that re-reads the tracked count also catches upstream. The sidebar's fork badge (<a class="dv-oid" href="#3e">3e</a>) then gets them for free.</div>
+              <div>The source counts are part of the stored worktree state (migration 0036), and a change to them alone counts as a change. The header chip, Pull's accent and the sidebar badge (<a class="dv-oid" href="#3e">3e</a>) read one number. The repo list is cached for 60s, so a repository that isn't a fork costs no extra Git.</div>
               <div><strong>Branches heading, <code>7 behind</code>.</strong> Counts branches behind their upstreams.</div>
               <div>Read live, but only when the repo prop changes or after this section's own Fetch.</div>
-              <div>Re-read on <code>repo:changed</code>, like the rows beside it.</div>
+              <div>Re-read on <code>repo:changed</code>, like the rows beside it. A refresh round emits that once per profile, and <code>graph:changed</code> once per repository, however many rows changed.</div>
               <div><strong>A branch whose upstream was deleted.</strong></div>
               <div><span class="stale">It reads as 0.</span> When a pruned upstream disappears, <code>git status</code> still names the upstream but prints no ahead/behind line, and the parser keeps its zeros with <code>hasUpstream</code> true. That's one way a Fetch turns &#8595;7 into nothing.</div>
-              <div>Read it as <em>gone</em>. The refs browser already has the word, and the branch is finished work, not &#8220;up to date&#8221;.</div>
+              <div>Read as <em>gone</em>. The header chip says &#8220;upstream gone&#8221; (&#8220;usually because the work landed&#8221; on hover), and the sidebar's tracking state is the refs browser's <code>upstream_missing</code>.</div>
             </div>
-            <p class="note">How 3 became 7, then 0. The count was stored when someone last looked. Agents then fetched, which moved <code>origin/main</code>, and later one of them pulled in the <code>main</code> checkout. Expanding the row re-read it (7). Fetching with <code>main</code> selected re-read it again, and by then it was 0: either an agent had already pulled, or a pruned upstream read as 0. Nothing was wrong with the fetch; the number was just old. <strong>What detects outside changes cheaply.</strong> The app avoids filesystem watchers on purpose, because recursive watches pegged fseventd on large trees. So follow the pattern <code>StashWatch</code> already uses: fingerprint each visible repo's refs with one <code>for-each-ref</code> over <code>refs/heads</code> and <code>refs/remotes</code>, or <code>stat</code> the mtimes of <code>packed-refs</code>, <code>FETCH_HEAD</code> and <code>HEAD</code> without spawning anything. Only a repo whose fingerprint moved pays for <code>git status</code> on its worktrees. Rows are marked visible with one shared IntersectionObserver, and the renderer only reports which rows are visible. Main owns the schedule and caps how many Git processes run, as the git layer's rule requires.</p>
+            <p class="note">How 3 became 7, then 0. The count was stored when someone last looked. Agents then fetched, which moved <code>origin/main</code>, and later one of them pulled in the <code>main</code> checkout. Expanding the row re-read it (7). Fetching with <code>main</code> selected re-read it again, and by then it was 0: either an agent had already pulled, or a pruned upstream read as 0. Nothing was wrong with the fetch; the number was just old. <strong>What detects outside changes cheaply, as shipped.</strong> The app avoids filesystem watchers on purpose, because recursive watches pegged fseventd on large trees. The fingerprint uses <code>stat</code> alone and spawns nothing. It reads <code>FETCH_HEAD</code> and <code>packed-refs</code> in the common git dir, plus <code>HEAD</code>, <code>logs/HEAD</code> and <code>index</code> for each visible worktree. A fetch, pull, commit, checkout or stage moves one of those, and that repository is re-read in the next round. A push that moves only a loose remote-tracking ref isn't seen, and the 30s read catches it. Rows are marked visible by one shared IntersectionObserver, and one debounced <code>worktree:reportVisible</code> is sent per change of the set. Main owns the schedule and caps how many Git processes run, as the git layer's rule requires.</p>
           </div>
 
           <div class="dv-opt" id="3g" data-screen-label="3g Live width prototype">
-            <div class="dv-olabel"><a class="dv-oid" href="#3g">3g</a><span><strong>Live.</strong> Change the pane width and collapse the panel, then flip between the build and the proposal. The widths match the steps in <a class="dv-oid" href="#3a">3a</a> and <a class="dv-oid" href="#3d">3d</a>.</span></div>
+            <div class="dv-olabel"><a class="dv-oid" href="#3g">3g</a><span><strong>Live.</strong> Change the pane width and collapse the panel, then flip between the app as reviewed and as shipped. The widths are the shipped build's measurements, quoted in <a class="dv-oid" href="#3a">3a</a> and <a class="dv-oid" href="#3d">3d</a>.</span></div>
             <div class="proto-bar" style="width:760px; flex-wrap:wrap;">
               <div class="seg">
-                <button class="{{ p3Built }}" onClick="{{ p3PickBuilt }}">As built</button>
-                <button class="{{ p3Prop }}" onClick="{{ p3PickProp }}">Proposed</button>
+                <button class="{{ p3Built }}" onClick="{{ p3PickBuilt }}">Before</button>
+                <button class="{{ p3Prop }}" onClick="{{ p3PickProp }}">Shipped</button>
               </div>
               <div class="seg">
-                <sc-for list="{{ p3Widths }}" as="w" hint-placeholder-count="6">
+                <sc-for list="{{ p3Widths }}" as="w" hint-placeholder-count="7">
                   <button class="{{ w.cls }}" onClick="{{ w.onPick }}">{{ w.label }}</button>
                 </sc-for>
               </div>
@@ -386,7 +390,7 @@
                   </span>
                 </div>
                 <div class="ltb">
-                  <span class="lbl">Lineage</span>
+                  <sc-if value="{{ p3Label }}"><span class="lbl">Lineage</span></sc-if>
                   <span class="{{ p3LpCls }}">{{ p3Flight }} <span class="gi gi-car"></span></span>
                   <span class="{{ p3LocCls }}"><span class="gi gi-loc"></span>{{ p3Loc }}</span>
                   <span class="{{ p3LpCls }}"><span class="cbx"></span>{{ p3Scope }}</span>
@@ -399,7 +403,7 @@
           </div>
 
         </div>
-        <p class="dv-next">Try next: &#8220;<a class="dv-oid" href="#3e">3e</a> in the dark theme&#8221; &#183; &#8220;what the repo row says when both the fork and the source are behind&#8221; &#183; &#8220;give the lanes a width budget so subjects survive at 400px (item 13)&#8221; &#183; &#8220;let Try pull all sync forks from their source&#8221;</p>
+        <p class="dv-next">Try next: &#8220;<a class="dv-oid" href="#3e">3e</a> in the dark theme&#8221; &#183; &#8220;give the lanes a width budget so subjects survive at 400px (item 13)&#8221; &#183; &#8220;let Try pull all sync forks from their source&#8221;</p>
       </section>
 
       <!-- ================= TURN 2 ================= -->
@@ -864,7 +868,8 @@
           return [];
         }
 
-        // Turn 3's width prototype. Widths are the measured ones quoted in 3a/3d.
+        // Turn 3's width prototype. "Shipped" uses the pane widths measured on the
+        // shipped build (#359) and quoted in 3a/3d; "Before" is the reviewed app.
         p3Vals() {
           var self = this;
           var st = this.state;
@@ -885,18 +890,17 @@
             v.p3ReopenRow = false; v.p3ReopenOv = rail;
             v.p3LpCls = "lp wrap"; v.p3LocCls = "lp wrap";
             v.p3Flight = "32 branches in flight"; v.p3Loc = "You are here"; v.p3Scope = "All branches";
+            v.p3Label = true;
             hint = (chipB ? "The chip shows, " : "The chip is gone below 680px of header, ") +
               (labelsB ? "and the labels stay." : "and the labels drop below 720px, whatever else is in the row.") +
               " The lineage pills wrap once they run out of room." + (rail ? " ‹ Panel covers the end of the row." : "");
           } else {
             var extra = rail ? 40 : 0;
-            var icons = 186 + extra;
-            var labels = 302 + extra;
             var rung;
-            if (labels + 8 + 148 <= content) rung = 0;
-            else if (icons + 8 + 148 <= content) rung = 1;
-            else if (icons + 8 + 108 <= content) rung = 2;
-            else if (icons + 8 + 48 <= content) rung = 3;
+            if (w >= 512 + extra) rung = 0;
+            else if (w >= 388 + extra) rung = 1;
+            else if (w >= 342 + extra) rung = 2;
+            else if (w >= 298 + extra) rung = 3;
             else rung = 4;
             var withLabels = rung === 0;
             v.p3Chip = rung < 4; v.p3Glyph = rung === 3;
@@ -907,18 +911,20 @@
             v.p3ReopenRow = rail; v.p3ReopenOv = false;
 
             var lr;
-            if (content >= 482) lr = 0;
-            else if (content >= 392) lr = 1;
-            else if (content >= 342) lr = 2;
-            else if (content >= 286) lr = 3;
-            else lr = 4;
+            if (w >= 493) lr = 0;
+            else if (w >= 417) lr = 1;
+            else if (w >= 367) lr = 2;
+            else if (w >= 312) lr = 3;
+            else if (w >= 271) lr = 4;
+            else lr = 5;
             v.p3LpCls = "lp";
             v.p3LocCls = lr === 0 ? "lp" : "lp icon";
             v.p3Loc = lr === 0 ? "You are here" : "";
             v.p3Flight = lr <= 1 ? "32 branches in flight" : lr <= 3 ? "32 in flight" : "32";
             v.p3Scope = lr <= 2 ? "All branches" : "All";
+            v.p3Label = lr < 5;
             var hRung = ["labels and the whole chip", "icons, whole chip", "icons, “↓25 upstream”", "icons, glyph + ↓25", "icons only; the Pull accent carries it"][rung];
-            hint = "Header: " + hRung + ". Lineage: step " + (lr + 1) + " of 5, no wrapping." + (rail ? " The reopen button is the row's last control." : "");
+            hint = "Header: " + hRung + ". Lineage: step " + (lr + 1) + " of 6, no wrapping." + (rail ? " The reopen button is the row's last control." : "");
           }
 
           v.p3WinCls = "win w" + w;
@@ -926,7 +932,7 @@
           v.p3Prop = built ? "seg-b" : "seg-b on";
           v.p3PickBuilt = function () { self.setState({ p3mode: "built" }); };
           v.p3PickProp = function () { self.setState({ p3mode: "prop" }); };
-          v.p3Widths = [760, 620, 500, 400, 340, 290].map(function (n) {
+          v.p3Widths = [760, 620, 500, 400, 340, 300, 260].map(function (n) {
             return { label: n + "px", cls: n === w ? "seg-b on" : "seg-b", onPick: function () { self.setState({ p3w: n }); } };
           });
           v.p3RailLabel = rail ? "Show panel" : "Collapse panel";
