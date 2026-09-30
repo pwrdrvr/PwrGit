@@ -1,6 +1,7 @@
 import type { BrowserWindowConstructorOptions } from "electron";
 import {
   DEFAULT_WINDOW_CHROME_THEME,
+  MACOS_TRAFFIC_LIGHT_POSITION,
   titleBarOverlay,
   type WindowChromeTheme
 } from "./window-chrome";
@@ -36,7 +37,7 @@ export function mainWindowChromeOptions(
   if (platform === "darwin") {
     return {
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 12, y: 10 }
+      trafficLightPosition: { ...MACOS_TRAFFIC_LIGHT_POSITION }
     };
   }
 

@@ -4,6 +4,7 @@ import { currentPlatform, pathLeaf, pathTail } from "../../lib/platform";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
+import { TitleBarBrand } from "./Brand";
 import { WindowControls } from "./WindowControls";
 import {
   hoverTooltip,
@@ -14,12 +15,13 @@ import {
  * The window's top strip: wordmark, then the selected worktree's identity as a
  * breadcrumb.
  *
- *   [●●●]  PwrGit   repo › ●branch ▾  [path chip]        …drag…
+ *   [●●●]  ⑂ PwrGit   repo › ●branch ▾  [path chip]        …drag…
  *
- * Pwr-family house chrome — PwrSnap runs the same full-width bar. (PwrAgnt's
- * `AppTitleBar` is win32-only; on macOS it keeps its wordmark in the sidebar
- * masthead, which has no room for a breadcrumb. PwrGit already had a
- * full-width strip, so the strip is the natural home for per-window context.)
+ * Pwr-family house chrome, specified in ./AGENTS.md. PwrSnap runs the same
+ * full-width bar. (PwrAgnt's `AppTitleBar` is win32-only; on macOS it keeps
+ * its wordmark in the sidebar masthead, which has no room for a breadcrumb.
+ * PwrGit already had a full-width strip, so the strip is the natural home for
+ * per-window context.)
  *
  * The strip is a window-drag region and `-webkit-app-region` INHERITS, so
  * every interactive descendant has to opt back out — see the `no-drag` rules
@@ -52,9 +54,7 @@ export function TitleBar({
         {/* macOS-only traffic-light reservation; CSS gives it width there
             and nowhere else. */}
         <div className="titlebar__gutter" />
-        <p className="titlebar__brand">
-          Pwr<span className="titlebar__brand-accent">Git</span>
-        </p>
+        <TitleBarBrand />
 
         {/* macOS keeps File/Edit in the system menu bar. Windows and Linux
             hid the title bar the native row lived in, so the strip paints the

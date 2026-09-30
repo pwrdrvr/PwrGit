@@ -184,9 +184,9 @@ describe("theme contract", () => {
 describe("platform window chrome", () => {
   it("leaves the titlebar divider visible below Windows caption buttons", () => {
     const titlebar = appCss.match(/\.titlebar\s*\{([\s\S]*?)\}/)?.[1];
-    expect(titlebar).toMatch(/height:\s*32px;/);
+    expect(titlebar).toMatch(/height:\s*41px;/);
     expect(titlebar).toMatch(/border-bottom:\s*1px\s+solid/);
-    expect(TITLE_BAR_OVERLAY_HEIGHT).toBe(31);
+    expect(TITLE_BAR_OVERLAY_HEIGHT).toBe(40);
   });
 
   it("moves the Windows window-control reservation to the right", () => {
@@ -197,7 +197,7 @@ describe("platform window chrome", () => {
 
   it("reserves the traffic-light gutter on macOS and nowhere else", () => {
     expect(appCss).toMatch(
-      /:root\[data-platform="darwin"\]\s+\.titlebar__gutter\s*\{[\s\S]*?width:\s*68px;/
+      /:root\[data-platform="darwin"\]\s+\.titlebar__gutter\s*\{[\s\S]*?width:\s*80px;/
     );
     // Unqualified: what reserved 68px of empty strip on Linux and Windows.
     expect(appCss).not.toMatch(/\n\.titlebar__gutter\s*\{[^}]*width:/);
@@ -223,7 +223,7 @@ describe("platform window chrome", () => {
 
   it("uses the same platform-aware title strip in auxiliary windows", () => {
     expect(appCss).toMatch(
-      /\.auxiliary-titlebar__breadcrumb\s*\{[\s\S]*?margin-left:\s*14px;/
+      /\.auxiliary-titlebar__breadcrumb\s*\{[\s\S]*?margin-left:\s*16px;/
     );
   });
 
