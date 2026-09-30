@@ -159,9 +159,14 @@ function divergedRelease(): Fixture {
   const to = basename(root);
   for (const file of linked) {
     const text = readFileSync(file, "utf8").replaceAll(from, to);
-    // A copy still naming the template would pass every assertion while
-    // committing into the template, which every later test then reads.
-    if (text.includes(from)) throw new Error(`${file} still names the template`);
+    // A copy still pointing at the template would pass every assertion while
+    // committing into the template, which every later test then reads. Check
+    // both halves: a path git wrote in a form that never named the template's
+    // dir (an 8.3 short name, say) matches nothing and would slip past a
+    // check for the old name alone.
+    if (text.includes(from) || !text.includes(to)) {
+      throw new Error(`${file} was not re-pointed at its copy`);
+    }
     // "r+", not writeFileSync's "w": Git for Windows hides the worktree's
     // `.git` file (core.hideDotFiles), and Windows refuses "w" on an existing
     // hidden file with EPERM. "r+" does not truncate, so do that ourselves.
