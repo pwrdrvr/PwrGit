@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.26.0 - 2026-09-30
+
+- Git Discovery - Added Repository setup for inspecting active and shadowed Git hooks, recent hook results, and team, clone, and machine ignore rules. Test why a path is ignored and safely edit clone-level exclusions.
+- Commits and ignores - Improved rejected-commit guidance with inline hook output and Retry, plus a guarded one-commit bypass. The Ignore dialog now previews rules and offers repository, clone, or global destinations.
+- Branches - Added pinning for any local branch from the refs browser or Command Palette. Branch, pull-request, and tag rows now have consistent actions and keyboard navigation, while exact branch searches favor the focused repository.
+- Forks - Improved upstream status in the header and sidebar, including narrow windows, and refreshed visible branch counts when Git changes outside PwrGit.
+- Performance - Fixed interface stalls while refreshing or pruning large repositories by indexing search-row lookups.
+- Updates - Reduced GitHub release checks across restarts and channels with a persistent request budget that respects rate limits and retry delays.
+- Desktop - Refreshed the title bar to match the Pwr family and fixed commit hover cards lingering after their row disappears.
+
 ## v0.25.0 - 2026-09-28
 
 - Maintenance - Added a guided flow to review and prune eligible worktrees, safely remove gone branches, and run Git cleanup in sequence. Recent worktrees are protected by default, and deleted branches can be restored from the results.
