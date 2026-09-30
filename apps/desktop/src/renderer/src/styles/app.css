@@ -200,12 +200,18 @@ textarea,
   user-select: text;
 }
 
+/* The Pwr-family title strip — spec in features/chrome/AGENTS.md. A 40px
+   fill with the 1px divider BELOW it (41px border-box), so the centreline is
+   the whole point y=20. The macOS stoplights (MACOS_TRAFFIC_LIGHT_POSITION)
+   and the Windows caption overlay (TITLE_BAR_OVERLAY_HEIGHT) are both sized
+   to that fill. Put the border back inside the 40 and the centre becomes
+   19.5, which a whole-point stoplight can never sit on. */
 .titlebar {
-  height: 32px;
+  height: 41px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 16px;
   background: var(--bg-titlebar);
   border-bottom: 1px solid var(--border-subtle);
   position: relative;
@@ -214,36 +220,26 @@ textarea,
 }
 
 /* macOS traffic lights occupy the left side of the hidden-inset title bar, so
-   the strip keeps that much clear for them. Only macOS: Windows overlays its
-   caption buttons on the right and Linux paints its own there, and a gutter
-   reserved on every platform is 68px of empty strip in front of the wordmark
-   on both of them. */
+   the strip keeps that much clear for them: the 16px padding plus 80 puts the
+   brand at x=96, 20px past the stoplights' right edge (x=76). Only macOS:
+   Windows overlays its caption buttons on the right and Linux paints its own
+   there, and a gutter reserved on every platform is 80px of empty strip in
+   front of the brand on both of them. */
 .titlebar__gutter {
   flex: 0 0 auto;
 }
 
 :root[data-platform="darwin"] .titlebar__gutter {
-  width: 68px;
-}
-
-/* One centreline for the whole strip, stoplights included. The border-box
-   bar is 32px with a 1px bottom border, so its content box centres on
-   y=15.5 — but Electron places the stoplights on whole points only
-   (MACOS_TRAFFIC_LIGHT_POSITION in main/window-chrome.ts), and a 14px
-   button can centre on 15 or 16, never 15.5. The extra top pixel moves the
-   content centre to y=16, the same line the stoplights sit on. Windows and
-   Linux centre against a 31px caption strip, so they keep 15.5. */
-:root[data-platform="darwin"] .titlebar {
-  padding-top: 1px;
+  width: 80px;
 }
 
 /* Strip text centres by its cap height, so the wordmark's capitals, the
-   stoplights and the chips share one centreline. Without the trim, flex
-   centres the font's line box, and Geist's ascent/descent put its capitals
-   about 1.25px above the middle of the strip. The crumbs that clip their
+   stoplights, the mark and the chips share one centreline. Without the trim,
+   flex centres the font's line box, and Geist's ascent/descent put its
+   capitals above the middle of the strip. The crumbs that clip their
    overflow for an ellipsis get padding back, because trimming shrinks the
    box to the cap height and descenders would be clipped. */
-.titlebar__brand,
+.titlebar__wordmark,
 .titlebar__repo,
 .auxiliary-titlebar__section,
 .auxiliary-titlebar__title {
@@ -265,17 +261,28 @@ textarea,
 /* Windows caption buttons overlay the right edge instead: reserve the native
    min/max/close strip on that side. */
 :root[data-platform="win32"] .titlebar {
-  padding-left: 12px;
   padding-right: 150px;
 }
 
-/* Wordmark, Pwr-family house style: neutral stem, accent tail. */
+/* Brand lockup, Pwr-family house style: the app's icon glyph in the accent,
+   then the wordmark with a neutral stem and an accent tail. */
 .titlebar__brand {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+.titlebar__mark {
+  flex: 0 0 auto;
+  display: block;
+}
+.titlebar__wordmark {
   margin: 0;
-  font: 700 13px/1.3 var(--font-sans);
+  font: 700 17px/1 var(--font-sans);
   color: var(--text-primary);
-  letter-spacing: 0.01em;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 .titlebar__brand-accent {
   color: var(--accent);
@@ -319,7 +326,7 @@ textarea,
   align-items: center;
   gap: 8px;
   min-width: 0;
-  margin-left: 14px;
+  margin-left: 16px;
 }
 
 .titlebar__spacer {
@@ -400,7 +407,7 @@ textarea,
   align-items: center;
   gap: 6px;
   min-width: 0;
-  margin-left: 14px;
+  margin-left: 16px;
   color: var(--text-muted);
   font: 500 11px/1 var(--font-sans);
 }
@@ -625,11 +632,11 @@ textarea,
   /* The row count is unbounded user data — one row per profile — and the menu
      hangs from the top of the sidebar, so without a cap a long list runs off
      the bottom of the window and takes "New profile…" with it. At the app's
-     minimum 600px window (src/main/window.ts) only six profiles fit. 140px is
-     the menu's own top offset (98px: titlebar + section padding + chip + gap)
+     minimum 600px window (src/main/window.ts) only six profiles fit. 149px is
+     the menu's own top offset (107px: titlebar + section padding + chip + gap)
      plus breathing room, so the cap tracks the window instead of scrolling
      early on a tall one. Same treatment as .branch-pop. */
-  max-height: calc(100vh - 140px);
+  max-height: calc(100vh - 149px);
   overflow-y: auto;
   background: var(--bg-menu);
   border: 1px solid var(--border-default);

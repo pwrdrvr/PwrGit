@@ -28,7 +28,7 @@ describe("auxiliary window chrome", () => {
   it("reserves macOS traffic lights without disabling windowed zoom", () => {
     expect(auxiliaryWindowChromeOptions("dark", "darwin")).toEqual({
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 12, y: 9 },
+      trafficLightPosition: { x: 16, y: 13 },
       fullscreenable: false,
       maximizable: true
     });

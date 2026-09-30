@@ -43,31 +43,30 @@ export const TITLE_BAR_OVERLAY_BACKGROUND =
 export const TITLE_BAR_OVERLAY_SYMBOL =
   WINDOW_CHROME_BY_THEME[DEFAULT_WINDOW_CHROME_THEME].symbol;
 
-/** One pixel shorter than the renderer's 32px `.titlebar`. The uncovered last
- * pixel is its bottom border, so the divider continues beneath the native
- * Windows caption buttons instead of disappearing under the overlay. */
-export const TITLE_BAR_OVERLAY_HEIGHT = 31;
+/** The renderer's `.titlebar` fill: 40px, with its 1px divider below that,
+ * so the overlay covers exactly the fill and the divider continues beneath
+ * the native Windows caption buttons instead of disappearing under them. */
+export const TITLE_BAR_OVERLAY_HEIGHT = 40;
 
 /**
  * Where macOS draws the stoplights inside our `hiddenInset` windows. The main
  * window and every auxiliary window share it; their title strips are the
- * same `.titlebar`.
+ * same `.titlebar`. Pwr-family values — PwrAgent's
+ * `MACOS_TRAFFIC_LIGHT_POSITION` is the same point, and the strip spec lives
+ * in `renderer/src/features/chrome/AGENTS.md`.
  *
- * - **x = 12** is the strip's own `padding-left` (`.titlebar` in app.css),
- *   so the stoplights start on the same inset as the wordmark on the other
- *   platforms.
- * - **y = 9** centres the 14px button (measured on macOS 26; Electron's y is
- *   the top of the button) on y=16, which is the strip's content centreline.
- *   A 14px button in the 31px strip above the border would need 8.5, and
- *   Electron takes whole points only, so app.css gives the macOS strip one
- *   extra pixel of top padding to put its centre on 16 too. The wordmark's
- *   capitals, the breadcrumb chevron and the branch and path chips all
- *   centre on that line.
+ * - **x = 16** is the strip's `padding-left`, the family rail inset.
+ * - **y = 13** centres the 14px button (measured on macOS 26; Electron's y is
+ *   the top of the button) in the strip's 40px fill: (40 - 14) / 2 = 13, the
+ *   y=20 centreline that the mark, the wordmark's capitals, the breadcrumb
+ *   chevron and the branch and path chips all centre on. The fill has to be
+ *   an even height for this to be a whole point — Electron takes no halves.
  *
- * This was `{ x: 12, y: 10 }`, which put the stoplights' centre 1.5px below
- * the chips and 2.75px below the wordmark's capitals.
+ * The group ends at x=76; the strip's 80px macOS gutter puts the brand at 96.
+ * This was `{ x: 12, y: 10 }` in the old 32px strip, which centred the
+ * stoplights 1.5px below its chips and 2.75px below the wordmark's capitals.
  */
-export const MACOS_TRAFFIC_LIGHT_POSITION = { x: 12, y: 9 } as const;
+export const MACOS_TRAFFIC_LIGHT_POSITION = { x: 16, y: 13 } as const;
 
 export function windowChrome(theme: WindowChromeTheme) {
   return WINDOW_CHROME_BY_THEME[theme];

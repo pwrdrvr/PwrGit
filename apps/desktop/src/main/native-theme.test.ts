@@ -67,7 +67,7 @@ describe("native theme controller", () => {
     expect(h.window.setTitleBarOverlay).toHaveBeenCalledWith({
       color: "#f7f4ef",
       symbolColor: "#524a40",
-      height: 31
+      height: 40
     });
   });
 
@@ -84,7 +84,7 @@ describe("native theme controller", () => {
     expect(h.window.setTitleBarOverlay).toHaveBeenLastCalledWith({
       color: "#f7f4ef",
       symbolColor: "#524a40",
-      height: 31
+      height: 40
     });
     expect(h.changes.at(-1)).toEqual({
       theme: "system",

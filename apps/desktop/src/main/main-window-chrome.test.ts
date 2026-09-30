@@ -6,7 +6,7 @@ describe("main window chrome", () => {
   it("insets the macOS traffic lights into the strip", () => {
     expect(mainWindowChromeOptions("dark", "darwin")).toEqual({
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 12, y: 9 }
+      trafficLightPosition: { x: 16, y: 13 }
     });
   });
 
