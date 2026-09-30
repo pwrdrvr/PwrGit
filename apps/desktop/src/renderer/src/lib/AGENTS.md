@@ -166,6 +166,17 @@ started handing Tab into a card. A keyboard user sets no pointer flag, so
 without it an unrelated scroll — the graph adjusting `scrollTop` as commits
 stream in — took the card away with their focus still inside it.
 
+### A card belongs to a connected trigger
+
+`show` refuses a trigger that is no longer in the document, and an open card
+closes — pinned or not — when its trigger leaves. Both exist because a graph row
+can unmount under the pointer (a refresh drops its commit) and React dispatches
+no `mouseleave` for a removed node. A gated open (`hoverIntentHandlers`) holds
+its trigger across the dwell, so it can call `show` on a row that is already
+gone; a detached element's rect is all zeros, which put the card at the viewport
+origin over the traffic lights with nothing left to dismiss it. Don't "fix" a
+misplaced card by special-casing the caller — the hook owns this.
+
 ### Nested triggers restore, they don't just hide
 
 A row carries a card and the path inside it carries another. React fires no
