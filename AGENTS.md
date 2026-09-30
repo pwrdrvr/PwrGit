@@ -69,6 +69,12 @@ pnpm typecheck  # tsc across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
+For headed lab E2E, prefer PwrSuiteLab Control MCP and read
+[the E2E guidance](apps/desktop/e2e/AGENTS.md#headed-e2e-in-pwrsuitelab).
+It covers live schema discovery, guest setup, ownership, and the script fallback
+when MCP is unavailable. Use the dedicated E2E VM, never a GHA runner or the
+physical host desktop for this workflow.
+
 `pnpm lint` chains `lint:forge-kinds` → `lint:colors` → `deps:maturity` →
 `licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
 doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
