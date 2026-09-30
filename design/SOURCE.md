@@ -96,6 +96,7 @@ first.
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
 | `Palette Kind Glyphs - UX Review.dc.html` | The &#8984;K palette's leading kind glyph &mdash; why branch and worktree do not separate at 15&nbsp;px, the channels that survive that size, the labels that shipped, and the redraws offered for worktree and for the remote branch that never had a mark of its own. Interactive. |
 | `Change Requests in Refs - UX Review.dc.html` | Why the refs browser cannot find a pull request by its number, the open-change-request cache that fixes it, and the three places PRs could live in the browser: matched on the Branches tab, a Pull requests / Merge requests sibling tab, or both with per-tab match counts. Interactive. |
+| `Branch Row Actions - UX Review.dc.html` | Why one branch row in the refs browser sits out of line with its neighbours (each row resolves its own `auto` actions column), how many verbs should stay on the row (one, two, or an icon toolbar, with a `⋮` menu for the rest), and how a branch is pinned from a branch row and from &#8984;K. Interactive. |
 | `Git Runtime Settings - UX Review.dc.html` | Settings &rsaquo; General &rsaquo; Git runtime &mdash; the read-only card that names which Git and Git LFS PwrGit runs. The card reproduced at shipped size at both the 760&nbsp;px column and the Settings window's own 760&nbsp;px minimum, five findings against it, the redraw, and the state table it should answer. |
 | `Agent History Editing - UX Review.dc.html` | A review of open PR #149's agent-assisted rebase &mdash; six findings against its review-only agent panel &mdash; and a counter-proposal: the agent proposes a history, PwrGit proves it (every commit once, a clean isolated replay, an identical tree), you apply it. Squash messages, &#10022;&nbsp;Tidy, the failure paths, and where the agent is chosen. A proposal; nothing in it is built. Interactive. |
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
@@ -307,6 +308,26 @@ per repo. Its specimens (`orbit-deploy`, `octo-contrib`, `~/src/orbit-deploy`)
 are invented; the one real name in it is the head branch of
 [pwrdrvr/microapps-app-release#106](https://github.com/pwrdrvr/microapps-app-release/pull/106),
 a public repository, quoted in finding 1a as the report that started it. It
+carries no `assets/`.
+
+`Branch Row Actions - UX Review.dc.html` was written here and pushed up through
+the `claude-design` MCP server's `write_files` (after `finalize_plan`, which the
+server refuses to skip); the project copy was re-pushed after the pins were built and is
+102,307 bytes, text-identical to this one (checked by reading it back and
+comparing; the reader adds a trailing newline). It includes three turn 6 text
+edits (storage is a `pinned_branches` table, not a column on `local_branches`;
+the Space-to-pin keyboard model; the rename and delete answers marked as
+built). It is a proposal, not a record of what is built. Turn **1** reproduces the drift with
+the shipped CSS and measures it (a four-button local row resolves its actions
+column to 283 px against 210 px for the rest, so its Upstream starts 43 px
+early at 940 px), and audits all four tabs. Turn **2** draws three row-action
+patterns, **2b** (two verbs and a `⋮`) recommended. Turn **3** puts the pin in a
+leading gutter (**3a**) and says what pinning a branch with no worktree means.
+Turn **4** is &#8984;K, with **4b** the ranking change made in the same branch
+(the focused repo's exact-name branch leads, ahead of files). Turn **5** is a
+live `DCLogic` prototype of 2b + 3a across Branches, Tags and Pull requests.
+Its specimens (`orbit-deploy`, `~/src/orbit-deploy`, `octo-contrib`) are
+invented. The icons are one inline `<symbol>` sprite, not per-row SVGs. It
 carries no `assets/`.
 
 `Git Runtime Settings - UX Review.dc.html` was written here and pushed up the

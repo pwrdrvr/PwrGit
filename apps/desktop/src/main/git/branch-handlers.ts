@@ -167,12 +167,17 @@ export function registerBranchHandlers(
     const refs = await listRepoRefs(execGit, repo.path, checkedOut);
     if (!refs.ok) return refs;
     const prs = localBranchPrs(req.repoId);
-    if (prs.size === 0) return refs;
+    const pinned = indexer.pinnedBranchNames(req.repoId);
+    if (prs.size === 0 && pinned.size === 0) return refs;
     return ok({
       ...refs.value,
       branches: refs.value.branches.map((branch) => {
         const pr = prs.get(branch.name);
-        return pr === undefined ? branch : { ...branch, pr };
+        return {
+          ...branch,
+          ...(pr === undefined ? {} : { pr }),
+          ...(pinned.has(branch.name) ? { pinned: true } : {})
+        };
       })
     });
   });
@@ -358,6 +363,7 @@ export function registerBranchHandlers(
       "branch",
       `renamed local branch ${req.branch} to ${req.newBranch} in ${repo.path}`
     );
+    indexer.renamePinnedBranch(req.repoId, req.branch, req.newBranch);
     await publishBranchMutation(req.repoId, repo.profile_id);
     return ok(null);
   });

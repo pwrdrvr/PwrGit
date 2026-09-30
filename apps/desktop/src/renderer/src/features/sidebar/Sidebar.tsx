@@ -182,6 +182,7 @@ export function Sidebar({
   onSelectWorktree,
   onSetRepoPin,
   onSetWorktreePin,
+  onSetBranchPin,
   onRemoveWorktree,
   onRemoveWorktrees,
   onCreateWorktree,
@@ -214,6 +215,7 @@ export function Sidebar({
   onSelectWorktree: (repo: Repo, worktree: Worktree) => void;
   onSetRepoPin: (repoId: string, pinned: boolean) => void;
   onSetWorktreePin: (worktreeId: string, pinned: boolean) => void;
+  onSetBranchPin: (repoId: string, branch: string, pinned: boolean) => void;
   onRemoveWorktree: (worktreeId: string) => void;
   onRemoveWorktrees: (
     worktreeIds: string[],
@@ -972,6 +974,9 @@ export function Sidebar({
           handleRowContext(repo, w, e, orderedIds)
         }
         onToggleWorktreePin={onSetWorktreePin}
+        onToggleBranchPin={(branch, pinned) =>
+          onSetBranchPin(repo.id, branch, pinned)
+        }
         onRemoveWorktree={onRemoveWorktree}
         onRemoveSelected={() => void onRemoveWorktrees(Array.from(sel.ids))}
         onClearSelected={clearSel}

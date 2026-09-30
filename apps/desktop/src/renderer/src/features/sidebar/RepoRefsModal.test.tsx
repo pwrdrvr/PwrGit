@@ -264,3 +264,86 @@ describe("fork parent remote offer", () => {
     await act(async () => finishFetch(ok(undefined)));
   });
 });
+
+describe("branch pins and the row keyboard", () => {
+  const branch = (name: string, extra: Record<string, unknown> = {}) => ({
+    name,
+    fullName: `refs/heads/${name}`,
+    head: "a".repeat(40),
+    ahead: 0,
+    behind: 0,
+    tracking: "unpublished" as const,
+    checkedOutWorktreeIds: [],
+    ...extra
+  });
+  const withBranches: RepoRefs = {
+    ...refs,
+    branches: [branch("main", { pinned: true }), branch("dev")]
+  };
+  const rows = (): HTMLElement[] => [
+    ...dialog().querySelectorAll<HTMLElement>("[data-refs-row]")
+  ];
+  const filter = (): HTMLInputElement =>
+    dialog().querySelector<HTMLInputElement>(".refs-search input")!;
+
+  it("stars a pinned branch and leaves the other unstarred", async () => {
+    await open(repo, withBranches);
+    const pins = [...dialog().querySelectorAll<HTMLElement>("[data-refs-pin]")];
+    expect(pins.map((pin) => pin.getAttribute("aria-label"))).toEqual([
+      "Unpin branch main",
+      "Pin branch dev"
+    ]);
+    expect(pins.map((pin) => pin.getAttribute("aria-pressed"))).toEqual([
+      "true",
+      "false"
+    ]);
+  });
+
+  it("pins through branch:setPin and shows it before the answer lands", async () => {
+    await open(repo, withBranches);
+    const dev = dialog().querySelector<HTMLElement>(
+      '[aria-label="Pin branch dev"]'
+    )!;
+    await act(async () => dev.click());
+    expect(dispatchMock).toHaveBeenCalledWith("branch:setPin", {
+      repoId: "repo-1",
+      branch: "dev",
+      pinned: true
+    });
+  });
+
+  it("moves from the filter into the rows with ArrowDown, and back with ArrowUp", async () => {
+    await open(repo, withBranches);
+    press(filter(), "ArrowDown");
+    expect(document.activeElement).toBe(rows()[0]);
+    press(rows()[0]!, "ArrowDown");
+    expect(document.activeElement).toBe(rows()[1]);
+    press(rows()[1]!, "ArrowUp");
+    expect(document.activeElement).toBe(rows()[0]);
+    press(rows()[0]!, "ArrowUp");
+    expect(document.activeElement).toBe(filter());
+  });
+
+  it("pins the focused row with Space, and only when the row itself has focus", async () => {
+    await open(repo, withBranches);
+    const dev = rows()[1]!;
+    dev.focus();
+    await act(async () => {
+      dev.dispatchEvent(
+        new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true })
+      );
+    });
+    expect(dispatchMock).toHaveBeenCalledWith("branch:setPin", {
+      repoId: "repo-1",
+      branch: "dev",
+      pinned: true
+    });
+    dispatchMock.mockClear();
+    // Space in the filter is a space, not a pin.
+    press(filter(), " ");
+    expect(dispatchMock).not.toHaveBeenCalledWith(
+      "branch:setPin",
+      expect.anything()
+    );
+  });
+});

@@ -20,6 +20,7 @@ import {
   type Profile,
   type ProfileId,
   type Repo,
+  type RepoId,
   type RepoIdentity,
   type RepoSearchHit,
   type RepoVisibility,
@@ -46,6 +47,15 @@ import {
 import { claimWorktreeOwnership } from "./repo-ownership";
 import { checkoutExists } from "./worktree-liveness";
 
+/**
+ * A worktree is pinned when it is, or when its branch is (`pinned_branches`).
+ * The second half is what makes a pin survive the branch gaining a worktree.
+ * Used against a `worktrees` row aliased `w`.
+ */
+const PINNED_WORKTREE_SQL = `(w.pinned = 1 OR EXISTS (
+  SELECT 1 FROM pinned_branches pb
+  WHERE pb.repo_id = w.repo_id AND pb.branch = w.branch
+))`;
 const MAX_SCAN_DEPTH = 5;
 const GIT_CONCURRENCY = 12;
 const HYDRATION_GIT_CONCURRENCY = 4;
@@ -236,6 +246,8 @@ const CHANGE_REQUEST_SEARCH_LIMIT = 15;
 export type SearchScope = {
   profileId: ProfileId | null;
   allProfiles: boolean;
+  /** The repository the asking window has focused, if any. */
+  focusedRepoId?: RepoId | null;
 };
 
 /** No window in particular, every profile — the default for tests and tools. */
@@ -593,9 +605,74 @@ export class RepoIndexer {
   }
 
   setWorktreePinned(worktreeId: string, pinned: boolean): void {
+    this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE worktrees SET pinned = ? WHERE id = ?")
+        .run(pinned ? 1 : 0, worktreeId);
+      // A worktree also reads as pinned when its BRANCH is (see
+      // `pinnedWorktreeSql`), so unpinning it has to release the branch too or
+      // the click would change nothing.
+      if (!pinned) {
+        this.db
+          .prepare(
+            `DELETE FROM pinned_branches
+             WHERE (repo_id, branch) IN (
+               SELECT repo_id, branch FROM worktrees WHERE id = ?
+             )`
+          )
+          .run(worktreeId);
+      }
+    })();
+  }
+
+  /**
+   * Pin or unpin one local branch. A worktree holding it is pinned directly, so
+   * the branch and its checkout are never pinned apart; with none, the pin is
+   * the `pinned_branches` row alone.
+   */
+  setBranchPinned(repoId: string, branch: string, pinned: boolean): void {
+    if (branch === "") return;
+    this.db.transaction(() => {
+      const held = this.db
+        .prepare(
+          "UPDATE worktrees SET pinned = ? WHERE repo_id = ? AND branch = ?"
+        )
+        .run(pinned ? 1 : 0, repoId, branch).changes;
+      if (pinned && held > 0) return;
+      // Unpinning always clears the row (it may pre-date the worktree); pinning
+      // writes one only for a branch nothing holds, so a pin taken through a
+      // worktree goes away with it, as a worktree pin always has.
+      this.db
+        .prepare(
+          pinned
+            ? "INSERT OR IGNORE INTO pinned_branches (repo_id, branch) VALUES (?, ?)"
+            : "DELETE FROM pinned_branches WHERE repo_id = ? AND branch = ?"
+        )
+        .run(repoId, branch);
+    })();
+  }
+
+  /** A rename keeps the pin: the pin follows the branch, not its name. */
+  renamePinnedBranch(repoId: string, from: string, to: string): void {
     this.db
-      .prepare("UPDATE worktrees SET pinned = ? WHERE id = ?")
-      .run(pinned ? 1 : 0, worktreeId);
+      .prepare(
+        "UPDATE OR REPLACE pinned_branches SET branch = ? WHERE repo_id = ? AND branch = ?"
+      )
+      .run(to, repoId, from);
+  }
+
+  /** Every branch of this repository that is pinned — by row, or through a
+   *  pinned worktree holding it. What the refs browser's star reads. */
+  pinnedBranchNames(repoId: string): Set<string> {
+    const rows = this.db
+      .prepare(
+        `SELECT branch FROM pinned_branches WHERE repo_id = ?
+         UNION
+         SELECT branch FROM worktrees
+          WHERE repo_id = ? AND pinned = 1 AND branch <> ''`
+      )
+      .all(repoId, repoId) as { branch: string }[];
+    return new Set(rows.map((row) => row.branch));
   }
 
   /**
@@ -807,13 +884,14 @@ export class RepoIndexer {
                                   OR path LIKE ? ESCAPE '\\'))
                          OR pr LIKE ?
                        THEN 0 ELSE 1 END,
+                  repo_name = (SELECT name FROM repos WHERE id = ?) COLLATE NOCASE DESC,
                   profile_id = ? DESC,
                   bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
          LIMIT 60`
       )
       .all(
         fts, only, only, query.trim(), query.trim(),
-        leafPosix, leafWindows, prLike, mine
+        leafPosix, leafWindows, prLike, scope.focusedRepoId ?? null, mine
       ) as {
       entity_id: string;
       kind: RepoSearchHit["kind"];
@@ -913,7 +991,7 @@ export class RepoIndexer {
     if (wtIds.length > 0) {
       const rows = this.db
         .prepare(
-          `SELECT w.id, w.branch, w.path, w.pinned, r.id AS repo_id, r.name AS repo_name,
+          `SELECT w.id, w.branch, w.path, ${PINNED_WORKTREE_SQL} AS pinned, r.id AS repo_id, r.name AS repo_name,
                   r.profile_id, p.name AS profile_name,
                   ${prSummarySelect("pr")}
            FROM worktrees w
@@ -1020,6 +1098,10 @@ export class RepoIndexer {
           `SELECT b.id, b.repo_id, b.name,
                   r.name AS repo_name, r.path, r.profile_id,
                   p.name AS profile_name,
+                  EXISTS (
+                    SELECT 1 FROM pinned_branches pb
+                    WHERE pb.repo_id = b.repo_id AND pb.branch = b.name
+                  ) AS pinned,
                   ${prSummarySelect("pr")}
            FROM local_branches b
            JOIN repos r ON r.id = b.repo_id
@@ -1036,6 +1118,7 @@ export class RepoIndexer {
         path: string;
         profile_id: string;
         profile_name: string;
+        pinned: number;
       }[];
       for (const branch of rows) {
         const hit: RepoSearchHit = {
@@ -1046,7 +1129,7 @@ export class RepoIndexer {
           profileId: branch.profile_id,
           profileName: branch.profile_name,
           worktreeCount: 0,
-          pinned: false,
+          pinned: branch.pinned === 1,
           repoName: branch.repo_name
         };
         const pr = prSummaryFromRow(branch as unknown as Record<string, unknown>);
@@ -1246,7 +1329,8 @@ export class RepoIndexer {
     const worktrees = (
       this.db
         .prepare(
-          `SELECT w.id, w.repo_id, w.branch, w.path, w.is_primary, w.pinned,
+          `SELECT w.id, w.repo_id, w.branch, w.path, w.is_primary,
+                  ${PINNED_WORKTREE_SQL} AS pinned,
                   w.missing, w.locked, w.custom_order AS custom_order,
                   s.dirty AS dirty, s.ahead AS ahead, s.behind AS behind,
                   s.has_upstream AS has_upstream,
@@ -1310,6 +1394,19 @@ export class RepoIndexer {
       worktrees
     };
     if (r.custom_order !== null) repo.order = r.custom_order;
+    // Pinned branches nothing has checked out. A held one is already
+    // represented by its worktree, which reads as pinned.
+    const held = new Set(worktrees.map((wt) => wt.branch));
+    const pinnedBranches = (
+      this.db
+        .prepare(
+          "SELECT branch FROM pinned_branches WHERE repo_id = ? ORDER BY branch COLLATE NOCASE, branch"
+        )
+        .all(r.id) as { branch: string }[]
+    )
+      .map((row) => row.branch)
+      .filter((branch) => !held.has(branch));
+    if (pinnedBranches.length > 0) repo.pinnedBranches = pinnedBranches;
     // Attached here rather than fetched by the renderer: the identity marks
     // sit on every repo row, so they have to arrive with the first
     // `repo:list` or the sidebar paints once without them and again a moment
@@ -1523,6 +1620,25 @@ export class RepoIndexer {
       if (checkedOut.has(branch.name)) continue;
       const fullName = `refs/heads/${branch.name}`;
       rows.push({ id: `${repoId}:${fullName}`, name: branch.name, fullName });
+    }
+
+    // The listing is the whole truth about which branches exist, so a pin on a
+    // branch git no longer has (deleted or renamed elsewhere) is dropped here.
+    const existing = new Set(
+      branches.filter((b) => !b.isRemote).map((b) => b.name)
+    );
+    const stale = (
+      this.db
+        .prepare("SELECT branch FROM pinned_branches WHERE repo_id = ?")
+        .all(repoId) as { branch: string }[]
+    ).filter((row) => !existing.has(row.branch));
+    if (stale.length > 0) {
+      const drop = this.db.prepare(
+        "DELETE FROM pinned_branches WHERE repo_id = ? AND branch = ?"
+      );
+      this.db.transaction(() => {
+        for (const row of stale) drop.run(repoId, row.branch);
+      })();
     }
 
     await this.replaceDerivedBranchRows(

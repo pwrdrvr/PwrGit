@@ -524,12 +524,14 @@ test("renames and normally deletes a free merged local branch", async () => {
   const main = browser.locator(".refs-table__row", {
     has: window.getByRole("button", { name: "Copy branch name main" })
   });
-  await expect(
-    main.getByRole("button", { name: "Rename local branch main" })
-  ).toBeDisabled();
-  await expect(
-    main.getByRole("button", { name: "Delete local branch main" })
-  ).toBeDisabled();
+  await main.getByRole("button", { name: "Actions for main" }).click();
+  await expect(window.getByRole("menuitem", { name: /^Rename…/ })).toBeDisabled();
+  await expect(window.getByRole("menuitem", { name: /^Delete…/ })).toBeDisabled();
+  // The reason is on the entry itself: a disabled control takes no hover.
+  await expect(window.getByRole("menuitem", { name: /^Delete…/ })).toContainText(
+    "Switch every worktree away from this branch first"
+  );
+  await window.keyboard.press("Escape");
 
   const old = browser.locator(".refs-table__row", {
     has: window.getByRole("button", {
@@ -537,8 +539,9 @@ test("renames and normally deletes a free merged local branch", async () => {
     })
   });
   await old
-    .getByRole("button", { name: "Rename local branch feature/old-name" })
+    .getByRole("button", { name: "Actions for feature/old-name" })
     .click();
+  await window.getByRole("menuitem", { name: /^Rename…/ }).click();
   const rename = window.getByRole("dialog", {
     name: "Rename branch feature/old-name"
   });
@@ -565,8 +568,9 @@ test("renames and normally deletes a free merged local branch", async () => {
     .toContain("feature/new-name");
 
   await renamed
-    .getByRole("button", { name: "Delete local branch feature/new-name" })
+    .getByRole("button", { name: "Actions for feature/new-name" })
     .click();
+  await window.getByRole("menuitem", { name: /^Delete…/ }).click();
   await window.getByRole("button", { name: "Delete branch" }).click();
 
   await expect(renamed).toHaveCount(0, { timeout: 20_000 });
@@ -601,11 +605,14 @@ test("force deletion requires a second confirmation and leaves the remote branch
       name: "Copy branch name feature/unique"
     })
   });
-  const remove = local.getByRole("button", {
-    name: "Delete local branch feature/unique"
-  });
+  const remove = async (): Promise<void> => {
+    await local
+      .getByRole("button", { name: "Actions for feature/unique" })
+      .click();
+    await window.getByRole("menuitem", { name: /^Delete…/ }).click();
+  };
 
-  await remove.click();
+  await remove();
   await window.getByRole("button", { name: "Delete branch" }).click();
   const forceDialog = window.getByRole("alertdialog", {
     name: "Force delete feature/unique?"
@@ -614,7 +621,7 @@ test("force deletion requires a second confirmation and leaves the remote branch
   await forceDialog.getByRole("button", { name: "Cancel" }).click();
   await expect(local).toBeVisible();
 
-  await remove.click();
+  await remove();
   await window.getByRole("button", { name: "Delete branch" }).click();
   await window.getByRole("button", { name: "Force delete branch" }).click();
 
@@ -648,9 +655,9 @@ test("force deletion requires a second confirmation and leaves the remote branch
   await expect(remote.getByRole("button", { name: "New worktree" })).toBeVisible({
     timeout: 20_000
   });
-  await expect(
-    remote.getByRole("button", { name: /Delete local branch/ })
-  ).toHaveCount(0);
+  await remote.getByRole("button", { name: /^Actions for origin\// }).click();
+  await expect(window.getByRole("menuitem", { name: /^Delete/ })).toHaveCount(0);
+  await window.keyboard.press("Escape");
 });
 
 /**

@@ -75,7 +75,9 @@ function harness(db: DB = fakeDb()): {
   operations: WorktreeOperationQueue;
 } {
   const indexer = {
-    refreshRepoWorktrees: vi.fn().mockResolvedValue(undefined)
+    refreshRepoWorktrees: vi.fn().mockResolvedValue(undefined),
+    renamePinnedBranch: vi.fn(),
+    pinnedBranchNames: vi.fn().mockReturnValue(new Set<string>())
   } as unknown as RepoIndexer;
   const refresher = {
     refreshWorktree: vi.fn(),
@@ -378,6 +380,13 @@ describe("branch handlers", () => {
         expect.anything(),
         "/repos/project",
         { branch: "feature/old", expectedHead: "a".repeat(40) },
+        "feature/new"
+      );
+      // The pin moves to the new name BEFORE the refresh prunes pins whose
+      // branch git no longer lists — the old name.
+      expect(indexer.renamePinnedBranch).toHaveBeenCalledExactlyOnceWith(
+        "repo-1",
+        "feature/old",
         "feature/new"
       );
       expect(indexer.refreshRepoWorktrees).toHaveBeenCalledExactlyOnceWith(

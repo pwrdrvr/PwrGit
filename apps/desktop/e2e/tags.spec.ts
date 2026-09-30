@@ -164,10 +164,12 @@ test("browses, creates, deletes, and explicitly reviews remote tag actions", asy
     .toBe("");
   await remote.getByRole("button", { name: "Close" }).click();
 
-  await candidate.getByRole("button", { name: "Delete local" }).click();
-  // The row's own button now carries an accessible name naming the tag
-  // ("Delete local tag candidate/2.0"), which the confirm label is a prefix
-  // of — reach the confirm by its dialog, as e2e/AGENTS.md prescribes.
+  await candidate
+    .getByRole("button", { name: "Actions for tag candidate/2.0" })
+    .click();
+  await window.getByRole("menuitem", { name: /^Delete local tag…/ }).click();
+  // The menu item's name ("Delete local tag…") is a prefix of the confirm
+  // label — reach the confirm by its dialog, as e2e/AGENTS.md prescribes.
   await window.locator(".modal--dialog .modal__create").click();
   await expect(candidate).toHaveCount(0);
   expect(box.git(repo.path, "tag", "--list", "candidate/2.0")).toBe("");
