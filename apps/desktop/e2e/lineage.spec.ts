@@ -768,22 +768,15 @@ test(
   async ({}, testInfo) => {
     sandbox = createGitSandbox();
     const s = sandbox;
-    const repo = s.makeRepo("linear-upstream");
+    const repo = s.makeRepoWithRemote("linear-upstream");
     const branch = "fix/desktop-federation-audit-followthrough";
     const wt = repo.addWorktree(branch);
     s.commit(wt, "local.txt", "preserve local pin placement");
     const localTip = s.git(wt, "rev-parse", "HEAD");
     s.commit(wt, "remote-one.txt", "wait for native focus");
     s.commit(wt, "remote-two.txt", "start visual documents after synchronization");
-    s.git(repo.path, "remote", "add", "origin", repo.path);
-    s.git(
-      repo.path,
-      "update-ref",
-      `refs/remotes/origin/${branch}`,
-      s.git(wt, "rev-parse", "HEAD")
-    );
+    s.git(wt, "push", "-u", "origin", branch);
     s.git(wt, "reset", "--hard", localTip);
-    s.git(wt, "branch", "--set-upstream-to", `origin/${branch}`);
 
     handle = await launchApp({ theme: "light" });
     const { window } = handle;
