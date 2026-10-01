@@ -158,6 +158,25 @@ export function hoverTooltip(
  * then. Measured on every enter rather than observed, because the answer moves
  * with the pane width and the text-size notch and is only ever asked here.
  */
+function isCutShort(el: HTMLElement): boolean {
+  if (el.scrollWidth > el.clientWidth) return true;
+  // Both of those are whole pixels, but the ellipsis is decided at subpixel
+  // precision: text 0.3px too wide is cut short while both read 120. The text
+  // range's own rect is fractional, so it catches what they round away.
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  // jsdom implements Range without layout.
+  if (typeof range.getBoundingClientRect !== "function") return false;
+  const style = getComputedStyle(el);
+  const content =
+    el.getBoundingClientRect().width -
+    parseFloat(style.paddingLeft || "0") -
+    parseFloat(style.paddingRight || "0") -
+    parseFloat(style.borderLeftWidth || "0") -
+    parseFloat(style.borderRightWidth || "0");
+  return range.getBoundingClientRect().width > content + 0.01;
+}
+
 export function truncatedTooltip(
   tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
   text: string
@@ -168,10 +187,7 @@ export function truncatedTooltip(
       open: (event: E) => void
     ) =>
     (event: E): void => {
-      const el = event.currentTarget;
-      // Half a pixel of slack, as PullBadge's fit test: subpixel layout can
-      // report a fitting label a fraction wider than its box.
-      if (el.scrollWidth > el.clientWidth + 0.5) open(event);
+      if (isCutShort(event.currentTarget)) open(event);
     };
   return {
     ...handlers,
