@@ -553,6 +553,31 @@ export function WorktreeHeader({
   /** The split Pull, so its menu opens under the whole control. */
   const pullSplit = useRef<HTMLDivElement>(null);
   const forkStatus = useForkStatus(worktree.id, repo.id);
+  const [remoteCheck, setRemoteCheck] = useState<{
+    worktreeId: string;
+    status: "checking" | "checked" | "untracked" | "unavailable";
+  } | null>(null);
+  useEffect(() => {
+    if (worktree.missing) return;
+    let active = true;
+    const check = (): void => {
+      setRemoteCheck({ worktreeId: worktree.id, status: "checking" });
+      void dispatch("remote:checkSelected", { worktreeId: worktree.id })
+        .then((result) => {
+          if (!active) return;
+          setRemoteCheck({
+            worktreeId: worktree.id,
+            status: result.ok ? result.value.status : "unavailable"
+          });
+        })
+        .catch(() => {
+          if (active) setRemoteCheck({ worktreeId: worktree.id, status: "unavailable" });
+        });
+    };
+    check();
+    const timer = window.setInterval(check, 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [worktree.id, worktree.missing]);
   /** What Pull does on a fork branch the source carries. Per repository, and
    *  re-read when the header moves to another one — it stays mounted. */
   const [pullChoice, setPullChoice] = useState<PullChoice>(() =>
@@ -1136,10 +1161,18 @@ export function WorktreeHeader({
   // a change of worktree), so there is no stale-selection case to guard.
   const forkChoice = forkChoiceOf(forkStatus);
   const choice: PullChoice = forkChoice === null ? "tracked" : pullChoice;
+  const localChip = baseChip(state, worktree, forkStatus?.source ?? null);
+  const selectedCheck = remoteCheck?.worktreeId === worktree.id
+    ? remoteCheck.status : "checking";
+  const checkedChip = localChip.text !== "up to date" || selectedCheck === "checked" || selectedCheck === "untracked"
+    ? localChip
+    : selectedCheck === "checking"
+      ? { text: "checking remote…", tone: "muted" as const }
+      : { text: "remote unchecked", tone: "muted" as const };
   const chip =
     running !== null
       ? { text: busyLabel(running), tone: "muted" as const }
-      : (flash ?? baseChip(state, worktree, forkStatus?.source ?? null));
+      : (flash ?? checkedChip);
   // Hovering the working control is how the status card is summoned, so the
   // handlers ride on whichever button this operation belongs to — and on the
   // progress chip beside them, which is the wider target and the thing a user
@@ -1414,11 +1447,15 @@ export function WorktreeHeader({
             ? flash === null
               ? hoverTooltip(
                   tip,
-                  chipExplanation(
-                    state?.worktreeId === worktree.id ? state : null,
-                    forkStatus,
-                    forkStatus?.branch ?? worktree.branch
-                  )
+                  selectedCheck === "unavailable" && localChip.text === "up to date"
+                    ? "The network could not confirm the remote branch. PwrGit will retry quietly."
+                    : selectedCheck === "checking" && localChip.text === "up to date"
+                      ? "Checking the remote branch for new commits."
+                      : chipExplanation(
+                          state?.worktreeId === worktree.id ? state : null,
+                          forkStatus,
+                          forkStatus?.branch ?? worktree.branch
+                        )
                 )
               : {}
             : !couldCarryCard(running)

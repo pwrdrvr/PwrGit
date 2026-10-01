@@ -15,6 +15,7 @@ import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import { addForkParentRemote } from "./fork-remotes";
+import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import {
   addRemote,
   commitsSince,
@@ -358,6 +359,105 @@ export function registerRemoteHandlers(
       );
     }
   };
+
+  // Background checks belong to main: a renderer effect alone cannot cap the
+  // number of Git children across profile windows or rapid selection changes.
+  const autoChecks = new Map<string, Promise<{ status: "checked" | "untracked" | "unavailable" }>>();
+  const autoCheckCache = new Map<string, { at: number; status: "checked" | "untracked" | "unavailable" }>();
+  let autoCheckInFlight = 0;
+  let networkPausedUntil = 0;
+
+  bus.register("remote:checkSelected", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    if (worktree.branch === null) return ok({ status: "untracked" as const });
+    const repo = repoOf(worktree.repoId);
+    if (repo === null) return ok({ status: "unavailable" as const });
+    const key = `${req.worktreeId}\0${worktree.branch}`;
+    const pending = autoChecks.get(key);
+    if (pending !== undefined) return ok(await pending);
+    const cached = autoCheckCache.get(key);
+    const ttl = cached?.status === "checked" ? 30_000 : 60_000;
+    if (cached !== undefined && Date.now() - cached.at < ttl) {
+      return ok({ status: cached.status });
+    }
+    if (Date.now() < networkPausedUntil || autoCheckInFlight >= 2) {
+      return ok({ status: "unavailable" as const });
+    }
+    autoCheckInFlight += 1;
+    const checking = (async (): Promise<{ status: "checked" | "untracked" | "unavailable" }> => {
+      let fetched = false;
+      let timeout: AbortSignal | undefined;
+      try {
+        const result = await tracked(
+          {
+            kind: "fetch",
+            profileId: repo.profileId,
+            repoId: worktree.repoId,
+            repoName: repo.name,
+            worktreeId: req.worktreeId,
+            branch: worktree.branch,
+            phase: "prepare"
+          },
+          "prepare",
+          async (_git, activity) => {
+            timeout = AbortSignal.timeout(12_000);
+            const signal = AbortSignal.any([activity.signal, timeout]);
+            const git = activityGit(activity, signal);
+            try {
+              const identity = readIdentity?.(worktree.repoId);
+              if (identity?.parent !== undefined) {
+                const parent = {
+                  hostname: identity.hostname,
+                  nameWithOwner: identity.parent.nameWithOwner
+                };
+                const ensured = await ensureForkParentRemote(
+                  git, worktree.path, parent,
+                  { hostname: identity.hostname, nameWithOwner: identity.nameWithOwner },
+                  hostsForRemotes?.() ?? {}
+                );
+                if (!ensured.ok) return ensured;
+              }
+              return await checkSelectedRemoteTips(
+                git, worktree.path, worktree.branch!, forkParentOf(worktree.repoId),
+                () => activity.setPhase("fetch"),
+                () => { fetched = true; activity.setPhase("prepare"); }
+              );
+            } finally {
+              if (fetched) {
+                activity.setPhase("refresh");
+                await refreshRemoteBranches(worktree.repoId, "automatic check");
+                await refresher.refreshWorktree(req.worktreeId);
+                emitEvent("graph:changed", { repoId: worktree.repoId });
+              }
+            }
+          }
+        );
+        if (!result.ok) {
+          if (timeout?.aborted || /network is unreachable|could not resolve|failed to connect|connection timed out|no route to host/i.test(result.error.message)) {
+            networkPausedUntil = Date.now() + 2 * 60_000;
+          }
+          logMain("debug", "remote", `automatic tip check unavailable for ${repo.path}: ${sanitizeGitLogDetail(result.error.message)}`);
+          return { status: "unavailable" };
+        }
+        return { status: result.value };
+      } catch (cause) {
+        if (timeout?.aborted) networkPausedUntil = Date.now() + 2 * 60_000;
+        logMain("debug", "remote", `automatic tip check unavailable for ${repo.path}: ${sanitizeGitLogDetail(cause)}`);
+        return { status: "unavailable" };
+      }
+    })();
+    autoChecks.set(key, checking);
+    try {
+      const answer = await checking;
+      autoCheckCache.set(key, { at: Date.now(), status: answer.status });
+      return ok(answer);
+    } finally {
+      autoChecks.delete(key);
+      autoCheckInFlight -= 1;
+    }
+  });
 
   // Ordinary sync successes log at info; Pull adds live phase/failure details
   // below because a long-running command cannot wait for command-bus logging.

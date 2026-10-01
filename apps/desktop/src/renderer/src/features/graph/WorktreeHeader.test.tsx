@@ -2003,6 +2003,7 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       if (name === "remote:forkStatus") return Promise.resolve(ok(fork));
       if (name === "remote:activities") return Promise.resolve(ok([]));
       if (name in replies) return Promise.resolve(replies[name]);
+      if (name === "remote:checkSelected") return Promise.resolve(ok({ status: "checked" }));
       return new Promise(() => undefined);
     });
   };
@@ -2068,6 +2069,21 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     answer({ ...behindSource(), tracked: null });
     await remount();
     expect(caret()).toBeNull();
+  });
+
+  it("does not claim a stale tracking ref is up to date while the remote is unavailable", async () => {
+    let finish!: (value: ReturnType<typeof ok<{ status: "unavailable" }>>) => void;
+    const checking = new Promise<ReturnType<typeof ok<{ status: "unavailable" }>>>(
+      (resolve) => { finish = resolve; }
+    );
+    answer(null, { "remote:checkSelected": checking });
+    await remount();
+    expect(statusChip()).toBe("checking remote…");
+    await act(async () => {
+      finish(ok({ status: "unavailable" }));
+      await settle();
+    });
+    expect(statusChip()).toBe("remote unchecked");
   });
 
   it("syncs from Pull by default, and the receipt names the push", async () => {

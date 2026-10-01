@@ -1482,6 +1482,11 @@ export interface Commands {
     req: { repoId: string; remote?: string };
     res: null;
   };
+  /** Quiet, bounded check of the selected branch's tracked and fork-source tips. */
+  "remote:checkSelected": {
+    req: { worktreeId: string };
+    res: { status: "checked" | "untracked" | "unavailable" };
+  };
   /** Fetch each repository once, optionally applying only proven-safe FFs. */
   "remote:bulkSync": {
     req: {
