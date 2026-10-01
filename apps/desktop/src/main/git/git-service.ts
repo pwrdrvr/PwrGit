@@ -1242,12 +1242,9 @@ export async function fetchRefspec(
   git: GitExec,
   cwd: string,
   remote: string,
-  refspec: string,
-  forceProgress = false
+  refspec: string
 ): Promise<Result<void>> {
-  return fetchWithRefRaceRetry(git, cwd, [
-    "fetch", "--no-tags", ...(forceProgress ? ["--progress"] : []), remote, refspec
-  ]);
+  return fetchWithRefRaceRetry(git, cwd, ["fetch", "--no-tags", remote, refspec]);
 }
 
 /** Fetch the checked-out branch's configured remote (or origin) and prune. */
