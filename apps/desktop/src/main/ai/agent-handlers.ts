@@ -57,6 +57,8 @@ export type AgentHandlerDependencies = {
 export type AgentHandlerLifecycle = {
   releaseWebContents: (webContentsId: number) => void;
   dispose: () => Promise<void>;
+  /** Whether `dispose` has a request to abort or a backend to close. */
+  hasPendingWork: () => boolean;
 };
 
 const DEFAULT_DEPENDENCIES: Omit<AgentHandlerDependencies, "session"> = {
@@ -418,5 +420,8 @@ export function registerAgentHandlers(
     await dependencies.session.close();
   };
 
-  return { releaseWebContents, dispose };
+  const hasPendingWork = (): boolean =>
+    active.size > 0 || dependencies.session.hasOpenClients?.() !== false;
+
+  return { releaseWebContents, dispose, hasPendingWork };
 }

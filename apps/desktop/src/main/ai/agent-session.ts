@@ -172,6 +172,8 @@ export interface AgentSession {
    *  Every other profile's pooled client keeps running. */
   reset(profileId: string): Promise<void>;
   close(): Promise<void>;
+  /** Whether `close` has a backend to shut down. Absent means assume so. */
+  hasOpenClients?(): boolean;
 }
 
 function abortError(): DOMException {
@@ -578,6 +580,10 @@ export class LocalAgentSession implements AgentSession {
     const current = this.clients.get(profileId);
     this.clients.delete(profileId);
     if (current !== undefined) await current.client.close();
+  }
+
+  hasOpenClients(): boolean {
+    return this.clients.size > 0;
   }
 
   async close(): Promise<void> {

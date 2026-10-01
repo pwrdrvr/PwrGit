@@ -19,6 +19,8 @@
     "tray-icon": "node ./scripts/generate-tray-icon.mjs",
     "postinstall": "pnpm run rebuild:electron-native && node ../../scripts/linux-sandbox.mjs --warn",
     "preview": "node ../../scripts/linux-sandbox.mjs --warn && electron-vite preview",
+    "probe:app-quit": "node ./scripts/app-quit-probe.mjs",
+    "probe:quit-reentry": "electron ./scripts/electron-quit-reentry-probe.mjs",
     "rebuild:electron-native": "node ./scripts/rebuild-native-for-electron.mjs",
     "package:dryrun": "node ./scripts/release.mjs --dryrun",
     "package": "node ./scripts/release.mjs --no-publish",
