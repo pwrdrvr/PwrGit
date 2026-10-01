@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.27.0 - 2026-10-01
+
+- Remote branches - Added automatic status checks for selected branches, including forks and custom remote refs, so their state stays current without a manual refresh and unchecked results are clearer.
+- Accessibility - Repository, branch, and title-bar names now show a full-name tooltip only when the visible text is actually truncated, on hover or keyboard focus.
+- Desktop reliability - Fixed a common macOS quit path that skipped cleanup and delayed exit after diagnostics finished.
+- Security - Updated vulnerable bundled dependencies and fixed a sync-status timer that could outlive its window.
+
 ## v0.26.0 - 2026-09-30
 
 - Git Discovery - Added Repository setup for inspecting active and shadowed Git hooks, recent hook results, and team, clone, and machine ignore rules. Test why a path is ignored and safely edit clone-level exclusions.
