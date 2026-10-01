@@ -347,9 +347,10 @@ describe("agent command safety", () => {
     );
     const bus = new CommandBus();
     const lifecycle = registerAgentHandlers(bus, fakeDb(), {
-      session: fakeSession({ proposeTidy }),
+      session: fakeSession({ proposeTidy, hasOpenClients: () => false }),
       ...handlerDeps()
     });
+    expect(lifecycle.hasPendingWork()).toBe(false);
 
     const pending = bus.dispatch(
       "agent:tidyPlan",
@@ -357,6 +358,8 @@ describe("agent command safety", () => {
       { webContentsId: 7 }
     );
     await vi.waitFor(() => expect(proposeTidy).toHaveBeenCalledOnce());
+    // A quit now has a request to abort, so it waits for dispose.
+    expect(lifecycle.hasPendingWork()).toBe(true);
     const cancelled = await bus.dispatch(
       "agent:cancel",
       { requestId: "agent-tidy-cancel" },
@@ -366,7 +369,28 @@ describe("agent command safety", () => {
 
     expect(cancelled).toEqual(ok({ cancelled: true }));
     expect(!result.ok && result.error.code).toBe("cancelled");
+    expect(lifecycle.hasPendingWork()).toBe(false);
     await lifecycle.dispose();
+  });
+
+  it("has work for a quit while the session holds a backend, or cannot say", async () => {
+    let open = true;
+    const withClient = registerAgentHandlers(new CommandBus(), fakeDb(), {
+      session: fakeSession({ hasOpenClients: () => open }),
+      ...handlerDeps()
+    });
+    expect(withClient.hasPendingWork()).toBe(true);
+    open = false;
+    expect(withClient.hasPendingWork()).toBe(false);
+
+    // A session that does not report its clients is assumed to have some.
+    const unknown = registerAgentHandlers(new CommandBus(), fakeDb(), {
+      session: fakeSession(),
+      ...handlerDeps()
+    });
+    expect(unknown.hasPendingWork()).toBe(true);
+    await withClient.dispose();
+    await unknown.dispose();
   });
 
   it("settles at the deadline even when the backend ignores abort", async () => {

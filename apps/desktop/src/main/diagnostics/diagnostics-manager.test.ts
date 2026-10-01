@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { writeHeapSnapshot } from "node:v8";
 import { app, type BrowserWindow } from "electron";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startStartupCpuProfiling, type StartupCpuDiagnostics } from "./diagnostics-manager";
+import { DIAGNOSTICS_DEFAULTS } from "@pwrgit/shared";
+import {
+  DiagnosticsManager,
+  startStartupCpuProfiling,
+  type StartupCpuDiagnostics
+} from "./diagnostics-manager";
 import { MainProcessCpuProfiler } from "./main-process-cpu-profiler";
 import { RendererStartupCpuProfiler } from "./renderer-startup-cpu-profiler";
 
@@ -42,9 +47,12 @@ describe("startup capture shutdown", () => {
     vi.stubEnv("PWRGIT_STARTUP_CPU_PROFILING_HEAP_SNAPSHOTS", "1");
     diagnostics = await startStartupCpuProfiling({ enabled: true, outputRoot: root });
     expect(diagnostics).not.toBeNull();
+    expect(diagnostics!.isRecording()).toBe(true);
     const stopping = diagnostics!.stop();
     expect(diagnostics!.stop()).toBe(stopping);
+    expect(diagnostics!.isRecording()).toBe(true);
     await stopping;
+    expect(diagnostics!.isRecording()).toBe(false);
 
     const [directory] = await readdir(root);
     const profile = JSON.parse(await readFile(join(root, directory!, "main.cpuprofile"), "utf8"));
@@ -69,6 +77,8 @@ describe("startup capture shutdown", () => {
     diagnostics = await startStartupCpuProfiling({ enabled: true, outputRoot: root });
     await vi.advanceTimersByTimeAsync(15_000);
     expect(stop).toHaveBeenCalledExactlyOnceWith("hard-timeout");
+    // Timed out, but still writing: a quit now must wait for it.
+    expect(diagnostics!.isRecording()).toBe(true);
     let complete = false;
     const stopping = diagnostics!.stop();
     void stopping.then(() => { complete = true; });
@@ -168,5 +178,20 @@ describe("startup capture shutdown", () => {
         resolve(); // Also releases startup if an assertion fails before the deadline.
       }
     });
+  });
+});
+
+describe("DiagnosticsManager.hasPendingWork", () => {
+  it("is true while a sync may start a monitor, and false with nothing running", async () => {
+    const manager = new DiagnosticsManager({
+      outputRoot: tmpdir(),
+      getDiagnostics: () => DIAGNOSTICS_DEFAULTS,
+      onHotCpuHeapSnapshotLimitReached: () => undefined
+    });
+    expect(manager.hasPendingWork()).toBe(false);
+    manager.sync();
+    expect(manager.hasPendingWork()).toBe(true);
+    await manager.shutdown();
+    expect(manager.hasPendingWork()).toBe(false);
   });
 });

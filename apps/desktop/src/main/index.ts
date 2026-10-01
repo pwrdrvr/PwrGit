@@ -1216,6 +1216,12 @@ if (!gotSingleInstanceLock) {
           drainBeforeQuit([() => agentHandlers.dispose()], 1_500)
         ]);
       },
+      // Nothing recording and no agent open is the common quit: let it
+      // through in one pass instead of deferring for a flush with no work.
+      hasPendingWork: () =>
+        diagnostics.hasPendingWork() ||
+        startupCpu?.isRecording() === true ||
+        agentHandlers.hasPendingWork(),
       // The drain re-issues this from a macrotask (quit-retry.ts), which is
       // what lets Electron finish the quit; the exit is only a safety net.
       resumeQuit: () =>

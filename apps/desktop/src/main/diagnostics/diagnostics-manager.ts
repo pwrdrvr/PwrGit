@@ -82,6 +82,7 @@ export class DiagnosticsManager {
   private heapConfigKey = "";
   private hotCpuConfigKey = "";
   private syncQueue: Promise<void> = Promise.resolve();
+  private pendingSyncs = 0;
   private shuttingDown = false;
 
   constructor(options: {
@@ -147,10 +148,27 @@ export class DiagnosticsManager {
     return this.syncQueue;
   }
 
+  /** Whether `shutdown` has anything to flush: a monitor or profiler is
+   *  running, or a queued sync may be about to start one. Quit is deferred
+   *  for the flush only when this is true. */
+  hasPendingWork(): boolean {
+    if (this.pendingSyncs > 0 || this.mainHeapMonitor !== null) return true;
+    for (const entry of this.windows.values()) {
+      if (entry.heapMonitor !== null || entry.hotCpuProfiler !== null) return true;
+    }
+    return false;
+  }
+
   private enqueueSync(task: () => Promise<void>): void {
-    this.syncQueue = this.syncQueue.then(task).catch((error) => {
-      log.error("diagnostics sync failed", error);
-    });
+    this.pendingSyncs += 1;
+    this.syncQueue = this.syncQueue
+      .then(task)
+      .catch((error) => {
+        log.error("diagnostics sync failed", error);
+      })
+      .finally(() => {
+        this.pendingSyncs -= 1;
+      });
   }
 
   private async syncInner(): Promise<void> {
@@ -324,6 +342,8 @@ export type StartupCpuDiagnostics = {
   attachFirstWindow: (window: BrowserWindow) => void;
   /** Finish active captures, or join completion already started by a timer. */
   stop: () => Promise<void>;
+  /** True until the capture has been written, however it finished. */
+  isRecording: () => boolean;
 };
 
 export async function startStartupCpuProfiling(options: {
@@ -360,6 +380,7 @@ export async function startStartupCpuProfiling(options: {
   let rendererWindow: BrowserWindow | null = null;
   let finished = false;
   let finishPromise: Promise<void> | undefined;
+  let written = false;
   let postLoadTimer: ReturnType<typeof setTimeout> | null = null;
   let hardTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   let expireRendererStart!: () => void;
@@ -416,7 +437,11 @@ export async function startStartupCpuProfiling(options: {
 
   const finish = (reason: string): Promise<void> => {
     finished = true;
-    finishPromise ??= Promise.resolve().then(() => finishInner(reason));
+    finishPromise ??= Promise.resolve()
+      .then(() => finishInner(reason))
+      .finally(() => {
+        written = true;
+      });
     return finishPromise;
   };
 
@@ -427,6 +452,7 @@ export async function startStartupCpuProfiling(options: {
 
   return {
     stop: () => finish("app-quit"),
+    isRecording: () => !written,
     attachFirstWindow: (window) => {
       if (rendererWindow !== null || finished) return;
       rendererWindow = window;
