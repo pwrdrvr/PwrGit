@@ -536,6 +536,10 @@ export function WorktreeHeader({
   const fitEndRef = useRef<HTMLSpanElement>(null);
   useFitLadder(headerRef, stateRowRef, fitEndRef, HEADER_FIT_STEPS);
   const [flash, setFlash] = useState<Chip | null>(null);
+  const flashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (flashTimeout.current !== null) clearTimeout(flashTimeout.current);
+  }, []);
   const activeWorktreeId = useRef(worktree.id);
   /** Bumped by every Fetch, Pull and Push this header starts, and by every
    *  change of checkout. `activeWorktreeId` alone cannot tell an outcome from
@@ -612,8 +616,12 @@ export function WorktreeHeader({
   }, [status.dismiss, worktree.id]);
 
   const showFlash = (chip: Chip, ms: number): void => {
+    if (flashTimeout.current !== null) clearTimeout(flashTimeout.current);
     setFlash(chip);
-    setTimeout(() => setFlash(null), ms);
+    flashTimeout.current = setTimeout(() => {
+      flashTimeout.current = null;
+      setFlash(null);
+    }, ms);
   };
 
   /**
