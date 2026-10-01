@@ -42,6 +42,9 @@ function forkFixture(): { origin: string; source: string; writer: string; local:
   return { origin, source, writer, local };
 }
 
+/** The repository lock, for tests that do not exercise it. */
+const unlocked = <T>(run: () => Promise<T>): Promise<T> => run();
+
 describe("automatic selected-branch remote check", () => {
   it("wires a stored fork parent once so the ordinary source status can see it", async () => {
     const remotes = new Map([["origin", "git@github.com:me/fork.git"]]);
@@ -76,13 +79,20 @@ describe("automatic selected-branch remote check", () => {
     const { source, writer, local } = forkFixture();
 
     const commands: string[][] = [];
+    const locked: string[] = [];
+    let holding = false;
     const recordingGit: GitExec = (args, cwd, options) => {
       commands.push(args);
+      if (holding) locked.push(args[0]!);
       return systemGit(args, cwd, options);
+    };
+    const exclusive = async <T>(run: () => Promise<T>): Promise<T> => {
+      holding = true;
+      try { return await run(); } finally { holding = false; }
     };
     let fetched = 0;
     const check = () => checkSelectedRemoteTips(
-      recordingGit, local, "main", null, () => undefined, () => { fetched += 1; }
+      recordingGit, local, "main", null, exclusive, () => { fetched += 1; }
     );
     expect(await check()).toEqual({ ok: true, value: "checked" });
     expect(commands.filter(([name]) => name === "fetch")).toHaveLength(0);
@@ -100,8 +110,8 @@ describe("automatic selected-branch remote check", () => {
     expect(await check()).toEqual({ ok: true, value: "checked" });
     expect(fetched).toBe(2);
     expect(commands.filter(([name]) => name === "fetch")).toEqual([
-      ["fetch", "--no-tags", "--progress", "origin", "+refs/heads/main:refs/remotes/origin/main"],
-      ["fetch", "--no-tags", "--progress", "upstream", "+refs/heads/main:refs/remotes/upstream/main"]
+      ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"],
+      ["fetch", "--no-tags", "upstream", "+refs/heads/main:refs/remotes/upstream/main"]
     ]);
     expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/origin/main")).toBe("1");
     expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/upstream/main")).toBe("2");
@@ -113,6 +123,10 @@ describe("automatic selected-branch remote check", () => {
     expect(fetched).toBe(3);
     expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/upstream/main"))
       .toBe("");
+    // Only ref writes hold the repository lock; asking a slow remote what it
+    // has must never keep a stash or a user fetch waiting.
+    expect(new Set(locked)).toEqual(new Set(["rev-parse", "fetch", "update-ref"]));
+    expect(commands.filter(([name]) => name === "ls-remote").length).toBeGreaterThan(0);
   });
 
   it("uses the configured merge ref when a fetch refspec renames the local tracking ref", async () => {
@@ -132,10 +146,10 @@ describe("automatic selected-branch remote check", () => {
       return systemGit(args, cwd, options);
     };
     expect(await checkSelectedRemoteTips(
-      recordingGit, local, "main", null, () => undefined, () => undefined
+      recordingGit, local, "main", null, unlocked, () => undefined
     )).toEqual(ok("checked"));
     expect(commands).toContainEqual([
-      "fetch", "--no-tags", "--progress", "origin",
+      "fetch", "--no-tags", "origin",
       "+refs/heads/main:refs/remotes/origin/cached-main"
     ]);
     expect(commands).not.toContainEqual([
@@ -155,7 +169,7 @@ describe("automatic selected-branch remote check", () => {
     git(writer, "push", "upstream", "main:topic");
 
     expect(await checkSelectedRemoteTips(
-      systemGit, local, "topic", null, () => undefined, () => undefined
+      systemGit, local, "topic", null, unlocked, () => undefined
     )).toEqual(ok("checked"));
     expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/upstream/topic"))
       .toBe("1");
@@ -178,7 +192,7 @@ describe("automatic selected-branch remote check", () => {
     git(writer, "push", "upstream", "main:master");
 
     expect(await checkSelectedRemoteTips(
-      systemGit, local, "main", null, () => undefined, () => undefined
+      systemGit, local, "main", null, unlocked, () => undefined
     )).toEqual(ok("checked"));
     expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/upstream/master"))
       .toBe("1");

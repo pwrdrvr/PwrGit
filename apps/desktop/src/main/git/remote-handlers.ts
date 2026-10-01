@@ -299,6 +299,10 @@ export function registerRemoteHandlers(
     };
   };
 
+  // Assigned by the automatic-check block below, which owns their state.
+  let yieldAutoChecks: (repoId: string) => void = () => undefined;
+  let remoteOperationSucceeded: () => void = () => undefined;
+
   /**
    * Run one tracked remote command under its repository lock: registered
    * BEFORE the lock is taken, so waiting behind another operation shows as
@@ -310,12 +314,19 @@ export function registerRemoteHandlers(
     phase: RemoteActivityPhase,
     run: (git: GitExec, activity: RemoteActivityHandle) => Promise<T>
   ): Promise<T> => {
+    // Something the user asked for outranks a background check: stop it
+    // rather than queue this behind it.
+    yieldAutoChecks(input.repoId);
     const activity = activities.begin(input);
     try {
-      return await operations.runRepository(input.repoId, async () => {
+      const result = await operations.runRepository(input.repoId, async () => {
         activity.setPhase(phase);
         return run(activityGit(activity, activity.signal), activity);
       });
+      if (typeof result === "object" && result !== null && "ok" in result && result.ok === true) {
+        remoteOperationSucceeded();
+      }
+      return result;
     } finally {
       activity.finish();
     }
@@ -362,19 +373,45 @@ export function registerRemoteHandlers(
 
   // Background checks belong to main: a renderer effect alone cannot cap the
   // number of Git children across profile windows or rapid selection changes.
-  const autoChecks = new Map<string, Promise<{ status: "checked" | "untracked" | "unavailable" }>>();
-  const autoCheckCache = new Map<string, { at: number; status: "checked" | "untracked" | "unavailable" }>();
+  //
+  // They are NOT tracked activities. The registry drives the header's buttons,
+  // its status card and the elsewhere-toast, so a check registered there
+  // turned the Fetch button into a spinner and locked Pull and Push for up to
+  // the whole timeout, every minute, without the user having asked for
+  // anything. The registry exists for commands that can wedge with no end;
+  // these carry their own timeout instead, and give way to any tracked
+  // operation on the same repository (see `yieldAutoChecks` in `tracked`).
+  type AutoCheckStatus = "checked" | "untracked" | "unavailable" | "superseded";
+  const AUTO_CHECK_SUPERSEDED = "superseded by a remote operation";
+  const autoChecks = new Map<string, Promise<{ status: AutoCheckStatus }>>();
+  const autoCheckCache = new Map<string, { at: number; repoId: string; status: Exclude<AutoCheckStatus, "superseded"> }>();
+  const autoCheckAborts = new Map<string, Set<AbortController>>();
+  const autoCheckSlots: Array<() => void> = [];
   let autoCheckInFlight = 0;
   let networkPausedUntil = 0;
+
+  yieldAutoChecks = (repoId) => {
+    for (const controller of autoCheckAborts.get(repoId) ?? []) {
+      controller.abort(AUTO_CHECK_SUPERSEDED);
+    }
+    // The operation about to run answers the question itself; the next
+    // check after it must ask the remote again rather than repeat a stale
+    // "unavailable" from before it.
+    for (const [key, entry] of autoCheckCache) {
+      if (entry.repoId === repoId) autoCheckCache.delete(key);
+    }
+  };
+  remoteOperationSucceeded = () => { networkPausedUntil = 0; };
 
   bus.register("remote:checkSelected", async (req) => {
     const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
     if (worktree.branch === null) return ok({ status: "untracked" as const });
+    const branch = worktree.branch;
     const repo = repoOf(worktree.repoId);
     if (repo === null) return ok({ status: "unavailable" as const });
-    const key = `${req.worktreeId}\0${worktree.branch}`;
+    const key = `${req.worktreeId}\0${branch}`;
     const pending = autoChecks.get(key);
     if (pending !== undefined) return ok(await pending);
     const cached = autoCheckCache.get(key);
@@ -382,60 +419,60 @@ export function registerRemoteHandlers(
     if (cached !== undefined && Date.now() - cached.at < ttl) {
       return ok({ status: cached.status });
     }
-    if (Date.now() < networkPausedUntil || autoCheckInFlight >= 2) {
+    if (Date.now() < networkPausedUntil) {
       return ok({ status: "unavailable" as const });
     }
-    autoCheckInFlight += 1;
-    const checking = (async (): Promise<{ status: "checked" | "untracked" | "unavailable" }> => {
+    const controller = new AbortController();
+    const aborts = autoCheckAborts.get(worktree.repoId) ?? new Set();
+    aborts.add(controller);
+    autoCheckAborts.set(worktree.repoId, aborts);
+    const checking = (async (): Promise<{ status: AutoCheckStatus }> => {
+      // A full slot waits rather than answering "unavailable": that answer
+      // reads as "remote unchecked", which is false when the network is fine
+      // and the user merely clicked through three repositories quickly.
+      while (autoCheckInFlight >= 2) {
+        await new Promise<void>((resolve) => { autoCheckSlots.push(resolve); });
+      }
+      autoCheckInFlight += 1;
+      const timeout = AbortSignal.timeout(12_000);
+      const signal = AbortSignal.any([controller.signal, timeout]);
+      const git = controlledGit(execGit, { signal });
+      // Time spent queued behind someone else's lock is not the network
+      // being slow, and must not pause every other check for two minutes.
+      let waitedForLock = false;
+      const exclusive = <T>(run: () => Promise<T>): Promise<T> => {
+        const queuedAt = Date.now();
+        return operations.runRepository(worktree.repoId, () => {
+          if (Date.now() - queuedAt > 250) waitedForLock = true;
+          return run();
+        });
+      };
       let fetched = false;
-      let timeout: AbortSignal | undefined;
       try {
-        const result = await tracked(
-          {
-            kind: "fetch",
-            profileId: repo.profileId,
-            repoId: worktree.repoId,
-            repoName: repo.name,
-            worktreeId: req.worktreeId,
-            branch: worktree.branch,
-            phase: "prepare"
-          },
-          "prepare",
-          async (_git, activity) => {
-            timeout = AbortSignal.timeout(12_000);
-            const signal = AbortSignal.any([activity.signal, timeout]);
-            const git = activityGit(activity, signal);
-            try {
-              const identity = readIdentity?.(worktree.repoId);
-              if (identity?.parent !== undefined) {
-                const parent = {
-                  hostname: identity.hostname,
-                  nameWithOwner: identity.parent.nameWithOwner
-                };
-                const ensured = await ensureForkParentRemote(
-                  git, worktree.path, parent,
-                  { hostname: identity.hostname, nameWithOwner: identity.nameWithOwner },
-                  hostsForRemotes?.() ?? {}
-                );
-                if (!ensured.ok) return ensured;
-              }
-              return await checkSelectedRemoteTips(
-                git, worktree.path, worktree.branch!, forkParentOf(worktree.repoId),
-                () => activity.setPhase("fetch"),
-                () => { fetched = true; activity.setPhase("prepare"); }
-              );
-            } finally {
-              if (fetched) {
-                activity.setPhase("refresh");
-                await refreshRemoteBranches(worktree.repoId, "automatic check");
-                await refresher.refreshWorktree(req.worktreeId);
-                emitEvent("graph:changed", { repoId: worktree.repoId });
-              }
-            }
+        if (controller.signal.aborted) return { status: "superseded" };
+        const result = await (async (): Promise<Result<"checked" | "untracked">> => {
+          const identity = readIdentity?.(worktree.repoId);
+          if (identity?.parent !== undefined) {
+            const parent = {
+              hostname: identity.hostname,
+              nameWithOwner: identity.parent.nameWithOwner
+            };
+            const ensured = await exclusive(() => ensureForkParentRemote(
+              git, worktree.path, parent,
+              { hostname: identity.hostname, nameWithOwner: identity.nameWithOwner },
+              hostsForRemotes?.() ?? {}
+            ));
+            if (!ensured.ok) return ensured;
           }
-        );
+          return checkSelectedRemoteTips(
+            git, worktree.path, branch, forkParentOf(worktree.repoId),
+            exclusive,
+            () => { fetched = true; }
+          );
+        })();
+        if (controller.signal.aborted) return { status: "superseded" };
         if (!result.ok) {
-          if (timeout?.aborted || /network is unreachable|could not resolve|failed to connect|connection timed out|no route to host/i.test(result.error.message)) {
+          if ((timeout.aborted && !waitedForLock) || /network is unreachable|could not resolve|failed to connect|connection timed out|no route to host/i.test(result.error.message)) {
             networkPausedUntil = Date.now() + 2 * 60_000;
           }
           logMain("debug", "remote", `automatic tip check unavailable for ${repo.path}: ${sanitizeGitLogDetail(result.error.message)}`);
@@ -443,19 +480,33 @@ export function registerRemoteHandlers(
         }
         return { status: result.value };
       } catch (cause) {
-        if (timeout?.aborted) networkPausedUntil = Date.now() + 2 * 60_000;
+        if (controller.signal.aborted) return { status: "superseded" };
+        if (timeout.aborted && !waitedForLock) networkPausedUntil = Date.now() + 2 * 60_000;
         logMain("debug", "remote", `automatic tip check unavailable for ${repo.path}: ${sanitizeGitLogDetail(cause)}`);
         return { status: "unavailable" };
+      } finally {
+        autoCheckInFlight -= 1;
+        autoCheckSlots.shift()?.();
+        if (fetched) {
+          await refreshRemoteBranches(worktree.repoId, "automatic check");
+          await refresher.refreshWorktree(req.worktreeId);
+          emitEvent("graph:changed", { repoId: worktree.repoId });
+        }
       }
     })();
     autoChecks.set(key, checking);
     try {
       const answer = await checking;
-      autoCheckCache.set(key, { at: Date.now(), status: answer.status });
+      // A superseded check learned nothing; caching it would hide the answer
+      // the next check gets once the user's own operation is done.
+      if (answer.status !== "superseded") {
+        autoCheckCache.set(key, { at: Date.now(), repoId: worktree.repoId, status: answer.status });
+      }
       return ok(answer);
     } finally {
       autoChecks.delete(key);
-      autoCheckInFlight -= 1;
+      aborts.delete(controller);
+      if (aborts.size === 0) autoCheckAborts.delete(worktree.repoId);
     }
   });
 

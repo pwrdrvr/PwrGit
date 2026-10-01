@@ -32,13 +32,19 @@ export async function ensureForkParentRemote(
   return added.ok ? ok(undefined) : err(added.error);
 }
 
-/** Read only the refs that can change the selected branch's sync chip. */
+/**
+ * Read only the refs that can change the selected branch's sync chip.
+ *
+ * Every read here — `ls-remote` included — runs outside the repository lock,
+ * because a slow or wedged remote would otherwise hold up stashes and user
+ * fetches for the whole timeout. Only the ref writes go through `exclusive`.
+ */
 export async function checkSelectedRemoteTips(
   git: GitExec,
   cwd: string,
   branch: string,
   parent: ForkParentHint | null,
-  onFetching: () => void,
+  exclusive: <T>(run: () => Promise<T>) => Promise<T>,
   onFetched: () => void
 ): Promise<Result<"checked" | "untracked">> {
   const endpoints = await listRemoteEndpoints(git, cwd);
@@ -114,37 +120,51 @@ export async function checkSelectedRemoteTips(
     }
     const line = advertised.value.stdout.split("\n").find((row) => row.endsWith(`\t${target.remoteRef}`));
     const remoteHead = line?.split("\t")[0] ?? "";
+    const deleted = advertised.value.stdout.trim() === "";
     const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], cwd);
     if (!local.ok) return local;
-    // A deleted branch must stop contributing stale counts. Compare the old
-    // OID when deleting so another Git client cannot lose a newer update.
-    if (advertised.value.stdout.trim() === "") {
-      if (local.value.exitCode === 0) {
-        const removed = await git(
-          ["update-ref", "-d", target.localRef, local.value.stdout.trim()], cwd
-        );
-        if (!removed.ok) return removed;
-        if (removed.value.exitCode !== 0) {
-          return err({ kind: "remote", code: "fetch_failed", message: "Remote ref changed during the check." });
-        }
-        onFetched();
-      }
-      continue;
-    }
-    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(remoteHead)) {
-      return err({ kind: "remote", code: "remote_missing", message: "Remote branch was not advertised." });
-    }
-    if (local.value.exitCode === 0 && local.value.stdout.trim() === remoteHead) continue;
-    onFetching();
-    const fetched = await fetchRefspec(
-      git,
-      cwd,
-      target.remote,
-      `+${target.remoteRef}:${target.localRef}`,
-      true
-    );
-    if (!fetched.ok) return fetched;
-    onFetched();
+    const current = local.value.exitCode === 0 ? local.value.stdout.trim() : null;
+    // The common answer is "nothing moved", and it needs no lock at all.
+    if (deleted ? current === null : current === remoteHead) continue;
+    const updated = await exclusive(() => syncTrackingRef(git, cwd, target, remoteHead, deleted));
+    if (!updated.ok) return updated;
+    if (updated.value) onFetched();
   }
   return ok(targets.length === 0 ? "untracked" : "checked");
+}
+
+/** Bring one tracking ref to the advertised tip; true when it moved. */
+async function syncTrackingRef(
+  git: GitExec,
+  cwd: string,
+  target: Target,
+  remoteHead: string,
+  deleted: boolean
+): Promise<Result<boolean>> {
+  const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], cwd);
+  if (!local.ok) return local;
+  // A deleted branch must stop contributing stale counts. Compare the old
+  // OID when deleting so another Git client cannot lose a newer update.
+  if (deleted) {
+    if (local.value.exitCode !== 0) return ok(false);
+    const removed = await git(
+      ["update-ref", "-d", target.localRef, local.value.stdout.trim()], cwd
+    );
+    if (!removed.ok) return removed;
+    if (removed.value.exitCode !== 0) {
+      return err({ kind: "remote", code: "fetch_failed", message: "Remote ref changed during the check." });
+    }
+    return ok(true);
+  }
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(remoteHead)) {
+    return err({ kind: "remote", code: "remote_missing", message: "Remote branch was not advertised." });
+  }
+  if (local.value.exitCode === 0 && local.value.stdout.trim() === remoteHead) return ok(false);
+  const fetched = await fetchRefspec(
+    git,
+    cwd,
+    target.remote,
+    `+${target.remoteRef}:${target.localRef}`
+  );
+  return fetched.ok ? ok(true) : fetched;
 }
