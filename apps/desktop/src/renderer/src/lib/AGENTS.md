@@ -113,6 +113,11 @@ already fully on screen: `.ssh-trust__link` (`overflow-wrap: anywhere`) and
 pointer is noise. Check for `text-overflow: ellipsis` before assuming a
 duplicated string is overflow recovery — most of them are.
 
+Even then, a name that fits is on screen too. An ellipsised label whose card
+would only repeat it — the repo and branch names in the sidebar, the title
+bar's repo crumb — takes `truncatedTooltip(tip, text)`, which opens only while
+the element is actually cut short.
+
 ### Testing it
 
 The sentence only exists while something is hovered, so assert the **rendered

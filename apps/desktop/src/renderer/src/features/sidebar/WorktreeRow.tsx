@@ -14,6 +14,7 @@ import {
 import { relativeAge } from "../../lib/relativeAge";
 import {
   hoverTooltip,
+  truncatedTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { openResetToRemote } from "../graph/reset-to-remote";
@@ -214,7 +215,10 @@ export function WorktreeRow({
           <path d="M18 9c0 6-6 6-6 12" />
         </svg>
       )}
-      <span className="wt-row__branch" {...hoverTooltip(tip, worktree.branch)}>
+      <span
+        className="wt-row__branch"
+        {...truncatedTooltip(tip, worktree.branch)}
+      >
         {worktree.branch}
       </span>
       {worktree.isPrimary && (
