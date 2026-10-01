@@ -69,3 +69,23 @@ For a cache, the test that matters is the **key**: two profiles whose repos
 share a branch name, asserted not to serve each other — the shape
 `graph-handlers.test.ts` already uses for scope and worktree ("caches per
 scope, so one scope cannot serve the other").
+
+## A deferred quit resumes from a macrotask
+
+A `before-quit` or `will-quit` listener that calls `preventDefault()` and then
+retries `app.quit()` must retry through `retryQuitAfterDispatch`
+(`quit-retry.ts`), never straight from the promise chain it waited on. A
+native quit (⌘Q, Dock → Quit, SIGTERM) runs that chain's microtasks *inside*
+the Electron pass being deferred, and the pass then cancels the retry:
+Electron emits `window-all-closed` where `will-quit` belongs, and only the
+exit fail-safe ends the process. `quitDrain` (`bounded-shutdown.ts`) is the
+one listener that defers today, and only while it has something to flush (a
+profiler recording, an agent request or backend open).
+
+Playwright quits from JavaScript, which never nests, so E2E cannot catch a
+regression. `quit-reentry.test.ts` drives the drain through a model of
+Electron's quit state machine (`test-support/electron-quit-model.ts`), and two
+probes check the real thing without drawing anything on screen:
+`pnpm --filter @pwrgit/desktop probe:quit-reentry` (re-run on an Electron
+major bump; it fails if Electron stops matching the model) and, after a
+build, `probe:app-quit` (the built app, quit with SIGTERM).
