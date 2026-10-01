@@ -211,6 +211,32 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+it("clears a pending sync flash when the header unmounts", async () => {
+  freezeClock();
+  const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+  bridge.dispatch.mockReturnValueOnce(Promise.resolve(ok({ remotes: [] })));
+  await act(async () => {
+    container
+      .querySelector<HTMLButtonElement>('button[aria-label="Fetch"]')
+      ?.click();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(container.querySelector(".sync-chip")?.textContent).toContain("fetched");
+  const flashTimeoutCall = setTimeoutSpy.mock.calls.findIndex(
+    ([, delay]) => delay === 1600
+  );
+  expect(flashTimeoutCall).toBeGreaterThanOrEqual(0);
+  const flashTimeout = setTimeoutSpy.mock.results[flashTimeoutCall]?.value;
+  const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+  await act(async () => root.unmount());
+  expect(clearTimeoutSpy).toHaveBeenCalledWith(flashTimeout);
+  setTimeoutSpy.mockRestore();
+  clearTimeoutSpy.mockRestore();
+  root = createRoot(container);
+});
+
 describe("WorktreeHeader sync buttons stay focusable while busy", () => {
   // The sibling of a11y-sidebar.spec.ts's guard on .wt-refresh. Chromium blurs
   // an element the moment it becomes disabled, so `disabled={busy !== null}`
