@@ -29,6 +29,7 @@ import {
   type SettingsFocusRequest
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
+import { CodexVersionHelp, codexVersionMessage } from "./CodexVersionHelp";
 
 /** What `aiProviders:codexModels` answered, and for which profile and binary. */
 type CodexModelsRead = {
@@ -57,13 +58,13 @@ export function AiFeaturesSettings(props: {
   useEffect(() => request(), [request]);
   const probeIds = useInUseAcpModelProbes();
 
-  // Codex's list is keyed by exactly what main caches it by — the binary and
-  // the account — so it is re-read when either moves and not otherwise.
+  // Follow main's binary version + account key, including upgrades in place.
   const resolved = codexSnapshot?.resolvedPath ?? null;
+  const version = codexSnapshot?.candidates.find((candidate) => candidate.path === resolved)?.version;
   const codexKey =
     profileId === null || resolved === null
       ? null
-      : JSON.stringify([profileId, resolved, codexSnapshot?.auth?.codexHome ?? null]);
+      : JSON.stringify([profileId, resolved, version ?? null, codexSnapshot?.auth?.codexHome ?? null]);
   const [codexModels, setCodexModels] = useState<CodexModelsRead | null>(null);
   const [codexModelsLoading, setCodexModelsLoading] = useState(false);
   const codexSeq = useRef(0);
@@ -126,6 +127,7 @@ export function AiFeaturesSettings(props: {
                 type="button"
                 onClick={() => {
                   if (refreshing) return;
+                  void ai.refreshCodexSnapshot(true);
                   if (codexKey !== null) void readCodexModels(codexKey, profileId, true);
                   for (const id of probeIds) void fetchAcpModels(id, true);
                 }}
@@ -160,6 +162,16 @@ export function AiFeaturesSettings(props: {
             eyebrow="Features"
             description="The provider, model and reasoning each feature starts with. Default leaves the choice to the provider."
           >
+            {codexSnapshot?.versionAdvisory !== undefined && (
+              <SettingsField
+                label="Update Codex for newer models"
+                sub={codexVersionMessage(codexSnapshot.versionAdvisory)}
+                control={<CodexVersionHelp
+                  key={`${codexSnapshot.versionAdvisory.command}:${codexSnapshot.versionAdvisory.version}`}
+                  advisory={codexSnapshot.versionAdvisory}
+                />}
+              />
+            )}
             {AI_JOB_IDS.map((jobId) => (
               <JobDefaultRow
                 key={jobId}

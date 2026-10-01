@@ -232,6 +232,18 @@ describe("AiProviderService", () => {
       expect(deps.discoverCodex).toHaveBeenCalledTimes(2);
     });
 
+    it("warns only about the selected runtime, then clears the advisory after an upgrade", async () => {
+      const { service, deps } = harness();
+      const snapshot = codexSnapshot();
+      snapshot.candidates.push({ command: "/opt/new/codex", source: "path", executable: true, selected: false, version: "0.159.2" });
+      deps.discoverCodex.mockResolvedValue(snapshot);
+      expect((await service.discoverCodex("personal")).versionAdvisory).toMatchObject({
+        command: CODEX, version: "0.130.0", minimumVersion: "0.159.2"
+      });
+      snapshot.candidates[0]!.version = "0.159.2";
+      expect((await service.discoverCodex("personal", { force: true })).versionAdvisory).toBeUndefined();
+    });
+
     it("re-probes on force", async () => {
       const { service, deps } = harness();
       await service.discoverCodex("personal");
@@ -379,7 +391,7 @@ describe("AiProviderService", () => {
       expect(await service.codexModels("personal")).toEqual({ ok: true, value: { models: persisted } });
 
       expect(deps.codexModelCache.load).toHaveBeenCalledTimes(1);
-      expect(deps.codexModelCache.load).toHaveBeenCalledWith(codexModelCacheKey(CODEX, DEFAULT_HOME));
+      expect(deps.codexModelCache.load).toHaveBeenCalledWith(codexModelCacheKey(CODEX, DEFAULT_HOME, "0.130.0"));
       expect(deps.listCodexModels).not.toHaveBeenCalled();
     });
 
@@ -396,7 +408,7 @@ describe("AiProviderService", () => {
         env: fakeEnvironment("personal", DEFAULT_AI_PROVIDER_SETTINGS.codex).env,
         includeHidden: false
       });
-      expect(deps.codexModelCache.save).toHaveBeenCalledWith(codexModelCacheKey(CODEX, DEFAULT_HOME), {
+      expect(deps.codexModelCache.save).toHaveBeenCalledWith(codexModelCacheKey(CODEX, DEFAULT_HOME, "0.130.0"), {
         models: [codexModel("gpt-5-codex")],
         discoveredAt: new Date(clock.now).toISOString()
       });
@@ -433,6 +445,27 @@ describe("AiProviderService", () => {
 
       expect(deps.listCodexModels).toHaveBeenCalledTimes(1);
       expect(refreshed).toEqual({ ok: true, value: { models: [codexModel("gpt-5-codex")] } });
+    });
+
+    it("discovers Sol models after the same executable is upgraded, including across restart", async () => {
+      const { service, deps } = harness();
+      const snapshot = codexSnapshot();
+      deps.discoverCodex.mockResolvedValue(snapshot);
+      const disk = new Map<string, { models: CodexModelOption[]; discoveredAt: string }>();
+      deps.codexModelCache.load.mockImplementation((key) => disk.get(key));
+      deps.codexModelCache.save.mockImplementation((key, entry) => { disk.set(key, entry); });
+      await service.codexModels("personal");
+      snapshot.candidates[0]!.version = "0.159.2";
+      const models = [codexModel("gpt-6-sol", "GPT-6 Sol"), codexModel("gpt-6.1-sol", "GPT-6.1 Sol")];
+      deps.listCodexModels.mockResolvedValue(models);
+      // A discovery refresh changes the version even though the path stays put.
+      await service.discoverCodex("personal", { force: true });
+      expect(await service.codexModels("personal")).toEqual({ ok: true, value: { models } });
+      expect(deps.listCodexModels).toHaveBeenCalledTimes(2);
+      const reopened = new AiProviderService(deps);
+      expect(await reopened.codexModels("personal")).toEqual({ ok: true, value: { models } });
+      expect(deps.listCodexModels).toHaveBeenCalledTimes(2);
+      reopened.dispose();
     });
 
     it("keeps each account's list apart", async () => {

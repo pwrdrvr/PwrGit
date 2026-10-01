@@ -27,6 +27,7 @@ import {
   type SettingsFocusRequest
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
+import { CodexVersionHelp, codexVersionMessage } from "./CodexVersionHelp";
 
 /**
  * Settings → AI Providers: the agents PwrGit can hand work to, one card per
@@ -204,6 +205,13 @@ function CodexSection(props: { status: AiProviderStatus; onEditDefaults: () => v
       {...statusChip(props.status)}
     >
       <DefaultForField provider="codex" onEditDefaults={props.onEditDefaults} />
+      {snapshot?.versionAdvisory !== undefined && (
+        <SettingsField
+          label="Update recommended"
+          sub={codexVersionMessage(snapshot.versionAdvisory)}
+          control={<CodexVersionHelp key={`${snapshot.versionAdvisory.command}:${snapshot.versionAdvisory.version}`} advisory={snapshot.versionAdvisory} />}
+        />
+      )}
       <SettingsField
         label="Selection"
         sub="Newest found follows the newest usable Codex on this machine. Specified path runs one binary for as long as it works."

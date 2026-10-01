@@ -366,3 +366,14 @@ describe("AI Providers pane", () => {
     expect(card("Grok").textContent).toContain("Grok is not signed in.");
   });
 });
+
+it("shows the selected runtime's model warning and installer-specific command", async () => {
+  codex.versionAdvisory = {
+    version: "0.153.4", minimumVersion: "0.159.2", command: codex.resolvedPath!,
+    installer: "homebrew", upgradeCommand: "brew upgrade --cask codex"
+  };
+  await render();
+  expect(container.textContent).toContain("GPT-6-Sol and GPT-6.1-Sol");
+  expect(container.textContent).toContain("brew upgrade --cask codex");
+  expect(container.textContent).toContain("Update recommended");
+});

@@ -88,6 +88,7 @@ import {
 } from "./ai-provider-discovery";
 import type { AiProviderSettingsStore } from "./ai-provider-settings";
 import { listCodexModels, type CodexModelLister } from "./codex-model-client";
+import { buildCodexVersionAdvisory } from "./codex-version-advisory";
 import { codexModelCacheKey, type CodexModelCache } from "./codex-model-cache";
 
 /** How long a discovery answer is served without re-probing. Settings'
@@ -356,12 +357,12 @@ export class AiProviderService {
     profileId: ProfileId,
     options: { refresh?: boolean } = {}
   ): Promise<Result<CodexModelList, PwrGitError>> {
-    const resolution = await this.codexResolution(this.settings(profileId), profileId, false);
+    const resolution = await this.codexResolution(this.settings(profileId), profileId, options.refresh === true);
     if (resolution.selected === null) {
       return err(agentError("codex_unavailable", "No usable Codex CLI was found."));
     }
-    const { command } = resolution.selected;
-    const key = codexModelCacheKey(command, resolution.environment.codexHome);
+    const { command, version } = resolution.selected;
+    const key = codexModelCacheKey(command, resolution.environment.codexHome, version);
     if (options.refresh !== true) {
       // Empty is never a hit, for the reason the ACP path gives below: it
       // would shadow a re-probe that might now succeed.
@@ -723,6 +724,11 @@ export class AiProviderService {
         : {})
     });
     const selected = selectedCodexCandidate(snapshot);
+    const versionAdvisory = await buildCodexVersionAdvisory({
+      command: selected?.command,
+      version: selected?.version,
+      source: snapshot.candidates.find((candidate) => candidate.command === selected?.command)?.source
+    });
     const auth =
       selected === null
         ? null
@@ -737,6 +743,7 @@ export class AiProviderService {
           );
     return {
       discovery: {
+        ...(versionAdvisory === undefined ? {} : { versionAdvisory }),
         candidates: toCodexCandidates(snapshot),
         resolvedPath: selected?.command ?? null,
         auth,

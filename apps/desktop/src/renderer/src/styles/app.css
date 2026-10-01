@@ -15442,6 +15442,25 @@ button.agent-auth-node:focus-visible,
   user-select: text;
 }
 
+/* Installer guidance needs the full card width, with actions below the text. */
+.codex-version-notice {
+  grid-template-columns: minmax(0, 1fr);
+  width: 420px;
+}
+.codex-version-notice .app-toast__actions {
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.codex-version-help {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  user-select: text;
+}
+.codex-version-help > p {
+  margin: 0;
+}
+
 .app-toast__eyebrow {
   margin: 0 0 4px;
   font: 700 10.5px/1.2 var(--font-sans);

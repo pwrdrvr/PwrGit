@@ -64,6 +64,19 @@ describe("toCodexModelOption", () => {
     });
   });
 
+  it.each(["gpt-6-sol", "gpt-6.1-sol"])("preserves live %s metadata and reasoning choices", (id) => {
+    const option = toCodexModelOption({
+      id, model: id, displayName: id === "gpt-6-sol" ? "GPT-6 Sol" : "GPT-6.1 Sol",
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map(
+        (reasoningEffort) => ({ reasoningEffort })
+      ), defaultReasoningEffort: "medium"
+    });
+    expect(option.id).toBe(id);
+    expect(option.displayName).toContain("Sol");
+    expect(option.supportedReasoningEfforts).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    expect(option.defaultReasoningEffort).toBe("medium");
+  });
+
   it("accepts efforts advertised as { reasoningEffort } records", () => {
     expect(
       toCodexModelOption({

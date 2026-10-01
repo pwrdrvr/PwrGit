@@ -130,9 +130,14 @@ separately.
   else the first. The context is keyed by that id and drops every answer when
   it changes. The picker sits in each pane head, so nobody edits another
   profile's settings unawares.
-- **Nothing is probed until someone asks.** `request()` is called when either
+- **Settings probes on demand.** `request()` is called when either
   AI pane mounts or the AI Providers group unfolds. Opening Settings on General
-  spawns nothing. Main serves from cache; only Re-check forces a re-probe.
+  spawns nothing. Main serves from cache; Re-check and Refresh models force a
+  re-probe.
+- **The launch notice probes Codex only when AI is enabled for its profile.**
+  `CodexVersionNotice` uses the same discovery service as Settings; its version
+  warning is advisory, so older models remain usable. Model-list keys include
+  the selected binary's version so upgrading it in place re-reads the picker.
 - **Model probes start the agent.** `aiProviders:acpModels` really starts the
   agent, so only an agent a job is routed to is probed on its own
   (`useInUseAcpModelProbes`). Any other agent is probed only when someone

@@ -8,6 +8,7 @@ overrides:
   '@types/node': 24.12.4
   js-yaml: 4.3.2
   hono: 4.13.7
+  '@pwrdrvr/codex-app-server-protocol': 0.159.2
 
 pnpmfileChecksum: sha256-nRR5Sc76JwWXOp9jCS3HnvGJPUnmWL0OyEHf3aFR3Nw=
 
@@ -57,6 +58,9 @@ importers:
       '@pwrdrvr/agent-transport':
         specifier: ^0.1.7
         version: 0.1.7
+      '@pwrdrvr/codex-app-server-protocol':
+        specifier: 0.159.2
+        version: 0.159.2
       '@pwrdrvr/codex-discovery':
         specifier: ^0.4.0
         version: 0.4.0
@@ -955,8 +959,8 @@ packages:
   '@pwrdrvr/agent-transport@0.1.7':
     resolution: {integrity: sha512-91LJLC+jdWO6v3WIqoWI/CLHkMJebF4hEqk0vOkgK6DlawrA926EP7kHQ1VOE/iQRo5LCRqFqxjtWn6mQcs/EQ==}
 
-  '@pwrdrvr/codex-app-server-protocol@0.144.0':
-    resolution: {integrity: sha512-WmURXzmmNEY8lmnNZunNQj/Bnn3yjzS6Rc0gzlDU7sBHMd0kvtskXE9BCMcR+E7sVJ53V/gwjfksRUli0xUgdA==}
+  '@pwrdrvr/codex-app-server-protocol@0.159.2':
+    resolution: {integrity: sha512-Zj2YiLuF+pMabkXYWBxft6KXEaKtKXqiVJTrvUhRjSGI73RuzFCoEiC/nP0XBIt2QtMVHb8Yt3zlkHb4u0H9VA==}
     engines: {node: '>=20'}
 
   '@pwrdrvr/codex-discovery@0.4.0':
@@ -3707,7 +3711,7 @@ snapshots:
     dependencies:
       '@pwrdrvr/agent-core': 0.2.0
       '@pwrdrvr/agent-transport': 0.1.7
-      '@pwrdrvr/codex-app-server-protocol': 0.144.0
+      '@pwrdrvr/codex-app-server-protocol': 0.159.2
       '@pwrdrvr/codex-discovery': 0.4.0
       zod: 4.6.5
 
@@ -3717,7 +3721,7 @@ snapshots:
     dependencies:
       '@pwrdrvr/agent-core': 0.2.0
 
-  '@pwrdrvr/codex-app-server-protocol@0.144.0': {}
+  '@pwrdrvr/codex-app-server-protocol@0.159.2': {}
 
   '@pwrdrvr/codex-discovery@0.4.0':
     dependencies:
