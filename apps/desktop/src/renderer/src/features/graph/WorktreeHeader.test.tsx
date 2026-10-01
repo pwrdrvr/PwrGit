@@ -2029,6 +2029,7 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       if (name === "remote:forkStatus") return Promise.resolve(ok(fork));
       if (name === "remote:activities") return Promise.resolve(ok([]));
       if (name in replies) return Promise.resolve(replies[name]);
+      if (name === "remote:checkSelected") return Promise.resolve(ok({ status: "checked" }));
       return new Promise(() => undefined);
     });
   };
@@ -2094,6 +2095,102 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     answer({ ...behindSource(), tracked: null });
     await remount();
     expect(caret()).toBeNull();
+  });
+
+  it("does not claim a stale tracking ref is up to date while the remote is unavailable", async () => {
+    let finish!: (value: ReturnType<typeof ok<{ status: "unavailable" }>>) => void;
+    const checking = new Promise<ReturnType<typeof ok<{ status: "unavailable" }>>>(
+      (resolve) => { finish = resolve; }
+    );
+    answer(null, { "remote:checkSelected": checking });
+    await remount();
+    expect(statusChip()).toBe("checking remote…");
+    await act(async () => {
+      finish(ok({ status: "unavailable" }));
+      await settle();
+    });
+    expect(statusChip()).toBe("remote unchecked");
+  });
+
+  it("checks again after the selected worktree switches branches", async () => {
+    type CheckReply = ReturnType<typeof ok<{ status: "checked" }>>;
+    const pending: Array<(value: CheckReply) => void> = [];
+    answer(null);
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "remote:checkSelected") {
+        return new Promise<CheckReply>((resolve) => { pending.push(resolve); });
+      }
+      if (name === "remote:forkStatus") return Promise.resolve(ok(null));
+      if (name === "remote:activities") return Promise.resolve(ok([]));
+      return new Promise(() => undefined);
+    });
+    await remount();
+    expect(pending).toHaveLength(1);
+    expect(statusChip()).toBe("checking remote…");
+
+    await act(async () => {
+      root.render(
+        <WorktreeHeader
+          repo={repo}
+          worktree={{ ...worktree, branch: "topic" }}
+          state={{ ...level, branch: "topic" }}
+        />
+      );
+    });
+    expect(pending).toHaveLength(2);
+    await act(async () => {
+      pending[0]!(ok({ status: "checked" }));
+      await settle();
+    });
+    expect(statusChip()).toBe("checking remote…");
+    await act(async () => {
+      pending[1]!(ok({ status: "checked" }));
+      await settle();
+    });
+    expect(statusChip()).toBe("up to date");
+  });
+
+  it("keeps a confirmed answer while it rechecks, and a superseded check changes nothing", async () => {
+    type CheckReply = ReturnType<typeof ok<{ status: "checked" | "superseded" }>>;
+    const pending: Array<(value: CheckReply) => void> = [];
+    answer(null);
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "remote:checkSelected") {
+        return new Promise<CheckReply>((resolve) => { pending.push(resolve); });
+      }
+      if (name === "remote:forkStatus") return Promise.resolve(ok(null));
+      if (name === "remote:activities") return Promise.resolve(ok([]));
+      return new Promise(() => undefined);
+    });
+    await remount();
+    await act(async () => {
+      pending[0]!(ok({ status: "checked" }));
+      await settle();
+    });
+    expect(statusChip()).toBe("up to date");
+
+    const show = async (branch: string): Promise<void> => {
+      await act(async () => {
+        root.render(
+          <WorktreeHeader
+            repo={repo}
+            worktree={{ ...worktree, branch }}
+            state={{ ...level, branch }}
+          />
+        );
+      });
+    };
+    await show("topic");
+    await show(worktree.branch);
+    // Back on a branch the remote already confirmed: the recheck runs, and
+    // the chip does not flicker through "checking remote…" while it does.
+    expect(pending).toHaveLength(3);
+    expect(statusChip()).toBe("up to date");
+    await act(async () => {
+      pending[2]!(ok({ status: "superseded" }));
+      await settle();
+    });
+    expect(statusChip()).toBe("up to date");
   });
 
   it("syncs from Pull by default, and the receipt names the push", async () => {

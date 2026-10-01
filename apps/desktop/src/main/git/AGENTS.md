@@ -163,6 +163,15 @@ looks the same from the outside. Nothing short of "Git has written nothing at
 all since this command started" separates the two — which is why `silent` is
 scoped to the command and why Cancel exists.
 
+**The one exception is `remote:checkSelected`, the automatic check behind the
+header's "up to date".** The registry drives the header's buttons, so a
+registered check showed "Preparing local changes…" on Fetch and locked Pull and
+Push for up to its whole timeout, every minute, with nothing asked for. It
+stays out because it cannot wedge: a 12s timeout of its own, the repository
+lock held only for ref writes (`ls-remote` runs unlocked), and `tracked()`
+aborting it so a user's fetch never queues behind it. A background check
+without all three belongs in the registry.
+
 ## Paths from git are always forward-slash
 
 `git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform, so

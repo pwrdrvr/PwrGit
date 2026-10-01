@@ -48,6 +48,8 @@ import {
 import type { WorktreeRefresher } from "./worktree-handlers";
 import type { RepoIndexer } from "./repo-indexer";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
+import { execGit } from "./dugite";
 
 vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
@@ -74,8 +76,16 @@ vi.mock("./git-service", async (importOriginal) => {
   };
 });
 
+vi.mock("./dugite", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./dugite")>();
+  return { ...actual, execGit: vi.fn(actual.execGit) };
+});
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
+vi.mock("./auto-remote-check", () => ({
+  checkSelectedRemoteTips: vi.fn(),
+  ensureForkParentRemote: vi.fn()
+}));
 vi.mock("./ssh-remote-recovery", () => ({
   applySshRemoteRecovery: vi.fn(),
   inspectSshPushRecovery: vi.fn(),
@@ -115,6 +125,8 @@ function liveActivities(
 describe("remote handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(checkSelectedRemoteTips).mockResolvedValue(ok("checked"));
+    vi.mocked(ensureForkParentRemote).mockResolvedValue(ok(undefined));
     vi.mocked(fetchAllRemotes).mockResolvedValue(ok(undefined));
     vi.mocked(fetchNamedRemote).mockResolvedValue(ok(undefined));
     vi.mocked(fetchNamedRemotes).mockResolvedValue(ok(undefined));
@@ -157,6 +169,114 @@ describe("remote handlers", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it("bounds automatic checks in main by queueing, and keeps same-named branches in two profiles separate", async () => {
+    const rows = new Map([
+      ["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }],
+      ["wt-b", { path: "/b/main", repoId: "repo-b", branch: "main" }],
+      ["wt-c", { path: "/c/main", repoId: "repo-c", branch: "main" }]
+    ]);
+    const repos = new Map([
+      ["repo-a", { path: "/a", name: "a", profileId: "profile-a" }],
+      ["repo-b", { path: "/b", name: "b", profileId: "profile-b" }],
+      ["repo-c", { path: "/c", name: "c", profileId: "profile-b" }]
+    ]);
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: (id: string) => sql.includes("FROM worktrees") ? rows.get(id) : repos.get(id)
+      }))
+    } as unknown as DB;
+    const refresher = {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    } satisfies WorktreeRefresher;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(checkSelectedRemoteTips).mockImplementation(async () => {
+      await gate;
+      return ok("checked");
+    });
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue());
+    const first = bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" });
+    const same = bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" });
+    const second = bus.dispatch("remote:checkSelected", { worktreeId: "wt-b" });
+    await vi.waitFor(() => expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(2));
+    // A third waits for a slot. Answering "unavailable" instead would show
+    // "remote unchecked" for a remote nothing is wrong with.
+    const third = bus.dispatch("remote:checkSelected", { worktreeId: "wt-c" });
+    await Promise.resolve();
+    expect(vi.mocked(checkSelectedRemoteTips).mock.calls.map(([, path]) => path))
+      .toEqual(["/a/main", "/b/main"]);
+    release();
+    expect(await first).toEqual(ok({ status: "checked" }));
+    expect(await same).toEqual(ok({ status: "checked" }));
+    expect(await second).toEqual(ok({ status: "checked" }));
+    expect(await third).toEqual(ok({ status: "checked" }));
+    expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" }))
+      .toEqual(ok({ status: "checked" }));
+    expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(3);
+  });
+
+  it("checks without registering an activity, and gives way to a user fetch", async () => {
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: () => sql.includes("FROM worktrees")
+          ? { path: "/repos/project", repoId: "repo-1", branch: "main" }
+          : { path: "/repos/project", name: "project", profileId: "profile-a" }
+      }))
+    } as unknown as DB;
+    // A remote that never answers: the check's Git blocks until its signal
+    // fires, which only a user operation on the repository should cause.
+    vi.mocked(checkSelectedRemoteTips).mockImplementation(async (git) => {
+      const blocked = await git(["ls-remote", "--heads", "origin"], "/repos/project");
+      return blocked.ok ? ok("checked") : blocked;
+    });
+    vi.mocked(execGit).mockImplementationOnce((_args, _cwd, options) =>
+      new Promise((resolve) => {
+        options?.signal?.addEventListener("abort", () =>
+          resolve(err({ kind: "git", code: "canceled", message: "aborted" }))
+        );
+      })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, {
+      refreshWorktree: vi.fn(async () => undefined), refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue());
+
+    const checking = bus.dispatch("remote:checkSelected", { worktreeId: "wt-1" });
+    await vi.waitFor(() => expect(execGit).toHaveBeenCalled());
+    expect(liveActivities(vi.mocked(emitEvent))).toEqual([]);
+
+    expect((await bus.dispatch("remote:fetch", { worktreeId: "wt-1" })).ok).toBe(true);
+    expect(await checking).toEqual(ok({ status: "superseded" }));
+    // Nothing was learned, so nothing is cached: the next ask checks again,
+    // and the network is not paused for a cancel the user caused.
+    vi.mocked(checkSelectedRemoteTips).mockResolvedValue(ok("checked"));
+    expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-1" }))
+      .toEqual(ok({ status: "checked" }));
+  });
+
+  it("backs off quietly across profiles when the network cannot resolve a remote", async () => {
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: (id: string) => sql.includes("FROM worktrees")
+          ? { path: `/${id}`, repoId: id === "wt-a" ? "repo-a" : "repo-b", branch: "main" }
+          : { path: `/${id}`, name: id, profileId: id === "repo-a" ? "profile-a" : "profile-b" }
+      }))
+    } as unknown as DB;
+    vi.mocked(checkSelectedRemoteTips).mockResolvedValue(
+      err({ kind: "git", code: "failed", message: "Could not resolve host" })
+    );
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue());
+    expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" }))
+      .toEqual(ok({ status: "unavailable" }));
+    expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-b" }))
+      .toEqual(ok({ status: "unavailable" }));
+    expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+  });
 
   it.each(["worktree", "repo", "all-remotes", "pull"] as const)(
     "refreshes identity after a successful %s fetch, but not a failed fetch",

@@ -1482,6 +1482,15 @@ export interface Commands {
     req: { repoId: string; remote?: string };
     res: null;
   };
+  /**
+   * Quiet, bounded check of the selected branch's tracked and fork-source
+   * tips. `superseded`: a fetch, pull or push on the repository stopped it,
+   * so it learned nothing — keep whatever was known before.
+   */
+  "remote:checkSelected": {
+    req: { worktreeId: string };
+    res: { status: "checked" | "untracked" | "unavailable" | "superseded" };
+  };
   /** Fetch each repository once, optionally applying only proven-safe FFs. */
   "remote:bulkSync": {
     req: {

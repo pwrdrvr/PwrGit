@@ -440,6 +440,8 @@ function forkSyncReceipt(
 }
 
 type Busy = "fetch" | "pull" | "push" | null;
+/** What an automatic remote check last concluded for a checkout's branch. */
+type SettledRemoteCheck = "checked" | "untracked" | "unavailable";
 
 /**
  * Hover/focus handlers shared by the sync chip and the action buttons.
@@ -556,7 +558,7 @@ export function WorktreeHeader({
   const pullButton = useRef<HTMLButtonElement | null>(null);
   /** The split Pull, so its menu opens under the whole control. */
   const pullSplit = useRef<HTMLDivElement>(null);
-  const forkStatus = useForkStatus(worktree.id, repo.id);
+  const forkStatus = useForkStatus(worktree.id, repo.id, worktree.branch);
   /** What Pull does on a fork branch the source carries. Per repository, and
    *  re-read when the header moves to another one — it stays mounted. */
   const [pullChoice, setPullChoice] = useState<PullChoice>(() =>
@@ -592,6 +594,43 @@ export function WorktreeHeader({
   // enter event announces the trigger, so the popover reads these instead.
   // Button first: it is the thing the user aimed at.
   const status = useRemoteActivityPopover(activity, [cardButton, cardChip]);
+  // The automatic remote check behind "up to date". What it last settled is
+  // remembered per checkout and branch, so a recheck — every minute, or on
+  // coming back to a worktree — keeps the chip steady instead of flickering
+  // through "checking remote…" each time.
+  const settledChecks = useRef(new Map<string, SettledRemoteCheck>());
+  const [remoteCheck, setRemoteCheck] = useState<{
+    key: string;
+    checking: boolean;
+  } | null>(null);
+  // Bumped when a remote operation on this checkout ends: the user's own
+  // fetch supersedes the background check, so ask again once it is done.
+  const [checkEpoch, setCheckEpoch] = useState(0);
+  const hadActivity = useRef(false);
+  useEffect(() => {
+    if (hadActivity.current && activity === null) setCheckEpoch((n) => n + 1);
+    hadActivity.current = activity !== null;
+  }, [activity]);
+  useEffect(() => {
+    if (worktree.missing) return;
+    const key = `${worktree.id}\0${worktree.branch}`;
+    let active = true;
+    const settle = (status: SettledRemoteCheck | "superseded"): void => {
+      // Recorded even after this header has moved on: it is still the truth
+      // about that branch, and coming back to it should start from it.
+      if (status !== "superseded") settledChecks.current.set(key, status);
+      if (active) setRemoteCheck({ key, checking: false });
+    };
+    const check = (): void => {
+      setRemoteCheck({ key, checking: true });
+      void dispatch("remote:checkSelected", { worktreeId: worktree.id })
+        .then((result) => settle(result.ok ? result.value.status : "unavailable"))
+        .catch(() => settle("unavailable"));
+    };
+    check();
+    const timer = window.setInterval(check, 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [worktree.id, worktree.branch, worktree.missing, checkEpoch]);
   // The card and a tooltip must never share the screen. A click leaves the
   // pointer on the button whose tooltip is open, and the card it pins opens
   // right over it.
@@ -1144,10 +1183,24 @@ export function WorktreeHeader({
   // a change of worktree), so there is no stale-selection case to guard.
   const forkChoice = forkChoiceOf(forkStatus);
   const choice: PullChoice = forkChoice === null ? "tracked" : pullChoice;
+  const localChip = baseChip(state, worktree, forkStatus?.source ?? null);
+  // "up to date" is only claimed once the remote has confirmed it. Until
+  // then the chip says what is actually known.
+  const checkKey = `${worktree.id}\0${worktree.branch}`;
+  const settledCheck = settledChecks.current.get(checkKey) ?? null;
+  const checkingRemote = remoteCheck?.key !== checkKey || remoteCheck.checking;
+  const remoteUnverified =
+    localChip.text === "up to date" &&
+    (settledCheck === null || settledCheck === "unavailable");
+  const checkedChip = !remoteUnverified
+    ? localChip
+    : checkingRemote
+      ? { text: "checking remote…", tone: "muted" as const }
+      : { text: "remote unchecked", tone: "muted" as const };
   const chip =
     running !== null
       ? { text: busyLabel(running), tone: "muted" as const }
-      : (flash ?? baseChip(state, worktree, forkStatus?.source ?? null));
+      : (flash ?? checkedChip);
   // Hovering the working control is how the status card is summoned, so the
   // handlers ride on whichever button this operation belongs to — and on the
   // progress chip beside them, which is the wider target and the thing a user
@@ -1422,11 +1475,15 @@ export function WorktreeHeader({
             ? flash === null
               ? hoverTooltip(
                   tip,
-                  chipExplanation(
-                    state?.worktreeId === worktree.id ? state : null,
-                    forkStatus,
-                    forkStatus?.branch ?? worktree.branch
-                  )
+                  remoteUnverified && !checkingRemote
+                    ? "The network could not confirm the remote branch. PwrGit will retry quietly."
+                    : remoteUnverified
+                      ? "Checking the remote branch for new commits."
+                      : chipExplanation(
+                          state?.worktreeId === worktree.id ? state : null,
+                          forkStatus,
+                          forkStatus?.branch ?? worktree.branch
+                        )
                 )
               : {}
             : !couldCarryCard(running)
