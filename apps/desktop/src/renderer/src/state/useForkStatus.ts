@@ -14,7 +14,8 @@ import { dispatch, subscribe } from "../lib/pwrgit";
  */
 export function useForkStatus(
   worktreeId: string,
-  repoId: string
+  repoId: string,
+  branch: string
 ): ForkStatus | null {
   const [status, setStatus] = useState<ForkStatus | null>(null);
 
@@ -43,7 +44,7 @@ export function useForkStatus(
       offWorktree();
       offGraph();
     };
-  }, [worktreeId, repoId]);
+  }, [worktreeId, repoId, branch]);
 
-  return status;
+  return status?.branch === branch ? status : null;
 }

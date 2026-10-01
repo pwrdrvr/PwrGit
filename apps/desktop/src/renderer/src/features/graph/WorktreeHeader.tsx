@@ -552,32 +552,34 @@ export function WorktreeHeader({
   const pullButton = useRef<HTMLButtonElement | null>(null);
   /** The split Pull, so its menu opens under the whole control. */
   const pullSplit = useRef<HTMLDivElement>(null);
-  const forkStatus = useForkStatus(worktree.id, repo.id);
+  const forkStatus = useForkStatus(worktree.id, repo.id, worktree.branch);
   const [remoteCheck, setRemoteCheck] = useState<{
     worktreeId: string;
+    branch: string;
     status: "checking" | "checked" | "untracked" | "unavailable";
   } | null>(null);
   useEffect(() => {
     if (worktree.missing) return;
     let active = true;
     const check = (): void => {
-      setRemoteCheck({ worktreeId: worktree.id, status: "checking" });
+      setRemoteCheck({ worktreeId: worktree.id, branch: worktree.branch, status: "checking" });
       void dispatch("remote:checkSelected", { worktreeId: worktree.id })
         .then((result) => {
           if (!active) return;
           setRemoteCheck({
             worktreeId: worktree.id,
+            branch: worktree.branch,
             status: result.ok ? result.value.status : "unavailable"
           });
         })
         .catch(() => {
-          if (active) setRemoteCheck({ worktreeId: worktree.id, status: "unavailable" });
+          if (active) setRemoteCheck({ worktreeId: worktree.id, branch: worktree.branch, status: "unavailable" });
         });
     };
     check();
     const timer = window.setInterval(check, 60_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [worktree.id, worktree.missing]);
+  }, [worktree.id, worktree.branch, worktree.missing]);
   /** What Pull does on a fork branch the source carries. Per repository, and
    *  re-read when the header moves to another one — it stays mounted. */
   const [pullChoice, setPullChoice] = useState<PullChoice>(() =>
@@ -1162,7 +1164,7 @@ export function WorktreeHeader({
   const forkChoice = forkChoiceOf(forkStatus);
   const choice: PullChoice = forkChoice === null ? "tracked" : pullChoice;
   const localChip = baseChip(state, worktree, forkStatus?.source ?? null);
-  const selectedCheck = remoteCheck?.worktreeId === worktree.id
+  const selectedCheck = remoteCheck?.worktreeId === worktree.id && remoteCheck.branch === worktree.branch
     ? remoteCheck.status : "checking";
   const checkedChip = localChip.text !== "up to date" || selectedCheck === "checked" || selectedCheck === "untracked"
     ? localChip
