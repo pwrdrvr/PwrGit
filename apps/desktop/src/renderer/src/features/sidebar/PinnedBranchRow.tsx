@@ -1,5 +1,9 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
+import {
+  hoverTooltip,
+  truncatedTooltip,
+  useViewportTooltip
+} from "../../lib/useViewportTooltip";
 import { PinIcon } from "./WorktreeRow";
 
 /** The row id a pinned branch takes in its repo's roving list, beside the
@@ -70,7 +74,10 @@ export function PinnedBranchRow({
         <circle cx="18" cy="6" r="3" />
         <path d="M18 9c0 6-6 6-6 12" />
       </svg>
-      <span className="wt-row__branch" {...hoverTooltip(tip, branch)}>
+      <span
+        className="wt-row__branch"
+        {...truncatedTooltip(tip, branch)}
+      >
         {branch}
       </span>
       <span

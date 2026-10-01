@@ -8,6 +8,7 @@ import { TitleBarBrand } from "./Brand";
 import { WindowControls } from "./WindowControls";
 import {
   hoverTooltip,
+  truncatedTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 
@@ -63,7 +64,10 @@ export function TitleBar({
 
         {repo !== null && worktree !== null && (
           <div className="titlebar__id">
-            <span className="titlebar__repo" {...hoverTooltip(tip, repo.name)}>
+            <span
+              className="titlebar__repo"
+              {...truncatedTooltip(tip, repo.name)}
+            >
               {repo.name}
             </span>
             <span aria-hidden="true" className="titlebar__sep">

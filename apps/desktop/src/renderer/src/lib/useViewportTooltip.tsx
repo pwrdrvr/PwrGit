@@ -149,6 +149,37 @@ export function hoverTooltip(
   };
 }
 
+/**
+ * `hoverTooltip` for an ellipsised label whose card would only repeat it.
+ *
+ * A name that fits is already fully on screen, and a card echoing it back is
+ * noise. One that has been cut short has no other way to be read (SC 1.4.4's
+ * intent — no loss of content when text is enlarged), so the card opens only
+ * then. Measured on every enter rather than observed, because the answer moves
+ * with the pane width and the text-size notch and is only ever asked here.
+ */
+export function truncatedTooltip(
+  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
+  text: string
+): ReturnType<typeof hoverTooltip> {
+  const handlers = hoverTooltip(tip, text);
+  const ifTruncated =
+    <E extends ReactMouseEvent<HTMLElement> | ReactFocusEvent<HTMLElement>>(
+      open: (event: E) => void
+    ) =>
+    (event: E): void => {
+      const el = event.currentTarget;
+      // Half a pixel of slack, as PullBadge's fit test: subpixel layout can
+      // report a fitting label a fraction wider than its box.
+      if (el.scrollWidth > el.clientWidth + 0.5) open(event);
+    };
+  return {
+    ...handlers,
+    onMouseEnter: ifTruncated(handlers.onMouseEnter),
+    onFocus: ifTruncated(handlers.onFocus)
+  };
+}
+
 type ViewportTooltipOptions = {
   /** Interactive cards remain open while the pointer moves from their target. */
   interactive?: boolean;

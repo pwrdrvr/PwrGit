@@ -22,6 +22,7 @@ import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
+  truncatedTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { useForgeNaming } from "../../state/useForgeNaming";
@@ -723,13 +724,12 @@ export function RepoRow({
             glyph on every row identifies nothing. The one signal it carried —
             "this repo holds the current selection" — moves to the name. */}
         {/* The name is the only thing in the row that can shrink, so at the
-            240px minimum width and the largest text notch it ellipsises. The
-            branch line below already carried a title for the same reason; this
-            one did not, leaving the truncated text with no way to be read
-            (SC 1.4.4's intent — no loss of content when text is enlarged). */}
+            240px minimum width and the largest text notch it ellipsises —
+            and only then does it get a card, since one echoing a name that
+            fits is noise. */}
         <span
           className={`repo-row__name${containsSelection ? " is-active" : ""}`}
-          {...hoverTooltip(tip, repo.name)}
+          {...truncatedTooltip(tip, repo.name)}
         >
           {repo.name}
         </span>
