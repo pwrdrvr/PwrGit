@@ -34,6 +34,7 @@ import {
 import { linuxWindowIconPath } from "./window-icon";
 import { openAppDocumentWindow } from "./app-document-window";
 import { createQuitDrain, drainBeforeQuit } from "./bounded-shutdown";
+import { quitWithExitFailSafe } from "./quit-retry";
 import {
   initAutoUpdater,
   handleUpdateSelectionChange,
@@ -1215,11 +1216,13 @@ if (!gotSingleInstanceLock) {
           drainBeforeQuit([() => agentHandlers.dispose()], 1_500)
         ]);
       },
-      resumeQuit: () => {
-        app.quit();
-        // Preserve the normal-quit fail-safe if the resumed quit is swallowed.
-        setTimeout(() => app.exit(0), 500);
-      },
+      // The drain re-issues this from a macrotask (quit-retry.ts), which is
+      // what lets Electron finish the quit; the exit is only a safety net.
+      resumeQuit: () =>
+        quitWithExitFailSafe(app, {
+          afterMs: 500,
+          warn: (message) => logMain("warn", "app", message)
+        }),
       warn: (message, error) => logMain("warn", "diagnostics", message, error)
     });
     // Flush while renderer windows (and their inspector targets) still exist.

@@ -54,6 +54,9 @@ describe("quit diagnostics barrier", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  /** Run the setImmediate the resume hops through (fake timers fire it 1 ms on). */
+  const afterResumeHop = () => vi.advanceTimersByTimeAsync(1);
+
   function setup() {
     let resolve!: () => void;
     let reject!: (error: unknown) => void;
@@ -79,7 +82,7 @@ describe("quit diagnostics barrier", () => {
     expect(s.stop).toHaveBeenCalledOnce();
     expect(s.resumeQuit).not.toHaveBeenCalled();
     s.resolve();
-    await vi.advanceTimersByTimeAsync(0);
+    await afterResumeHop();
     expect(s.resumeQuit).toHaveBeenCalledOnce();
     expect(s.event.preventDefault).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
@@ -96,6 +99,7 @@ describe("quit diagnostics barrier", () => {
     expect(vi.getTimerCount()).toBe(1);
     expect(s.resumeQuit).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
+    await afterResumeHop();
     expect(s.resumeQuit).toHaveBeenCalledOnce();
     expect(s.warn).toHaveBeenCalledWith(expect.stringContaining("10000 ms"), undefined);
     expect(s.drain.beforeQuit(s.event)).toBe(false);
@@ -108,7 +112,7 @@ describe("quit diagnostics barrier", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     if (settle === "resolve") s.resolve();
     else s.reject(new Error("late failure"));
-    await vi.advanceTimersByTimeAsync(0);
+    await afterResumeHop();
     expect(s.resumeQuit).toHaveBeenCalledOnce();
     expect(s.warn).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
@@ -127,7 +131,7 @@ describe("quit diagnostics barrier", () => {
       warn
     });
     drain.beforeQuit({ preventDefault: vi.fn() });
-    await vi.advanceTimersByTimeAsync(0);
+    await afterResumeHop();
     expect(resumeQuit).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed"), error);
     expect(vi.getTimerCount()).toBe(0);
@@ -139,7 +143,7 @@ describe("quit diagnostics barrier", () => {
     const stop = vi.fn(() => { drain.beforeQuit(event); });
     const drain = createQuitDrain({ stop, resumeQuit, warn: vi.fn() });
     drain.beforeQuit(event);
-    await vi.advanceTimersByTimeAsync(0);
+    await afterResumeHop();
     expect(stop).toHaveBeenCalledOnce();
     expect(event.preventDefault).toHaveBeenCalledTimes(2);
     expect(resumeQuit).toHaveBeenCalledOnce();
@@ -167,8 +171,73 @@ describe("quit diagnostics barrier", () => {
     const flush = s.drain.flushForUpdate();
     await vi.advanceTimersByTimeAsync(10_000);
     await flush;
+    await afterResumeHop();
     expect(s.resumeQuit).not.toHaveBeenCalled();
     expect(s.drain.beforeQuit(s.event)).toBe(false);
+  });
+
+  it("resumes from a later macrotask, never from the flush's own microtasks", async () => {
+    // A native quit runs those microtasks inside the before-quit pass being
+    // deferred, which then cancels the resumed quit (quit-reentry.test.ts).
+    const s = setup();
+    s.drain.beforeQuit(s.event);
+    s.resolve();
+    for (let i = 0; i < 100; i += 1) await Promise.resolve();
+    expect(s.resumeQuit).not.toHaveBeenCalled();
+    await afterResumeHop();
+    expect(s.resumeQuit).toHaveBeenCalledOnce();
+  });
+
+  it("lets an update that takes over during the resume hop win", async () => {
+    const s = setup();
+    s.drain.beforeQuit(s.event);
+    s.resolve();
+    for (let i = 0; i < 100; i += 1) await Promise.resolve();
+    void s.drain.flushForUpdate();
+    await afterResumeHop();
+    expect(s.resumeQuit).not.toHaveBeenCalled();
+  });
+
+  it("does not defer a quit when nothing is pending, but still stops", async () => {
+    const stop = vi.fn(async () => undefined);
+    const resumeQuit = vi.fn();
+    const drain = createQuitDrain({
+      stop,
+      resumeQuit,
+      warn: vi.fn(),
+      hasPendingWork: () => false
+    });
+    const event = { preventDefault: vi.fn() };
+    expect(drain.beforeQuit(event)).toBe(false);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    await afterResumeHop();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(resumeQuit).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("defers when work is pending, and keeps an update's quit deferred regardless", async () => {
+    let pending = true;
+    const s = setup();
+    const drain = createQuitDrain({
+      stop: s.stop,
+      resumeQuit: s.resumeQuit,
+      warn: s.warn,
+      hasPendingWork: () => pending
+    });
+    expect(drain.beforeQuit(s.event)).toBe(true);
+    // Once a quit is deferred, every later pass waits for the same flush.
+    pending = false;
+    expect(drain.beforeQuit(s.event)).toBe(true);
+
+    const update = createQuitDrain({
+      stop: s.stop,
+      resumeQuit: vi.fn(),
+      warn: vi.fn(),
+      hasPendingWork: () => false
+    });
+    void update.flushForUpdate();
+    expect(update.beforeQuit(s.event)).toBe(true);
   });
 
   it("runs the agent's existing deadline alongside diagnostics", async () => {
@@ -188,7 +257,7 @@ describe("quit diagnostics barrier", () => {
     expect(agent).toHaveBeenCalledOnce();
     expect(resumeQuit).not.toHaveBeenCalled();
     finishDiagnostics();
-    await vi.advanceTimersByTimeAsync(0);
+    await afterResumeHop();
     expect(resumeQuit).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
