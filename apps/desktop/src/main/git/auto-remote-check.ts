@@ -12,7 +12,7 @@ import {
   type ForkParentHint
 } from "./git-service";
 
-type Target = { remote: string; branch: string };
+type Target = { remote: string; remoteRef: string; localRef: string };
 
 /** Make a known fork parent visible to the ordinary fork sync path. */
 export async function ensureForkParentRemote(
@@ -45,43 +45,83 @@ export async function checkSelectedRemoteTips(
   if (!endpoints.ok) return endpoints;
   const upstream = await git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd);
   if (!upstream.ok) return upstream;
-  if (upstream.value.exitCode !== 0) return ok("untracked");
-
-  const upstreamRef = upstream.value.stdout.trim();
-  const tracked = [...endpoints.value]
+  const upstreamRef = upstream.value.exitCode === 0
+    ? upstream.value.stdout.trim() : null;
+  const tracked = upstreamRef === null ? undefined : [...endpoints.value]
     .sort((a, b) => b.name.length - a.name.length)
     .find((endpoint) => upstreamRef.startsWith(`refs/remotes/${endpoint.name}/`));
-  if (tracked === undefined) return ok("untracked");
-  const trackedBranch = upstreamRef.slice(`refs/remotes/${tracked.name}/`.length);
-  if (trackedBranch === "") return ok("untracked");
-  const targets: Target[] = [{ remote: tracked.name, branch: trackedBranch }];
-  const source = forkSourceRemote(endpoints.value, tracked.name, parent);
-  if (source !== null) targets.push({ remote: source.remote, branch });
+  if (upstreamRef !== null && tracked === undefined) {
+    return err({ kind: "remote", code: "remote_missing", message: "The tracked remote is not configured." });
+  }
+  const trackedBranch = tracked === undefined || upstreamRef === null
+    ? branch : upstreamRef.slice(`refs/remotes/${tracked.name}/`.length);
+  const targets: Target[] = [];
+  if (tracked !== undefined && upstreamRef !== null) {
+    // A custom fetch refspec can map refs/heads/main to origin/other-name.
+    // The configured merge ref is the server branch; @{u} is its local home.
+    const merge = await git(["config", "--get", `branch.${branch}.merge`], cwd);
+    if (!merge.ok) return merge;
+    const remoteRef = merge.value.exitCode === 0 ? merge.value.stdout.trim() : "";
+    if (!remoteRef.startsWith("refs/heads/") || remoteRef === "refs/heads/") {
+      return err({ kind: "remote", code: "remote_config_failed", message: "The tracked branch has no remote head." });
+    }
+    targets.push({ remote: tracked.name, remoteRef, localRef: upstreamRef });
+  }
+  const source = forkSourceRemote(endpoints.value, tracked?.name ?? null, parent);
+  if (source !== null) {
+    const prefix = `refs/remotes/${source.remote}/`;
+    const sourceRef = `${prefix}${trackedBranch}`;
+    targets.push({ remote: source.remote, remoteRef: `refs/heads/${trackedBranch}`, localRef: sourceRef });
+    // Match resolveForkStatus: a branch tracking its home remote's default
+    // may use the source's default under a different name when its own name
+    // is absent there. Checking both also keeps the default drift fresh.
+    if (tracked !== undefined && upstreamRef !== null) {
+      const homeHead = await git(
+        ["symbolic-ref", "--quiet", `refs/remotes/${tracked.name}/HEAD`], cwd
+      );
+      if (!homeHead.ok) return homeHead;
+      if (homeHead.value.exitCode === 0 && homeHead.value.stdout.trim() === upstreamRef) {
+        const sourceHead = await git(
+          ["symbolic-ref", "--quiet", `${prefix}HEAD`], cwd
+        );
+        if (!sourceHead.ok) return sourceHead;
+        const defaultRef = sourceHead.value.exitCode === 0
+          ? sourceHead.value.stdout.trim() : "";
+        if (defaultRef.startsWith(prefix) && defaultRef !== sourceRef) {
+          targets.push({
+            remote: source.remote,
+            remoteRef: `refs/heads/${defaultRef.slice(prefix.length)}`,
+            localRef: defaultRef
+          });
+        }
+      }
+    }
+  }
 
   for (const target of targets) {
     // Git accepts option-shaped remote names. Do not let one turn a background
     // check into a different command, even when it came from local config.
-    if (target.remote.startsWith("-")) return ok("untracked");
-    const remoteRef = `refs/heads/${target.branch}`;
-    const localRef = `refs/remotes/${target.remote}/${target.branch}`;
+    if (target.remote.startsWith("-")) {
+      return err({ kind: "remote", code: "remote_config_failed", message: "The remote name cannot be checked safely." });
+    }
     const advertised = await git(
-      ["ls-remote", "--heads", target.remote, remoteRef],
+      ["ls-remote", "--heads", target.remote, target.remoteRef],
       cwd
     );
     if (!advertised.ok) return advertised;
     if (advertised.value.exitCode !== 0) {
       return err({ kind: "remote", code: "fetch_failed", message: "Remote tip check failed." });
     }
-    const line = advertised.value.stdout.split("\n").find((row) => row.endsWith(`\t${remoteRef}`));
+    const line = advertised.value.stdout.split("\n").find((row) => row.endsWith(`\t${target.remoteRef}`));
     const remoteHead = line?.split("\t")[0] ?? "";
-    const local = await git(["rev-parse", "--verify", "--quiet", localRef], cwd);
+    const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], cwd);
     if (!local.ok) return local;
     // A deleted branch must stop contributing stale counts. Compare the old
     // OID when deleting so another Git client cannot lose a newer update.
     if (advertised.value.stdout.trim() === "") {
       if (local.value.exitCode === 0) {
         const removed = await git(
-          ["update-ref", "-d", localRef, local.value.stdout.trim()], cwd
+          ["update-ref", "-d", target.localRef, local.value.stdout.trim()], cwd
         );
         if (!removed.ok) return removed;
         if (removed.value.exitCode !== 0) {
@@ -100,11 +140,11 @@ export async function checkSelectedRemoteTips(
       git,
       cwd,
       target.remote,
-      `+${remoteRef}:${localRef}`,
+      `+${target.remoteRef}:${target.localRef}`,
       true
     );
     if (!fetched.ok) return fetched;
     onFetched();
   }
-  return ok("checked");
+  return ok(targets.length === 0 ? "untracked" : "checked");
 }

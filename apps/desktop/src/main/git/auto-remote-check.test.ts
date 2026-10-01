@@ -8,6 +8,7 @@ import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 import { timedGitSync } from "./test-support/git-tripwire";
 import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
+import { resolveForkStatus } from "./git-service";
 
 const systemGit = createSystemGit();
 
@@ -17,6 +18,28 @@ function git(cwd: string, ...args: string[]): string {
       cwd: tmpdir(), encoding: "utf8"
     }).trim()
   );
+}
+
+function forkFixture(): { origin: string; source: string; writer: string; local: string } {
+  const root = mkdtempSync(join(tmpdir(), "pwrgit-auto-remote-"));
+  const origin = join(root, "origin.git");
+  const source = join(root, "source.git");
+  const writer = join(root, "writer");
+  const local = join(root, "local");
+  git(root, "init", "--bare", "-b", "main", origin);
+  git(root, "clone", origin, writer);
+  git(writer, "config", "user.name", "Test");
+  git(writer, "config", "user.email", "test@example.com");
+  git(writer, "config", "core.autocrlf", "false");
+  writeFileSync(join(writer, "first.txt"), "first\n");
+  git(writer, "add", ".");
+  git(writer, "commit", "-m", "first");
+  git(writer, "push", "-u", "origin", "main");
+  git(root, "clone", "--bare", origin, source);
+  git(root, "clone", origin, local);
+  git(local, "remote", "add", "upstream", source);
+  git(local, "fetch", "upstream");
+  return { origin, source, writer, local };
 }
 
 describe("automatic selected-branch remote check", () => {
@@ -50,24 +73,7 @@ describe("automatic selected-branch remote check", () => {
   });
 
   it("leaves equal tips alone and fetches only changed tracked and fork-source branches", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pwrgit-auto-remote-"));
-    const origin = join(root, "origin.git");
-    const source = join(root, "source.git");
-    const writer = join(root, "writer");
-    const local = join(root, "local");
-    git(root, "init", "--bare", "-b", "main", origin);
-    git(root, "clone", origin, writer);
-    git(writer, "config", "user.name", "Test");
-    git(writer, "config", "user.email", "test@example.com");
-    git(writer, "config", "core.autocrlf", "false");
-    writeFileSync(join(writer, "first.txt"), "first\n");
-    git(writer, "add", ".");
-    git(writer, "commit", "-m", "first");
-    git(writer, "push", "-u", "origin", "main");
-    git(root, "clone", "--bare", origin, source);
-    git(root, "clone", origin, local);
-    git(local, "remote", "add", "upstream", source);
-    git(local, "fetch", "upstream");
+    const { source, writer, local } = forkFixture();
 
     const commands: string[][] = [];
     const recordingGit: GitExec = (args, cwd, options) => {
@@ -107,5 +113,78 @@ describe("automatic selected-branch remote check", () => {
     expect(fetched).toBe(3);
     expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/upstream/main"))
       .toBe("");
+  });
+
+  it("uses the configured merge ref when a fetch refspec renames the local tracking ref", async () => {
+    const { writer, local } = forkFixture();
+    git(local, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/cached-main");
+    git(local, "fetch", "origin");
+    expect(git(local, "rev-parse", "--symbolic-full-name", "@{u}"))
+      .toBe("refs/remotes/origin/cached-main");
+    writeFileSync(join(writer, "second.txt"), "second\n");
+    git(writer, "add", ".");
+    git(writer, "commit", "-m", "second");
+    git(writer, "push", "origin", "main");
+
+    const commands: string[][] = [];
+    const recordingGit: GitExec = (args, cwd, options) => {
+      commands.push(args);
+      return systemGit(args, cwd, options);
+    };
+    expect(await checkSelectedRemoteTips(
+      recordingGit, local, "main", null, () => undefined, () => undefined
+    )).toEqual(ok("checked"));
+    expect(commands).toContainEqual([
+      "fetch", "--no-tags", "--progress", "origin",
+      "+refs/heads/main:refs/remotes/origin/cached-main"
+    ]);
+    expect(commands).not.toContainEqual([
+      "update-ref", "-d", "refs/remotes/origin/cached-main", expect.any(String)
+    ]);
+    expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/origin/cached-main"))
+      .toBe("1");
+  });
+
+  it("checks a fork source on a branch with no tracked remote", async () => {
+    const { source, writer, local } = forkFixture();
+    git(local, "switch", "-c", "topic");
+    writeFileSync(join(writer, "second.txt"), "second\n");
+    git(writer, "add", ".");
+    git(writer, "commit", "-m", "second");
+    git(writer, "remote", "add", "upstream", source);
+    git(writer, "push", "upstream", "main:topic");
+
+    expect(await checkSelectedRemoteTips(
+      systemGit, local, "topic", null, () => undefined, () => undefined
+    )).toEqual(ok("checked"));
+    expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/upstream/topic"))
+      .toBe("1");
+    const status = await resolveForkStatus(systemGit, local, null);
+    expect(status.ok && status.value?.source).toMatchObject({
+      ref: "refs/remotes/upstream/topic", behind: 1
+    });
+    expect(status.ok && status.value?.tracked).toBeNull();
+  });
+
+  it("refreshes the source default when it differs from the fork default", async () => {
+    const { source, writer, local } = forkFixture();
+    git(source, "branch", "-m", "main", "master");
+    git(local, "fetch", "--prune", "upstream");
+    git(local, "remote", "set-head", "upstream", "master");
+    writeFileSync(join(writer, "second.txt"), "second\n");
+    git(writer, "add", ".");
+    git(writer, "commit", "-m", "second");
+    git(writer, "remote", "add", "upstream", source);
+    git(writer, "push", "upstream", "main:master");
+
+    expect(await checkSelectedRemoteTips(
+      systemGit, local, "main", null, () => undefined, () => undefined
+    )).toEqual(ok("checked"));
+    expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/upstream/master"))
+      .toBe("1");
+    const status = await resolveForkStatus(systemGit, local, null);
+    expect(status.ok && status.value?.source).toMatchObject({
+      ref: "refs/remotes/upstream/master", behind: 1
+    });
   });
 });
