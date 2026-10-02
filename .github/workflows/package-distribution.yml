@@ -109,7 +109,9 @@ jobs:
           Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery
           # Without -Latest, Repair only repairs the preinstalled client, which
           # can validate a newer schema against its older embedded schema IDs.
-          Repair-WinGetPackageManager -AllUsers -Latest -Force
+          # Validate as the runner account. All-users provisioning can select
+          # the image's neutral bundle during re-registration instead of x64.
+          Repair-WinGetPackageManager -Latest -Force
           Assert-WinGetPackageManager -Latest
           winget --version
           if ($LASTEXITCODE -ne 0) { throw 'The repaired WinGet client is not executable' }
