@@ -39,6 +39,7 @@ import { readPullChoice, writePullChoice, type PullChoice } from "./pull-choice"
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
+import { ForkTrackingRecoveryDialog } from "../sidebar/ForkTrackingRecoveryDialog";
 import { PublishBranchDialog } from "./PublishBranchDialog";
 import { GitForkIcon, pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 import {
@@ -1213,7 +1214,8 @@ export function WorktreeHeader({
   const forkChoice = forkChoiceOf(forkStatus);
   /** Pull is split: from the live read, or seeded from the stored source
    *  while that read is out. Only the live read can run anything. */
-  const split = forkChoice !== null || seedSplit;
+  const trackingRepair = forkStatus?.trackingRepair ?? null;
+  const split = forkChoice !== null || seedSplit || trackingRepair !== null;
   const choice: PullChoice = split ? pullChoice : "tracked";
   const shownSource = forkStatus?.source ?? seed;
   const localChip = baseChip(state, worktree, shownSource);
@@ -1439,7 +1441,18 @@ export function WorktreeHeader({
     runPull(next, pullButton.current);
   };
   const pullMenu =
-    forkChoice === null
+    trackingRepair !== null
+      ? {
+          note: <>{trackingRepair.branch} tracks {trackingRepair.upstream}, the fork's parent.</>,
+          actions: [{
+            key: "repair-tracking",
+            title: <>Track <code>{trackingRepair.target}</code></>,
+            detail: "Use your existing fork for Pull and Push. Changes tracking only.",
+            onSelect: () => setForkPrompt({ reason: `${trackingRepair.branch} tracks ${trackingRepair.upstream} instead of your fork.` })
+          }],
+          choices: []
+        }
+      : forkChoice === null
       ? null
       : pullMenuRows(forkChoice, behind, choice, {
           pick: pickPullChoice,
@@ -1777,7 +1790,23 @@ export function WorktreeHeader({
           }}
         />
       )}
-      {forkPrompt !== null && (
+      {forkPrompt?.reason !== undefined && (
+        <ForkTrackingRecoveryDialog
+          repo={repo}
+          worktreeId={worktree.id}
+          reason={forkPrompt.reason}
+          onClose={() => setForkPrompt(null)}
+          onRepaired={() => {
+            setForkPrompt(null);
+            showFlash({ text: "tracking fixed — Push again to send to your fork", tone: "ok" }, 4000);
+          }}
+          onForked={() => {
+            setForkPrompt(null);
+            showFlash({ text: "origin is now your fork", tone: "ok" }, 2600);
+          }}
+        />
+      )}
+      {forkPrompt !== null && forkPrompt.reason === undefined && (
         <ForkCheckoutDialog
           profileId={repo.profileId}
           repoId={repo.id}

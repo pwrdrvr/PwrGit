@@ -70,6 +70,7 @@ import {
   testSshRemoteRecovery
 } from "./ssh-remote-recovery";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
 
 const seconds = (startedAt: number): string =>
   `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
@@ -1159,12 +1160,46 @@ export function registerRemoteHandlers(
     return entry.running;
   };
 
+  const trackingInspections = new Map<string, ReturnType<typeof inspectForkTracking>>();
+  bus.register("remote:inspectForkTracking", async (req) => {
+    const ongoing = trackingInspections.get(req.worktreeId);
+    if (ongoing !== undefined) return ongoing;
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    const read = operations.run(req.worktreeId, () => operations.runRepository(
+      worktree.repoId, () => inspectForkTracking(
+        execGit, worktree.path, readIdentity?.(worktree.repoId), hostsForRemotes?.()
+      )
+    ));
+    trackingInspections.set(req.worktreeId, read);
+    try {
+      return await read;
+    } finally {
+      if (trackingInspections.get(req.worktreeId) === read) trackingInspections.delete(req.worktreeId);
+    }
+  });
+
+  bus.register("remote:repairForkTracking", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    const result = await operations.run(req.worktreeId, () => operations.runRepository(
+      worktree.repoId, () => repairForkTracking(
+        execGit, worktree.path, readIdentity?.(worktree.repoId), req, hostsForRemotes?.()
+      )
+    ));
+    if (!result.ok) return result;
+    refresher.refreshRepoWorktrees(worktree.repoId);
+    return ok(null);
+  });
+
   bus.register("remote:forkStatus", async (req) => {
     const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
     const read = (): ForkStatusRead =>
-      resolveForkStatus(execGit, worktree.path, forkParentOf(worktree.repoId));
+      resolveForkStatus(execGit, worktree.path, forkParentOf(worktree.repoId), readIdentity?.(worktree.repoId));
     const entry = forkStatusReads.get(req.worktreeId);
     if (entry === undefined) return startForkStatusRead(req.worktreeId, read);
     const next = (): ForkStatusRead => startForkStatusRead(req.worktreeId, read);
