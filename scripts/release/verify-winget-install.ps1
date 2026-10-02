@@ -32,7 +32,13 @@ $entries = @(Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/U
 if ($entries.Count -ne 1 -or $entries[0].DisplayVersion -ne $status.version -or $entries[0].Publisher -ne 'PwrDrvr LLC') {
   throw 'Unexpected per-user Add/Remove Programs metadata'
 }
-$app = Join-Path $entries[0].InstallLocation 'PwrGit.exe'
+# electron-builder stores InstallLocation in HKCU/Software/<app GUID>,
+# separately from the Add/Remove Programs entry under Uninstall/<app GUID>.
+$installationKey = Join-Path 'HKCU:/Software' $entries[0].PSChildName
+$installLocation = (Get-ItemProperty -LiteralPath $installationKey -Name InstallLocation).InstallLocation
+if ([string]::IsNullOrWhiteSpace($installLocation)) { throw 'Missing per-user installation directory' }
+$app = Join-Path $installLocation 'PwrGit.exe'
+if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw "Installed executable is missing: $app" }
 $appSignature = Get-AuthenticodeSignature $app
 if ($appSignature.Status -ne 'Valid' -or $appSignature.SignerCertificate.Subject -notmatch 'CN=PwrDrvr LLC') {
   throw 'Installed app signature is invalid'
@@ -42,7 +48,8 @@ if ($appSignature.Status -ne 'Valid' -or $appSignature.SignerCertificate.Subject
 $bytes = [IO.File]::ReadAllBytes($app)
 $pe = [BitConverter]::ToInt32($bytes, 0x3c)
 if ([BitConverter]::ToUInt16($bytes, $pe + 4) -ne 0x8664) { throw 'Installed payload is not x64' }
-$entries[0] | Select-Object DisplayName, DisplayVersion, Publisher, PSChildName, InstallLocation | ConvertTo-Json
+$entries[0] | Select-Object DisplayName, DisplayVersion, Publisher, PSChildName,
+  @{ Name = 'InstallLocation'; Expression = { $installLocation } } | ConvertTo-Json
 winget uninstall --name PwrGit --exact --silent --disable-interactivity
 if ($LASTEXITCODE -ne 0) { throw 'WinGet uninstall failed' }
 Write-Output 'Verified manifest, Authenticode, user scope, installed version, x64 payload and uninstall.'
