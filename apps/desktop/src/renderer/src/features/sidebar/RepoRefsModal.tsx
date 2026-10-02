@@ -828,7 +828,10 @@ export function RepoRefsModal({
     const confirmed = await confirmDialog({
       title: `Delete local branch ${branch.name}?`,
       message:
-        "Git will delete this local branch only if its commits are merged into its upstream (or the current history when it has no upstream). No remote branch is changed.",
+        "Git will delete this local branch only if its commits are merged into its upstream (or the current history when it has no upstream). No remote branch is changed." +
+        // The ref listing prunes pins on branches Git no longer has, so the
+        // sidebar row goes too; say so before it happens (Post-ship 3c).
+        (isPinned(branch) ? "\n\nIt's also removed from Pinned in the sidebar." : ""),
       confirmLabel: "Delete branch",
       danger: true
     });
@@ -1136,9 +1139,16 @@ export function RepoRefsModal({
                           <RefRowMenu
                             label={`Actions for ${branch.qualifiedName}`}
                             items={[
+                              // The short name, as a click on the name copies;
+                              // the full ref is its own entry (Post-ship 3c).
                               {
                                 type: "item",
                                 label: "Copy branch name",
+                                onSelect: () => void copyText(branch.name)
+                              },
+                              {
+                                type: "item",
+                                label: `Copy ${branch.qualifiedName}`,
                                 onSelect: () => void copyText(branch.qualifiedName)
                               }
                             ]}
@@ -1234,13 +1244,29 @@ export function RepoRefsModal({
                         <RefRowMenu
                           label={`Actions for ${branch.name}`}
                           items={[
-                            {
-                              type: "item",
-                              label: isPinned(branch)
-                                ? "Unpin branch"
-                                : "Pin branch",
-                              onSelect: () => void toggleBranchPin(branch)
-                            },
+                            // A checked-out branch's pin lands on the worktree
+                            // holding it (RepoIndexer), so the entry is named
+                            // for what it pins (Post-ship 3c).
+                            branch.checkedOutWorktreeIds.length > 0
+                              ? {
+                                  type: "item",
+                                  label: isPinned(branch)
+                                    ? "Unpin worktree"
+                                    : "Pin worktree",
+                                  ...(isPinned(branch)
+                                    ? {}
+                                    : {
+                                        hint: "This branch is checked out, so its worktree is what gets pinned."
+                                      }),
+                                  onSelect: () => void toggleBranchPin(branch)
+                                }
+                              : {
+                                  type: "item",
+                                  label: isPinned(branch)
+                                    ? "Unpin branch"
+                                    : "Pin branch",
+                                  onSelect: () => void toggleBranchPin(branch)
+                                },
                             {
                               type: "item",
                               label: "Copy branch name",
