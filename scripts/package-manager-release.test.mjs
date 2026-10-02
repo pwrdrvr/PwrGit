@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vitest";
-import { audit, compareVersions, distribution, renderManifests, selectAssets, stableVersion } from "./package-manager-release.mjs";
+import { audit, compareVersions, distribution, prepare, renderManifests, selectAssets, stableVersion } from "./package-manager-release.mjs";
 
 function release() {
   const tag_name = "v0.27.0";
@@ -18,7 +22,7 @@ function api({ winget = null, cask = null, central = null, duplicate = false, pe
     if (path.endsWith(distribution.wingetPath)) return winget?.map((name) => ({ name })) ?? null;
     if (path.includes("homebrew-tap/contents")) return cask ? { content: Buffer.from(`  version "${cask}"\n`).toString("base64") } : null;
     if (path.includes("homebrew-cask/contents")) return central;
-    if (path.startsWith("search/code")) return { items: duplicate ? [{ path: "manifests/o/Other/PwrGit/1.0.0/file.yaml" }] : [] };
+    if (path.startsWith("search/code")) return { total_count: duplicate ? 1 : 0, items: duplicate ? [{ path: "manifests/o/Other/PwrGit/1.0.0/file.yaml" }] : [] };
     if (path.startsWith("search/issues")) return { items: pending };
     throw new Error(`Unexpected API request: ${path}`);
   };
@@ -70,6 +74,85 @@ test("compares authoritative versions and refuses downgrades or duplicates", asy
 
 test("preserves errors from remote sources", async () => {
   await expect(audit({ api: () => { throw new Error("HTTP 403"); } })).rejects.toThrow("HTTP 403");
+});
+
+test("inspects later identity-search pages before allowing submission", async () => {
+  const firstPage = Array.from({ length: 100 }, (_, i) => ({ path: `${distribution.wingetPath}/0.${i}.0/file.yaml` }));
+  const source = api();
+  const pages = [];
+  const paginated = (path) => {
+    if (!path.startsWith("search/code")) return source(path);
+    const page = Number(new URLSearchParams(path.split("?")[1]).get("page"));
+    pages.push(page);
+    return { total_count: 101, incomplete_results: false, items: page === 1 ? firstPage : [{ path: "manifests/o/Other/PwrGit/1.0.0/file.yaml" }] };
+  };
+  await expect(audit({ api: paginated })).rejects.toThrow("Another Winget identity");
+  expect(pages).toEqual([1, 2]);
+  const result = await audit({ api: (path) => {
+    const response = paginated(path);
+    if (path.startsWith("search/code") && path.endsWith("page=2")) response.items = [{ path: `${distribution.wingetPath}/0.100.0/file.yaml` }];
+    return response;
+  } });
+  expect(result.winget.version).toBeNull();
+});
+
+test.each([
+  { total_count: 31, incomplete_results: false, items: Array.from({ length: 30 }, (_, i) => ({ path: `${distribution.wingetPath}/0.${i}.0/file.yaml` })) },
+  { total_count: 1001, incomplete_results: false, items: [] },
+  { total_count: 0, incomplete_results: true, items: [] },
+])("rejects uninspectable identity results %#", async (response) => {
+  const source = api();
+  await expect(audit({ api: (path) => path.startsWith("search/code") ? response : source(path) })).rejects.toThrow("identity search was incomplete");
+});
+
+test("removes interrupted or corrupt downloads and retries without poisoning the cache", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-distribution-test-"));
+  const value = release();
+  const payloads = value.assets.map((asset) => Buffer.from(`complete ${asset.name}`));
+  value.assets.forEach((asset, i) => {
+    asset.size = payloads[i].length;
+    asset.digest = `sha256:${createHash("sha256").update(payloads[i]).digest("hex")}`;
+  });
+  const sumsUrl = "https://example.com/checksums";
+  value.assets.push({ name: "PwrGit-windows-SHA256SUMS", browser_download_url: sumsUrl });
+  const source = api();
+  const releaseApi = (path) => path.includes("/releases/") ? value : source(path);
+  const requests = [];
+  let interrupted = true;
+  let corrupt = true;
+  const fetchAsset = async (url) => {
+    requests.push(url);
+    if (interrupted) {
+      interrupted = false;
+      return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(Buffer.from("partial bytes"));
+          setTimeout(() => controller.error(new Error("connection interrupted")), 10);
+        },
+      }));
+    }
+    if (corrupt) {
+      corrupt = false;
+      return new Response("incorrect bytes");
+    }
+    if (url === sumsUrl) return new Response(`${value.assets[2].digest.slice(7)}  ${value.assets[2].name}`);
+    return new Response(payloads[value.assets.findIndex((asset) => asset.browser_download_url === url)]);
+  };
+  try {
+    await expect(prepare(value.tag_name, directory, { api: releaseApi, fetch: fetchAsset })).rejects.toThrow("connection interrupted");
+    expect(readdirSync(join(directory, "downloads"))).toEqual([]);
+    await expect(prepare(value.tag_name, directory, { api: releaseApi, fetch: fetchAsset })).rejects.toThrow("Downloaded bytes do not match GitHub");
+    expect(readdirSync(join(directory, "downloads"))).toEqual([]);
+    await prepare(value.tag_name, directory, { api: releaseApi, fetch: fetchAsset });
+    expect(requests.filter((url) => url === value.assets[0].browser_download_url)).toHaveLength(3);
+    expect(readFileSync(join(directory, "downloads", value.assets[0].name))).toEqual(payloads[0]);
+    expect(readdirSync(join(directory, "downloads"))).toHaveLength(3);
+    const previousRequests = requests.length;
+    await prepare(value.tag_name, directory, { api: releaseApi, fetch: fetchAsset });
+    expect(requests.slice(previousRequests)).toEqual([sumsUrl]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("awaits remote source lookups, including delayed searches", async () => {

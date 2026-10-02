@@ -2,7 +2,7 @@
 // Package managers follow the promoted Stable Latest release, never a build tag.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -59,10 +59,28 @@ export async function audit({ api = ghJson } = {}) {
   const winget = await api(`repos/${distribution.wingetRepo}/contents/${distribution.wingetPath}`, true);
   const tap = await api(`repos/${distribution.tapRepo}/contents/Casks/pwrgit.rb`, true);
   const central = await api("repos/Homebrew/homebrew-cask/contents/Casks/p/pwrgit.rb", true);
-  const duplicates = await api("search/code?q=pwrgit+repo:microsoft/winget-pkgs");
-  if (duplicates.incomplete_results) throw new Error("Winget identity search was incomplete");
-  if (duplicates.items.some((item) => !item.path.startsWith(`${distribution.wingetPath}/`))) {
-    throw new Error("Another Winget identity mentions PwrGit; resolve ownership before submitting");
+  const identityPaths = new Set();
+  let total;
+  for (let page = 1; ; page++) {
+    const result = await api(`search/code?q=pwrgit+repo:microsoft/winget-pkgs&per_page=100&page=${page}`);
+    // GitHub caps code search at 1,000 results. Pagination is separate from
+    // incomplete_results, so fail closed when we cannot inspect every match.
+    if (result.incomplete_results || !Number.isInteger(result.total_count) || result.total_count < 0 || result.total_count > 1000 ||
+        (total !== undefined && result.total_count !== total)) {
+      throw new Error("Winget identity search was incomplete");
+    }
+    total = result.total_count;
+    for (const item of result.items) {
+      if (!item.path.startsWith(`${distribution.wingetPath}/`)) {
+        throw new Error("Another Winget identity mentions PwrGit; resolve ownership before submitting");
+      }
+      if (identityPaths.has(item.path)) throw new Error("Winget identity search was incomplete");
+      identityPaths.add(item.path);
+    }
+    if (identityPaths.size === total) break;
+    if (identityPaths.size > total || result.items.length !== 100 || page === 10) {
+      throw new Error("Winget identity search was incomplete");
+    }
   }
   if (central) throw new Error("Homebrew core now contains pwrgit; reconcile distribution ownership before proceeding");
   const wingetVersions = (winget ?? []).map((entry) => entry.name);
@@ -178,7 +196,7 @@ ManifestVersion: 1.12.0
   };
 }
 
-export async function prepare(tag, directory, { api = ghJson } = {}) {
+export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset = fetch } = {}) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("Usage: prepare vX.Y.Z <output-directory>");
   const report = await audit({ api });
   if (tag !== report.stableTag) throw new Error(`Only Stable Latest ${report.stableTag} can update the package managers`);
@@ -190,9 +208,18 @@ export async function prepare(tag, directory, { api = ghJson } = {}) {
   for (const asset of assets) {
     const path = join(downloads, asset.name);
     if (!existsSync(path)) {
-      const response = await fetch(asset.browser_download_url);
+      const response = await fetchAsset(asset.browser_download_url);
       if (!response.ok || !response.body) throw new Error(`Download failed: ${asset.name} HTTP ${response.status}`);
-      await pipeline(Readable.fromWeb(response.body), createWriteStream(path));
+      const temporaryDirectory = mkdtempSync(join(downloads, ".download-"));
+      const temporaryPath = join(temporaryDirectory, asset.name);
+      try {
+        await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
+        const actual = await hashFile(temporaryPath);
+        if (actual.digest !== asset.digest || actual.size !== asset.size) throw new Error(`Downloaded bytes do not match GitHub: ${asset.name}`);
+        renameSync(temporaryPath, path);
+      } finally {
+        rmSync(temporaryDirectory, { recursive: true, force: true });
+      }
     }
     const actual = await hashFile(path);
     if (actual.digest !== asset.digest || actual.size !== asset.size) throw new Error(`Downloaded bytes do not match GitHub: ${asset.name}`);
@@ -200,7 +227,7 @@ export async function prepare(tag, directory, { api = ghJson } = {}) {
   }
   const sumsAsset = release.assets.find((asset) => asset.name === "PwrGit-windows-SHA256SUMS");
   if (!sumsAsset) throw new Error("Missing Windows release checksum file");
-  const sumsResponse = await fetch(sumsAsset.browser_download_url);
+  const sumsResponse = await fetchAsset(sumsAsset.browser_download_url);
   if (!sumsResponse.ok) throw new Error("Windows checksum download failed");
   const sums = await sumsResponse.text();
   const expected = `${assets[2].digest.slice(7)}  ${assets[2].name}`;
