@@ -1,4 +1,6 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { LocalBranchSummary } from "@pwrgit/shared";
+import { relativeAge } from "../../lib/relativeAge";
 import {
   hoverTooltip,
   truncatedTooltip,
@@ -11,18 +13,44 @@ import { PinIcon } from "./WorktreeRow";
  *  id read as a worktree's. */
 export const pinnedBranchRowId = (branch: string): string => `branch:${branch}`;
 
+/** What the meta line says about the branch against the one it tracks. */
+function trackingWords(branch: LocalBranchSummary): string {
+  switch (branch.tracking) {
+    case "up_to_date":
+      return "up to date";
+    case "ahead":
+      return `↑${branch.ahead}`;
+    case "behind":
+      return `↓${branch.behind}`;
+    case "diverged":
+      return `↓${branch.behind} ↑${branch.ahead}`;
+    case "unpublished":
+      return "local only";
+    case "upstream_missing":
+      return "gone";
+  }
+}
+
 /**
  * A pinned branch that no worktree holds, in the repo's Pinned group.
  *
  * It looks like the worktree rows around it (same icon, name and hover star) so
- * the group reads as one shelf, and says what it is with a `branch` tag: there
- * is no checkout behind it, so nothing here can be dirty, ahead or behind.
+ * the group reads as one shelf, and says what it is on a muted line beneath
+ * the name — "no worktree", then the tracking count and the tip's age, the
+ * order a worktree row's folder line and badges take (Post-ship 3a). The
+ * count and age come from the ref listing the Branches section already
+ * loads (`summary`); until it answers, the line says "no worktree" alone.
  * Activating it — click, Enter or Space — opens New worktree on the branch,
  * which is what picking the same branch in ⌘K does. Once a worktree exists the
  * pin belongs to that worktree's row and this one goes away.
+ *
+ * Nothing here drags and there is no kebab, so the row draws neither the
+ * grip's `cursor: grab` nor the lane a kebab would take.
  */
 export function PinnedBranchRow({
   branch,
+  summary,
+  now,
   posinset,
   setsize,
   focusable,
@@ -32,6 +60,9 @@ export function PinnedBranchRow({
   onFocus
 }: {
   branch: string;
+  /** The branch in the repo's ref listing, once that has loaded. */
+  summary?: LocalBranchSummary | undefined;
+  now: number;
   posinset: number;
   setsize: number;
   focusable: boolean;
@@ -56,7 +87,7 @@ export function PinnedBranchRow({
       onKeyDown={onKeyDown}
       onFocus={onFocus}
     >
-      <span className="wt-row__handle" aria-hidden="true" />
+      <span className="wt-row__lead" aria-hidden="true" />
       <svg
         className="wt-row__branch-icon"
         width="12"
@@ -80,12 +111,27 @@ export function PinnedBranchRow({
       >
         {branch}
       </span>
-      <span
-        className="wt-tag wt-tag--branch"
-        aria-hidden="true"
-        {...hoverTooltip(tip, "Pinned branch — no worktree has it checked out")}
-      >
-        branch
+      {/* aria-hidden: the row's label already says "no worktree". */}
+      <span className="wt-row__folder wt-row__meta" aria-hidden="true">
+        <span className="wt-row__folder-name">
+          no worktree
+          {summary !== undefined && (
+            <>
+              {" · "}
+              <span
+                className={
+                  summary.tracking === "behind" || summary.tracking === "diverged"
+                    ? "wt-row__meta-behind"
+                    : undefined
+                }
+              >
+                {trackingWords(summary)}
+              </span>
+              {summary.lastCommitAt !== undefined &&
+                ` · ${relativeAge(summary.lastCommitAt, now)}`}
+            </>
+          )}
+        </span>
       </span>
       <div className="wt-row__hoveracts">
         <button

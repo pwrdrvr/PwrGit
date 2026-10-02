@@ -7,7 +7,13 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { TagSummary, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import type {
+  LocalBranchSummary,
+  TagSummary,
+  Repo,
+  Worktree,
+  WorktreeSort
+} from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
@@ -241,6 +247,16 @@ export function RepoRow({
   >(null);
   const clearRefsBrowserRequest = useCallback(
     () => setRefsBrowserRequest(null),
+    []
+  );
+  /** The Branches section's ref listing, by name, for the pinned branch rows'
+   *  meta line. Both live under `expanded`, so it is there when they are. */
+  const [refBranches, setRefBranches] = useState<
+    ReadonlyMap<string, LocalBranchSummary>
+  >(new Map());
+  const keepRefBranches = useCallback(
+    (branches: LocalBranchSummary[]) =>
+      setRefBranches(new Map(branches.map((b) => [b.name, b]))),
     []
   );
   // Collapsed before the refs landed: the ask goes with it, or it would fire
@@ -900,6 +916,8 @@ export function RepoRow({
               <PinnedBranchRow
                 key={pinnedBranchRowId(branch)}
                 branch={branch}
+                summary={refBranches.get(branch)}
+                now={now}
                 posinset={displayIds.indexOf(pinnedBranchRowId(branch)) + 1}
                 setsize={displayIds.length}
                 focusable={tabStopId === pinnedBranchRowId(branch)}
@@ -1047,6 +1065,7 @@ export function RepoRow({
               onRevealWorktree(worktreeId);
             }}
             onCreateWorktree={onCreateWorktreeFromRef}
+            onBranches={keepRefBranches}
           />
         </div>
       )}

@@ -95,7 +95,8 @@ export function RepoRefsSections({
   onFork,
   browserRequest = null,
   onBrowserRequestHandled,
-  onCleanUpBranches
+  onCleanUpBranches,
+  onBranches
 }: {
   repo: Repo;
   now: number;
@@ -121,6 +122,10 @@ export function RepoRefsSections({
   /** Open Maintenance › Local branches on this repository, already reviewing
    *  — the refs browser's Gone view offers it. */
   onCleanUpBranches?: (() => void) | undefined;
+  /** The local branches, each time the listing loads. The repo row's pinned
+   *  branch rows read their tracking count and age from it rather than ask
+   *  Git a second time. */
+  onBranches?: ((branches: LocalBranchSummary[]) => void) | undefined;
 }) {
   const forgeNaming = useForgeNaming();
   /** One card for every hover surface in this tree. Native `title` is what the
@@ -185,13 +190,18 @@ export function RepoRefsSections({
   // prompts, each accepted one dispatching another switch.
   const activating = useRef(false);
 
+  // A ref, so a caller's inline callback does not re-run the load.
+  const onBranchesRef = useRef(onBranches);
+  onBranchesRef.current = onBranches;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     const result = await dispatch("repo:refs", { repoId: repo.id });
     setLoading(false);
-    if (result.ok) setRefs(result.value);
-    else setError(result.error.message.split("\n")[0]);
+    if (result.ok) {
+      setRefs(result.value);
+      onBranchesRef.current?.(result.value.branches);
+    } else setError(result.error.message.split("\n")[0]);
   }, [repo.id]);
 
   useEffect(() => {

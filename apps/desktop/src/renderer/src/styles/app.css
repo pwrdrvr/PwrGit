@@ -2347,9 +2347,27 @@ a.forge-chip:focus-visible {
   color: var(--text-subtle);
   cursor: grab;
 }
+/* The grip's column on a row that cannot be dragged (PinnedBranchRow): it
+   keeps the icon and name on the worktree rows' edge without promising a
+   drag through `cursor: grab` (Post-ship 3a). */
+.wt-row__lead {
+  flex: 0 0 11px;
+}
 .wt-row__branch-icon {
   flex: 0 0 auto;
   color: var(--text-muted);
+}
+/* A pinned branch nothing has checked out: "no worktree · ↓41 · 1mo" on the
+   folder line's footing, so the Pinned group scans as one list. The count
+   takes the warn tone a worktree row's ↓ does. */
+.wt-row__meta-behind {
+  color: var(--status-warning);
+}
+/* It has a star and no kebab, so the hover strip gives back the kebab's lane:
+   the star sits where a kebab would, not one lane in from an empty one. 9px is
+   the kebab's `right: 5px` plus the 4px the pin's negative margin bleeds. */
+.wt-row--branch .wt-row__hoveracts {
+  padding-right: 9px;
 }
 /* On .wt-row.is-selected's --bg-row-active tint, so this keeps the bright
    rung — the tint comes from the ancestor, not from this rule. */
@@ -2451,15 +2469,6 @@ a.forge-chip:focus-visible {
 }
 .wt-row.is-missing .wt-row__branch {
   color: var(--text-muted);
-}
-/* A pinned branch nothing has checked out. Quiet like "locked": it is a fact
-   about what the row is, not a state to act on. */
-.wt-tag--branch {
-  background: transparent;
-  color: var(--text-subtle);
-  padding: 0 2px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
 }
 .wt-tag--locked {
   background: transparent;
