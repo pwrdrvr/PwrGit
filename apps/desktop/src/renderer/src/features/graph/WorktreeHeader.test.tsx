@@ -2080,6 +2080,12 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(caret()?.getAttribute("aria-label")).toBe("More pull options");
     expect(container.querySelector(".wt-split.is-behind")).not.toBeNull();
     expect(container.querySelector(".sync-chip--fork")).toBeNull();
+    // The source's look, as the sidebar's badge draws it: the outline and the
+    // fork glyph, never the warn fill the tracked branch's ↓N keeps.
+    const chip = container.querySelector(".sync-chip:not(.sync-chip--drift)");
+    expect(chip?.classList.contains("sync-chip--source")).toBe(true);
+    expect(chip?.classList.contains("sync-chip--warn")).toBe(false);
+    expect(chip?.firstElementChild?.classList.contains("sync-chip__glyph")).toBe(true);
   });
 
   it("keeps the plain Pull wherever there is one place to pull from", async () => {

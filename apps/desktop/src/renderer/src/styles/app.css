@@ -7404,18 +7404,6 @@ button.agent-menu__item:hover {
 .wt-header.fit-chip-short .sync-chip[data-short]::after {
   content: attr(data-short);
 }
-/* On a fork the glyph stands in for the remote's name. Lucide git-fork, fully
-   percent-encoded: a partly encoded data URI drew only part of a glyph. */
-.wt-header.fit-chip-short .sync-chip[data-short][data-fork]::before {
-  content: "";
-  width: 11px;
-  height: 11px;
-  margin-right: 5px;
-  flex: 0 0 auto;
-  background: currentColor;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272.4%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2718%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2718%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M18%209v2c0%20.6-.4%201-1%201H7c-.6%200-1-.4-1-1V9%27%2F%3E%3Cpath%20d%3D%27M12%2012v3%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272.4%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2718%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2718%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M18%209v2c0%20.6-.4%201-1%201H7c-.6%200-1-.4-1-1V9%27%2F%3E%3Cpath%20d%3D%27M12%2012v3%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
-}
 /* The LFS chip cannot shrink, and while it is hidden the sticky toast still
    carries a broken setup at any width. */
 .wt-header.fit-no-lfs .wt-header__state .lfs-chip {
@@ -7685,6 +7673,24 @@ button.agent-menu__item:hover {
 .sync-chip--warn {
   background: var(--warn-soft);
   color: var(--status-warning);
+}
+/* The fork's source has commits for this branch: the sidebar's `.badge--source`
+   look, so the header chip and the row beside it say one fact one way. The
+   fill above stays "your own remote has commits for you" (Fork Sync 3e rule 2,
+   Post-ship 2a). The glyph is a real element and leads at every fit step, so
+   `↓25 behind upstream`, `↓25 upstream` and `↓25` keep one shape; the shorter
+   forms are drawn after it by the `::after` rules above. 1px off the padding,
+   like the other outlined chips, so the text keeps their left offset. */
+.sync-chip--source {
+  border: 1px solid var(--accent-border);
+  background: transparent;
+  color: var(--accent);
+  padding: 0 9px;
+}
+.sync-chip__glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-right: 5px;
 }
 .sync-chip--progress {
   /* Shrinks, so it is the one chip the fit steps cannot see overflow; the

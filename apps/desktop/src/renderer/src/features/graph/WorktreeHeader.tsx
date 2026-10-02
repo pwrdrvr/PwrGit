@@ -40,7 +40,7 @@ import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
 import { PublishBranchDialog } from "./PublishBranchDialog";
-import { pushAccessTitle } from "../sidebar/RepoIdentityMarks";
+import { GitForkIcon, pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -50,15 +50,18 @@ import { useFitLadder } from "../../lib/useFitLadder";
 /**
  * The sync chip. `mid` and `short` are what it says once the header has
  * stepped down (see `HEADER_FIT_STEPS`); they are drawn by CSS from data
- * attributes, so the chip's text in the DOM stays the whole sentence. `fork`
- * puts the fork glyph in front of `short`, standing in for the remote's name.
+ * attributes, so the chip's text in the DOM stays the whole sentence.
+ *
+ * `source` is the fork's source having commits for this branch: the sidebar's
+ * `.badge--source` look (accent outline, fork glyph leading at every step), so
+ * the header and the row beside it say one fact one way. `warn`'s fill stays
+ * the user's own remote having them (Fork Sync 3e rule 2, Post-ship 2a).
  */
 type Chip = {
   text: string;
-  tone: "muted" | "ok" | "warn";
+  tone: "muted" | "ok" | "warn" | "source";
   mid?: string;
   short?: string;
-  fork?: boolean;
 };
 
 /**
@@ -205,16 +208,14 @@ function forkSourceChip(source: ForkSourceTarget): Chip | null {
   return source.ahead > 0
     ? {
         text: `↓${source.behind} ${source.remote} · ↑${source.ahead}`,
-        tone: "warn",
-        short: `↓${source.behind} · ↑${source.ahead}`,
-        fork: true
+        tone: "source",
+        short: `↓${source.behind} · ↑${source.ahead}`
       }
     : {
         text: `↓${source.behind} behind ${source.remote}`,
-        tone: "warn",
+        tone: "source",
         mid: `↓${source.behind} ${source.remote}`,
-        short: `↓${source.behind}`,
-        fork: true
+        short: `↓${source.behind}`
       };
 }
 
@@ -1466,7 +1467,6 @@ export function WorktreeHeader({
           // chip's own text stays the whole sentence.
           {...(chip.mid === undefined ? {} : { "data-mid": chip.mid })}
           {...(chip.short === undefined ? {} : { "data-short": chip.short })}
-          {...(chip.fork === true ? { "data-fork": "" } : {})}
           // Pointer only: the chip is not focusable, and making a live status
           // a tab stop would buy the keyboard nothing the working button below
           // does not already offer. At rest it explains itself — on a fork,
@@ -1494,6 +1494,11 @@ export function WorktreeHeader({
                   onMouseLeave: status.close
                 })}
         >
+          {chip.tone === "source" && (
+            <span className="sync-chip__glyph" aria-hidden="true">
+              <GitForkIcon size={11} />
+            </span>
+          )}
           <span className="sync-chip__text">{chip.text}</span>
         </span>
 
