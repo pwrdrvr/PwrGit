@@ -80,6 +80,19 @@ export function trackingLabel(branch: LocalBranchSummary): string {
   }
 }
 
+/**
+ * The Upstream cell's text. When a branch tracks its own name on a remote —
+ * nearly always — the cell repeated the name beside it and was clipped hard
+ * at the 940px window, so it says only what differs: `origin/…`. The full
+ * ref stays in the cell's card and is what a click copies (Post-ship 3b).
+ */
+export function upstreamShorthand(upstream: string, name: string): string {
+  const suffix = `/${name}`;
+  if (!upstream.endsWith(suffix)) return upstream;
+  const remote = upstream.slice(0, -suffix.length);
+  return remote === "" ? upstream : `${remote}/…`;
+}
+
 /** What an empty filtered Branches tab says, per status. */
 const EMPTY_STATUS: Record<Exclude<BranchStatusFilter, "all">, string> = {
   ahead: "No branches have commits to push.",
@@ -1089,7 +1102,9 @@ export function RepoRefsModal({
                         hint={`${branch.qualifiedName}\nClick to copy remote branch`}
                         className="refs-table__muted refs-copyable-upstream copyable"
                       >
-                        {branch.qualifiedName}
+                        <span className="refs-copyable-upstream__text">
+                          {upstreamShorthand(branch.qualifiedName, branch.name)}
+                        </span>
                       </CopyTarget>
                       <span className="refs-status refs-status--remote">Remote</span>
                       <span className="refs-table__muted">
@@ -1136,7 +1151,7 @@ export function RepoRefsModal({
                 const branch = item.branch;
                 return (
                   <div
-                    className="refs-table__row"
+                    className={`refs-table__row${isPinned(branch) ? " is-pinned" : ""}`}
                     key={branch.fullName}
                     data-refs-row=""
                     tabIndex={-1}
@@ -1162,7 +1177,11 @@ export function RepoRefsModal({
                         hint={`${branch.upstream}\nClick to copy upstream branch`}
                         className="refs-table__muted refs-copyable-upstream copyable"
                       >
-                        {branch.upstream}
+                        {/* Its own box: the cell is inline-flex, and a bare
+                            text node there could not draw an ellipsis. */}
+                        <span className="refs-copyable-upstream__text">
+                          {upstreamShorthand(branch.upstream, branch.name)}
+                        </span>
                       </CopyTarget>
                     )}
                     <span className={`refs-status refs-status--${branch.tracking}`}>

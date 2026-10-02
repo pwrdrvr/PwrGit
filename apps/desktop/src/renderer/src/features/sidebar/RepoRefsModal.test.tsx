@@ -15,7 +15,7 @@ vi.mock("../../lib/toast", () => ({
   showInfoToast: vi.fn()
 }));
 
-import { RepoRefsModal } from "./RepoRefsModal";
+import { RepoRefsModal, upstreamShorthand } from "./RepoRefsModal";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -299,6 +299,15 @@ describe("branch pins and the row keyboard", () => {
     ]);
   });
 
+  // Post-ship 3b: pinned rows were hard to find among hundreds.
+  it("marks a pinned row so its name can take the accent", async () => {
+    await open(repo, withBranches);
+    expect(rows().map((row) => row.classList.contains("is-pinned"))).toEqual([
+      true,
+      false
+    ]);
+  });
+
   it("pins through branch:setPin and shows it before the answer lands", async () => {
     await open(repo, withBranches);
     const dev = dialog().querySelector<HTMLElement>(
@@ -344,6 +353,44 @@ describe("branch pins and the row keyboard", () => {
     expect(dispatchMock).not.toHaveBeenCalledWith(
       "branch:setPin",
       expect.anything()
+    );
+  });
+});
+
+describe("the Upstream column at the 940px window", () => {
+  it("says only what differs from the branch's own name", () => {
+    expect(upstreamShorthand("origin/main", "main")).toBe("origin/…");
+    expect(upstreamShorthand("origin/feat/x", "feat/x")).toBe("origin/…");
+    // A different name is the one worth reading, so it is spelled out.
+    expect(upstreamShorthand("upstream/fix/local-rewrites", "fix/rewrite-qs")).toBe(
+      "upstream/fix/local-rewrites"
+    );
+    // Only a whole path segment counts as the same name.
+    expect(upstreamShorthand("origin/my-main", "main")).toBe("origin/my-main");
+  });
+
+  it("puts the text in its own box, so the ellipsis can draw, and keeps the full ref", async () => {
+    await open(repo, {
+      ...refs,
+      branches: [
+        {
+          name: "tenant-deploy-windows",
+          fullName: "refs/heads/tenant-deploy-windows",
+          head: "a".repeat(40),
+          upstream: "origin/tenant-deploy-windows",
+          ahead: 0,
+          behind: 0,
+          tracking: "up_to_date",
+          checkedOutWorktreeIds: []
+        }
+      ]
+    });
+    const cell = dialog().querySelector<HTMLElement>(".refs-copyable-upstream")!;
+    expect(cell.querySelector(".refs-copyable-upstream__text")?.textContent).toBe(
+      "origin/…"
+    );
+    expect(cell.getAttribute("aria-label")).toBe(
+      "Copy upstream branch origin/tenant-deploy-windows"
     );
   });
 });

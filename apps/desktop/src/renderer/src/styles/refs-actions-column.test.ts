@@ -47,9 +47,12 @@ it("gives the branch and pull-request grids the same fixed last column", () => {
   expect(pr?.template.endsWith("var(--refs-actions-w)")).toBe(true);
 });
 
-it("gives the tag grid the same token, at both of its breakpoints", () => {
+// One breakpoint now: the ≤1040px one that dropped Annotation was written for a
+// browser width (min(1120px, 92vw)) the refs browser no longer has, and the
+// 940px window never reaches it (Post-ship 3b).
+it("gives the tag grid the same token", () => {
   const tags = refsGridTemplates().filter((t) => t.selector.includes(".refs-tag-table__row"));
-  expect(tags).toHaveLength(2);
+  expect(tags).toHaveLength(1);
   for (const { template } of tags) expect(template.endsWith("var(--refs-actions-w)")).toBe(true);
 });
 

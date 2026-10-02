@@ -6572,17 +6572,18 @@ button.agent-menu__item:hover {
   overflow: auto;
   padding: 10px 16px 18px;
 }
-/* The fr ratio, not the minimums: the row grew a fourth action (`Switch here`)
-   and the slack left for the two flexible columns shrank — and all of it came
-   out of Upstream, which starved to about 22 characters while Branch kept room
-   it was not using. Raising Upstream's MINIMUM instead would push the row past
-   the 940px the app window can be narrowed to, and overflow it horizontally.
+/* The fr ratio, not the minimums. At the 940px window (an 884px browser)
+   Branch sat at its 190px minimum — about 13 characters beside a PR chip —
+   while Upstream got 157px to repeat the same name. Upstream now says only
+   what differs (`origin/…`, `upstreamShorthand`), so Branch takes the larger
+   share: 236px to Upstream's 111px at that width. Raising a MINIMUM instead
+   would push the row past the 940px window and overflow it horizontally.
    The actions column is `--refs-actions-w`, never content-sized: see
    `.refs-browser`. */
 .refs-table__header,
 .refs-table__row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.2fr) minmax(120px, 1fr) 105px 80px var(--refs-actions-w);
+  grid-template-columns: minmax(190px, 1.8fr) minmax(96px, 0.7fr) 105px 80px var(--refs-actions-w);
   gap: 12px;
   align-items: center;
 }
@@ -6649,18 +6650,6 @@ button.agent-menu__item:hover {
   margin-top: 3px;
   color: var(--text-muted);
   font: 500 9.5px/1.25 var(--font-sans);
-}
-/* Drop Annotation before the table starts overflowing. 1040px is the viewport
-   at which the browser (min(1120px, 92vw)) stops fitting four columns at their
-   minimums; the app window itself cannot go below 940px, so this is the only
-   breakpoint the tag table can actually reach. */
-@media (max-width: 1040px) {
-  .refs-tag-table__row {
-    grid-template-columns: minmax(185px, 1.4fr) minmax(130px, 0.85fr) var(--refs-actions-w);
-  }
-  .refs-tag-table__row > :nth-child(3) {
-    display: none;
-  }
 }
 .refs-tag-actions {
   display: flex;
@@ -6740,6 +6729,13 @@ button.agent-menu__item:hover {
   gap: 4px;
   min-width: 0;
 }
+/* The flex item the ellipsis hangs off — see `.refs-copyable-name` above. */
+.refs-copyable-upstream__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .refs-table__identity small,
 .refs-remote-branch small {
   display: block;
@@ -6797,6 +6793,19 @@ button.agent-menu__item:hover {
   width: 16px;
   align-items: center;
   justify-content: center;
+}
+/* Bordered at rest, so the column reads as stars to press among 259 rows
+   rather than a bare glyph that appears on hover; filled once pinned, and
+   the pinned row's name takes the accent (Post-ship 3b). */
+.refs-pin {
+  border-color: var(--border-default);
+}
+.refs-pin.is-pinned {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.refs-table__row.is-pinned .refs-copyable-name > strong {
+  color: var(--accent);
 }
 /* A row is a focus stop (↑/↓ walks them, Space pins, Enter runs the primary
    action — lib/refsRowKeys.ts). Inset, because the body scrolls and clips an
@@ -7121,15 +7130,6 @@ button.agent-menu__item:hover {
   color: var(--text-muted);
   font: 500 10.5px/1.4 var(--font-sans);
 }
-/* Doubled class: the generic `.refs-table__row` narrow rule sits later in
-   this file and would otherwise win the tie. It hides the same two columns. */
-@media (max-width: 760px) {
-  .refs-table__header.refs-pr-table__row,
-  .refs-table__row.refs-pr-table__row {
-    grid-template-columns: minmax(200px, 1fr) 90px 120px;
-  }
-}
-
 /* BranchRefPicker — a filter box over a sized native listbox. */
 .branch-picker {
   display: grid;
@@ -7429,26 +7429,6 @@ button.agent-menu__item:hover {
   background: var(--bg-panel-elevated);
   color: var(--text-subtle);
   opacity: 1;
-}
-
-@media (max-width: 760px) {
-  .refs-table__header,
-  .refs-table__row {
-    grid-template-columns: minmax(180px, 1fr) 100px 100px;
-  }
-  /* The 100px column cannot hold the buttons in one line. */
-  .refs-row-actions {
-    flex-wrap: wrap;
-  }
-  .refs-table__header > :nth-child(2),
-  .refs-table__row > :nth-child(2),
-  .refs-table__header > :nth-child(4),
-  .refs-table__row > :nth-child(4) {
-    display: none;
-  }
-  .refs-browser__toolbar {
-    flex-wrap: wrap;
-  }
 }
 
 /* ---- Main pane: worktree header (Fetch/Pull/Push arrive in U9) ---- */
