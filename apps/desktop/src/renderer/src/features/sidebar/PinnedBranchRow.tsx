@@ -31,6 +31,24 @@ function trackingWords(branch: LocalBranchSummary): string {
   }
 }
 
+/** The same, said rather than drawn: arrows read badly aloud. */
+function trackingSpoken(branch: LocalBranchSummary): string {
+  switch (branch.tracking) {
+    case "up_to_date":
+      return "up to date";
+    case "ahead":
+      return `${branch.ahead} to push`;
+    case "behind":
+      return `${branch.behind} behind`;
+    case "diverged":
+      return `${branch.behind} behind, ${branch.ahead} to push`;
+    case "unpublished":
+      return "local only";
+    case "upstream_missing":
+      return "the branch it tracked is gone";
+  }
+}
+
 /**
  * A pinned branch that no worktree holds, in the repo's Pinned group.
  *
@@ -81,7 +99,9 @@ export function PinnedBranchRow({
       aria-level={2}
       aria-posinset={posinset}
       aria-setsize={setsize}
-      aria-label={`${branch}, pinned branch, no worktree. Enter opens a worktree for it.`}
+      aria-label={`${branch}, pinned branch, no worktree${
+        summary === undefined ? "" : `, ${trackingSpoken(summary)}`
+      }. Enter opens a worktree for it.`}
       tabIndex={focusable ? 0 : -1}
       onClick={onOpen}
       onKeyDown={onKeyDown}
@@ -111,7 +131,7 @@ export function PinnedBranchRow({
       >
         {branch}
       </span>
-      {/* aria-hidden: the row's label already says "no worktree". */}
+      {/* aria-hidden: the row's label says this in words. */}
       <span className="wt-row__folder wt-row__meta" aria-hidden="true">
         <span className="wt-row__folder-name">
           no worktree

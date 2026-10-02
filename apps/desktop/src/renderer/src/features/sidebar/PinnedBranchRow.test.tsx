@@ -97,6 +97,10 @@ describe("PinnedBranchRow", () => {
     };
     expect(meta({ tracking: "behind", behind: 41 })).toBe("no worktree · ↓41 · 1mo");
     expect(container.querySelector(".wt-row__meta-behind")?.textContent).toBe("↓41");
+    // The line is drawn aria-hidden; the row's name says the count in words.
+    expect(container.querySelector('[role="treeitem"]')?.getAttribute("aria-label")).toBe(
+      "main, pinned branch, no worktree, 41 behind. Enter opens a worktree for it."
+    );
     expect(meta({})).toBe("no worktree · up to date · 1mo");
     expect(meta({ tracking: "unpublished" })).toBe(
       "no worktree · local only · 1mo"
