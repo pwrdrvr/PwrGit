@@ -1,0 +1,142 @@
+import { realpath } from "node:fs/promises";
+import type {
+  CodexCandidateSource,
+  CodexInstaller,
+  CodexVersionAdvisory,
+} from "@pwrgit/shared";
+
+/** Recommended runtime baseline, aligned with our App Server protocol. */
+export const CODEX_MINIMUM_RECOMMENDED_VERSION = "0.159.2";
+
+const VERSION_CORE = /(\d+)\.(\d+)\.(\d+)/u;
+
+/**
+ * The `major.minor.patch` inside a version string, ignoring any prerelease or
+ * build suffix. `codex --version` prints `codex-cli 0.152.0`, and discovery
+ * may hand back either that or the bare number.
+ *
+ * A prerelease of the minimum (`0.159.2-alpha.2`) compares equal to it. That is
+ * deliberate: the alphas are cut from the same line the release ships from, and
+ * warning a developer on one that their Codex is old would be wrong more often
+ * than right.
+ */
+export function parseCodexVersionCore(
+  version: string | undefined,
+): [number, number, number] | undefined {
+  const match = version ? VERSION_CORE.exec(version) : null;
+  if (!match) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** False when the version does not parse: unknown is not old. */
+export function isCodexVersionBelowMinimum(
+  version: string | undefined,
+  minimum: string = CODEX_MINIMUM_RECOMMENDED_VERSION,
+): boolean {
+  const actual = parseCodexVersionCore(version);
+  const floor = parseCodexVersionCore(minimum);
+  if (!actual || !floor) return false;
+  for (let index = 0; index < 3; index += 1) {
+    const delta = (actual[index] ?? 0) - (floor[index] ?? 0);
+    if (delta !== 0) return delta < 0;
+  }
+  return false;
+}
+
+export type CodexInstallerClassification = {
+  installer: CodexInstaller;
+  /** Shell command that updates this install, when the installer is one we can name. */
+  upgradeCommand?: string;
+};
+
+/**
+ * Who installed this Codex, from where its executable really lives. Homebrew and
+ * the JavaScript package managers all leave a symlink or shim on PATH that
+ * points somewhere recognizable, so the resolved path names the installer even
+ * when the command the operator typed (`/opt/homebrew/bin/codex`, `~/.bun/bin/codex`)
+ * does not.
+ *
+ * Only an install this recognizes gets a command. Anything else gets none: a
+ * wrong `brew upgrade` for a binary Homebrew never installed would fail
+ * confusingly, and an operator who knows how they installed Codex knows how to
+ * update it.
+ */
+export function classifyCodexInstaller(params: {
+  command: string;
+  resolvedPath?: string | undefined;
+  source?: CodexCandidateSource | undefined;
+}): CodexInstallerClassification {
+  const paths = [params.resolvedPath, params.command]
+    .filter((entry): entry is string => Boolean(entry))
+    .map((entry) => entry.replaceAll("\\", "/"));
+  const has = (pattern: RegExp): boolean =>
+    paths.some((entry) => pattern.test(entry));
+  if (has(/\/Caskroom\/codex\//u)) {
+    return { installer: "homebrew", upgradeCommand: "brew upgrade --cask codex" };
+  }
+  if (has(/\/Cellar\/codex\//u)) {
+    return { installer: "homebrew", upgradeCommand: "brew upgrade codex" };
+  }
+  // Recommend a global update only for recognizable global roots or shims.
+  // A project's node_modules can belong to any package manager, and updating
+  // a global install would leave that selected executable unchanged.
+  if (has(/\/\.bun\/(?:install\/global\/node_modules\/@openai\/codex\b|bin\/codex(?:\.exe)?$)/iu)) {
+    return { installer: "bun", upgradeCommand: "bun add -g @openai/codex@latest" };
+  }
+  if (
+    has(/\/pnpm\/global\/[^/]+\/node_modules\/@openai\/codex(?:\/|$)/iu) ||
+    has(/\/(?:\.local\/share|Library|AppData\/Local)\/pnpm\/codex(?:\.(?:cmd|ps1|exe))?$/iu)
+  ) {
+    return { installer: "pnpm", upgradeCommand: "pnpm add -g @openai/codex@latest" };
+  }
+  if (
+    has(/\/lib\/node_modules\/@openai\/codex(?:\/|$)/u) ||
+    has(/\/AppData\/Roaming\/npm\/(?:node_modules\/@openai\/codex(?:\/|$)|codex(?:\.(?:cmd|ps1|exe))?$)/iu) ||
+    has(/\/Program Files\/nodejs\/node_modules\/@openai\/codex(?:\/|$)/iu)
+  ) {
+    return { installer: "npm", upgradeCommand: "npm install -g @openai/codex@latest" };
+  }
+  if (params.source === "application" || has(/\.app\/Contents\/Resources\/codex$/u)) {
+    return { installer: "application" };
+  }
+  return { installer: "unknown" };
+}
+
+/**
+ * The advisory to show for the Codex PwrGit will launch, or `undefined` when
+ * it is new enough or its version is unknown.
+ */
+export async function buildCodexVersionAdvisory(params: {
+  command: string | undefined;
+  version: string | undefined;
+  source?: CodexCandidateSource | undefined;
+  /** Injected so tests need no real filesystem. */
+  resolvePath?: (command: string) => Promise<string | undefined>;
+}): Promise<CodexVersionAdvisory | undefined> {
+  const { command, version } = params;
+  if (!command || !version || !isCodexVersionBelowMinimum(version)) {
+    return undefined;
+  }
+  const resolvePath = params.resolvePath ?? defaultResolvePath;
+  const classification = classifyCodexInstaller({
+    command,
+    resolvedPath: await resolvePath(command),
+    ...(params.source ? { source: params.source } : {}),
+  });
+  return {
+    // The number, not `codex-cli 0.152.0`: it goes into a sentence.
+    version: (parseCodexVersionCore(version) ?? []).join("."),
+    minimumVersion: CODEX_MINIMUM_RECOMMENDED_VERSION,
+    command,
+    ...classification,
+  };
+}
+
+async function defaultResolvePath(command: string): Promise<string | undefined> {
+  try {
+    return await realpath(command);
+  } catch {
+    // A bare `codex` resolved through PATH, or a path that has since gone.
+    return undefined;
+  }
+}

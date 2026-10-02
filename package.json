@@ -39,7 +39,8 @@
     "overrides": {
       "@types/node": "24.12.4",
       "js-yaml": "4.3.2",
-      "hono": "4.13.7"
+      "hono": "4.13.7",
+      "@pwrdrvr/codex-app-server-protocol": "0.159.2"
     },
     "onlyBuiltDependencies": [
       "dugite",

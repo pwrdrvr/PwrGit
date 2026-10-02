@@ -284,6 +284,81 @@ describe("AI Features — default agents", () => {
     ]);
   });
 
+  it("offers both Sol models and uses GPT-6.1 Sol's advertised reasoning choices", async () => {
+    models = [
+      model({ id: "gpt-6-sol", displayName: "GPT-6 Sol" }),
+      model({ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", isDefault: true,
+        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: "low" })
+    ];
+    await render();
+    expect(options(select("History editing model"))).toEqual(["Default (GPT-6.1 Sol)", "GPT-6 Sol", "GPT-6.1 Sol"]);
+    expect(options(select("History editing reasoning effort"))).toEqual(["Default (low)", "low", "medium", "high", "xhigh", "max"]);
+    await choose(select("History editing model"), "gpt-6.1-sol");
+    expect(updates()).toEqual([{ jobs: { historyEditing: { model: "gpt-6.1-sol" } } }]);
+  });
+
+  it("refreshes runtime discovery along with the models so an upgrade clears its warning", async () => {
+    await render();
+    await click(button(container, "Refresh models"));
+    expect(mocks.dispatch).toHaveBeenCalledWith("aiProviders:discoverCodex", { profileId: PERSONAL.id, force: true });
+    expect(mocks.dispatch).toHaveBeenCalledWith("aiProviders:codexModels", { profileId: PERSONAL.id, refresh: true });
+  });
+
+  it("re-reads for an upgraded runtime and ignores a late refresh from its old key", async () => {
+    let upgraded = false;
+    let resolveOld!: (value: unknown) => void;
+    const oldRefresh = new Promise((resolve) => { resolveOld = resolve; });
+    const newModels = [model({ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", isDefault: true })];
+    mocks.dispatch.mockImplementation(async (name, request) => {
+      if (name === "aiProviders:discoverCodex") {
+        if (request.force) upgraded = true;
+        return ok({ candidates: [{ path: "/opt/homebrew/bin/codex", source: "path", version: upgraded ? "0.159.2" : "0.153.4", available: true }],
+          resolvedPath: "/opt/homebrew/bin/codex", auth: null, refreshedAt: "now" });
+      }
+      if (name === "aiProviders:codexModels") {
+        if (request.refresh) return oldRefresh;
+        return ok({ models: upgraded ? newModels : models });
+      }
+      return answer(name, request);
+    });
+    await render();
+    expect(options(select("History editing model"))).toContain("GPT Luna");
+    await click(button(container, "Refresh models"));
+    expect(options(select("History editing model"))).toEqual(["Default (GPT-6.1 Sol)", "GPT-6.1 Sol"]);
+    await act(async () => { resolveOld(ok({ models })); });
+    expect(options(select("History editing model"))).toEqual(["Default (GPT-6.1 Sol)", "GPT-6.1 Sol"]);
+  });
+
+  function withOldCodex(): void {
+    mocks.dispatch.mockImplementation(async (name, request) => {
+      const result = await answer(name, request);
+      if (name !== "aiProviders:discoverCodex") return result;
+      return { ...(result as object), value: {
+        ...((result as { value: object }).value),
+        versionAdvisory: { command: "/opt/homebrew/bin/codex", version: "0.153.4", minimumVersion: "0.159.2", installer: "homebrew", upgradeCommand: "brew upgrade --cask codex" }
+      } };
+    });
+  }
+
+  it("says nothing about an old Codex while AI is off, because nothing runs on it", async () => {
+    withOldCodex();
+    await render();
+    expect(container.textContent).not.toContain("may not offer GPT-6 Sol");
+  });
+
+  it("explains missing Sol models directly beside the model pickers", async () => {
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, enabled: true, consentAcceptedAt: "2026-09-01T12:00:00.000Z" };
+    withOldCodex();
+    await render();
+    expect(container.textContent).toContain("Codex 0.153.4 may not offer GPT-6 Sol or GPT-6.1 Sol.");
+    // The command and installer guidance live on AI Providers, one click away.
+    expect(container.textContent).not.toContain("brew upgrade --cask codex");
+    await click(button(container, "Update in AI Providers"));
+    expect(mocks.dispatch).toHaveBeenCalledWith("settings:open", {
+      page: "ai-providers", sub: "codex", profileId: "personal"
+    });
+  });
+
   it("clears an effort the newly chosen model does not take", async () => {
     settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { reasoning: "high" } } };
     await render();
@@ -336,4 +411,17 @@ describe("AI Features — guidance", () => {
 
     expect(updates()).toEqual([{ guidance: "Keep it short." }]);
   });
+});
+
+it("keeps a hidden saved choice visible as the current value without offering it again", async () => {
+  settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { model: "gpt-5.5" } } };
+  models = [model({ id: "gpt-5.5", displayName: "GPT-5.5", hidden: true }), model({ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", isDefault: true })];
+  await render();
+  const picker = select("History editing model");
+  expect(picker.value).toBe("gpt-5.5");
+  const saved = [...picker.options].find((option) => option.value === "gpt-5.5")!;
+  expect(saved.hidden).toBe(true);
+  expect(saved.disabled).toBe(true);
+  expect(saved.textContent).toContain("saved choice");
+  expect(updates()).toEqual([]);
 });

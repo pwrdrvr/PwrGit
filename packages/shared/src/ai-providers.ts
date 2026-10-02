@@ -357,7 +357,19 @@ export type CodexAuthState = {
   detail?: string;
 };
 
+/** Update guidance for the selected runtime, not every installed candidate. */
+export type CodexInstaller = "homebrew" | "npm" | "pnpm" | "bun" | "application" | "unknown";
+
+export type CodexVersionAdvisory = {
+  version: string;
+  minimumVersion: string;
+  command: string;
+  installer: CodexInstaller;
+  upgradeCommand?: string;
+};
+
 export type CodexProviderDiscovery = {
+  versionAdvisory?: CodexVersionAdvisory;
   candidates: CodexCandidate[];
   /** The binary the next spawn will use, or null when none is usable. The
    *  "Using" marker follows this, never the mode, so the screen cannot claim a

@@ -13,6 +13,7 @@
 // Codex process, it can list models through that process instead.
 
 import { JsonRpcConnection, StdioJsonRpcTransport } from "@pwrdrvr/agent-transport";
+import type { InitializeParams } from "@pwrdrvr/codex-app-server-protocol";
 import { isAiReasoningEffort, type CodexModelOption } from "@pwrgit/shared";
 import {
   PWRGIT_CLIENT_NAME,
@@ -45,14 +46,15 @@ export const listCodexModels: CodexModelLister = async ({
   );
   try {
     await connection.connect();
-    await connection.request("initialize", {
+    const initialize: InitializeParams = {
       clientInfo: {
         name: PWRGIT_CLIENT_NAME,
         title: PWRGIT_CLIENT_TITLE,
         version: "0.0.0"
       },
       capabilities: { experimentalApi: true, requestAttestation: false }
-    });
+    };
+    await connection.request("initialize", initialize);
     const models: CodexModelOption[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page += 1) {

@@ -7,7 +7,7 @@
 // Server. With the list on disk, AI Features renders its pickers at once and
 // a refresh updates them.
 //
-// Keyed by binary + CODEX_HOME: which models a Codex offers depends on the
+// Keyed by binary + version + CODEX_HOME: which models a Codex offers depends on the
 // build and on the account it is signed in to. Same atomic-write and
 // corrupt-is-empty rules as the ACP cache.
 
@@ -31,10 +31,10 @@ type CacheFile = {
   lists: Record<string, CodexModelCacheEntry>;
 };
 
-/** The key one binary + account pair's list is stored under. JSON rather than
+/** The key one binary version + account's list is stored under. JSON rather than
  *  a joined string, so no path can contain the separator. */
-export function codexModelCacheKey(command: string, codexHome: string): string {
-  return JSON.stringify([command, codexHome]);
+export function codexModelCacheKey(command: string, codexHome: string, version?: string): string {
+  return JSON.stringify([command, codexHome, version ?? null]);
 }
 
 /** Lists whose shape a caller can rely on — the per-entry half of "corrupt is

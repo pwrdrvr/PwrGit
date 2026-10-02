@@ -15442,6 +15442,85 @@ button.agent-auth-node:focus-visible,
   user-select: text;
 }
 
+/* Installer guidance needs the full card width, with one action row below
+   the text, shaped like the "Update ready" card. */
+.codex-version-notice {
+  grid-template-columns: minmax(0, 1fr);
+  width: 420px;
+}
+.codex-version-notice .app-toast__actions {
+  flex-wrap: wrap;
+}
+/* Prose in a toast. `__detail` is mono, for command output; this is not. */
+.app-toast__hint {
+  margin: 6px 0 0;
+  font: 400 11.5px/1.4 var(--font-sans);
+  color: var(--text-muted);
+}
+.codex-version-help {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  user-select: text;
+}
+.codex-version-help > p {
+  margin: 0;
+}
+.codex-version-help__gap {
+  font: 500 12px/1.3 var(--font-mono);
+  color: var(--text-primary);
+}
+.codex-version-help__want {
+  color: var(--status-warning);
+}
+/* The command to copy, set apart from the prose around it. */
+.codex-version-well {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 5px 6px 5px 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+}
+.codex-version-well code {
+  min-width: 0;
+  font: 500 11.5px/1.3 var(--font-mono);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.app-toast .codex-version-well {
+  margin-top: 8px;
+  padding: 7px 9px;
+}
+/* AI Features: one line above the pickers, not a peer of the feature rows. */
+.ai-features-codex-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+  font: 500 11.5px/1.4 var(--font-sans);
+  color: var(--text-primary);
+}
+.ai-features-codex-notice__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--status-warning);
+}
+.ai-features-codex-notice__text {
+  flex: 1;
+  min-width: 0;
+}
+
 .app-toast__eyebrow {
   margin: 0 0 4px;
   font: 700 10.5px/1.2 var(--font-sans);

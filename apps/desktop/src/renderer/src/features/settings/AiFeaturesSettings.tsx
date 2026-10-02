@@ -29,6 +29,7 @@ import {
   type SettingsFocusRequest
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
+import { codexModelsNotice } from "./CodexVersionHelp";
 
 /** What `aiProviders:codexModels` answered, and for which profile and binary. */
 type CodexModelsRead = {
@@ -57,13 +58,13 @@ export function AiFeaturesSettings(props: {
   useEffect(() => request(), [request]);
   const probeIds = useInUseAcpModelProbes();
 
-  // Codex's list is keyed by exactly what main caches it by — the binary and
-  // the account — so it is re-read when either moves and not otherwise.
+  // Follow main's binary version + account key, including upgrades in place.
   const resolved = codexSnapshot?.resolvedPath ?? null;
+  const version = codexSnapshot?.candidates.find((candidate) => candidate.path === resolved)?.version;
   const codexKey =
     profileId === null || resolved === null
       ? null
-      : JSON.stringify([profileId, resolved, codexSnapshot?.auth?.codexHome ?? null]);
+      : JSON.stringify([profileId, resolved, version ?? null, codexSnapshot?.auth?.codexHome ?? null]);
   const [codexModels, setCodexModels] = useState<CodexModelsRead | null>(null);
   const [codexModelsLoading, setCodexModelsLoading] = useState(false);
   const codexSeq = useRef(0);
@@ -126,6 +127,7 @@ export function AiFeaturesSettings(props: {
                 type="button"
                 onClick={() => {
                   if (refreshing) return;
+                  void ai.refreshCodexSnapshot(true);
                   if (codexKey !== null) void readCodexModels(codexKey, profileId, true);
                   for (const id of probeIds) void fetchAcpModels(id, true);
                 }}
@@ -160,6 +162,28 @@ export function AiFeaturesSettings(props: {
             eyebrow="Features"
             description="The provider, model and reasoning each feature starts with. Default leaves the choice to the provider."
           >
+            {/* One line answering "why can't I pick Sol?" above the pickers,
+                only while AI is on: every job runs on Codex then, so an old
+                build limits what they can pick. With AI off nothing runs, and
+                the AI Providers card still carries the full help. */}
+            {ai.settings?.enabled === true && codexSnapshot?.versionAdvisory !== undefined && (
+              <div className="ai-features-codex-notice" role="status">
+                <span className="ai-features-codex-notice__dot" aria-hidden="true" />
+                <span className="ai-features-codex-notice__text">
+                  {codexModelsNotice(codexSnapshot.versionAdvisory)}
+                </span>
+                <button
+                  type="button"
+                  className="settings-inline-button"
+                  onClick={() => {
+                    void dispatch("settings:open", { page: "ai-providers", sub: "codex", profileId })
+                      .catch(() => undefined);
+                  }}
+                >
+                  Update in AI Providers
+                </button>
+              </div>
+            )}
             {AI_JOB_IDS.map((jobId) => (
               <JobDefaultRow
                 key={jobId}
@@ -254,8 +278,18 @@ function JobDefaultRow(props: {
         label: modelLabel(model),
         isDefault: model.isDefault
       }));
-  const defaultModel = choices.find((choice) => choice.isDefault);
+  // The Sol policy can hide the runtime's own default; Default still runs it,
+  // so still name it.
+  const hiddenDefault = isAcp ? undefined
+    : props.codexModels?.find((model) => model.isDefault && model.hidden);
+  const defaultModel = choices.find((choice) => choice.isDefault) ??
+    (hiddenDefault === undefined ? undefined : { label: modelLabel(hiddenDefault) });
   const modelInChoices = choices.some((choice) => choice.id === modelValue);
+  // A hidden saved choice (for example GPT-5.5) must not silently display
+  // Default while main still runs it. Show the saved value without offering
+  // it as a new selection; migrations are persisted by the Codex service.
+  const savedHiddenCodex = isAcp ? undefined
+    : props.codexModels?.find((model) => model.id === modelValue && model.hidden);
   // A model the running provider's live list does not carry is left over from
   // another provider or a retired release. Shown as Default — and cleared, so
   // the value stored is the value shown is the value that runs. Only against a
@@ -351,7 +385,7 @@ function JobDefaultRow(props: {
               aria-disabled={blocked}
               className="settings-select"
               disabled={unavailable || modelLoading}
-              value={modelLoading ? LOADING : modelInChoices ? modelValue : ""}
+              value={modelLoading ? LOADING : modelInChoices || savedHiddenCodex !== undefined ? modelValue : ""}
               onChange={(event) => {
                 if (blocked) return;
                 const next = event.target.value;
@@ -378,6 +412,11 @@ function JobDefaultRow(props: {
                   <option value="">
                     {defaultModel === undefined ? "Default" : `Default (${defaultModel.label})`}
                   </option>
+                  {savedHiddenCodex !== undefined && (
+                    <option value={savedHiddenCodex.id} hidden disabled>
+                      {modelLabel(savedHiddenCodex)} (saved choice)
+                    </option>
+                  )}
                   {choices.map((choice) => (
                     <option key={choice.id} value={choice.id}>
                       {choice.label}

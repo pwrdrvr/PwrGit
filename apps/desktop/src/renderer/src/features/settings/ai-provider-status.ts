@@ -107,6 +107,9 @@ export function describeCodexStatus(
   if (snapshot.auth?.status === "failed") {
     return withSentence({ ...base, tone: "warn", chip: "check", badge: "Sign-in check failed", meta });
   }
+  if (snapshot.versionAdvisory !== undefined) {
+    return withSentence({ ...base, tone: "warn", chip: "update", badge: "Update recommended", meta });
+  }
   return withSentence({ ...base, tone: "ok", badge: "Ready", meta });
 }
 

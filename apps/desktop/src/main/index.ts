@@ -1140,6 +1140,7 @@ if (!gotSingleInstanceLock) {
     const aiProviderSettings = new AiProviderSettingsStore(db);
     const aiProviders = createAiProviderService({
       settings: aiProviderSettings,
+      onSettingsChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot),
       acpModelCache: new AcpModelCache(
         join(app.getPath("userData"), "cache", "acp-models.json")
       ),

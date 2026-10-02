@@ -52,6 +52,12 @@ const { backend, model, effort, guidance } = job.value;
 For display, `discoverCodex` and `discoverAcp` serve the same cached answers as
 Settings.
 
+`codex-model-policy.ts` owns model hiding and saved-default migrations, using
+only selectable replacements in that runtime's catalog. Caches keep the raw
+catalog. A migration writes only the requesting profile and broadcasts its
+new settings; a pending list cannot migrate a different binary/account's
+defaults. `resolveJob` uses cached catalogs only, never starts a model probe.
+
 ## Settings are per profile
 
 They are stored in `app_meta` under `profile:<id>:ai-providers`

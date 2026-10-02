@@ -1,4 +1,4 @@
-import { renameSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
@@ -91,13 +91,15 @@ test("lineage failures surface a toast instead of looking like empty history", a
 
   // Make the next, differently-scoped graph request fail after the repo has
   // already loaded. The renderer must not silently translate that Result into
-  // "No commits."
-  renameSync(join(repo.path, ".git"), join(repo.path, ".git-unavailable"));
+  // "No commits." Keep .git in place: Windows watchers can prevent renaming
+  // it, and removing it races the missing-worktree guard instead of testing
+  // a Git failure. An invalid repo-local config makes every Git read fail.
+  writeFileSync(join(repo.path, ".git", "config"), "[invalid fixture config\n");
   await window.locator(".only-me").click();
 
   const toast = window.locator(".app-toast", { hasText: "History unavailable" });
   await expect(toast).toBeVisible();
-  await expect(toast).toContainText(/not a git repository/i);
+  await expect(toast).toContainText(/bad config line 1/i);
   await expect(toast.getByRole("button", { name: "Logs" })).toBeVisible();
   await expect(window.locator(".graph-empty")).toBeHidden();
 });
