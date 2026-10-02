@@ -241,9 +241,9 @@ function JobDefaultRow(props: {
   // since been switched off.
   const provider: AiProviderId =
     settings === null ? "codex" : effectiveJobProvider(settings, props.jobId);
-  const isAcp = provider !== "codex";
+  const isAcp = provider !== "codex" && provider !== "chatgpt";
   const providerOptions: AiProviderId[] = [
-    "codex",
+    "codex", "chatgpt",
     ...(job.acp ? (settings?.acp.enabledAgentIds ?? []) : [])
   ];
   const providerLabel = (id: AiProviderId): string =>
@@ -265,7 +265,7 @@ function JobDefaultRow(props: {
   const acpList = isAcp ? acpModels[provider] : undefined;
   const modelLoading = isAcp
     ? acpModelsLoadingIds.includes(provider) || acpList === undefined
-    : props.codexModelsLoading;
+    : provider === "chatgpt" ? false : props.codexModelsLoading;
   const visibleCodex = (props.codexModels ?? []).filter((model) => !model.hidden);
   const choices: Array<{ id: string; label: string; isDefault: boolean }> = isAcp
     ? (acpList ?? []).map((model) => ({
@@ -344,7 +344,7 @@ function JobDefaultRow(props: {
     patch({ ...(staleModel ? { model: "" } : {}), ...(staleReasoning ? { reasoning: "" } : {}) });
   }, [staleModel, staleReasoning, provider, modelValue, reasoningValue, patch]);
 
-  const modelError = isAcp ? acpModelErrors[provider] : props.codexModelsError;
+  const modelError = isAcp ? acpModelErrors[provider] : provider === "chatgpt" ? null : props.codexModelsError;
   const unavailable = settings === null;
   const blocked = ai.saving;
 

@@ -8,6 +8,7 @@ import {
   nativeTheme,
   protocol,
   safeStorage,
+  shell,
   webContents
 } from "electron";
 import {
@@ -143,6 +144,8 @@ import { registerLocalAgentHandlers } from "./local-agents/local-agent-handlers"
 import { AcpModelCache } from "./ai/acp-model-cache";
 import { registerAiProviderHandlers } from "./ai/ai-provider-handlers";
 import { createAiProviderService } from "./ai/ai-provider-service";
+import { ChatGptAuth } from "./ai/chatgpt-auth";
+import { ChatGptSecretStore } from "./ai/chatgpt-storage";
 import { AiProviderSettingsStore } from "./ai/ai-provider-settings";
 import { CodexModelCache } from "./ai/codex-model-cache";
 import { ConsentBroker } from "./agent-access/consent-broker";
@@ -1138,7 +1141,12 @@ if (!gotSingleInstanceLock) {
     // the opposite direction from Local Agents above. Per profile, and
     // nothing is probed until Settings asks or a job resolves its agent.
     const aiProviderSettings = new AiProviderSettingsStore(db);
+    const chatGpt = new ChatGptAuth(
+      new ChatGptSecretStore(db, safeStorage),
+      async (url) => { await shell.openExternal(url); }
+    );
     const aiProviders = createAiProviderService({
+      chatGpt,
       settings: aiProviderSettings,
       onSettingsChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot),
       acpModelCache: new AcpModelCache(
@@ -1153,8 +1161,14 @@ if (!gotSingleInstanceLock) {
       discoveryDisabled:
         !app.isPackaged && process.env["PWRGIT_E2E_AGENT_UNAVAILABLE"] === "1"
     });
+    const agentSession = new LocalAgentSession({
+      resolveJob: (input) => aiProviders.resolveJob(input),
+      tempRoot: join(app.getPath("temp"), "pwrgit-agent")
+    });
     registerAiProviderHandlers(bus, {
       service: aiProviders,
+      chatGpt,
+      resetAgent: (profileId) => agentSession.reset(profileId),
       store: aiProviderSettings,
       profiles,
       onChanged: (snapshot) => emitEvent("aiProviders:changed", snapshot)
@@ -1164,12 +1178,9 @@ if (!gotSingleInstanceLock) {
     // are all `resolveJob`'s answer, so this session discovers nothing itself
     // and inherits the E2E seam above.
     const agentHandlers = registerAgentHandlers(bus, db, {
-      session: new LocalAgentSession({
-        resolveJob: (input) => aiProviders.resolveJob(input),
-        tempRoot: join(app.getPath("temp"), "pwrgit-agent")
-      })
+      session: agentSession
     });
-    app.on("before-quit", () => aiProviders.dispose());
+    app.on("before-quit", () => { chatGpt.dispose(); aiProviders.dispose(); });
     // The loopback listener stays off until the operator turns it on: it is a
     // standing grant on their repositories, not a default.
     const mcpPolicyFile = join(app.getPath("userData"), "mcp-policy.json");

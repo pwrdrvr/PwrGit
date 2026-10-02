@@ -57,6 +57,7 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "aiProviders:read" || name === "aiProviders:update") {
     return ok({ profileId: PERSONAL.id, settings });
   }
+  if (name === "aiProviders:chatGptStatus") return ok({ connected: false, planUsage: false, label: "", welcome: false });
   if (name === "aiProviders:discoverCodex") return ok(codex);
   if (name === "aiProviders:discoverAcp") return ok(acp);
   if (name === "aiProviders:codexAuthProfiles") {
@@ -203,7 +204,7 @@ describe("AI Providers pane", () => {
     const titles = [...container.querySelectorAll(".settings-panel__title")].map((node) =>
       node.textContent?.trim()
     );
-    expect(titles).toEqual(["Codex", "Grok", "Kimi Code CLI", "Qwen Code"]);
+    expect(titles).toEqual(["Codex", "Sign in with ChatGPT", "Grok", "Kimi Code CLI", "Qwen Code"]);
     expect(container.textContent).not.toMatch(/gemini/i);
   });
 
@@ -389,4 +390,28 @@ it("shows the selected runtime's model warning and installer-specific command", 
   expect(container.textContent).toContain("GPT-6 Sol and GPT-6.1 Sol need 0.159.2 or newer.");
   expect(container.textContent).toContain("brew upgrade --cask codex");
   expect(container.textContent).toContain("Update recommended");
+});
+
+it("offers explicit ChatGPT sign-in, shows the first-plan welcome, and links usage/help without enabling AI", async () => {
+  let connected = false;
+  mocks.dispatch.mockImplementation((name: string, req: unknown) => {
+    if (name === "aiProviders:chatGptStatus") return ok({ connected, planUsage: connected, label: connected ? "fixture@example.invalid" : "", welcome: false });
+    if (name === "aiProviders:chatGptSignIn") { const welcome = !connected; connected = true; return ok({ connected, planUsage: true, label: "fixture@example.invalid", welcome }); }
+    return answer(name, req);
+  });
+  await render();
+  expect(mocks.dispatch.mock.calls.some(([name]) => name === "aiProviders:chatGptSignIn")).toBe(false);
+  const section = card("Sign in with ChatGPT");
+  expect(section.textContent).toContain("PwrGit is free");
+  await act(async () => button(section, "Continue with ChatGPT").click());
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain("You’re using your ChatGPT plan");
+  await act(async () => button(container, "Got it").click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  await act(async () => button(section, "Continue with ChatGPT").click());
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  await act(async () => button(section, "Manage usage").click());
+  expect(mocks.dispatch).toHaveBeenCalledWith("shell:openExternal", { url: "https://chatgpt.com/settings/usage" });
+  await act(async () => button(section, "Learn more").click());
+  expect(mocks.dispatch).toHaveBeenCalledWith("shell:openExternal", { url: "https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites" });
+  expect(updates()).toEqual([]);
 });

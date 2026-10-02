@@ -1,3 +1,4 @@
+import { dispatch } from "../../lib/pwrgit";
 import { useState } from "react";
 import { AgentGlyph } from "../../lib/AgentGlyph";
 import type { MessageDraft } from "./useMessageDraft";
@@ -67,7 +68,9 @@ export function DraftFooter({
       text: describeFailure(agentName, status),
       tone: status.code === "cancelled" ? "quiet" : "warn"
     };
-    if (agentReady) {
+    if (status.code === "subscription_sharing_usage_limit_exceeded") {
+      links.push({ label: "Manage usage", onClick: () => { void dispatch("shell:openExternal", { url: "https://chatgpt.com/settings/usage" }); } });
+    } else if (agentReady && status.code !== "subscription_sharing_user_not_eligible") {
       links.push({
         label: status.code === "cancelled" ? "Draft" : "Retry",
         agent: status.code === "cancelled",
@@ -80,6 +83,7 @@ export function DraftFooter({
       tone: "agent"
     };
     links.push({ label: "Regenerate", onClick: draft.request });
+    if (draft.draft.providerId === "chatgpt") links.push({ label: "Manage usage", onClick: () => { void dispatch("shell:openExternal", { url: "https://chatgpt.com/settings/usage" }); } });
     if (fallbackAction !== null) {
       links.push({ label: fallbackAction, quiet: true, onClick: draft.restoreFallback });
     }

@@ -37,8 +37,14 @@ working on can have its own directory — so a long build, a running test suite,
 or something else editing one branch leaves the branch you are reading alone.
 The lineage graph draws what actually happened, including the commits a branch
 is missing. Pull- and merge-request status comes from the `gh` or `glab` CLI
-you already signed in with: PwrGit never asks for a password and stores no token
-of its own.
+you already signed in with: PwrGit uses those CLIs’ existing forge authentication. Optional ChatGPT sign-in
+stores its own tokens encrypted locally, separately for each profile.
+
+PwrGit is free. The free app can use your ChatGPT plan for optional commit-message
+drafts and history editing through Settings → AI Providers → Sign in with ChatGPT.
+AI stays off until you opt in for that profile.
+[Learn more](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites)
+about plan usage, or read the [setup and operator steps](docs/sign-in-with-chatgpt.md).
 
 ## Why you might want it
 

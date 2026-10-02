@@ -246,14 +246,14 @@ describe("AI Features — availability", () => {
 });
 
 describe("AI Features — default agents", () => {
-  it("offers only Codex for history editing, and says why", async () => {
+  it("offers Codex and ChatGPT for history editing, and explains the ACP boundary", async () => {
     // Grok is enabled, and would be offered for a job that accepts ACP.
     settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, acp: { enabledAgentIds: ["grok"], agents: {} } };
     await render();
 
     const provider = select("History editing provider");
-    expect(options(provider)).toEqual(["Codex"]);
-    expect(provider.disabled).toBe(true);
+    expect(options(provider)).toEqual(["Codex", "Sign in with ChatGPT"]);
+    expect(provider.disabled).toBe(false);
     expect(container.textContent).toContain("no-tools boundary");
   });
 
