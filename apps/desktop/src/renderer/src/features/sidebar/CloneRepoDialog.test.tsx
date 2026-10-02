@@ -201,3 +201,44 @@ it("offers no pair for a repository you own", async () => {
   expect(container.querySelector(".clone-from")).toBeNull();
   expect(submit().textContent).toBe("Clone repository");
 });
+
+it("keeps an explicit fork pick when the forge then refuses it, rather than cloning the original", async () => {
+  mockForge(preflight());
+  let answer!: (value: unknown) => void;
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) => {
+    if (channel === "repo:forkPreflight") {
+      return new Promise((resolve) => { answer = resolve; });
+    }
+    return base(channel, ...rest);
+  })(dispatchMock.getMockImplementation()!));
+  await openAndPick();
+
+  await act(async () => card("Your fork").click());
+  const refused: ForkPreflight = {
+    ...preflight(),
+    blocked: {
+      code: "forking_disabled",
+      message: "riverbend/sparkline already exists and is not a fork of octo-labs/sparkline."
+    }
+  };
+  await act(async () => answer(ok(refused)));
+
+  expect(card("Your fork").getAttribute("aria-pressed")).toBe("true");
+  expect(card("Your fork").textContent).toContain("already exists and is not a fork");
+  expect(submit().textContent).not.toBe("Clone repository");
+  expect(submit().disabled).toBe(true);
+});
+
+it("offers no pair when the account lookup fails", async () => {
+  mockForge(preflight());
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) => {
+    if (channel === "repo:forkTargets") {
+      return Promise.resolve({ ok: false, error: { kind: "remote", code: "x", message: "gh: not logged in" } });
+    }
+    return base(channel, ...rest);
+  })(dispatchMock.getMockImplementation()!));
+  await openAndPick();
+
+  expect(container.querySelector(".clone-from")).toBeNull();
+  expect(submit().textContent).toBe("Clone repository");
+});

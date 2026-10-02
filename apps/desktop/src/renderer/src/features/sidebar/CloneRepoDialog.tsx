@@ -195,6 +195,7 @@ export function CloneRepoDialog({
   const activeCloneIdRef = useRef<string | null>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const destinationInputRef = useRef<HTMLInputElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
 
   // Escape, the focus trap, and handing focus back to whatever opened this —
   // the contract ForkCheckoutDialog already had. It refuses while a clone is
@@ -376,29 +377,45 @@ export function CloneRepoDialog({
   const forkOwnersHost: ForgeKind | null =
     forgeSource !== null && isForgeKind(forgeSource.host) ? forgeSource.host : null;
   const forkOwnersHostname = forgeSource?.hostname ?? null;
+  /** Accounts per forge instance, kept for the dialog's life. Editing the
+   *  query deselects the source, and keying a fetch on the selection spent a
+   *  fresh `gh` lookup on every re-pick of a repository on the same host. */
+  const [ownersByInstance, setOwnersByInstance] = useState<
+    Record<string, ForgeOwner[] | "failed">
+  >({});
+  const ownersKey =
+    forkOwnersHost === null ? null : `${forkOwnersHost}|${forkOwnersHostname ?? ""}`;
+  const ownersAnswer = ownersKey === null ? undefined : ownersByInstance[ownersKey];
   /** Null while loading — the pair waits for it, so it is drawn once rather
    *  than appearing and then vanishing for a repository the user owns. */
-  const [forkOwners, setForkOwners] = useState<ForgeOwner[] | null>(null);
+  const forkOwners: ForgeOwner[] | null =
+    ownersAnswer === undefined ? null : ownersAnswer === "failed" ? [] : ownersAnswer;
   const [forkTargetPick, setForkTargetPick] = useState<ForgeOwner | null>(null);
   const [forkPreflight, setForkPreflight] = useState<ForkPreflight | null>(null);
   const [forkCheckError, setForkCheckError] = useState<string | null>(null);
   /** The user's own choice; null follows `cloneFromDefault`. */
   const [cloneFromPick, setCloneFromPick] = useState<CloneFrom | null>(null);
 
+  const ownersKnown = ownersAnswer !== undefined;
   useEffect(() => {
-    setForkOwners(null);
-    if (forkOwnersHost === null) return undefined;
+    if (forkOwnersHost === null || ownersKey === null || ownersKnown) {
+      return undefined;
+    }
     let active = true;
     void dispatch("repo:forkTargets", {
       host: forkOwnersHost,
       ...(forkOwnersHostname === null ? {} : { hostname: forkOwnersHostname })
     }).then((result) => {
-      if (active) setForkOwners(result.ok ? result.value : []);
+      if (!active) return;
+      setOwnersByInstance((current) => ({
+        ...current,
+        [ownersKey]: result.ok ? result.value : "failed"
+      }));
     });
     return () => {
       active = false;
     };
-  }, [forkOwnersHost, forkOwnersHostname]);
+  }, [ownersKey, ownersKnown]);
 
   const forkTargetList = useMemo(
     () => (forkOwners === null ? null : forkTargets(forkOwners, forgeSource)),
@@ -411,11 +428,16 @@ export function CloneRepoDialog({
           forkTargetList.some((owner) => owner.login === forkTargetPick.login)
         ? forkTargetPick
         : defaultForkTarget(forkTargetList);
-  const offerPair = offersCloneFrom({
-    source: forgeSource,
-    owners: forkOwners,
-    preflight: forkPreflight
-  });
+  // A failed lookup leaves nothing to fork into AND nothing to tell whether
+  // the repository is the user's own, so the pair would only ever offer a
+  // dead card — on their own repositories too. It stays away instead.
+  const offerPair =
+    ownersAnswer !== "failed" &&
+    offersCloneFrom({
+      source: forgeSource,
+      owners: forkOwners,
+      preflight: forkPreflight
+    });
 
   // Keyed on strings, for the reason ForkRepoDialog's preflight is: the
   // source object is replaced by every pick, the slug it names is not.
@@ -459,10 +481,15 @@ export function CloneRepoDialog({
     selectedRepository === null
       ? undefined
       : canPushOriginal(selectedRepository, forkPreflight);
-  const cloneFrom: CloneFrom =
-    !offerPair || forkCard.kind === "unavailable"
-      ? "original"
-      : (cloneFromPick ?? cloneFromDefault(originalCanPush, forkCard));
+  // An explicit pick is honoured even when the fork turns out to be
+  // unavailable: the card says why and the button stays disabled, rather than
+  // quietly relabelling itself to clone the original the user just declined.
+  const cloneFrom: CloneFrom = !offerPair
+    ? "original"
+    : (cloneFromPick ??
+      (forkCard.kind === "unavailable"
+        ? "original"
+        : cloneFromDefault(originalCanPush, forkCard)));
   const forking = cloneFrom === "fork";
   const forkStep = forkAction(forkPreflight);
   const forkUpstream = defaultUpstream(forkPreflight);
@@ -478,6 +505,14 @@ export function CloneRepoDialog({
   /** Your fork is already on disk: nothing is cloned, so the clone sections
    *  step aside and the button reveals it. */
   const revealing = forking && forkStep.kind === "reveal_existing";
+  // Picking a source moves focus to the destination field, and the forge's
+  // answer can then remove that field. Hand focus to the button that now does
+  // the work rather than letting it fall to <body>.
+  useEffect(() => {
+    if (!revealing) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body) submitRef.current?.focus();
+  }, [revealing]);
 
   // Nothing is asked of the forge until the box settles — and never on open.
   // The catalog this replaced listed every known owner's repositories up
@@ -1338,6 +1373,7 @@ export function CloneRepoDialog({
           </button>
           <button
             type="button"
+            ref={submitRef}
             className="modal__create clone-dialog__submit"
             disabled={submitDisabled}
             onClick={() => void submit()}

@@ -350,84 +350,80 @@ export function ForkRepoDialog({
     setCheckError(null);
     if (!inPlaceMode) setCheckoutPreflight(null);
     let active = true;
-    // In place, the same fork questions are asked about the checkout itself:
-    // `repo:forkCheckoutPreflight` answers them verbatim under `.fork`, plus
-    // the remote layout the rewire will write.
-    const asked: Promise<
-      | { ok: true; value: { fork: ForkPreflight; checkout: ForkCheckoutPreflight | null } }
-      | { ok: false; error: { message: string } }
-    > = inPlaceMode && inPlace !== undefined
-      ? dispatch("repo:forkCheckoutPreflight", {
-          profileId: profile.id,
-          repoId: inPlace.repoId,
-          ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
-          ...(preflightTargetName === null
-            ? {}
-            : { targetName: preflightTargetName }),
-          ...(upstreamQuery === null ? {} : { upstream: upstreamQuery })
-        }).then((result) =>
-          result.ok
-            ? { ok: true as const, value: { fork: result.value.fork, checkout: result.value } }
-            : result
-        )
-      : dispatch("repo:forkPreflight", {
-      profileId: profile.id,
-      source: selectedSource.nameWithOwner,
-      host: selectedSource.host,
-      // Without the instance, a self-managed source is preflighted against the
-      // forge's SaaS host — reporting a different repository's fork state, and
-      // then creating the fork there.
-      ...(preflightHostname === null ? {} : { hostname: preflightHostname }),
-      ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
-      // Only once the user has actually named it: before that the service's
-      // default (the source's name) is the right guess, and sending an empty
-      // string mid-edit would probe a nonexistent repository.
-      ...(preflightTargetName === null
-        ? {}
-        : { targetName: preflightTargetName })
-    }).then((result) =>
-      result.ok ? { ok: true as const, value: { fork: result.value, checkout: null } } : result
-    );
-    void asked.then((result) => {
+    const apply = (
+      fork: ForkPreflight,
+      checkout: ForkCheckoutPreflight | null
+    ): void => {
       if (!active) return;
       setChecking(false);
-      if (result.ok) {
-        const fork = result.value.fork;
-        setPreflight(fork);
-        setCheckoutPreflight(result.value.checkout);
-        // A slug typed rather than picked from a catalog was selected as an
-        // `unknown` placeholder. Preflight has since read the real thing, so
-        // the row stops claiming PwrGit could not determine what it just read.
-        if (fork.blocked?.code === undefined) {
-          setSelectedSource((current) =>
-            current !== null &&
-            current.nameWithOwner === fork.source.nameWithOwner
-              ? fork.source
-              : current
-          );
-        }
-        if (!forkNameTouched) {
-          setForkName(fork.target.name);
-          setDebouncedForkName(fork.target.name);
-        }
-        // Kept while it is still one of the choices. A re-run for another
-        // account or name answers about the same lineage, and in place the
-        // upstream choice is itself an input — resetting it here would undo
-        // the radio the user just pressed.
-        setUpstream((current) =>
+      setPreflight(fork);
+      setCheckoutPreflight(checkout);
+      // A slug typed rather than picked from a catalog was selected as an
+      // `unknown` placeholder. Preflight has since read the real thing, so
+      // the row stops claiming PwrGit could not determine what it just read.
+      if (fork.blocked?.code === undefined) {
+        setSelectedSource((current) =>
           current !== null &&
-          fork.upstreamChoices.some(
-            (choice) => choice.nameWithOwner === current
-          )
-            ? current
-            : defaultUpstream(fork)
+          current.nameWithOwner === fork.source.nameWithOwner
+            ? fork.source
+            : current
         );
-      } else {
-        setPreflight(null);
-        setCheckoutPreflight(null);
-        setCheckError(result.error.message);
       }
-    });
+      if (!forkNameTouched) {
+        setForkName(fork.target.name);
+        setDebouncedForkName(fork.target.name);
+      }
+      // Kept while it is still one of the choices. A re-run for another
+      // account or name answers about the same lineage, and in place the
+      // upstream choice is itself an input — resetting it here would undo
+      // the radio the user just pressed.
+      setUpstream((current) =>
+        current !== null &&
+        fork.upstreamChoices.some((choice) => choice.nameWithOwner === current)
+          ? current
+          : defaultUpstream(fork)
+      );
+    };
+    const fail = (message: string): void => {
+      if (!active) return;
+      setChecking(false);
+      setPreflight(null);
+      setCheckoutPreflight(null);
+      setCheckError(message);
+    };
+    const target = {
+      ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
+      ...(preflightTargetName === null ? {} : { targetName: preflightTargetName })
+    };
+    if (inPlaceMode && inPlace !== undefined) {
+      // In place, the same fork questions are asked about the checkout itself:
+      // `repo:forkCheckoutPreflight` answers them verbatim under `.fork`, plus
+      // the remote layout the rewire will write.
+      void dispatch("repo:forkCheckoutPreflight", {
+        profileId: profile.id,
+        repoId: inPlace.repoId,
+        ...target,
+        ...(upstreamQuery === null ? {} : { upstream: upstreamQuery })
+      }).then((result) =>
+        result.ok ? apply(result.value.fork, result.value) : fail(result.error.message)
+      );
+    } else {
+      void dispatch("repo:forkPreflight", {
+        profileId: profile.id,
+        source: selectedSource.nameWithOwner,
+        host: selectedSource.host,
+        // Without the instance, a self-managed source is preflighted against
+        // the forge's SaaS host — reporting a different repository's fork
+        // state, and then creating the fork there.
+        ...(preflightHostname === null ? {} : { hostname: preflightHostname }),
+        // Only once the user has actually named it: before that the service's
+        // default (the source's name) is the right guess, and sending an empty
+        // string mid-edit would probe a nonexistent repository.
+        ...target
+      }).then((result) =>
+        result.ok ? apply(result.value, null) : fail(result.error.message)
+      );
+    }
     return () => {
       active = false;
     };
@@ -635,7 +631,13 @@ export function ForkRepoDialog({
     action.kind === "blocked" ||
     (inPlaceMode
       ? action.kind !== "reveal_existing" &&
-        (checkoutPreflight === null || nameProblem !== null || targetOwner === null)
+        // `checking` too: a re-check for another account or name keeps the
+        // previous answer on screen, and its label ("Switch origin to my
+        // fork") can describe a fork the new target does not have.
+        (checking ||
+          checkoutPreflight === null ||
+          nameProblem !== null ||
+          targetOwner === null)
       : activeDestination === null ||
         (action.kind !== "reveal_existing" &&
           (nameProblem !== null || targetOwner === null)));
@@ -802,7 +804,7 @@ export function ForkRepoDialog({
                 Search for something else and the checkout this names is no
                 longer the one being forked, so the dialog is a plain Fork &
                 clone again. */}
-            {inPlace !== undefined && seedIsSource && inPlaceMode && (
+            {inPlace !== undefined && inPlaceMode && (
               <div className="fork-in-place">
                 <span>
                   <strong>Forking this checkout in place: {inPlace.repoName}</strong>
