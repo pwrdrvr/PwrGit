@@ -51,8 +51,24 @@ Generated manifests use immutable versioned URLs. Never use aliases or
 Output contains `Casks/pwrgit.rb`, three Winget files under
 `manifests/p/PwrDrvr/PwrGit/X.Y.Z/`, and `distribution-status.json`. The workflow
 uploads them as `package-manager-submissions`; it does not submit or merge them.
-Generation needs no additional credential. A green generation run does not prove
-either channel is published.
+Generation defaults to the read-only `GITHUB_TOKEN`. If cross-repository search
+is throttled, configure the optional repository Actions secret
+`DISTRIBUTION_READ_TOKEN` with an expiring fine-grained PAT limited to public
+repository access and no additional permissions. GitHub's code-search endpoint
+does not require fine-grained permissions. Do not reuse a release-publishing or
+administrator credential for these read-only checks. Configure it in PwrGit's
+Actions secrets, or use `gh secret set DISTRIBUTION_READ_TOKEN --repo
+pwrdrvr/PwrGit` and enter the value at the hidden prompt.
+
+The audit steps prefer this secret and log only its name; fork PRs retain the
+workflow-token fallback because repository secrets are unavailable there.
+Superseded runs for the same ref are canceled to reduce redundant searches.
+HTTP 429 is a rate-limit response, not proof of missing repository permission.
+A PAT changes the authentication/quota source but does not remove GitHub's
+code-search or secondary limits. Preserve failures and investigate throttling
+if it persists. See [GitHub's code-search authentication reference](https://docs.github.com/en/rest/search/search#search-code)
+and [rate-limit documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
+A green generation run does not prove either channel is published.
 
 ## Artifact and installation gates
 

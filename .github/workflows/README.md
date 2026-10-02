@@ -11,6 +11,14 @@ Submission, tap updates and client publication verification follow
 [the distribution runbook](../../docs/package-manager-distribution.md); generated
 workflow artifacts alone do not establish publication.
 
+Distribution audits optionally use repository Actions secret
+`DISTRIBUTION_READ_TOKEN`, an expiring fine-grained PAT with public-repository
+access only and no additional permissions. Without it (including fork PRs), they
+use `GITHUB_TOKEN`. It is used only for read-only comparisons/generation, not
+submission or signing; do not reuse `RELEASES_PAT` or an administrator token.
+The workflow logs the selected credential's name and cancels superseded runs for
+the same ref. A dedicated token does not bypass GitHub's search/secondary limits.
+
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + macOS + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |

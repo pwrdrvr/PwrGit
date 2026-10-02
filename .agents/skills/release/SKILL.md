@@ -379,6 +379,13 @@ gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main
 pnpm distribution:prepare v<version> node_modules/.cache/pwrgit-distribution
 ```
 
+If hosted cross-repository audits hit HTTP 429, inspect the logged token source.
+The optional Actions secret `DISTRIBUTION_READ_TOKEN` selects an expiring
+public-read fine-grained PAT with no extra permissions instead of `GITHUB_TOKEN`
+for those steps. Do not reuse publishing/admin credentials. Rate limiting is not
+evidence of missing repository access, and a PAT does not bypass search or
+secondary limits. Follow the distribution runbook for setup and remaining gates.
+
 Require immutable versioned URLs and download/hash the actual published bytes.
 Validate arm64 versus universal DMG selection, app bundle ID/version, Developer ID
 and Gatekeeper; validate Windows x64 payload, Authenticode on installer and app,

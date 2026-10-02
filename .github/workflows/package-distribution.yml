@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: package-distribution-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   prepare:
     if: ${{ github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft) }}
@@ -33,9 +37,13 @@ jobs:
           package-manager-cache: false
       - name: Compare remote package sources and generate verified manifests
         env:
-          GH_TOKEN: ${{ github.token }}
+          # A dedicated public-read PAT uses user authentication for the
+          # cross-repository search; retain the workflow token for fork PRs.
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
+          TOKEN_SOURCE: ${{ secrets.DISTRIBUTION_READ_TOKEN && 'DISTRIBUTION_READ_TOKEN' || 'GITHUB_TOKEN' }}
         run: |
           set -euo pipefail
+          echo "Distribution API token source: $TOKEN_SOURCE"
           tag="$(gh api repos/pwrdrvr/PwrGit/releases/latest --jq .tag_name)"
           node scripts/package-manager-release.mjs prepare "$tag" "$RUNNER_TEMP/distribution"
       - name: Verify both macOS architectures and signatures
@@ -76,7 +84,7 @@ jobs:
       - name: Require repositories to have caught up on daily checks
         if: github.event_name == 'schedule'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
         run: node scripts/package-manager-release.mjs audit --check
 
   windows:
