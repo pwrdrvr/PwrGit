@@ -1,0 +1,120 @@
+name: Validate package manager distribution
+
+# Releases born as prereleases are ineligible. Promotion emits `edited` when
+# performed with a maintainer token; the release skill also dispatches this
+# explicitly because events produced by GITHUB_TOKEN do not start workflows.
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+  schedule:
+    - cron: "41 11 * * *"
+  pull_request:
+    paths:
+      - scripts/package-manager-release*
+      - scripts/release/verify-winget-install.ps1
+      - .github/workflows/package-distribution.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-distribution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    if: ${{ github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft) }}
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Compare remote package sources and generate verified manifests
+        env:
+          # A dedicated public-read PAT uses user authentication for the
+          # cross-repository search; retain the workflow token for fork PRs.
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
+          TOKEN_SOURCE: ${{ secrets.DISTRIBUTION_READ_TOKEN && 'DISTRIBUTION_READ_TOKEN' || 'GITHUB_TOKEN' }}
+        run: |
+          set -euo pipefail
+          echo "Distribution API token source: $TOKEN_SOURCE"
+          tag="$(gh api repos/pwrdrvr/PwrGit/releases/latest --jq .tag_name)"
+          node scripts/package-manager-release.mjs prepare "$tag" "$RUNNER_TEMP/distribution"
+      - name: Verify both macOS architectures and signatures
+        run: |
+          set -euo pipefail
+          version="$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/distribution/distribution-status.json")).version')"
+          for arch in arm64 universal; do
+            mount="$RUNNER_TEMP/mount-$arch"
+            mkdir -p "$mount"
+            trap 'hdiutil detach "$mount" || true' EXIT
+            hdiutil attach "$RUNNER_TEMP/distribution/downloads/PwrGit-$version-$arch.dmg" -readonly -nobrowse -mountpoint "$mount"
+            app="$mount/PwrGit.app"
+            test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
+            test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist")" = com.pwrdrvr.pwrgit
+            codesign --verify --deep --strict "$app"
+            codesign -dv --verbose=2 "$app" 2>&1 | grep -q 'Authority=Developer ID Application: PwrDrvr LLC'
+            spctl --assess --type execute --verbose=2 "$app"
+            slices="$(lipo -archs "$app/Contents/MacOS/PwrGit")"
+            if [ "$arch" = arm64 ]; then
+              test "$slices" = arm64
+            else
+              echo "$slices" | grep -qw arm64
+              echo "$slices" | grep -qw x86_64
+            fi
+            hdiutil detach "$mount"
+            trap - EXIT
+          done
+      - name: Upload submission files and source comparison
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-manager-submissions
+          path: |
+            ${{ runner.temp }}/distribution/Casks
+            ${{ runner.temp }}/distribution/manifests
+            ${{ runner.temp }}/distribution/distribution-status.json
+          retention-days: 14
+          if-no-files-found: error
+      - name: Require repositories to have caught up on daily checks
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
+        run: node scripts/package-manager-release.mjs audit --check
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package-manager-submissions
+          path: distribution
+      - name: Install the official WinGet client
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-Command winget -ErrorAction SilentlyContinue) { winget --version }
+          Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery
+          # Without -Latest, Repair only repairs the preinstalled client, which
+          # can validate a newer schema against its older embedded schema IDs.
+          # Validate as the runner account. All-users provisioning can select
+          # the image's neutral bundle during re-registration instead of x64.
+          Repair-WinGetPackageManager -Latest -Force
+          Assert-WinGetPackageManager -Latest
+          winget --version
+          if ($LASTEXITCODE -ne 0) { throw 'The repaired WinGet client is not executable' }
+      - name: Validate manifest, signed installer, install and upgrade
+        shell: pwsh
+        run: ./scripts/release/verify-winget-install.ps1 -Directory distribution
