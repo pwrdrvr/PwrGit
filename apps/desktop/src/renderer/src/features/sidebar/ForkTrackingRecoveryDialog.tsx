@@ -3,6 +3,7 @@ import type { ForkTrackingRepair, Repo } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import { ForkCheckoutDialog } from "./ForkCheckoutDialog";
+import { GitForkIcon } from "./RepoIdentityMarks";
 
 /** A denied push may target the parent even though origin is already the
  *  user's fork. Offer tracking repair before asking them to fork again. */
@@ -94,6 +95,7 @@ function ForkTrackingRecoveryPanel({ checking, repair, error, busy, reason, onCl
       role="dialog" aria-modal="true" aria-label="Set up fork tracking"
       onClick={(event) => event.stopPropagation()}>
       <div className="clone-dialog__title">
+        <span className="clone-dialog__icon"><GitForkIcon size={17} /></span>
         <span><strong>{repair === null ? "Check fork tracking" : "Use your existing fork"}</strong>
           <small>{checking ? "Checking origin and branch tracking…" : "Repair tracking in this checkout"}</small></span>
         <button className="clone-dialog__close" aria-label="Close" disabled={busy} onClick={onClose}>×</button>
