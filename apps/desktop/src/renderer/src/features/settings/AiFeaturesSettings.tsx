@@ -162,9 +162,11 @@ export function AiFeaturesSettings(props: {
             eyebrow="Features"
             description="The provider, model and reasoning each feature starts with. Default leaves the choice to the provider."
           >
-            {/* One line answering "why can't I pick Sol?" above the pickers.
-                The command and installer guidance live on AI Providers. */}
-            {codexSnapshot?.versionAdvisory !== undefined && profileId !== null && (
+            {/* One line answering "why can't I pick Sol?" above the pickers,
+                only while AI is on: every job runs on Codex then, so an old
+                build limits what they can pick. With AI off nothing runs, and
+                the AI Providers card still carries the full help. */}
+            {ai.settings?.enabled === true && codexSnapshot?.versionAdvisory !== undefined && (
               <div className="ai-features-codex-notice" role="status">
                 <span className="ai-features-codex-notice__dot" aria-hidden="true" />
                 <span className="ai-features-codex-notice__text">

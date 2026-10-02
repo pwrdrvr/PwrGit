@@ -329,7 +329,7 @@ describe("AI Features — default agents", () => {
     expect(options(select("History editing model"))).toEqual(["Default (GPT-6.1 Sol)", "GPT-6.1 Sol"]);
   });
 
-  it("explains missing Sol models directly beside the model pickers", async () => {
+  function withOldCodex(): void {
     mocks.dispatch.mockImplementation(async (name, request) => {
       const result = await answer(name, request);
       if (name !== "aiProviders:discoverCodex") return result;
@@ -338,6 +338,17 @@ describe("AI Features — default agents", () => {
         versionAdvisory: { command: "/opt/homebrew/bin/codex", version: "0.153.4", minimumVersion: "0.159.2", installer: "homebrew", upgradeCommand: "brew upgrade --cask codex" }
       } };
     });
+  }
+
+  it("says nothing about an old Codex while AI is off, because nothing runs on it", async () => {
+    withOldCodex();
+    await render();
+    expect(container.textContent).not.toContain("may not offer GPT-6 Sol");
+  });
+
+  it("explains missing Sol models directly beside the model pickers", async () => {
+    settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, enabled: true, consentAcceptedAt: "2026-09-01T12:00:00.000Z" };
+    withOldCodex();
     await render();
     expect(container.textContent).toContain("Codex 0.153.4 may not offer GPT-6 Sol or GPT-6.1 Sol.");
     // The command and installer guidance live on AI Providers, one click away.

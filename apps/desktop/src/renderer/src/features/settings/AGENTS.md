@@ -139,7 +139,7 @@ separately.
   warning is advisory, so older models remain usable. The command and
   installer guidance live in the notice and on the AI Providers Codex card;
   AI Features shows one line above the pickers that links there, rather than a
-  third copy of the help. Model-list keys include
+  third copy of the help, and only while AI is on (every job runs on Codex). Model-list keys include
   the selected binary's version so upgrading it in place re-reads the picker.
 - **Model probes start the agent.** `aiProviders:acpModels` really starts the
   agent, so only an agent a job is routed to is probed on its own
