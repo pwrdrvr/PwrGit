@@ -102,7 +102,10 @@ export function DraftFooter({
     <>
       <div className="msg-foot" role="status">
         {source.tone === "agent" && <AgentGlyph />}
-        <span className={`msg-foot__src msg-foot__src--${source.tone}`}>
+        <span
+          className={`msg-foot__src msg-foot__src--${source.tone}`}
+          title={status.kind === "failed" ? status.detail : undefined}
+        >
           {source.text}
         </span>
         <span className="msg-foot__sp" />

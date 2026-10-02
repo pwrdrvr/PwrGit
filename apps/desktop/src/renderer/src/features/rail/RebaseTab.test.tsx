@@ -611,3 +611,21 @@ describe("Tidy", () => {
     expect(calls("aiProviders:codexModels")).toHaveLength(0);
   });
 });
+
+
+describe("agent configuration diagnostics", () => {
+  it.each(["squash", "tidy"] as const)("shows the explanation and raw diagnostic on hover for %s", async (op) => {
+    const explanation = "Codex could not load its configuration before generating the draft. Nothing changed.";
+    const raw = "failed to load workspace requirements";
+    route({
+      "agent:draftMessage": () => err({ kind: "agent", code: "configuration_failed", message: explanation, detail: raw }),
+      "agent:tidyPlan": () => err({ kind: "agent", code: "configuration_failed", message: explanation, detail: raw })
+    });
+    await render(op);
+    expect(container.textContent).toContain(explanation);
+    const diagnostic = [...container.querySelectorAll("[title]")].find(el => el.getAttribute("title") === raw);
+    expect(diagnostic?.textContent).toBe(explanation);
+    expect(button("Retry")).toBeDefined();
+    expect(calls("rebase:apply")).toHaveLength(0);
+  });
+});
