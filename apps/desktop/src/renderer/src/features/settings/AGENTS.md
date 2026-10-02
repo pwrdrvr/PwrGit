@@ -136,7 +136,10 @@ separately.
   re-probe.
 - **The launch notice probes Codex only when AI is enabled for its profile.**
   `CodexVersionNotice` uses the same discovery service as Settings; its version
-  warning is advisory, so older models remain usable. Model-list keys include
+  warning is advisory, so older models remain usable. The command and
+  installer guidance live in the notice and on the AI Providers Codex card;
+  AI Features shows one line above the pickers that links there, rather than a
+  third copy of the help. Model-list keys include
   the selected binary's version so upgrading it in place re-reads the picker.
 - **Model probes start the agent.** `aiProviders:acpModels` really starts the
   agent, so only an agent a job is routed to is probed on its own

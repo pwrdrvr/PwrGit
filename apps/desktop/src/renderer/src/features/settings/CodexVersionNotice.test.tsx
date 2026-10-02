@@ -65,7 +65,12 @@ describe("Codex launch notice", () => {
   it("offers model guidance, the actual upgrade command, and the profile's settings", async () => {
     await render();
     expect(container.textContent).toContain("0.159.2");
-    expect(container.textContent).toContain("GPT-6-Sol and GPT-6.1-Sol");
+    expect(container.textContent).toContain("GPT-6 Sol and GPT-6.1 Sol");
+    // One primary, the action this installer can take; Dismiss is text.
+    const primary = container.querySelectorAll(".app-toast__button--primary");
+    expect([...primary].map((entry) => entry.textContent)).toEqual(["Copy command"]);
+    expect(container.textContent).toContain("PwrGit checks again when you switch back.");
+    expect(container.textContent).not.toContain("Re-check");
     await click("Copy command");
     expect(copy).toHaveBeenCalledWith("brew upgrade --cask codex");
     expect(container.textContent).toContain("Copied");
@@ -95,7 +100,7 @@ describe("Codex launch notice", () => {
     settings.enabled = false;
     await render();
     await act(async () => { changed({ profileId: "personal", settings: { ...settings, enabled: true } }); });
-    expect(container.textContent).toContain("Update Codex");
+    expect(container.textContent).toContain("Codex update recommended");
     await act(async () => { changed({ profileId: "personal", settings }); });
     expect(container.textContent).toBe("");
   });
@@ -126,7 +131,7 @@ describe("Codex launch notice", () => {
     await render();
     expect(container.textContent).toContain("macOS, Windows, or Linux");
     expect(container.textContent).not.toContain("Copy command");
-    await click("Codex releases");
+    await click("Codex releases ↗");
     expect(mocks.dispatch).toHaveBeenCalledWith("shell:openExternal", { url: "https://github.com/openai/codex/releases" });
   });
 

@@ -252,6 +252,19 @@ describe("AI Providers pane", () => {
     expect(updates()).toEqual([{ codex: { authProfile: null } }]);
   });
 
+  it("names no followed account rather than showing empty parentheses", async () => {
+    mocks.dispatch.mockImplementation(async (name: string, req: unknown) =>
+      name === "aiProviders:codexAuthProfiles"
+        ? ok({ profiles: [{ name: "work", displayName: "work", codexHome: "/Users/you/.codex/profiles/work", hasAuthFile: false }], followed: "" })
+        : answer(name, req)
+    );
+    await render();
+    const select = container.querySelector<HTMLSelectElement>("select[aria-label='Codex account']");
+    if (select === null) throw new Error("no account select");
+    expect([...select.options].map((option) => option.textContent)).toContain("Follow profile");
+    expect(select.textContent).not.toContain("()");
+  });
+
   it("starts a sign-in and says where to finish it", async () => {
     codex = {
       ...codex,
@@ -373,7 +386,7 @@ it("shows the selected runtime's model warning and installer-specific command", 
     installer: "homebrew", upgradeCommand: "brew upgrade --cask codex"
   };
   await render();
-  expect(container.textContent).toContain("GPT-6-Sol and GPT-6.1-Sol");
+  expect(container.textContent).toContain("GPT-6 Sol and GPT-6.1 Sol need 0.159.2 or newer.");
   expect(container.textContent).toContain("brew upgrade --cask codex");
   expect(container.textContent).toContain("Update recommended");
 });

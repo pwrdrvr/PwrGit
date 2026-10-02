@@ -29,7 +29,7 @@ import {
   type SettingsFocusRequest
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
-import { CodexVersionHelp, codexVersionMessage } from "./CodexVersionHelp";
+import { codexModelsNotice } from "./CodexVersionHelp";
 
 /** What `aiProviders:codexModels` answered, and for which profile and binary. */
 type CodexModelsRead = {
@@ -162,15 +162,25 @@ export function AiFeaturesSettings(props: {
             eyebrow="Features"
             description="The provider, model and reasoning each feature starts with. Default leaves the choice to the provider."
           >
-            {codexSnapshot?.versionAdvisory !== undefined && (
-              <SettingsField
-                label="Update Codex for newer models"
-                sub={codexVersionMessage(codexSnapshot.versionAdvisory)}
-                control={<CodexVersionHelp
-                  key={`${codexSnapshot.versionAdvisory.command}:${codexSnapshot.versionAdvisory.version}`}
-                  advisory={codexSnapshot.versionAdvisory}
-                />}
-              />
+            {/* One line answering "why can't I pick Sol?" above the pickers.
+                The command and installer guidance live on AI Providers. */}
+            {codexSnapshot?.versionAdvisory !== undefined && profileId !== null && (
+              <div className="ai-features-codex-notice" role="status">
+                <span className="ai-features-codex-notice__dot" aria-hidden="true" />
+                <span className="ai-features-codex-notice__text">
+                  {codexModelsNotice(codexSnapshot.versionAdvisory)}
+                </span>
+                <button
+                  type="button"
+                  className="settings-inline-button"
+                  onClick={() => {
+                    void dispatch("settings:open", { page: "ai-providers", sub: "codex", profileId })
+                      .catch(() => undefined);
+                  }}
+                >
+                  Update in AI Providers
+                </button>
+              </div>
             )}
             {AI_JOB_IDS.map((jobId) => (
               <JobDefaultRow

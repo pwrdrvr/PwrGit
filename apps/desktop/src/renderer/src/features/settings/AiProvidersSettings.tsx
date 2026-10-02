@@ -27,7 +27,7 @@ import {
   type SettingsFocusRequest
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
-import { CodexVersionHelp, codexVersionMessage } from "./CodexVersionHelp";
+import { CodexVersionHelp } from "./CodexVersionHelp";
 
 /**
  * Settings → AI Providers: the agents PwrGit can hand work to, one card per
@@ -206,9 +206,11 @@ function CodexSection(props: { status: AiProviderStatus; onEditDefaults: () => v
     >
       <DefaultForField provider="codex" onEditDefaults={props.onEditDefaults} />
       {snapshot?.versionAdvisory !== undefined && (
+        // The card's badge already says "Update recommended"; the field names
+        // its subject and states the gap.
         <SettingsField
-          label="Update recommended"
-          sub={codexVersionMessage(snapshot.versionAdvisory)}
+          label="Version"
+          sub={`GPT-6 Sol and GPT-6.1 Sol need ${snapshot.versionAdvisory.minimumVersion} or newer. Older builds may not list or run them.`}
           control={<CodexVersionHelp key={`${snapshot.versionAdvisory.command}:${snapshot.versionAdvisory.version}`} advisory={snapshot.versionAdvisory} />}
         />
       )}
@@ -409,7 +411,8 @@ function CodexAccountField() {
   const followedLabel =
     list === null
       ? null
-      : (list.profiles.find((option) => option.name === list.followed)?.displayName ?? list.followed);
+      : (list.profiles.find((option) => option.name === list.followed)?.displayName ?? list.followed) ||
+        null; // An empty name would render "Follow profile ()".
   const auth = snapshot?.auth ?? null;
   const canSignIn = snapshot !== null && snapshot.resolvedPath !== null && profileId !== null;
   const waiting = login.phase === "waiting";

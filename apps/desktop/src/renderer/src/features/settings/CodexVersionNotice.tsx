@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { jobProviders, type AiProviderSettings, type CodexVersionAdvisory } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
-import { CodexVersionHelp, codexVersionMessage } from "./CodexVersionHelp";
+import { CodexVersionToastBody } from "./CodexVersionHelp";
 
 /** Probe only when this window's profile enables a feature routed to Codex.
  * Dismissal lasts for this launch; a different runtime can raise a new notice. */
@@ -54,29 +54,28 @@ export function CodexVersionNotice({ profileId }: { profileId: string | null }) 
 
   const key = notice === null ? "" : JSON.stringify([notice.profileId, notice.advisory.command, notice.advisory.version]);
   if (!enabled || notice?.profileId !== profileId || dismissed.current.has(key)) return null;
+  // One action row, shaped like the "Update ready" card beside it: the
+  // primary the installer can act on, then AI Providers, then a text Dismiss.
   return (
     <aside className="app-toast codex-version-notice" role="status" aria-live="polite">
-      <div className="app-toast__content">
-        <p className="app-toast__eyebrow app-toast__eyebrow--info">Update Codex for newer models</p>
-        <p className="app-toast__message">{codexVersionMessage(notice.advisory)}</p>
-        <CodexVersionHelp key={key} advisory={notice.advisory} compact />
-        {error !== null && <p className="settings-field__error" role="alert">{error}</p>}
-      </div>
-      <div className="app-toast__actions">
-        <button type="button" className="app-toast__button" onClick={() => {
-          void dispatch("settings:open", { page: "ai-providers", sub: "codex", profileId })
-            .then((result) => { if (!result.ok) setError(result.error.message); })
-            .catch(() => setError("Couldn’t open AI Providers."));
-        }}>AI Providers</button>
-        <button type="button" className="app-toast__button" aria-label="Dismiss Codex update notice" onClick={() => {
-          dismissed.current.add(key);
-          setDismissal((value) => value + 1);
-        }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="m6 6 12 12M18 6 6 18" />
-          </svg>
-        </button>
-      </div>
+      <CodexVersionToastBody
+        key={key}
+        advisory={notice.advisory}
+        error={error}
+        actions={
+          <>
+            <button type="button" className="app-toast__button" onClick={() => {
+              void dispatch("settings:open", { page: "ai-providers", sub: "codex", profileId })
+                .then((result) => { if (!result.ok) setError(result.error.message); })
+                .catch(() => setError("Couldn’t open AI Providers."));
+            }}>AI Providers</button>
+            <button type="button" className="app-toast__button" aria-label="Dismiss Codex update notice" onClick={() => {
+              dismissed.current.add(key);
+              setDismissal((value) => value + 1);
+            }}>Dismiss</button>
+          </>
+        }
+      />
     </aside>
   );
 }

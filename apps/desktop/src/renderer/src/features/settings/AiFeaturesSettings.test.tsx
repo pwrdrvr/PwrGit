@@ -339,8 +339,13 @@ describe("AI Features — default agents", () => {
       } };
     });
     await render();
-    expect(container.textContent).toContain("GPT-6-Sol and GPT-6.1-Sol");
-    expect(container.textContent).toContain("brew upgrade --cask codex");
+    expect(container.textContent).toContain("Codex 0.153.4 may not offer GPT-6 Sol or GPT-6.1 Sol.");
+    // The command and installer guidance live on AI Providers, one click away.
+    expect(container.textContent).not.toContain("brew upgrade --cask codex");
+    await click(button(container, "Update in AI Providers"));
+    expect(mocks.dispatch).toHaveBeenCalledWith("settings:open", {
+      page: "ai-providers", sub: "codex", profileId: "personal"
+    });
   });
 
   it("clears an effort the newly chosen model does not take", async () => {
