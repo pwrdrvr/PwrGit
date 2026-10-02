@@ -146,7 +146,12 @@ both macOS bundles passed strict signature and notarized Gatekeeper checks.
 | Channel | Published package version at audit | Target | Submission | State / next action |
 |---|---|---|---|---|
 | Winget | None | 0.27.0 | Preparation in this PR | Run native validation, submit to Microsoft and track review/index publication |
-| Homebrew | None | 0.27.0 | [tap PR #8](https://github.com/pwrdrvr/homebrew-tap/pull/8) | Install/signature CI pending; review and merge, refresh tap and verify client install |
+| Homebrew | None | 0.27.0 | [tap PR #8](https://github.com/pwrdrvr/homebrew-tap/pull/8) | PwrGit Intel/Apple Silicon install/signature/uninstall checks [passed](https://github.com/pwrdrvr/homebrew-tap/actions/runs/37006517071); review and merge, refresh tap and verify client install |
+
+The same tap run fails its existing PwrSnap audits because that cask is 1.1.2
+while PwrSnap Latest is 1.1.12. This sibling version is unchanged in the PwrGit
+submission; the tap maintainer must resolve that separate drift before treating
+the combined tap check as green.
 
 These are initial registration records, not proof of live distribution. The
 maintainer `huntharo` owns submission follow-up. Update this dated snapshot with
