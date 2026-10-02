@@ -87,7 +87,7 @@ const HEADER_FIT_STEPS = [
 function baseChip(
   state: WorktreeState | null,
   worktree: Worktree,
-  source: ForkSourceTarget | null
+  source: SourceCounts | null
 ): Chip {
   // A gone checkout outranks every sync reading: nothing below is true of a
   // directory that does not exist. Read it from this worktree's own row when
@@ -95,9 +95,11 @@ function baseChip(
   const missing =
     state?.worktreeId === worktree.id ? state.missing : worktree.missing;
   if (missing === true) return { text: "directory missing", tone: "warn" };
-  if (state === null) return { text: "…", tone: "muted" };
+  // The source's count needs nothing from the live snapshot, so it does not
+  // wait for one: on a fork's first paint it may be all there is.
   const fromSource = source === null ? null : forkSourceChip(source);
   if (fromSource !== null) return fromSource;
+  if (state === null) return { text: "…", tone: "muted" };
   if (state.behind > 0) {
     const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
     return {
@@ -124,7 +126,9 @@ function baseChip(
  */
 function chipExplanation(
   state: WorktreeState | null,
-  fork: ForkStatus | null,
+  fork: Pick<ForkStatus, "tracked"> & {
+    source: (SourceCounts & { label: string; parent?: string }) | null;
+  } | null,
   branch: string
 ): string | undefined {
   const source = fork?.source ?? null;
@@ -203,7 +207,11 @@ function commits(count: number): string {
  * number that matters, and the tracked branch only comes up once the source
  * has nothing new — as `↑N ahead`, the commits a push would carry.
  */
-function forkSourceChip(source: ForkSourceTarget): Chip | null {
+/** What the chip needs of the source: the live read's `ForkSourceTarget`, or
+ *  the stored `WorktreeForkSource` it paints from until that read lands. */
+type SourceCounts = Pick<ForkSourceTarget, "remote" | "ahead" | "behind">;
+
+function forkSourceChip(source: SourceCounts): Chip | null {
   if (source.behind <= 0) return null;
   return source.ahead > 0
     ? {
@@ -559,7 +567,22 @@ export function WorktreeHeader({
   const pullButton = useRef<HTMLButtonElement | null>(null);
   /** The split Pull, so its menu opens under the whole control. */
   const pullSplit = useRef<HTMLDivElement>(null);
-  const forkStatus = useForkStatus(worktree.id, repo.id, worktree.branch);
+  const forkRead = useForkStatus(worktree.id, repo.id, worktree.branch);
+  const forkStatus = forkRead ?? null;
+  /** Until the live read lands, the stored source the sidebar already draws
+   *  from (Post-ship 2c). Selecting a fork's main used to paint "checking
+   *  remote…" with a plain Pull, then swap in the chip and the 22px arrow
+   *  ~300ms later, moving Push and the kebab under the pointer. Whether a
+   *  branch has a counterpart on the source only changes when a remote does,
+   *  so the stored answer is safe to paint; the live read can then only
+   *  correct the digits, or take the arrow away on a real change of state. */
+  const seed = forkRead === undefined ? (worktree.source ?? null) : null;
+  /** The split Pull the live read would draw — a source to pull from and a
+   *  tracked branch to fall back on — painted from the stored row. */
+  const seedSplit =
+    seed !== null &&
+    worktree.tracking !== "unpublished" &&
+    worktree.tracking !== "upstream_missing";
   /** What Pull does on a fork branch the source carries. Per repository, and
    *  re-read when the header moves to another one — it stays mounted. */
   const [pullChoice, setPullChoice] = useState<PullChoice>(() =>
@@ -1180,11 +1203,16 @@ export function WorktreeHeader({
     activity !== null && activity.kind === kind
       ? `${remoteActivityPhaseLabel(activity.phase)}…`
       : IDLE_LABEL[kind];
-  // The live read is keyed to this checkout already (useForkStatus resets on
-  // a change of worktree), so there is no stale-selection case to guard.
+  // The live read is keyed to this checkout already (useForkStatus answers
+  // undefined until it has read this one), so there is no stale-selection
+  // case to guard.
   const forkChoice = forkChoiceOf(forkStatus);
-  const choice: PullChoice = forkChoice === null ? "tracked" : pullChoice;
-  const localChip = baseChip(state, worktree, forkStatus?.source ?? null);
+  /** Pull is split: from the live read, or seeded from the stored source
+   *  while that read is out. Only the live read can run anything. */
+  const split = forkChoice !== null || seedSplit;
+  const choice: PullChoice = split ? pullChoice : "tracked";
+  const shownSource = forkStatus?.source ?? seed;
+  const localChip = baseChip(state, worktree, shownSource);
   // "up to date" is only claimed once the remote has confirmed it. Until
   // then the chip says what is actually known.
   const checkKey = `${worktree.id}\0${worktree.branch}`;
@@ -1360,22 +1388,26 @@ export function WorktreeHeader({
   // while the chip counts commits waiting on `origin/main`.
   const runs: PullChoice =
     choice === "sync" &&
-    forkChoice !== null &&
-    forkChoice.source.behind === 0 &&
+    split &&
+    (shownSource?.behind ?? 0) === 0 &&
     behind > 0
       ? "tracked"
       : choice;
   // The accent says pulling has something to do, so it follows what Pull
   // would pull from.
   const pullHasWork =
-    forkChoice === null || runs === "tracked"
+    !split || runs === "tracked"
       ? behind > 0
-      : forkChoice.source.behind > 0;
+      : (shownSource?.behind ?? 0) > 0;
   const pullTrigger = buttonTriggers("pull", pullTitle(runs, forkChoice));
 
   /** Run what Pull does, from the button or from a row of its menu. */
   const runPull = (run: PullChoice, from: HTMLElement | null): void => {
     if (running !== null) return;
+    // Seeded, not yet read: the sync needs the live tips to lease against,
+    // and a plain pull in its place would do something the arrow does not
+    // say. The read lands within a frame or two of the selection.
+    if (forkChoice === null && split && run !== "tracked") return;
     if (from !== null) pinStatus("pull", from);
     if (forkChoice === null || run === "tracked") onPull();
     else onSyncFork(forkChoice, run === "sync");
@@ -1481,7 +1513,8 @@ export function WorktreeHeader({
                       ? "Checking the remote branch for new commits."
                       : chipExplanation(
                           state?.worktreeId === worktree.id ? state : null,
-                          forkStatus,
+                          forkStatus ??
+                            (seed === null ? null : { source: seed, tracked: null }),
                           forkStatus?.branch ?? worktree.branch
                         )
                 )
@@ -1551,7 +1584,7 @@ export function WorktreeHeader({
             const pullButtonNode = (
               <button
                 className={`wt-btn wt-btn--pull${pullHasWork ? " is-behind" : ""}${
-                  pullMenu === null ? "" : " wt-split__main"
+                  split ? " wt-split__main" : ""
                 }`}
                 onClick={(event) => runPull(runs, event.currentTarget)}
                 aria-disabled={running !== null}
@@ -1573,7 +1606,9 @@ export function WorktreeHeader({
                 </span>
               </button>
             );
-            if (pullMenu === null) return pullButtonNode;
+            if (!split) return pullButtonNode;
+            // While seeded the arrow is there (it holds its width from the
+            // first frame) but has nothing to offer until the read lands.
             return (
               <div
                 ref={pullSplit}
@@ -1582,9 +1617,9 @@ export function WorktreeHeader({
                 {pullButtonNode}
                 <PullMenu
                   anchorRef={pullSplit}
-                  disabled={running !== null}
+                  disabled={running !== null || pullMenu === null}
                   checked={choice}
-                  {...pullMenu}
+                  {...(pullMenu ?? { actions: [], choices: [] })}
                 />
               </div>
             );

@@ -2103,6 +2103,75 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(caret()).toBeNull();
   });
 
+  // Post-ship 2c: selecting a fork's main painted "checking remote…" and a
+  // plain Pull, then the live read swapped in the chip and the 22px arrow and
+  // moved Push and the kebab under the pointer. The stored source — what the
+  // sidebar draws — paints the final shape from the first frame.
+  describe("first paint, before the live read lands", () => {
+    const stored: Worktree = {
+      ...worktree,
+      behind: 0,
+      tracking: "up_to_date",
+      source: { remote: "upstream", label: "upstream/main", ahead: 0, behind: 25 }
+    };
+    let land!: (fork: ForkStatus | null) => void;
+    const answerLater = (): void => {
+      const pending = new Promise<ForkStatus | null>((resolve) => {
+        land = resolve;
+      });
+      bridge.dispatch.mockImplementation((name: string) => {
+        if (name === "remote:forkStatus") return pending.then((fork) => ok(fork));
+        if (name === "remote:activities") return Promise.resolve(ok([]));
+        if (name === "remote:checkSelected") return Promise.resolve(ok({ status: "checked" }));
+        return new Promise(() => undefined);
+      });
+    };
+
+    it("paints the stored count and the arrow at once", async () => {
+      answerLater();
+      await remount(stored);
+      expect(statusChip()).toBe("↓25 behind upstream");
+      expect(
+        container.querySelector(".sync-chip--source")
+      ).not.toBeNull();
+      // The arrow holds its width from the first frame, inert until the read.
+      expect(caret()).not.toBeNull();
+      expect(caret()?.getAttribute("aria-disabled")).toBe("true");
+      expect(pull()?.classList.contains("is-behind")).toBe(true);
+      // A seeded Pull does not run a plain pull in the sync's place.
+      await act(async () => pull()?.click());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:syncFork", expect.anything());
+
+      // The live read can only correct the digits.
+      await act(async () => {
+        land(behindSource({ behind: 27 }));
+        await settle();
+      });
+      expect(statusChip()).toBe("↓27 behind upstream");
+      expect(caret()?.getAttribute("aria-disabled")).toBe("false");
+    });
+
+    it("lets a read that finds no source take the arrow away", async () => {
+      answerLater();
+      await remount(stored);
+      expect(caret()).not.toBeNull();
+      await act(async () => {
+        land(null);
+        await settle();
+      });
+      expect(caret()).toBeNull();
+      expect(statusChip()).not.toContain("upstream");
+    });
+
+    it("keeps checking remote… for a branch with nothing stored", async () => {
+      answerLater();
+      await remount({ ...worktree, behind: 0 });
+      expect(caret()).toBeNull();
+      expect(container.querySelector(".sync-chip--source")).toBeNull();
+    });
+  });
+
   it("does not claim a stale tracking ref is up to date while the remote is unavailable", async () => {
     let finish!: (value: ReturnType<typeof ok<{ status: "unavailable" }>>) => void;
     const checking = new Promise<ReturnType<typeof ok<{ status: "unavailable" }>>>(
