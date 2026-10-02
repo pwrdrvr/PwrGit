@@ -6349,6 +6349,8 @@ button.agent-menu__item:hover {
 }
 .refs-browser__toolbar {
   display: flex;
+  /* Zoomed far enough, the tabs and the filter cannot share a line. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-height: 55px;
@@ -6358,6 +6360,7 @@ button.agent-menu__item:hover {
 }
 .refs-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--border-subtle);
@@ -6395,6 +6398,9 @@ button.agent-menu__item:hover {
   align-items: center;
   gap: 7px;
   flex: 1;
+  /* Zoomed, it wraps to a line of its own before it gets too short to type
+     in, and only shrinks below that when the line itself is narrower. */
+  min-width: min(160px, 100%);
   max-width: 310px;
   height: 34px;
   padding: 0 10px;
@@ -6913,6 +6919,9 @@ button.agent-menu__item:hover {
 }
 .refs-remote-card__head {
   display: flex;
+  /* Zoomed far enough, the actions take a line under the name. */
+  flex-wrap: wrap;
+  gap: 6px 10px;
   align-items: center;
   justify-content: space-between;
   min-height: 45px;
@@ -6930,6 +6939,7 @@ button.agent-menu__item:hover {
 }
 .refs-remote-card__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
 }
@@ -6990,6 +7000,23 @@ button.agent-menu__item:hover {
   min-height: 45px;
   padding: 6px 13px;
   border-top: 1px solid var(--border-subtle);
+}
+/* 18 + 80 + 112 + 26 of padding + the card's 2px border: below that the row
+   would overflow its card, so the age goes and the actions take their own
+   line (see the narrow refs tables, `refs-body`). */
+@container refs-body (width < 240px) {
+  .refs-remote-branch {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+  .refs-remote-branch > :nth-child(3) {
+    display: none;
+  }
+  .refs-remote-branch > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-remote-branch .refs-row-actions {
+    flex-wrap: wrap;
+  }
 }
 /* Paged ref lists carry a footer saying how much of the match set is on
    screen — see RefsPageFooter. Without it, a page that stops at 50 of 4,466
@@ -7130,14 +7157,95 @@ button.agent-menu__item:hover {
   color: var(--text-muted);
   font: 500 10.5px/1.4 var(--font-sans);
 }
-/* Doubled class: the generic `.refs-table__row` narrow rule sits later in
-   this file and would otherwise win the tie. It hides the same two columns.
-   Reached through zoom: View › Zoom In takes the 940px window below 760 CSS
-   pixels. */
-@media (max-width: 760px) {
-  .refs-table__header.refs-pr-table__row,
-  .refs-table__row.refs-pr-table__row {
-    grid-template-columns: minmax(200px, 1fr) 90px 120px;
+/* Narrow refs tables. The window stops at 940px, but View › Zoom In narrows
+   the page: one step leaves ~858 CSS px, two ~783, three ~715, and the five
+   columns' minimums stop fitting at the first. So the steps are measured
+   against the body the rows sit in (`refs-body`, a container), not the
+   viewport: its content box is what a row actually gets, scrollbar and
+   padding already taken off, and it is the same box on every platform.
+
+   Each threshold is that table's minimums plus its gaps (12px) and the row's
+   18px of padding; below it the row would overflow, so the next step takes
+   over. Compact drops the two quietest columns and keeps the actions whole;
+   stacked keeps the name and one status column, and moves the actions to a
+   line of their own, still at the right edge, where the slots may wrap.
+   Stacked fits to ~135px.
+
+     Branches  190+96+105+80+252 + 4×12 + 18 = 789   compact 160+105+252 + 42 = 559
+     Tags      185+130+190+252   + 3×12 + 18 = 811   compact 160+120+252 + 42 = 574
+     PRs       260+70+80+56+252  + 4×12 + 18 = 784   compact 160+80+252  + 42 = 534 */
+.refs-browser__body {
+  container: refs-body / inline-size;
+}
+@container refs-body (width < 790px) {
+  :is(.refs-table__header, .refs-table__row):not(.refs-tag-table__row, .refs-pr-table__row) {
+    grid-template-columns: minmax(160px, 1fr) 105px var(--refs-actions-w);
+  }
+  :is(.refs-table__header, .refs-table__row):not(.refs-tag-table__row, .refs-pr-table__row)
+    > :is(:nth-child(2), :nth-child(4)) {
+    display: none;
+  }
+}
+@container refs-body (width < 812px) {
+  .refs-tag-table__row {
+    grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 0.85fr) var(--refs-actions-w);
+  }
+  .refs-tag-table__row > :nth-child(3) {
+    display: none;
+  }
+}
+@container refs-body (width < 785px) {
+  .refs-pr-table__row {
+    grid-template-columns: minmax(160px, 1fr) minmax(80px, 112px) var(--refs-actions-w);
+  }
+  .refs-pr-table__row > :is(:nth-child(2), :nth-child(4)) {
+    display: none;
+  }
+}
+@container refs-body (width < 560px) {
+  :is(.refs-table__header, .refs-table__row):not(.refs-tag-table__row, .refs-pr-table__row) {
+    grid-template-columns: minmax(0, 1fr) 105px;
+  }
+}
+@container refs-body (width < 575px) {
+  .refs-tag-table__row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 120px);
+  }
+}
+@container refs-body (width < 535px) {
+  .refs-pr-table__row {
+    grid-template-columns: minmax(0, 1fr) 80px;
+  }
+}
+/* Stacked, shared: the actions take the row's second line. The header's
+   actions cell names nothing a stacked row lines up under. */
+@container refs-body (width < 560px) {
+  .refs-table__row:not(.refs-tag-table__row, .refs-pr-table__row) > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-table__header:not(.refs-tag-table__row, .refs-pr-table__row) > :last-child {
+    display: none;
+  }
+}
+@container refs-body (width < 575px) {
+  .refs-table__row.refs-tag-table__row > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-table__header.refs-tag-table__row > :last-child {
+    display: none;
+  }
+}
+@container refs-body (width < 535px) {
+  .refs-table__row.refs-pr-table__row > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-table__header.refs-pr-table__row > :last-child {
+    display: none;
+  }
+}
+@container refs-body (width < 575px) {
+  .refs-row-actions {
+    flex-wrap: wrap;
   }
 }
 /* BranchRefPicker — a filter box over a sized native listbox. */
@@ -7439,29 +7547,6 @@ button.agent-menu__item:hover {
   background: var(--bg-panel-elevated);
   color: var(--text-subtle);
   opacity: 1;
-}
-
-/* The window cannot be narrowed below 940px, but zoom narrows the page: three
-   steps of View › Zoom In leave about 715 CSS pixels, where the five columns'
-   minimums no longer fit the browser. Drop Upstream and Age there. */
-@media (max-width: 760px) {
-  .refs-table__header,
-  .refs-table__row {
-    grid-template-columns: minmax(180px, 1fr) 100px 100px;
-  }
-  /* The 100px column cannot hold the buttons in one line. */
-  .refs-row-actions {
-    flex-wrap: wrap;
-  }
-  .refs-table__header > :nth-child(2),
-  .refs-table__row > :nth-child(2),
-  .refs-table__header > :nth-child(4),
-  .refs-table__row > :nth-child(4) {
-    display: none;
-  }
-  .refs-browser__toolbar {
-    flex-wrap: wrap;
-  }
 }
 
 /* ---- Main pane: worktree header (Fetch/Pull/Push arrive in U9) ---- */
