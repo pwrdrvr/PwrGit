@@ -254,9 +254,25 @@ export function RepoRow({
   const [refBranches, setRefBranches] = useState<
     ReadonlyMap<string, LocalBranchSummary>
   >(new Map());
+  // The listing reloads on every snapshot of the repo; keep the old map when
+  // nothing the meta line reads has moved, or each reload re-renders the row.
   const keepRefBranches = useCallback(
     (branches: LocalBranchSummary[]) =>
-      setRefBranches(new Map(branches.map((b) => [b.name, b]))),
+      setRefBranches((current) =>
+        branches.length === current.size &&
+        branches.every((b) => {
+          const was = current.get(b.name);
+          return (
+            was !== undefined &&
+            was.tracking === b.tracking &&
+            was.ahead === b.ahead &&
+            was.behind === b.behind &&
+            was.lastCommitAt === b.lastCommitAt
+          );
+        })
+          ? current
+          : new Map(branches.map((b) => [b.name, b]))
+      ),
     []
   );
   // Collapsed before the refs landed: the ask goes with it, or it would fire
