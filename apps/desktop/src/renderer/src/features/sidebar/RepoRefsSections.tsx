@@ -95,7 +95,8 @@ export function RepoRefsSections({
   onFork,
   browserRequest = null,
   onBrowserRequestHandled,
-  onCleanUpBranches
+  onCleanUpBranches,
+  onBranches
 }: {
   repo: Repo;
   now: number;
@@ -121,6 +122,10 @@ export function RepoRefsSections({
   /** Open Maintenance › Local branches on this repository, already reviewing
    *  — the refs browser's Gone view offers it. */
   onCleanUpBranches?: (() => void) | undefined;
+  /** The local branches, each time the listing loads. The repo row's pinned
+   *  branch rows read their tracking count and age from it rather than ask
+   *  Git a second time. */
+  onBranches?: ((branches: LocalBranchSummary[]) => void) | undefined;
 }) {
   const forgeNaming = useForgeNaming();
   /** One card for every hover surface in this tree. Native `title` is what the
@@ -185,13 +190,18 @@ export function RepoRefsSections({
   // prompts, each accepted one dispatching another switch.
   const activating = useRef(false);
 
+  // A ref, so a caller's inline callback does not re-run the load.
+  const onBranchesRef = useRef(onBranches);
+  onBranchesRef.current = onBranches;
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     const result = await dispatch("repo:refs", { repoId: repo.id });
     setLoading(false);
-    if (result.ok) setRefs(result.value);
-    else setError(result.error.message.split("\n")[0]);
+    if (result.ok) {
+      setRefs(result.value);
+      onBranchesRef.current?.(result.value.branches);
+    } else setError(result.error.message.split("\n")[0]);
   }, [repo.id]);
 
   useEffect(() => {
@@ -496,7 +506,11 @@ export function RepoRefsSections({
             `aria-expanded`, so open and closed were indistinguishable to
             anything not looking at the pixels (SC 4.1.2). The Worktrees toggle
             in RepoRow already did this correctly; these two did not. */}
-        <div className="ref-section__head-wrap">
+        <div
+          className={`ref-section__head-wrap${
+            summary === null ? "" : " ref-section__head-wrap--on"
+          }`}
+        >
           <button
             className="ref-section__head"
             aria-expanded={openSections.has("branches")}
@@ -510,10 +524,10 @@ export function RepoRefsSections({
             <span className="ref-section__count">
               {loading ? "…" : (branchCount ?? 0)}
             </span>
-            {/* The pair, readable without expanding hundreds of rows — and the
-                thing that makes the sidebar agree with the title bar at rest. */}
+            {/* Still part of the disclosure's name; the visible copy sits at
+                the far end of the heading, after the counts (below). */}
             {summary !== null && (
-              <span className="ref-section__on">· {summary}</span>
+              <span className="a11y-sr-only">, {summary}</span>
             )}
           </button>
           {refs !== null &&
@@ -532,7 +546,7 @@ export function RepoRefsSections({
                   countChip(
                     "behind",
                     `${counts.behind} behind`,
-                    `${plural(counts.behind, "branch")} behind their upstream`
+                    `${plural(counts.behind, "branch")} behind the branch they track`
                   )}
                 {/* Branches whose upstream was deleted. They rank last in the
                     slice, so without this a repository full of finished work
@@ -548,6 +562,25 @@ export function RepoRefsSections({
                   )}
               </span>
             )}
+          {/* The pair, readable without expanding hundreds of rows — and the
+              thing that makes the sidebar agree with the title bar at rest.
+              After the counts, at the heading's far end: beside the count it
+              read as one phrase with them ("on main 7 behind"), and "93 · 7
+              behind" is a share of the 93 (Post-ship 2b). A click here folds
+              the section like the rest of the heading; the words reach a
+              screen reader through the disclosure's own name. */}
+          {summary !== null && (
+            <span
+              className="ref-section__on"
+              aria-hidden="true"
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleSection("branches");
+              }}
+            >
+              <span className="ref-section__on-text">{summary}</span>
+            </span>
+          )}
         </div>
         {openSections.has("branches") && (
           <div className="ref-section__body">

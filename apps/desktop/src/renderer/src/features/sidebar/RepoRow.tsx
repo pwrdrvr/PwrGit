@@ -7,7 +7,13 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { TagSummary, Repo, Worktree, WorktreeSort } from "@pwrgit/shared";
+import type {
+  LocalBranchSummary,
+  TagSummary,
+  Repo,
+  Worktree,
+  WorktreeSort
+} from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
@@ -243,6 +249,32 @@ export function RepoRow({
     () => setRefsBrowserRequest(null),
     []
   );
+  /** The Branches section's ref listing, by name, for the pinned branch rows'
+   *  meta line. Both live under `expanded`, so it is there when they are. */
+  const [refBranches, setRefBranches] = useState<
+    ReadonlyMap<string, LocalBranchSummary>
+  >(new Map());
+  // The listing reloads on every snapshot of the repo; keep the old map when
+  // nothing the meta line reads has moved, or each reload re-renders the row.
+  const keepRefBranches = useCallback(
+    (branches: LocalBranchSummary[]) =>
+      setRefBranches((current) =>
+        branches.length === current.size &&
+        branches.every((b) => {
+          const was = current.get(b.name);
+          return (
+            was !== undefined &&
+            was.tracking === b.tracking &&
+            was.ahead === b.ahead &&
+            was.behind === b.behind &&
+            was.lastCommitAt === b.lastCommitAt
+          );
+        })
+          ? current
+          : new Map(branches.map((b) => [b.name, b]))
+      ),
+    []
+  );
   // Collapsed before the refs landed: the ask goes with it, or it would fire
   // on some later expand the user meant only as an expand.
   useEffect(() => {
@@ -358,6 +390,13 @@ export function RepoRow({
   // What Pull would bring into the primary checkout: on a fork, from the
   // source (Fork Sync, 3e). The same stored count the header chip reads.
   const primaryPull = repoPrimaryPull(repo);
+  // A fork with a known parent already draws a fork mark among its identity
+  // glyphs; the source's count rides on that mark rather than on a second
+  // `⑂` a few pixels away (Post-ship 2b).
+  const pullOnForkMark =
+    primaryPull !== null &&
+    primaryPull.pull.kind === "source" &&
+    repo.identity?.parent !== undefined;
   useReportVisible(
     rowRef,
     (repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0])?.id ?? null
@@ -733,7 +772,7 @@ export function RepoRow({
         >
           {repo.name}
         </span>
-        {primaryPull !== null && (
+        {primaryPull !== null && !pullOnForkMark && (
           <PullBadge
             pull={primaryPull.pull}
             branch={primaryPull.branch}
@@ -755,6 +794,14 @@ export function RepoRow({
             repoId={repo.id}
             profileId={repo.profileId}
             onFork={onForkRepo}
+            {...(pullOnForkMark && primaryPull !== null
+              ? {
+                  sourcePull: {
+                    behind: primaryPull.pull.behind,
+                    sentence: pullSentence(primaryPull.pull, primaryPull.branch)
+                  }
+                }
+              : {})}
           />
         )}
         {wtCount > 0 && (
@@ -885,6 +932,8 @@ export function RepoRow({
               <PinnedBranchRow
                 key={pinnedBranchRowId(branch)}
                 branch={branch}
+                summary={refBranches.get(branch)}
+                now={now}
                 posinset={displayIds.indexOf(pinnedBranchRowId(branch)) + 1}
                 setsize={displayIds.length}
                 focusable={tabStopId === pinnedBranchRowId(branch)}
@@ -1032,6 +1081,7 @@ export function RepoRow({
               onRevealWorktree(worktreeId);
             }}
             onCreateWorktree={onCreateWorktreeFromRef}
+            onBranches={keepRefBranches}
           />
         </div>
       )}

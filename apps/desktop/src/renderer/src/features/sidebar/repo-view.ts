@@ -286,13 +286,33 @@ export function repoPrimaryBehind(repo: Repo): number {
  * because that is what Pull's default fetches. `null` means nothing to bring.
  */
 export type PullSummary =
-  | { kind: "source"; behind: number; label: string }
+  | {
+      kind: "source";
+      behind: number;
+      label: string;
+      /** The branch's own commits the source lacks — the header chip's
+       *  `· ↑N`, so the row counts against the same thing it does. */
+      ahead: number;
+      /** What the branch it tracks also has for it. The source wins the
+       *  badge, so this one is said in the badge's words only. */
+      trackedBehind: number;
+      /** What a push would carry to the branch it tracks. The row's own `↑`
+       *  steps aside for the source's, so this too lives in the words. */
+      trackedAhead: number;
+    }
   | { kind: "tracked"; behind: number };
 
 export function worktreePull(worktree: Worktree): PullSummary | null {
   const source = worktree.source;
   if (source !== undefined && source.behind > 0) {
-    return { kind: "source", behind: source.behind, label: source.label };
+    return {
+      kind: "source",
+      behind: source.behind,
+      label: source.label,
+      ahead: source.ahead,
+      trackedBehind: worktree.behind,
+      trackedAhead: worktree.ahead
+    };
   }
   return worktree.behind > 0
     ? { kind: "tracked", behind: worktree.behind }

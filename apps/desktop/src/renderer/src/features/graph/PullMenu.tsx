@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -27,7 +28,12 @@ export type PullMenuRow = {
  * The arrow half of a split Pull, and the menu it opens.
  *
  * `choices` are what Pull can remember doing — `menuitemradio`, with the one
- * the button runs checked. `actions` are one-off reviews offered while the
+ * the button will run checked. That is not always the one kept: Sync falls
+ * back to the tracked branch once the source has nothing new, and a tick on
+ * the kept choice then pointed at something Pull was not going to do. The
+ * kept choice says so in words instead ("Your default for this repo"), so
+ * both facts show without a second checkmark (Post-ship 2d). `actions` are
+ * one-off reviews offered while the
  * branch has commits the source lacks; they sit above the choices, under
  * `note`, because they are what that state is asking for.
  *
@@ -43,7 +49,8 @@ export function PullMenu({
   note,
   actions,
   choices,
-  checked
+  checked,
+  kept
 }: {
   anchorRef: RefObject<HTMLElement | null>;
   /** Something is running; the arrow stays focusable but does nothing. */
@@ -51,10 +58,13 @@ export function PullMenu({
   note?: ReactNode;
   actions: PullMenuRow[];
   choices: PullMenuRow[];
-  /** The `key` of the choice Pull runs. */
+  /** The `key` of the choice Pull will run. */
   checked: string;
+  /** The `key` of the choice kept for this repository. */
+  kept: string;
 }) {
   const tip = useViewportTooltip();
+  const noteId = useId();
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
@@ -123,7 +133,12 @@ export function PullMenu({
         <span className="pull-menu__check">{on && <CheckGlyph />}</span>
         <span className="pull-menu__text">
           <span className="pull-menu__title">{item.title}</span>
-          <span className="pull-menu__detail">{item.detail}</span>
+          <span className="pull-menu__detail">
+            {radio && item.key === kept && (
+              <span className="pull-menu__kept">Your default for this repo. </span>
+            )}
+            {item.detail}
+          </span>
         </span>
       </button>
     );
@@ -151,10 +166,13 @@ export function PullMenu({
             className="pop-menu pull-menu"
             role="menu"
             aria-label="Pull"
+            // The note is why the reviews lead; a screen reader hears it as
+            // the menu opens rather than never (it was aria-hidden).
+            {...(note === undefined ? {} : { "aria-describedby": noteId })}
             style={{ position: "fixed", top: pos.top, right: pos.right }}
           >
             {note !== undefined && (
-              <div className="pull-menu__note" aria-hidden="true">
+              <div id={noteId} className="pull-menu__note">
                 {note}
               </div>
             )}

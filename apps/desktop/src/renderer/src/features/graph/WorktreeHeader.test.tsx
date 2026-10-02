@@ -1049,9 +1049,9 @@ describe("WorktreeHeader settled status card", () => {
   // either way could not tell the user their upstream was brought in.
   it("names the remotes a Fetch asked on its receipt", async () => {
     await press("Fetch", ok({ remotes: ["origin", "upstream"] }));
-    expect(card()?.textContent).toContain(
-      "Fetched origin + upstream — refs and tags are up to date"
-    );
+    expect(card()?.textContent).toContain("Fetched origin + upstream");
+    // It said nothing moved even after a fetch brought in 25 commits.
+    expect(card()?.textContent).not.toContain("refs and tags are up to date");
   });
 
   // Escape latches the trigger inside `useViewportTooltip` so that restoring
@@ -2080,6 +2080,12 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(caret()?.getAttribute("aria-label")).toBe("More pull options");
     expect(container.querySelector(".wt-split.is-behind")).not.toBeNull();
     expect(container.querySelector(".sync-chip--fork")).toBeNull();
+    // The source's look, as the sidebar's badge draws it: the outline and the
+    // fork glyph, never the warn fill the tracked branch's ↓N keeps.
+    const chip = container.querySelector(".sync-chip:not(.sync-chip--drift)");
+    expect(chip?.classList.contains("sync-chip--source")).toBe(true);
+    expect(chip?.classList.contains("sync-chip--warn")).toBe(false);
+    expect(chip?.firstElementChild?.classList.contains("sync-chip__glyph")).toBe(true);
   });
 
   it("keeps the plain Pull wherever there is one place to pull from", async () => {
@@ -2095,6 +2101,85 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     answer({ ...behindSource(), tracked: null });
     await remount();
     expect(caret()).toBeNull();
+  });
+
+  // Post-ship 2c: selecting a fork's main painted "checking remote…" and a
+  // plain Pull, then the live read swapped in the chip and the 22px arrow and
+  // moved Push and the kebab under the pointer. The stored source — what the
+  // sidebar draws — paints the final shape from the first frame.
+  describe("first paint, before the live read lands", () => {
+    const stored: Worktree = {
+      ...worktree,
+      behind: 0,
+      tracking: "up_to_date",
+      source: { remote: "upstream", label: "upstream/main", ahead: 0, behind: 25 }
+    };
+    let land!: (fork: ForkStatus | null) => void;
+    const answerLater = (): void => {
+      const pending = new Promise<ForkStatus | null>((resolve) => {
+        land = resolve;
+      });
+      bridge.dispatch.mockImplementation((name: string) => {
+        if (name === "remote:forkStatus") return pending.then((fork) => ok(fork));
+        if (name === "remote:activities") return Promise.resolve(ok([]));
+        if (name === "remote:checkSelected") return Promise.resolve(ok({ status: "checked" }));
+        return new Promise(() => undefined);
+      });
+    };
+
+    it("paints the stored count and the arrow at once", async () => {
+      answerLater();
+      await remount(stored);
+      expect(statusChip()).toBe("↓25 behind upstream");
+      expect(
+        container.querySelector(".sync-chip--source")
+      ).not.toBeNull();
+      // The arrow holds its width from the first frame, inert until the read.
+      expect(caret()).not.toBeNull();
+      expect(caret()?.getAttribute("aria-disabled")).toBe("true");
+      expect(pull()?.classList.contains("is-behind")).toBe(true);
+
+      // The live read can only correct the digits.
+      await act(async () => {
+        land(behindSource({ behind: 27 }));
+        await settle();
+      });
+      expect(statusChip()).toBe("↓27 behind upstream");
+      expect(caret()?.getAttribute("aria-disabled")).toBe("false");
+    });
+
+    it("holds a seeded Pull for the read, then runs the sync, not a plain pull", async () => {
+      answerLater();
+      await remount(stored);
+      await act(async () => pull()?.click());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:syncFork", expect.anything());
+      await act(async () => {
+        land(behindSource({ behind: 27 }));
+        await settle();
+      });
+      expect(bridge.dispatch).toHaveBeenCalledWith("remote:syncFork", expect.anything());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
+    });
+
+    it("lets a read that finds no source take the arrow away", async () => {
+      answerLater();
+      await remount(stored);
+      expect(caret()).not.toBeNull();
+      await act(async () => {
+        land(null);
+        await settle();
+      });
+      expect(caret()).toBeNull();
+      expect(statusChip()).not.toContain("upstream");
+    });
+
+    it("keeps checking remote… for a branch with nothing stored", async () => {
+      answerLater();
+      await remount({ ...worktree, behind: 0 });
+      expect(caret()).toBeNull();
+      expect(container.querySelector(".sync-chip--source")).toBeNull();
+    });
   });
 
   it("does not claim a stale tracking ref is up to date while the remote is unavailable", async () => {
@@ -2255,8 +2340,10 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       ["Pull origin/main only", "false"]
     ]);
     expect(row("Sync with upstream/main")?.textContent).toContain(
-      "Fast-forward main 10 commits, then push them to origin/main."
+      "Your default for this repo. Fast-forward main 10 commits, then push them to origin/main."
     );
+    expect(row("Pull origin/main only")?.textContent).toContain("Your fork's own tip.");
+    expect(row("Pull origin/main only")?.textContent).not.toContain("Your default");
 
     await act(async () => {
       row("Pull upstream/main only")?.click();
@@ -2301,8 +2388,12 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     await remount();
     expect(statusChip()).toBe("↓12 upstream · ↑2");
     await openMenu();
-    expect(document.querySelector(".pull-menu__note")?.textContent).toBe(
-      "main has 2 commits upstream/main doesn't"
+    const note = document.querySelector(".pull-menu__note");
+    expect(note?.textContent).toBe("main has 2 commits upstream/main doesn't");
+    // Read out, not hidden: it is why the reviews lead.
+    expect(note?.hasAttribute("aria-hidden")).toBe(false);
+    expect(document.querySelector('.pull-menu[role="menu"]')?.getAttribute("aria-describedby")).toBe(
+      note?.id
     );
     expect(
       menuRows().map((el) => el.querySelector(".pull-menu__title")?.textContent)
@@ -2380,6 +2471,33 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     });
     expect(document.querySelector(".pull-divergence")).toBeNull();
     expect(statusChip()).toBe("rebased · pushed to origin/main");
+  });
+
+  // Post-ship 2d: once the source had nothing new, Sync fell back to pulling
+  // origin/main, but the tick stayed on Sync — on something Pull was not
+  // going to do.
+  it("ticks what Pull will run, and names the kept choice in words", async () => {
+    answer(behindSource({ behind: 0 }), {});
+    // origin/main has 3 for main; upstream/main has nothing new.
+    await remount(worktree, { ...level, behind: 3 });
+    await openMenu();
+    expect(
+      menuRows().map((el) => [
+        el.querySelector(".pull-menu__title")?.textContent,
+        el.getAttribute("aria-checked")
+      ])
+    ).toEqual([
+      ["Sync with upstream/main", "false"],
+      ["Pull upstream/main only", "false"],
+      ["Pull origin/main only", "true"]
+    ]);
+    expect(row("Sync with upstream/main")?.textContent).toContain(
+      "Your default for this repo."
+    );
+    expect(row("Pull origin/main only")?.textContent).toContain(
+      "Your fork's own tip. 3 commits to bring in."
+    );
+    expect(row("Pull origin/main only")?.textContent).not.toContain("Your default");
   });
 
   it("re-reads when a fetch moves only the source's tip", async () => {

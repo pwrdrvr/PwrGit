@@ -1887,16 +1887,81 @@ a.forge-chip:focus-visible {
   color: var(--accent-bright);
 }
 
-/* "· on main" beside the Branches count — the pair, readable while the section
-   is collapsed. Quieter than .ref-section__summary's warning tier: it states
-   where you are, not that anything needs attention. */
+/* "on main" at the Branches heading's far end — the pair, readable while the
+   section is collapsed. It sat beside the count and read as one phrase with
+   the counts after it ("on main 7 behind"); now the counts follow the total
+   ("93 · 7 behind") and this takes the rest of the line, muted: it states
+   where you are, not that anything needs attention (Post-ship 2b). It folds
+   the section like the disclosure beside it, so the heading's hit area is the
+   whole line it always was. */
 .ref-section__on {
+  /* Leftover space only: it is the one thing in the heading that may give way,
+     so the total and the counts never ride over each other. */
+  flex: 1 1 0;
+  min-width: 0;
+  height: 31px;
+  /* The wrap's gap already separates it from the counts; every pixel here is
+     one "on main" keeps at the default 320px sidebar. */
+  padding: 0 6px 0 0;
+  overflow: hidden;
+  /* It ellipsizes down to about six characters ("on m…"), then leaves whole
+     rather than draw "o…": below that the text wraps past the zero-width
+     marker onto a second line, which the fixed height clips. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+  color: var(--text-subtle);
+  text-transform: none;
+  cursor: pointer;
+}
+.ref-section__on::before {
+  content: "";
+  /* A full-height first line, so a wrapped text lands below the clip. */
+  height: 31px;
+}
+.ref-section__on-text {
+  /* Breaks onto the hidden line only when even 6ch will not fit; otherwise
+     grows toward its whole width and ellipsizes there. */
+  flex: 1 1 6ch;
+  max-width: max-content;
+  min-width: 6ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 31px;
+}
+/* The disclosure gives up the full width it takes elsewhere so the counts can
+   sit right after the total; the strip still lights as one. */
+.ref-section__head-wrap--on > .ref-section__head {
+  flex: 0 0 auto;
+  width: auto;
+}
+.ref-section__head-wrap--on > .ref-section__head:hover {
+  background: transparent;
+}
+.ref-section__head-wrap--on:has(
+    > .ref-section__head:hover,
+    > .ref-section__on:hover
+  ) {
+  background: var(--bg-panel-hover);
+}
+.ref-section__head-wrap--on:has(> .ref-section__on:hover) > .ref-section__head {
+  color: var(--text-primary);
+}
+/* Last resort at the narrowest sidebar with every count showing: clip at the
+   heading's edge rather than run past it. */
+.ref-section__head-wrap--on > .ref-section__chips {
+  flex-shrink: 1;
+  min-width: 0;
+  margin-right: 0;
+  overflow: hidden;
+}
+.ref-section__head-wrap--on > .ref-section__chips::before {
+  content: "·";
+  margin-right: 3px;
+  color: var(--text-subtle);
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
-  color: var(--accent);
-  text-transform: none;
 }
 /* 24px target occupying 20px — see .pin. The ref rows are 29px tall, so this
    costs no height. */
@@ -2282,9 +2347,27 @@ a.forge-chip:focus-visible {
   color: var(--text-subtle);
   cursor: grab;
 }
+/* The grip's column on a row that cannot be dragged (PinnedBranchRow): it
+   keeps the icon and name on the worktree rows' edge without promising a
+   drag through `cursor: grab` (Post-ship 3a). */
+.wt-row__lead {
+  flex: 0 0 11px;
+}
 .wt-row__branch-icon {
   flex: 0 0 auto;
   color: var(--text-muted);
+}
+/* A pinned branch nothing has checked out: "no worktree · ↓41 · 1mo" on the
+   folder line's footing, so the Pinned group scans as one list. The count
+   takes the warn tone a worktree row's ↓ does. */
+.wt-row__meta-behind {
+  color: var(--status-warning);
+}
+/* It has a star and no kebab, so the hover strip gives back the kebab's lane:
+   the star sits where a kebab would, not one lane in from an empty one. 9px is
+   the kebab's `right: 5px` plus the 4px the pin's negative margin bleeds. */
+.wt-row--branch .wt-row__hoveracts {
+  padding-right: 9px;
 }
 /* On .wt-row.is-selected's --bg-row-active tint, so this keeps the bright
    rung — the tint comes from the ancestor, not from this rule. */
@@ -2387,19 +2470,19 @@ a.forge-chip:focus-visible {
 .wt-row.is-missing .wt-row__branch {
   color: var(--text-muted);
 }
-/* A pinned branch nothing has checked out. Quiet like "locked": it is a fact
-   about what the row is, not a state to act on. */
-.wt-tag--branch {
+.wt-tag--locked {
+  background: transparent;
+  color: var(--text-subtle);
+  padding: 0 2px;
+}
+/* The branch it tracks was deleted. Quiet, like the Branches heading's
+   "n gone": it usually means the work landed, and finished is not a warning. */
+.wt-tag--gone {
   background: transparent;
   color: var(--text-subtle);
   padding: 0 2px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-}
-.wt-tag--locked {
-  background: transparent;
-  color: var(--text-subtle);
-  padding: 0 2px;
 }
 .wt-row__branch-icon--local {
   color: var(--accent);
@@ -6266,6 +6349,8 @@ button.agent-menu__item:hover {
 }
 .refs-browser__toolbar {
   display: flex;
+  /* Zoomed far enough, the tabs and the filter cannot share a line. */
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-height: 55px;
@@ -6275,6 +6360,7 @@ button.agent-menu__item:hover {
 }
 .refs-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--border-subtle);
@@ -6312,6 +6398,9 @@ button.agent-menu__item:hover {
   align-items: center;
   gap: 7px;
   flex: 1;
+  /* Zoomed, it wraps to a line of its own before it gets too short to type
+     in, and only shrinks below that when the line itself is narrower. */
+  min-width: min(160px, 100%);
   max-width: 310px;
   height: 34px;
   padding: 0 10px;
@@ -6489,17 +6578,18 @@ button.agent-menu__item:hover {
   overflow: auto;
   padding: 10px 16px 18px;
 }
-/* The fr ratio, not the minimums: the row grew a fourth action (`Switch here`)
-   and the slack left for the two flexible columns shrank — and all of it came
-   out of Upstream, which starved to about 22 characters while Branch kept room
-   it was not using. Raising Upstream's MINIMUM instead would push the row past
-   the 940px the app window can be narrowed to, and overflow it horizontally.
+/* The fr ratio, not the minimums. At the 940px window (an 884px browser)
+   Branch sat at its 190px minimum — about 13 characters beside a PR chip —
+   while Upstream got 157px to repeat the same name. Upstream now says only
+   what differs (`origin/…`, `upstreamShorthand`), so Branch takes the larger
+   share: 236px to Upstream's 111px at that width. Raising a MINIMUM instead
+   would push the row past the 940px window and overflow it horizontally.
    The actions column is `--refs-actions-w`, never content-sized: see
    `.refs-browser`. */
 .refs-table__header,
 .refs-table__row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.2fr) minmax(120px, 1fr) 105px 80px var(--refs-actions-w);
+  grid-template-columns: minmax(190px, 1.8fr) minmax(96px, 0.7fr) 105px 80px var(--refs-actions-w);
   gap: 12px;
   align-items: center;
 }
@@ -6566,18 +6656,6 @@ button.agent-menu__item:hover {
   margin-top: 3px;
   color: var(--text-muted);
   font: 500 9.5px/1.25 var(--font-sans);
-}
-/* Drop Annotation before the table starts overflowing. 1040px is the viewport
-   at which the browser (min(1120px, 92vw)) stops fitting four columns at their
-   minimums; the app window itself cannot go below 940px, so this is the only
-   breakpoint the tag table can actually reach. */
-@media (max-width: 1040px) {
-  .refs-tag-table__row {
-    grid-template-columns: minmax(185px, 1.4fr) minmax(130px, 0.85fr) var(--refs-actions-w);
-  }
-  .refs-tag-table__row > :nth-child(3) {
-    display: none;
-  }
 }
 .refs-tag-actions {
   display: flex;
@@ -6657,6 +6735,13 @@ button.agent-menu__item:hover {
   gap: 4px;
   min-width: 0;
 }
+/* The flex item the ellipsis hangs off — see `.refs-copyable-name` above. */
+.refs-copyable-upstream__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .refs-table__identity small,
 .refs-remote-branch small {
   display: block;
@@ -6714,6 +6799,19 @@ button.agent-menu__item:hover {
   width: 16px;
   align-items: center;
   justify-content: center;
+}
+/* Bordered at rest, so the column reads as stars to press among 259 rows
+   rather than a bare glyph that appears on hover; filled once pinned, and
+   the pinned row's name takes the accent (Post-ship 3b). */
+.refs-pin {
+  border-color: var(--border-default);
+}
+.refs-pin.is-pinned {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.refs-table__row.is-pinned .refs-copyable-name > strong {
+  color: var(--accent);
 }
 /* A row is a focus stop (↑/↓ walks them, Space pins, Enter runs the primary
    action — lib/refsRowKeys.ts). Inset, because the body scrolls and clips an
@@ -6821,6 +6919,9 @@ button.agent-menu__item:hover {
 }
 .refs-remote-card__head {
   display: flex;
+  /* Zoomed far enough, the actions take a line under the name. */
+  flex-wrap: wrap;
+  gap: 6px 10px;
   align-items: center;
   justify-content: space-between;
   min-height: 45px;
@@ -6838,6 +6939,7 @@ button.agent-menu__item:hover {
 }
 .refs-remote-card__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
 }
@@ -6898,6 +7000,23 @@ button.agent-menu__item:hover {
   min-height: 45px;
   padding: 6px 13px;
   border-top: 1px solid var(--border-subtle);
+}
+/* 18 + 80 + 112 + 26 of padding + the card's 2px border: below that the row
+   would overflow its card, so the age goes and the actions take their own
+   line (see the narrow refs tables, `refs-body`). */
+@container refs-body (width < 240px) {
+  .refs-remote-branch {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+  .refs-remote-branch > :nth-child(3) {
+    display: none;
+  }
+  .refs-remote-branch > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-remote-branch .refs-row-actions {
+    flex-wrap: wrap;
+  }
 }
 /* Paged ref lists carry a footer saying how much of the match set is on
    screen — see RefsPageFooter. Without it, a page that stops at 50 of 4,466
@@ -7038,15 +7157,97 @@ button.agent-menu__item:hover {
   color: var(--text-muted);
   font: 500 10.5px/1.4 var(--font-sans);
 }
-/* Doubled class: the generic `.refs-table__row` narrow rule sits later in
-   this file and would otherwise win the tie. It hides the same two columns. */
-@media (max-width: 760px) {
-  .refs-table__header.refs-pr-table__row,
-  .refs-table__row.refs-pr-table__row {
-    grid-template-columns: minmax(200px, 1fr) 90px 120px;
+/* Narrow refs tables. The window stops at 940px, but View › Zoom In narrows
+   the page: one step leaves ~858 CSS px, two ~783, three ~715, and the five
+   columns' minimums stop fitting at the first. So the steps are measured
+   against the body the rows sit in (`refs-body`, a container), not the
+   viewport: its content box is what a row actually gets, scrollbar and
+   padding already taken off, and it is the same box on every platform.
+
+   Each threshold is that table's minimums plus its gaps (12px) and the row's
+   18px of padding; below it the row would overflow, so the next step takes
+   over. Compact drops the two quietest columns and keeps the actions whole;
+   stacked keeps the name and one status column, and moves the actions to a
+   line of their own, still at the right edge, where the slots may wrap.
+   Stacked fits to ~135px.
+
+     Branches  190+96+105+80+252 + 4×12 + 18 = 789   compact 160+105+252 + 42 = 559
+     Tags      185+130+190+252   + 3×12 + 18 = 811   compact 160+120+252 + 42 = 574
+     PRs       260+70+80+56+252  + 4×12 + 18 = 784   compact 160+80+252  + 42 = 534 */
+.refs-browser__body {
+  container: refs-body / inline-size;
+}
+@container refs-body (width < 790px) {
+  :is(.refs-table__header, .refs-table__row):not(.refs-tag-table__row, .refs-pr-table__row) {
+    grid-template-columns: minmax(160px, 1fr) 105px var(--refs-actions-w);
+  }
+  :is(.refs-table__header, .refs-table__row):not(.refs-tag-table__row, .refs-pr-table__row)
+    > :is(:nth-child(2), :nth-child(4)) {
+    display: none;
   }
 }
-
+@container refs-body (width < 812px) {
+  .refs-tag-table__row {
+    grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 0.85fr) var(--refs-actions-w);
+  }
+  .refs-tag-table__row > :nth-child(3) {
+    display: none;
+  }
+}
+@container refs-body (width < 785px) {
+  .refs-pr-table__row {
+    grid-template-columns: minmax(160px, 1fr) minmax(80px, 112px) var(--refs-actions-w);
+  }
+  .refs-pr-table__row > :is(:nth-child(2), :nth-child(4)) {
+    display: none;
+  }
+}
+@container refs-body (width < 560px) {
+  :is(.refs-table__header, .refs-table__row):not(.refs-tag-table__row, .refs-pr-table__row) {
+    grid-template-columns: minmax(0, 1fr) 105px;
+  }
+}
+@container refs-body (width < 575px) {
+  .refs-tag-table__row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 120px);
+  }
+}
+@container refs-body (width < 535px) {
+  .refs-pr-table__row {
+    grid-template-columns: minmax(0, 1fr) 80px;
+  }
+}
+/* Stacked, shared: the actions take the row's second line. The header's
+   actions cell names nothing a stacked row lines up under. */
+@container refs-body (width < 560px) {
+  .refs-table__row:not(.refs-tag-table__row, .refs-pr-table__row) > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-table__header:not(.refs-tag-table__row, .refs-pr-table__row) > :last-child {
+    display: none;
+  }
+}
+@container refs-body (width < 575px) {
+  .refs-table__row.refs-tag-table__row > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-table__header.refs-tag-table__row > :last-child {
+    display: none;
+  }
+}
+@container refs-body (width < 535px) {
+  .refs-table__row.refs-pr-table__row > :last-child {
+    grid-column: 1 / -1;
+  }
+  .refs-table__header.refs-pr-table__row > :last-child {
+    display: none;
+  }
+}
+@container refs-body (width < 575px) {
+  .refs-row-actions {
+    flex-wrap: wrap;
+  }
+}
 /* BranchRefPicker — a filter box over a sized native listbox. */
 .branch-picker {
   display: grid;
@@ -7348,26 +7549,6 @@ button.agent-menu__item:hover {
   opacity: 1;
 }
 
-@media (max-width: 760px) {
-  .refs-table__header,
-  .refs-table__row {
-    grid-template-columns: minmax(180px, 1fr) 100px 100px;
-  }
-  /* The 100px column cannot hold the buttons in one line. */
-  .refs-row-actions {
-    flex-wrap: wrap;
-  }
-  .refs-table__header > :nth-child(2),
-  .refs-table__row > :nth-child(2),
-  .refs-table__header > :nth-child(4),
-  .refs-table__row > :nth-child(4) {
-    display: none;
-  }
-  .refs-browser__toolbar {
-    flex-wrap: wrap;
-  }
-}
-
 /* ---- Main pane: worktree header (Fetch/Pull/Push arrive in U9) ---- */
 
 .wt-header {
@@ -7403,18 +7584,6 @@ button.agent-menu__item:hover {
 }
 .wt-header.fit-chip-short .sync-chip[data-short]::after {
   content: attr(data-short);
-}
-/* On a fork the glyph stands in for the remote's name. Lucide git-fork, fully
-   percent-encoded: a partly encoded data URI drew only part of a glyph. */
-.wt-header.fit-chip-short .sync-chip[data-short][data-fork]::before {
-  content: "";
-  width: 11px;
-  height: 11px;
-  margin-right: 5px;
-  flex: 0 0 auto;
-  background: currentColor;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272.4%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2718%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2718%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M18%209v2c0%20.6-.4%201-1%201H7c-.6%200-1-.4-1-1V9%27%2F%3E%3Cpath%20d%3D%27M12%2012v3%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27black%27%20stroke-width%3D%272.4%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2718%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%276%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2718%27%20cy%3D%276%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M18%209v2c0%20.6-.4%201-1%201H7c-.6%200-1-.4-1-1V9%27%2F%3E%3Cpath%20d%3D%27M12%2012v3%27%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
 }
 /* The LFS chip cannot shrink, and while it is hidden the sticky toast still
    carries a broken setup at any width. */
@@ -7685,6 +7854,24 @@ button.agent-menu__item:hover {
 .sync-chip--warn {
   background: var(--warn-soft);
   color: var(--status-warning);
+}
+/* The fork's source has commits for this branch: the sidebar's `.badge--source`
+   look, so the header chip and the row beside it say one fact one way. The
+   fill above stays "your own remote has commits for you" (Fork Sync 3e rule 2,
+   Post-ship 2a). The glyph is a real element and leads at every fit step, so
+   `↓25 behind upstream`, `↓25 upstream` and `↓25` keep one shape; the shorter
+   forms are drawn after it by the `::after` rules above. 1px off the padding,
+   like the other outlined chips, so the text keeps their left offset. */
+.sync-chip--source {
+  border: 1px solid var(--accent-border);
+  background: transparent;
+  color: var(--accent);
+  padding: 0 9px;
+}
+.sync-chip__glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-right: 5px;
 }
 .sync-chip--progress {
   /* Shrinks, so it is the one chip the fit steps cannot see overflow; the
@@ -8325,13 +8512,28 @@ button.commit-byline:focus-visible {
    via --lane-scroll (driven by the shared .lane-scrollbar). At constrained
    main-pane widths it yields enough room for the fixed SHA + age before the
    row can overflow. The app's 940px minimum leaves a 276px main pane with the
-   default side panels, where this still exposes roughly three lanes. */
+   default side panels.
+
+   The 230px covers the checkbox, the SHA and the age, and left nothing for
+   the subject: at a 400px pane the lanes kept their full 160px and subjects
+   collapsed to "M…". The extra 14ch keeps about fourteen characters of
+   subject before the lanes give way (Post-ship 2g). The 160px ceiling still
+   wins at the stock 696px pane; this only bites below a pane of ~510px, and
+   it never caps the lane count at normal widths. The scrollbar below carries
+   the same expression, so the two stay the same width.
+
+   `ch` resolves against the element's own font, and neither element draws
+   text: left to inherit, it measured the body's 16px "0" (10.75px), and the
+   rule bit below a ~540px pane. Both take `.commit-msg`'s size and weight so
+   14ch is fourteen characters of subject. */
 .graph-lanes-clip {
   flex: 0 0 auto;
   align-self: stretch;
   display: flex;
   align-items: center;
-  max-width: clamp(16px, calc(100cqi - 230px), 160px);
+  font-size: 12.5px;
+  font-weight: 600;
+  max-width: clamp(16px, calc(100cqi - 230px - 14ch), 160px);
   overflow: hidden;
 }
 .graph-lanes {
@@ -8346,7 +8548,9 @@ button.commit-byline:focus-visible {
   overflow-x: auto;
   overflow-y: hidden;
   height: 12px;
-  max-width: clamp(16px, calc(100cqi - 230px), 160px);
+  font-size: 12.5px;
+  font-weight: 600;
+  max-width: clamp(16px, calc(100cqi - 230px - 14ch), 160px);
   margin: 0 0 4px 29px;
 }
 .lane-scrollbar::-webkit-scrollbar {
@@ -10142,6 +10346,10 @@ body.is-col-resizing {
   font: 500 11px/1.45 var(--font-sans);
   color: var(--text-muted);
   text-wrap: pretty;
+}
+/* The kept choice, named in words: the tick marks what Pull will run. */
+.pull-menu__kept {
+  color: var(--text-secondary);
 }
 .pull-menu__title code,
 .pull-menu__detail code {

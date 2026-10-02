@@ -80,10 +80,30 @@ export function trackingLabel(branch: LocalBranchSummary): string {
   }
 }
 
+/**
+ * The Upstream cell's text. When a branch tracks its own name on a remote —
+ * nearly always — the cell repeated the name beside it and was clipped hard
+ * at the 940px window, so it says only what differs: `origin/…`. The full
+ * ref stays in the cell's card and is what a click copies (Post-ship 3b).
+ */
+export function upstreamShorthand(
+  upstream: string,
+  name: string,
+  remotes: readonly string[]
+): string {
+  const suffix = `/${name}`;
+  if (!upstream.endsWith(suffix)) return upstream;
+  // What is left must be a remote, or the name only matched a tail:
+  // `origin/feature/x` is not `x`'s own name, and `origin/feature/…` would
+  // read as though it were.
+  const remote = upstream.slice(0, -suffix.length);
+  return remotes.includes(remote) ? `${remote}/…` : upstream;
+}
+
 /** What an empty filtered Branches tab says, per status. */
 const EMPTY_STATUS: Record<Exclude<BranchStatusFilter, "all">, string> = {
   ahead: "No branches have commits to push.",
-  behind: "No branches are behind their upstream.",
+  behind: "No branches are behind the branch they track.",
   gone: "No branches have a deleted upstream.",
   unpublished: "No branches are local only."
 };
@@ -508,6 +528,10 @@ export function RepoRefsModal({
   const addingParentRef = useRef(false);
   const forgeHosts = useForgeHostMap();
   const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
+  const remoteNames = useMemo(
+    () => refs.remotes.map((remote) => remote.name),
+    [refs.remotes]
+  );
   const [renaming, setRenaming] = useState<LocalBranchSummary | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -815,7 +839,10 @@ export function RepoRefsModal({
     const confirmed = await confirmDialog({
       title: `Delete local branch ${branch.name}?`,
       message:
-        "Git will delete this local branch only if its commits are merged into its upstream (or the current history when it has no upstream). No remote branch is changed.",
+        "Git will delete this local branch only if its commits are merged into its upstream (or the current history when it has no upstream). No remote branch is changed." +
+        // The ref listing prunes pins on branches Git no longer has, so the
+        // sidebar row goes too; say so before it happens (Post-ship 3c).
+        (isPinned(branch) ? "\n\nIt's also removed from Pinned in the sidebar." : ""),
       confirmLabel: "Delete branch",
       danger: true
     });
@@ -1089,7 +1116,9 @@ export function RepoRefsModal({
                         hint={`${branch.qualifiedName}\nClick to copy remote branch`}
                         className="refs-table__muted refs-copyable-upstream copyable"
                       >
-                        {branch.qualifiedName}
+                        <span className="refs-copyable-upstream__text">
+                          {upstreamShorthand(branch.qualifiedName, branch.name, remoteNames)}
+                        </span>
                       </CopyTarget>
                       <span className="refs-status refs-status--remote">Remote</span>
                       <span className="refs-table__muted">
@@ -1121,9 +1150,16 @@ export function RepoRefsModal({
                           <RefRowMenu
                             label={`Actions for ${branch.qualifiedName}`}
                             items={[
+                              // The short name, as a click on the name copies;
+                              // the full ref is its own entry (Post-ship 3c).
                               {
                                 type: "item",
                                 label: "Copy branch name",
+                                onSelect: () => void copyText(branch.name)
+                              },
+                              {
+                                type: "item",
+                                label: `Copy ${branch.qualifiedName}`,
                                 onSelect: () => void copyText(branch.qualifiedName)
                               }
                             ]}
@@ -1134,9 +1170,10 @@ export function RepoRefsModal({
                   );
                 }
                 const branch = item.branch;
+                const checkedOut = branch.checkedOutWorktreeIds.length > 0;
                 return (
                   <div
-                    className="refs-table__row"
+                    className={`refs-table__row${isPinned(branch) ? " is-pinned" : ""}`}
                     key={branch.fullName}
                     data-refs-row=""
                     tabIndex={-1}
@@ -1162,7 +1199,11 @@ export function RepoRefsModal({
                         hint={`${branch.upstream}\nClick to copy upstream branch`}
                         className="refs-table__muted refs-copyable-upstream copyable"
                       >
-                        {branch.upstream}
+                        {/* Its own box: the cell is inline-flex, and a bare
+                            text node there could not draw an ellipsis. */}
+                        <span className="refs-copyable-upstream__text">
+                          {upstreamShorthand(branch.upstream, branch.name, remoteNames)}
+                        </span>
                       </CopyTarget>
                     )}
                     <span className={`refs-status refs-status--${branch.tracking}`}>
@@ -1215,11 +1256,19 @@ export function RepoRefsModal({
                         <RefRowMenu
                           label={`Actions for ${branch.name}`}
                           items={[
+                            // A checked-out branch's pin lands on the worktree
+                            // holding it (RepoIndexer), so the entry is named
+                            // for what it pins (Post-ship 3c).
                             {
                               type: "item",
-                              label: isPinned(branch)
-                                ? "Unpin branch"
-                                : "Pin branch",
+                              label: `${isPinned(branch) ? "Unpin" : "Pin"} ${
+                                checkedOut ? "worktree" : "branch"
+                              }`,
+                              ...(checkedOut && !isPinned(branch)
+                                ? {
+                                    hint: "This branch is checked out, so its worktree is what gets pinned."
+                                  }
+                                : {}),
                               onSelect: () => void toggleBranchPin(branch)
                             },
                             {

@@ -47,10 +47,18 @@ it("gives the branch and pull-request grids the same fixed last column", () => {
   expect(pr?.template.endsWith("var(--refs-actions-w)")).toBe(true);
 });
 
-it("gives the tag grid the same token, at both of its breakpoints", () => {
+// The narrow steps are container queries on the browser's body (zoom takes
+// the 940px window well below the tables' minimums). A step either keeps the
+// actions in their column, at the token, or stacks them on a line of their
+// own and declares no actions column at all.
+it("gives the tag grid the same token", () => {
   const tags = refsGridTemplates().filter((t) => t.selector.includes(".refs-tag-table__row"));
-  expect(tags).toHaveLength(2);
-  for (const { template } of tags) expect(template.endsWith("var(--refs-actions-w)")).toBe(true);
+  expect(tags.length).toBeGreaterThan(0);
+  for (const { template } of tags) {
+    const tracks = template.match(/minmax\([^)]*\)|var\([^)]*\)|[\d.]+px/g) ?? [];
+    if (tracks.length > 2) expect(template.endsWith("var(--refs-actions-w)")).toBe(true);
+    else expect(template).not.toContain("--refs-actions-w");
+  }
 });
 
 it("never sizes a refs grid's last column by its content", () => {

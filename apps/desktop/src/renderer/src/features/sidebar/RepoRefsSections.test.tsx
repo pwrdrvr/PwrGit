@@ -290,12 +290,36 @@ describe("RepoRefsSections branch counts", () => {
     expect(button("Show 2 branches with commits to push")?.textContent).toBe(
       "2 ahead"
     );
-    expect(button("Show 1 branch behind their upstream")?.textContent).toBe(
+    expect(button("Show 1 branch behind the branch they track")?.textContent).toBe(
       "1 behind"
     );
     expect(
       button("Show 2 branches whose remote branch was deleted")?.textContent
     ).toBe("2 gone");
+  });
+
+  // "on main" sat beside the total and read as one phrase with the counts
+  // after it ("on main 2 ahead"). The counts follow the total now, and the
+  // pair sits at the heading's far end.
+  it("puts the counts after the total and the pair at the end", async () => {
+    await renderCounted();
+    const wrap = container.querySelector(".ref-section__head-wrap--on")!;
+    const parts = [...wrap.children].map((node) => node.className);
+    expect(parts).toEqual([
+      "ref-section__head",
+      "ref-section__chips",
+      "ref-section__on"
+    ]);
+    expect(wrap.querySelector(".ref-section__on")?.textContent).toBe("on main");
+    // Still in the disclosure's name, where the visible copy no longer is.
+    expect(wrap.querySelector(".ref-section__head")?.textContent).toContain(", on main");
+    // And still folds the section, as the whole heading did.
+    const head = wrap.querySelector<HTMLButtonElement>(".ref-section__head")!;
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    await act(async () =>
+      wrap.querySelector<HTMLElement>(".ref-section__on")?.click()
+    );
+    expect(head.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("opens the refs browser on the branches the ↑ count means", async () => {

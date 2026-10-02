@@ -12,10 +12,24 @@ const ROW_FIT_STEPS = ["fit-glyph", "fit-gone"] as const;
 
 /** What the badge's card and its screen-reader text say. */
 export function pullSentence(pull: PullSummary, branch: string): string {
-  const commits = pull.behind === 1 ? "1 commit" : `${pull.behind} commits`;
-  return pull.kind === "source"
-    ? `${branch} is ${commits} behind ${pull.label}, the source of this fork`
-    : `${branch} is ${commits} behind its upstream`;
+  const commits = (n: number): string => (n === 1 ? "1 commit" : `${n} commits`);
+  if (pull.kind === "tracked") {
+    return `${branch} is ${commits(pull.behind)} behind the branch it tracks`;
+  }
+  const own =
+    pull.ahead > 0 ? `, and has ${commits(pull.ahead)} it doesn't` : "";
+  // The badge counts the source only; what the branch it tracks has for it,
+  // or waits on from it, is said here rather than dropped (Post-ship 2b).
+  const { trackedBehind: down, trackedAhead: up } = pull;
+  const tracked =
+    down > 0 && up > 0
+      ? `\n${commits(down)} behind the branch it tracks, and ${up} to push to it`
+      : down > 0
+        ? `\n${commits(down)} behind the branch it tracks`
+        : up > 0
+          ? `\n${commits(up)} to push to the branch it tracks`
+          : "";
+  return `${branch} is ${commits(pull.behind)} behind ${pull.label}, the source of this fork${own}${tracked}`;
 }
 
 /**
@@ -23,10 +37,13 @@ export function pullSentence(pull: PullSummary, branch: string): string {
  *
  * Two looks for two different facts (Fork Sync, 3e rule 2): the warn fill is
  * the user's own remote having commits for them; the accent outline with the
- * fork glyph is the fork's source having them. The repo row always draws the
- * compact `⑂ ↓25`. A worktree row says `↓25 upstream`, then `⑂ ↓25`, then
- * nothing, taking each step only while the branch name beside it would
- * otherwise be cut.
+ * fork glyph is the fork's source having them. The repo row draws the compact
+ * `⑂ ↓25` only when its identity marks have no fork mark to carry the count
+ * (`RepoIdentityGlyphs`' `sourcePull`). A worktree row says `↓25 upstream`,
+ * then `⑂ ↓25`, then nothing, taking each step only while the branch name
+ * beside it would otherwise be cut. Its `· ↑2` is the branch's own commits
+ * against the source, the same count the header chip gives, and stays at
+ * every step but the last.
  */
 export function PullBadge({
   pull,
@@ -76,7 +93,11 @@ export function PullBadge({
         >
           ↓{pull.behind}
         </span>
-        <span className="a11y-sr-only">{pull.behind} behind upstream</span>
+        {/* Git's "upstream", said in words: on a fork, "upstream" is the
+            source's remote, which this count is not about (Post-ship 2f). */}
+        <span className="a11y-sr-only">
+          {pull.behind} behind the branch it tracks
+        </span>
       </>
     );
   }
@@ -97,6 +118,7 @@ export function PullBadge({
         {placement === "row" && (
           <span className="badge--source__word"> {remote}</span>
         )}
+        {placement === "row" && pull.ahead > 0 && ` · ↑${pull.ahead}`}
       </span>
       {placement === "row" && <span className="a11y-sr-only">{sentence}</span>}
     </>

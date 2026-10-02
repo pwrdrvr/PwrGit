@@ -151,7 +151,12 @@ test("includes fetched remote-only branches in the branches browser", async () =
     hasText: "releases/1.0"
   });
   await expect(release).toBeVisible();
-  await expect(release).toContainText("origin/releases/1.0");
+  // The column says only what differs from the name; the full ref is in the
+  // copy target's label (and its card).
+  await expect(release).toContainText("origin/…");
+  await expect(
+    release.getByRole("button", { name: "Copy remote branch origin/releases/1.0" })
+  ).toBeVisible();
   await expect(release.getByRole("button", { name: "New worktree" })).toBeVisible();
 });
 
@@ -650,7 +655,9 @@ test("force deletion requires a second confirmation and leaves the remote branch
   // Once the local row disappears, the fetched remote row remains and offers
   // worktree creation only — there is no remote-delete action hidden here.
   const remote = browser.locator(".refs-table__row", {
-    hasText: "origin/feature/unique"
+    has: window.getByRole("button", {
+      name: "Copy remote branch origin/feature/unique"
+    })
   });
   await expect(remote.getByRole("button", { name: "New worktree" })).toBeVisible({
     timeout: 20_000
@@ -716,7 +723,9 @@ test("the branch browser checks out a remote-only branch in place", async () => 
   const browser = await openBranchBrowser(window, "browser-remote-switch");
   await browser.getByPlaceholder("Filter branches…").fill("releases/1.0");
   const row = browser.locator(".refs-table__row", { hasText: "releases/1.0" });
-  await expect(row).toContainText("origin/releases/1.0");
+  await expect(
+    row.getByRole("button", { name: "Copy remote branch origin/releases/1.0" })
+  ).toBeVisible();
   await row.getByRole("button", { name: /^Switch .* to releases\/1\.0$/ }).click();
 
   await expect(window.locator(".titlebar__branch-name")).toHaveText(

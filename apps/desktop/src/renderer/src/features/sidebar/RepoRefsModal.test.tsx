@@ -14,8 +14,15 @@ vi.mock("../../lib/toast", () => ({
   showErrorToast: vi.fn(),
   showInfoToast: vi.fn()
 }));
+const confirmDialogMock = vi.hoisted(() => vi.fn());
+const copyTextMock = vi.hoisted(() => vi.fn());
+vi.mock("../shell/dialogs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/dialogs")>()),
+  confirmDialog: confirmDialogMock
+}));
+vi.mock("../../lib/copyText", () => ({ copyText: copyTextMock }));
 
-import { RepoRefsModal } from "./RepoRefsModal";
+import { RepoRefsModal, upstreamShorthand } from "./RepoRefsModal";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -299,6 +306,15 @@ describe("branch pins and the row keyboard", () => {
     ]);
   });
 
+  // Post-ship 3b: pinned rows were hard to find among hundreds.
+  it("marks a pinned row so its name can take the accent", async () => {
+    await open(repo, withBranches);
+    expect(rows().map((row) => row.classList.contains("is-pinned"))).toEqual([
+      true,
+      false
+    ]);
+  });
+
   it("pins through branch:setPin and shows it before the answer lands", async () => {
     await open(repo, withBranches);
     const dev = dialog().querySelector<HTMLElement>(
@@ -345,5 +361,158 @@ describe("branch pins and the row keyboard", () => {
       "branch:setPin",
       expect.anything()
     );
+  });
+});
+
+describe("the Upstream column at the 940px window", () => {
+  it("says only what differs from the branch's own name", () => {
+    const remotes = ["origin", "upstream", "team/rocket"];
+    expect(upstreamShorthand("origin/main", "main", remotes)).toBe("origin/…");
+    expect(upstreamShorthand("origin/feat/x", "feat/x", remotes)).toBe("origin/…");
+    expect(upstreamShorthand("team/rocket/main", "main", remotes)).toBe(
+      "team/rocket/…"
+    );
+    // A different name is the one worth reading, so it is spelled out.
+    expect(
+      upstreamShorthand("upstream/fix/local-rewrites", "fix/rewrite-qs", remotes)
+    ).toBe("upstream/fix/local-rewrites");
+    // Only a whole path segment counts as the same name.
+    expect(upstreamShorthand("origin/my-main", "main", remotes)).toBe("origin/my-main");
+    // A matching tail is not the same name: `x` tracking origin/feature/x.
+    expect(upstreamShorthand("origin/feature/x", "x", remotes)).toBe(
+      "origin/feature/x"
+    );
+  });
+
+  it("puts the text in its own box, so the ellipsis can draw, and keeps the full ref", async () => {
+    await open(repo, {
+      ...refs,
+      remotes: [
+        {
+          name: "origin",
+          fetchUrl: "git@github.com:me/widget.git",
+          pushUrl: "git@github.com:me/widget.git",
+          skipFetchAll: false,
+          previewBranches: [],
+          branchCount: 0
+        }
+      ],
+      branches: [
+        {
+          name: "tenant-deploy-windows",
+          fullName: "refs/heads/tenant-deploy-windows",
+          head: "a".repeat(40),
+          upstream: "origin/tenant-deploy-windows",
+          ahead: 0,
+          behind: 0,
+          tracking: "up_to_date",
+          checkedOutWorktreeIds: []
+        }
+      ]
+    });
+    const cell = dialog().querySelector<HTMLElement>(".refs-copyable-upstream")!;
+    expect(cell.querySelector(".refs-copyable-upstream__text")?.textContent).toBe(
+      "origin/…"
+    );
+    expect(cell.getAttribute("aria-label")).toBe(
+      "Copy upstream branch origin/tenant-deploy-windows"
+    );
+  });
+});
+
+describe("the row menu says what each entry acts on", () => {
+  const local = (name: string, extra: Record<string, unknown> = {}) => ({
+    name,
+    fullName: `refs/heads/${name}`,
+    head: "a".repeat(40),
+    upstream: `origin/${name}`,
+    ahead: 0,
+    behind: 0,
+    tracking: "up_to_date" as const,
+    checkedOutWorktreeIds: [],
+    ...extra
+  });
+  const openMenu = async (label: string): Promise<string[]> => {
+    await act(async () =>
+      dialog().querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click()
+    );
+    return [...document.querySelectorAll<HTMLElement>('.pop-menu [role="menuitem"]')].map(
+      (item) => item.textContent ?? ""
+    );
+  };
+  const choose = async (label: string): Promise<void> => {
+    const item = [...document.querySelectorAll<HTMLElement>('.pop-menu [role="menuitem"]')].find(
+      (node) => node.textContent?.startsWith(label)
+    );
+    await act(async () => item!.click());
+  };
+
+  beforeEach(() => {
+    copyTextMock.mockResolvedValue(undefined);
+    confirmDialogMock.mockResolvedValue(false);
+  });
+
+  it("names the worktree as what a checked-out branch's pin pins", async () => {
+    await open(repo, {
+      ...refs,
+      branches: [local("tenant-deploy-windows", { checkedOutWorktreeIds: ["wt-1"] }), local("dev")]
+    });
+    const checkedOut = await openMenu("Actions for tenant-deploy-windows");
+    expect(checkedOut[0]).toBe(
+      "Pin worktreeThis branch is checked out, so its worktree is what gets pinned."
+    );
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await act(async () => root.render(null));
+    await open(repo, { ...refs, branches: [local("dev")] });
+    expect((await openMenu("Actions for dev"))[0]).toBe("Pin branch");
+  });
+
+  it("copies a remote row's short name, as a click on the name does, and offers the full ref", async () => {
+    dispatchMock.mockImplementation((channel: string) => {
+      if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
+      if (channel === "pr:openList") {
+        return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [] }));
+      }
+      if (channel === "repo:remoteBranches") {
+        return Promise.resolve(
+          ok({
+            rows: [
+              {
+                name: "codex/console-rebuild-plan",
+                qualifiedName: "origin/codex/console-rebuild-plan",
+                fullName: "refs/remotes/origin/codex/console-rebuild-plan",
+                head: "b".repeat(40)
+              }
+            ],
+            total: 1
+          })
+        );
+      }
+      return Promise.resolve(ok({ rows: [], total: 0 }));
+    });
+    await open();
+    // The remote page is debounced (SEARCH_DEBOUNCE_MS).
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 260)));
+    const items = await openMenu("Actions for origin/codex/console-rebuild-plan");
+    expect(items).toEqual(["Copy branch name", "Copy origin/codex/console-rebuild-plan"]);
+    await choose("Copy branch name");
+    expect(copyTextMock).toHaveBeenLastCalledWith("codex/console-rebuild-plan");
+    await openMenu("Actions for origin/codex/console-rebuild-plan");
+    await choose("Copy origin/");
+    expect(copyTextMock).toHaveBeenLastCalledWith("origin/codex/console-rebuild-plan");
+  });
+
+  it("says a pinned branch leaves Pinned too, before it is deleted", async () => {
+    await open(repo, { ...refs, branches: [local("main", { pinned: true }), local("dev")] });
+    await openMenu("Actions for main");
+    await choose("Delete");
+    expect(confirmDialogMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("\n\nIt's also removed from Pinned in the sidebar.")
+      })
+    );
+    await openMenu("Actions for dev");
+    await choose("Delete");
+    expect(confirmDialogMock.mock.lastCall?.[0].message).not.toContain("Pinned");
   });
 });

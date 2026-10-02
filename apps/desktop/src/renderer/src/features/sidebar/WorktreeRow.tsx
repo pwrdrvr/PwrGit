@@ -253,6 +253,18 @@ export function WorktreeRow({
           locked
         </span>
       )}
+      {/* The header says "upstream gone"; the row read clean beside it. */}
+      {!missing && worktree.tracking === "upstream_missing" && (
+        <span
+          className="wt-tag wt-tag--gone"
+          {...hoverTooltip(
+            tip,
+            "The branch it tracks was deleted, usually because the work landed"
+          )}
+        >
+          gone
+        </span>
+      )}
       {/* ●3 / ↑2 / ↓1 are the row's whole status story, and as bare glyphs they
           reached a screen reader as "3", "2", "1" run together with the branch
           name — the meaning lived only in a symbol and a colour (SC 1.1.1,
@@ -275,13 +287,16 @@ export function WorktreeRow({
           </span>
         </>
       )}
-      {!missing && worktree.ahead > 0 && (
+      {/* On a fork row whose source has commits, the source badge carries the
+          branch's own ↑ against the source, as the header's `↓12 upstream ·
+          ↑2` does; an ↑ against origin beside it counted something else. */}
+      {!missing && worktree.ahead > 0 && pull?.kind !== "source" && (
         <>
           <span className="badge-text badge-text--ok" aria-hidden="true">
             ↑{worktree.ahead}
           </span>
           <span className="a11y-sr-only">
-            {worktree.ahead} ahead of upstream
+            {worktree.ahead} to push to the branch it tracks
           </span>
         </>
       )}

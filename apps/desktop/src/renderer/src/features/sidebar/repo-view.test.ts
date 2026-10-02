@@ -750,13 +750,48 @@ describe("repoPrimaryPull", () => {
     });
     expect(repoPrimaryPull(r)).toEqual({
       branch: "main",
-      pull: { kind: "source", behind: 25, label: "upstream/main" }
+      pull: {
+        kind: "source",
+        behind: 25,
+        label: "upstream/main",
+        ahead: 0,
+        trackedBehind: 0,
+        trackedAhead: 0
+      }
     });
   });
 
   it("shows the source when both are behind, since that is what Pull fetches", () => {
-    const w = wt({ id: "p", branch: "main", isPrimary: true, behind: 2, source: source(25) });
-    expect(worktreePull(w)).toEqual({ kind: "source", behind: 25, label: "upstream/main" });
+    const w = wt({
+      id: "p",
+      branch: "main",
+      isPrimary: true,
+      behind: 2,
+      ahead: 3,
+      source: source(25)
+    });
+    expect(worktreePull(w)).toEqual({
+      kind: "source",
+      behind: 25,
+      label: "upstream/main",
+      ahead: 0,
+      // Kept for the badge's words: the source wins the count, not the facts.
+      trackedBehind: 2,
+      trackedAhead: 3
+    });
+  });
+
+  // The header says `↓12 upstream · ↑2`, both against the source; the row
+  // used to say `↑N` against origin beside the source's ↓12.
+  it("counts the branch's own commits against the source, as the header does", () => {
+    const w = wt({
+      id: "p",
+      branch: "main",
+      isPrimary: true,
+      ahead: 0,
+      source: { ...source(12), ahead: 2 }
+    });
+    expect(worktreePull(w)).toMatchObject({ kind: "source", behind: 12, ahead: 2 });
   });
 
   it("falls back to the tracked count when the source has nothing new", () => {

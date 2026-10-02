@@ -110,8 +110,47 @@ describe("WorktreeRow — what Pull would bring in", () => {
   it("keeps the tracked count's own look when there is no source to show", () => {
     const markup = render(worktree({ behind: 2 }));
     expect(markup).toContain("badge-text badge-text--warn");
-    expect(markup).toContain("2 behind upstream");
+    // Git's sense of "upstream", said in words: on a fork "upstream" is the
+    // source's remote, which this count is not about.
+    expect(markup).toContain("2 behind the branch it tracks");
     expect(markup).not.toContain("badge--source");
+  });
+
+  // The header says `↓12 upstream · ↑2`, both against the source. The row
+  // said `↑N` against origin beside the source's ↓12 and could not agree.
+  it("counts the branch's own commits against the source, in the same badge", () => {
+    const markup = render(
+      worktree({
+        branch: "main",
+        isPrimary: true,
+        ahead: 5,
+        source: { ...source, behind: 12, ahead: 2 }
+      })
+    );
+    expect(markup).toContain("↓12");
+    expect(markup).toContain(" · ↑2");
+    // origin's count is not what the header shows on this branch.
+    expect(markup).not.toContain("↑5");
+    expect(markup).not.toContain("badge-text--ok");
+    // ...but it is not dropped: the badge's words carry what a push would.
+    expect(markup).toContain("5 commits to push to the branch it tracks");
+  });
+
+  it("keeps origin's ↑ where the source has nothing to say", () => {
+    const markup = render(
+      worktree({ ahead: 3, source: { ...source, behind: 0, ahead: 0 } })
+    );
+    expect(markup).toContain("badge-text badge-text--ok");
+    expect(markup).toContain("↑3");
+  });
+
+  it("names the tracked branch's count on the card when the fork lags too", async () => {
+    const card = await hoverCard(
+      worktree({ branch: "main", isPrimary: true, behind: 3, source }),
+      ".badge--source"
+    );
+    expect(card).toContain("main is 25 commits behind upstream/main");
+    expect(card).toContain("3 commits behind the branch it tracks");
   });
 
   it("explains the source badge on its card", async () => {
@@ -122,6 +161,24 @@ describe("WorktreeRow — what Pull would bring in", () => {
     expect(card).toBe(
       "main is 25 commits behind upstream/main, the source of this fork"
     );
+  });
+});
+
+describe("WorktreeRow — a pruned upstream", () => {
+  // The header says "upstream gone"; the row used to read clean beside it.
+  it("tags a branch whose tracked branch was deleted", async () => {
+    const markup = render(worktree({ tracking: "upstream_missing" }));
+    expect(markup).toContain('class="wt-tag wt-tag--gone"');
+    expect(markup).toContain(">gone<");
+    expect(await hoverCard(worktree({ tracking: "upstream_missing" }), ".wt-tag--gone")).toBe(
+      "The branch it tracks was deleted, usually because the work landed"
+    );
+  });
+
+  it("says nothing for any other tracking state", () => {
+    for (const tracking of ["up_to_date", "behind", "unpublished"] as const) {
+      expect(render(worktree({ tracking }))).not.toContain("wt-tag--gone");
+    }
   });
 });
 
