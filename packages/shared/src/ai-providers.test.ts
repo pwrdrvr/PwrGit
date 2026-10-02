@@ -47,7 +47,7 @@ describe("isAiProviderId", () => {
   });
 
   it("lists Codex first, then the ACP agents", () => {
-    expect(AI_PROVIDER_IDS).toEqual(["codex", ...BUILT_IN_ACP_AGENT_IDS]);
+    expect(AI_PROVIDER_IDS).toEqual(["codex", "chatgpt", ...BUILT_IN_ACP_AGENT_IDS]);
   });
 
   it("rejects Gemini, casing variants and non-strings", () => {

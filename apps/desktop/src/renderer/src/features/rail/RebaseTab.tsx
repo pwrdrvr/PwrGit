@@ -964,7 +964,9 @@ function TidyBody({
             ? `${agentName} stopped after ${Math.max(1, Math.round(tidy.afterMs / 1000))} s. Nothing changed.`
             : tidy.message,
       tone: tidy.code === "cancelled" ? "quiet" : "warn",
-      ...(agentReady
+      ...(tidy.code === "subscription_sharing_usage_limit_exceeded"
+        ? { link: { label: "Manage usage", onClick: () => { void dispatch("shell:openExternal", { url: "https://chatgpt.com/settings/usage" }); } } }
+        : agentReady && tidy.code !== "subscription_sharing_user_not_eligible"
         ? {
             link: {
               label: tidy.code === "cancelled" ? "Tidy" : "Retry",

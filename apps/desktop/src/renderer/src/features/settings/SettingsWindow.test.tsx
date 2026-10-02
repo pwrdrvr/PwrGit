@@ -586,7 +586,7 @@ describe("Settings nav — AI", () => {
     const labels = [
       ...sublist("ai-providers").querySelectorAll(".settings-nav__sublabel")
     ].map((node) => node.textContent?.trim());
-    expect(labels).toEqual(["Codex", "Grok", "Kimi Code CLI", "Qwen Code"]);
+    expect(labels).toEqual(["Codex", "Sign in with ChatGPT", "Grok", "Kimi Code CLI", "Qwen Code"]);
     expect(container.textContent).not.toMatch(/gemini/i);
   });
 
