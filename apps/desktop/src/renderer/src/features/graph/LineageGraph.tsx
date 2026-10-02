@@ -897,7 +897,29 @@ export function LineageGraph({
   };
 
   const gutterW = gutterWidth(prLandingLayout.laneCount);
-  const laneOverflow = prLandingLayout.laneCount > MAX_GUTTER_LANES;
+  // The gutter also clips below its 160px cap when the pane is narrow
+  // (`.graph-lanes-clip`'s max-width keeps ~14ch of subject), and lanes cut
+  // off there need the same scrollbar as lanes past the cap, or a commit's
+  // dot can sit out of reach. Measured, because the width that clips is a
+  // container-query expression, not a lane count.
+  const [gutterClipped, setGutterClipped] = useState(false);
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller === null) return;
+    const measure = (): void => {
+      const clip = scroller.querySelector<HTMLElement>(".graph-lanes-clip");
+      // 0 is a gutter not laid out yet (a hidden pane), not a clipped one.
+      const width = clip?.clientWidth ?? 0;
+      setGutterClipped(width > 0 && width < gutterW - 0.5);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [gutterW, vms.length > 0]);
+  const laneOverflow =
+    prLandingLayout.laneCount > MAX_GUTTER_LANES || gutterClipped;
 
   // Horizontally reveal a lane inside the clipped gutter (no-op when the
   // gutter isn't overflowing). Scrolling the bar drives a CSS var on the card.
