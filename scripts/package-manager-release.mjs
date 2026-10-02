@@ -6,6 +6,7 @@ import { createReadStream, existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createWriteStream } from "node:fs";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
@@ -18,13 +19,22 @@ export const distribution = {
   cask: "pwrdrvr/tap/pwrgit",
 };
 
-function ghJson(endpoint, optional = false) {
-  try {
-    return JSON.parse(execFileSync("gh", ["api", endpoint], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  } catch (error) {
-    // Authentication, throttling and transport errors are never package absence.
-    if (optional && String(error.stderr).includes("(HTTP 404)")) return null;
-    throw error;
+async function ghJson(endpoint, optional = false) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return JSON.parse(execFileSync("gh", ["api", endpoint], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    } catch (error) {
+      const message = String(error.stderr);
+      // Authentication, throttling and transport errors are never package absence.
+      if (optional && message.includes("(HTTP 404)")) return null;
+      const seconds = Number(message.match(/try again in ([\d.]+)s/)?.[1]);
+      if (attempt === 0 && message.includes("(HTTP 429)") && seconds > 0 && seconds <= 900) {
+        console.error(`GitHub throttled ${endpoint}; retrying once after ${Math.ceil(seconds) + 1}s`);
+        await sleep((Math.ceil(seconds) + 1) * 1000);
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
@@ -44,12 +54,12 @@ export function compareVersions(a, b) {
 }
 
 export async function audit({ api = ghJson } = {}) {
-  const release = api(`repos/${distribution.repo}/releases/latest`);
+  const release = await api(`repos/${distribution.repo}/releases/latest`);
   const version = stableVersion(release);
-  const winget = api(`repos/${distribution.wingetRepo}/contents/${distribution.wingetPath}`, true);
-  const tap = api(`repos/${distribution.tapRepo}/contents/Casks/pwrgit.rb`, true);
-  const central = api("repos/Homebrew/homebrew-cask/contents/Casks/p/pwrgit.rb", true);
-  const duplicates = api("search/code?q=pwrgit+repo:microsoft/winget-pkgs");
+  const winget = await api(`repos/${distribution.wingetRepo}/contents/${distribution.wingetPath}`, true);
+  const tap = await api(`repos/${distribution.tapRepo}/contents/Casks/pwrgit.rb`, true);
+  const central = await api("repos/Homebrew/homebrew-cask/contents/Casks/p/pwrgit.rb", true);
+  const duplicates = await api("search/code?q=pwrgit+repo:microsoft/winget-pkgs");
   if (duplicates.incomplete_results) throw new Error("Winget identity search was incomplete");
   if (duplicates.items.some((item) => !item.path.startsWith(`${distribution.wingetPath}/`))) {
     throw new Error("Another Winget identity mentions PwrGit; resolve ownership before submitting");
@@ -68,7 +78,7 @@ export async function audit({ api = ghJson } = {}) {
   }
   const submissions = {};
   for (const [channel, repo] of [["winget", distribution.wingetRepo], ["homebrew", distribution.tapRepo]]) {
-    const result = api(`search/issues?q=${encodeURIComponent(`pwrgit repo:${repo} is:pr is:open`)}`);
+    const result = await api(`search/issues?q=${encodeURIComponent(`pwrgit repo:${repo} is:pr is:open`)}`);
     if (result.incomplete_results) throw new Error("Submission search was incomplete");
     submissions[channel] = result.items.map(({ html_url, title }) => ({ url: html_url, title }));
   }
@@ -172,7 +182,7 @@ export async function prepare(tag, directory, { api = ghJson } = {}) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("Usage: prepare vX.Y.Z <output-directory>");
   const report = await audit({ api });
   if (tag !== report.stableTag) throw new Error(`Only Stable Latest ${report.stableTag} can update the package managers`);
-  const release = api(`repos/${distribution.repo}/releases/tags/${tag}`);
+  const release = await api(`repos/${distribution.repo}/releases/tags/${tag}`);
   const assets = selectAssets(release);
   const downloads = join(directory, "downloads");
   mkdirSync(downloads, { recursive: true });

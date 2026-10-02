@@ -72,6 +72,13 @@ test("preserves errors from remote sources", async () => {
   await expect(audit({ api: () => { throw new Error("HTTP 403"); } })).rejects.toThrow("HTTP 403");
 });
 
+test("awaits remote source lookups, including delayed searches", async () => {
+  const source = api({ winget: ["0.27.0"], cask: "0.27.0" });
+  const result = await audit({ api: async (...args) => source(...args) });
+  expect(result.winget.version).toBe("0.27.0");
+  expect(result.homebrew.version).toBe("0.27.0");
+});
+
 test("maps native arm64 and universal Intel DMGs separately and offers only Windows x64", () => {
   const value = release();
   const output = renderManifests(value, selectAssets(value));
