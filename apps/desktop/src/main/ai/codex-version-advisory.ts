@@ -77,15 +77,23 @@ export function classifyCodexInstaller(params: {
   if (has(/\/Cellar\/codex\//u)) {
     return { installer: "homebrew", upgradeCommand: "brew upgrade codex" };
   }
-  // Order matters: bun and pnpm both keep an `@openai/codex` under a
-  // `node_modules`, so their own roots have to be tested before the generic one.
+  // Recommend a global update only for recognizable global roots or shims.
+  // A project's node_modules can belong to any package manager, and updating
+  // a global install would leave that selected executable unchanged.
   if (has(/\/\.bun\/(?:install\/global\/node_modules\/@openai\/codex\b|bin\/codex(?:\.exe)?$)/iu)) {
     return { installer: "bun", upgradeCommand: "bun add -g @openai/codex@latest" };
   }
-  if (has(/\/pnpm\/(?:global\/[^/]+\/node_modules\/@openai\/codex\b|codex\.(?:cmd|ps1|exe)$)/iu)) {
+  if (
+    has(/\/pnpm\/global\/[^/]+\/node_modules\/@openai\/codex(?:\/|$)/iu) ||
+    has(/\/(?:\.local\/share|Library|AppData\/Local)\/pnpm\/codex(?:\.(?:cmd|ps1|exe))?$/iu)
+  ) {
     return { installer: "pnpm", upgradeCommand: "pnpm add -g @openai/codex@latest" };
   }
-  if (has(/\/node_modules\/@openai\/codex\b/iu) || has(/\/AppData\/Roaming\/npm\/codex(?:\.(?:cmd|ps1|exe))?$/iu)) {
+  if (
+    has(/\/lib\/node_modules\/@openai\/codex(?:\/|$)/u) ||
+    has(/\/AppData\/Roaming\/npm\/(?:node_modules\/@openai\/codex(?:\/|$)|codex(?:\.(?:cmd|ps1|exe))?$)/iu) ||
+    has(/\/Program Files\/nodejs\/node_modules\/@openai\/codex(?:\/|$)/iu)
+  ) {
     return { installer: "npm", upgradeCommand: "npm install -g @openai/codex@latest" };
   }
   if (params.source === "application" || has(/\.app\/Contents\/Resources\/codex$/u)) {
