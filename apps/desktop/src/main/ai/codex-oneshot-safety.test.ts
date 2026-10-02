@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CodexOneShotClient } from "@pwrdrvr/agent-client";
+import { CodexOneShotClient, DISABLE_CODING_AGENT_THREAD_CONFIG } from "@pwrdrvr/agent-client";
 
 const tempRoots: string[] = [];
 
@@ -85,6 +85,7 @@ describe("Codex one-shot rebase safety posture", () => {
     const workspaceDir = join(root, "pwrgit-agent", "work");
     const client = new CodexOneShotClient({
       workspaceDir,
+      threadConfig: DISABLE_CODING_AGENT_THREAD_CONFIG,
       transportFactory: () => transport,
       requestTimeoutMs: 1_000,
       turnTimeoutMs: 1_000
@@ -115,6 +116,12 @@ describe("Codex one-shot rebase safety posture", () => {
     );
     expect(threadStart["cwd"]).not.toBe("/repo");
     expect(threadStart["dynamicTools"]).toBeUndefined();
+    // PwrGit uses the legacy sandbox path. Introducing profiles here without
+    // retaining their selection breaks Codex's account-routing config reload.
+    expect(threadStart["permissions"]).toBeUndefined();
+    expect(threadStart["config"]).toEqual(DISABLE_CODING_AGENT_THREAD_CONFIG);
+    expect(threadStart["config"]).not.toHaveProperty("permissions");
+    expect(threadStart["config"]).not.toHaveProperty("default_permissions");
 
     const serverRequestId = transport.request("item/tool/call", {
       tool: "git reset --hard"

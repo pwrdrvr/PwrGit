@@ -13,7 +13,7 @@ export type DraftSource =
 export type DraftStatus =
   | { kind: "idle" }
   | { kind: "drafting"; startedAt: number }
-  | { kind: "failed"; code: string; message: string; afterMs: number };
+  | { kind: "failed"; code: string; message: string; detail?: string; afterMs: number };
 
 export type MessageDraft = {
   text: string;
@@ -113,6 +113,7 @@ export function useMessageDraft({
           kind: "failed",
           code: result.error.code,
           message: result.error.message,
+          ...(result.error.detail !== undefined ? { detail: result.error.detail } : {}),
           afterMs: Date.now() - startedAt
         });
         return;

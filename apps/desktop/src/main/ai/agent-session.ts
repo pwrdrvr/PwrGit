@@ -400,7 +400,10 @@ function agentError(
 ): PwrGitError {
   return cause === undefined
     ? { kind: "agent", code, message }
-    : { kind: "agent", code, message, cause };
+    : {
+        kind: "agent", code, message, cause,
+        detail: cause instanceof Error ? cause.message : String(cause)
+      };
 }
 
 function isAbort(error: unknown): boolean {
@@ -636,6 +639,15 @@ export class LocalAgentSession implements AgentSession {
       return agentError("cancelled", "Cancelled. Nothing changed.");
     }
     const message = cause instanceof Error ? cause.message : String(cause);
+    // Account routing rebuilds retained configuration before sending content.
+    // Codex reports this category without the underlying configuration error.
+    if (/failed to (?:load|reload) workspace requirements/i.test(message)) {
+      return agentError(
+        "configuration_failed",
+        `Codex could not load its configuration before generating the ${what}. Check the configuration for the Codex account selected in AI Providers. Nothing changed.`,
+        cause
+      );
+    }
     if (/timed?\s*out|timeout/i.test(message)) {
       return agentError(
         "timeout",

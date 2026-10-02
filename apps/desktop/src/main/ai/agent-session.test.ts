@@ -377,6 +377,52 @@ describe("draftMessage", () => {
   });
 });
 
+describe("Codex configuration failures", () => {
+  it.each(["failed to load workspace requirements", "failed to reload workspace requirements"])(
+    "explains %s for staged messages, Squash messages and Tidy, preserving diagnostics",
+    async (raw) => {
+      const cause = new Error(raw);
+      const agent = new LocalAgentSession({
+        resolveJob: async ({ profileId, jobId }) => ok(resolved(profileId, jobId)),
+        createCodexClient: () => ({
+          run: async () => { throw cause; },
+          close: async () => undefined
+        })
+      });
+      const results = [
+        await agent.draftMessage({ requestId: "staged", profileId: "work", source: "staged", data: staged }),
+        await agent.draftMessage({ requestId: "squash", profileId: "work", source: "commits", data: input }),
+        await agent.proposeTidy({ requestId: "tidy", profileId: "work", commits, data: input })
+      ];
+      for (const result of results) {
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.code).toBe("configuration_failed");
+          expect(result.error.message).toContain("Codex could not load its configuration");
+          expect(result.error.message).toContain("Nothing changed.");
+          expect(result.error.detail).toBe(raw);
+          expect(result.error.cause).toBe(cause);
+        }
+      }
+      await agent.close();
+    }
+  );
+
+  it.each([
+    [new Error("json-rpc timeout: turn/start"), "timeout"],
+    [new DOMException("cancelled", "AbortError"), "cancelled"],
+    [new Error("model is unavailable"), "session_failed"]
+  ])("keeps existing handling for %s", async (cause, code) => {
+    const agent = new LocalAgentSession({
+      resolveJob: async ({ profileId, jobId }) => ok(resolved(profileId, jobId)),
+      createCodexClient: () => ({ run: async () => { throw cause; }, close: async () => undefined })
+    });
+    const result = await agent.draftMessage({ requestId: "a", profileId: "work", source: "staged", data: staged });
+    expect(!result.ok && result.error.code).toBe(code);
+    await agent.close();
+  });
+});
+
 describe("one client per profile", () => {
   it("never lets one profile's reset touch another's client", async () => {
     const capture: Capture = { options: [], requests: [], closed: [] };

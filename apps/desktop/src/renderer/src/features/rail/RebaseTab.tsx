@@ -80,7 +80,7 @@ type TidyState =
       /** The plan this one replaced, and why the check refused it. */
       revisedFrom: { program: HistoryEditProgram; detail: RebaseSnagDetail } | null;
     }
-  | { kind: "failed"; code: string; message: string; afterMs: number };
+  | { kind: "failed"; code: string; message: string; detail?: string; afterMs: number };
 
 export function ProofLedger({ rows }: { rows: LedgerRow[] }) {
   return (
@@ -494,6 +494,7 @@ export function RebaseTab({
           kind: "failed",
           code: result.error.code,
           message: result.error.message,
+          ...(result.error.detail !== undefined ? { detail: result.error.detail } : {}),
           afterMs: Date.now() - startedAt
         });
         return;
@@ -993,7 +994,10 @@ function TidyBody({
         </div>
         <div className="msg-foot" role="status">
           {footer.tone === "agent" && <AgentGlyph />}
-          <span className={`msg-foot__src msg-foot__src--${footer.tone}`}>{footer.text}</span>
+          <span
+            className={`msg-foot__src msg-foot__src--${footer.tone}`}
+            title={tidy.kind === "failed" ? tidy.detail : undefined}
+          >{footer.text}</span>
           <span className="msg-foot__sp" />
           {footer.link !== undefined && (
             <button
