@@ -3392,6 +3392,36 @@ a.forge-chip:focus-visible {
   color: var(--accent);
   border-color: var(--accent-border);
 }
+/* The way out of in-place mode. Quiet on purpose: cloning a second copy of a
+   checkout you are forking is the rare case, and the primary button already
+   says what happens by default. Still a real button, underlined so it reads
+   as one. */
+.fork-in-place__link {
+  flex: none;
+  align-self: flex-start;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px dotted var(--accent-border);
+  background: transparent;
+  color: var(--accent);
+  font: 500 10.5px/1.3 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* The underline firms up; the colour stays --accent, since --accent-bright is
+   for accent-tinted fills only (styles/theme-contract.test.ts). */
+.fork-in-place__link:hover:not(:disabled) {
+  border-bottom-style: solid;
+}
+.fork-in-place__link:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.fork-in-place__link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 
 .fork-options {
   display: flex;
@@ -3658,6 +3688,98 @@ a.forge-chip:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
   scroll-margin: 4px;
+}
+/* "Clone from" — the original, or your fork (design/Fork While Cloning,
+   turn 2a). Built from the protocol cards beside it: the same border, fill and
+   active state, taller because each card answers a question rather than
+   naming a URL. A drawn radio says the two are one choice; `aria-pressed`
+   carries it for AT, as on `.fork-host`. */
+.clone-from {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.clone-from__card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.clone-from__card:hover:not(:disabled),
+.clone-from__card.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.clone-from__card:disabled {
+  cursor: default;
+}
+/* Dimmed by part, not as a whole: the reason it is unavailable sits in the
+   card and has to stay readable. */
+.clone-from__card:disabled .clone-from__top,
+.clone-from__card:disabled .clone-from__slug {
+  opacity: 0.45;
+}
+.clone-from__card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  scroll-margin: 4px;
+}
+.clone-from__top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.clone-from__top strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+}
+.clone-from__card.is-active .clone-from__top strong {
+  color: var(--accent-bright);
+}
+.clone-from__radio {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-panel);
+}
+.clone-from__card.is-active .clone-from__radio {
+  border: 3.5px solid var(--accent);
+}
+.clone-from__slug {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 10.5px/1.1 var(--font-mono);
+}
+.clone-from__card small {
+  color: var(--text-muted);
+  font: 500 9.5px/1.35 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+.clone-from__into {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+  color: var(--text-subtle);
+  font: 500 9.5px/1 var(--font-mono);
+}
+.clone-from__into .fork-hosts {
+  margin-left: 0;
+  flex-wrap: wrap;
 }
 .clone-destination-row {
   min-height: 32px;

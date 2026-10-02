@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, LIGHT block — the theme the report came from. */
+          :root {
+            --app: #ffffff; --side: #f7f4ef; --panel: #fdfcfa; --elev: #ffffff;
+            --hov: #f4f0e8; --hov2: #ebe5da; --rowact: #fff5e9; --actstrong: #ffe8cf;
+            --line0: rgba(0,0,0,.05); --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12); --line3: rgba(0,0,0,.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64; --tsub: rgba(26,22,18,.68);
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: rgba(183,76,0,.12); --atint: rgba(183,76,0,.08); --abord: rgba(183,76,0,.42);
+            --warn: #805200; --ok: #2e7d3c; --bad: #a8472a;
+            --sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #efe9df; }
+          body { margin: 0; background: #efe9df; font-family: var(--sans); color: var(--t1); -webkit-font-smoothing: antialiased; }
+          a { color: var(--acc); text-decoration: none; } a:hover { color: var(--accb); }
+
+          /* ---- review chrome (house: "Refresh Affordances - Normalization") ---- */
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #fff; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 14px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: var(--t2); max-width: 820px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.35 var(--sans); color: var(--t2); max-width: 720px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .note { margin: 0; max-width: 340px; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .note code, .fitem code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+
+          /* ---- findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.gap { background: var(--warn); }
+          .pin.ok { background: var(--ok); }
+          .find { width: 420px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 10px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 12px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .tag { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; margin-left: 6px; border-radius: 999px; font: 600 9px/1 var(--mono); letter-spacing: .03em; vertical-align: 1px; }
+          .tag.bug { background: rgba(168,71,42,.12); color: var(--bad); }
+          .tag.gap { background: rgba(128,82,0,.12); color: var(--warn); }
+          /* ---- fork dialog ---- */
+          .dlg { position: relative; width: 640px; border: 1px solid var(--line2); border-radius: 14px; background: var(--elev); box-shadow: 0 18px 50px rgba(40,26,10,.14); overflow: hidden; }
+          .dh { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+          .dh .ic { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; background: var(--asoft); color: var(--acc); }
+          .dh h3 { margin: 0; font: 650 15px/1.2 var(--sans); }
+          .dh p { margin: 3px 0 0; font: 400 12px/1.3 var(--sans); color: var(--t2); }
+          .db { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+          .lbl { display: flex; align-items: center; gap: 8px; font: 600 10.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; color: var(--t1); }
+          .lbl .grow { flex: 1; }
+          .seg { display: inline-flex; gap: 4px; }
+          .seg span { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line2); font: 600 9.5px/1 var(--mono); letter-spacing: .05em; color: var(--t2); }
+          .seg span.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .field { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--elev); font: 500 13.5px/1 var(--sans); color: var(--t1); }
+          .field .ph { color: var(--t3); }
+          .srcrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--rowact); }
+          .srcrow .nm { font: 600 13px/1.2 var(--mono); color: var(--t1); }
+          .srcrow .meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font: 500 11px/1.2 var(--mono); color: var(--t2); }
+          .srcrow .grow { flex: 1; }
+          .pill { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line2); font: 600 10px/1 var(--mono); color: var(--t2); background: var(--elev); }
+          .pill.warn { color: var(--warn); border-color: rgba(128,82,0,.35); }
+          .pill.wait { color: var(--t3); border-style: dashed; }
+          .bridge { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 9px; background: var(--panel); }
+          .bridge .ic { color: var(--acc); display: inline-flex; }
+          .bridge b { font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+          .bridge p { margin: 2px 0 0; font: 400 11.5px/1.45 var(--sans); color: var(--t2); }
+          .bridge p code { font: 500 11px/1 var(--mono); color: var(--t1); }
+          .cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+          .card { padding: 9px 11px; border: 1px solid var(--line2); border-radius: 8px; font: 600 12.5px/1.2 var(--sans); color: var(--t1); }
+          .card small { display: block; margin-top: 3px; font: 500 10.5px/1 var(--mono); color: var(--t2); }
+          .card.on { border-color: var(--abord); background: var(--rowact); color: var(--accb); }
+          .fade { opacity: .45; }
+          .df { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+          .df .grow { flex: 1; }
+          .df .hint { font: 500 11px/1 var(--mono); color: var(--t2); }
+          .pbtn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; background: var(--acc); color: #fff; font: 600 13px/1 var(--sans); }
+          .sbtn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; border: 1px solid var(--line2); background: var(--elev); color: var(--t1); font: 500 13px/1 var(--sans); }
+          .slink { font: 600 12px/1 var(--sans); color: var(--acc); padding: 7px 10px; border-radius: 7px; border: 1px solid var(--abord); background: var(--elev); white-space: nowrap; }
+
+          /* ---- plan table ---- */
+          .plan { width: 900px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+          .pr { display: grid; grid-template-columns: 36px 250px minmax(0,1fr) 110px; gap: 14px; align-items: start; padding: 10px 14px; border-bottom: 1px solid var(--line); font: 400 11.5px/1.5 var(--sans); color: var(--t2); }
+          .pr.last { border-bottom: 0; }
+          .pr.head { font: 600 9.5px/1.3 var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--t3); background: rgba(0,0,0,.025); }
+          .pr b { font: 600 12px/1.4 var(--sans); color: var(--t1); }
+          .pr code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); }
+          .pr .k { font: 700 11px/1.4 var(--mono); color: var(--acc); }
+
+          /* ---- live prototype ---- */
+          .proto { display: flex; gap: 22px; align-items: flex-start; }
+          .ctl { display: flex; flex-direction: column; gap: 12px; width: 300px; }
+          .ctlg { display: flex; flex-direction: column; gap: 6px; }
+          .ctlh { font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+          .opts { display: flex; flex-wrap: wrap; gap: 5px; }
+          .opt { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line2); background: var(--elev); font: 500 11.5px/1 var(--sans); color: var(--t2); cursor: pointer; }
+          .opt.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); font-weight: 600; }
+          .readout { padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line2); background: var(--panel); font: 400 11.5px/1.5 var(--sans); color: var(--t2); }
+          .readout b { color: var(--t1); font-weight: 650; }
+          .click { cursor: pointer; }
+
+          /* ---- clone dialog parts (app.css names in comments) ---- */
+          .rows { display: flex; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0,0,0,.025); }   /* .clone-source-results */
+          .srow { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid transparent; border-radius: 8px; }   /* .clone-source-row */
+          .srow.pick { border-color: var(--abord); background: var(--rowact); }
+          .srow .dot { flex: none; width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--t2); }
+          .srow.pick .dot { background: var(--acc); border-color: var(--acc); }
+          .srow .nm { font: 600 12.5px/1.2 var(--mono); color: var(--t1); }
+          .srow small { display: block; margin-top: 2px; font: 400 11px/1.3 var(--sans); color: var(--t2); }
+          .srow .grow { flex: 1; min-width: 0; }
+          .pill.ok { color: var(--ok); border-color: rgba(46,125,60,.35); }
+          .pill.acc { color: var(--accb); border-color: var(--abord); background: var(--atint); }
+          .will { font: 500 11px/1.3 var(--mono); color: var(--t2); }
+          .will b { color: var(--accb); font-weight: 600; }
+          .ghost { display: flex; align-items: center; justify-content: center; height: 54px; border: 1px dashed var(--line3); border-radius: 9px; font: 500 11px/1.3 var(--mono); color: var(--t3); background: repeating-linear-gradient(135deg, rgba(0,0,0,.025) 0 6px, transparent 6px 12px); }
+
+          /* ---- NEW: "Clone from" choice (proposed .clone-copy) ---- */
+          .copy { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
+          .cc { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 9px; background: var(--elev); min-width: 0; }
+          .cc.on { border-color: var(--abord); background: var(--rowact); }
+          .cc.off { opacity: .5; }
+          .cc .top { display: flex; align-items: center; gap: 7px; font: 600 12.5px/1.2 var(--sans); color: var(--t1); }
+          .cc.on .top { color: var(--accb); }
+          .cc .top .grow { flex: 1; }
+          .cc .slug { font: 500 11px/1.2 var(--mono); color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .cc .why { font: 400 11px/1.4 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .radio { flex: none; width: 13px; height: 13px; border-radius: 999px; border: 1.5px solid var(--line3); background: var(--elev); }
+          .cc.on .radio { border: 4px solid var(--acc); }
+          .into { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 500 11px/1 var(--mono); color: var(--t2); }
+          .into code { font: 500 11px/1 var(--mono); color: var(--accb); }
+
+          /* ---- in-place card + remote plan (.fork-remote-plan) ---- */
+          .here { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--rowact); }
+          .here .ic { color: var(--acc); display: inline-flex; padding-top: 1px; }
+          .here b { font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+          .here p { margin: 2px 0 0; font: 400 11.5px/1.45 var(--sans); color: var(--t2); }
+          .qlink { font: 500 11.5px/1.3 var(--sans); color: var(--acc); white-space: nowrap; border-bottom: 1px dotted var(--abord); }
+          .rp { display: flex; flex-direction: column; gap: 4px; }
+          .rpr { display: grid; grid-template-columns: 64px minmax(0,1fr) 220px; gap: 10px; align-items: center; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+          .rpr code { font: 600 11.5px/1 var(--mono); color: var(--t1); }
+          .rpr b { display: block; font: 600 12px/1.3 var(--mono); color: var(--t1); }
+          .rpr small { font: 400 10.5px/1.3 var(--sans); color: var(--t2); }
+          .rpr .url { font: 500 10.5px/1.2 var(--mono); color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .chk { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--rowact); }
+          .chk .box { flex: none; width: 14px; height: 14px; margin-top: 1px; border-radius: 4px; background: var(--acc); color: #fff; font: 700 10px/14px var(--sans); text-align: center; }
+          .chk b { font: 600 12px/1.3 var(--sans); color: var(--t1); }
+          .chk b code { font: 600 11px/1 var(--mono); color: var(--accb); }
+          .chk small { display: block; margin-top: 2px; font: 400 11px/1.4 var(--sans); color: var(--t2); }
+          .dv-opt .dlg { width: 600px; }
+        </style>
+      </helmet>
+
+      <div style="background:#efe9df;min-width:1280px">
+
+      <!-- ================================================================ 1 -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">As built: Clone never offers a fork, and Fork&#8230; still wants a second copy</span></div>
+        <p class="dv-sub">Two dialogs, two gaps. <b>Clone</b> picks a repository you can't push to, marks it <code>read-only</code>, and clones it anyway. It never asks the forge whether you already have a fork, and never offers to make one. <b>Fork&#8230;</b>, opened on a checkout that is already on disk, offers "Fork in place&#8230;" as a side door. The primary button still says <b>Fork &amp; clone</b>, and the dialog still asks how and where to clone a second copy. Names are contrived: <code>octo-labs/sparkline</code> is the source, <code>riverbend</code> is the signed-in account, <code>lumen-co</code> is an org.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Clone as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Clone a repository: read-only source, no way to fork first</div>
+            <div class="dlg">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg></span><div><h3>Clone a repository</h3><p>Find repos from owners already used in Work</p></div></div>
+              <div class="db">
+                <div class="lbl">Repository<span class="grow"></span><span class="seg"><span class="on">GITHUB</span><span>GITCAFE</span></span></div>
+                <div class="field">octo-labs/sparkline</div>
+                <div class="rows">
+                  <div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">octo-labs/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">GITHUB</span><span class="pill">public</span><span class="pill warn">read-only</span></div>
+                  <div class="srow"><span class="dot"></span><span class="grow"><span class="nm">octo-labs/sparkline-docs</span><small>Docs site</small></span><span class="pill">GITHUB</span><span class="pill">public</span></div>
+                </div>
+                <div class="lbl">Clone with</div>
+                <div class="cards"><div class="card on">SSH<small>git@github.com:octo-labs/&#8230;</small></div><div class="card">HTTPS<small>https://github.com/octo-&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone octo-labs/&#8230;</small></div></div>
+                <div class="lbl">Check out to</div>
+                <div class="field">src/github/</div>
+                <div class="will">Will create <b>~/src/github/sparkline</b></div>
+              </div>
+              <div class="df"><span class="hint">&#8593;&#8595; navigate &#183; tab next field</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone repository</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>What goes wrong</div>
+            <div class="find">
+              <div class="fitem"><span class="pin gap">1</span><div><h4>Read-only is shown, then ignored<span class="tag gap">GAP</span></h4><p>The row already knows <code>viewerCanPush === false</code>, and draws the chip. The next thing the user does with this checkout is push a branch. The forge refuses it, and only then does the header offer to fork in place.</p></div></div>
+              <div class="fitem"><span class="pin gap">2</span><div><h4>An existing fork is never looked for<span class="tag gap">GAP</span></h4><p>If <code>riverbend/sparkline</code> already exists, the right clone is that one, with the original as <code>upstream</code>. <code>repo:forkPreflight</code> answers exactly this, but only the Fork&#8230; dialog asks it.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>Fork&#8230; on a local checkout defaults to a second clone<span class="tag bug">UX</span></h4><p>Forking a repository that is already on disk and cloning it a second time is the 0.1% case. The dialog makes that the primary action anyway. The in-place path is a secondary button that closes this dialog and opens a different one with the same questions.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>No new main-process work</h4><p><code>repo:forkPreflight</code>, <code>repo:forkTargets</code>, <code>repo:fork</code>, <code>repo:forkCheckoutPreflight</code> and <code>repo:forkCheckout</code> already do everything below. This is renderer only.</p></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "what does the forge say about a repo I'm a collaborator on?" &#183; "should Clone ever fork without asking?"</p>
+      </section>
+
+      <!-- ================================================================ 2 -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Where the fork choice lives in Clone</span></div>
+        <p class="dv-sub">The decision is "which repository becomes <code>origin</code>". It needs to sit between picking the source and choosing a protocol, because the protocol card's URL and the "Will create" path both depend on the answer. Three placements:</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Clone from cards">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b>Recommended.</b> A "Clone from" pair of cards, built like the existing Clone with cards</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">octo-labs/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">GITHUB</span><span class="pill">public</span><span class="pill warn">read-only</span></div></div>
+                <div class="lbl">Clone from<span style="letter-spacing:0;text-transform:none;font-weight:500;color:var(--t2)">&#160; origin is the one you pick</span></div>
+                <div class="copy">
+                  <div class="cc"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><span class="slug">octo-labs/sparkline</span><span class="why">You can read it. Pushes will be refused.</span></div>
+                  <div class="cc on"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">will be created</span></div><span class="slug">riverbend/sparkline</span><span class="why">Created on GitHub first. The original is kept as <code>upstream</code>.</span></div>
+                </div>
+                <div class="into">Fork into <span class="seg"><span class="on">RIVERBEND</span><span>LUMEN-CO</span></span><span style="flex:1"></span>upstream &#8594; <code>octo-labs/sparkline</code></div>
+              </div>
+            </div>
+            <p class="note">Two radio cards, so both answers are visible and it reads as a choice (the affordance rule). The fork card's pill answers the forge question: <code>will be created</code>, <code>on GitHub</code>, or <code>checked out</code>. The account row appears only with more than one account, using the <code>.fork-host</code> pills from the header.</p>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b Banner">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>A banner under the source row, shown only when read-only</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">octo-labs/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill warn">read-only</span></div></div>
+                <div class="bridge"><div><b>You can't push to octo-labs/sparkline</b><p>Fork it first and clone your copy. The original stays as <code>upstream</code>.</p></div><span class="slink">Fork first</span></div>
+              </div>
+            </div>
+            <p class="note">Quieter, but a toggle hidden in a banner swaps its own label (the "flip-flopping pill" problem). It also disappears for collaborators, who may still want a personal fork.</p>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Split button">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>A split submit: Clone repository &#9662; Fork &amp; clone</div>
+            <div class="dlg">
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn" style="border-radius:9px 0 0 9px">Clone repository</span><span class="pbtn" style="border-radius:0 9px 9px 0;margin-left:-9px;border-left:1px solid rgba(255,255,255,.35);padding:0 10px">&#9662;</span></div>
+            </div>
+            <p class="note">Hides the decision until the very last click. By then the protocol URL and the "Will create" path already describe the wrong repository.</p>
+          </div>
+        </div>
+        <p class="dv-next">Going with 2a. Try next: "put the account row inside the fork card" &#183; "hide the pair entirely for repos I own"</p>
+      </section>
+
+      <!-- ================================================================ 3 -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">2a in every state the forge can answer</span></div>
+        <p class="dv-sub">Picking a forge repository runs one <code>repo:forkPreflight</code> for the default account. Its answer sets the fork card's pill, the default choice, and the submit label. <b>Defaults:</b> the original, unless you can't push <i>and</i> a fork of yours already exists. Creating a repository on your account is never a default. Repositories you own skip the pair, since preflight answers <code>self_owned</code>. So do local-path sources, which have nothing to fork.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a No fork yet">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Read-only, no fork yet: user picks Your fork</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="lbl">Clone from</div>
+                <div class="copy">
+                  <div class="cc"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><span class="slug">octo-labs/sparkline</span></div>
+                  <div class="cc on"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">will be created</span></div><span class="slug">riverbend/sparkline</span></div>
+                </div>
+                <div class="lbl">Clone with</div>
+                <div class="cards"><div class="card on">SSH<small>git@github.com:riverbend/&#8230;</small></div><div class="card">HTTPS<small>https://github.com/riverb&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone riverbend/&#8230;</small></div></div>
+                <div class="will">Will create <b>~/src/github/sparkline</b> &#183; origin riverbend/sparkline &#183; upstream octo-labs/sparkline</div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Fork &amp; clone</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="3b" data-screen-label="3b Fork exists">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Read-only, your fork already on GitHub: preselected</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="lbl">Clone from</div>
+                <div class="copy">
+                  <div class="cc"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><span class="slug">octo-labs/sparkline</span></div>
+                  <div class="cc on"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill ok">on GitHub</span></div><span class="slug">riverbend/sparkline</span></div>
+                </div>
+                <div class="will">Will create <b>~/src/github/sparkline</b> &#183; origin riverbend/sparkline &#183; upstream octo-labs/sparkline</div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone your fork</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="3c" data-screen-label="3c Fork checked out">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Your fork is already checked out: reveal it, don't clone again</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="lbl">Clone from</div>
+                <div class="copy">
+                  <div class="cc"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><span class="slug">octo-labs/sparkline</span></div>
+                  <div class="cc on"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill acc">checked out</span></div><span class="slug">riverbend/sparkline</span><span class="why">Already at ~/src/github/sparkline</span></div>
+                </div>
+                <div class="ghost">Clone with &#183; Check out to &#8212; hidden: nothing is cloned</div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Reveal checkout</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="3d" data-screen-label="3d Can push">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>You can push (a collaborator): the original stays the default</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="lbl">Clone from</div>
+                <div class="copy">
+                  <div class="cc on"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill ok">can push</span></div><span class="slug">octo-labs/sparkline</span></div>
+                  <div class="cc"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">will be created</span></div><span class="slug">riverbend/sparkline</span></div>
+                </div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone repository</span></div>
+            </div>
+            <p class="note">While preflight is in flight the fork card's pill reads <code>checking&#8230;</code> and the card can still be picked. A blocked answer (a name collision, forking disabled) greys the card out and puts the forge's sentence in its body.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "let me rename the fork from here" (deferred to Fork&#8230;) &#183; "default to Your fork for every read-only repo"</p>
+      </section>
+
+      <!-- ================================================================ 4 -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Fork&#8230; on a checkout that's already here: the button becomes Fork in place</span></div>
+        <p class="dv-sub">When the dialog is seeded from a local checkout and the source is still that repository, nothing needs cloning. The dialog switches to in-place mode itself, with no hand-off to a second dialog. It asks <code>repo:forkCheckoutPreflight</code> instead of <code>repo:forkPreflight</code>, and the answer is a superset. Clone with and Check out to give way to the <b>Afterwards</b> remote plan that <code>ForkCheckoutDialog</code> already draws. Submit runs <code>repo:forkCheckout</code>. "Clone a separate copy instead" stays as a quiet link for the rare case.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a In place, no fork">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>No fork on the forge yet: <b>Fork in place</b></div>
+            <div class="dlg">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg></span><div><h3>Fork a repository</h3><p>Create your own copy, then check it out in Work</p></div></div>
+              <div class="db">
+                <div class="lbl">Repository to fork</div>
+                <div class="field">octo-labs/sparkline</div>
+                <div class="here"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10H3z"></path></svg></span><div><b>Forking this checkout in place: sparkline</b><p>Nothing new is cloned. Your branches and changes stay put. Only the remotes change.</p></div><span class="qlink">Clone a separate copy instead</span></div>
+                <div class="lbl">Fork into</div>
+                <div class="cards"><div class="card on">riverbend<small>personal account</small></div><div class="card">lumen-co<small>organization</small></div><div class="card fade">&#160;<small>&#160;</small></div></div>
+                <div class="field" style="border-color:var(--line2)"><span class="ph">riverbend /</span>sparkline<span style="flex:1"></span><span style="font:500 11px var(--mono);color:var(--ok)">name is free</span></div>
+                <div class="lbl">After forking</div>
+                <div class="chk"><span class="box">&#10003;</span><div><b>Keep the original as <code>upstream</code></b><small>Fetch and rebase on it without leaving PwrGit.</small></div></div>
+                <div class="lbl">Afterwards</div>
+                <div class="rp">
+                  <div class="rpr"><code>origin</code><span><b>riverbend/sparkline</b><small>your fork &#8212; where pushes go</small></span><span class="url">git@github.com:riverbend/sparkline.git</span></div>
+                  <div class="rpr"><code>upstream</code><span><b>octo-labs/sparkline</b><small>the original &#8212; fetch and rebase on it</small></span><span class="url">git@github.com:octo-labs/sparkline.git</span></div>
+                </div>
+              </div>
+              <div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Fork in place</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="4b" data-screen-label="4b In place, fork exists">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Your fork already exists: adopt it</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="here"><span class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h6l2 2h10v10H3z"></path></svg></span><div><b>Forking this checkout in place: sparkline</b><p>riverbend/sparkline already exists. Nothing is created, and this checkout is pointed at it.</p></div><span class="qlink">Clone a separate copy instead</span></div>
+                <div class="rp">
+                  <div class="rpr"><code>origin</code><span><b>riverbend/sparkline</b><small>your fork &#8212; where pushes go</small></span><span class="url">git@github.com:riverbend/sparkline.git</span></div>
+                  <div class="rpr"><code>upstream</code><span><b>octo-labs/sparkline</b><small>the original &#8212; fetch and rebase on it</small></span><span class="url">git@github.com:octo-labs/sparkline.git</span></div>
+                </div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Switch origin to my fork</span></div>
+            </div>
+            <p class="note">The labels are <code>forkCheckoutAction</code>'s, so this dialog and the header's in-place dialog can't word the same operation two ways. If the fork is already checked out <i>somewhere else</i>, Reveal checkout still wins: re-pointing this one would leave two clones of your fork.</p>
+          </div>
+          <div class="dv-opt" id="4c" data-screen-label="4c Escape hatch">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>After "Clone a separate copy instead": today's dialog, with the way back</div>
+            <div class="dlg">
+              <div class="db">
+                <div class="bridge"><div><b>Already checked out here, as sparkline</b><p>You're cloning a second copy. Fork in place keeps this checkout instead.</p></div><span class="slink">Fork in place</span></div>
+                <div class="lbl">Clone with</div>
+                <div class="cards"><div class="card on">SSH<small>git@github.com:riverbend/&#8230;</small></div><div class="card">HTTPS<small>https://github.com/riverb&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone riverbend/&#8230;</small></div></div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Fork &amp; clone</span></div>
+            </div>
+            <p class="note">Typing a different source leaves in-place mode on its own, as the bridge does today, because the checkout no longer matches what is being forked.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "drop the escape hatch entirely" &#183; "show the in-place card in the header-opened dialog too"</p>
+      </section>
+
+      <!-- ================================================================ 5 -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Live: what the forge says, and what Clone does with it</span></div>
+        <p class="dv-sub">Set the push answer and the fork lookup, then click the cards. The submit button, the protocol URL and the "Will create" line all follow the chosen card.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Prototype</div>
+            <div class="proto">
+              <div class="ctl">
+                <div class="ctlg"><span class="ctlh">You on octo-labs/sparkline</span>
+                  <div class="opts"><sc-for list="{{ pushOpts }}" as="o" hint-placeholder-count="3"><span class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</span></sc-for></div>
+                </div>
+                <div class="ctlg"><span class="ctlh">riverbend/sparkline</span>
+                  <div class="opts"><sc-for list="{{ forkOpts }}" as="o" hint-placeholder-count="4"><span class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</span></sc-for></div>
+                </div>
+                <div class="readout"><b>{{ readTitle }}</b><br />{{ readBody }}</div>
+              </div>
+              <div class="dlg">
+                <div class="db">
+                  <div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">octo-labs/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">GITHUB</span><span class="{{ pushPillCls }}">{{ pushPill }}</span></div></div>
+                  <sc-if value="{{ showPair }}" hint-placeholder-val="{{ true }}">
+                    <div class="lbl">Clone from</div>
+                    <div class="copy">
+                      <div class="{{ origCls }}" onClick="{{ pickOrig }}"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="{{ pushPillCls }}">{{ pushPill }}</span></div><span class="slug">octo-labs/sparkline</span></div>
+                      <div class="{{ forkCls }}" onClick="{{ pickFork }}"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="{{ forkPillCls }}">{{ forkPill }}</span></div><span class="slug">riverbend/sparkline</span><span class="why">{{ forkWhy }}</span></div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ showClone }}" hint-placeholder-val="{{ true }}">
+                    <div class="lbl">Clone with</div>
+                    <div class="cards"><div class="card on">SSH<small>{{ sshUrl }}</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone &#8230;</small></div></div>
+                    <div class="will">{{ willLine }}</div>
+                  </sc-if>
+                </div>
+                <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="{{ submitCls }}">{{ submitLabel }}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ 6 -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">Build list</span></div>
+        <p class="dv-sub">Renderer only. Every command already exists. The decision logic goes in pure helpers beside <code>forkAction</code>, so it is unit-tested rather than living in JSX.</p>
+        <div class="plan">
+          <div class="pr head"><span>#</span><span>Change</span><span>Where</span><span>Turn</span></div>
+          <div class="pr"><span class="k">A</span><b>"Clone from" pair in Clone</b><span>Preflight on pick (forge sources only). Cards, account pills, and a default from <code>cloneFromDefault</code>. Submit routes to <code>repo:fork</code> for the fork card, with <code>repo:forkProgress</code> labels. <code>CloneRepoDialog.tsx</code>, <code>clone-dialog.ts</code></span><span>2a, 3</span></div>
+          <div class="pr"><span class="k">B</span><b>Reveal from Clone</b><span><code>onReveal</code> prop, wired the way <code>ForkRepoDialog</code>'s is. <code>App.tsx</code></span><span>3c</span></div>
+          <div class="pr"><span class="k">C</span><b>In-place mode in Fork&#8230;</b><span>The seed's <code>repoId</code> rides on <code>inPlace</code>. In that mode the dialog asks <code>repo:forkCheckoutPreflight</code> and submits <code>repo:forkCheckout</code>, and the footer takes <code>forkCheckoutAction</code>'s label. <code>ForkRepoDialog.tsx</code>, <code>App.tsx</code></span><span>4a, 4b</span></div>
+          <div class="pr"><span class="k">D</span><b>Share the remote plan list</b><span><code>ForkRemotePlan</code>, lifted out of <code>ForkCheckoutDialog</code> so both dialogs draw the same rows. <code>ForkRemotePlan.tsx</code></span><span>4a</span></div>
+          <div class="pr last"><span class="k">E</span><b>Escape hatch</b><span>A quiet "Clone a separate copy instead" link. The old bridge row comes back as the way to return. <code>ForkRepoDialog.tsx</code></span><span>4c</span></div>
+        </div>
+        <p class="dv-next">Try next: "rename the fork from Clone" &#183; "remember the last Clone-from choice per owner"</p>
+      </section>
+
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { push: "cannot", fork: "none", pick: "" };
+        }
+        renderVals() {
+          const s = this.state;
+          const pushDefs = [
+            { key: "cannot", label: "can't push" },
+            { key: "can", label: "can push" },
+            { key: "own", label: "own it" }
+          ];
+          const forkDefs = [
+            { key: "checking", label: "checking…" },
+            { key: "none", label: "doesn't exist" },
+            { key: "forge", label: "on GitHub" },
+            { key: "local", label: "checked out" }
+          ];
+          const pushOpts = pushDefs.map((d) => ({
+            label: d.label,
+            cls: d.key === s.push ? "opt on" : "opt",
+            pick: () => { this.setState({ push: d.key, pick: "" }); }
+          }));
+          const forkOpts = forkDefs.map((d) => ({
+            label: d.label,
+            cls: d.key === s.fork ? "opt on" : "opt",
+            pick: () => { this.setState({ fork: d.key, pick: "" }); }
+          }));
+          const showPair = s.push !== "own";
+          const autoFork = s.push === "cannot" && (s.fork === "forge" || s.fork === "local");
+          const chosen = !showPair ? "orig" : (s.pick !== "" ? s.pick : (autoFork ? "fork" : "orig"));
+          const forkMode = chosen === "fork";
+          const reveal = forkMode && s.fork === "local";
+          let submitLabel = "Clone repository";
+          if (forkMode) {
+            submitLabel = s.fork === "local" ? "Reveal checkout" : s.fork === "forge" ? "Clone your fork" : "Fork & clone";
+          }
+          const pillFor = {
+            checking: ["pill wait", "checking…"],
+            none: ["pill wait", "will be created"],
+            forge: ["pill ok", "on GitHub"],
+            local: ["pill acc", "checked out"]
+          }[s.fork];
+          const pushPill = s.push === "cannot" ? "read-only" : s.push === "can" ? "can push" : "yours";
+          const pushPillCls = s.push === "cannot" ? "pill warn" : "pill ok";
+          const slug = forkMode ? "riverbend/sparkline" : "octo-labs/sparkline";
+          let readTitle = "Default: the original";
+          let readBody = "Creating a repository on your account is never the default.";
+          if (!showPair) {
+            readTitle = "No pair";
+            readBody = "Preflight answers self_owned, so there is nothing to fork: the dialog is today's.";
+          } else if (s.pick !== "") {
+            readTitle = "Picked: " + (forkMode ? "your fork" : "the original");
+            readBody = forkMode ? (reveal ? "Nothing is cloned, so the clone sections step aside." : "Runs repo:fork. origin will be your fork, and upstream will be octo-labs/sparkline.") : "Runs repo:clone, as today.";
+          } else if (autoFork) {
+            readTitle = "Default: your fork";
+            readBody = "You can't push to the original, and your fork already exists, so cloning it is the obvious next step.";
+          }
+          return {
+            pushOpts: pushOpts,
+            forkOpts: forkOpts,
+            pushPill: pushPill,
+            pushPillCls: pushPillCls,
+            showPair: showPair,
+            origCls: chosen === "orig" ? "cc on click" : "cc click",
+            forkCls: forkMode ? "cc on click" : "cc click",
+            pickOrig: () => { this.setState({ pick: "orig" }); },
+            pickFork: () => { this.setState({ pick: "fork" }); },
+            forkPill: pillFor[1],
+            forkPillCls: pillFor[0],
+            forkWhy: s.fork === "local" ? "Already at ~/src/github/sparkline" : "upstream → octo-labs/sparkline",
+            showClone: !reveal,
+            sshUrl: "git@github.com:" + slug + ".git",
+            willLine: "Will create ~/src/github/sparkline · origin " + slug + (forkMode ? " · upstream octo-labs/sparkline" : ""),
+            submitLabel: submitLabel,
+            submitCls: "pbtn",
+            readTitle: readTitle,
+            readBody: readBody
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

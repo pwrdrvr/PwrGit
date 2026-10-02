@@ -101,6 +101,7 @@ first.
 | `Agent History Editing - UX Review.dc.html` | A review of open PR #149's agent-assisted rebase &mdash; six findings against its review-only agent panel &mdash; and a counter-proposal: the agent proposes a history, PwrGit proves it (every commit once, a clean isolated replay, an identical tree), you apply it. Squash messages, &#10022;&nbsp;Tidy, the failure paths, and where the agent is chosen. A proposal; nothing in it is built. Interactive. |
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
+| `Fork While Cloning - UX Review.dc.html` | Why Clone marked a repository read-only and cloned it anyway, never asking whether your fork already existed, and why Fork&hellip; on a checkout already on disk still defaulted to cloning a second copy. Then a &ldquo;Clone from&rdquo; pair (the original, or your fork) in every state the forge can answer, and Fork&hellip;'s in-place mode, whose primary button becomes Fork in place. Interactive. |
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
 | `Person Card - UX Review.dc.html` | Who wrote this commit? The lineage byline that had a hand cursor and no action, four answers to it (the card from what PwrGit already knows, one with a GitHub profile section, one that filters the graph to one author, and a live prototype of all three), and the recommended card in every state it can be in: proven, proven with no photo, no linked account, yours, and a forge that cannot link commits to accounts. Then the wiring it borrows from the PR and SHA chips, and main's people store, the only thing that asks a forge about an author. Interactive. |
 | `Finished Branches - UX Review.dc.html` | Why the sidebar's `↑2` and `225 gone` could not be clicked, why garbage collection and `fetch --prune` never remove a gone branch, and why Maintenance › Local branches declined every squash merge. Then the counts as filter chips, a status filter in the refs browser, the evidence rules (a merged PR whose final head *is* the local tip), the redrawn review with an age guard, and garbage collection's hand-off to it. Interactive. |
@@ -368,6 +369,17 @@ from. The repository names are the reported ones (`huntharo/diskhound`, a fork
 of `tzarebczan/diskhound`), and so are the SHAs and counts in turns 1 and 2b.
 The diverged fork in **2c** and **3b** is invented: `3c1a9e0` and its two
 commits exist only in the artboard.
+
+`Fork While Cloning - UX Review.dc.html` was written here and pushed up through
+the `claude-design` MCP, in the same change that builds what it draws. The
+project copy was verified at the same 47,623 bytes. It answers two asks. Clone
+should offer to fork, after checking whether a fork already exists on the
+forge. And Fork&hellip; on a checkout already on disk should fork it in place,
+not clone it again. Turn **1** is the as-built pair, turn **2** places the
+choice, turn **3** draws 2a in each state preflight can answer, turn **4** is
+Fork&hellip;'s in-place mode, **5a** is a live `DCLogic` prototype, and turn
+**6** is the build list that shipped with it. Its names are contrived
+(`octo-labs/sparkline`, `riverbend`, `lumen-co`).
 
 `Fork From Here - UX Review.dc.html` was written here and pushed up through the
 `claude-design` MCP, in the same change that builds what it draws; the project

@@ -297,6 +297,70 @@ for (const host of ["github", "gitlab"] as const) {
   });
 }
 
+test("clone can fork first and checks out the fork with the original as upstream", async () => {
+  sandbox = createGitSandbox();
+  const name = "clone-fork-first";
+  const sourceSlug = `upstream/${name}`;
+  const targetSlug = `tester/${name}`;
+  const fixture = createForgeFixture(sandbox, {
+    github: {
+      installed: true,
+      loggedIn: true,
+      owners: [{ login: "tester", kind: "user" }],
+      repositories: {
+        [sourceSlug]: {
+          remotePath: sandbox.makeBareRemote("clone-fork-first-source"),
+          description: "Hermetic GitHub repository"
+        }
+      },
+      forks: {
+        [targetSlug]: {
+          source: sourceSlug,
+          remotePath: sandbox.makeBareRemote("clone-fork-first-target"),
+          visibility: "public",
+          parent: sourceSlug
+        }
+      }
+    },
+    gitlab: {
+      installed: false,
+      loggedIn: false,
+      owners: [],
+      repositories: {}
+    }
+  });
+  handle = await launchApp({ forgeFixturePath: fixture.path });
+  const { window } = handle;
+  await addRoot(window, handle, sandbox);
+
+  await window.locator(".clone-repo").click();
+  const dialog = window.getByRole("dialog", { name: "Clone a repository" });
+  await chooseCloneSource(dialog, sourceSlug);
+  // "Clone from" — the original, or your fork (design/Fork While Cloning).
+  const forkCard = dialog.locator(".clone-from__card", { hasText: "Your fork" });
+  await expect(forkCard).toBeEnabled();
+  await expect(forkCard).toContainText(targetSlug);
+  await forkCard.click();
+  await expect(forkCard).toHaveAttribute("aria-pressed", "true");
+  // Everything naming the new checkout names the fork, not the source.
+  await expect(
+    dialog.locator(".clone-protocol", { hasText: "SSH" }).locator("small")
+  ).toHaveText(`git@github.com:${targetSlug}.git`);
+  await dialog.locator(".clone-protocol", { hasText: "GitHub CLI" }).click();
+  await chooseDestination(dialog, sandbox.reposDir, "clone");
+  await dialog.locator(".clone-dialog__submit").click();
+  await expect(dialog).toBeHidden();
+
+  const checkout = join(sandbox.reposDir, name);
+  expect(sandbox.git(checkout, "remote", "get-url", "origin")).toBe(
+    `git@github.com:${targetSlug}.git`
+  );
+  expect(sandbox.git(checkout, "remote", "get-url", "upstream")).toBe(
+    `git@github.com:${sourceSlug}.git`
+  );
+  await expectIndexedAndSelected(window, name);
+});
+
 function githubCloneFixture(
   box: GitSandbox,
   name: string

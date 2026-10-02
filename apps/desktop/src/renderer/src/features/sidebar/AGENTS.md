@@ -126,3 +126,23 @@ pins, Enter runs the primary action. Space is a **row** key on purpose — in th
 filter it types a space. The actions column is three fixed slots
 (`RefRowActions`), and `--refs-actions-w` in `app.css` is their widths plus
 gaps: change a slot, change the token, or the columns drift again.
+
+## Clone and Fork… ask the forge the same question
+
+Clone's "Clone from" pair (the original, or your fork) runs `repo:forkPreflight`
+once per pick, after `repo:forkTargets` — the same answer `ForkRepoDialog`
+reads. The default, the pill and the submit label come from `clone-from.ts` and
+`forkAction`, not from JSX, and are unit-tested there. Two rules worth keeping:
+
+- **Creating a repository is never a default.** Your fork is preselected only
+  when you can't push to the original *and* the fork already exists.
+- **`originRepository` is the one source of "what origin will be".** The
+  protocol cards, "Will create" and the SSH recovery card all read it, so
+  choosing the fork can't leave one of them describing the source.
+
+Fork… opened from a checkout (`inPlace`) forks it **in place** while the source
+is still that checkout: it asks `repo:forkCheckoutPreflight`, submits
+`repo:forkCheckout`, and draws `ForkRemotePlan` (shared with
+`ForkCheckoutDialog`) instead of Clone with / Check out to. Reveal still wins
+when your fork is already checked out elsewhere. Design:
+`design/Fork While Cloning - UX Review.dc.html`.

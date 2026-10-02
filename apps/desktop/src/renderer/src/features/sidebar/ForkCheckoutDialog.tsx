@@ -7,10 +7,7 @@ import type {
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
-import {
-  hoverTooltip,
-  useViewportTooltip
-} from "../../lib/useViewportTooltip";
+import { useViewportTooltip } from "../../lib/useViewportTooltip";
 import {
   defaultForkTarget,
   defaultUpstream,
@@ -20,12 +17,8 @@ import {
   needsUpstreamChoice,
   ownerKindLabel
 } from "./fork-dialog";
-import {
-  forkCheckoutAction,
-  forkCheckoutLead,
-  remoteChanges,
-  upstreamAnswerIsCurrent
-} from "./fork-checkout-dialog";
+import { forkCheckoutAction, forkCheckoutLead } from "./fork-checkout-dialog";
+import { ForkRemotePlan } from "./ForkRemotePlan";
 import { GitForkIcon } from "./RepoIdentityMarks";
 
 /**
@@ -213,20 +206,6 @@ export function ForkCheckoutDialog({
   const action = forkCheckoutAction(preflight);
   const nameProblem = forkNameProblem(forkName, preflight?.fork ?? null);
   const chosenUpstream = addUpstream ? upstream : null;
-  // The list is a promise about what will exist afterwards, so it is drawn
-  // only while every part of it has been answered about the current choices.
-  const changes =
-    preflight !== null &&
-    action.kind !== "blocked" &&
-    nameProblem === null &&
-    targetOwner !== null &&
-    upstreamAnswerIsCurrent(preflight, chosenUpstream)
-      ? remoteChanges({
-          preflight,
-          target: `${targetOwner.login}/${forkName.trim()}`,
-          upstream: chosenUpstream
-        })
-      : null;
 
   const submitDisabled =
     busy ||
@@ -457,40 +436,16 @@ export function ForkCheckoutDialog({
           )}
 
           {/* ── What this changes ──────────────────────────────── */}
-          {changes !== null && (
-            <section className="clone-section">
-              <div className="clone-label">
-                Afterwards
-                <span className="clone-label__hint">
-                  nothing moves on disk; your branches and changes stay put
-                </span>
-              </div>
-              <ul className="fork-remote-plan">
-                {changes.map((change) => (
-                  <li
-                    key={change.remote}
-                    className={`fork-remote-plan__row${
-                      change.unchanged ? " is-unchanged" : ""
-                    }`}
-                  >
-                    <code className="fork-remote-plan__name">
-                      {change.remote}
-                    </code>
-                    <span className="fork-remote-plan__copy">
-                      <strong>{change.nameWithOwner}</strong>
-                      <small>{change.note}</small>
-                    </span>
-                    <code
-                      className="fork-remote-plan__url"
-                      {...hoverTooltip(tip, change.url)}
-                    >
-                      {change.url}
-                    </code>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <ForkRemotePlan
+            preflight={preflight}
+            target={
+              nameProblem === null && targetOwner !== null
+                ? `${targetOwner.login}/${forkName.trim()}`
+                : null
+            }
+            upstream={chosenUpstream}
+            tip={tip}
+          />
 
           {submitError !== null && (
             <div className="clone-submit-error">{submitError}</div>

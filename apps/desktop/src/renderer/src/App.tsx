@@ -86,20 +86,12 @@ export function App() {
       repoId: repo.id,
       repoName: repo.identity?.nameWithOwner ?? repo.name
     });
-  /** The fork dialog's "Fork in place…" hand-off, when it was opened from a
-   *  checkout: close it and open the in-place dialog on that checkout. */
+  /** The checkout the fork dialog was opened from, when there is one: the
+   *  dialog forks it in place rather than cloning it a second time. */
   const inPlaceFor = (checkout: Repo | null) =>
     checkout === null
       ? {}
-      : {
-          inPlace: {
-            repoName: checkout.name,
-            onChoose: () => {
-              setForkOpen(null);
-              openForkCheckout(checkout);
-            }
-          }
-        };
+      : { inPlace: { repoId: checkout.id, repoName: checkout.name } };
   // A ⌘F pick on a branch with no worktree — the New worktree modal, primed to
   // branch from a fetched ref (remote-only) or to check the branch out (local).
   const [searchNewWorktree, setSearchNewWorktree] = useState<{
@@ -1051,6 +1043,10 @@ export function App() {
               worktreeId: null,
               branch: null
             });
+          }}
+          onReveal={(path) => {
+            setCloneOpen(false);
+            void dispatch("shell:revealPath", { path });
           }}
           onClose={() => setCloneOpen(false)}
         />
