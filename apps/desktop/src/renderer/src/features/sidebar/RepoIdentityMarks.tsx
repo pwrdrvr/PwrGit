@@ -301,11 +301,17 @@ export function RepoIdentityGlyphs({
   identity,
   repoId,
   profileId,
-  onFork
+  onFork,
+  sourcePull
 }: {
   identity: RepoIdentity;
   repoId: string;
   profileId: string;
+  /** The fork's source has commits for the primary checkout. The fork mark
+   *  then carries the count itself, as `PullBadge`'s outlined `⑂ ↓25`, so
+   *  the row draws the glyph once instead of twice (Post-ship 2b). It keeps
+   *  its place and its card; the card gains the count's sentence. */
+  sourcePull?: { behind: number; sentence: string };
   /** Open the fork prompt for this repository. Optional: without it the
    *  read-only mark stays the passive statement it was, so a caller that has
    *  nowhere to send the user does not grow a dead button. */
@@ -397,6 +403,22 @@ export function RepoIdentityGlyphs({
             ? ""
             : ` (originally ${identity.root.nameWithOwner})`
         }`;
+        if (sourcePull !== undefined) {
+          const said = `${lineage}. ${sourcePull.sentence}`;
+          return (
+            <span
+              className="badge badge--source badge--source-repo"
+              role="img"
+              aria-label={said}
+              {...hoverTooltip(tip, `${lineage}\n${sourcePull.sentence}`)}
+            >
+              <span className="badge--source__glyph">
+                <GitForkIcon size={10} />
+              </span>
+              ↓{sourcePull.behind}
+            </span>
+          );
+        }
         return (
           <span
             className="repo-mark repo-mark--fork"

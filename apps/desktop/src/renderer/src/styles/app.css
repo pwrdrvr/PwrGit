@@ -1887,16 +1887,81 @@ a.forge-chip:focus-visible {
   color: var(--accent-bright);
 }
 
-/* "· on main" beside the Branches count — the pair, readable while the section
-   is collapsed. Quieter than .ref-section__summary's warning tier: it states
-   where you are, not that anything needs attention. */
+/* "on main" at the Branches heading's far end — the pair, readable while the
+   section is collapsed. It sat beside the count and read as one phrase with
+   the counts after it ("on main 7 behind"); now the counts follow the total
+   ("93 · 7 behind") and this takes the rest of the line, muted: it states
+   where you are, not that anything needs attention (Post-ship 2b). It folds
+   the section like the disclosure beside it, so the heading's hit area is the
+   whole line it always was. */
 .ref-section__on {
+  /* Leftover space only: it is the one thing in the heading that may give way,
+     so the total and the counts never ride over each other. */
+  flex: 1 1 0;
+  min-width: 0;
+  height: 31px;
+  /* The wrap's gap already separates it from the counts; every pixel here is
+     one "on main" keeps at the default 320px sidebar. */
+  padding: 0 6px 0 0;
+  overflow: hidden;
+  /* It ellipsizes down to about six characters ("on m…"), then leaves whole
+     rather than draw "o…": below that the text wraps past the zero-width
+     marker onto a second line, which the fixed height clips. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+  color: var(--text-subtle);
+  text-transform: none;
+  cursor: pointer;
+}
+.ref-section__on::before {
+  content: "";
+  /* A full-height first line, so a wrapped text lands below the clip. */
+  height: 31px;
+}
+.ref-section__on-text {
+  /* Breaks onto the hidden line only when even 6ch will not fit; otherwise
+     grows toward its whole width and ellipsizes there. */
+  flex: 1 1 6ch;
+  max-width: max-content;
+  min-width: 6ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 31px;
+}
+/* The disclosure gives up the full width it takes elsewhere so the counts can
+   sit right after the total; the strip still lights as one. */
+.ref-section__head-wrap--on > .ref-section__head {
+  flex: 0 0 auto;
+  width: auto;
+}
+.ref-section__head-wrap--on > .ref-section__head:hover {
+  background: transparent;
+}
+.ref-section__head-wrap--on:has(
+    > .ref-section__head:hover,
+    > .ref-section__on:hover
+  ) {
+  background: var(--bg-panel-hover);
+}
+.ref-section__head-wrap--on:has(> .ref-section__on:hover) > .ref-section__head {
+  color: var(--text-primary);
+}
+/* Last resort at the narrowest sidebar with every count showing: clip at the
+   heading's edge rather than run past it. */
+.ref-section__head-wrap--on > .ref-section__chips {
+  flex-shrink: 1;
+  min-width: 0;
+  margin-right: 0;
+  overflow: hidden;
+}
+.ref-section__head-wrap--on > .ref-section__chips::before {
+  content: "·";
+  margin-right: 3px;
+  color: var(--text-subtle);
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
-  color: var(--accent);
-  text-transform: none;
 }
 /* 24px target occupying 20px — see .pin. The ref rows are 29px tall, so this
    costs no height. */
@@ -2400,6 +2465,15 @@ a.forge-chip:focus-visible {
   background: transparent;
   color: var(--text-subtle);
   padding: 0 2px;
+}
+/* The branch it tracks was deleted. Quiet, like the Branches heading's
+   "n gone": it usually means the work landed, and finished is not a warning. */
+.wt-tag--gone {
+  background: transparent;
+  color: var(--text-subtle);
+  padding: 0 2px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 .wt-row__branch-icon--local {
   color: var(--accent);

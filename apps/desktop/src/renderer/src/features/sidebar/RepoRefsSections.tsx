@@ -496,7 +496,11 @@ export function RepoRefsSections({
             `aria-expanded`, so open and closed were indistinguishable to
             anything not looking at the pixels (SC 4.1.2). The Worktrees toggle
             in RepoRow already did this correctly; these two did not. */}
-        <div className="ref-section__head-wrap">
+        <div
+          className={`ref-section__head-wrap${
+            summary === null ? "" : " ref-section__head-wrap--on"
+          }`}
+        >
           <button
             className="ref-section__head"
             aria-expanded={openSections.has("branches")}
@@ -510,10 +514,10 @@ export function RepoRefsSections({
             <span className="ref-section__count">
               {loading ? "…" : (branchCount ?? 0)}
             </span>
-            {/* The pair, readable without expanding hundreds of rows — and the
-                thing that makes the sidebar agree with the title bar at rest. */}
+            {/* Still part of the disclosure's name; the visible copy sits at
+                the far end of the heading, after the counts (below). */}
             {summary !== null && (
-              <span className="ref-section__on">· {summary}</span>
+              <span className="a11y-sr-only">, {summary}</span>
             )}
           </button>
           {refs !== null &&
@@ -548,6 +552,25 @@ export function RepoRefsSections({
                   )}
               </span>
             )}
+          {/* The pair, readable without expanding hundreds of rows — and the
+              thing that makes the sidebar agree with the title bar at rest.
+              After the counts, at the heading's far end: beside the count it
+              read as one phrase with them ("on main 7 behind"), and "93 · 7
+              behind" is a share of the 93 (Post-ship 2b). A click here folds
+              the section like the rest of the heading; the words reach a
+              screen reader through the disclosure's own name. */}
+          {summary !== null && (
+            <span
+              className="ref-section__on"
+              aria-hidden="true"
+              onClick={(event) => {
+                event.stopPropagation();
+                toggleSection("branches");
+              }}
+            >
+              <span className="ref-section__on-text">{summary}</span>
+            </span>
+          )}
         </div>
         {openSections.has("branches") && (
           <div className="ref-section__body">

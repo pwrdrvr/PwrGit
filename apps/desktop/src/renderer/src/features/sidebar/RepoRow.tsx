@@ -358,6 +358,13 @@ export function RepoRow({
   // What Pull would bring into the primary checkout: on a fork, from the
   // source (Fork Sync, 3e). The same stored count the header chip reads.
   const primaryPull = repoPrimaryPull(repo);
+  // A fork with a known parent already draws a fork mark among its identity
+  // glyphs; the source's count rides on that mark rather than on a second
+  // `⑂` a few pixels away (Post-ship 2b).
+  const pullOnForkMark =
+    primaryPull !== null &&
+    primaryPull.pull.kind === "source" &&
+    repo.identity?.parent !== undefined;
   useReportVisible(
     rowRef,
     (repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0])?.id ?? null
@@ -733,7 +740,7 @@ export function RepoRow({
         >
           {repo.name}
         </span>
-        {primaryPull !== null && (
+        {primaryPull !== null && !pullOnForkMark && (
           <PullBadge
             pull={primaryPull.pull}
             branch={primaryPull.branch}
@@ -755,6 +762,14 @@ export function RepoRow({
             repoId={repo.id}
             profileId={repo.profileId}
             onFork={onForkRepo}
+            {...(pullOnForkMark && primaryPull !== null
+              ? {
+                  sourcePull: {
+                    behind: primaryPull.pull.behind,
+                    sentence: pullSentence(primaryPull.pull, primaryPull.branch)
+                  }
+                }
+              : {})}
           />
         )}
         {wtCount > 0 && (

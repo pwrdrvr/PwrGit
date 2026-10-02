@@ -292,3 +292,40 @@ it("chips read-only in the dialogs, where there is room to spell it out", async 
     await act(async () => root.unmount());
   }
 });
+
+it("carries the source's count on the fork mark, so the row draws one glyph", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const identity = {
+    host: "github" as const, hostname: "github.com", owner: "demo-dev",
+    name: "sparkline", nameWithOwner: "demo-dev/sparkline", visibility: "public" as const,
+    parent: { nameWithOwner: "octo-labs/sparkline", url: "https://github.com/octo-labs/sparkline" }
+  };
+  try {
+    await act(async () => root.render(
+      <RepoIdentityGlyphs repoId="repo-1" profileId="profile-1" identity={identity} />
+    ));
+    expect(container.querySelectorAll(".repo-mark--fork")).toHaveLength(1);
+    expect(container.querySelector(".badge--source")).toBeNull();
+    await act(async () => root.render(
+      <RepoIdentityGlyphs
+        repoId="repo-1"
+        profileId="profile-1"
+        identity={identity}
+        sourcePull={{ behind: 12, sentence: "main is 12 commits behind upstream/main, the source of this fork" }}
+      />
+    ));
+    // The mark becomes the count: still exactly one fork glyph in the row.
+    expect(container.querySelector(".repo-mark--fork")).toBeNull();
+    const mark = container.querySelector(".badge--source.badge--source-repo")!;
+    expect(mark.textContent).toBe("↓12");
+    expect(container.querySelectorAll("svg circle[cx='12'][cy='18']")).toHaveLength(1);
+    expect(mark.getAttribute("aria-label")).toBe(
+      "Fork of octo-labs/sparkline. main is 12 commits behind upstream/main, the source of this fork"
+    );
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
