@@ -25,6 +25,7 @@ import {
   type AiProviderServiceDependencies,
   type CodexEnvironment
 } from "./ai-provider-service";
+import { ChatGptAuth, type ChatGptRegistration } from "./chatgpt-auth";
 import { codexModelCacheKey } from "./codex-model-cache";
 import { applyAiProviderSettingsPatch } from "./ai-provider-settings";
 
@@ -1136,4 +1137,34 @@ describe("AiProviderService", () => {
       expect(deps.discoverCodex).toHaveBeenCalledTimes(2);
     });
   });
+});
+
+it("routes both opted-in jobs through the profile's scoped ChatGPT plan without Codex login or token discovery", async () => {
+  const { deps, configure } = harness();
+  const saved: ChatGptRegistration = { clientId: "oaiapp_fixture", subject: "fixture", label: "Fixture", welcomed: true, credential: { clientId: "oaiapp_fixture", subject: "fixture", label: "Fixture", accessToken: "fixture-access", refreshToken: "fixture-refresh", idToken: "fixture-id", scopes: ["chatgpt.tokens.use.direct"], expiresAt: Date.now() + 3600000 } };
+  const auth = new ChatGptAuth({ hostId: () => "urn:uuid:fixture", read: (id) => id === "work" ? saved : undefined, write: () => {} }, async () => {});
+  const service = new AiProviderService({ ...deps, chatGpt: auth });
+  configure("work", (settings) => { settings.jobs.commitMessage.provider = "chatgpt"; settings.jobs.historyEditing.provider = "chatgpt"; });
+  configure("personal", (settings) => { settings.jobs.commitMessage.provider = "chatgpt"; });
+  deps.checkCodexAuth.mockImplementation(async (params) => authAnswer(params, "unauthenticated"));
+  for (const jobId of ["commitMessage", "historyEditing"] as const) {
+    const result = await service.resolveJob({ profileId: "work", jobId });
+    expect(result.ok).toBe(true);
+    if (!result.ok || result.value.backend.kind !== "codex") throw new Error("expected Codex backend");
+    expect(result.value.backend.providerId).toBe("chatgpt");
+    expect(result.value.backend.displayName).toBe("Using ChatGPT plan");
+    expect(result.value.backend.env.ACCESS_TOKEN).toBeUndefined();
+    expect(result.value.backend.codexHome).not.toBe(DEFAULT_HOME);
+    expect((await result.value.backend.chatGptCredential!()).accessToken).toBe("fixture-access");
+  }
+  expect(await service.resolveJob({ profileId: "personal", jobId: "commitMessage" })).toMatchObject({ ok: false, error: { code: "signed_out" } });
+  saved.credential!.scopes = ["openid"];
+  expect(await service.resolveJob({ profileId: "work", jobId: "historyEditing" })).toMatchObject({ ok: false, error: { code: "signed_out" } });
+  configure("work", (settings) => { settings.enabled = false; });
+  deps.discoverCodex.mockClear();
+  expect(await service.resolveJob({ profileId: "work", jobId: "commitMessage" })).toMatchObject({ ok: false, error: { code: "disabled" } });
+  expect(deps.discoverCodex).not.toHaveBeenCalled();
+  expect(deps.startCodexLogin).not.toHaveBeenCalled();
+  expect(deps.discoverAcp).not.toHaveBeenCalled();
+  service.dispose();
 });

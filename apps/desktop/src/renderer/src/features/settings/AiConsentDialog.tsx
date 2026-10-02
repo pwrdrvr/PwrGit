@@ -52,7 +52,7 @@ export function AiConsentDialog(props: {
           When you use an AI feature, PwrGit sends what that feature needs to the agent set
           up under Settings → AI Providers — Codex unless you chose another. The agent runs
           on this machine under your own account and may send it on to its provider’s
-          service.
+          service. If you choose Sign in with ChatGPT, these requests use your ChatGPT plan.
         </p>
         <p className="dialog__message">
           Drafting a commit message sends your staged changes — never unstaged edits.

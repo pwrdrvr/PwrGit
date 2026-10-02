@@ -296,6 +296,7 @@ describe("describeAiProviders", () => {
   it("lists Codex, then the ACP agents in display order", () => {
     expect(describeAiProviders(input()).map((status) => status.sub)).toEqual([
       "codex",
+      "chatgpt",
       "grok",
       "kimi",
       "qwen"
@@ -316,15 +317,16 @@ describe("describeAiProviders", () => {
         acpModelErrors: { gemini: "boom" }
       })
     );
-    expect(statuses.map((status) => status.sub)).toEqual(["codex", "grok", "kimi", "qwen"]);
+    expect(statuses.map((status) => status.sub)).toEqual(["codex", "chatgpt", "grok", "kimi", "qwen"]);
     expect(statuses.map((status) => status.label)).not.toContain("Gemini CLI");
   });
 
   it("matches each agent to its own discovery entry, enablement and probe error", () => {
-    const [codexStatus, grok, kimi, qwen] = describeAiProviders(
+    const [codexStatus, chatGpt, grok, kimi, qwen] = describeAiProviders(
       input({ enabledAgentIds: ["kimi", "qwen"], acpModelErrors: { kimi: "not signed in" } })
     );
     expect(codexStatus?.tone).toBe("ok");
+    expect(chatGpt?.badge).toBe("Unknown");
     expect(grok).toMatchObject({ tone: "off", chip: "off" });
     expect(kimi).toMatchObject({ tone: "warn", meta: "not signed in" });
     expect(qwen).toMatchObject({ tone: "bad", chip: "missing" });
@@ -341,9 +343,10 @@ describe("describeAiProviders", () => {
       })
     );
     expect(statuses[0]?.badge).toBe("Checking…");
-    expect(statuses[1]?.badge).toBe("Checking…");
+    expect(statuses[1]?.badge).toBe("Unknown");
+    expect(statuses[2]?.badge).toBe("Checking…");
     // Not enabled: off, whatever discovery is doing.
-    expect(statuses[2]?.tone).toBe("off");
+    expect(statuses[3]?.tone).toBe("off");
   });
 });
 

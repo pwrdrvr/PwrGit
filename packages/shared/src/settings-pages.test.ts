@@ -29,7 +29,7 @@ describe("SETTINGS_PAGE_SUBS", () => {
   it("gives AI Providers one sub per provider PwrGit offers, and never Gemini", () => {
     // The sub list is the deep-link allowlist, so a Gemini sub here would be a
     // route to a card PwrGit deliberately never renders.
-    expect(SETTINGS_PAGE_SUBS["ai-providers"]).toEqual(["codex", "grok", "kimi", "qwen"]);
+    expect(SETTINGS_PAGE_SUBS["ai-providers"]).toEqual(["codex", "chatgpt", "grok", "kimi", "qwen"]);
     expect(SETTINGS_PAGE_SUBS["ai-providers"]).not.toContain("gemini");
   });
 });
