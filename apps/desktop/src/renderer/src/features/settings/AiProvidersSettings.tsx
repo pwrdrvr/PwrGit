@@ -11,6 +11,7 @@ import {
   type CodexCandidateSource
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
+import { ChatGptSection } from "./ChatGptSection";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { AiProfilePicker, type AiProfileSelection } from "./AiProfilePicker";
@@ -113,7 +114,9 @@ export function AiProvidersSettings(props: {
               .join(". ")}
           </p>
           {ai.statuses.map((status) =>
-            status.sub === "codex" ? (
+            status.sub === "chatgpt" ? (
+              <ChatGptSection key={ai.profileId} status={status} />
+            ) : status.sub === "codex" ? (
               <CodexSection key={status.sub} status={status} onEditDefaults={props.onEditDefaults} />
             ) : (
               <AcpAgentSection
