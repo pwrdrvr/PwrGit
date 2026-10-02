@@ -184,6 +184,13 @@ Smoke-test installation and launch on macOS and Windows before promotion. Then:
 gh release edit vX.Y.Z --repo pwrdrvr/PwrGit --latest --prerelease=false
 ```
 
+Before preparing every release, run `pnpm distribution:audit` and record remote
+Winget/Homebrew versions and pending submissions. After stable promotion, dispatch
+`package-distribution.yml`, submit the verified updates and validate install,
+upgrade and client publication using [the distribution runbook](package-manager-distribution.md).
+Prereleases leave both channels on Stable Latest. Pending review or index/cache
+propagation must retain its URL, owner and next action and must not be called live.
+
 `releases/latest/download/` resolves only for the release marked Latest, so the
 stable aliases start working at this step and not before. After promoting the
 first release that carries `PwrGit.Setup.exe`, point README.md's Windows

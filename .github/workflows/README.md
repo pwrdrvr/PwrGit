@@ -2,6 +2,15 @@
 
 ## Workflows
 
+`package-distribution.yml` compares authoritative Winget/Homebrew sources against
+promoted Stable Latest, generates manifests from downloaded and hashed artifacts,
+and validates macOS signatures/architectures plus native Winget installation. It
+runs on stable release publication/edit, daily and by manual dispatch; its PR gate
+validates changes to the generator. The daily comparison fails on version drift.
+Submission, tap updates and client publication verification follow
+[the distribution runbook](../../docs/package-manager-distribution.md); generated
+workflow artifacts alone do not establish publication.
+
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + macOS + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |

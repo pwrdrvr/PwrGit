@@ -1,6 +1,6 @@
 ---
 name: release
-description: Prepare, validate, tag, publish, and monitor guarded PwrGit desktop releases. Use when the user asks to release PwrGit, prepare a vX.Y.Z or vX.Y.Z-prerelease tag, update CHANGELOG.md or GitHub release notes, verify package/tag/changelog alignment, trigger the macOS universal and Windows desktop release workflow, inspect release status, or assess whether the repository is ready to publish.
+description: Prepare, validate, tag, publish, and monitor guarded PwrGit desktop releases, including Winget and Homebrew distribution. Use when the user asks to release PwrGit, prepare a vX.Y.Z or vX.Y.Z-prerelease tag, update CHANGELOG.md or GitHub release notes, verify package/tag/changelog alignment, trigger the desktop release workflow, inspect release or package-manager status, or assess publication readiness.
 ---
 
 # Release
@@ -23,6 +23,9 @@ Read the current versions of these files before changing release metadata:
 7. [../../../apps/desktop/package.json](../../../apps/desktop/package.json)
 8. [../../../apps/desktop/electron-builder.yml](../../../apps/desktop/electron-builder.yml)
 9. [../../../apps/desktop/src/main/auto-updater.ts](../../../apps/desktop/src/main/auto-updater.ts)
+10. [../../../docs/package-manager-distribution.md](../../../docs/package-manager-distribution.md)
+11. [../../../scripts/package-manager-release.mjs](../../../scripts/package-manager-release.mjs)
+12. [../../../.github/workflows/package-distribution.yml](../../../.github/workflows/package-distribution.yml)
 
 If any file does not exist, handle that through the readiness gate below instead
 of assuming the sibling repositories' configuration applies.
@@ -45,9 +48,9 @@ the following:
 - The protected `apple-signing` and `windows-signing` GitHub Environments exist,
   require reviewers, and allow only `v*` release tags.
 - All Apple secrets listed in `.github/workflows/README.md` exist in the
-  `apple-signing` Environment. The `windows-signing` Environment either has the
-  two Authenticode secrets or explicitly sets
-  `WINDOWS_UNSIGNED_RELEASE=true`.
+  `apple-signing` Environment. The `windows-signing` Environment has the Azure
+  Artifact Signing variables and credentials listed in the current runbook.
+  Historical unsigned release mode is not a substitute for a signed installer.
 - The auto-updater consumes the same provider and channel metadata that the
   workflow publishes.
 
@@ -144,7 +147,23 @@ repository's default branch:
 
 ## Prepare Release Metadata
 
-1. Determine the release branch, previous tag, and requested next version:
+1. Before editing versions, compare authoritative remote distribution sources:
+
+   ```bash
+   pnpm distribution:audit
+   ```
+
+   Record GitHub Stable Latest, Winget `PwrDrvr.PwrGit` in
+   `microsoft/winget-pkgs`, Homebrew `pwrdrvr/tap/pwrgit` in the existing
+   `pwrdrvr/homebrew-tap`, current remote versions, ownership and pending PR
+   URLs. Inspect open and closed prior submissions when registration is missing.
+   Do not treat authentication/network/search errors as absence. Reuse existing
+   identities and pending submissions, and resolve any central Homebrew cask or
+   alternate Winget identity before generating files. A lower maintenance release
+   must not downgrade the repository-wide Stable Latest packages. Read the
+   distribution runbook for current source and client checks.
+
+2. Determine the release branch, previous tag, and requested next version:
 
    ```bash
    gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name'
@@ -152,11 +171,11 @@ repository's default branch:
    gh release list --limit 10
    ```
 
-2. Review merged pull requests and direct commits since the previous tag.
+3. Review merged pull requests and direct commits since the previous tag.
    Exclude internal mechanics unless they materially affect installation,
    updates, performance, or data safety.
 
-3. Update the desktop package version without creating a tag:
+4. Update the desktop package version without creating a tag:
 
    ```bash
    pnpm --filter @pwrgit/desktop version <version> --no-git-tag-version
@@ -165,7 +184,7 @@ repository's default branch:
    If the installed pnpm does not support that command, edit only
    `apps/desktop/package.json` and preserve its formatting.
 
-4. Add the new entry at the top of `CHANGELOG.md`:
+5. Add the new entry at the top of `CHANGELOG.md`:
 
    ```md
    ## v0.0.1-alpha.1 - YYYY-MM-DD
@@ -186,7 +205,7 @@ repository's default branch:
    - Minor - Dependency updates and small interface polish.
    ```
 
-5. Run the metadata gate and the same pre-signing gates as `release.yml` before
+6. Run the metadata gate and the same pre-signing gates as `release.yml` before
    committing:
 
    ```bash
@@ -305,16 +324,15 @@ Verify the macOS release contains:
 
 - `PwrGit-<version>-universal.dmg`;
 - the stable-name `PwrGit.dmg` alias;
-- both universal and arm64 updater ZIPs and their `.blockmap` files;
+- `PwrGit-<version>-universal-mac.zip` and
+  `PwrGit-<version>-arm64-mac.zip` and their `.blockmap` files;
 - `PwrGit-<version>-arm64.dmg` and its `PwrGit-arm64.dmg` alias; and
 - `latest-mac.yml`.
 
-Verify the Windows release contains one of these intentional shapes:
-
-- Authenticode-signed `PwrGit-<version>-windows-x64-setup.exe`, its blockmap,
-  `SHA256SUMS`, `latest.yml`, and the stable-name `PwrGit.Setup.exe` alias; or
-- `PwrGit-<version>-windows-x64-unsigned-setup.exe` while
-  `WINDOWS_UNSIGNED_RELEASE=true`, with no updater feed.
+Verify the Windows release contains Authenticode-signed
+`PwrGit-<version>-windows-x64-setup.exe`, its blockmap,
+`PwrGit-windows-SHA256SUMS`, `latest.yml`, and the stable-name
+`PwrGit.Setup.exe` alias.
 
 Do not accept a silently unsigned installer under the signed filename.
 
@@ -343,6 +361,53 @@ gh release edit v<version> \
 ```
 
 Do not compose replacement notes ad hoc after approval.
+
+## Package Manager Updates On Every Release
+
+Follow [../../../docs/package-manager-distribution.md](../../../docs/package-manager-distribution.md)
+after verifying GitHub publication. Alpha, beta and Stable candidates leave both
+package managers on promoted Stable Latest; record that decision and compare
+remote versions again. Do not cut or promote a product release just to register
+a package manager.
+
+After an explicitly authorized stable promotion, dispatch the distribution
+workflow even if a release event already ran it (events emitted by `GITHUB_TOKEN`
+may not trigger another workflow):
+
+```bash
+gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main
+pnpm distribution:prepare v<version> node_modules/.cache/pwrgit-distribution
+```
+
+Require immutable versioned URLs and download/hash the actual published bytes.
+Validate arm64 versus universal DMG selection, app bundle ID/version, Developer ID
+and Gatekeeper; validate Windows x64 payload, Authenticode on installer and app,
+size and SHA-256 against GitHub and `PwrGit-windows-SHA256SUMS`. Never distribute
+an unsigned preview or use mutable Latest aliases in manifests. Recheck current
+official Winget schema and Homebrew DSL before each submission.
+
+Submit the generated one-version Winget manifest set to `microsoft/winget-pkgs`
+under the established ID. Update the cask in `pwrdrvr/homebrew-tap` by dispatching
+`bump-pwrgit.yml` or opening a validated tap PR; inspect its CI before merging.
+Use the authorized maintainer account: PwrGit's workflow token cannot write to
+another repository. Retain submission URLs and do not duplicate pending PRs.
+
+Require `winget validate`, native silent install/uninstall, user-scope registry
+and payload checks, tap style/online audit, Intel and Apple Silicon installs,
+and older-to-newer upgrades on subsequent versions. Use `brew upgrade --cask
+--greedy` for this auto-updating cask. Record initial-registration upgrade checks
+as unavailable when no prior indexed package exists. Use the dedicated lab for
+headed launch and retained-settings/repository checks.
+
+After merges, rerun `pnpm distribution:audit --check`, refresh Winget's source
+and Homebrew's tap, inspect `winget show --id PwrDrvr.PwrGit --exact --source
+winget` and `brew info --cask pwrdrvr/tap/pwrgit`, then verify fresh client
+install/upgrade. Repository merge does not prove Winget index or Homebrew cache
+propagation. Do not call setup live until client discovery and installation are
+verified. Track each channel's target, repository and client versions, PR/check
+URLs, review/index/cache state, exact blocker, owner and next action. Continue
+monitoring pending submissions and address review; report external delays as
+pending, not completed publication.
 
 ## Local Packaging Fallback
 

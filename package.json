@@ -25,6 +25,8 @@
     "test:e2e": "pnpm --filter @pwrgit/desktop test:e2e",
     "test:desktop-e2e": "pnpm --filter @pwrgit/desktop test:e2e",
     "release:check": "node ./scripts/check-desktop-release-metadata.mjs",
+    "distribution:audit": "node scripts/package-manager-release.mjs audit",
+    "distribution:prepare": "node scripts/package-manager-release.mjs prepare",
     "fix:linux-sandbox": "node ./scripts/linux-sandbox.mjs --fix",
     "check:linux-sandbox": "node ./scripts/linux-sandbox.mjs --warn"
   },
