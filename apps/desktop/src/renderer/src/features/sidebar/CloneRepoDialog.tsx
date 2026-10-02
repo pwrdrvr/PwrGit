@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
+  isForgeKind,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -8,6 +9,9 @@ import {
   type CloneRepository,
   type ForgeHost,
   type ForgeKind,
+  type ForgeOwner,
+  type ForkPreflight,
+  type ForkProgress,
   type Profile,
   type Repo,
   type SshHostVerification
@@ -35,11 +39,28 @@ import {
 import type { ExactRepository } from "./clone-dialog";
 import {
   cliProtocolLabel,
+  defaultForkTarget,
+  defaultUpstream,
+  forkAction,
+  forkTargets,
+  FORK_PROGRESS_LABELS,
+  ownerKindLabel,
   sourceEmptyMessage,
   statusFor,
   forgeCanAnswerAnywhere,
   forgeCanAnswerDialog
 } from "./fork-dialog";
+import {
+  canPushOriginal,
+  cloneFromDefault,
+  forkCardDetail,
+  forkCardPill,
+  forkCardState,
+  forkOriginRepository,
+  offersCloneFrom,
+  originalCardDetail,
+  type CloneFrom
+} from "./clone-from";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { useModal } from "../../lib/useModal";
 import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
@@ -117,10 +138,14 @@ const CLONE_PROGRESS_LABELS: Record<CloneProgress["phase"], string> = {
 export function CloneRepoDialog({
   profile,
   onCloned,
+  onReveal,
   onClose
 }: {
   profile: Profile;
   onCloned: (repo: Repo) => void;
+  /** Your fork is already checked out: the answer is that checkout, not a
+   *  second clone of it. Same contract as `ForkRepoDialog`'s. */
+  onReveal: (path: string) => void;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
@@ -153,7 +178,13 @@ export function CloneRepoDialog({
   >(null);
   const [busy, setBusy] = useState(false);
   const [canceling, setCanceling] = useState(false);
-  const [cloneProgress, setCloneProgress] = useState<CloneProgress | null>(null);
+  // Typed as the fork's progress, which is a superset: when "Clone from" is
+  // your fork the same panel follows `repo:fork`, whose phases include every
+  // clone phase plus the forge-side ones in front.
+  const [cloneProgress, setCloneProgress] = useState<ForkProgress | null>(null);
+  /** Which command the running operation is — the progress labels, the
+   *  busy button and Cancel all depend on it. */
+  const [operation, setOperation] = useState<"clone" | "fork">("clone");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [hostVerificationCommand, setHostVerificationCommand] = useState<string | null>(null);
   /** What the trust panel found, lifted so the whole card can carry the
@@ -201,6 +232,18 @@ export function CloneRepoDialog({
   useEffect(
     () =>
       subscribe("repo:cloneProgress", (event) => {
+        if (
+          event.profileId === profile.id &&
+          event.operationId === activeCloneIdRef.current
+        ) {
+          setCloneProgress(event.progress);
+        }
+      }),
+    [profile.id]
+  );
+  useEffect(
+    () =>
+      subscribe("repo:forkProgress", (event) => {
         if (
           event.profileId === profile.id &&
           event.operationId === activeCloneIdRef.current
@@ -318,6 +361,123 @@ export function CloneRepoDialog({
   const forgeStatus = statusFor(catalog?.forges ?? [], activeHost);
   const cliDisabled =
     catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname);
+
+  // ── Clone from: the original, or your fork ──────────────────────────────
+  // Asked only once a forge repository is picked, never per keystroke: the
+  // accounts a fork could land in (one forge call per instance), then one
+  // `repo:forkPreflight` for the default account. Drawn in
+  // design/Fork While Cloning - UX Review.dc.html, turns 2a and 3.
+  const forgeSource =
+    selectedRepository !== null &&
+    selectedRepository.localPath === undefined &&
+    isForgeKind(selectedRepository.host)
+      ? selectedRepository
+      : null;
+  const forkOwnersHost: ForgeKind | null =
+    forgeSource !== null && isForgeKind(forgeSource.host) ? forgeSource.host : null;
+  const forkOwnersHostname = forgeSource?.hostname ?? null;
+  /** Null while loading — the pair waits for it, so it is drawn once rather
+   *  than appearing and then vanishing for a repository the user owns. */
+  const [forkOwners, setForkOwners] = useState<ForgeOwner[] | null>(null);
+  const [forkTargetPick, setForkTargetPick] = useState<ForgeOwner | null>(null);
+  const [forkPreflight, setForkPreflight] = useState<ForkPreflight | null>(null);
+  const [forkCheckError, setForkCheckError] = useState<string | null>(null);
+  /** The user's own choice; null follows `cloneFromDefault`. */
+  const [cloneFromPick, setCloneFromPick] = useState<CloneFrom | null>(null);
+
+  useEffect(() => {
+    setForkOwners(null);
+    if (forkOwnersHost === null) return undefined;
+    let active = true;
+    void dispatch("repo:forkTargets", {
+      host: forkOwnersHost,
+      ...(forkOwnersHostname === null ? {} : { hostname: forkOwnersHostname })
+    }).then((result) => {
+      if (active) setForkOwners(result.ok ? result.value : []);
+    });
+    return () => {
+      active = false;
+    };
+  }, [forkOwnersHost, forkOwnersHostname]);
+
+  const forkTargetList = useMemo(
+    () => (forkOwners === null ? null : forkTargets(forkOwners, forgeSource)),
+    [forkOwners, forgeSource]
+  );
+  const forkTarget =
+    forkTargetList === null
+      ? null
+      : forkTargetPick !== null &&
+          forkTargetList.some((owner) => owner.login === forkTargetPick.login)
+        ? forkTargetPick
+        : defaultForkTarget(forkTargetList);
+  const offerPair = offersCloneFrom({
+    source: forgeSource,
+    owners: forkOwners,
+    preflight: forkPreflight
+  });
+
+  // Keyed on strings, for the reason ForkRepoDialog's preflight is: the
+  // source object is replaced by every pick, the slug it names is not.
+  const forkSourceKey =
+    forgeSource === null
+      ? null
+      : `${forgeSource.host}|${forgeSource.hostname}|${forgeSource.nameWithOwner}`;
+  const forkTargetLogin = forkTarget?.login ?? null;
+  const forkOwnersLoaded = forkOwners !== null;
+  useEffect(() => {
+    setForkPreflight(null);
+    setForkCheckError(null);
+    // No account to fork into is answered without asking the forge.
+    if (forgeSource === null || !forkOwnersLoaded || forkTargetLogin === null) {
+      return undefined;
+    }
+    let active = true;
+    void dispatch("repo:forkPreflight", {
+      profileId: profile.id,
+      source: forgeSource.nameWithOwner,
+      host: forgeSource.host,
+      hostname: forgeSource.hostname,
+      targetOwner: forkTargetLogin
+    }).then((result) => {
+      if (!active) return;
+      if (result.ok) setForkPreflight(result.value);
+      else setForkCheckError(result.error.message);
+    });
+    return () => {
+      active = false;
+    };
+  }, [forkSourceKey, forkTargetLogin, forkOwnersLoaded, profile.id]);
+
+  const forkCard = forkCardState({
+    preflight: forkPreflight,
+    checkError: forkCheckError,
+    targets: forkTargetList,
+    cliLabel: cliProtocolLabel(forgeSource?.host ?? host).label
+  });
+  const originalCanPush =
+    selectedRepository === null
+      ? undefined
+      : canPushOriginal(selectedRepository, forkPreflight);
+  const cloneFrom: CloneFrom =
+    !offerPair || forkCard.kind === "unavailable"
+      ? "original"
+      : (cloneFromPick ?? cloneFromDefault(originalCanPush, forkCard));
+  const forking = cloneFrom === "fork";
+  const forkStep = forkAction(forkPreflight);
+  const forkUpstream = defaultUpstream(forkPreflight);
+  /** What `origin` will be: the picked repository, or the fork. Null while
+   *  the fork's name is still being looked up. Every surface that names the
+   *  new checkout reads this — the protocol cards, "Will create", and the
+   *  SSH recovery card — so none of them describes the wrong repository. */
+  const originRepository: CloneRepository | null = forking
+    ? forkPreflight === null
+      ? null
+      : forkOriginRepository(forkPreflight)
+    : selectedRepository;
+  /** Your fork is already on disk: nothing is cloned, so the clone sections
+   *  step aside and the button reveals it. */
+  const revealing = forking && forkStep.kind === "reveal_existing";
 
   // Nothing is asked of the forge until the box settles — and never on open.
   // The catalog this replaced listed every known owner's repositories up
@@ -448,6 +608,7 @@ export function CloneRepoDialog({
 
   const chooseRepository = (repository: CloneRepository): void => {
     setSelectedRepository(repository);
+    setCloneFromPick(null);
     setPicked({
       host: repository.host,
       hostname: repository.hostname,
@@ -462,25 +623,55 @@ export function CloneRepoDialog({
     selectedDestination ?? destinationResults[destinationSelection] ?? null;
 
   const submit = async (destination = activeDestination): Promise<void> => {
-    if (selectedRepository === null || destination === null || busy) return;
+    if (selectedRepository === null || busy) return;
+    if (revealing && forkStep.kind === "reveal_existing") {
+      onReveal(forkStep.path);
+      return;
+    }
+    if (destination === null || originRepository === null) return;
+    if (
+      forking &&
+      (forkPreflight === null || forkTarget === null || forkStep.kind === "blocked")
+    ) {
+      return;
+    }
     const operationId = window.crypto.randomUUID();
     activeCloneIdRef.current = operationId;
+    setOperation(forking ? "fork" : "clone");
     setBusy(true);
     setCanceling(false);
     setCloneProgress({ phase: "starting", percent: null });
     clearSubmitError();
-    const result = await dispatch("repo:clone", {
-      operationId,
-      profileId: profile.id,
-      nameWithOwner: selectedRepository.nameWithOwner,
-      ...(selectedRepository.localPath === undefined
-        ? {}
-        : { sourcePath: selectedRepository.localPath }),
-      protocol,
-      parentPath: destination.path,
-      host: selectedRepository.host,
-      hostname: selectedRepository.hostname
-    });
+    const result =
+      forking && forkPreflight !== null && forkTarget !== null
+        ? await dispatch("repo:fork", {
+            operationId,
+            profileId: profile.id,
+            source: selectedRepository.nameWithOwner,
+            host: selectedRepository.host,
+            hostname: selectedRepository.hostname,
+            targetOwner: forkTarget.login,
+            targetOwnerKind: forkTarget.kind,
+            // Whatever preflight answered about — the existing fork, or the
+            // name the service will create — never re-derived here.
+            targetName: forkPreflight.target.name,
+            protocol,
+            parentPath: destination.path,
+            defaultBranchOnly: false,
+            upstream: forkUpstream
+          })
+        : await dispatch("repo:clone", {
+            operationId,
+            profileId: profile.id,
+            nameWithOwner: selectedRepository.nameWithOwner,
+            ...(selectedRepository.localPath === undefined
+              ? {}
+              : { sourcePath: selectedRepository.localPath }),
+            protocol,
+            parentPath: destination.path,
+            host: selectedRepository.host,
+            hostname: selectedRepository.hostname
+          });
     activeCloneIdRef.current = null;
     setBusy(false);
     setCanceling(false);
@@ -490,7 +681,7 @@ export function CloneRepoDialog({
       setSubmitError(result.error.message);
       setCommandCopied(false);
       setHostVerificationCommand(protocol === "ssh"
-        ? sshHostVerificationCommand(result.error.message, selectedRepository.sshUrl)
+        ? sshHostVerificationCommand(result.error.message, originRepository.sshUrl)
         : null);
     }
   };
@@ -503,8 +694,35 @@ export function CloneRepoDialog({
     const operationId = activeCloneIdRef.current;
     if (operationId === null || canceling) return;
     setCanceling(true);
-    await dispatch("repo:cancelClone", { operationId });
+    if (operation === "fork") await dispatch("repo:cancelFork", { operationId });
+    else await dispatch("repo:cancelClone", { operationId });
   };
+
+  const progressLabel = (phase: ForkProgress["phase"]): string =>
+    operation === "fork"
+      ? FORK_PROGRESS_LABELS[phase]
+      : CLONE_PROGRESS_LABELS[phase as CloneProgress["phase"]];
+  const submitDisabled =
+    busy ||
+    selectedRepository === null ||
+    (revealing
+      ? false
+      : activeDestination === null ||
+        originRepository === null ||
+        (forking && (forkTarget === null || forkStep.kind === "blocked")));
+  const submitLabel = busy
+    ? operation === "fork"
+      ? `${FORK_PROGRESS_LABELS[cloneProgress?.phase ?? "starting"]}${
+          typeof cloneProgress?.percent === "number"
+            ? ` ${cloneProgress.percent}%`
+            : ""
+        }…`
+      : typeof cloneProgress?.percent === "number"
+        ? `Cloning ${cloneProgress.percent}%…`
+        : "Cloning…"
+    : forking
+      ? forkStep.label
+      : "Clone repository";
 
   return (
     <div
@@ -675,217 +893,333 @@ export function CloneRepoDialog({
             </div>
           </section>
 
-          <section className="clone-section">
-            <div className="clone-label">Clone with</div>
-            <div className="clone-protocols">
-              {localSelected ? (
+          {offerPair && selectedRepository !== null && (
+            <section className="clone-section">
+              <div className="clone-label" id="clone-from-label">
+                Clone from
+                <span className="clone-label__hint">
+                  origin is the one you pick
+                </span>
+              </div>
+              {/* Two cards that show both answers, the way the protocol cards
+                  below do — never one toggle that swaps its own label. */}
+              <div
+                className="clone-from"
+                role="group"
+                aria-labelledby="clone-from-label"
+              >
                 <button
                   type="button"
-                  disabled
-                  className="clone-protocol is-active"
+                  className={`clone-from__card${forking ? "" : " is-active"}`}
+                  aria-pressed={!forking}
+                  disabled={busy}
+                  onClick={() => {
+                    setCloneFromPick("original");
+                    clearSubmitError();
+                  }}
                 >
-                  <strong>Local path</strong>
-                  <small>git clone</small>
+                  <span className="clone-from__top">
+                    <span className="clone-from__radio" aria-hidden="true" />
+                    <strong>The original</strong>
+                    {originalCanPush === false && (
+                      <span className="clone-chip clone-chip--nopush">read-only</span>
+                    )}
+                    {originalCanPush === true && (
+                      <span className="clone-chip clone-chip--muted">can push</span>
+                    )}
+                  </span>
+                  <code className="clone-from__slug">
+                    {selectedRepository.nameWithOwner}
+                  </code>
+                  <small>{originalCardDetail(originalCanPush)}</small>
                 </button>
-              ) : PROTOCOL_IDS.map((candidate) => {
-                const disabled = candidate === "cli" && cliDisabled;
-                const detail = protocolDetail(
-                  candidate,
-                  selectedRepository,
-                  activeHost
-                );
-                const label = protocolLabel(candidate, activeHost);
-                return (
+                <button
+                  type="button"
+                  className={`clone-from__card${forking ? " is-active" : ""}`}
+                  aria-pressed={forking}
+                  disabled={busy || forkCard.kind === "unavailable"}
+                  onClick={() => {
+                    setCloneFromPick("fork");
+                    clearSubmitError();
+                  }}
+                >
+                  <span className="clone-from__top">
+                    <span className="clone-from__radio" aria-hidden="true" />
+                    <strong>Your fork</strong>
+                    {(() => {
+                      const pill = forkCardPill(forkCard, selectedRepository.host);
+                      return (
+                        <span
+                          className={
+                            pill.tone === "accent"
+                              ? "clone-chip"
+                              : `clone-chip clone-chip--${pill.tone}`
+                          }
+                        >
+                          {pill.label}
+                        </span>
+                      );
+                    })()}
+                  </span>
+                  <code className="clone-from__slug">
+                    {forkPreflight?.target.nameWithOwner ??
+                      `${forkTarget?.login ?? "you"}/${selectedRepository.name}`}
+                  </code>
+                  <small>
+                    {forkCardDetail(forkCard, selectedRepository.host, forkUpstream)}
+                  </small>
+                </button>
+              </div>
+              {/* Only where there is a choice to make, and only once it is the
+                  fork being cloned. Renaming stays in Fork…, where the name
+                  field and its collision check live. */}
+              {forking && forkTargetList !== null && forkTargetList.length > 1 && (
+                <div className="clone-from__into">
+                  <span id="clone-fork-into">Fork into</span>
+                  <span
+                    className="fork-hosts"
+                    role="group"
+                    aria-labelledby="clone-fork-into"
+                  >
+                    {forkTargetList.map((owner) => (
+                      <button
+                        type="button"
+                        key={owner.login}
+                        className={`fork-host${
+                          forkTarget?.login === owner.login ? " is-active" : ""
+                        }`}
+                        aria-pressed={forkTarget?.login === owner.login}
+                        disabled={busy}
+                        {...hoverTooltip(tip, ownerKindLabel(owner))}
+                        onClick={() => setForkTargetPick(owner)}
+                      >
+                        {owner.login}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+              )}
+            </section>
+          )}
+
+          {!revealing && (
+            <section className="clone-section">
+              <div className="clone-label">Clone with</div>
+              <div className="clone-protocols">
+                {localSelected ? (
                   <button
                     type="button"
-                    key={candidate}
-                    disabled={busy || disabled}
-                    className={`clone-protocol${
-                      protocol === candidate ? " is-active" : ""
-                    }`}
-                    /* The unavailable reason goes in the NAME as well as the
-                       card: a disabled button still announces its name, and AT
-                       reads that over any card. The enabled case carries
-                       `detail`, which `.clone-protocol small` ellipsises. */
-                    aria-label={
-                      disabled
-                        ? `${label} — unavailable, ${label} must be installed and signed in`
-                        : undefined
-                    }
-                    {...hoverTooltip(
-                      tip,
-                      disabled ? `${label} must be installed and signed in` : detail
-                    )}
-                    onClick={() => { setProtocol(candidate); clearSubmitError(); }}
+                    disabled
+                    className="clone-protocol is-active"
                   >
-                    <strong>{label}</strong>
-                    <small>{detail}</small>
+                    <strong>Local path</strong>
+                    <small>git clone</small>
                   </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="clone-section">
-            <label className="clone-label" htmlFor="clone-destination">
-              Check out to
-              <span className="clone-label__hint">
-                inside a registered repo folder
-              </span>
-            </label>
-            <div className="clone-input-wrap">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M3 7h6l2 2h10v10H3z" />
-              </svg>
-              <input
-                id="clone-destination"
-                ref={destinationInputRef}
-                value={destinationQuery}
-                aria-describedby={
-                  activeDestination === null || selectedRepository === null
-                    ? undefined
-                    : "clone-destination-choice"
-                }
-                disabled={busy || selectedRepository === null}
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Type to find a root or nested prefix…"
-                onChange={(event) => {
-                  setDestinationQuery(event.target.value);
-                  setSelectedDestination(null);
-                  clearSubmitError();
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    const selection = moveCloneSelection(
-                      destinationSelection,
-                      1,
-                      destinationResults.length
-                    );
-                    setDestinationSelectionPath(
-                      destinationResults[selection]?.path ?? null
-                    );
-                  } else if (event.key === "ArrowUp") {
-                    event.preventDefault();
-                    const selection = moveCloneSelection(
-                      destinationSelection,
-                      -1,
-                      destinationResults.length
-                    );
-                    setDestinationSelectionPath(
-                      destinationResults[selection]?.path ?? null
-                    );
-                  } else if (event.key === "Enter") {
-                    const destination =
-                      selectedDestination ??
-                      destinationResults[destinationSelection];
-                    if (destination !== undefined) {
-                      event.preventDefault();
-                      void submit(destination);
-                    }
-                  }
-                }}
-              />
-              {destinationsLoading && (
-                <span className="clone-input-status">finding folders…</span>
-              )}
-            </div>
-
-            <div className="clone-destination-results" role="listbox">
-              {destinationResults.map((destination, index) => (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={index === destinationSelection}
-                  key={destination.path}
-                  className={`clone-destination-row${
-                    index === destinationSelection ? " is-selected" : ""
-                  }${
-                    selectedDestination?.path === destination.path
-                      ? " is-picked"
-                      : ""
-                  }`}
-                  disabled={busy || selectedRepository === null}
-                  /* The full path as the option's NAME, where the row's own
-                     text is a `root/relative/` label whose basename repeats
-                     across registered roots. That ambiguity was why the path
-                     was sitting in a `title` — an attribute no screen reader
-                     reads off a named button, and no keyboard user can open. */
-                  aria-label={`${destination.path} — ${destinationMeta(destination)}`}
-                  {...destinationTip(destination)}
-                  // The row already moves the selection on enter, so the
-                  // card's own handler is called rather than spread over it —
-                  // a later `onMouseEnter` would silently win.
-                  onMouseEnter={(event) => {
-                    setDestinationSelectionPath(destination.path);
-                    tip.show(event.currentTarget, destination.path);
-                  }}
-                  onClick={() => {
-                    setSelectedDestination(destination);
-                    setDestinationQuery(cloneDestinationLabel(destination));
-                  }}
-                >
-                  <span className="clone-destination-row__path">
-                    {cloneDestinationLabel(destination)}
-                  </span>
-                  <span className="clone-destination-row__meta">
-                    {destinationMeta(destination)}
-                  </span>
-                </button>
-              ))}
-              {destinationsError !== null && destinations.length === 0 && (
-                <div className="clone-empty clone-empty--error">
-                  {destinationsError}
-                </div>
-              )}
-              {!destinationsLoading &&
-                destinationsError === null &&
-                destinations.length === 0 && (
-                  <div className="clone-empty">
-                    Add a repo folder to this profile before cloning.
-                  </div>
-                )}
-              {!destinationsLoading &&
-                destinations.length > 0 &&
-                destinationResults.length === 0 && (
-                  <div className="clone-empty">
-                    No checkout folders match “{destinationQuery}”.
-                  </div>
-              )}
-              {destinationsLoading && (
-                <div className="clone-destination-progress" role="status">
-                  <span className="clone-destination-progress__dot" />
-                  Finding more checkout folders…
-                </div>
-              )}
-            </div>
-            {activeDestination !== null && selectedRepository !== null && (
-              <div
-                id="clone-destination-choice"
-                className="clone-destination-choice"
-                role="status"
-                {...hoverTooltip(
-                  tip,
-                  checkoutPath(activeDestination, selectedRepository)
-                )}
-              >
-                Will create{" "}
-                <strong>
-                  {checkoutPath(activeDestination, selectedRepository)}
-                </strong>
+                ) : PROTOCOL_IDS.map((candidate) => {
+                  const disabled = candidate === "cli" && cliDisabled;
+                  const detail = protocolDetail(
+                    candidate,
+                    originRepository,
+                    activeHost
+                  );
+                  const label = protocolLabel(candidate, activeHost);
+                  return (
+                    <button
+                      type="button"
+                      key={candidate}
+                      disabled={busy || disabled}
+                      className={`clone-protocol${
+                        protocol === candidate ? " is-active" : ""
+                      }`}
+                      /* The unavailable reason goes in the NAME as well as the
+                         card: a disabled button still announces its name, and AT
+                         reads that over any card. The enabled case carries
+                         `detail`, which `.clone-protocol small` ellipsises. */
+                      aria-label={
+                        disabled
+                          ? `${label} — unavailable, ${label} must be installed and signed in`
+                          : undefined
+                      }
+                      {...hoverTooltip(
+                        tip,
+                        disabled ? `${label} must be installed and signed in` : detail
+                      )}
+                      onClick={() => { setProtocol(candidate); clearSubmitError(); }}
+                    >
+                      <strong>{label}</strong>
+                      <small>{detail}</small>
+                    </button>
+                  );
+                })}
               </div>
-            )}
-          </section>
+            </section>
+          )}
+
+          {!revealing && (
+            <section className="clone-section">
+              <label className="clone-label" htmlFor="clone-destination">
+                Check out to
+                <span className="clone-label__hint">
+                  inside a registered repo folder
+                </span>
+              </label>
+              <div className="clone-input-wrap">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 7h6l2 2h10v10H3z" />
+                </svg>
+                <input
+                  id="clone-destination"
+                  ref={destinationInputRef}
+                  value={destinationQuery}
+                  aria-describedby={
+                    activeDestination === null || originRepository === null
+                      ? undefined
+                      : "clone-destination-choice"
+                  }
+                  disabled={busy || selectedRepository === null}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Type to find a root or nested prefix…"
+                  onChange={(event) => {
+                    setDestinationQuery(event.target.value);
+                    setSelectedDestination(null);
+                    clearSubmitError();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      const selection = moveCloneSelection(
+                        destinationSelection,
+                        1,
+                        destinationResults.length
+                      );
+                      setDestinationSelectionPath(
+                        destinationResults[selection]?.path ?? null
+                      );
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      const selection = moveCloneSelection(
+                        destinationSelection,
+                        -1,
+                        destinationResults.length
+                      );
+                      setDestinationSelectionPath(
+                        destinationResults[selection]?.path ?? null
+                      );
+                    } else if (event.key === "Enter") {
+                      const destination =
+                        selectedDestination ??
+                        destinationResults[destinationSelection];
+                      if (destination !== undefined) {
+                        event.preventDefault();
+                        void submit(destination);
+                      }
+                    }
+                  }}
+                />
+                {destinationsLoading && (
+                  <span className="clone-input-status">finding folders…</span>
+                )}
+              </div>
+
+              <div className="clone-destination-results" role="listbox">
+                {destinationResults.map((destination, index) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === destinationSelection}
+                    key={destination.path}
+                    className={`clone-destination-row${
+                      index === destinationSelection ? " is-selected" : ""
+                    }${
+                      selectedDestination?.path === destination.path
+                        ? " is-picked"
+                        : ""
+                    }`}
+                    disabled={busy || selectedRepository === null}
+                    /* The full path as the option's NAME, where the row's own
+                       text is a `root/relative/` label whose basename repeats
+                       across registered roots. That ambiguity was why the path
+                       was sitting in a `title` — an attribute no screen reader
+                       reads off a named button, and no keyboard user can open. */
+                    aria-label={`${destination.path} — ${destinationMeta(destination)}`}
+                    {...destinationTip(destination)}
+                    // The row already moves the selection on enter, so the
+                    // card's own handler is called rather than spread over it —
+                    // a later `onMouseEnter` would silently win.
+                    onMouseEnter={(event) => {
+                      setDestinationSelectionPath(destination.path);
+                      tip.show(event.currentTarget, destination.path);
+                    }}
+                    onClick={() => {
+                      setSelectedDestination(destination);
+                      setDestinationQuery(cloneDestinationLabel(destination));
+                    }}
+                  >
+                    <span className="clone-destination-row__path">
+                      {cloneDestinationLabel(destination)}
+                    </span>
+                    <span className="clone-destination-row__meta">
+                      {destinationMeta(destination)}
+                    </span>
+                  </button>
+                ))}
+                {destinationsError !== null && destinations.length === 0 && (
+                  <div className="clone-empty clone-empty--error">
+                    {destinationsError}
+                  </div>
+                )}
+                {!destinationsLoading &&
+                  destinationsError === null &&
+                  destinations.length === 0 && (
+                    <div className="clone-empty">
+                      Add a repo folder to this profile before cloning.
+                    </div>
+                  )}
+                {!destinationsLoading &&
+                  destinations.length > 0 &&
+                  destinationResults.length === 0 && (
+                    <div className="clone-empty">
+                      No checkout folders match “{destinationQuery}”.
+                    </div>
+                )}
+                {destinationsLoading && (
+                  <div className="clone-destination-progress" role="status">
+                    <span className="clone-destination-progress__dot" />
+                    Finding more checkout folders…
+                  </div>
+                )}
+              </div>
+              {activeDestination !== null && originRepository !== null && (
+                <div
+                  id="clone-destination-choice"
+                  className="clone-destination-choice"
+                  role="status"
+                  {...hoverTooltip(
+                    tip,
+                    checkoutPath(activeDestination, originRepository)
+                  )}
+                >
+                  Will create{" "}
+                  <strong>
+                    {checkoutPath(activeDestination, originRepository)}
+                  </strong>
+                  {forking && forkUpstream !== null && (
+                    <> · upstream {forkUpstream}</>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
           {submitError !== null && (
             hostVerificationCommand === null ? (
@@ -942,7 +1276,7 @@ export function CloneRepoDialog({
         {busy && cloneProgress !== null && (
           <div className="clone-progress" aria-live="polite">
             <div className="clone-progress__status">
-              <strong>{CLONE_PROGRESS_LABELS[cloneProgress.phase]}</strong>
+              <strong>{progressLabel(cloneProgress.phase)}</strong>
               {cloneProgress.percent !== null && (
                 <span>{cloneProgress.percent}%</span>
               )}
@@ -952,7 +1286,7 @@ export function CloneRepoDialog({
                 cloneProgress.percent === null ? " is-indeterminate" : ""
               }`}
               role="progressbar"
-              aria-label={CLONE_PROGRESS_LABELS[cloneProgress.phase]}
+              aria-label={progressLabel(cloneProgress.phase)}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={cloneProgress.percent ?? undefined}
@@ -1005,16 +1339,10 @@ export function CloneRepoDialog({
           <button
             type="button"
             className="modal__create clone-dialog__submit"
-            disabled={
-              busy || selectedRepository === null || activeDestination === null
-            }
+            disabled={submitDisabled}
             onClick={() => void submit()}
           >
-            {busy && typeof cloneProgress?.percent === "number"
-              ? `Cloning ${cloneProgress.percent}%…`
-              : busy
-                ? "Cloning…"
-                : "Clone repository"}
+            {submitLabel}
           </button>
         </div>
       </div>

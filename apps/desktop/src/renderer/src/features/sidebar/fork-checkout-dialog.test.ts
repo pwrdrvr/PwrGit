@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CloneRepository, ForkCheckoutPreflight } from "@pwrgit/shared";
 import {
   forkCheckoutAction,
+  forkInPlaceAction,
   forkCheckoutLead,
   originForkOffer,
   remoteChanges,
@@ -43,6 +44,25 @@ const preflight = (
   upstreamRemote: { name: "upstream", existing: false },
   upstreamFor: "desktop/dugite",
   ...over
+});
+
+describe("forkInPlaceAction", () => {
+  it("says Fork in place where the alternative on screen is Fork & clone", () => {
+    expect(forkInPlaceAction(preflight())).toEqual({
+      kind: "fork",
+      label: "Fork in place"
+    });
+    expect(forkInPlaceAction(null).label).toBe("Fork in place");
+  });
+
+  it("adopts an existing fork in the header dialog's words", () => {
+    const existing = preflight();
+    existing.fork.existing = { ...source, nameWithOwner: "huntharo/dugite" };
+    expect(forkInPlaceAction(existing)).toEqual({
+      kind: "adopt",
+      label: "Switch origin to my fork"
+    });
+  });
 });
 
 describe("forkCheckoutAction", () => {

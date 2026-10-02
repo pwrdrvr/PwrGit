@@ -71,7 +71,12 @@ describe.each([
     title: "CloneRepoDialog",
     sourceId: "clone-source",
     render: (onClose: () => void): ReactElement =>
-      createElement(CloneRepoDialog, { profile, onCloned: () => undefined, onClose })
+      createElement(CloneRepoDialog, {
+        profile,
+        onCloned: () => undefined,
+        onReveal: () => undefined,
+        onClose
+      })
   },
   {
     title: "ForkRepoDialog",

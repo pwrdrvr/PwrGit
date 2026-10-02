@@ -9,6 +9,7 @@ import {
   type CloneRepository,
   type ForgeKind,
   type ForgeOwner,
+  type ForkCheckoutPreflight,
   type ForkPreflight,
   type ForkProgress,
   type Profile,
@@ -49,6 +50,8 @@ import {
   forgeCanAnswerAnywhere,
   forgeCanAnswerDialog
 } from "./fork-dialog";
+import { forkInPlaceAction } from "./fork-checkout-dialog";
+import { ForkRemotePlan } from "./ForkRemotePlan";
 import { GitForkIcon, RepoIdentityChips } from "./RepoIdentityMarks";
 
 function destinationMeta(destination: CloneDestination): string {
@@ -75,10 +78,12 @@ export function ForkRepoDialog({
    *  placeholder is enough. */
   initialSource?: CloneRepository;
   /** The checkout `initialSource` was read from. Forking that repository
-   *  does not need a second clone: `ForkCheckoutDialog` forks it and points
-   *  the existing checkout at the fork. This dialog cannot do that itself, so
-   *  it offers the way there while the source is still that repository. */
-  inPlace?: { repoName: string; onChoose: () => void };
+   *  does not need a second clone, so while the source is still that
+   *  repository the dialog forks it IN PLACE — `repo:forkCheckout`, the same
+   *  operation `ForkCheckoutDialog` runs: origin moves to the fork, the
+   *  original stays as upstream, nothing is cloned. Cloning a second copy is
+   *  the rare case, one quiet link away. See design/Fork While Cloning, turn 4. */
+  inPlace?: { repoId: string; repoName: string };
   onForked: (repo: Repo) => void;
   onReveal: (path: string) => void;
   onClose: () => void;
@@ -130,6 +135,13 @@ export function ForkRepoDialog({
   const [canceling, setCanceling] = useState(false);
   const [progress, setProgress] = useState<ForkProgress | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** The user chose "Clone a separate copy instead" over forking in place. */
+  const [cloneCopy, setCloneCopy] = useState(false);
+  /** The in-place half of the answer: which remote `origin` is, the protocol
+   *  it speaks, what the original will be kept as. Null outside in-place
+   *  mode, where `preflight` alone is the whole answer. */
+  const [checkoutPreflight, setCheckoutPreflight] =
+    useState<ForkCheckoutPreflight | null>(null);
   const activeForkIdRef = useRef<string | null>(null);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const destinationInputRef = useRef<HTMLInputElement>(null);
@@ -289,6 +301,29 @@ export function ForkRepoDialog({
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
 
+  // The seed is still the source: forking it is forking the checkout it came
+  // from. `nameWithOwner` and `hostname` because a same-named project on
+  // another instance is a different repository.
+  const seedIsSource =
+    inPlace !== undefined &&
+    initialSource !== undefined &&
+    selectedSource !== null &&
+    selectedSource.hostname === initialSource.hostname &&
+    selectedSource.nameWithOwner.toLowerCase() ===
+      initialSource.nameWithOwner.toLowerCase();
+  const inPlaceMode = seedIsSource && !cloneCopy;
+  /** The upstream worth asking main about in place — none, until it differs
+   *  from `origin`'s own repository, which is what main assumes. The same
+   *  rule `ForkCheckoutDialog` keeps, for the same round trips. */
+  const upstreamQuery =
+    inPlaceMode &&
+    upstream !== null &&
+    checkoutPreflight !== null &&
+    upstream.toLowerCase() !==
+      checkoutPreflight.origin.nameWithOwner.toLowerCase()
+      ? upstream
+      : null;
+
   // What preflight is actually keyed on. Strings, deliberately: the effect
   // writes its own answer back into `selectedSource` (to upgrade an
   // unverified placeholder), and an IPC response is a fresh object every
@@ -307,13 +342,35 @@ export function ForkRepoDialog({
   useEffect(() => {
     if (selectedSource === null) {
       setPreflight(null);
+      setCheckoutPreflight(null);
       setCheckError(null);
       return;
     }
     setChecking(true);
     setCheckError(null);
+    if (!inPlaceMode) setCheckoutPreflight(null);
     let active = true;
-    void dispatch("repo:forkPreflight", {
+    // In place, the same fork questions are asked about the checkout itself:
+    // `repo:forkCheckoutPreflight` answers them verbatim under `.fork`, plus
+    // the remote layout the rewire will write.
+    const asked: Promise<
+      | { ok: true; value: { fork: ForkPreflight; checkout: ForkCheckoutPreflight | null } }
+      | { ok: false; error: { message: string } }
+    > = inPlaceMode && inPlace !== undefined
+      ? dispatch("repo:forkCheckoutPreflight", {
+          profileId: profile.id,
+          repoId: inPlace.repoId,
+          ...(targetOwner === null ? {} : { targetOwner: targetOwner.login }),
+          ...(preflightTargetName === null
+            ? {}
+            : { targetName: preflightTargetName }),
+          ...(upstreamQuery === null ? {} : { upstream: upstreamQuery })
+        }).then((result) =>
+          result.ok
+            ? { ok: true as const, value: { fork: result.value.fork, checkout: result.value } }
+            : result
+        )
+      : dispatch("repo:forkPreflight", {
       profileId: profile.id,
       source: selectedSource.nameWithOwner,
       host: selectedSource.host,
@@ -328,29 +385,46 @@ export function ForkRepoDialog({
       ...(preflightTargetName === null
         ? {}
         : { targetName: preflightTargetName })
-    }).then((result) => {
+    }).then((result) =>
+      result.ok ? { ok: true as const, value: { fork: result.value, checkout: null } } : result
+    );
+    void asked.then((result) => {
       if (!active) return;
       setChecking(false);
       if (result.ok) {
-        setPreflight(result.value);
+        const fork = result.value.fork;
+        setPreflight(fork);
+        setCheckoutPreflight(result.value.checkout);
         // A slug typed rather than picked from a catalog was selected as an
         // `unknown` placeholder. Preflight has since read the real thing, so
         // the row stops claiming PwrGit could not determine what it just read.
-        if (result.value.blocked?.code === undefined) {
+        if (fork.blocked?.code === undefined) {
           setSelectedSource((current) =>
             current !== null &&
-            current.nameWithOwner === result.value.source.nameWithOwner
-              ? result.value.source
+            current.nameWithOwner === fork.source.nameWithOwner
+              ? fork.source
               : current
           );
         }
         if (!forkNameTouched) {
-          setForkName(result.value.target.name);
-          setDebouncedForkName(result.value.target.name);
+          setForkName(fork.target.name);
+          setDebouncedForkName(fork.target.name);
         }
-        setUpstream(defaultUpstream(result.value));
+        // Kept while it is still one of the choices. A re-run for another
+        // account or name answers about the same lineage, and in place the
+        // upstream choice is itself an input — resetting it here would undo
+        // the radio the user just pressed.
+        setUpstream((current) =>
+          current !== null &&
+          fork.upstreamChoices.some(
+            (choice) => choice.nameWithOwner === current
+          )
+            ? current
+            : defaultUpstream(fork)
+        );
       } else {
         setPreflight(null);
+        setCheckoutPreflight(null);
         setCheckError(result.error.message);
       }
     });
@@ -363,7 +437,9 @@ export function ForkRepoDialog({
     preflightHostname,
     preflightTargetName,
     targetOwner?.login,
-    profile.id
+    profile.id,
+    inPlaceMode,
+    upstreamQuery
   ]);
 
   const targets = useMemo(
@@ -411,7 +487,14 @@ export function ForkRepoDialog({
   const activeDestination =
     selectedDestination ?? destinationResults[destinationSelection] ?? null;
 
-  const action = forkAction(preflight);
+  // In place, the button flips to the in-place verb — except when your fork
+  // is already checked out somewhere: re-pointing this checkout too would
+  // leave two clones of it, so Reveal still wins.
+  const cloneAction = forkAction(preflight);
+  const action =
+    inPlaceMode && cloneAction.kind !== "reveal_existing"
+      ? forkInPlaceAction(checkoutPreflight)
+      : cloneAction;
   const nameProblem = forkNameProblem(forkName, preflight);
   const sourceHost = selectedSource?.host ?? host;
   const forgeStatus = statusFor(forges, sourceHost);
@@ -450,9 +533,49 @@ export function ForkRepoDialog({
     window.requestAnimationFrame(() => destinationInputRef.current?.focus());
   };
 
+  const submitInPlace = async (): Promise<void> => {
+    if (
+      inPlace === undefined ||
+      checkoutPreflight === null ||
+      busy ||
+      action.kind === "blocked" ||
+      nameProblem !== null ||
+      targetOwner === null
+    ) {
+      return;
+    }
+    const operationId = window.crypto.randomUUID();
+    activeForkIdRef.current = operationId;
+    setBusy(true);
+    setCanceling(false);
+    setProgress({ phase: "starting", percent: null });
+    setSubmitError(null);
+    const result = await dispatch("repo:forkCheckout", {
+      operationId,
+      profileId: profile.id,
+      repoId: inPlace.repoId,
+      targetOwner: targetOwner.login,
+      targetOwnerKind: targetOwner.kind,
+      targetName: forkName.trim(),
+      upstream: addUpstream ? upstream : null
+    });
+    activeForkIdRef.current = null;
+    setBusy(false);
+    setCanceling(false);
+    if (result.ok) onForked(result.value);
+    else {
+      setProgress(null);
+      setSubmitError(result.error.message);
+    }
+  };
+
   const submit = async (): Promise<void> => {
     if (action.kind === "reveal_existing") {
       onReveal(action.path);
+      return;
+    }
+    if (inPlaceMode) {
+      await submitInPlace();
       return;
     }
     if (
@@ -509,10 +632,15 @@ export function ForkRepoDialog({
   const submitDisabled =
     busy ||
     selectedSource === null ||
-    activeDestination === null ||
     action.kind === "blocked" ||
-    (action.kind !== "reveal_existing" &&
-      (nameProblem !== null || targetOwner === null));
+    (inPlaceMode
+      ? action.kind !== "reveal_existing" &&
+        (checkoutPreflight === null || nameProblem !== null || targetOwner === null)
+      : activeDestination === null ||
+        (action.kind !== "reveal_existing" &&
+          (nameProblem !== null || targetOwner === null)));
+  /** Sections that only exist to make a second copy. */
+  const cloning = action.kind !== "reveal_existing" && !inPlaceMode;
 
   return (
     <div
@@ -670,35 +798,55 @@ export function ForkRepoDialog({
             {action.kind === "blocked" && (
               <div className="clone-submit-error">{action.message}</div>
             )}
-            {/* Only while the source is still the seed. Search for something
-                else and the checkout this names is no longer the one being
-                forked. `nameWithOwner` and `hostname` because a same-named
-                project on another instance is a different repository. */}
-            {inPlace !== undefined &&
-              initialSource !== undefined &&
-              selectedSource !== null &&
-              selectedSource.hostname === initialSource.hostname &&
-              selectedSource.nameWithOwner.toLowerCase() ===
-                initialSource.nameWithOwner.toLowerCase() && (
-                <div className="fork-in-place">
-                  <span>
-                    <strong>Already checked out here, as {inPlace.repoName}</strong>
-                    <small>
-                      Forking in place keeps this checkout: origin moves to your
-                      fork and the original stays as upstream. Nothing new is
-                      cloned.
-                    </small>
-                  </span>
-                  <button
-                    type="button"
-                    className="modal__cancel fork-in-place__action"
-                    disabled={busy}
-                    onClick={inPlace.onChoose}
-                  >
-                    Fork in place…
-                  </button>
-                </div>
-              )}
+            {/* Only while the source is still the seed (`seedIsSource`).
+                Search for something else and the checkout this names is no
+                longer the one being forked, so the dialog is a plain Fork &
+                clone again. */}
+            {inPlace !== undefined && seedIsSource && inPlaceMode && (
+              <div className="fork-in-place">
+                <span>
+                  <strong>Forking this checkout in place: {inPlace.repoName}</strong>
+                  <small>
+                    Nothing new is cloned. Your branches and changes stay put;
+                    only the remotes change.
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className="fork-in-place__link"
+                  disabled={busy}
+                  onClick={() => {
+                    setCloneCopy(true);
+                    setSubmitError(null);
+                  }}
+                >
+                  Clone a separate copy instead
+                </button>
+              </div>
+            )}
+            {inPlace !== undefined && seedIsSource && !inPlaceMode && (
+              <div className="fork-in-place">
+                <span>
+                  <strong>Already checked out here, as {inPlace.repoName}</strong>
+                  <small>
+                    You're cloning a second copy. Forking in place keeps this
+                    checkout instead: origin moves to your fork and the
+                    original stays as upstream.
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className="modal__cancel fork-in-place__action"
+                  disabled={busy}
+                  onClick={() => {
+                    setCloneCopy(false);
+                    setSubmitError(null);
+                  }}
+                >
+                  Fork in place
+                </button>
+              </div>
+            )}
             {preflight?.existing !== undefined &&
               action.kind !== "blocked" && (
                 <div className="fork-existing">
@@ -708,7 +856,9 @@ export function ForkRepoDialog({
                     <small>
                       {action.kind === "reveal_existing"
                         ? `Your fork is already checked out at ${action.path}`
-                        : "Your fork already exists — this will clone it."}
+                        : inPlaceMode
+                          ? "Your fork already exists — nothing new is created, this checkout is pointed at it."
+                          : "Your fork already exists — this will clone it."}
                     </small>
                   </span>
                 </div>
@@ -716,7 +866,7 @@ export function ForkRepoDialog({
           </section>
 
           {/* ── Fork into ──────────────────────────────────────── */}
-          {action.kind === "fork" && (
+          {(action.kind === "fork" || action.kind === "adopt") && (
             <section className="clone-section">
               <label className="clone-label" htmlFor="fork-name">
                 Fork into
@@ -773,7 +923,7 @@ export function ForkRepoDialog({
           )}
 
           {/* ── After forking ──────────────────────────────────── */}
-          {action.kind === "fork" && (
+          {(action.kind === "fork" || action.kind === "adopt") && (
             <section className="clone-section">
               <div className="clone-label">After forking</div>
               <div className="fork-options">
@@ -788,7 +938,9 @@ export function ForkRepoDialog({
                   />
                   <span>
                     <strong>
-                      Add an <code>upstream</code> remote
+                      Add an{" "}
+                      <code>{checkoutPreflight?.upstreamRemote.name ?? "upstream"}</code>{" "}
+                      remote
                       {upstream !== null && (
                         <>
                           {" → "}
@@ -838,7 +990,9 @@ export function ForkRepoDialog({
                   </div>
                 )}
 
-                {defaultBranchOnlySupported && (
+                {/* Never in place: it is a clone-size saving, and this path
+                    clones nothing — see `forkCheckout` in main. */}
+                {defaultBranchOnlySupported && !inPlaceMode && (
                   <label
                     className={`fork-option${defaultBranchOnly ? " is-on" : ""}`}
                   >
@@ -870,8 +1024,22 @@ export function ForkRepoDialog({
             </section>
           )}
 
+          {/* ── What this changes (in place) ───────────────────── */}
+          {inPlaceMode && action.kind !== "reveal_existing" && (
+            <ForkRemotePlan
+              preflight={checkoutPreflight}
+              target={
+                nameProblem === null && targetOwner !== null
+                  ? `${targetOwner.login}/${forkName.trim()}`
+                  : null
+              }
+              upstream={addUpstream ? upstream : null}
+              tip={tip}
+            />
+          )}
+
           {/* ── Clone with ─────────────────────────────────────── */}
-          {action.kind !== "reveal_existing" && (
+          {cloning && (
             <section className="clone-section">
               <div className="clone-label">Clone with</div>
               <div className="clone-protocols">
@@ -933,7 +1101,7 @@ export function ForkRepoDialog({
           )}
 
           {/* ── Destination ────────────────────────────────────── */}
-          {action.kind !== "reveal_existing" && (
+          {cloning && (
             <section className="clone-section">
               <label className="clone-label" htmlFor="fork-destination">
                 Check out to

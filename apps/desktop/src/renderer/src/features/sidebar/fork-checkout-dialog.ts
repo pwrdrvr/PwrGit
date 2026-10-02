@@ -48,6 +48,21 @@ export function forkCheckoutAction(
     : { kind: "adopt", label: "Switch origin to my fork" };
 }
 
+/**
+ * The same action, as `ForkRepoDialog` words it in its in-place mode.
+ *
+ * There the dialog's own name is "Fork a repository" and the alternative on
+ * screen is "Fork & clone", so the button says what differs — that nothing is
+ * cloned — rather than repeating the header dialog's "Fork & switch origin".
+ * Adopting an existing fork reads the same in both.
+ */
+export function forkInPlaceAction(
+  preflight: ForkCheckoutPreflight | null
+): ForkCheckoutAction {
+  const action = forkCheckoutAction(preflight);
+  return action.kind === "adopt" ? action : { ...action, label: "Fork in place" };
+}
+
 /** One line of the "what this changes" list. */
 export type RemoteChange = {
   /** The remote's name, as it will read in `git remote -v`. */
