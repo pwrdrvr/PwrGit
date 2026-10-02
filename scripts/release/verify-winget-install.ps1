@@ -50,6 +50,7 @@ $pe = [BitConverter]::ToInt32($bytes, 0x3c)
 if ([BitConverter]::ToUInt16($bytes, $pe + 4) -ne 0x8664) { throw 'Installed payload is not x64' }
 $entries[0] | Select-Object DisplayName, DisplayVersion, Publisher, PSChildName,
   @{ Name = 'InstallLocation'; Expression = { $installLocation } } | ConvertTo-Json
-winget uninstall --name PwrGit --exact --silent --disable-interactivity
+# Limit source queries to winget so uninstall does not prompt for msstore agreements.
+winget uninstall --name PwrGit --exact --source winget --silent --accept-source-agreements --disable-interactivity
 if ($LASTEXITCODE -ne 0) { throw 'WinGet uninstall failed' }
 Write-Output 'Verified manifest, Authenticode, user scope, installed version, x64 payload and uninstall.'
