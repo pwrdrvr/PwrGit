@@ -84,8 +84,9 @@ prove launch.
 
 For Winget follow the current [Microsoft submission guide](https://learn.microsoft.com/en-us/windows/package-manager/package/repository)
 and [first contribution checklist](https://github.com/microsoft/winget-pkgs/blob/master/doc/FirstContribution.md).
-Recheck the supported schema; the generator uses the upstream template's 1.12
-schema. Run `winget validate --manifest <version-directory>`, enable local
+Recheck the recommended schema in the upstream PR template; it currently selects
+1.12 although the documentation also lists 1.28. The generator follows that
+community-repository recommendation. Run `winget validate --manifest <version-directory>`, enable local
 manifests with `winget settings --enable LocalManifestFiles` (elevation required),
 and install the manifest. Use Windows Sandbox when policy blocks local manifests.
 Capture actual per-user registry metadata for NSIS `/currentuser`; do not guess an
