@@ -8405,13 +8405,28 @@ button.commit-byline:focus-visible {
    via --lane-scroll (driven by the shared .lane-scrollbar). At constrained
    main-pane widths it yields enough room for the fixed SHA + age before the
    row can overflow. The app's 940px minimum leaves a 276px main pane with the
-   default side panels, where this still exposes roughly three lanes. */
+   default side panels.
+
+   The 230px covers the checkbox, the SHA and the age, and left nothing for
+   the subject: at a 400px pane the lanes kept their full 160px and subjects
+   collapsed to "M…". The extra 14ch keeps about fourteen characters of
+   subject before the lanes give way (Post-ship 2g). The 160px ceiling still
+   wins at the stock 696px pane; this only bites below a pane of ~510px, and
+   it never caps the lane count at normal widths. The scrollbar below carries
+   the same expression, so the two stay the same width.
+
+   `ch` resolves against the element's own font, and neither element draws
+   text: left to inherit, it measured the body's 16px "0" (10.75px), and the
+   rule bit below a ~540px pane. Both take `.commit-msg`'s size and weight so
+   14ch is fourteen characters of subject. */
 .graph-lanes-clip {
   flex: 0 0 auto;
   align-self: stretch;
   display: flex;
   align-items: center;
-  max-width: clamp(16px, calc(100cqi - 230px), 160px);
+  font-size: 12.5px;
+  font-weight: 600;
+  max-width: clamp(16px, calc(100cqi - 230px - 14ch), 160px);
   overflow: hidden;
 }
 .graph-lanes {
@@ -8426,7 +8441,9 @@ button.commit-byline:focus-visible {
   overflow-x: auto;
   overflow-y: hidden;
   height: 12px;
-  max-width: clamp(16px, calc(100cqi - 230px), 160px);
+  font-size: 12.5px;
+  font-weight: 600;
+  max-width: clamp(16px, calc(100cqi - 230px - 14ch), 160px);
   margin: 0 0 4px 29px;
 }
 .lane-scrollbar::-webkit-scrollbar {
