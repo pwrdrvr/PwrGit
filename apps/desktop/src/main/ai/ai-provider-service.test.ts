@@ -444,7 +444,7 @@ describe("AiProviderService", () => {
       expect(deps.listCodexModels).toHaveBeenCalledTimes(2);
     });
 
-    it.each(["gpt-5.6-terra", "gpt-5.6", "gpt-6-sol"])("persists %s defaults as GPT-6.1 Sol only for the requesting profile", async (source) => {
+    it.each(["gpt-5.4", "gpt-5.6-terra", "gpt-5.6", "gpt-6-sol"])("persists %s defaults as GPT-6.1 Sol only for the requesting profile", async (source) => {
       const { service, deps, configure } = harness();
       for (const id of ["work", "personal"]) configure(id, (s) => {
         s.jobs.commitMessage = { model: source, reasoning: "high" };

@@ -6,7 +6,7 @@ function model(id: string, hidden = false): CodexModelOption {
   return { id, model: id, displayName: id, description: "", hidden, isDefault: false,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"], defaultReasoningEffort: "low" };
 }
-const legacyIds = ["gpt-5.5", "gpt-5.5-2026-04-23", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
+const legacyIds = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.5", "gpt-5.5-2026-04-23", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
 function settings(id: string): AiProviderSettings {
   return { ...structuredClone(DEFAULT_AI_PROVIDER_SETTINGS), jobs: { commitMessage: { model: id, reasoning: "high" }, historyEditing: { model: "gpt-6-astra" } } };
 }
@@ -25,7 +25,7 @@ describe("Codex model choices", () => {
 });
 
 describe("Codex default migration", () => {
-  it.each(["gpt-5.6-terra", "gpt-5.6", "gpt-6-sol"])("moves %s to GPT-6.1 Sol and preserves Astra", (source) => {
+  it.each(["gpt-5.4", "gpt-5.6-terra", "gpt-5.6", "gpt-6-sol"])("moves %s to GPT-6.1 Sol and preserves Astra", (source) => {
     const current = settings(source);
     expect(codexDefaultMigration(current, [model("gpt-6.1-sol")], current.codex)).toEqual({ jobs: { commitMessage: { model: "gpt-6.1-sol" } } });
   });
@@ -33,7 +33,7 @@ describe("Codex default migration", () => {
     const current = settings("gpt-5.6-luna");
     expect(codexDefaultMigration(current, [model("gpt-6-luna")], current.codex)).toEqual({ jobs: { commitMessage: { model: "gpt-6-luna" } } });
   });
-  it.each(["gpt-5.6-terra", "gpt-5.6", "gpt-6-sol", "gpt-5.6-luna"])("keeps %s without its selectable replacement", (source) => {
+  it.each(["gpt-5.4", "gpt-5.6-terra", "gpt-5.6", "gpt-6-sol", "gpt-5.6-luna"])("keeps %s without its selectable replacement", (source) => {
     const current = settings(source);
     expect(codexDefaultMigration(current, [model("gpt-6-sol"), model("gpt-6.1-sol", true), model("gpt-6-luna", true)], current.codex)).toBeUndefined();
   });

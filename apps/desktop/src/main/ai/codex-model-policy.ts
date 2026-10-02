@@ -7,7 +7,7 @@ import {
   type CodexModelOption
 } from "@pwrgit/shared";
 
-const SOL_DEFAULT_SOURCES = new Set(["gpt-5.6-terra", "gpt-5.6", "gpt-6-sol"]);
+const SOL_DEFAULT_SOURCES = new Set(["gpt-5.4", "gpt-5.6-terra", "gpt-5.6", "gpt-6-sol"]);
 
 /** Return only a replacement this runtime advertises as selectable. */
 function replacementModel(id: string | undefined, models: readonly CodexModelOption[]) {
@@ -22,7 +22,7 @@ export function codexModelChoices(models: readonly CodexModelOption[]): CodexMod
   const hasSol = models.some((model) => !model.hidden &&
     (model.id === "gpt-6-sol" || model.id === "gpt-6.1-sol"));
   return models.map((model) => hasSol &&
-    /^gpt-5\.(?:5|6)(?:$|[-.])/u.test(model.id)
+    /^gpt-5\.(?:4|5|6)(?:$|[-.])/u.test(model.id)
     ? { ...model, hidden: true } : model);
 }
 
