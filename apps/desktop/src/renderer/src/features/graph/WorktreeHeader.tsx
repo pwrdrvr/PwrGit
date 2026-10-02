@@ -567,6 +567,10 @@ export function WorktreeHeader({
   const pullButton = useRef<HTMLButtonElement | null>(null);
   /** The split Pull, so its menu opens under the whole control. */
   const pullSplit = useRef<HTMLDivElement>(null);
+  /** A Pull clicked while the header is still seeded (below). */
+  const pendingPull = useRef<{ key: string; from: HTMLElement | null } | null>(
+    null
+  );
   const forkRead = useForkStatus(worktree.id, repo.id, worktree.branch);
   const forkStatus = forkRead ?? null;
   /** Until the live read lands, the stored source the sidebar already draws
@@ -1399,19 +1403,36 @@ export function WorktreeHeader({
     !split || runs === "tracked"
       ? behind > 0
       : (shownSource?.behind ?? 0) > 0;
-  const pullTrigger = buttonTriggers("pull", pullTitle(runs, forkChoice));
+  const pullTrigger = buttonTriggers(
+    "pull",
+    forkChoice === null && seed !== null && split
+      ? `Pull · checking ${seed.label}…`
+      : pullTitle(runs, forkChoice)
+  );
 
   /** Run what Pull does, from the button or from a row of its menu. */
   const runPull = (run: PullChoice, from: HTMLElement | null): void => {
     if (running !== null) return;
     // Seeded, not yet read: the sync needs the live tips to lease against,
     // and a plain pull in its place would do something the arrow does not
-    // say. The read lands within a frame or two of the selection.
-    if (forkChoice === null && split && run !== "tracked") return;
+    // say. Hold the click for the read, which lands within a frame or two of
+    // the selection, rather than drop it.
+    if (forkChoice === null && split && run !== "tracked") {
+      pendingPull.current = { key: checkKey, from };
+      return;
+    }
     if (from !== null) pinStatus("pull", from);
     if (forkChoice === null || run === "tracked") onPull();
     else onSyncFork(forkChoice, run === "sync");
   };
+  // The held click runs once the read lands, as whatever Pull now runs, and
+  // only for the checkout it was made on.
+  useEffect(() => {
+    const pending = pendingPull.current;
+    if (pending === null || forkRead === undefined) return;
+    pendingPull.current = null;
+    if (pending.key === checkKey) runPull(runs, pending.from);
+  });
   const pickPullChoice = (next: PullChoice): void => {
     setPullChoice(next);
     writePullChoice(repo.id, next);

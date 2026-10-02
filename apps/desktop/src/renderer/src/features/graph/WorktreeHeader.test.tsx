@@ -2138,10 +2138,6 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       expect(caret()).not.toBeNull();
       expect(caret()?.getAttribute("aria-disabled")).toBe("true");
       expect(pull()?.classList.contains("is-behind")).toBe(true);
-      // A seeded Pull does not run a plain pull in the sync's place.
-      await act(async () => pull()?.click());
-      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
-      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:syncFork", expect.anything());
 
       // The live read can only correct the digits.
       await act(async () => {
@@ -2150,6 +2146,20 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       });
       expect(statusChip()).toBe("↓27 behind upstream");
       expect(caret()?.getAttribute("aria-disabled")).toBe("false");
+    });
+
+    it("holds a seeded Pull for the read, then runs the sync, not a plain pull", async () => {
+      answerLater();
+      await remount(stored);
+      await act(async () => pull()?.click());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:syncFork", expect.anything());
+      await act(async () => {
+        land(behindSource({ behind: 27 }));
+        await settle();
+      });
+      expect(bridge.dispatch).toHaveBeenCalledWith("remote:syncFork", expect.anything());
+      expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
     });
 
     it("lets a read that finds no source take the arrow away", async () => {
