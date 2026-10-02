@@ -86,11 +86,18 @@ export function trackingLabel(branch: LocalBranchSummary): string {
  * at the 940px window, so it says only what differs: `origin/…`. The full
  * ref stays in the cell's card and is what a click copies (Post-ship 3b).
  */
-export function upstreamShorthand(upstream: string, name: string): string {
+export function upstreamShorthand(
+  upstream: string,
+  name: string,
+  remotes: readonly string[]
+): string {
   const suffix = `/${name}`;
   if (!upstream.endsWith(suffix)) return upstream;
+  // What is left must be a remote, or the name only matched a tail:
+  // `origin/feature/x` is not `x`'s own name, and `origin/feature/…` would
+  // read as though it were.
   const remote = upstream.slice(0, -suffix.length);
-  return remote === "" ? upstream : `${remote}/…`;
+  return remotes.includes(remote) ? `${remote}/…` : upstream;
 }
 
 /** What an empty filtered Branches tab says, per status. */
@@ -521,6 +528,10 @@ export function RepoRefsModal({
   const addingParentRef = useRef(false);
   const forgeHosts = useForgeHostMap();
   const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
+  const remoteNames = useMemo(
+    () => refs.remotes.map((remote) => remote.name),
+    [refs.remotes]
+  );
   const [renaming, setRenaming] = useState<LocalBranchSummary | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -1106,7 +1117,7 @@ export function RepoRefsModal({
                         className="refs-table__muted refs-copyable-upstream copyable"
                       >
                         <span className="refs-copyable-upstream__text">
-                          {upstreamShorthand(branch.qualifiedName, branch.name)}
+                          {upstreamShorthand(branch.qualifiedName, branch.name, remoteNames)}
                         </span>
                       </CopyTarget>
                       <span className="refs-status refs-status--remote">Remote</span>
@@ -1159,6 +1170,7 @@ export function RepoRefsModal({
                   );
                 }
                 const branch = item.branch;
+                const checkedOut = branch.checkedOutWorktreeIds.length > 0;
                 return (
                   <div
                     className={`refs-table__row${isPinned(branch) ? " is-pinned" : ""}`}
@@ -1190,7 +1202,7 @@ export function RepoRefsModal({
                         {/* Its own box: the cell is inline-flex, and a bare
                             text node there could not draw an ellipsis. */}
                         <span className="refs-copyable-upstream__text">
-                          {upstreamShorthand(branch.upstream, branch.name)}
+                          {upstreamShorthand(branch.upstream, branch.name, remoteNames)}
                         </span>
                       </CopyTarget>
                     )}
@@ -1247,26 +1259,18 @@ export function RepoRefsModal({
                             // A checked-out branch's pin lands on the worktree
                             // holding it (RepoIndexer), so the entry is named
                             // for what it pins (Post-ship 3c).
-                            branch.checkedOutWorktreeIds.length > 0
-                              ? {
-                                  type: "item",
-                                  label: isPinned(branch)
-                                    ? "Unpin worktree"
-                                    : "Pin worktree",
-                                  ...(isPinned(branch)
-                                    ? {}
-                                    : {
-                                        hint: "This branch is checked out, so its worktree is what gets pinned."
-                                      }),
-                                  onSelect: () => void toggleBranchPin(branch)
-                                }
-                              : {
-                                  type: "item",
-                                  label: isPinned(branch)
-                                    ? "Unpin branch"
-                                    : "Pin branch",
-                                  onSelect: () => void toggleBranchPin(branch)
-                                },
+                            {
+                              type: "item",
+                              label: `${isPinned(branch) ? "Unpin" : "Pin"} ${
+                                checkedOut ? "worktree" : "branch"
+                              }`,
+                              ...(checkedOut && !isPinned(branch)
+                                ? {
+                                    hint: "This branch is checked out, so its worktree is what gets pinned."
+                                  }
+                                : {}),
+                              onSelect: () => void toggleBranchPin(branch)
+                            },
                             {
                               type: "item",
                               label: "Copy branch name",

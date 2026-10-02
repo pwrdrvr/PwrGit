@@ -366,19 +366,37 @@ describe("branch pins and the row keyboard", () => {
 
 describe("the Upstream column at the 940px window", () => {
   it("says only what differs from the branch's own name", () => {
-    expect(upstreamShorthand("origin/main", "main")).toBe("origin/…");
-    expect(upstreamShorthand("origin/feat/x", "feat/x")).toBe("origin/…");
-    // A different name is the one worth reading, so it is spelled out.
-    expect(upstreamShorthand("upstream/fix/local-rewrites", "fix/rewrite-qs")).toBe(
-      "upstream/fix/local-rewrites"
+    const remotes = ["origin", "upstream", "team/rocket"];
+    expect(upstreamShorthand("origin/main", "main", remotes)).toBe("origin/…");
+    expect(upstreamShorthand("origin/feat/x", "feat/x", remotes)).toBe("origin/…");
+    expect(upstreamShorthand("team/rocket/main", "main", remotes)).toBe(
+      "team/rocket/…"
     );
+    // A different name is the one worth reading, so it is spelled out.
+    expect(
+      upstreamShorthand("upstream/fix/local-rewrites", "fix/rewrite-qs", remotes)
+    ).toBe("upstream/fix/local-rewrites");
     // Only a whole path segment counts as the same name.
-    expect(upstreamShorthand("origin/my-main", "main")).toBe("origin/my-main");
+    expect(upstreamShorthand("origin/my-main", "main", remotes)).toBe("origin/my-main");
+    // A matching tail is not the same name: `x` tracking origin/feature/x.
+    expect(upstreamShorthand("origin/feature/x", "x", remotes)).toBe(
+      "origin/feature/x"
+    );
   });
 
   it("puts the text in its own box, so the ellipsis can draw, and keeps the full ref", async () => {
     await open(repo, {
       ...refs,
+      remotes: [
+        {
+          name: "origin",
+          fetchUrl: "git@github.com:me/widget.git",
+          pushUrl: "git@github.com:me/widget.git",
+          skipFetchAll: false,
+          previewBranches: [],
+          branchCount: 0
+        }
+      ],
       branches: [
         {
           name: "tenant-deploy-windows",
