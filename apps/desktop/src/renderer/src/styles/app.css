@@ -10223,6 +10223,10 @@ body.is-col-resizing {
   color: var(--text-muted);
   text-wrap: pretty;
 }
+/* The kept choice, named in words: the tick marks what Pull will run. */
+.pull-menu__kept {
+  color: var(--text-secondary);
+}
 .pull-menu__title code,
 .pull-menu__detail code {
   font-family: var(--font-mono);

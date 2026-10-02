@@ -2330,8 +2330,10 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       ["Pull origin/main only", "false"]
     ]);
     expect(row("Sync with upstream/main")?.textContent).toContain(
-      "Fast-forward main 10 commits, then push them to origin/main."
+      "Your default for this repo. Fast-forward main 10 commits, then push them to origin/main."
     );
+    expect(row("Pull origin/main only")?.textContent).toContain("Your fork's own tip.");
+    expect(row("Pull origin/main only")?.textContent).not.toContain("Your default");
 
     await act(async () => {
       row("Pull upstream/main only")?.click();
@@ -2376,8 +2378,12 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     await remount();
     expect(statusChip()).toBe("↓12 upstream · ↑2");
     await openMenu();
-    expect(document.querySelector(".pull-menu__note")?.textContent).toBe(
-      "main has 2 commits upstream/main doesn't"
+    const note = document.querySelector(".pull-menu__note");
+    expect(note?.textContent).toBe("main has 2 commits upstream/main doesn't");
+    // Read out, not hidden: it is why the reviews lead.
+    expect(note?.hasAttribute("aria-hidden")).toBe(false);
+    expect(document.querySelector('.pull-menu[role="menu"]')?.getAttribute("aria-describedby")).toBe(
+      note?.id
     );
     expect(
       menuRows().map((el) => el.querySelector(".pull-menu__title")?.textContent)
@@ -2455,6 +2461,33 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     });
     expect(document.querySelector(".pull-divergence")).toBeNull();
     expect(statusChip()).toBe("rebased · pushed to origin/main");
+  });
+
+  // Post-ship 2d: once the source had nothing new, Sync fell back to pulling
+  // origin/main, but the tick stayed on Sync — on something Pull was not
+  // going to do.
+  it("ticks what Pull will run, and names the kept choice in words", async () => {
+    answer(behindSource({ behind: 0 }), {});
+    // origin/main has 3 for main; upstream/main has nothing new.
+    await remount(worktree, { ...level, behind: 3 });
+    await openMenu();
+    expect(
+      menuRows().map((el) => [
+        el.querySelector(".pull-menu__title")?.textContent,
+        el.getAttribute("aria-checked")
+      ])
+    ).toEqual([
+      ["Sync with upstream/main", "false"],
+      ["Pull upstream/main only", "false"],
+      ["Pull origin/main only", "true"]
+    ]);
+    expect(row("Sync with upstream/main")?.textContent).toContain(
+      "Your default for this repo."
+    );
+    expect(row("Pull origin/main only")?.textContent).toContain(
+      "Your fork's own tip. 3 commits to bring in."
+    );
+    expect(row("Pull origin/main only")?.textContent).not.toContain("Your default");
   });
 
   it("re-reads when a fetch moves only the source's tip", async () => {

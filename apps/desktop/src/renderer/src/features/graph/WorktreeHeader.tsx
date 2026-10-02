@@ -333,8 +333,8 @@ function pullMenuRows(
       ),
       detail:
         trackedBehind > 0
-          ? `The branch this checkout tracks, as Pull is everywhere else. ${commits(trackedBehind)} to bring in.`
-          : "The branch this checkout tracks, as Pull is everywhere else.",
+          ? `Your fork's own tip. ${commits(trackedBehind)} to bring in.`
+          : "Your fork's own tip.",
       onSelect: () => on.pick("tracked")
     }
   ];
@@ -1618,7 +1618,8 @@ export function WorktreeHeader({
                 <PullMenu
                   anchorRef={pullSplit}
                   disabled={running !== null || pullMenu === null}
-                  checked={choice}
+                  checked={runs}
+                  kept={choice}
                   {...(pullMenu ?? { actions: [], choices: [] })}
                 />
               </div>
