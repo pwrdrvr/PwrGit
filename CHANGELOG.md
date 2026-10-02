@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.28.0 - 2026-10-02
+
+- AI Features - Improved Codex model discovery after upgrades and migrated supported saved defaults to GPT-6.1 Sol and GPT-6 Luna when available, preserving compatible reasoning choices.
+- Codex setup - Added guidance for older Codex installations, with update commands matched to the selected installer and a startup notice for profiles using Codex features.
+- Fork sync - Fixed inconsistent fork counts and source indicators between the header and sidebar, stabilized the initial Pull controls, and made the Pull menu checkmark follow the operation that will run.
+- Branches - Improved pinned branch details, marked deleted tracked branches as gone, and clarified pinning and branch-name copy actions.
+- Layout and accessibility - Kept refs browser actions accessible at higher zoom levels and gave commit subjects more room in narrow panes, with scrolling for clipped graph lanes.
+
 ## v0.27.0 - 2026-10-01
 
 - Remote branches - Added automatic status checks for selected branches, including forks and custom remote refs, so their state stays current without a manual refresh and unchecked results are clearer.
