@@ -7130,6 +7130,16 @@ button.agent-menu__item:hover {
   color: var(--text-muted);
   font: 500 10.5px/1.4 var(--font-sans);
 }
+/* Doubled class: the generic `.refs-table__row` narrow rule sits later in
+   this file and would otherwise win the tie. It hides the same two columns.
+   Reached through zoom: View › Zoom In takes the 940px window below 760 CSS
+   pixels. */
+@media (max-width: 760px) {
+  .refs-table__header.refs-pr-table__row,
+  .refs-table__row.refs-pr-table__row {
+    grid-template-columns: minmax(200px, 1fr) 90px 120px;
+  }
+}
 /* BranchRefPicker — a filter box over a sized native listbox. */
 .branch-picker {
   display: grid;
@@ -7429,6 +7439,29 @@ button.agent-menu__item:hover {
   background: var(--bg-panel-elevated);
   color: var(--text-subtle);
   opacity: 1;
+}
+
+/* The window cannot be narrowed below 940px, but zoom narrows the page: three
+   steps of View › Zoom In leave about 715 CSS pixels, where the five columns'
+   minimums no longer fit the browser. Drop Upstream and Age there. */
+@media (max-width: 760px) {
+  .refs-table__header,
+  .refs-table__row {
+    grid-template-columns: minmax(180px, 1fr) 100px 100px;
+  }
+  /* The 100px column cannot hold the buttons in one line. */
+  .refs-row-actions {
+    flex-wrap: wrap;
+  }
+  .refs-table__header > :nth-child(2),
+  .refs-table__row > :nth-child(2),
+  .refs-table__header > :nth-child(4),
+  .refs-table__row > :nth-child(4) {
+    display: none;
+  }
+  .refs-browser__toolbar {
+    flex-wrap: wrap;
+  }
 }
 
 /* ---- Main pane: worktree header (Fetch/Pull/Push arrive in U9) ---- */
