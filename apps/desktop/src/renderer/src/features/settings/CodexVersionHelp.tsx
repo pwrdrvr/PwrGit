@@ -9,6 +9,11 @@ export function codexVersionMessage(advisory: CodexVersionAdvisory): string {
   return `Codex ${advisory.version} is older than ${advisory.minimumVersion}, which GPT-6 Sol and GPT-6.1 Sol need.`;
 }
 
+/** The AI Providers Version field's sub-line: what the gap costs. */
+export function codexVersionNeed(advisory: CodexVersionAdvisory): string {
+  return `GPT-6 Sol and GPT-6.1 Sol need ${advisory.minimumVersion} or newer. Older builds may not list or run them.`;
+}
+
 /** The AI Features line above the pickers: why Sol may be missing there. */
 export function codexModelsNotice(advisory: CodexVersionAdvisory): string {
   return `Codex ${advisory.version} may not offer GPT-6 Sol or GPT-6.1 Sol. ${advisory.minimumVersion} or newer is recommended.`;
@@ -42,7 +47,10 @@ function useCodexVersionActions(advisory: CodexVersionAdvisory) {
     void navigator.clipboard.writeText(command).then(() => {
       setCopied(true);
       setError(null);
-    }).catch(() => setError("Couldn’t copy the command. Select and copy it above."));
+    }).catch(() => {
+      setCopied(false);
+      setError("Couldn’t copy the command. Select and copy it above.");
+    });
   };
   const openReleases = (): void => {
     void dispatch("shell:openExternal", { url: CODEX_RELEASES_URL })

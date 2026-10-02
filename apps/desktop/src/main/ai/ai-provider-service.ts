@@ -333,10 +333,8 @@ export class AiProviderService {
   migrateKnownCodexDefaults(profileId: ProfileId): AiProviderSettings {
     const settings = this.settings(profileId);
     const environment = this.deps.environmentFor(profileId, settings.codex);
-    const probe = this.codex.peek(this.codexKey(settings, environment));
-    if (probe?.selected === null || probe?.selected === undefined) return settings;
-    const key = codexModelCacheKey(probe.selected.command, environment.codexHome, probe.selected.version);
-    const models = this.codexModelLists.get(key) ?? this.deps.codexModelCache.load(key)?.models;
+    const selected = this.codex.peek(this.codexKey(settings, environment))?.selected ?? null;
+    const models = selected === null ? undefined : this.knownCodexModels(selected, environment);
     return models === undefined ? settings : this.migrateCodexDefaults(profileId, models, settings.codex, false);
   }
 
@@ -624,8 +622,7 @@ export class AiProviderService {
         }
         // Availability does not start an app-server. Use this runtime/account's
         // known catalog; an uncached list waits until a model picker asks.
-        const key = codexModelCacheKey(resolution.selected.command, resolution.environment.codexHome, resolution.selected.version);
-        const models = this.codexModelLists.get(key) ?? this.deps.codexModelCache.load(key)?.models;
+        const models = this.knownCodexModels(resolution.selected, resolution.environment);
         const current = models === undefined ? settings : this.migrateCodexDefaults(profileId, models, settings.codex);
         const codexJob = current.jobs[jobId];
         const codexModel = isAiModelId(codexJob.model) ? codexJob.model : null;
@@ -709,6 +706,15 @@ export class AiProviderService {
   }
 
   // ---- Internals ----------------------------------------------------------
+
+  /** This runtime/account's catalog from memory or disk, never a probe. */
+  private knownCodexModels(
+    selected: { command: string; version?: string },
+    environment: CodexEnvironment
+  ): readonly CodexModelOption[] | undefined {
+    const key = codexModelCacheKey(selected.command, environment.codexHome, selected.version);
+    return this.codexModelLists.get(key) ?? this.deps.codexModelCache.load(key)?.models;
+  }
 
   private migrateCodexDefaults(
     profileId: ProfileId,

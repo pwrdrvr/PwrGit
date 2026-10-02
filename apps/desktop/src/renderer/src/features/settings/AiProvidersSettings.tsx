@@ -27,7 +27,7 @@ import {
   type SettingsFocusRequest
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
-import { CodexVersionHelp } from "./CodexVersionHelp";
+import { CodexVersionHelp, codexVersionNeed } from "./CodexVersionHelp";
 
 /**
  * Settings → AI Providers: the agents PwrGit can hand work to, one card per
@@ -210,7 +210,7 @@ function CodexSection(props: { status: AiProviderStatus; onEditDefaults: () => v
         // its subject and states the gap.
         <SettingsField
           label="Version"
-          sub={`GPT-6 Sol and GPT-6.1 Sol need ${snapshot.versionAdvisory.minimumVersion} or newer. Older builds may not list or run them.`}
+          sub={codexVersionNeed(snapshot.versionAdvisory)}
           control={<CodexVersionHelp key={`${snapshot.versionAdvisory.command}:${snapshot.versionAdvisory.version}`} advisory={snapshot.versionAdvisory} />}
         />
       )}

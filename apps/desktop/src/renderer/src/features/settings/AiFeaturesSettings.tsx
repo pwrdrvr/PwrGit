@@ -278,7 +278,12 @@ function JobDefaultRow(props: {
         label: modelLabel(model),
         isDefault: model.isDefault
       }));
-  const defaultModel = choices.find((choice) => choice.isDefault);
+  // The Sol policy can hide the runtime's own default; Default still runs it,
+  // so still name it.
+  const hiddenDefault = isAcp ? undefined
+    : props.codexModels?.find((model) => model.isDefault && model.hidden);
+  const defaultModel = choices.find((choice) => choice.isDefault) ??
+    (hiddenDefault === undefined ? undefined : { label: modelLabel(hiddenDefault) });
   const modelInChoices = choices.some((choice) => choice.id === modelValue);
   // A hidden saved choice (for example GPT-5.5) must not silently display
   // Default while main still runs it. Show the saved value without offering

@@ -96,6 +96,22 @@ describe("Codex launch notice", () => {
     expect(container.textContent).toBe("");
   });
 
+  it("does not force a Codex probe on focus while nothing is showing", async () => {
+    delete discovery.versionAdvisory;
+    await render();
+    await focus();
+    expect(mocks.dispatch).not.toHaveBeenCalledWith("aiProviders:discoverCodex", { profileId: "personal", force: true });
+  });
+
+  it("keeps the notice and skips a re-probe when an unrelated setting changes", async () => {
+    await render();
+    const probes = () => mocks.dispatch.mock.calls.filter(([name]) => name === "aiProviders:discoverCodex").length;
+    const before = probes();
+    await act(async () => { changed({ profileId: "personal", settings: { ...settings, guidance: "Prefer short subjects." } }); });
+    expect(probes()).toBe(before);
+    expect(container.textContent).toContain("Codex update recommended");
+  });
+
   it("handles enabling and disabling AI without restarting the window", async () => {
     settings.enabled = false;
     await render();

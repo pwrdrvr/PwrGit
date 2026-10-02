@@ -9,6 +9,7 @@ export function CodexVersionNotice({ profileId }: { profileId: string | null }) 
   const [settings, setSettings] = useState<{ profileId: string; value: AiProviderSettings } | null>(null);
   const [notice, setNotice] = useState<{ profileId: string; advisory: CodexVersionAdvisory } | null>(null);
   const dismissed = useRef(new Set<string>());
+  const showing = useRef(false);
   const [, setDismissal] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,6 +33,9 @@ export function CodexVersionNotice({ profileId }: { profileId: string | null }) 
 
   const enabled = settings?.profileId === profileId && settings.value.enabled &&
     jobProviders(settings.value).includes("codex");
+  // Only a change to which Codex runs needs a new probe. Keying on the whole
+  // settings object hid the notice and re-probed on every unrelated write.
+  const codexSelection = settings === null ? null : JSON.stringify(settings.value.codex);
   useEffect(() => {
     setNotice(null);
     if (!enabled || profileId === null) return;
@@ -47,13 +51,16 @@ export function CodexVersionNotice({ profileId }: { profileId: string | null }) 
     };
     check(false);
     // Returning from a terminal update should settle the notice immediately.
-    const focus = () => check(true);
+    // With nothing showing there is nothing to settle, so no forced probe.
+    const focus = () => { if (showing.current) check(true); };
     window.addEventListener("focus", focus);
     return () => { live = false; window.removeEventListener("focus", focus); };
-  }, [enabled, profileId, settings]);
+  }, [enabled, profileId, codexSelection]);
 
   const key = notice === null ? "" : JSON.stringify([notice.profileId, notice.advisory.command, notice.advisory.version]);
-  if (!enabled || notice?.profileId !== profileId || dismissed.current.has(key)) return null;
+  const visible = enabled && notice?.profileId === profileId && !dismissed.current.has(key);
+  useEffect(() => { showing.current = visible; }, [visible]);
+  if (!visible || notice === null) return null;
   // One action row, shaped like the "Update ready" card beside it: the
   // primary the installer can act on, then AI Providers, then a text Dismiss.
   return (
