@@ -396,3 +396,16 @@ describe("AI Features — guidance", () => {
     expect(updates()).toEqual([{ guidance: "Keep it short." }]);
   });
 });
+
+it("keeps a hidden saved choice visible as the current value without offering it again", async () => {
+  settings = { ...DEFAULT_AI_PROVIDER_SETTINGS, jobs: { ...DEFAULT_AI_PROVIDER_SETTINGS.jobs, historyEditing: { model: "gpt-5.5" } } };
+  models = [model({ id: "gpt-5.5", displayName: "GPT-5.5", hidden: true }), model({ id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", isDefault: true })];
+  await render();
+  const picker = select("History editing model");
+  expect(picker.value).toBe("gpt-5.5");
+  const saved = [...picker.options].find((option) => option.value === "gpt-5.5")!;
+  expect(saved.hidden).toBe(true);
+  expect(saved.disabled).toBe(true);
+  expect(saved.textContent).toContain("saved choice");
+  expect(updates()).toEqual([]);
+});

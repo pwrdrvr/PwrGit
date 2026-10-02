@@ -53,6 +53,7 @@ import {
   type AiCodexSettings,
   type AiJobId,
   type AiProviderSettings,
+  type AiProviderSettingsSnapshot,
   type BuiltInAcpAgentId,
   type CodexAuthProfileList,
   type CodexLoginResult,
@@ -90,6 +91,7 @@ import type { AiProviderSettingsStore } from "./ai-provider-settings";
 import { listCodexModels, type CodexModelLister } from "./codex-model-client";
 import { buildCodexVersionAdvisory } from "./codex-version-advisory";
 import { codexModelCacheKey, type CodexModelCache } from "./codex-model-cache";
+import { codexDefaultMigration, codexModelChoices } from "./codex-model-policy";
 
 /** How long a discovery answer is served without re-probing. Settings'
  *  Refresh bypasses it; this only bounds how stale an unrefreshed answer gets,
@@ -147,7 +149,8 @@ export type ResolvedAgentJob = {
 };
 
 export type AiProviderServiceDependencies = {
-  settings: Pick<AiProviderSettingsStore, "read">;
+  settings: Pick<AiProviderSettingsStore, "read" | "update">;
+  onSettingsChanged?: (snapshot: AiProviderSettingsSnapshot) => void;
   discoverCodex: (params: DiscoverCodexCommandsParams) => Promise<CodexDiscoverySnapshot>;
   checkCodexAuth: (params: {
     command: string;
@@ -296,6 +299,11 @@ class DiscoveryCache<T> {
     this.values.clear();
     this.inFlight.clear();
   }
+
+  peek(key: string): T | undefined {
+    const cached = this.values.get(key);
+    return cached !== undefined && this.now() - cached.at < this.maxAgeMs ? cached.value : undefined;
+  }
 }
 
 export class AiProviderService {
@@ -318,6 +326,18 @@ export class AiProviderService {
 
   settings(profileId: ProfileId): AiProviderSettings {
     return this.deps.settings.read(profileId);
+  }
+
+  /** Normalize a settings write against the current cached runtime without
+   * probing. The command handler broadcasts the final settings once. */
+  migrateKnownCodexDefaults(profileId: ProfileId): AiProviderSettings {
+    const settings = this.settings(profileId);
+    const environment = this.deps.environmentFor(profileId, settings.codex);
+    const probe = this.codex.peek(this.codexKey(settings, environment));
+    if (probe?.selected === null || probe?.selected === undefined) return settings;
+    const key = codexModelCacheKey(probe.selected.command, environment.codexHome, probe.selected.version);
+    const models = this.codexModelLists.get(key) ?? this.deps.codexModelCache.load(key)?.models;
+    return models === undefined ? settings : this.migrateCodexDefaults(profileId, models, settings.codex, false);
   }
 
   // ---- Discovery ------------------------------------------------------------
@@ -357,24 +377,28 @@ export class AiProviderService {
     profileId: ProfileId,
     options: { refresh?: boolean } = {}
   ): Promise<Result<CodexModelList, PwrGitError>> {
-    const resolution = await this.codexResolution(this.settings(profileId), profileId, options.refresh === true);
+    const settings = this.settings(profileId);
+    const resolution = await this.codexResolution(settings, profileId, options.refresh === true);
     if (resolution.selected === null) {
       return err(agentError("codex_unavailable", "No usable Codex CLI was found."));
     }
     const { command, version } = resolution.selected;
     const key = codexModelCacheKey(command, resolution.environment.codexHome, version);
-    if (options.refresh !== true) {
-      // Empty is never a hit, for the reason the ACP path gives below: it
-      // would shadow a re-probe that might now succeed.
-      const memory = this.codexModelLists.get(key);
-      if (memory !== undefined && memory.length > 0) return ok({ models: memory });
-      const persisted = this.deps.codexModelCache.load(key);
-      if (persisted !== undefined && persisted.models.length > 0) {
-        this.codexModelLists.set(key, persisted.models);
-        return ok({ models: persisted.models });
-      }
-    }
     try {
+      if (options.refresh !== true) {
+        // Empty lists must not shadow a fresh probe that could now succeed.
+        const memory = this.codexModelLists.get(key);
+        if (memory !== undefined && memory.length > 0) {
+          this.migrateCodexDefaults(profileId, memory, settings.codex);
+          return ok({ models: codexModelChoices(memory) });
+        }
+        const persisted = this.deps.codexModelCache.load(key);
+        if (persisted !== undefined && persisted.models.length > 0) {
+          this.codexModelLists.set(key, persisted.models);
+          this.migrateCodexDefaults(profileId, persisted.models, settings.codex);
+          return ok({ models: codexModelChoices(persisted.models) });
+        }
+      }
       let listing = this.codexModelsInFlight.get(key);
       if (listing === undefined) {
         listing = this.deps.listCodexModels({
@@ -397,7 +421,8 @@ export class AiProviderService {
           discoveredAt: new Date(this.deps.now()).toISOString()
         });
       }
-      return ok({ models });
+      this.migrateCodexDefaults(profileId, models, settings.codex);
+      return ok({ models: codexModelChoices(models) });
     } catch (cause) {
       return err(agentError("codex_models_failed", agentErrorMessage(cause), cause));
     }
@@ -597,6 +622,13 @@ export class AiProviderService {
             )
           );
         }
+        // Availability does not start an app-server. Use this runtime/account's
+        // known catalog; an uncached list waits until a model picker asks.
+        const key = codexModelCacheKey(resolution.selected.command, resolution.environment.codexHome, resolution.selected.version);
+        const models = this.codexModelLists.get(key) ?? this.deps.codexModelCache.load(key)?.models;
+        const current = models === undefined ? settings : this.migrateCodexDefaults(profileId, models, settings.codex);
+        const codexJob = current.jobs[jobId];
+        const codexModel = isAiModelId(codexJob.model) ? codexJob.model : null;
         return ok({
           ...base,
           backend: {
@@ -611,9 +643,9 @@ export class AiProviderService {
             codexHome: resolution.environment.codexHome,
             authProfile: resolution.environment.authProfile
           },
-          model,
-          modelLabel: model === null ? null : (this.deps.codexModelCache.findLabel(model) ?? null),
-          effort: job.reasoning ?? null
+          model: codexModel,
+          modelLabel: codexModel === null ? null : (this.deps.codexModelCache.findLabel(codexModel) ?? null),
+          effort: codexJob.reasoning ?? null
         });
       }
 
@@ -677,6 +709,20 @@ export class AiProviderService {
   }
 
   // ---- Internals ----------------------------------------------------------
+
+  private migrateCodexDefaults(
+    profileId: ProfileId,
+    models: readonly CodexModelOption[],
+    expectedCodex: AiCodexSettings,
+    notify = true
+  ): AiProviderSettings {
+    const current = this.settings(profileId);
+    const patch = codexDefaultMigration(current, models, expectedCodex);
+    if (patch === undefined) return current;
+    const settings = this.deps.settings.update(profileId, patch);
+    if (notify) this.deps.onSettingsChanged?.({ profileId, settings });
+    return settings;
+  }
 
   private codexKey(settings: AiProviderSettings, environment: CodexEnvironment): string {
     return JSON.stringify([
@@ -778,7 +824,8 @@ export class AiProviderService {
 /** Production wiring: the agent kit's discovery, the short-lived listers, and
  *  one login manager whose children die with the service. */
 export function createAiProviderService(options: {
-  settings: Pick<AiProviderSettingsStore, "read">;
+  settings: Pick<AiProviderSettingsStore, "read" | "update">;
+  onSettingsChanged: (snapshot: AiProviderSettingsSnapshot) => void;
   acpModelCache: Pick<AcpModelCache, "load" | "save">;
   codexModelCache: Pick<CodexModelCache, "load" | "save" | "findLabel">;
   scratchDir: string;
@@ -790,6 +837,7 @@ export function createAiProviderService(options: {
   });
   return new AiProviderService({
     settings: options.settings,
+    onSettingsChanged: options.onSettingsChanged,
     discoverCodex: (params) => discoverCodexCommands(params),
     checkCodexAuth: (params) => checkCodexAuthStatus(params),
     discoverAcp: (discovery) => discoverLocalAcpAgentInstances(discovery),

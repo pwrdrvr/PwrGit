@@ -268,6 +268,11 @@ function JobDefaultRow(props: {
       }));
   const defaultModel = choices.find((choice) => choice.isDefault);
   const modelInChoices = choices.some((choice) => choice.id === modelValue);
+  // A hidden saved choice (for example GPT-5.5) must not silently display
+  // Default while main still runs it. Show the saved value without offering
+  // it as a new selection; migrations are persisted by the Codex service.
+  const savedHiddenCodex = isAcp ? undefined
+    : props.codexModels?.find((model) => model.id === modelValue && model.hidden);
   // A model the running provider's live list does not carry is left over from
   // another provider or a retired release. Shown as Default — and cleared, so
   // the value stored is the value shown is the value that runs. Only against a
@@ -363,7 +368,7 @@ function JobDefaultRow(props: {
               aria-disabled={blocked}
               className="settings-select"
               disabled={unavailable || modelLoading}
-              value={modelLoading ? LOADING : modelInChoices ? modelValue : ""}
+              value={modelLoading ? LOADING : modelInChoices || savedHiddenCodex !== undefined ? modelValue : ""}
               onChange={(event) => {
                 if (blocked) return;
                 const next = event.target.value;
@@ -390,6 +395,11 @@ function JobDefaultRow(props: {
                   <option value="">
                     {defaultModel === undefined ? "Default" : `Default (${defaultModel.label})`}
                   </option>
+                  {savedHiddenCodex !== undefined && (
+                    <option value={savedHiddenCodex.id} hidden disabled>
+                      {modelLabel(savedHiddenCodex)} (saved choice)
+                    </option>
+                  )}
                   {choices.map((choice) => (
                     <option key={choice.id} value={choice.id}>
                       {choice.label}

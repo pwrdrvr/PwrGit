@@ -30,6 +30,7 @@ function fixture() {
   const store = new AiProviderSettingsStore(db);
   const deps = {
     settings: store,
+    onSettingsChanged: (snapshot) => onChanged(snapshot),
     discoverCodex: vi.fn<Deps["discoverCodex"]>(async () => ({
       candidates: [
         { command: "/usr/local/bin/codex", source: "path", executable: true, selected: true }
@@ -79,6 +80,22 @@ function fixture() {
 }
 
 describe("aiProviders handlers", () => {
+  it("normalizes saved defaults against the known catalog and broadcasts the final settings once", async () => {
+    const { bus, deps, store, work, onChanged } = fixture();
+    deps.listCodexModels.mockResolvedValue([{
+      id: "gpt-6.1-sol", model: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", description: "", hidden: false,
+      isDefault: true, supportedReasoningEfforts: ["low", "high"], defaultReasoningEffort: "low"
+    }]);
+    await bus.dispatch("aiProviders:codexModels", { profileId: work.id });
+    onChanged.mockClear();
+    const result = await bus.dispatch("aiProviders:update", { profileId: work.id,
+      patch: { jobs: { commitMessage: { model: "gpt-6-sol", reasoning: "none" } } } });
+    expect(result).toMatchObject({ ok: true, value: { settings: { jobs: { commitMessage: { model: "gpt-6.1-sol" } } } } });
+    expect(store.read(work.id).jobs.commitMessage).toEqual({ model: "gpt-6.1-sol" });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(deps.listCodexModels).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses every command for a profile that does not exist, before probing anything", async () => {
     const { bus, deps } = fixture();
     const profileId = "ghost";

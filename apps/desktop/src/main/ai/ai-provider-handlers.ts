@@ -75,7 +75,8 @@ export function registerAiProviderHandlers(
   bus.register("aiProviders:update", (req) => {
     const profile = knownProfile(profiles, req.profileId);
     if (!profile.ok) return profile;
-    const settings = store.update(profile.value, sanitizeAiProviderSettingsPatch(req.patch));
+    store.update(profile.value, sanitizeAiProviderSettingsPatch(req.patch));
+    const settings = service.migrateKnownCodexDefaults(profile.value);
     const snapshot = { profileId: profile.value, settings };
     options.onChanged(snapshot);
     return ok(snapshot);
