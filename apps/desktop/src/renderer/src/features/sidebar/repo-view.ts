@@ -296,6 +296,9 @@ export type PullSummary =
       /** What the branch it tracks also has for it. The source wins the
        *  badge, so this one is said in the badge's words only. */
       trackedBehind: number;
+      /** What a push would carry to the branch it tracks. The row's own `↑`
+       *  steps aside for the source's, so this too lives in the words. */
+      trackedAhead: number;
     }
   | { kind: "tracked"; behind: number };
 
@@ -307,7 +310,8 @@ export function worktreePull(worktree: Worktree): PullSummary | null {
       behind: source.behind,
       label: source.label,
       ahead: source.ahead,
-      trackedBehind: worktree.behind
+      trackedBehind: worktree.behind,
+      trackedAhead: worktree.ahead
     };
   }
   return worktree.behind > 0

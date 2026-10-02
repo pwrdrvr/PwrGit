@@ -18,12 +18,17 @@ export function pullSentence(pull: PullSummary, branch: string): string {
   }
   const own =
     pull.ahead > 0 ? `, and has ${commits(pull.ahead)} it doesn't` : "";
-  // The badge counts the source only; when the fork lags too, say so here
-  // rather than drop it (Post-ship 2b).
+  // The badge counts the source only; what the branch it tracks has for it,
+  // or waits on from it, is said here rather than dropped (Post-ship 2b).
+  const { trackedBehind: down, trackedAhead: up } = pull;
   const tracked =
-    pull.trackedBehind > 0
-      ? `\n${commits(pull.trackedBehind)} behind the branch it tracks`
-      : "";
+    down > 0 && up > 0
+      ? `\n${commits(down)} behind the branch it tracks, and ${up} to push to it`
+      : down > 0
+        ? `\n${commits(down)} behind the branch it tracks`
+        : up > 0
+          ? `\n${commits(up)} to push to the branch it tracks`
+          : "";
   return `${branch} is ${commits(pull.behind)} behind ${pull.label}, the source of this fork${own}${tracked}`;
 }
 

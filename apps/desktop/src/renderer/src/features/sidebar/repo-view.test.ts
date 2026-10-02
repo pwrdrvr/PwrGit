@@ -755,20 +755,29 @@ describe("repoPrimaryPull", () => {
         behind: 25,
         label: "upstream/main",
         ahead: 0,
-        trackedBehind: 0
+        trackedBehind: 0,
+        trackedAhead: 0
       }
     });
   });
 
   it("shows the source when both are behind, since that is what Pull fetches", () => {
-    const w = wt({ id: "p", branch: "main", isPrimary: true, behind: 2, source: source(25) });
+    const w = wt({
+      id: "p",
+      branch: "main",
+      isPrimary: true,
+      behind: 2,
+      ahead: 3,
+      source: source(25)
+    });
     expect(worktreePull(w)).toEqual({
       kind: "source",
       behind: 25,
       label: "upstream/main",
       ahead: 0,
       // Kept for the badge's words: the source wins the count, not the facts.
-      trackedBehind: 2
+      trackedBehind: 2,
+      trackedAhead: 3
     });
   });
 

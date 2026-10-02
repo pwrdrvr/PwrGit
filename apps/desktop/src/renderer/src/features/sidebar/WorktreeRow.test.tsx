@@ -132,6 +132,8 @@ describe("WorktreeRow — what Pull would bring in", () => {
     // origin's count is not what the header shows on this branch.
     expect(markup).not.toContain("↑5");
     expect(markup).not.toContain("badge-text--ok");
+    // ...but it is not dropped: the badge's words carry what a push would.
+    expect(markup).toContain("5 commits to push to the branch it tracks");
   });
 
   it("keeps origin's ↑ where the source has nothing to say", () => {
