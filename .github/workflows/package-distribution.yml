@@ -92,11 +92,19 @@ jobs:
           name: package-manager-submissions
           path: distribution
       - name: Install the official WinGet client
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          if (Get-Command winget -ErrorAction SilentlyContinue) { winget --version }
           Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery
-          Repair-WinGetPackageManager -AllUsers
+          # Without -Latest, Repair only repairs the preinstalled client, which
+          # can validate a newer schema against its older embedded schema IDs.
+          Repair-WinGetPackageManager -AllUsers -Latest -Force
+          Assert-WinGetPackageManager -Latest
+          winget --version
+          if ($LASTEXITCODE -ne 0) { throw 'The repaired WinGet client is not executable' }
       - name: Validate manifest, signed installer, install and upgrade
         shell: pwsh
         run: ./scripts/release/verify-winget-install.ps1 -Directory distribution
