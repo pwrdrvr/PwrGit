@@ -110,7 +110,9 @@ describe("WorktreeRow — what Pull would bring in", () => {
   it("keeps the tracked count's own look when there is no source to show", () => {
     const markup = render(worktree({ behind: 2 }));
     expect(markup).toContain("badge-text badge-text--warn");
-    expect(markup).toContain("2 behind upstream");
+    // Git's sense of "upstream", said in words: on a fork "upstream" is the
+    // source's remote, which this count is not about.
+    expect(markup).toContain("2 behind the branch it tracks");
     expect(markup).not.toContain("badge--source");
   });
 

@@ -83,7 +83,7 @@ export function trackingLabel(branch: LocalBranchSummary): string {
 /** What an empty filtered Branches tab says, per status. */
 const EMPTY_STATUS: Record<Exclude<BranchStatusFilter, "all">, string> = {
   ahead: "No branches have commits to push.",
-  behind: "No branches are behind their upstream.",
+  behind: "No branches are behind the branch they track.",
   gone: "No branches have a deleted upstream.",
   unpublished: "No branches are local only."
 };

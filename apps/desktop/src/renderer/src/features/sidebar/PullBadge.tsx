@@ -14,7 +14,7 @@ const ROW_FIT_STEPS = ["fit-glyph", "fit-gone"] as const;
 export function pullSentence(pull: PullSummary, branch: string): string {
   const commits = (n: number): string => (n === 1 ? "1 commit" : `${n} commits`);
   if (pull.kind === "tracked") {
-    return `${branch} is ${commits(pull.behind)} behind its upstream`;
+    return `${branch} is ${commits(pull.behind)} behind the branch it tracks`;
   }
   const own =
     pull.ahead > 0 ? `, and has ${commits(pull.ahead)} it doesn't` : "";
@@ -88,7 +88,11 @@ export function PullBadge({
         >
           ↓{pull.behind}
         </span>
-        <span className="a11y-sr-only">{pull.behind} behind upstream</span>
+        {/* Git's "upstream", said in words: on a fork, "upstream" is the
+            source's remote, which this count is not about (Post-ship 2f). */}
+        <span className="a11y-sr-only">
+          {pull.behind} behind the branch it tracks
+        </span>
       </>
     );
   }

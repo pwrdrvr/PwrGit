@@ -290,7 +290,7 @@ describe("RepoRefsSections branch counts", () => {
     expect(button("Show 2 branches with commits to push")?.textContent).toBe(
       "2 ahead"
     );
-    expect(button("Show 1 branch behind their upstream")?.textContent).toBe(
+    expect(button("Show 1 branch behind the branch they track")?.textContent).toBe(
       "1 behind"
     );
     expect(

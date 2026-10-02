@@ -536,7 +536,7 @@ export function RepoRefsSections({
                   countChip(
                     "behind",
                     `${counts.behind} behind`,
-                    `${plural(counts.behind, "branch")} behind their upstream`
+                    `${plural(counts.behind, "branch")} behind the branch they track`
                   )}
                 {/* Branches whose upstream was deleted. They rank last in the
                     slice, so without this a repository full of finished work

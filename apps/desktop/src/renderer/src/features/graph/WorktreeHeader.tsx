@@ -850,11 +850,11 @@ export function WorktreeHeader({
       () => dispatch("remote:fetch", { worktreeId: id }),
       { text: "fetched", tone: "muted" },
       // Name what was asked: on a fork a plain Fetch asks the source too, and
-      // a receipt that read the same either way could not say so.
+      // a receipt that read the same either way could not say so. Only what
+      // was asked: "refs and tags are up to date" was said even after a fetch
+      // brought in 25 commits. The chip says what moved (Post-ship 2f).
       ({ remotes }) =>
-        remotes.length === 0
-          ? "Fetched — refs and tags are up to date"
-          : `Fetched ${remotes.join(" + ")} — refs and tags are up to date`,
+        remotes.length === 0 ? "Fetched" : `Fetched ${remotes.join(" + ")}`,
       "Fetch"
     );
   };

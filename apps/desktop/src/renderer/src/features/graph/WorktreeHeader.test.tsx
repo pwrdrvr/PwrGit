@@ -1049,9 +1049,9 @@ describe("WorktreeHeader settled status card", () => {
   // either way could not tell the user their upstream was brought in.
   it("names the remotes a Fetch asked on its receipt", async () => {
     await press("Fetch", ok({ remotes: ["origin", "upstream"] }));
-    expect(card()?.textContent).toContain(
-      "Fetched origin + upstream — refs and tags are up to date"
-    );
+    expect(card()?.textContent).toContain("Fetched origin + upstream");
+    // It said nothing moved even after a fetch brought in 25 commits.
+    expect(card()?.textContent).not.toContain("refs and tags are up to date");
   });
 
   // Escape latches the trigger inside `useViewportTooltip` so that restoring

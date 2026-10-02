@@ -494,7 +494,7 @@ test("status badges keep their glyph visible and their meaning readable", async 
   // ↓2 alone reached a screen reader as "2", jammed onto the end of the branch
   // name — a count whose meaning lived entirely in an arrow and a colour.
   await expect(
-    window.getByRole("treeitem", { name: /2 behind upstream/ })
+    window.getByRole("treeitem", { name: /2 behind the branch it tracks/ })
   ).toHaveCount(1, { timeout: 20_000 });
 
   // ...and the badge itself still paints exactly "↓2". The first cut of this
