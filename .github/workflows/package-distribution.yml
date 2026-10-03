@@ -5,7 +5,7 @@ name: Validate package manager distribution
 # explicitly because events produced by GITHUB_TOKEN do not start workflows.
 on:
   release:
-    types: [published, edited]
+    types: [published, released, edited]
   workflow_dispatch:
     inputs:
       audit_only:
@@ -23,6 +23,8 @@ on:
     secrets:
       DISTRIBUTION_READ_TOKEN:
         required: false
+      HOMEBREW_TAP_DISPATCH_TOKEN:
+        required: false
   schedule:
     - cron: "41 11 * * *"
   pull_request:
@@ -32,6 +34,7 @@ on:
       - docs/package-manager-distribution.md
       - .agents/skills/release/**
       - scripts/release/verify-winget-install.ps1
+      - scripts/release/sync-homebrew*
       - .github/workflows/package-distribution.yml
       - .github/workflows/release.yml
 
@@ -53,6 +56,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
@@ -87,6 +91,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
@@ -137,8 +142,44 @@ jobs:
             ${{ runner.temp }}/distribution/distribution-status.json
           retention-days: 14
           if-no-files-found: error
-      - name: Require repositories to have caught up on daily checks
-        if: github.event_name == 'schedule'
+
+  homebrew:
+    needs: [audit, prepare]
+    if: ${{ inputs.audit_only != true && github.event_name != 'pull_request' && (github.event_name == 'release' || github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+          ref: main
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Publish Homebrew through the tap and verify main
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
+          HOMEBREW_TAP_DISPATCH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+          STABLE_TAG: ${{ needs.audit.outputs.stable_tag }}
+        run: |
+          set -euo pipefail
+          version="${STABLE_TAG#v}"
+          node scripts/release/sync-homebrew.mjs "$version"
+
+  freshness:
+    needs: [prepare, homebrew]
+    if: ${{ inputs.audit_only != true && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Compare channel publication after Homebrew synchronization
         env:
           GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
         run: node scripts/package-manager-release.mjs audit --check

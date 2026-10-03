@@ -9,9 +9,14 @@ installation. It audits every release publication/edit, including prereleases,
 daily and by manual dispatch; preparation/install checks require an eligible
 stable release. Use `-f audit_only=true` to retain a remote comparison without
 downloads/installations; its PR gate validates changes to the generator. The
-daily comparison fails on version drift. Submission, tap updates and client
-publication verification follow [the distribution runbook](../../docs/package-
-manager-distribution.md); generated workflow artifacts alone do not establish
+daily comparison fails on version drift after Homebrew synchronization. The
+`homebrew` job dispatches the tap publisher after validation and verifies tap
+`main` reached Stable Latest, with a direct tap run link on failure. The tap
+commits validated cask updates automatically; routine releases have no bump PR.
+Immediate dispatch needs `HOMEBREW_TAP_DISPATCH_TOKEN` (fine-grained PAT for
+`pwrdrvr/homebrew-tap` only, Actions write). The public-read token below cannot
+dispatch; the tap also reconciles every 15 minutes. Winget submission and client
+publication verification follow [the distribution runbook](../../docs/package-manager-distribution.md); generated workflow artifacts alone do not establish
 publication. `release.yml` reuses the same workflow in read-only mode before
 preparation and after publication, with stage-specific artifacts. Preflight
 blockers stop preparation; follow-up blockers require an owned retry without

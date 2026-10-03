@@ -9,15 +9,15 @@ const workflow = readFileSync(new URL("../.github/workflows/release.yml", import
 // be represented in the fixture rather than treating prepare's success as enough.
 // https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions
 // Actionlint separately validates the complete workflow syntax.
-function eligible(job, { github, needs, cancelled = false, ancestors }) {
-  const body = workflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
+function eligible(job, { github, needs, inputs = {}, cancelled = false, ancestors }, source = workflow) {
+  const body = source.split(`\n  ${job}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
   const expression = body?.match(/^    if: (?:>-\s*\n\s*)?\$\{\{([\s\S]*?)\}\}/m)?.[1];
   if (!expression) throw new Error(`Missing job condition for ${job}`);
   const success = () => ancestors.every((result) => result === "success");
   if (!/\b(?:success|failure|always|cancelled)\s*\(/.test(expression) && !success()) return false;
   const js = expression.replace(/needs\.([\w-]+)/g, 'needs["$1"]')
     .replace("github.event.pull_request.labels.*.name", "github.event.pull_request.labels.map(label => label.name)");
-  return runInNewContext(js, { github, needs, cancelled: () => cancelled, success,
+  return runInNewContext(js, { github, needs, inputs, cancelled: () => cancelled, success,
     contains: (items, value) => items.includes(value) });
 }
 
@@ -60,4 +60,21 @@ test("failed preflight and cancellation do not enter signing", () => {
   expect(eligible("windows-prepare", fixture)).toBe(false);
   expect(eligible("windows-sign", fixture)).toBe(false);
   expect(eligible("windows-sign", context({ cancelled: true }))).toBe(false);
+});
+
+const distributionWorkflow = readFileSync(new URL("../.github/workflows/package-distribution.yml", import.meta.url), "utf8");
+
+test.each(["workflow_dispatch", "release", "schedule"])("read-only package audit cannot dispatch Homebrew (%s)", (event) => {
+  const fixture = context({ event, audit: "success" });
+  fixture.github.ref = "refs/heads/main";
+  // Successful dependencies exercise the explicit audit-only guard instead of
+  // passing solely because preparation happens to be skipped by today's DAG.
+  expect(eligible("homebrew", { ...fixture, inputs: { audit_only: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("homebrew", { ...fixture, inputs: { audit_only: false } }, distributionWorkflow)).toBe(true);
+});
+
+test("PR package validation cannot publish Homebrew", () => {
+  const fixture = context({ audit: "success" });
+  fixture.github.ref = "refs/heads/main";
+  expect(eligible("homebrew", { ...fixture, inputs: { audit_only: false } }, distributionWorkflow)).toBe(false);
 });

@@ -39,6 +39,7 @@ import { readPullChoice, writePullChoice, type PullChoice } from "./pull-choice"
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
+import { ForkTrackingRecoveryDialog } from "../sidebar/ForkTrackingRecoveryDialog";
 import { PublishBranchDialog } from "./PublishBranchDialog";
 import { GitForkIcon, pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 import {
@@ -1213,8 +1214,12 @@ export function WorktreeHeader({
   const forkChoice = forkChoiceOf(forkStatus);
   /** Pull is split: from the live read, or seeded from the stored source
    *  while that read is out. Only the live read can run anything. */
-  const split = forkChoice !== null || seedSplit;
-  const choice: PullChoice = split ? pullChoice : "tracked";
+  const trackingRepair = forkStatus?.trackingRepair ?? null;
+  const sourceSplit = forkChoice !== null || seedSplit;
+  const split = sourceSplit || trackingRepair !== null;
+  // A repair-only dropdown has no source operation. Keep plain Pull usable
+  // without discarding the repository's saved choice for after repair.
+  const choice: PullChoice = sourceSplit ? pullChoice : "tracked";
   const shownSource = forkStatus?.source ?? seed;
   const localChip = baseChip(state, worktree, shownSource);
   // "up to date" is only claimed once the remote has confirmed it. Until
@@ -1417,7 +1422,7 @@ export function WorktreeHeader({
     // and a plain pull in its place would do something the arrow does not
     // say. Hold the click for the read, which lands within a frame or two of
     // the selection, rather than drop it.
-    if (forkChoice === null && split && run !== "tracked") {
+    if (forkChoice === null && seedSplit && run !== "tracked") {
       pendingPull.current = { key: checkKey, from };
       return;
     }
@@ -1439,7 +1444,18 @@ export function WorktreeHeader({
     runPull(next, pullButton.current);
   };
   const pullMenu =
-    forkChoice === null
+    trackingRepair !== null
+      ? {
+          note: <>{trackingRepair.branch} tracks {trackingRepair.upstream}, the fork's parent.</>,
+          actions: [{
+            key: "repair-tracking",
+            title: <>Track <code>{trackingRepair.target}</code></>,
+            detail: "Use your existing fork for Pull and Push. Changes tracking only.",
+            onSelect: () => setForkPrompt({ reason: `${trackingRepair.branch} tracks ${trackingRepair.upstream} instead of your fork.` })
+          }],
+          choices: []
+        }
+      : forkChoice === null
       ? null
       : pullMenuRows(forkChoice, behind, choice, {
           pick: pickPullChoice,
@@ -1777,7 +1793,23 @@ export function WorktreeHeader({
           }}
         />
       )}
-      {forkPrompt !== null && (
+      {forkPrompt?.reason !== undefined && (
+        <ForkTrackingRecoveryDialog
+          repo={repo}
+          worktreeId={worktree.id}
+          reason={forkPrompt.reason}
+          onClose={() => setForkPrompt(null)}
+          onRepaired={() => {
+            setForkPrompt(null);
+            showFlash({ text: "tracking fixed — Push again to send to your fork", tone: "ok" }, 4000);
+          }}
+          onForked={() => {
+            setForkPrompt(null);
+            showFlash({ text: "origin is now your fork", tone: "ok" }, 2600);
+          }}
+        />
+      )}
+      {forkPrompt !== null && forkPrompt.reason === undefined && (
         <ForkCheckoutDialog
           profileId={repo.profileId}
           repoId={repo.id}

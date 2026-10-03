@@ -36,6 +36,7 @@ import type {
   ForkPreflight,
   ForkProgress,
   ForkStatus,
+  ForkTrackingRepair,
   ForkSyncOutcome,
   ForkSyncPush,
   RepoIdentity,
@@ -1695,6 +1696,17 @@ export interface Commands {
   "remote:inspectReset": {
     req: { worktreeId: string; remoteRef: string };
     res: RemoteResetPreview;
+  };
+  /** Repair a branch left tracking the parent after origin was renamed.
+   *  Revalidates the reviewed tracking and forge relationship; moves no refs. */
+  "remote:repairForkTracking": {
+    req: { worktreeId: string; branch: string; upstream: string };
+    res: null;
+  };
+  /** Local inspection after a denied push: origin may already be the fork. */
+  "remote:inspectForkTracking": {
+    req: { worktreeId: string };
+    res: ForkTrackingRepair | null;
   };
   /**
    * The checked-out branch against its counterpart on the fork's source, or

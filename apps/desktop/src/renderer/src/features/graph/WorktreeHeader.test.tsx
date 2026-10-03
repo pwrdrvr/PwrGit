@@ -13,6 +13,7 @@ import {
 } from "vitest";
 import {
   err,
+  forkTrackingRepair,
   ok,
   type ForkStatus,
   type ForkSyncOutcome,
@@ -2067,8 +2068,70 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     await act(async () => caret()?.click());
   };
 
+  it.each([
+    [null, 0], [null, 3], ["source", 0], ["source", 3], ["tracked", 0], ["tracked", 3]
+  ] as const)("runs plain Pull during tracking repair with saved choice %s and %i incoming commits", async (saved, behind) => {
+    if (saved !== null) window.localStorage.setItem("pwrgit.pullChoice.repo-1", saved);
+    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    answer({ ...behindSource(), source: null,
+      tracked: { ...behindSource().tracked!, label: "upstream/main", remote: "upstream", ref: "refs/remotes/upstream/main", behind },
+      trackingRepair: repair
+    }, {
+      "remote:pull": ok({ fastForwarded: behind > 0, stashed: false, reappliedWithConflicts: false })
+    });
+    await remount({ ...worktree, behind }, { ...level, behind });
+    expect(caret()).not.toBeNull();
+    await act(async () => pull()!.click());
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:pull")).toEqual([
+      ["remote:pull", { worktreeId: worktree.id }]
+    ]);
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:syncFork" || name === "remote:repairForkTracking")).toHaveLength(0);
+    expect(window.localStorage.getItem("pwrgit.pullChoice.repo-1")).toBe(saved);
+    await openMenu();
+    expect(row("Track origin/main")).toBeDefined();
+  });
+
+  it("keeps the Pull dropdown on a fork tracking its parent and offers tracking repair", async () => {
+    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    const renamed = { ...behindSource(), source: null,
+      tracked: { ...behindSource().tracked!, label: "upstream/main", remote: "upstream", ref: "refs/remotes/upstream/main" },
+      trackingRepair: repair };
+    answer(renamed, {
+      "repo:refreshIdentities": ok({ changed: 0, outcomes: [] }),
+      "remote:inspectForkTracking": ok(repair),
+      "remote:repairForkTracking": ok(null)
+    });
+    await remount();
+    expect(caret()).not.toBeNull();
+    await openMenu();
+    const fix = row("Track origin/main");
+    expect(fix).toBeDefined();
+    await act(async () => fix!.click());
+    expect(document.querySelector(".fork-checkout-dialog")?.textContent).toContain("Origin already points at your fork");
+    const button = [...document.querySelectorAll<HTMLButtonElement>(".fork-checkout-dialog button")].find((node) => node.textContent === "Track origin/main")!;
+    await act(async () => button.click());
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:repairForkTracking", {
+      worktreeId: "worktree-1", branch: "main", upstream: "upstream/main"
+    });
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "repo:forkCheckout" || name === "remote:syncFork")).toHaveLength(0);
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
+  });
+
+  it("rechecks the missing Pull dropdown when fork metadata arrives after the first status read", async () => {
+    answer(null);
+    await remount();
+    expect(caret()).toBeNull();
+    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    answer({ ...behindSource(), source: null, trackingRepair: repair });
+    await act(async () => bridge.handlers.get("repo:identityChanged")?.({
+      profileId: repo.profileId, identities: [{ repoId: repo.id, identity: {} }]
+    }));
+    expect(caret()).not.toBeNull();
+    await openMenu();
+    expect(row("Track origin/main")).toBeDefined();
   });
 
   it("reads the chip against the source, where the tracked branch says nothing", async () => {
@@ -2732,6 +2795,62 @@ describe("WorktreeHeader offers a fork when this account cannot push", () => {
     )!;
     await act(async () => push.click());
     expect(document.querySelector(".fork-checkout-dialog")).toBeNull();
+  });
+
+  it("keeps fork checkout available after denied Push on someone else's read-only fork", async () => {
+    const identity = { ...readOnly,
+      parent: { nameWithOwner: "team/dugite", url: "https://github.com/team/dugite" }
+    };
+    const own = await mount(identity);
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "remote:push") return Promise.resolve(err({
+        kind: "remote", code: "push_denied", message: "Permission to team/dugite.git denied."
+      }));
+      if (name === "remote:activities") return Promise.resolve(ok([]));
+      if (name === "repo:refreshIdentities") return Promise.resolve(ok({ changed: 0, outcomes: [] }));
+      if (name === "remote:inspectForkTracking") return Promise.resolve(ok(forkTrackingRepair(identity, [
+        { name: "origin", fetchUrl: "git@github.com:desktop/dugite.git", pushUrl: "git@github.com:desktop/dugite.git" },
+        { name: "upstream", fetchUrl: "git@github.com:team/dugite.git", pushUrl: "git@github.com:team/dugite.git" }
+      ], { name: "main", upstream: "upstream/main" })));
+      return new Promise(() => undefined);
+    });
+    const push = own.querySelector<HTMLButtonElement>('[aria-label="Push"]')!;
+    await act(async () => push.click());
+    expect(bridge.dispatch).toHaveBeenCalledWith("repo:forkCheckoutPreflight", expect.objectContaining({ repoId: repo.id }));
+    expect(own.querySelector(".fork-checkout-dialog")?.textContent).not.toContain("Use your existing fork");
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:repairForkTracking")).toHaveLength(0);
+  });
+
+  it("offers tracking repair after a denied Push when origin is already the user's fork", async () => {
+    const own = await mount();
+    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "remote:push") return Promise.resolve(err({
+        kind: "remote", code: "push_denied",
+        message: "ERROR: Permission to team/widget.git denied to me."
+      }));
+      if (name === "remote:activities") return Promise.resolve(ok([]));
+      if (name === "repo:refreshIdentities") return Promise.resolve(ok({ changed: 1, outcomes: [] }));
+      if (name === "remote:inspectForkTracking") return Promise.resolve(ok(repair));
+      if (name === "remote:repairForkTracking") return Promise.resolve(ok(null));
+      return new Promise(() => undefined);
+    });
+    const push = [...own.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "Push")!;
+    await act(async () => push.click());
+    const dialog = own.querySelector(".fork-checkout-dialog");
+    expect(dialog?.textContent).toContain("Use your existing fork");
+    expect(dialog?.textContent).toContain("Permission to team/widget.git denied");
+    expect(bridge.dispatch).toHaveBeenCalledWith("repo:refreshIdentities", {
+      profileId: repo.profileId, repoId: repo.id, force: true
+    });
+    const repairButton = [...dialog!.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Track origin/main")!;
+    await act(async () => repairButton.click());
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:repairForkTracking", {
+      worktreeId: worktree.id, branch: "main", upstream: "upstream/main"
+    });
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "repo:forkCheckoutPreflight" || name === "repo:forkCheckout")).toHaveLength(0);
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:push")).toHaveLength(1);
+    expect(own.textContent).toContain("tracking fixed");
   });
 });
 

@@ -416,13 +416,35 @@ an unsigned preview or use mutable Latest aliases in manifests. Recheck current
 official Winget schema and Homebrew DSL before each submission.
 
 Submit the generated one-version Winget manifest set to `microsoft/winget-pkgs`
-under the proposed ID after rechecking identity/history. Update the cask in
-`pwrdrvr/homebrew-tap` by updating existing registration PR #8 while it is
-pending; its cask and `bump-pwrgit.yml` are not yet on the tap default branch.
-After registration lands, verify the workflow exists remotely before dispatching
-it or reuse its pending validated update PR; inspect its CI before merging. Use
-the authorized maintainer account: PwrGit's workflow token cannot write to
-another repository. Retain submission URLs and do not duplicate pending PRs.
+under the proposed ID after rechecking identity/history. Microsoft still requires an upstream submission and
+review; retain its URL and reuse pending submissions.
+
+Homebrew publication belongs to `pwrdrvr/homebrew-tap`. Its `bump-pwrgit.yml`
+validates both Mac architectures and commits the cask to tap `main` automatically.
+Initial registration requires merging the setup PR once; subsequent promotions
+require no routine bump PR, workflow approval or merge. The product's distribution
+workflow dispatches the tap and waits for publication, reporting a direct tap run
+link and blocker in its job summary. Verify its `homebrew` job instead of assuming
+that generating manifests published the cask.
+
+Immediate cross-repository dispatch uses `HOMEBREW_TAP_DISPATCH_TOKEN`: a
+fine-grained PAT for `pwrdrvr/homebrew-tap` only, Actions write permission. The
+public-read `DISTRIBUTION_READ_TOKEN` cannot dispatch. The tap commits with its own
+`GITHUB_TOKEN`; no cross-repository contents-write token is needed. A 15-minute
+schedule reconciles UI promotions and missed dispatches, subject to GitHub's
+schedule delays. When promoting through this skill, use the maintainer's existing
+CLI authentication to dispatch immediately even if that secret is not configured:
+
+```bash
+gh workflow run bump-pwrgit.yml --repo pwrdrvr/homebrew-tap --ref main -f version=<version>
+```
+
+Track this run through validation and verify the default-branch cask version.
+Do not open another Homebrew update PR as a fallback. If publication fails, report
+the failed step/run URL, target and still-published version; fix the cause and
+retry the same workflow once. Stop on a repeated failure or missing credential,
+retaining the precise next action. Read the distribution runbook for initial
+setup, dispatch-token configuration and publication checks.
 
 Require `winget validate`, native silent install/uninstall, user-scope registry
 and payload checks, tap style/online audit, Intel and Apple Silicon installs on
@@ -432,7 +454,7 @@ and older-to-newer upgrades on subsequent versions. Use `brew upgrade --cask
 as unavailable when no prior indexed package exists. Use the dedicated lab for
 headed launch and retained-settings/repository checks.
 
-After merges, rerun `pnpm distribution:audit --check`, refresh Winget's source
+After channel publication, rerun `pnpm distribution:audit --check`, refresh Winget's source
 and Homebrew's tap, inspect `winget show --id PwrDrvr.PwrGit --exact --source
 winget` and `brew info --cask pwrdrvr/tap/pwrgit`, then verify fresh client
 install/upgrade. Repository merge does not prove Winget index or Homebrew cache

@@ -191,16 +191,17 @@ gh release edit vX.Y.Z --repo pwrdrvr/PwrGit --latest --prerelease=false
 ```
 
 Before preparing every release, run `pnpm distribution:audit` and record remote
-Winget/Homebrew versions and pending submissions. After stable promotion,
-dispatch `package-distribution.yml`, submit the verified updates and validate
-install, upgrade and client publication using [the distribution
-runbook](package-manager-distribution.md). Rerun and retain the remote audit
-after every publication; prereleases leave both channels on Stable Latest.
-`package-distribution.yml -f audit_only=true` verifies organization-token public
-reads without downloading/installing. Require complete searches and keep
-throttling/incomplete results as owned blockers. Pending review or index/cache
-propagation must retain its URL, owner and next action and must not be called
-live.
+Winget/Homebrew versions and pending submissions. After stable promotion, dispatch
+`package-distribution.yml`. Its Homebrew job dispatches the tap publisher, waits
+for tap `main` to reach the target, and reports a direct run link if it fails;
+routine Homebrew bumps require no PR approval or merge. Submit Winget updates
+and validate install, upgrade and client publication using [the distribution runbook](package-manager-distribution.md).
+Rerun and retain the remote audit after every publication; prereleases leave
+both channels on Stable Latest. `package-distribution.yml -f audit_only=true`
+verifies organization-token public reads without downloading/installing or
+dispatching the tap publisher. Require complete searches and keep throttling
+or incomplete results as owned blockers. Pending review or index/cache
+propagation must retain its URL, owner and next action and must not be called live.
 
 `releases/latest/download/` resolves only for the release marked Latest, so the
 stable aliases start working at this step and not before. After promoting the
