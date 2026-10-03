@@ -7,11 +7,17 @@ promoted Stable Latest, generates manifests from downloaded and hashed artifacts
 and validates macOS signatures/architectures plus native Winget installation. It
 runs on stable release publication/edit, daily and by manual dispatch; its PR gate
 validates changes to the generator. The daily comparison fails on version drift.
-Submission, tap updates and client publication verification follow
+The `homebrew` job dispatches the tap publisher after validation and verifies
+tap `main` reached Stable Latest, with a direct tap run link on failure. The tap
+commits validated cask updates automatically; routine releases have no bump PR.
+Immediate dispatch needs `HOMEBREW_TAP_DISPATCH_TOKEN` (fine-grained PAT for
+`pwrdrvr/homebrew-tap` only, Actions write). The public-read token below cannot
+dispatch; the tap also reconciles every 15 minutes. Winget submission and final
+client publication verification follow
 [the distribution runbook](../../docs/package-manager-distribution.md); generated
 workflow artifacts alone do not establish publication.
 
-Distribution audits optionally use repository Actions secret
+Distribution audits prefer the organization Actions secret shared with PwrGit,
 `DISTRIBUTION_READ_TOKEN`, an expiring fine-grained PAT with public-repository
 access only and no additional permissions. Without it (including fork PRs), they
 use `GITHUB_TOKEN`. It is used only for read-only comparisons/generation, not
