@@ -1215,8 +1215,11 @@ export function WorktreeHeader({
   /** Pull is split: from the live read, or seeded from the stored source
    *  while that read is out. Only the live read can run anything. */
   const trackingRepair = forkStatus?.trackingRepair ?? null;
-  const split = forkChoice !== null || seedSplit || trackingRepair !== null;
-  const choice: PullChoice = split ? pullChoice : "tracked";
+  const sourceSplit = forkChoice !== null || seedSplit;
+  const split = sourceSplit || trackingRepair !== null;
+  // A repair-only dropdown has no source operation. Keep plain Pull usable
+  // without discarding the repository's saved choice for after repair.
+  const choice: PullChoice = sourceSplit ? pullChoice : "tracked";
   const shownSource = forkStatus?.source ?? seed;
   const localChip = baseChip(state, worktree, shownSource);
   // "up to date" is only claimed once the remote has confirmed it. Until
@@ -1419,7 +1422,7 @@ export function WorktreeHeader({
     // and a plain pull in its place would do something the arrow does not
     // say. Hold the click for the read, which lands within a frame or two of
     // the selection, rather than drop it.
-    if (forkChoice === null && split && run !== "tracked") {
+    if (forkChoice === null && seedSplit && run !== "tracked") {
       pendingPull.current = { key: checkKey, from };
       return;
     }

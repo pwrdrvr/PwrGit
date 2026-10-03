@@ -24,6 +24,8 @@ test("existing fork remote rename preserves Pull recovery and repairs a denied P
   box.git(checkout.path, "remote", "add", "origin", `git@github.com:${fork}.git`);
   box.git(checkout.path, "update-ref", "refs/remotes/origin/main", "HEAD");
   box.git(checkout.path, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  // The checked-out branch must retain its literal name even when a tag collides.
+  box.git(checkout.path, "tag", "main");
   writeFileSync(join(checkout.path, "local-edit.txt"), "keep this edit\n");
   const head = box.git(checkout.path, "rev-parse", "HEAD");
   expect(box.git(checkout.path, "rev-parse", "--abbrev-ref", "@{u}")).toBe("upstream/main");
@@ -66,6 +68,12 @@ process.exit(result.status === null ? 1 : result.status);
   await expect(window.getByRole("menuitem", { name: /Track origin\/main/ })).toBeVisible();
   await window.locator(".pull-menu").screenshot({ path: testInfo.outputPath("pull-tracking-repair.png") });
   await window.keyboard.press("Escape");
+
+  // Repair adds a menu, but plain Pull must still run with no source and no
+  // incoming commits (the default sync preference used to swallow this click).
+  await window.getByRole("button", { name: "Pull", exact: true }).click();
+  await expect(window.locator(".sync-chip").first()).toContainText("fast-forwarded");
+  expect(box.git(checkout.path, "rev-parse", "--abbrev-ref", "@{u}")).toBe("upstream/main");
 
   await window.getByRole("button", { name: "Push", exact: true }).click();
   const recovery = window.getByRole("dialog", { name: "Set up fork tracking" });

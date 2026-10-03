@@ -10,7 +10,10 @@ export function forkTrackingRepair(
   branch: { name: string; upstream?: string },
   hosts: ForgeHostMap = {}
 ): ForkTrackingRepair | null {
-  if (identity?.parent === undefined || branch.upstream === undefined) {
+  if (
+    identity?.parent === undefined || identity.viewerCanPush === false ||
+    branch.upstream === undefined
+  ) {
     return null;
   }
   const upstream = branch.upstream;

@@ -13,6 +13,7 @@ import {
 } from "vitest";
 import {
   err,
+  forkTrackingRepair,
   ok,
   type ForkStatus,
   type ForkSyncOutcome,
@@ -2067,6 +2068,29 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     await act(async () => caret()?.click());
   };
 
+  it.each([
+    [null, 0], [null, 3], ["source", 0], ["source", 3], ["tracked", 0], ["tracked", 3]
+  ] as const)("runs plain Pull during tracking repair with saved choice %s and %i incoming commits", async (saved, behind) => {
+    if (saved !== null) window.localStorage.setItem("pwrgit.pullChoice.repo-1", saved);
+    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    answer({ ...behindSource(), source: null,
+      tracked: { ...behindSource().tracked!, label: "upstream/main", remote: "upstream", ref: "refs/remotes/upstream/main", behind },
+      trackingRepair: repair
+    }, {
+      "remote:pull": ok({ fastForwarded: behind > 0, stashed: false, reappliedWithConflicts: false })
+    });
+    await remount({ ...worktree, behind }, { ...level, behind });
+    expect(caret()).not.toBeNull();
+    await act(async () => pull()!.click());
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:pull")).toEqual([
+      ["remote:pull", { worktreeId: worktree.id }]
+    ]);
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:syncFork" || name === "remote:repairForkTracking")).toHaveLength(0);
+    expect(window.localStorage.getItem("pwrgit.pullChoice.repo-1")).toBe(saved);
+    await openMenu();
+    expect(row("Track origin/main")).toBeDefined();
+  });
+
   it("keeps the Pull dropdown on a fork tracking its parent and offers tracking repair", async () => {
     const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
     const renamed = { ...behindSource(), source: null,
@@ -2771,6 +2795,30 @@ describe("WorktreeHeader offers a fork when this account cannot push", () => {
     )!;
     await act(async () => push.click());
     expect(document.querySelector(".fork-checkout-dialog")).toBeNull();
+  });
+
+  it("keeps fork checkout available after denied Push on someone else's read-only fork", async () => {
+    const identity = { ...readOnly,
+      parent: { nameWithOwner: "team/dugite", url: "https://github.com/team/dugite" }
+    };
+    const own = await mount(identity);
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "remote:push") return Promise.resolve(err({
+        kind: "remote", code: "push_denied", message: "Permission to team/dugite.git denied."
+      }));
+      if (name === "remote:activities") return Promise.resolve(ok([]));
+      if (name === "repo:refreshIdentities") return Promise.resolve(ok({ changed: 0, outcomes: [] }));
+      if (name === "remote:inspectForkTracking") return Promise.resolve(ok(forkTrackingRepair(identity, [
+        { name: "origin", fetchUrl: "git@github.com:desktop/dugite.git", pushUrl: "git@github.com:desktop/dugite.git" },
+        { name: "upstream", fetchUrl: "git@github.com:team/dugite.git", pushUrl: "git@github.com:team/dugite.git" }
+      ], { name: "main", upstream: "upstream/main" })));
+      return new Promise(() => undefined);
+    });
+    const push = own.querySelector<HTMLButtonElement>('[aria-label="Push"]')!;
+    await act(async () => push.click());
+    expect(bridge.dispatch).toHaveBeenCalledWith("repo:forkCheckoutPreflight", expect.objectContaining({ repoId: repo.id }));
+    expect(own.querySelector(".fork-checkout-dialog")?.textContent).not.toContain("Use your existing fork");
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:repairForkTracking")).toHaveLength(0);
   });
 
   it("offers tracking repair after a denied Push when origin is already the user's fork", async () => {

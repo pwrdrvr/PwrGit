@@ -19,9 +19,12 @@ export async function inspectForkTracking(
   identity: RepoIdentity | undefined,
   hosts: ForgeHostMap = {}
 ): Promise<Result<ForkTrackingRepair | null>> {
-  const current = await git(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd);
+  // --short expands an ambiguous branch/tag name to heads/<name>. Read the
+  // full ref so tracking always uses the literal branch name.
+  const current = await git(["symbolic-ref", "--quiet", "HEAD"], cwd);
   if (!current.ok) return current;
-  if (current.value.exitCode !== 0) return ok(null);
+  const branchRef = current.value.stdout.trim();
+  if (current.value.exitCode !== 0 || !branchRef.startsWith("refs/heads/")) return ok(null);
   const upstream = await git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd);
   if (!upstream.ok) return upstream;
   if (upstream.value.exitCode !== 0) return ok(null);
@@ -30,7 +33,7 @@ export async function inspectForkTracking(
   const remotes = await listRemoteEndpoints(git, cwd);
   if (!remotes.ok) return remotes;
   return ok(forkTrackingRepair(identity, remotes.value, {
-    name: current.value.stdout.trim(), upstream: ref.slice("refs/remotes/".length)
+    name: branchRef.slice("refs/heads/".length), upstream: ref.slice("refs/remotes/".length)
   }, hosts));
 }
 
@@ -48,9 +51,9 @@ export async function repairForkTracking(
     code: "fork_tracking_stale",
     message: "The branch or fork remotes changed. Reopen Remotes and review tracking again. Nothing was changed."
   });
-  const current = await git(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd);
+  const current = await git(["symbolic-ref", "--quiet", "HEAD"], cwd);
   if (!current.ok) return current;
-  if (current.value.exitCode !== 0 || current.value.stdout.trim() !== reviewed.branch) {
+  if (current.value.exitCode !== 0 || current.value.stdout.trim() !== `refs/heads/${reviewed.branch}`) {
     return stale();
   }
   const upstream = await git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd);

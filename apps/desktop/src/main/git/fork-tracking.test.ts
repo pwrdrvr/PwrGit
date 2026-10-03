@@ -60,6 +60,30 @@ describe("repairing a pre-existing fork after renaming origin", () => {
     } });
     expect(repaired.ok && repaired.value).not.toHaveProperty("trackingRepair");
   });
+  it("does not offer or apply tracking repair for a confirmed read-only fork", async () => {
+    const readOnly = { ...identity, viewerCanPush: false };
+    const before = git("config", "--local", "--list");
+    expect(await inspectForkTracking(systemGit, path, readOnly)).toEqual({ ok: true, value: null });
+    expect((await repairForkTracking(systemGit, path, readOnly, reviewed)).ok).toBe(false);
+    expect(git("config", "--local", "--list")).toBe(before);
+  });
+
+  it("inspects main literally when a tag is also named main", async () => {
+    git("tag", "main");
+    expect(await inspectForkTracking(systemGit, path, identity)).toEqual({
+      ok: true, value: { ...reviewed, target: "origin/main" }
+    });
+  });
+
+  it("repairs unchanged main when a tag is also named main", async () => {
+    git("tag", "main");
+    const head = git("rev-parse", "HEAD");
+    expect(await repairForkTracking(systemGit, path, identity, reviewed)).toEqual({ ok: true, value: null });
+    expect(git("rev-parse", "--symbolic-full-name", "@{u}")).toBe("refs/remotes/origin/main");
+    expect(git("rev-parse", "HEAD")).toBe(head);
+    expect(git("rev-parse", "refs/tags/main")).toBe(head);
+  });
+
   it("restores fork tracking and sync status without moving commits or losing edits", async () => {
     writeFileSync(join(path, "file.txt"), "local edit\n");
     const head = git("rev-parse", "HEAD");
