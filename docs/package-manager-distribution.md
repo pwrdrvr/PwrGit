@@ -37,10 +37,13 @@ gh run list --repo pwrdrvr/PwrGit --workflow package-distribution.yml --limit 5
 pnpm distribution:prepare vX.Y.Z node_modules/.cache/pwrgit-distribution
 ```
 
-The workflow also runs on stable publication/edit and daily. Events emitted by
-`GITHUB_TOKEN` cannot be relied on to start another workflow. Daily comparison
-fails while remote versions lag; inspect pending review rather than resubmitting.
-Assign failed checks an owner and next action in the release checklist.
+The workflow runs on stable publication/promotion/edit and daily. Its `homebrew`
+job dispatches the tap publisher and waits up to 20 minutes for the target to
+appear on tap `main`, stopping early on a failed tap run. Its summary names the
+channel, target and direct tap run link on failure. Daily freshness checks run
+after Homebrew synchronization so pending Winget review does not prevent tap
+publication. Events emitted by `GITHUB_TOKEN` cannot be relied on to start another
+workflow; the explicit dispatch above remains part of promotion through the skill.
 
 The generator accepts only public Stable Latest. It downloads arm64 and universal
 DMGs and the signed Windows x64 NSIS installer, hashes actual bytes, checks size
@@ -50,15 +53,16 @@ Generated manifests use immutable versioned URLs. Never use aliases or
 
 Output contains `Casks/pwrgit.rb`, three Winget files under
 `manifests/p/PwrDrvr/PwrGit/X.Y.Z/`, and `distribution-status.json`. The workflow
-uploads them as `package-manager-submissions`; it does not submit or merge them.
-Generation defaults to the read-only `GITHUB_TOKEN`. If cross-repository search
-is throttled, configure the optional repository Actions secret
-`DISTRIBUTION_READ_TOKEN` with an expiring fine-grained PAT limited to public
-repository access and no additional permissions. GitHub's code-search endpoint
+uploads them as `package-manager-submissions`. Winget submission remains a
+maintainer/upstream-review operation. Homebrew publication is handled automatically
+by the tap workflow below. Read-only generation prefers the organization Actions
+secret `DISTRIBUTION_READ_TOKEN`, already shared with PwrGit, PwrSnap and PwrAgent.
+If creating or rotating this secret, use an expiring fine-grained PAT limited to
+public repository access and no additional permissions. GitHub's code-search endpoint
 does not require fine-grained permissions. Do not reuse a release-publishing or
-administrator credential for these read-only checks. Configure it in PwrGit's
-Actions secrets, or use `gh secret set DISTRIBUTION_READ_TOKEN --repo
-pwrdrvr/PwrGit` and enter the value at the hidden prompt.
+administrator credential for these read-only checks. Rotate the organization
+secret and preserve its selected-repository access.
+Never print or copy its value into a workflow or run log.
 
 The audit steps prefer this secret and log only its name; fork PRs retain the
 workflow-token fallback because repository secrets are unavailable there.
@@ -114,13 +118,50 @@ validation boxes unchecked. Reuse the identifier on subsequent updates. The
 authenticated maintainer needs push access to their fork; initial submission
 ownership is `huntharo`. CLA, malware checks and manual review are external gates.
 
-For Homebrew copy the generated cask into a branch of `pwrdrvr/homebrew-tap`,
-validate it and open a PR there. The existing tap avoids central cask acceptance
-requirements for a new app. After future stable promotions dispatch its
-`bump-pwrgit.yml`; the scheduled job is a fallback. Review and merge the generated
-PR after CI and verify the default branch. The maintainer account needs tap
-write/PR permissions; a read-only PwrGit `GITHUB_TOKEN` cannot update another
-repository. Do not copy signing credentials into the tap.
+### Homebrew: automatic validated publication
+
+The tap owns the cask update. Merge its initial registration/setup PR once.
+Subsequent promoted Stable Latest versions follow this path:
+
+1. PwrGit's promotion event runs `package-distribution.yml`; the release skill
+   also dispatches it explicitly when it promotes with CLI credentials.
+2. The `homebrew` job dispatches tap `bump-pwrgit.yml` on `main` for the target.
+3. The tap checks immutable DMG bytes and runs cask style/online audit,
+   install/upgrade, bundle identity, architecture, signing/Gatekeeper and uninstall
+   on Intel and Apple Silicon. Failed gates preserve the published version.
+4. After both architecture jobs pass, the tap's own `GITHUB_TOKEN` updates only
+   `Casks/pwrgit.rb` on tap `main`. It rechecks Latest/artifact metadata and uses
+   the previous cask SHA to reject concurrent changes. There is no routine update
+   PR, workflow approval or merge step.
+5. PwrGit verifies tap `main` reached the target and reports the result in its
+   `homebrew` job summary. Users receive it after `brew update`; fresh client
+   installation remains the final client check.
+
+The tap also checks Latest every 15 minutes, skipping expensive Mac validation
+when unchanged. GitHub schedules can be delayed; immediate dispatch is the normal
+promotion path. A tap failure opens one issue per outage with the failed run and
+recovery action. Resolve that run and dispatch the same publisher; do not create
+another bump PR.
+
+**Immediate dispatch credential:** create a fine-grained PAT with resource owner
+`pwrdrvr`, repository access **Only select repositories → homebrew-tap**, and
+repository **Actions: Read and write**. No Contents write permission is needed.
+Give it an expiration and store it as `HOMEBREW_TAP_DISPATCH_TOKEN` in PwrGit's
+Actions secrets, or as an organization secret shared with PwrGit. This token only
+starts the tap's trusted workflow; the public-read `DISTRIBUTION_READ_TOKEN`
+cannot do so. Missing or expired credentials produce an explicit failure summary
+with the tap workflow link. The schedule still reconciles once tap setup is live.
+
+An agent promoting through the release skill can dispatch directly with the
+maintainer's existing CLI authentication:
+
+```sh
+gh workflow run bump-pwrgit.yml --repo pwrdrvr/homebrew-tap --ref main -f version=X.Y.Z
+gh run list --repo pwrdrvr/homebrew-tap --workflow bump-pwrgit.yml --limit 5
+```
+
+Record the run URL, follow its checks and verify the cask on tap `main`. Do not
+call a dispatch, artifact upload or still-open registration PR publication.
 
 ## Verify publication and pending work
 
@@ -173,3 +214,16 @@ These are initial registration records, not proof of live distribution. The
 maintainer `huntharo` owns submission follow-up. Update this dated snapshot with
 submission/check URLs and evidence as review and publication advance; use the
 live audit rather than this snapshot when preparing subsequent releases.
+
+## Registration follow-up (2026-10-03)
+
+Stable Latest is now v0.29.0. Tap PR #8 has been updated to its actual downloaded
+DMG hashes and the automatic publisher; publication still requires its initial
+merge. The owner squash-merged PwrSnap 1.1.14 in tap PR #10, resolving the stale
+PwrSnap version that failed the original combined checks. Both casks and both
+PwrGit publisher architecture checks subsequently passed in
+[CI](https://github.com/pwrdrvr/homebrew-tap/actions/runs/37140449391) and
+[the publisher dry run](https://github.com/pwrdrvr/homebrew-tap/actions/runs/37140449420).
+Publication was skipped because these are PR runs. A separate tap child
+PR scopes registration CI to changed casks. Use current run results rather than
+the historical October 2 checks above.
