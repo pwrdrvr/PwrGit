@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import { audit, compareVersions, distribution, prepare, readCask, readWingetInstaller, renderManifests, selectAssets, stableVersion } from "./package-manager-release.mjs";
 
-function release() {
-  const tag_name = "v0.27.0";
+function release(version = "0.27.0") {
+  const tag_name = `v${version}`;
   return {
     tag_name, draft: false, prerelease: false,
     assets: ["arm64.dmg", "universal.dmg", "windows-x64-setup.exe"].map((suffix, i) => {
-      const name = `PwrGit-0.27.0-${suffix}`;
+      const name = `PwrGit-${version}-${suffix}`;
       return { name, browser_download_url: `https://github.com/pwrdrvr/PwrGit/releases/download/${tag_name}/${name}`, size: 123, digest: `sha256:${String(i + 1).repeat(64)}` };
     }),
   };
@@ -211,3 +211,35 @@ test("retains closed submission history and confirms public repository reads", a
   expect(result.submissions.winget[0]).toMatchObject({ state: "closed", author: "huntharo" });
   await expect(audit({ api: (path) => /^repos\/[^/]+\/[^/?]+$/.test(path) ? { private: true } : source(path) })).rejects.toThrow("readable/public");
 });
+
+// Every substituted URL and digest below belongs to a real published asset in
+// the fixture. Only the platform/architecture is wrong, so membership checks
+// alone would accept it. Exercise current and lagging package versions.
+test.each([
+  ["winget", 0], ["winget", 1],
+  ["homebrew", 0], ["homebrew", 1], ["homebrew", 2],
+].flatMap(([channel, wrongAsset]) => ["0.27.0", "0.28.0"].map((latest) => ({ channel, wrongAsset, latest }))))(
+  "blocks $channel using asset $wrongAsset against Latest $latest",
+  async ({ channel, wrongAsset, latest }) => {
+    const source = api({ winget: ["0.27.0"], cask: "0.27.0" });
+    const published = release().assets[wrongAsset];
+    await expect(audit({ api: (path, options) => {
+      if (path.endsWith("/releases/latest")) return release(latest);
+      const result = source(path, options);
+      if (channel === "winget" && path.includes(".installer.yaml")) {
+        const text = Buffer.from(result.content, "base64").toString("utf8")
+          .replace(/^  InstallerUrl:.*$/m, `  InstallerUrl: ${published.browser_download_url}`)
+          .replace(/^  InstallerSha256:.*$/m, `  InstallerSha256: ${published.digest.slice(7)}`);
+        result.content = Buffer.from(text).toString("base64");
+      }
+      if (channel === "homebrew" && path.includes("homebrew-tap/contents")) {
+        const text = Buffer.from(result.content, "base64").toString("utf8")
+          .replace(/^  url .*$/m, `  url "${published.browser_download_url}"`)
+          .replace(/^  sha256 arm:.*$/m, `  sha256 arm:   "${published.digest.slice(7)}",`)
+          .replace(/^ +intel: "[a-f0-9]{64}"$/m, `         intel: "${published.digest.slice(7)}"`);
+        result.content = Buffer.from(text).toString("base64");
+      }
+      return result;
+    } })).rejects.toThrow("URL/checksum disagrees");
+  },
+);

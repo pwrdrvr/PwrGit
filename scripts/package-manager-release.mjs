@@ -107,12 +107,15 @@ export async function audit({ api = ghJson } = {}) {
   const wingetAssets = wingetInstallerPath ? readWingetInstaller(sourceText(await api(`repos/${distribution.wingetRepo}/contents/${wingetInstallerPath}?ref=${wingetRef}`)), wingetVersion) : [];
   // Compare authoritative manifest URLs/checksums to their published GitHub
   // release, including lagging versions; prepare() separately hashes real bytes.
-  for (const [current, assets] of [[wingetVersion, wingetAssets], [cask.version, cask.assets]]) {
+  for (const [channel, current, assets] of [["winget", wingetVersion, wingetAssets], ["homebrew", cask.version, cask.assets]]) {
     if (!current) continue;
     const published = current === version ? targetAssets : selectAssets(await api(`repos/${distribution.repo}/releases/tags/v${current}`));
+    const [arm64, universal, windowsX64] = published;
+    const expectedAssets = channel === "winget" ? { x64: windowsX64 } : { arm64, universal };
     for (const asset of assets) {
-      if (!published.some((a) => a.browser_download_url === asset.url && a.digest === asset.digest)) {
-        throw new Error("Audit blocked: remote package URL/checksum disagrees with published GitHub assets");
+      const expected = expectedAssets[asset.architecture];
+      if (!expected || expected.browser_download_url !== asset.url || expected.digest !== asset.digest) {
+        throw new Error(`Audit blocked: remote package URL/checksum disagrees with published GitHub assets for ${channel} ${asset.architecture}`);
       }
     }
   }
