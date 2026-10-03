@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 // Package managers follow the promoted Stable Latest release, never a build tag.
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { setTimeout as sleep } from "node:timers/promises";
 import { createWriteStream } from "node:fs";
+import { makeApi, searchAll } from "./lib/distribution-api.mjs";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
 export const distribution = {
@@ -19,24 +18,7 @@ export const distribution = {
   cask: "pwrdrvr/tap/pwrgit",
 };
 
-async function ghJson(endpoint, optional = false) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      return JSON.parse(execFileSync("gh", ["api", endpoint], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-    } catch (error) {
-      const message = String(error.stderr);
-      // Authentication, throttling and transport errors are never package absence.
-      if (optional && message.includes("(HTTP 404)")) return null;
-      const seconds = Number(message.match(/try again in ([\d.]+)s/)?.[1]);
-      if (attempt === 0 && message.includes("(HTTP 429)") && seconds > 0 && seconds <= 900) {
-        console.error(`GitHub throttled ${endpoint}; retrying once after ${Math.ceil(seconds) + 1}s`);
-        await sleep((Math.ceil(seconds) + 1) * 1000);
-        continue;
-      }
-      throw error;
-    }
-  }
-}
+const ghJson = makeApi();
 
 export function stableVersion(release) {
   if (release.draft || release.prerelease || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) {
@@ -53,60 +35,103 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+function sourceText(file) {
+  if (file?.encoding !== "base64" || typeof file.content !== "string") {
+    throw new Error("Audit blocked: missing authoritative source content");
+  }
+  return Buffer.from(file.content, "base64").toString("utf8").replaceAll("\r\n", "\n");
+}
+
+// Deliberately recognize the established manifest/cask layout; a changed layout
+// requires inspection rather than an invented architecture or checksum.
+export function readWingetInstaller(text, version) {
+  if (!new RegExp(`^PackageIdentifier: ${distribution.wingetId.replaceAll(".", "\\.")}$`, "m").test(text) ||
+      text.match(/^PackageVersion: (\d+\.\d+\.\d+)$/m)?.[1] !== version) throw new Error("Audit blocked: Winget identity/version changed");
+  const architectures = [...text.matchAll(/^\s*-?\s*Architecture:\s*(\S+)/gm)].map((m) => m[1]);
+  const urls = [...text.matchAll(/^\s*InstallerUrl:\s*(\S+)/gm)].map((m) => m[1]);
+  const hashes = [...text.matchAll(/^\s*InstallerSha256:\s*([a-fA-F0-9]{64})\s*$/gm)].map((m) => m[1].toLowerCase());
+  if (architectures.length !== 1 || architectures[0] !== "x64" || urls.length !== 1 || hashes.length !== 1) {
+    throw new Error("Audit blocked: Winget installer layout changed; inspect architectures/URLs/checksums");
+  }
+  return [{ architecture: "x64", url: urls[0], digest: `sha256:${hashes[0]}` }];
+}
+
+export function readCask(text) {
+  const version = text.match(/^  version "(\d+\.\d+\.\d+)"$/m)?.[1];
+  const url = text.match(/^  url "([^"\n]+)"$/m)?.[1];
+  const arm = text.match(/^  sha256 arm: +"([a-f0-9]{64})",$/m)?.[1];
+  const intel = text.match(/^ +intel: "([a-f0-9]{64})"$/m)?.[1];
+  if (!text.startsWith('cask "pwrgit" do\n') || !text.includes('  app "PwrGit.app"\n') || !version || !url || !arm || !intel || !text.includes('arch arm: "arm64", intel: "universal"')) {
+    throw new Error("Audit blocked: cask layout changed; inspect version/architectures/URLs/checksums");
+  }
+  const assets = [["arm64", arm], ["universal", intel]].map(([architecture, hash]) => ({
+    architecture, url: url.replaceAll("#{version}", version).replaceAll("#{arch}", architecture), digest: `sha256:${hash}`,
+  }));
+  return { version, assets };
+}
+
 export async function audit({ api = ghJson } = {}) {
+  const repositories = {};
+  for (const repo of [distribution.repo, distribution.wingetRepo, distribution.tapRepo, "Homebrew/homebrew-cask", "Homebrew/homebrew-core"]) {
+    const metadata = await api(`repos/${repo}`);
+    if (metadata.private !== false || !metadata.default_branch) throw new Error(`Audit blocked: ${repo} is not confirmed readable/public`);
+    repositories[repo] = metadata.default_branch;
+  }
   const release = await api(`repos/${distribution.repo}/releases/latest`);
   const version = stableVersion(release);
-  const winget = await api(`repos/${distribution.wingetRepo}/contents/${distribution.wingetPath}`, true);
-  const tap = await api(`repos/${distribution.tapRepo}/contents/Casks/pwrgit.rb`, true);
-  const central = await api("repos/Homebrew/homebrew-cask/contents/Casks/p/pwrgit.rb", true);
-  const identityPaths = new Set();
-  let total;
-  for (let page = 1; ; page++) {
-    const result = await api(`search/code?q=pwrgit+repo:microsoft/winget-pkgs&per_page=100&page=${page}`);
-    // GitHub caps code search at 1,000 results. Pagination is separate from
-    // incomplete_results, so fail closed when we cannot inspect every match.
-    if (result.incomplete_results || !Number.isInteger(result.total_count) || result.total_count < 0 || result.total_count > 1000 ||
-        (total !== undefined && result.total_count !== total)) {
-      throw new Error("Winget identity search was incomplete");
-    }
-    total = result.total_count;
-    for (const item of result.items) {
-      if (!item.path.startsWith(`${distribution.wingetPath}/`)) {
-        throw new Error("Another Winget identity mentions PwrGit; resolve ownership before submitting");
-      }
-      if (identityPaths.has(item.path)) throw new Error("Winget identity search was incomplete");
-      identityPaths.add(item.path);
-    }
-    if (identityPaths.size === total) break;
-    if (identityPaths.size > total || result.items.length !== 100 || page === 10) {
-      throw new Error("Winget identity search was incomplete");
-    }
+  const targetAssets = selectAssets(release);
+  const wingetRef = repositories[distribution.wingetRepo];
+  const tapRef = repositories[distribution.tapRepo];
+  const winget = await api(`repos/${distribution.wingetRepo}/contents/${distribution.wingetPath}?ref=${wingetRef}`, { allow404: true });
+  const tap = await api(`repos/${distribution.tapRepo}/contents/Casks/pwrgit.rb?ref=${tapRef}`, { allow404: true });
+  const identities = await searchAll(api, "code", "pwrgit repo:microsoft/winget-pkgs");
+  if (identities.some((item) => !item.path?.startsWith(`${distribution.wingetPath}/`)) || (!winget && identities.length)) {
+    throw new Error("Audit blocked: Another Winget identity mentions PwrGit or known path disagrees with search; resolve ownership before submitting");
   }
-  if (central) throw new Error("Homebrew core now contains pwrgit; reconcile distribution ownership before proceeding");
+  // Discover central casks AND formulae, including alternate names/paths.
+  for (const repo of ["Homebrew/homebrew-cask", "Homebrew/homebrew-core"]) {
+    const matches = await searchAll(api, "code", `pwrgit repo:${repo}`);
+    if (matches.length) throw new Error(`Audit blocked: ${repo} mentions PwrGit; reconcile distribution ownership before proceeding`);
+  }
+  if (winget !== null && !Array.isArray(winget)) throw new Error("Audit blocked: malformed Winget directory");
   const wingetVersions = (winget ?? []).map((entry) => entry.name);
-  if (wingetVersions.some((v) => !/^\d+\.\d+\.\d+$/.test(v))) {
-    throw new Error("Unexpected Winget version; compare the remote manifests manually");
+  if (wingetVersions.some((v) => !/^\d+\.\d+\.\d+$/.test(v)) || (winget && !wingetVersions.length)) {
+    throw new Error("Audit blocked: Unexpected Winget version; compare the remote manifests manually");
   }
   const wingetVersion = wingetVersions.sort(compareVersions).at(-1) ?? null;
-  const caskText = tap ? Buffer.from(tap.content, "base64").toString("utf8") : "";
-  const caskVersion = tap ? caskText.match(/^  version "(\d+\.\d+\.\d+)"$/m)?.[1] : null;
-  if (tap && !caskVersion) throw new Error("Cannot read the authoritative cask version");
-  for (const current of [wingetVersion, caskVersion]) {
+  const cask = tap ? readCask(sourceText(tap)) : { version: null, assets: [] };
+  for (const current of [wingetVersion, cask.version]) {
     if (current && compareVersions(current, version) > 0) throw new Error("Remote package is newer than Latest; refusing a downgrade");
+  }
+  const wingetInstallerPath = wingetVersion && `${distribution.wingetPath}/${wingetVersion}/${distribution.wingetId}.installer.yaml`;
+  const wingetAssets = wingetInstallerPath ? readWingetInstaller(sourceText(await api(`repos/${distribution.wingetRepo}/contents/${wingetInstallerPath}?ref=${wingetRef}`)), wingetVersion) : [];
+  // Compare authoritative manifest URLs/checksums to their published GitHub
+  // release, including lagging versions; prepare() separately hashes real bytes.
+  for (const [current, assets] of [[wingetVersion, wingetAssets], [cask.version, cask.assets]]) {
+    if (!current) continue;
+    const published = current === version ? targetAssets : selectAssets(await api(`repos/${distribution.repo}/releases/tags/v${current}`));
+    for (const asset of assets) {
+      if (!published.some((a) => a.browser_download_url === asset.url && a.digest === asset.digest)) {
+        throw new Error("Audit blocked: remote package URL/checksum disagrees with published GitHub assets");
+      }
+    }
   }
   const submissions = {};
   for (const [channel, repo] of [["winget", distribution.wingetRepo], ["homebrew", distribution.tapRepo]]) {
-    const result = await api(`search/issues?q=${encodeURIComponent(`pwrgit repo:${repo} is:pr is:open`)}`);
-    if (result.incomplete_results) throw new Error("Submission search was incomplete");
-    submissions[channel] = result.items.map(({ html_url, title }) => ({ url: html_url, title }));
+    const results = await searchAll(api, "issues", `pwrgit repo:${repo} is:pr`);
+    submissions[channel] = results.map(({ html_url, title, state, user }) => ({ url: html_url, title, state, author: user?.login }));
   }
+  const channelState = (current, channel) => current === version ? "source-current; client verification pending" :
+    submissions[channel].some((p) => p.state === "open") ? "pending-review; inspect existing submission before updating" :
+      current ? "source-lagging; maintainer update required" : "not-published-at-known-path; maintainer submission required";
   return {
-    checkedAt: new Date().toISOString(), stableTag: release.tag_name, version,
-    winget: { identifier: distribution.wingetId, source: `https://github.com/${distribution.wingetRepo}/tree/master/${distribution.wingetPath}`, version: wingetVersion },
-    homebrew: { identifier: distribution.cask, source: `https://github.com/${distribution.tapRepo}/blob/main/Casks/pwrgit.rb`, version: caskVersion },
+    status: "complete", checkedAt: new Date().toISOString(), stableTag: release.tag_name, version,
+    github: { url: release.html_url, policy: "promoted suffix-free Stable Latest; prereleases leave package channels unchanged", assets: targetAssets.map(({ name, browser_download_url, digest, size }) => ({ name, url: browser_download_url, digest, size })) },
+    repositories,
+    winget: { identifier: distribution.wingetId, source: `https://github.com/${distribution.wingetRepo}/tree/${wingetRef}/${distribution.wingetPath}`, version: wingetVersion, assets: wingetAssets, installerSource: wingetInstallerPath && `https://github.com/${distribution.wingetRepo}/blob/${wingetRef}/${wingetInstallerPath}`, owner: "huntharo (submission); Microsoft (review/index)", state: channelState(wingetVersion, "winget") },
+    homebrew: { identifier: distribution.cask, source: `https://github.com/${distribution.tapRepo}/blob/${tapRef}/Casks/pwrgit.rb`, version: cask.version, assets: cask.assets, owner: "huntharo / PwrDrvr tap maintainers", state: channelState(cask.version, "homebrew") },
     submissions,
-    // Repository presence does not prove Winget index propagation or brew cache refresh.
-    clientPublication: "Verify with winget source update/show and brew update/info on fresh clients",
+    clientPublication: "Verify with winget source update/show and brew update/info on fresh disposable clients; repository presence does not prove index/cache/install/upgrade",
   };
 }
 
@@ -244,15 +269,27 @@ export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset 
 export async function runCli(args = process.argv.slice(2)) {
   const [command, tag, directory] = args;
   if (command === "audit") {
-    const report = await audit();
-    console.log(JSON.stringify(report, null, 2));
-    if (tag === "--check" && [report.winget.version, report.homebrew.version].some((v) => v !== report.version)) {
-      throw new Error("Package sources lag Stable Latest; follow pending submissions before opening another PR");
+    const outputIndex = args.indexOf("--output");
+    const output = outputIndex < 0 ? null : args[outputIndex + 1];
+    if (outputIndex >= 0 && !output) throw new Error("--output requires a path");
+    let report;
+    try {
+      report = await audit();
+      if (args.includes("--check") && [report.winget.version, report.homebrew.version].some((v) => v !== report.version)) {
+        report.check = "blocked: package sources lag Stable Latest; huntharo must follow existing submissions before opening another PR";
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      report = { status: "blocked", checkedAt: new Date().toISOString(), error: error.message, owner: "huntharo / PwrDrvr organization maintainers", nextAction: "Resolve remote read/search/source blocker and rerun; do not infer absence or submit duplicates" };
+      process.exitCode = 1;
     }
+    const json = `${JSON.stringify(report, null, 2)}\n`;
+    if (output) { mkdirSync(join(output, ".."), { recursive: true }); writeFileSync(output, json); }
+    console.log(json);
   } else if (command === "prepare" && directory) {
     console.log(JSON.stringify(await prepare(tag, directory), null, 2));
   } else {
-    throw new Error("Usage: package-manager-release.mjs audit [--check] | prepare vX.Y.Z <output-directory>");
+    throw new Error("Usage: package-manager-release.mjs audit [--check] [--output <path>] | prepare vX.Y.Z <output-directory>");
   }
 }
 

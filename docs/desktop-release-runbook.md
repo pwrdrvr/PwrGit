@@ -75,6 +75,7 @@ heading must agree.
 
 ```bash
 git fetch origin <release-branch> --tags
+pnpm distribution:audit --output <ignored-directory>/distribution-audit.json
 RELEASE_TAG=vX.Y.Z pnpm release:check
 pnpm lint
 pnpm test
@@ -91,6 +92,11 @@ Latest is a separate maintainer action after verification; only suffix-free
 stable tags may be promoted.
 
 ## CI flow
+
+`release.yml` reuses the existing package-distribution workflow in read-only mode
+before preparation and after GitHub publication. Retain both stage audit artifacts.
+A preflight blocker stops preparation; a post-publication blocker needs an owned
+follow-up, not republishing. Signing and publication keep their existing credentials.
 
 1. The macOS prepare job checks metadata, typechecks, selects an Xcode with
    actool 26 for the icon compile (`.github/actions/select-xcode-for-actool`),
@@ -185,11 +191,16 @@ gh release edit vX.Y.Z --repo pwrdrvr/PwrGit --latest --prerelease=false
 ```
 
 Before preparing every release, run `pnpm distribution:audit` and record remote
-Winget/Homebrew versions and pending submissions. After stable promotion, dispatch
-`package-distribution.yml`, submit the verified updates and validate install,
-upgrade and client publication using [the distribution runbook](package-manager-distribution.md).
-Prereleases leave both channels on Stable Latest. Pending review or index/cache
-propagation must retain its URL, owner and next action and must not be called live.
+Winget/Homebrew versions and pending submissions. After stable promotion,
+dispatch `package-distribution.yml`, submit the verified updates and validate
+install, upgrade and client publication using [the distribution
+runbook](package-manager-distribution.md). Rerun and retain the remote audit
+after every publication; prereleases leave both channels on Stable Latest.
+`package-distribution.yml -f audit_only=true` verifies organization-token public
+reads without downloading/installing. Require complete searches and keep
+throttling/incomplete results as owned blockers. Pending review or index/cache
+propagation must retain its URL, owner and next action and must not be called
+live.
 
 `releases/latest/download/` resolves only for the release marked Latest, so the
 stable aliases start working at this step and not before. After promoting the
