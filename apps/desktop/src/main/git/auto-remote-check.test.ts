@@ -2,12 +2,13 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ok } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 import { timedGitSync } from "./test-support/git-tripwire";
 import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
+import { RemoteTipChecker } from "./remote-tip-checker";
 import { resolveForkStatus } from "./git-service";
 
 const systemGit = createSystemGit();
@@ -46,6 +47,41 @@ function forkFixture(): { origin: string; source: string; writer: string; local:
 const unlocked = <T>(run: () => Promise<T>): Promise<T> => run();
 
 describe("automatic selected-branch remote check", () => {
+  it("discovers two remote commits for a visible repository without selecting or changing its checkout", async () => {
+    const { writer, local } = forkFixture();
+    const head = git(local, "rev-parse", "HEAD");
+    for (const name of ["second", "third"]) {
+      writeFileSync(join(writer, `${name}.txt`), `${name}\n`);
+      git(writer, "add", ".");
+      git(writer, "commit", "-m", name);
+    }
+    git(writer, "push", "origin", "main");
+    expect(git(local, "rev-list", "--count", "HEAD..origin/main")).toBe("0");
+    let behind = 0;
+    const checked: string[] = [];
+    const checker = new RemoteTipChecker({
+      isFocused: () => true,
+      check: async (id) => {
+        checked.push(id);
+        const result = await checkSelectedRemoteTips(
+          systemGit, local, "main", null, unlocked, () => undefined
+        );
+        behind = Number(git(local, "rev-list", "--count", "HEAD..origin/main"));
+        return result.ok ? ok({ status: result.value }) : result;
+      }
+    });
+    try {
+      checker.report(1, ["unselected-repo"]);
+      expect(checked).toEqual([]);
+      await vi.waitFor(() => expect(behind).toBe(2), { timeout: 5_000 });
+      expect(checked).toEqual(["unselected-repo"]);
+      expect(git(local, "rev-parse", "HEAD")).toBe(head);
+      expect(git(local, "status", "--porcelain")).toBe("");
+    } finally {
+      checker.stop();
+    }
+  });
+
   it("wires a stored fork parent once so the ordinary source status can see it", async () => {
     const remotes = new Map([["origin", "git@github.com:me/fork.git"]]);
     const commands: string[][] = [];

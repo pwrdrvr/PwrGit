@@ -236,6 +236,41 @@ describe("remote handlers", () => {
     expect(repairForkTracking).toHaveBeenCalledTimes(calls);
   });
 
+  it("refreshes an unselected visible repo's state and branch index, while hover bypasses a fresh cache", async () => {
+    vi.useFakeTimers();
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: () => sql.includes("FROM worktrees")
+          ? { path: "/repos/visible", repoId: "repo-visible", branch: "main" }
+          : { path: "/repos/visible", name: "visible", profileId: "profile-a" }
+      }))
+    } as unknown as DB;
+    const refresher = { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() } satisfies WorktreeRefresher;
+    const indexer = { refreshRepoRemoteBranches: vi.fn(async () => ok(undefined)) };
+    vi.mocked(checkSelectedRemoteTips).mockImplementation(async (_git, _path, _branch, _parent, _exclusive, fetched) => {
+      fetched();
+      return ok("checked");
+    });
+    const bus = new CommandBus();
+    const checker = registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue(), indexer);
+    try {
+      checker.report(1, ["wt-visible"]);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+      expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith("repo-visible");
+      expect(refresher.refreshWorktree).toHaveBeenCalledExactlyOnceWith("wt-visible");
+      expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-visible" });
+      expect(liveActivities(vi.mocked(emitEvent))).toEqual([]);
+      // Selection can reuse the fresh viewport answer; deliberate hover asks again.
+      await bus.dispatch("remote:checkSelected", { worktreeId: "wt-visible" });
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+      await bus.dispatch("remote:checkSelected", { worktreeId: "wt-visible", intent: "hover" });
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(2);
+    } finally {
+      checker.stop();
+    }
+  });
+
   it("bounds automatic checks in main by queueing, and keeps same-named branches in two profiles separate", async () => {
     const rows = new Map([
       ["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }],

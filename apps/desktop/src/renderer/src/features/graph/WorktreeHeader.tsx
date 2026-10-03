@@ -650,14 +650,14 @@ export function WorktreeHeader({
       if (status !== "superseded") settledChecks.current.set(key, status);
       if (active) setRemoteCheck({ key, checking: false });
     };
-    const check = (): void => {
+    const check = (intent: "selected" | "periodic" = "selected"): void => {
       setRemoteCheck({ key, checking: true });
-      void dispatch("remote:checkSelected", { worktreeId: worktree.id })
+      void dispatch("remote:checkSelected", { worktreeId: worktree.id, intent })
         .then((result) => settle(result.ok ? result.value.status : "unavailable"))
         .catch(() => settle("unavailable"));
     };
     check();
-    const timer = window.setInterval(check, 60_000);
+    const timer = window.setInterval(() => check("periodic"), 60_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [worktree.id, worktree.branch, worktree.missing, checkEpoch]);
   // The card and a tooltip must never share the screen. A click leaves the
