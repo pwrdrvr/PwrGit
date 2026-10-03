@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.29.0 - 2026-10-02
+
+- Clone - Added a choice between the original repository and your fork when cloning from a forge. Reuse an existing fork, create one explicitly, or reveal its existing checkout; fork clones keep the original as upstream.
+- Forks - Improved Fork… on a local checkout with a direct Fork in place or Switch origin to my fork action and a preview of the resulting remotes, while keeping a separate clone available.
+- AI Features - Improved Codex configuration-failure messages for commit drafts, squash messages, and history plans, with the original diagnostic available in logs and error tooltips.
+
 ## v0.28.0 - 2026-10-02
 
 - AI Features - Improved Codex model discovery after upgrades and migrated supported saved defaults to GPT-6.1 Sol and GPT-6 Luna when available, preserving compatible reasoning choices.
