@@ -72,7 +72,7 @@ process.exit(result.status === null ? 1 : result.status);
   // Repair adds a menu, but plain Pull must still run with no source and no
   // incoming commits (the default sync preference used to swallow this click).
   await window.getByRole("button", { name: "Pull", exact: true }).click();
-  await expect(window.locator(".sync-chip").first()).toContainText("fast-forwarded");
+  await expect(window.locator(".sync-chip").first()).toContainText("pulled · changes reapplied");
   expect(box.git(checkout.path, "rev-parse", "--abbrev-ref", "@{u}")).toBe("upstream/main");
 
   await window.getByRole("button", { name: "Push", exact: true }).click();
