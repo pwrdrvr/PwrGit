@@ -24,8 +24,19 @@ permissions:
   id-token: none
 
 jobs:
+  distribution-audit:
+    name: Inspect Winget and Homebrew before release
+    if: ${{ github.event_name != 'pull_request' }}
+    uses: ./.github/workflows/package-distribution.yml
+    with:
+      audit_only: true
+      stage: before-release
+    secrets:
+      DISTRIBUTION_READ_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN }}
+
   prepare:
     name: Test and prepare macOS signing input
+    needs: distribution-audit
     if: ${{ github.event_name != 'pull_request' }}
     # Xcode 26's AssetCatalogAgent links against macOS 26 frameworks. Selecting
     # Xcode 26 on macos-15 reaches actool but crashes while compiling .icon.
@@ -221,17 +232,22 @@ jobs:
 
   windows-prepare:
     name: Prepare Windows signing input
+    needs: distribution-audit
     runs-on: windows-2022
     if: >-
       ${{
-        github.event_name != 'pull_request'
-        || (
-          github.event.pull_request.head.repo.full_name == github.repository
-          && (
-            (github.event.action == 'labeled' && github.event.label.name == 'ci:windows-signing')
-            || (
-              github.event.action != 'labeled'
-              && contains(github.event.pull_request.labels.*.name, 'ci:windows-signing')
+        !cancelled()
+        && (github.event_name == 'pull_request' || needs.distribution-audit.result == 'success')
+        && (
+          github.event_name != 'pull_request'
+          || (
+            github.event.pull_request.head.repo.full_name == github.repository
+            && (
+              (github.event.action == 'labeled' && github.event.label.name == 'ci:windows-signing')
+              || (
+                github.event.action != 'labeled'
+                && contains(github.event.pull_request.labels.*.name, 'ci:windows-signing')
+              )
             )
           )
         )
@@ -293,20 +309,9 @@ jobs:
     # the environment deployment rule against refs/pull/<number>/merge; a rule
     # mismatch fails the deployment before credentialed steps can start.
     needs: windows-prepare
-    if: >-
-      ${{
-        github.event_name != 'pull_request'
-        || (
-          github.event.pull_request.head.repo.full_name == github.repository
-          && (
-            (github.event.action == 'labeled' && github.event.label.name == 'ci:windows-signing')
-            || (
-              github.event.action != 'labeled'
-              && contains(github.event.pull_request.labels.*.name, 'ci:windows-signing')
-            )
-          )
-        )
-      }}
+    # The audit ancestor is intentionally skipped on PRs. Override implicit
+    # success() while requiring the event-gated preparation job to succeed.
+    if: ${{ !cancelled() && needs.windows-prepare.result == 'success' }}
     environment: windows-signing
     runs-on: windows-2022
     timeout-minutes: 45
@@ -485,3 +490,13 @@ jobs:
           fi
 
           node scripts/publish-desktop-release.mjs "$RELEASE_TAG" mac-dist windows-dist "$notes"
+
+  distribution-audit-after:
+    name: Inspect Winget and Homebrew after publication
+    needs: publish-release-assets
+    uses: ./.github/workflows/package-distribution.yml
+    with:
+      audit_only: true
+      stage: after-publication
+    secrets:
+      DISTRIBUTION_READ_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN }}

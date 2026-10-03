@@ -2,22 +2,34 @@
 
 ## Workflows
 
-`package-distribution.yml` compares authoritative Winget/Homebrew sources against
-promoted Stable Latest, generates manifests from downloaded and hashed artifacts,
-and validates macOS signatures/architectures plus native Winget installation. It
-runs on stable release publication/edit, daily and by manual dispatch; its PR gate
-validates changes to the generator. The daily comparison fails on version drift.
-Submission, tap updates and client publication verification follow
-[the distribution runbook](../../docs/package-manager-distribution.md); generated
-workflow artifacts alone do not establish publication.
+`package-distribution.yml` compares authoritative Winget/Homebrew sources
+against promoted Stable Latest, generates manifests from downloaded and hashed
+artifacts, and validates macOS signatures/architectures plus native Winget
+installation. It audits every release publication/edit, including prereleases,
+daily and by manual dispatch; preparation/install checks require an eligible
+stable release. Use `-f audit_only=true` to retain a remote comparison without
+downloads/installations; its PR gate validates changes to the generator. The
+daily comparison fails on version drift. Submission, tap updates and client
+publication verification follow [the distribution runbook](../../docs/package-
+manager-distribution.md); generated workflow artifacts alone do not establish
+publication. `release.yml` reuses the same workflow in read-only mode before
+preparation and after publication, with stage-specific artifacts. Preflight
+blockers stop preparation; follow-up blockers require an owned retry without
+repeating GitHub publication.
 
-Distribution audits optionally use repository Actions secret
+Distribution public reads prefer the organization Actions secret
 `DISTRIBUTION_READ_TOKEN`, an expiring fine-grained PAT with public-repository
-access only and no additional permissions. Without it (including fork PRs), they
+access only and no additional permissions, shared with PwrGit, PwrSnap and PwrAgent
+under selected repository visibility. Without it (including fork PRs), they
 use `GITHUB_TOKEN`. It is used only for read-only comparisons/generation, not
 submission or signing; do not reuse `RELEASES_PAT` or an administrator token.
-The workflow logs the selected credential's name and cancels superseded runs for
+The workflow logs the selected credential's name/availability, retains sanitized
+complete/blocked JSON comparisons and cancels superseded runs for
 the same ref. A dedicated token does not bypass GitHub's search/secondary limits.
+The helper bounds header-aware retries and requires complete code/issue pagination.
+`huntharo` / organization maintainers own the expiry inventory and same-name,
+same-policy rotation; verify metadata/sharing and runtime reads in all three
+repositories after rotation. See the distribution runbook for exact checks.
 
 | Workflow | Trigger | What it does |
 |---|---|---|

@@ -150,13 +150,13 @@ repository's default branch:
 1. Before editing versions, compare authoritative remote distribution sources:
 
    ```bash
-   pnpm distribution:audit
+   pnpm distribution:audit --output <ignored-directory>/distribution-audit.json
    ```
 
-   Record GitHub Stable Latest, Winget `PwrDrvr.PwrGit` in
-   `microsoft/winget-pkgs`, Homebrew `pwrdrvr/tap/pwrgit` in the existing
-   `pwrdrvr/homebrew-tap`, current remote versions, ownership and pending PR
-   URLs. Inspect open and closed prior submissions when registration is missing.
+   Record GitHub Stable Latest, proposed Winget `PwrDrvr.PwrGit` in
+   `microsoft/winget-pkgs`, Homebrew `pwrdrvr/tap/pwrgit` (pending registration) in the existing
+   `pwrdrvr/homebrew-tap`, current remote versions, ownership and open/closed submission PR
+   URLs, architecture-selected URLs/checksums and source/client state. Inspect open and closed prior submissions when registration is missing.
    Do not treat authentication/network/search errors as absence. Reuse existing
    identities and pending submissions, and resolve any central Homebrew cask or
    alternate Winget identity before generating files. A lower maintenance release
@@ -364,11 +364,25 @@ Do not compose replacement notes ad hoc after approval.
 
 ## Package Manager Updates On Every Release
 
-Follow [../../../docs/package-manager-distribution.md](../../../docs/package-manager-distribution.md)
-after verifying GitHub publication. Alpha, beta and Stable candidates leave both
-package managers on promoted Stable Latest; record that decision and compare
-remote versions again. Do not cut or promote a product release just to register
-a package manager.
+Follow [../../../docs/package-manager-distribution.md](../../../docs/package-
+manager-distribution.md) after verifying GitHub publication. Alpha, beta and
+Stable candidates leave both package managers on promoted Stable Latest; record
+that decision and compare remote versions again. Run the existing workflow in
+read-only mode to verify public reads without downloading or installing
+anything:
+
+```bash
+gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref <audit-branch> -f audit_only=true
+```
+
+Retain its `distribution-audit-standalone` artifact and run URL. Release CI
+reuses the same workflow with `audit_only: true` before preparation and after
+publication; inspect both stage artifacts. Preflight blocks preparation; a post-
+publication blocker needs an owned retry, not republishing. Require complete
+search pagination and `incomplete_results=false`; metadata, transport,
+throttling and search failures remain named-owner blockers, never package
+absence. A completed audit is a source comparison, not client publication. Do
+not cut or promote a product release just to register a package manager.
 
 After an explicitly authorized stable promotion, dispatch the distribution
 workflow even if a release event already ran it (events emitted by `GITHUB_TOKEN`
@@ -380,11 +394,19 @@ pnpm distribution:prepare v<version> node_modules/.cache/pwrgit-distribution
 ```
 
 If hosted cross-repository audits hit HTTP 429, inspect the logged token source.
-The optional Actions secret `DISTRIBUTION_READ_TOKEN` selects an expiring
-public-read fine-grained PAT with no extra permissions instead of `GITHUB_TOKEN`
-for those steps. Do not reuse publishing/admin credentials. Rate limiting is not
-evidence of missing repository access, and a PAT does not bypass search or
-secondary limits. Follow the distribution runbook for setup and remaining gates.
+The organization Actions secret `DISTRIBUTION_READ_TOKEN`, shared with PwrGit,
+PwrSnap and PwrAgent under selected visibility, selects an expiring public-read
+fine-grained PAT with no extra permissions instead of `GITHUB_TOKEN` for those
+steps. Do not reuse publishing/admin credentials. Rate limiting is not evidence
+of missing repository access, and a PAT does not bypass search or secondary
+limits. Use `GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}`
+for public cross-repository reads; fork checks retain the fallback. Verify
+secret metadata and selected repositories, then the read-only Actions log's
+source/availability and successful runtime reads, without exposing its value.
+`huntharo` / organization maintainers own expiry inventory, renewal/rotation
+under the same name and policy, and verification in each selected repository
+afterward. Do not infer expiry from secret update time. Follow the distribution
+runbook for bounded Retry-After/reset budgets and remaining gates.
 
 Require immutable versioned URLs and download/hash the actual published bytes.
 Validate arm64 versus universal DMG selection, app bundle ID/version, Developer ID
@@ -394,13 +416,17 @@ an unsigned preview or use mutable Latest aliases in manifests. Recheck current
 official Winget schema and Homebrew DSL before each submission.
 
 Submit the generated one-version Winget manifest set to `microsoft/winget-pkgs`
-under the established ID. Update the cask in `pwrdrvr/homebrew-tap` by dispatching
-`bump-pwrgit.yml` or opening a validated tap PR; inspect its CI before merging.
-Use the authorized maintainer account: PwrGit's workflow token cannot write to
+under the proposed ID after rechecking identity/history. Update the cask in
+`pwrdrvr/homebrew-tap` by updating existing registration PR #8 while it is
+pending; its cask and `bump-pwrgit.yml` are not yet on the tap default branch.
+After registration lands, verify the workflow exists remotely before dispatching
+it or reuse its pending validated update PR; inspect its CI before merging. Use
+the authorized maintainer account: PwrGit's workflow token cannot write to
 another repository. Retain submission URLs and do not duplicate pending PRs.
 
 Require `winget validate`, native silent install/uninstall, user-scope registry
-and payload checks, tap style/online audit, Intel and Apple Silicon installs,
+and payload checks, tap style/online audit, Intel and Apple Silicon installs on
+disposable clients (never the operator's live app),
 and older-to-newer upgrades on subsequent versions. Use `brew upgrade --cask
 --greedy` for this auto-updating cask. Record initial-registration upgrade checks
 as unavailable when no prior indexed package exists. Use the dedicated lab for
