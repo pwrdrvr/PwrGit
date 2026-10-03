@@ -47,10 +47,14 @@ export function useForkStatus(
     const offGraph = subscribe("graph:changed", (payload) => {
       if (payload.repoId === repoId) load();
     });
+    const offIdentity = subscribe("repo:identityChanged", (payload) => {
+      if (payload.identities.some((entry) => entry.repoId === repoId)) load();
+    });
     return () => {
       active = false;
       offWorktree();
       offGraph();
+      offIdentity();
     };
   }, [key, worktreeId, repoId]);
 

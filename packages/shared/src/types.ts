@@ -267,6 +267,12 @@ export type ForkDrift = {
  * gains its menu; the tracked branch reads 0/0 on a fork whose source has
  * moved on, so nothing else in the header can say it.
  */
+export type ForkTrackingRepair = {
+  branch: string;
+  upstream: string;
+  target: string;
+};
+
 export type ForkStatus = {
   branch: string;
   head: string;
@@ -280,6 +286,9 @@ export type ForkStatus = {
   /** The source's default branch against a branch that is not it; null on
    *  the counterpart of that default, or when it is not fetched. */
   drift: ForkDrift | null;
+  /** Known fork whose branch still tracks its parent after a remote rename.
+   *  Keep Pull's dropdown available to offer a tracking-only repair. */
+  trackingRepair?: ForkTrackingRepair;
 };
 
 /** How a fork sync ended for the branch the checkout tracks. */

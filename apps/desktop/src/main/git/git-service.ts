@@ -6,6 +6,7 @@ import {
   type BranchTrackingStatus,
   changeRequestMatch,
   changeRequestNumberQuery,
+  forkTrackingRepair,
   type ChangeSet,
   CHANGE_LIST_LIMIT,
   type Commit,
@@ -34,6 +35,7 @@ import {
   type RemoteResetPreview,
   type RemoteResetSnapshot,
   type RemoteSummary,
+  type RepoIdentity,
   type RemoteTagAction,
   type RemoteTagPlan,
   type RemoteTagResult,
@@ -2434,7 +2436,8 @@ async function forkDrift(
 export async function resolveForkStatus(
   git: GitExec,
   cwd: string,
-  forkParent: ForkParentHint | null
+  forkParent: ForkParentHint | null,
+  identity?: RepoIdentity
 ): Promise<Result<ForkStatus | null>> {
   const checkout = await resolveCheckedOutRef(git, cwd);
   if (!checkout.ok) {
@@ -2464,7 +2467,23 @@ export async function resolveForkStatus(
     tracked?.remote ?? null,
     forkParent
   );
-  if (source === null) return ok(null);
+  if (source === null) {
+    const repair = forkTrackingRepair(identity, endpoints.value, {
+      name: checkout.value.branch,
+      ...(tracked === null ? {} : { upstream: `${tracked.remote}/${tracked.name}` })
+    });
+    if (repair === null) return ok(null);
+    const trackedTarget = upstreamRef === null || tracked === null
+      ? null : await resetTargetOf(git, cwd, upstreamRef, tracked.remote);
+    return ok({
+      branch: checkout.value.branch,
+      head: checkout.value.head,
+      source: null,
+      tracked: trackedTarget,
+      drift: null,
+      trackingRepair: repair
+    });
+  }
 
   const defaultRaw =
     tracked === null

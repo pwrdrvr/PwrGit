@@ -50,6 +50,9 @@ import type { RepoIndexer } from "./repo-indexer";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import { execGit } from "./dugite";
+import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
+
+vi.mock("./fork-tracking", () => ({ inspectForkTracking: vi.fn(), repairForkTracking: vi.fn() }));
 
 vi.mock("./git-service", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./git-service")>();
@@ -125,6 +128,8 @@ function liveActivities(
 describe("remote handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(repairForkTracking).mockResolvedValue(ok(null));
+    vi.mocked(inspectForkTracking).mockResolvedValue(ok(null));
     vi.mocked(checkSelectedRemoteTips).mockResolvedValue(ok("checked"));
     vi.mocked(ensureForkParentRemote).mockResolvedValue(ok(undefined));
     vi.mocked(fetchAllRemotes).mockResolvedValue(ok(undefined));
@@ -169,6 +174,67 @@ describe("remote handlers", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it("coalesces fork tracking inspections and keeps identical branch names in two profiles separate", async () => {
+    const rows = new Map([
+      ["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }],
+      ["wt-b", { path: "/b/main", repoId: "repo-b", branch: "main" }]
+    ]);
+    const db = { prepare: () => ({ get: (id: string) => rows.get(id) }) } as unknown as DB;
+    const readIdentity = vi.fn(() => undefined);
+    const refresher = { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue(), undefined, undefined, readIdentity);
+    let release!: () => void;
+    vi.mocked(inspectForkTracking).mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve(ok({ branch: "main", upstream: "upstream/main", target: "origin/main" }));
+    }));
+    const first = bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" });
+    const same = bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" });
+    const second = bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-b" });
+    await vi.waitFor(() => expect(inspectForkTracking).toHaveBeenCalledTimes(2));
+    release();
+    expect(await first).toEqual(await same);
+    expect(await second).toEqual(ok(null));
+    expect(readIdentity.mock.calls).toEqual([["repo-a"], ["repo-b"]]);
+    expect(vi.mocked(inspectForkTracking).mock.calls.map(([, path]) => path)).toEqual(["/a/main", "/b/main"]);
+    expect(refresher.refreshRepoWorktrees).not.toHaveBeenCalled();
+  });
+
+  it("repairs tracking using the selected worktree's repository and identity across profiles", async () => {
+    const rows = new Map([
+      ["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }],
+      ["wt-b", { path: "/b/main", repoId: "repo-b", branch: "main" }]
+    ]);
+    const repos = new Map([
+      ["repo-a", { path: "/a", profileId: "profile-a" }],
+      ["repo-b", { path: "/b", profileId: "profile-b" }]
+    ]);
+    const db = { prepare: (sql: string) => ({
+      get: (id: string) => sql.includes("FROM worktrees") ? rows.get(id) : repos.get(id)
+    }) } as unknown as DB;
+    const readIdentity = vi.fn((id: string) => ({
+      host: "github" as const, hostname: "github.com", owner: id, name: "widget",
+      nameWithOwner: `${id}/widget`, visibility: "public" as const,
+      parent: { nameWithOwner: "team/widget", url: "https://github.com/team/widget" }
+    }));
+    const refresher = { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() } satisfies WorktreeRefresher;
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue(), undefined, undefined, readIdentity);
+    for (const suffix of ["a", "b"]) {
+      const request = { worktreeId: `wt-${suffix}`, branch: "main", upstream: "upstream/main" };
+      expect(await bus.dispatch("remote:repairForkTracking", request)).toEqual(ok(null));
+      expect(repairForkTracking).toHaveBeenLastCalledWith(execGit, `/${suffix}/main`, expect.objectContaining({ nameWithOwner: `repo-${suffix}/widget` }), request, undefined);
+    }
+    expect(readIdentity.mock.calls).toEqual([["repo-a"], ["repo-b"]]);
+    expect(refresher.refreshRepoWorktrees.mock.calls).toEqual([["repo-a"], ["repo-b"]]);
+    vi.mocked(repairForkTracking).mockResolvedValueOnce(err({ kind: "remote", code: "stale", message: "Changed" }));
+    expect((await bus.dispatch("remote:repairForkTracking", { worktreeId: "wt-a", branch: "main", upstream: "upstream/main" })).ok).toBe(false);
+    expect(refresher.refreshRepoWorktrees).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(repairForkTracking).mock.calls.length;
+    expect((await bus.dispatch("remote:repairForkTracking", { worktreeId: "missing", branch: "main", upstream: "upstream/main" })).ok).toBe(false);
+    expect(repairForkTracking).toHaveBeenCalledTimes(calls);
+  });
 
   it("bounds automatic checks in main by queueing, and keeps same-named branches in two profiles separate", async () => {
     const rows = new Map([

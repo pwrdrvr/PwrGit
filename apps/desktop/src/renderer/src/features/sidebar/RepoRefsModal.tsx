@@ -38,6 +38,7 @@ import { PushRefsDialog } from "./PushRefsDialog";
 import { CreateTagDialog } from "./CreateTagDialog";
 import { RemoteEditorDialog } from "./RemoteEditorDialog";
 import { ForkParentRemoteDialog } from "./ForkParentRemoteDialog";
+import { ForkRemoteStatus } from "./ForkRemoteStatus";
 import { forkParentOffer } from "./fork-parent-offer";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
 import { TagRemoteDialog } from "./TagRemoteDialog";
@@ -1554,6 +1555,7 @@ export function RepoRefsModal({
 
           {shownTab === "remotes" && (
             <div className="refs-remotes">
+              <ForkRemoteStatus repo={repo} refs={refs} focusedWorktree={focusedWorktree} onRefresh={onRefresh} />
               {parentOffer !== null && (
                 <section className="refs-remote-card refs-fork-parent-offer">
                   <div>
