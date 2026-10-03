@@ -19,6 +19,7 @@
 // `login status`, ACP agents with `--version` / `--help`. Only model listing
 // starts an agent for real.
 
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
   CodexLoginManager,
@@ -64,6 +65,7 @@ import {
   type PwrGitError,
   type Result
 } from "@pwrgit/shared";
+import type { ChatGptAuth, ChatGptCredential } from "./chatgpt-auth";
 import { acpReasoningEffort } from "./acp-effort";
 import {
   acpDiscoveryOptionsForInstallScan,
@@ -115,7 +117,8 @@ export type CodexEnvironment = {
 export type ResolvedAgentBackend =
   | {
       kind: "codex";
-      providerId: "codex";
+      providerId: "codex" | "chatgpt";
+      chatGptCredential?: () => Promise<ChatGptCredential>;
       displayName: string;
       command: string;
       version?: string;
@@ -149,6 +152,7 @@ export type ResolvedAgentJob = {
 };
 
 export type AiProviderServiceDependencies = {
+  chatGpt?: ChatGptAuth;
   settings: Pick<AiProviderSettingsStore, "read" | "update">;
   onSettingsChanged?: (snapshot: AiProviderSettingsSnapshot) => void;
   discoverCodex: (params: DiscoverCodexCommandsParams) => Promise<CodexDiscoverySnapshot>;
@@ -597,7 +601,7 @@ export class AiProviderService {
     const model = isAiModelId(job.model) ? job.model : null;
     const base = { profileId, jobId, guidance: settings.guidance };
     try {
-      if (providerId === "codex") {
+      if (providerId === "codex" || providerId === "chatgpt") {
         const resolution = await this.codexResolution(
           settings,
           profileId,
@@ -612,7 +616,10 @@ export class AiProviderService {
             )
           );
         }
-        if (resolution.discovery.auth?.status === "unauthenticated") {
+        if (providerId === "chatgpt" && !this.deps.chatGpt?.status(profileId).planUsage) {
+          return err(agentError("signed_out", "Continue with ChatGPT for this profile and grant ChatGPT plan usage."));
+        }
+        if (providerId === "codex" && resolution.discovery.auth?.status === "unauthenticated") {
           return err(
             agentError(
               "signed_out",
@@ -622,22 +629,28 @@ export class AiProviderService {
         }
         // Availability does not start an app-server. Use this runtime/account's
         // known catalog; an uncached list waits until a model picker asks.
-        const models = this.knownCodexModels(resolution.selected, resolution.environment);
+        const models = providerId === "chatgpt" ? undefined : this.knownCodexModels(resolution.selected, resolution.environment);
         const current = models === undefined ? settings : this.migrateCodexDefaults(profileId, models, settings.codex);
         const codexJob = current.jobs[jobId];
         const codexModel = isAiModelId(codexJob.model) ? codexJob.model : null;
+        const codexHome = providerId === "chatgpt"
+          ? join(this.deps.scratchDir, "chatgpt-homes", createHash("sha256").update(profileId).digest("hex"))
+          : resolution.environment.codexHome;
         return ok({
           ...base,
           backend: {
             kind: "codex",
-            providerId: "codex",
-            displayName: aiProviderDisplayName("codex"),
+            providerId,
+            ...(providerId === "chatgpt" ? { chatGptCredential: () => this.deps.chatGpt!.credential(profileId) } : {}),
+            displayName: providerId === "chatgpt" ? "Using ChatGPT plan" : aiProviderDisplayName("codex"),
             command: resolution.selected.command,
             ...(resolution.selected.version !== undefined
               ? { version: resolution.selected.version }
               : {}),
-            env: resolution.environment.env,
-            codexHome: resolution.environment.codexHome,
+            env: providerId === "chatgpt"
+              ? { ...resolution.environment.env, CODEX_HOME: codexHome }
+              : resolution.environment.env,
+            codexHome,
             authProfile: resolution.environment.authProfile
           },
           model: codexModel,
@@ -830,6 +843,7 @@ export class AiProviderService {
 /** Production wiring: the agent kit's discovery, the short-lived listers, and
  *  one login manager whose children die with the service. */
 export function createAiProviderService(options: {
+  chatGpt?: ChatGptAuth;
   settings: Pick<AiProviderSettingsStore, "read" | "update">;
   onSettingsChanged: (snapshot: AiProviderSettingsSnapshot) => void;
   acpModelCache: Pick<AcpModelCache, "load" | "save">;
@@ -842,6 +856,7 @@ export function createAiProviderService(options: {
     openExternal
   });
   return new AiProviderService({
+    ...(options.chatGpt ? { chatGpt: options.chatGpt } : {}),
     settings: options.settings,
     onSettingsChanged: options.onSettingsChanged,
     discoverCodex: (params) => discoverCodexCommands(params),

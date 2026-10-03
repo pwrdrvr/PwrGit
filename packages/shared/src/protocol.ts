@@ -2125,6 +2125,9 @@ export interface Commands {
   // hands work to, per profile. Every call names its profile because the
   // Settings window is shared by all of them. Discovery answers from cache
   // unless `force`; model lists answer from cache unless `refresh`.
+  "aiProviders:chatGptStatus": { req: { profileId: ProfileId }; res: import("./ai-providers").ChatGptConnection };
+  "aiProviders:chatGptSignIn": { req: { profileId: ProfileId }; res: import("./ai-providers").ChatGptConnection };
+  "aiProviders:chatGptSignOut": { req: { profileId: ProfileId }; res: { remoteRevocationConfirmed: boolean } };
   "aiProviders:read": {
     req: { profileId: ProfileId };
     res: AiProviderSettingsSnapshot;

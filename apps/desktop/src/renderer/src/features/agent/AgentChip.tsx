@@ -7,6 +7,7 @@ import {
   type AiJobId,
   type CodexModelOption
 } from "@pwrgit/shared";
+import { dispatch } from "../../lib/pwrgit";
 import { ChevronGlyph } from "../../lib/ChevronGlyph";
 import { useDismissable } from "../../lib/useDismissable";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
@@ -129,6 +130,7 @@ export function AgentChip({
             {/* Both jobs run on one provider, so the rows below are its models. */}
             {agent.ready ? `${AI_JOBS[jobId].label} · ${agent.name}` : title}
           </div>
+          {agent.status?.providerName === "Using ChatGPT plan" && <button className="agent-menu__item" type="button" role="menuitem" onClick={() => { close(); void dispatch("shell:openExternal", { url: "https://chatgpt.com/settings/usage" }); }}>Manage usage</button>}
           {agent.ready ? (
             models.length > 0 ? (
               models.map((option) => {
@@ -211,7 +213,8 @@ export function AgentChip({
           )}
           <div className="agent-menu__sep" role="separator" />
           <div className="agent-menu__foot">
-            {agent.ready ? (
+            {agent.status?.providerName === "Using ChatGPT plan" && <button className="agent-menu__item" type="button" role="menuitem" onClick={() => { close(); void dispatch("shell:openExternal", { url: "https://chatgpt.com/settings/usage" }); }}>Manage usage</button>}
+          {agent.ready ? (
               <>
                 Only this request. The default is in
                 <button
