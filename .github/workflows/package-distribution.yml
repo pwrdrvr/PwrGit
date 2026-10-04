@@ -126,7 +126,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/distribution/.validated-macos
           key: distribution-validated-v1-macos-26-${{ needs.prepare.outputs.macos_validation }}
-          lookup-only: true
       - name: Report reused macOS validation
         if: steps.validated.outputs.cache-hit == 'true' && !inputs.force_validation
         run: echo 'Exact release bytes and validator inputs already passed macOS validation; no installers downloaded or mounted.' >> "$GITHUB_STEP_SUMMARY"
@@ -191,7 +190,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/distribution/.validated-windows
           key: distribution-validated-v1-windows-latest-x64-${{ needs.prepare.outputs.windows_validation }}
-          lookup-only: true
       - name: Report reused Windows validation
         if: steps.validated.outputs.cache-hit == 'true' && !inputs.force_validation
         shell: pwsh

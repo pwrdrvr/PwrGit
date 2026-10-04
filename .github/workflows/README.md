@@ -7,7 +7,7 @@ promoted Stable Latest and generates manifests from GitHub asset digests without
 downloading installers. Separate native jobs validate macOS signatures and both
 architectures, plus WinGet manifests, signatures, install/upgrade and uninstall.
 Successful validation is cached by release bytes, manifests, validator inputs and
-runner platform. Unchanged daily runs only look up that success record; they do
+runner platform. Unchanged daily runs only restore that tiny success record; they do
 not download, mount or install release assets. Publication audits still run and
 fail on absent/stale channels independently of native validation reuse.
 

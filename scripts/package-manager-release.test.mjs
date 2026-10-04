@@ -226,6 +226,16 @@ test("validation identity ignores routine metadata but changes for relevant inpu
   const windowsBytes = structuredClone(value);
   windowsBytes.assets[2].digest = `sha256:${"f".repeat(64)}`;
   expect(validationPlan(windowsBytes, report, digest).windows_validation).not.toBe(plan.windows_validation);
+  const newRelease = structuredClone(value);
+  newRelease.tag_name = "v0.28.0";
+  newRelease.assets.forEach((asset) => {
+    asset.name = asset.name.replace("0.27.0", "0.28.0");
+    asset.browser_download_url = asset.browser_download_url.replaceAll("0.27.0", "0.28.0");
+  });
+  const versionPlan = validationPlan(newRelease, report, digest);
+  expect(versionPlan.macos_validation).not.toBe(plan.macos_validation);
+  expect(versionPlan.windows_validation).not.toBe(plan.windows_validation);
+  expect(versionPlan.windows_cache).not.toBe(plan.windows_cache);
   const logicPlan = validationPlan(value, report, "b".repeat(64));
   expect(logicPlan.macos_validation).not.toBe(plan.macos_validation);
   expect(logicPlan.windows_validation).not.toBe(plan.windows_validation);
@@ -268,4 +278,16 @@ test("platform downloads fetch once and verify restored bytes before reuse", asy
 test("an absent channel and a pending submission remain publication failures", async () => {
   const report = await audit({ api: api({ winget: ["0.26.0"], cask: "0.27.0", pending: [{ html_url: "https://github.com/example/pull/1", title: "PwrGit" }] }) });
   expect(publicationFailures(report)).toEqual(["winget: published 0.26.0; expected 0.27.0; open submissions: https://github.com/example/pull/1"]);
+});
+
+test("rejects an authenticated checksum file that disagrees with the installer", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-distribution-sums-"));
+  const { value, payloads } = downloadableRelease();
+  payloads[3] = Buffer.from(`${"0".repeat(64)}  ${value.assets[2].name}\n`);
+  value.assets[3].digest = `sha256:${createHash("sha256").update(payloads[3]).digest("hex")}`;
+  const source = api();
+  try {
+    await prepare(value.tag_name, directory, { api: (path) => path.includes("/releases/") ? value : source(path), metadataOnly: true });
+    await expect(downloadPlatform(directory, "windows", { fetch: async (url) => new Response(payloads[value.assets.findIndex((asset) => asset.browser_download_url === url)]) })).rejects.toThrow("checksum file disagrees");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
