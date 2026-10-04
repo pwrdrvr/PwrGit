@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { audit, compareVersions, distribution, prepare, renderManifests, selectAssets, stableVersion } from "./package-manager-release.mjs";
+import { audit, compareVersions, distribution, downloadPlatform, prepare, publicationFailures, renderManifests, selectAssets, stableVersion, validationPlan } from "./package-manager-release.mjs";
 
 function release() {
   const tag_name = "v0.27.0";
@@ -113,8 +113,10 @@ test("removes interrupted or corrupt downloads and retries without poisoning the
     asset.size = payloads[i].length;
     asset.digest = `sha256:${createHash("sha256").update(payloads[i]).digest("hex")}`;
   });
-  const sumsUrl = "https://example.com/checksums";
-  value.assets.push({ name: "PwrGit-windows-SHA256SUMS", browser_download_url: sumsUrl });
+  const sumsUrl = `https://github.com/pwrdrvr/PwrGit/releases/download/${value.tag_name}/PwrGit-windows-SHA256SUMS`;
+  const sums = `${value.assets[2].digest.slice(7)}  ${value.assets[2].name}`;
+  value.assets.push({ name: "PwrGit-windows-SHA256SUMS", browser_download_url: sumsUrl,
+    digest: `sha256:${createHash("sha256").update(sums).digest("hex")}`, size: Buffer.byteLength(sums) });
   const source = api();
   const releaseApi = (path) => path.includes("/releases/") ? value : source(path);
   const requests = [];
@@ -135,7 +137,7 @@ test("removes interrupted or corrupt downloads and retries without poisoning the
       corrupt = false;
       return new Response("incorrect bytes");
     }
-    if (url === sumsUrl) return new Response(`${value.assets[2].digest.slice(7)}  ${value.assets[2].name}`);
+    if (url === sumsUrl) return new Response(sums);
     return new Response(payloads[value.assets.findIndex((asset) => asset.browser_download_url === url)]);
   };
   try {
@@ -146,10 +148,10 @@ test("removes interrupted or corrupt downloads and retries without poisoning the
     await prepare(value.tag_name, directory, { api: releaseApi, fetch: fetchAsset });
     expect(requests.filter((url) => url === value.assets[0].browser_download_url)).toHaveLength(3);
     expect(readFileSync(join(directory, "downloads", value.assets[0].name))).toEqual(payloads[0]);
-    expect(readdirSync(join(directory, "downloads"))).toHaveLength(3);
+    expect(readdirSync(join(directory, "downloads"))).toHaveLength(4);
     const previousRequests = requests.length;
     await prepare(value.tag_name, directory, { api: releaseApi, fetch: fetchAsset });
-    expect(requests.slice(previousRequests)).toEqual([sumsUrl]);
+    expect(requests.slice(previousRequests)).toEqual([]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -174,4 +176,121 @@ test("maps native arm64 and universal Intel DMGs separately and offers only Wind
   expect(installer).toContain(`InstallerSha256: ${"3".repeat(64)}`);
   expect(installer).not.toContain("Architecture: arm64");
   expect(installer).not.toContain("/latest/");
+});
+
+function downloadableRelease() {
+  const value = release();
+  const payloads = value.assets.map((asset) => Buffer.from(`verified ${asset.name}`));
+  const sums = Buffer.from(`${createHash("sha256").update(payloads[2]).digest("hex")}  ${value.assets[2].name}\n`);
+  value.assets.push({ name: "PwrGit-windows-SHA256SUMS", browser_download_url: `https://github.com/pwrdrvr/PwrGit/releases/download/${value.tag_name}/PwrGit-windows-SHA256SUMS` });
+  payloads.push(sums);
+  value.assets.forEach((asset, i) => {
+    asset.size = payloads[i].length;
+    asset.digest = `sha256:${createHash("sha256").update(payloads[i]).digest("hex")}`;
+  });
+  return { value, payloads };
+}
+
+test("daily plan generates metadata without fetching any release bytes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-distribution-plan-"));
+  const { value } = downloadableRelease();
+  const source = api({ cask: "0.27.0" });
+  try {
+    await prepare(value.tag_name, directory, {
+      api: (path) => path.includes("/releases/") ? value : source(path),
+      fetch: () => { throw new Error("No asset downloads allowed"); }, metadataOnly: true, validatorDigest: "a".repeat(64),
+    });
+    expect(readdirSync(directory).sort()).toEqual(["Casks", "distribution-status.json", "manifests"]);
+    const status = JSON.parse(readFileSync(join(directory, "distribution-status.json")));
+    expect(status.assets).toHaveLength(3);
+    expect(status.winget.version).toBeNull();
+    expect(status.validation.windows_cache).toContain("0.27.0-windows-x64-");
+    expect(publicationFailures(status)).toEqual(["winget: registration absent; expected 0.27.0; no open submission found"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("validation identity ignores routine metadata but changes for relevant inputs", () => {
+  const { value } = downloadableRelease();
+  const report = { winget: { version: null }, checkedAt: "yesterday", homebrew: { version: null } };
+  const digest = "a".repeat(64);
+  const plan = validationPlan(value, report, digest);
+  const changedCounters = structuredClone(value);
+  changedCounters.assets.forEach((asset) => { asset.download_count = 99; });
+  expect(validationPlan(changedCounters, { ...report, checkedAt: "today", homebrew: { version: "0.27.0" } }, digest)).toEqual(plan);
+  const changedBytes = structuredClone(value);
+  changedBytes.assets[0].digest = `sha256:${"f".repeat(64)}`;
+  const bytesPlan = validationPlan(changedBytes, report, digest);
+  expect(bytesPlan.macos_validation).not.toBe(plan.macos_validation);
+  expect(bytesPlan.arm64_cache).not.toBe(plan.arm64_cache);
+  expect(bytesPlan.windows_validation).toBe(plan.windows_validation);
+  const windowsBytes = structuredClone(value);
+  windowsBytes.assets[2].digest = `sha256:${"f".repeat(64)}`;
+  expect(validationPlan(windowsBytes, report, digest).windows_validation).not.toBe(plan.windows_validation);
+  const newRelease = structuredClone(value);
+  newRelease.tag_name = "v0.28.0";
+  newRelease.assets.forEach((asset) => {
+    asset.name = asset.name.replace("0.27.0", "0.28.0");
+    asset.browser_download_url = asset.browser_download_url.replaceAll("0.27.0", "0.28.0");
+  });
+  const versionPlan = validationPlan(newRelease, report, digest);
+  expect(versionPlan.macos_validation).not.toBe(plan.macos_validation);
+  expect(versionPlan.windows_validation).not.toBe(plan.windows_validation);
+  expect(versionPlan.windows_cache).not.toBe(plan.windows_cache);
+  const logicPlan = validationPlan(value, report, "b".repeat(64));
+  expect(logicPlan.macos_validation).not.toBe(plan.macos_validation);
+  expect(logicPlan.windows_validation).not.toBe(plan.windows_validation);
+  expect(logicPlan.windows_cache).toBe(plan.windows_cache);
+  const windowsLogicPlan = validationPlan(value, report, digest, "b".repeat(64));
+  expect(windowsLogicPlan.macos_validation).toBe(plan.macos_validation);
+  expect(windowsLogicPlan.windows_validation).not.toBe(plan.windows_validation);
+  const upgradePlan = validationPlan(value, { ...report, winget: { version: "0.26.0" } }, digest);
+  expect(upgradePlan.windows_validation).not.toBe(plan.windows_validation);
+  expect(upgradePlan.macos_validation).toBe(plan.macos_validation);
+  const changedSums = structuredClone(value);
+  changedSums.assets[3].digest = `sha256:${"f".repeat(64)}`;
+  expect(validationPlan(changedSums, report, digest).windows_validation).not.toBe(plan.windows_validation);
+  expect(() => validationPlan(value, report, "")).toThrow("validator inputs");
+});
+
+test("platform downloads fetch once and verify restored bytes before reuse", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-distribution-cache-"));
+  const { value, payloads } = downloadableRelease();
+  const source = api();
+  const requests = [];
+  const fetchAsset = async (url) => {
+    requests.push(url);
+    return new Response(payloads[value.assets.findIndex((asset) => asset.browser_download_url === url)]);
+  };
+  try {
+    await prepare(value.tag_name, directory, { api: (path) => path.includes("/releases/") ? value : source(path), metadataOnly: true });
+    await downloadPlatform(directory, "windows", { fetch: fetchAsset });
+    expect(requests).toEqual(value.assets.slice(2).map((asset) => asset.browser_download_url));
+    await downloadPlatform(directory, "windows", { fetch: () => { throw new Error("cache hit must not fetch"); } });
+    await downloadPlatform(directory, "macos", { fetch: fetchAsset });
+    expect(requests).toHaveLength(4);
+    await downloadPlatform(directory, "all", { fetch: () => { throw new Error("cache hit must not fetch"); } });
+    writeFileSync(join(directory, "downloads", value.assets[2].name), "corrupt restore");
+    await expect(downloadPlatform(directory, "windows", { fetch: fetchAsset })).rejects.toThrow("bytes do not match GitHub");
+    expect(requests).toHaveLength(4);
+    writeFileSync(join(directory, "downloads", value.assets[2].name), payloads[2]);
+    writeFileSync(join(directory, "downloads", value.assets[3].name), "corrupt checksum restore");
+    await expect(downloadPlatform(directory, "windows", { fetch: fetchAsset })).rejects.toThrow("bytes do not match GitHub");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("an absent channel and a pending submission remain publication failures", async () => {
+  const report = await audit({ api: api({ winget: ["0.26.0"], cask: "0.27.0", pending: [{ html_url: "https://github.com/example/pull/1", title: "PwrGit" }] }) });
+  expect(publicationFailures(report)).toEqual(["winget: published 0.26.0; expected 0.27.0; open submissions: https://github.com/example/pull/1"]);
+});
+
+test("rejects an authenticated checksum file that disagrees with the installer", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "pwrgit-distribution-sums-"));
+  const { value, payloads } = downloadableRelease();
+  payloads[3] = Buffer.from(`${"0".repeat(64)}  ${value.assets[2].name}\n`);
+  value.assets[3].digest = `sha256:${createHash("sha256").update(payloads[3]).digest("hex")}`;
+  const source = api();
+  try {
+    await prepare(value.tag_name, directory, { api: (path) => path.includes("/releases/") ? value : source(path), metadataOnly: true });
+    await expect(downloadPlatform(directory, "windows", { fetch: async (url) => new Response(payloads[value.assets.findIndex((asset) => asset.browser_download_url === url)]) })).rejects.toThrow("checksum file disagrees");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

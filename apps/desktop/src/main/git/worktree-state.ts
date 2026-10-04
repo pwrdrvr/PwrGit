@@ -483,6 +483,25 @@ export class WorktreeStateService {
     }
     const parsed = parseStatus(status.value.stdout);
 
+    // Without a tracker Git omits branch.ab; zero then hides local commits.
+    // Exclude every fetched remote branch, so a push without -u (or to a
+    // different remote/name) does not make published history look unpushed.
+    // This remains a local snapshot; the bounded background remote check
+    // refreshes same-name remote tips separately, as it does for trackers.
+    let ahead = parsed.ahead;
+    if (!parsed.hasUpstream && parsed.branch !== "(detached)" &&
+        parsed.head !== "(initial)" && parsed.head !== "") {
+      const unpublished = await this.git(
+        ["rev-list", "--count", parsed.head, "--not", "--remotes"], wt.path
+      );
+      if (!unpublished.ok || unpublished.value.exitCode !== 0) {
+        return this.getCached(worktreeId);
+      }
+      const count = Number(unpublished.value.stdout.trim());
+      if (!Number.isSafeInteger(count) || count < 0) return this.getCached(worktreeId);
+      ahead = count;
+    }
+
     let lastActivityAt: string | undefined;
     const logRaw = await this.git(["log", "-1", "--format=%cI"], wt.path);
     if (logRaw.ok && logRaw.value.exitCode === 0) {
@@ -550,7 +569,7 @@ export class WorktreeStateService {
       branch: branchName,
       head: parsed.head,
       hasUpstream: parsed.hasUpstream,
-      ahead: parsed.ahead,
+      ahead,
       behind: parsed.behind,
       dirty: parsed.dirty,
       behindDefault,

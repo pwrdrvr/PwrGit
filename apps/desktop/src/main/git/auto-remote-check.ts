@@ -12,7 +12,7 @@ import {
   type ForkParentHint
 } from "./git-service";
 
-type Target = { remote: string; remoteRef: string; localRef: string };
+type Target = { remote: string; remoteRef: string; localRef: string; optional?: boolean };
 
 /** Make a known fork parent visible to the ordinary fork sync path. */
 export async function ensureForkParentRemote(
@@ -33,7 +33,7 @@ export async function ensureForkParentRemote(
 }
 
 type CheckedWorktree = { id: string; path: string; branch: string };
-type TipAnswer = Result<"checked" | "untracked">;
+type TipAnswer = Result<"checked" | "untracked" | "unavailable">;
 
 /** Resolve every requested checkout before networking. One advertisement per
  * remote answers all its requested heads; absence is tested per exact ref. */
@@ -48,7 +48,7 @@ export async function checkRemoteTips(
   const symbolicHeads = new Map<string, Promise<Awaited<ReturnType<GitExec>>>>();
   const byRemote = new Map<string, {
     remote: string; cwd: string;
-    targets: Map<string, { target: Target; cwd: string; owners: Set<string> }>
+    targets: Map<string, { target: Target; cwd: string; owners: Map<string, boolean> }>
   }>();
   for (const worktree of worktrees) {
     // Tracking, conditional includes, and remote URLs are effective checkout
@@ -65,9 +65,10 @@ export async function checkRemoteTips(
       }
       return result;
     };
-    const planned = await remoteTargets(worktree.branch, parent, endpoints, upstreamRef, mergeRef, symbolicHead);
+    const planned = await remoteTargets(worktree.branch, parent, endpoints, upstreamRef, mergeRef, symbolicHead,
+      (remote) => git(["config", "--get-all", `remote.${remote}.fetch`], worktree.path));
     if (!planned.ok) { answers.set(worktree.id, planned); continue; }
-    answers.set(worktree.id, ok(planned.value.length === 0 ? "untracked" : "checked"));
+    answers.set(worktree.id, ok(planned.value.length === 0 ? "untracked" : "unavailable"));
     for (const target of planned.value) {
       const endpoint = endpoints.find((endpoint) => endpoint.name === target.remote)!;
       // A worktree override can give the same remote name a different URL.
@@ -76,14 +77,23 @@ export async function checkRemoteTips(
       const group = byRemote.get(key) ?? { remote: target.remote, cwd: worktree.path, targets: new Map() };
       byRemote.set(key, group);
       const refKey = `${target.remoteRef}\0${target.localRef}`;
-      const entry = group.targets.get(refKey) ?? { target, cwd: worktree.path, owners: new Set<string>() };
-      entry.owners.add(worktree.id);
+      const entry = group.targets.get(refKey) ?? { target, cwd: worktree.path, owners: new Map<string, boolean>() };
+      entry.owners.set(worktree.id, target.optional === true);
       group.targets.set(refKey, entry);
     }
   }
-  for (const { remote, cwd, targets } of byRemote.values()) {
+  const groups = [...byRemote.values()];
+  const required = (group: typeof groups[number]): boolean => [...group.targets.values()]
+    .some(({ owners }) => [...owners.values()].some((optional) => !optional));
+  // Source/tracked checks run before optional publication counterparts, which
+  // can exhaust the shared timeout. Optional failures stay local to that ref.
+  groups.sort((a, b) => Number(required(b)) - Number(required(a)));
+  const failOwners = (owners: Map<string, boolean>, answer: TipAnswer): void => {
+    for (const [id, optional] of owners) if (!optional) answers.set(id, answer);
+  };
+  for (const { remote, cwd, targets } of groups) {
     const fail = (answer: TipAnswer): void => {
-      for (const { owners } of targets.values()) for (const id of owners) answers.set(id, answer);
+      for (const { owners } of targets.values()) failOwners(owners, answer);
     };
     if (remote.startsWith("-")) {
       fail(err({ kind: "remote", code: "remote_config_failed", message: "The remote name cannot be checked safely." }));
@@ -107,12 +117,14 @@ export async function checkRemoteTips(
       const remoteHead = heads.get(target.remoteRef) ?? "";
       const deleted = !heads.has(target.remoteRef);
       const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], targetCwd);
-      if (!local.ok) { for (const id of owners) answers.set(id, local); continue; }
+      if (!local.ok) { failOwners(owners, local); continue; }
       const current = local.value.exitCode === 0 ? local.value.stdout.trim() : null;
-      if (deleted ? current === null : current === remoteHead) continue;
-      const updated = await exclusive(() => syncTrackingRef(git, targetCwd, target, remoteHead, deleted));
-      if (!updated.ok) { for (const id of owners) answers.set(id, updated); continue; }
-      if (updated.value) onFetched();
+      if (!(deleted ? current === null : current === remoteHead)) {
+        const updated = await exclusive(() => syncTrackingRef(git, targetCwd, target, remoteHead, deleted));
+        if (!updated.ok) { failOwners(owners, updated); continue; }
+        if (updated.value) onFetched();
+      }
+      for (const id of owners.keys()) if (answers.get(id)?.ok) answers.set(id, ok("checked"));
     }
   }
   return answers;
@@ -148,7 +160,8 @@ async function readTrackingConfiguration(git: GitExec, cwd: string, branch: stri
 async function remoteTargets(
   branch: string, parent: ForkParentHint | null, endpoints: RemoteEndpoint[],
   upstreamRef: string | null, remoteRef: string,
-  symbolicHead: (ref: string) => ReturnType<GitExec>
+  symbolicHead: (ref: string) => ReturnType<GitExec>,
+  fetchMappings: (remote: string) => ReturnType<GitExec>
 ): Promise<Result<Target[]>> {
   const tracked = upstreamRef === null ? undefined : [...endpoints]
     .sort((a, b) => b.name.length - a.name.length)
@@ -158,6 +171,8 @@ async function remoteTargets(
   }
   const trackedBranch = tracked === undefined || upstreamRef === null
     ? branch : upstreamRef.slice(`refs/remotes/${tracked.name}/`.length);
+  const source = forkSourceRemote(endpoints, tracked?.name ?? null, parent);
+  const counterparts = upstreamRef === null && !branch.startsWith("detached@");
   const targets: Target[] = [];
   if (tracked !== undefined && upstreamRef !== null) {
     // A custom fetch refspec can map refs/heads/main to origin/other-name.
@@ -166,9 +181,24 @@ async function remoteTargets(
       return err({ kind: "remote", code: "remote_config_failed", message: "The tracked branch has no remote head." });
     }
     targets.push({ remote: tracked.name, remoteRef, localRef: upstreamRef });
+  } else if (counterparts) {
+    // A branch may be published without -u. Refresh its mapped counterparts
+    // so another client's push stops contributing stale local-only counts.
+    for (const endpoint of endpoints) {
+      const optional = endpoint.name !== source?.remote;
+      const mappings = await fetchMappings(endpoint.name);
+      if (!mappings.ok) { if (!optional) return mappings; continue; }
+      if (mappings.value.exitCode !== 0 && mappings.value.exitCode !== 1) {
+        if (!optional) return err({ kind: "remote", code: "remote_config_failed", message: "Could not read fetch mappings." });
+        continue;
+      }
+      const remoteRef = `refs/heads/${branch}`;
+      for (const localRef of mappedTrackingRefs(remoteRef, mappings.value.stdout.trim().split("\n"))) {
+        targets.push({ remote: endpoint.name, remoteRef, localRef, optional });
+      }
+    }
   }
-  const source = forkSourceRemote(endpoints, tracked?.name ?? null, parent);
-  if (source !== null) {
+  if (!counterparts && source !== null && !targets.some((target) => target.remote === source.remote)) {
     const prefix = `refs/remotes/${source.remote}/`;
     const sourceRef = `${prefix}${trackedBranch}`;
     targets.push({ remote: source.remote, remoteRef: `refs/heads/${trackedBranch}`, localRef: sourceRef });
@@ -195,6 +225,36 @@ async function remoteTargets(
   }
 
   return ok(targets);
+}
+
+/** Match Git's exact/pattern fetch mappings, including negative exclusions.
+ * Only remote-tracking refs may be written by an automatic counterpart check. */
+function mappedTrackingRefs(remoteRef: string, refspecs: string[]): string[] {
+  const match = (pattern: string): string | null => {
+    const star = pattern.indexOf("*");
+    if (star === -1) return pattern === remoteRef ? "" : null;
+    if (pattern.indexOf("*", star + 1) !== -1) return null;
+    const prefix = pattern.slice(0, star);
+    const suffix = pattern.slice(star + 1);
+    return remoteRef.startsWith(prefix) && remoteRef.endsWith(suffix) && remoteRef.length >= prefix.length + suffix.length
+      ? remoteRef.slice(prefix.length, remoteRef.length - suffix.length) : null;
+  };
+  if (refspecs.some((refspec) => refspec.startsWith("^") && match(refspec.slice(1)) !== null)) return [];
+  const destinations = new Set<string>();
+  for (const refspec of refspecs) {
+    const positive = refspec.startsWith("+") ? refspec.slice(1) : refspec;
+    const colon = positive.indexOf(":");
+    if (colon === -1 || positive.startsWith("^")) continue;
+    const from = positive.slice(0, colon);
+    const to = positive.slice(colon + 1);
+    const captured = match(from);
+    if (captured === null || from.includes("*") !== to.includes("*")) continue;
+    const destination = to.replace("*", captured);
+    if (destination.startsWith("refs/remotes/") && destination !== "refs/remotes/" && !destination.includes("*")) {
+      destinations.add(destination);
+    }
+  }
+  return [...destinations];
 }
 
 /** Bring one tracking ref to the advertised tip; true when it moved. */

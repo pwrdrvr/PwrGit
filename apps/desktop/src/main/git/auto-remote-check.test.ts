@@ -54,6 +54,101 @@ function forkFixture(): { origin: string; source: string; writer: string; local:
 const unlocked = <T>(run: () => Promise<T>): Promise<T> => run();
 
 describe("automatic selected-branch remote check", () => {
+  it("batches tracked and no-upstream branches while isolating an optional backup failure", async () => {
+    const { writer, local, source } = forkFixture();
+    git(local, "remote", "add", "backup", join(local, "missing.git"));
+    const linked = join(mkdtempSync(join(tmpdir(), "pwrgit-merged-remote-check-")), "topic");
+    git(local, "worktree", "add", "--no-track", "-b", "topic", linked, "HEAD");
+    git(writer, "commit", "--allow-empty", "-m", "source topic");
+    git(writer, "remote", "add", "upstream", source);
+    git(writer, "push", "upstream", "main:topic");
+    const advertisements: string[][] = [];
+    const recorded: GitExec = (args, cwd, options) => {
+      if (args[0] === "ls-remote") advertisements.push(args);
+      return systemGit(args, cwd, options);
+    };
+    expect(await checkRemoteTips(recorded, [
+      { id: "main", path: local, branch: "main" },
+      { id: "topic", path: linked, branch: "topic" }
+    ], null, unlocked, () => undefined)).toEqual(new Map([["main", ok("checked")], ["topic", ok("checked")]]));
+    expect(advertisements).toEqual([
+      ["ls-remote", "--heads", "origin", "refs/heads/main", "refs/heads/topic"],
+      ["ls-remote", "--heads", "upstream", "refs/heads/main", "refs/heads/topic"],
+      ["ls-remote", "--heads", "backup", "refs/heads/topic"]
+    ]);
+    expect(git(linked, "rev-list", "--count", "HEAD..upstream/topic")).toBe("1");
+  });
+
+  it("preserves a custom-mapped tracking ref that belongs to another remote branch", async () => {
+    const { local } = forkFixture();
+    git(local, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/topic");
+    git(local, "fetch", "origin");
+    const mapped = git(local, "rev-parse", "refs/remotes/origin/topic");
+    git(local, "switch", "-c", "topic");
+    const commands: string[][] = [];
+    const recorded: GitExec = (args, cwd, options) => {
+      commands.push(args);
+      return systemGit(args, cwd, options);
+    };
+    expect(await checkSelectedRemoteTips(recorded, local, "topic", null, unlocked, () => undefined))
+      .toEqual(ok("checked"));
+    expect(git(local, "for-each-ref", "--format=%(objectname)", "refs/remotes/origin/topic")).toBe(mapped);
+    expect(commands).not.toContainEqual(["ls-remote", "--heads", "origin", "refs/heads/topic"]);
+  });
+
+  it("updates configured wildcard destinations for an untracked branch without inventing conventional refs", async () => {
+    const { local, writer } = forkFixture();
+    git(local, "switch", "-c", "topic");
+    git(local, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/cache/*");
+    git(writer, "commit", "--allow-empty", "-m", "published topic");
+    git(writer, "push", "origin", "main:topic");
+    expect(await checkSelectedRemoteTips(systemGit, local, "topic", null, unlocked, () => undefined))
+      .toEqual(ok("checked"));
+    expect(git(local, "for-each-ref", "--format=%(objectname)", "refs/remotes/cache/topic"))
+      .toBe(git(writer, "rev-parse", "HEAD"));
+    expect(git(local, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/topic")).toBe("");
+  });
+
+  it.each(["^refs/heads/topic", "^refs/heads/top*"])("respects negative fetch mapping %s for optional counterparts", async (refspec) => {
+    const { local } = forkFixture();
+    git(local, "switch", "-c", "topic");
+    git(local, "config", "--add", "remote.origin.fetch", refspec);
+    git(local, "update-ref", "refs/remotes/origin/topic", "HEAD");
+    const before = git(local, "rev-parse", "refs/remotes/origin/topic");
+    expect(await checkSelectedRemoteTips(systemGit, local, "topic", null, unlocked, () => undefined))
+      .toEqual(ok("checked"));
+    expect(git(local, "for-each-ref", "--format=%(objectname)", "refs/remotes/origin/topic")).toBe(before);
+  });
+
+  it("refreshes the fork source despite an unavailable optional backup remote", async () => {
+    const { local, writer, source } = forkFixture();
+    git(local, "switch", "-c", "topic");
+    git(local, "remote", "add", "backup", join(local, "missing.git"));
+    git(writer, "commit", "--allow-empty", "-m", "source topic");
+    git(writer, "remote", "add", "upstream", source);
+    git(writer, "push", "upstream", "main:topic");
+    const commands: string[][] = [];
+    const recorded: GitExec = (args, cwd, options) => {
+      commands.push(args);
+      return systemGit(args, cwd, options);
+    };
+    expect(await checkSelectedRemoteTips(recorded, local, "topic", null, unlocked, () => undefined))
+      .toEqual(ok("checked"));
+    expect(git(local, "rev-list", "--count", "HEAD..refs/remotes/upstream/topic")).toBe("1");
+    expect(commands.filter(([name]) => name === "ls-remote").map((args) => args[2])[0]).toBe("upstream");
+  });
+
+  it("returns unavailable without a global network error when only optional counterparts fail", async () => {
+    const { local } = forkFixture();
+    git(local, "remote", "remove", "upstream");
+    git(local, "switch", "-c", "topic");
+    const failingGit: GitExec = (args, cwd, options) => args[0] === "ls-remote"
+      ? Promise.resolve(ok({ exitCode: 128, stdout: "", stderr: "Could not resolve host: backup.test" }))
+      : systemGit(args, cwd, options);
+    expect(await checkSelectedRemoteTips(failingGit, local, "topic", null, unlocked, () => undefined))
+      .toEqual(ok("unavailable"));
+  });
+
   it.each([false, true])("resolves each worktree's effective tracking before batching (different endpoint: %s)", async (differentEndpoint) => {
     const { writer, local, source, origin } = forkFixture();
     git(local, "remote", "remove", "upstream");

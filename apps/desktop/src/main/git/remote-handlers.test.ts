@@ -440,6 +440,47 @@ describe("remote handlers", () => {
       .toEqual(ok({ status: "checked" }));
   });
 
+  it.each(["DNS", "timeout"])("does not pause another profile after optional counterpart %s failures", async (failure) => {
+    const actual = await vi.importActual<typeof import("./auto-remote-check")>("./auto-remote-check");
+    vi.mocked(checkRemoteTips).mockImplementationOnce(actual.checkRemoteTips).mockImplementationOnce(actual.checkRemoteTips);
+    const originalGit = vi.mocked(execGit).getMockImplementation()!;
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+    const oid = "a".repeat(40);
+    vi.mocked(execGit).mockImplementation(async (args, cwd) => {
+      if (args[0] === "remote") return ok({ exitCode: 0, stdout: "origin\thttps://example.test/repo (fetch)\n", stderr: "" });
+      if (args[0] === "config") return ok({ exitCode: args.includes("--get-all") ? 0 : 1, stdout: args.includes("--get-all") ? "+refs/heads/*:refs/remotes/origin/*\n" : "", stderr: "" });
+      if (args[0] === "for-each-ref") return ok({ exitCode: 0, stdout: "refs/heads/topic\0\n", stderr: "" });
+      if (args[0] === "rev-parse") return ok({ exitCode: args.includes("@{u}") ? 128 : 0, stdout: args.includes("@{u}") ? "" : oid, stderr: "" });
+      if (args[0] === "ls-remote") {
+        if (cwd === "/wt-a") {
+          if (failure === "timeout") deadline.abort();
+          return ok({ exitCode: 128, stdout: "", stderr: "Could not resolve host: example.test" });
+        }
+        return ok({ exitCode: 0, stdout: `${oid}\trefs/heads/topic\n`, stderr: "" });
+      }
+      throw new Error(`unexpected Git command: ${args.join(" ")}`);
+    });
+    const db = { prepare: (sql: string) => ({
+      get: (id: string) => sql.includes("FROM worktrees")
+        ? { path: `/${id}`, repoId: id === "wt-a" ? "repo-a" : "repo-b", branch: "topic" }
+        : { path: `/${id}`, name: id, profileId: id === "repo-a" ? "profile-a" : "profile-b" }
+    }) } as unknown as DB;
+    const bus = new CommandBus();
+    const checker = registerRemoteHandlers(bus, db, {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue());
+    try {
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" })).toEqual(ok({ status: "unavailable" }));
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-b" })).toEqual(ok({ status: "checked" }));
+      expect(checkRemoteTips).toHaveBeenCalledTimes(2);
+    } finally {
+      checker.stop();
+      vi.mocked(execGit).mockImplementation(originalGit);
+      timeout.mockRestore();
+    }
+  });
+
   it("backs off quietly across profiles when the network cannot resolve a remote", async () => {
     const db = {
       prepare: vi.fn((sql: string) => ({

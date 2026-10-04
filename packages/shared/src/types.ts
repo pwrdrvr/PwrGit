@@ -1713,6 +1713,8 @@ export type WorktreeState = {
   branch: string;
   head: string;
   hasUpstream: boolean;
+  /** Ahead of the configured upstream, or (without one) commits absent from
+   *  all fetched remote branches. Detached/unborn checkouts read zero. */
   ahead: number;
   behind: number;
   dirty: number;

@@ -52,6 +52,24 @@ the build if either leaks in. The universal merge combines the two Darwin
 slices at the common `build/Release` path, and `release.mjs` verifies both
 architectures.
 
+## The Electron binary is downloaded by our postinstall
+
+Since Electron 42 the `electron` package has no install script; it fetches its
+binary on the first `require("electron")`. electron-vite never requires it — it
+reads `path.txt` and fails `pnpm dev` with "Electron uninstall" — and parallel
+Playwright workers would race to extract it. So the desktop `postinstall` runs
+[scripts/install-electron-binary.mjs](scripts/install-electron-binary.mjs)
+first; `pnpm --filter @pwrgit/desktop run install:electron-binary` repairs a
+missing `dist/`.
+
+A major Electron bump also touches, beyond `package.json` and the lock:
+`electronVersion` and `LSMinimumSystemVersion` in
+[electron-builder.yml](electron-builder.yml), `THIRD_PARTY_LICENSES`
+(`pnpm licenses:generate`), and the README's macOS floor. electron-vite 5.0.0
+maps Electron majors to build targets only through 39 and falls back to
+`node22.20` / `chrome142` above that — older than the runtime, so safe, and
+unchanged by a bump.
+
 ## The packaging deps are pinned exact, not caret
 
 `electron-builder` and `electron-updater` carry **exact** versions in
