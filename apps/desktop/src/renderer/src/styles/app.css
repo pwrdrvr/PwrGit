@@ -3598,6 +3598,577 @@ a.forge-chip:focus-visible {
   font: 500 10.5px/1.35 var(--font-mono);
 }
 
+/* ---- Fork tracking repair: where a branch pulls from and pushes to ----
+   Drawn, not named in Git's terms; design 2b in
+   design/Fork Tracking Repair - UX Review.dc.html. */
+.fork-tracking-dialog {
+  width: min(620px, 94vw);
+}
+.fork-tracking-dialog__body {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fork-tracking-dialog__lead {
+  margin: 0;
+  color: var(--text-primary);
+  font: 500 12.5px/1.5 var(--font-sans);
+  text-wrap: pretty;
+}
+.fork-tracking-dialog__lead b {
+  font-weight: 650;
+}
+.fork-tracking-dialog__quiet {
+  margin: 0;
+  color: var(--text-secondary);
+  font: 500 11.5px/1.45 var(--font-sans);
+}
+/* The forge's refusal, attributed and quoted rather than shouted. */
+.fork-tracking-refused {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--danger-border);
+  border-radius: 9px;
+  background: var(--danger-soft);
+}
+.fork-tracking-refused__mark {
+  grid-row: 1 / 3;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--danger-text);
+  color: var(--bg-panel-elevated);
+  font: 700 11px/1 var(--font-sans);
+}
+.fork-tracking-refused b {
+  color: var(--text-primary);
+  font: 650 12px/1.3 var(--font-sans);
+}
+.fork-tracking-refused__quote {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.4 var(--font-mono);
+  user-select: text;
+}
+/* The strip is its own container: it sits in dialogs, a modal and a refs
+   card, and the stacked layout below must answer to the strip's width, not
+   to whichever pane the overlay happens to be mounted in. */
+.fork-route {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.fork-route__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.fork-route__caption {
+  color: var(--text-muted);
+  font: 500 10.5px/1.3 var(--font-sans);
+}
+.fork-route__phase {
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 7px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.fork-route__phase--after {
+  border-color: var(--accent-border);
+  background: var(--accent-tint);
+  color: var(--accent-bright);
+}
+.fork-route__grid {
+  align-self: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px minmax(0, 1fr) 72px minmax(0, 1fr);
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+.fork-route__grid--after {
+  border-color: var(--accent-border);
+  background: var(--bg-row-active);
+}
+.fork-route__node {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-panel-elevated);
+}
+.fork-route__node--here {
+  align-items: center;
+  text-align: center;
+  border-style: dashed;
+}
+.fork-route__node--here b {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font: 650 12.5px/1.2 var(--font-mono);
+}
+/* Not used by the branch yet: present, but not part of the route. */
+.fork-route__node--unused {
+  opacity: 0.5;
+}
+.fork-route__node--chosen {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+.fork-route__role {
+  color: var(--text-muted);
+  font: 600 8.5px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.fork-route__slug {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font: 500 11px/1.25 var(--font-mono);
+}
+.fork-route__slug b {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+.fork-route__tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.fork-route__remote {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-hover-strong);
+  color: var(--text-secondary);
+  font: 500 9.5px/1 var(--font-mono);
+}
+.fork-route__perm {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font: 600 9.5px/1 var(--font-sans);
+}
+.fork-route__perm--no {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.fork-route__perm--yes {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+/* A state, not a permission: "will be created", "not forked yet". */
+.fork-route__perm--pending {
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+}
+/* The nickname lands here in this change. Only ever drawn on an After strip,
+   whose tint --accent-bright is floored against. */
+.fork-route__remote--moved {
+  background: var(--accent-tint);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+  color: var(--accent-bright);
+}
+/* A lane holds up to two arrows: a label over a shaft with a head at one
+   end. The dashes and the ×/tick marks carry each state without colour. */
+.fork-route__lane {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 0 4px;
+}
+.fork-route__arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  --route-line: var(--text-muted);
+}
+.fork-route__arrow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font: 600 9.5px/1 var(--font-sans);
+}
+.fork-route__shaft {
+  position: relative;
+  width: 100%;
+  height: 8px;
+}
+.fork-route__shaft::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  top: 3px;
+  border-top: 2px var(--route-style, solid) var(--route-line);
+}
+.fork-route__shaft::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+.fork-route__arrow--right .fork-route__shaft::after {
+  right: 0;
+  border-left: 7px solid var(--route-line);
+}
+.fork-route__arrow--left .fork-route__shaft::after {
+  left: 0;
+  border-right: 7px solid var(--route-line);
+}
+.fork-route__arrow--bad {
+  --route-line: var(--danger-text);
+}
+.fork-route__arrow--bad .fork-route__arrow-label {
+  color: var(--danger-text);
+}
+.fork-route__arrow--bad {
+  --route-style: dashed;
+}
+.fork-route__arrow--go {
+  --route-line: var(--accent);
+}
+/* The go arrows only ever stand on the After strip's tint, which is what
+   --accent-bright is floored against; the selector says so. */
+.fork-route__grid--after .fork-route__arrow--go .fork-route__arrow-label {
+  color: var(--accent-bright);
+}
+.fork-route__arrow--ghost {
+  --route-line: var(--border-strong);
+}
+.fork-route__arrow--ghost .fork-route__arrow-label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.fork-route__arrow--ghost {
+  --route-style: dotted;
+}
+.fork-route__x {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--danger-text);
+  color: var(--bg-panel-elevated);
+  font: 700 9px/1 var(--font-sans);
+}
+/* Drawn: no bundled face carries U+2713. */
+.fork-route__tick {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--status-ok);
+}
+.fork-route__tick::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  width: 3px;
+  height: 6px;
+  border: solid var(--bg-panel-elevated);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+/* The Pull menu's caret, drawn for the same reason. */
+.fork-route__caret {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4px solid currentColor;
+}
+.fork-route-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font: 500 10.5px/1.4 var(--font-mono);
+}
+.fork-route-line__node {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 5px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+}
+.fork-route-line__arrows {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 14px;
+}
+.fork-route-line__arrows i {
+  position: relative;
+  height: 4px;
+}
+.fork-route-line__arrows i::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 1.5px;
+  border-top: 1px solid currentColor;
+}
+.fork-route-line__arrows i::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
+}
+.fork-route-line__arrows i:first-child::after {
+  left: 0;
+  border-right: 4px solid currentColor;
+}
+.fork-route-line__arrows i:last-child::after {
+  right: 0;
+  border-left: 4px solid currentColor;
+}
+/* The step form: one-way arrows between boxes, wrapping between stops so an
+   arrow never strands at the end of a line without its box. */
+.fork-route-line__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fork-route-line__node--here {
+  border-style: dashed;
+}
+.fork-route-line__node--go {
+  border-color: var(--accent-border);
+  background: var(--bg-row-active);
+  color: var(--accent-bright);
+}
+.fork-route-line__to {
+  display: inline-flex;
+  width: 12px;
+}
+.fork-route-line__to i {
+  position: relative;
+  width: 100%;
+  height: 6px;
+}
+.fork-route-line__to i::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: 2px;
+  top: 2.5px;
+  border-top: 1px solid currentColor;
+}
+.fork-route-line__to i::after {
+  content: "";
+  position: absolute;
+  top: 0.5px;
+  right: 0;
+  border-top: 2.5px solid transparent;
+  border-bottom: 2.5px solid transparent;
+  border-left: 4px solid currentColor;
+}
+/* More than one fork you can push to. Scrolls past a handful so the footer
+   stays on screen however many an organisation holds. */
+.fork-tracking-pick {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.fork-tracking-pick__list {
+  max-height: 172px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+.fork-tracking-pick__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.fork-tracking-pick__row:hover {
+  background: var(--bg-panel-hover);
+}
+.fork-tracking-pick__row.is-picked {
+  border-color: var(--accent-border);
+  background: var(--bg-row-active);
+}
+.fork-tracking-pick__row input {
+  margin: 0;
+  accent-color: var(--accent-bright);
+}
+/* The margin sits on the input because the input is what focus scrolls
+   into view; it clears the row's padding, so the ring is never cut by the
+   list's edge. */
+.fork-tracking-pick__row input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  scroll-margin: 12px;
+}
+.fork-tracking-pick__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fork-tracking-pick__copy b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 600 11.5px/1.2 var(--font-mono);
+}
+.fork-tracking-pick__copy small {
+  color: var(--text-secondary);
+  font: 500 10.5px/1.3 var(--font-sans);
+}
+.fork-tracking-pick__copy code {
+  font: 500 10px/1 var(--font-mono);
+}
+.fork-tracking-terms {
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--bg-panel);
+}
+.fork-tracking-terms summary {
+  padding: 8px 11px;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  font: 500 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+.fork-tracking-terms summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.fork-tracking-terms p {
+  margin: 0;
+  padding: 0 11px 10px 24px;
+  color: var(--text-secondary);
+  font: 500 11px/1.55 var(--font-sans);
+  user-select: text;
+}
+.fork-tracking-terms code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+  font: 500 10.5px/1.5 var(--font-mono);
+}
+/* Fork… in place: Now and After, with the remote list under In Git terms. */
+.fork-remote-plan-route {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fork-remote-plan-route .clone-label {
+  margin-bottom: 0;
+}
+.fork-tracking-terms .fork-remote-plan {
+  margin: 0;
+  padding: 0 11px 10px;
+}
+/* A narrow pane (a small window, or zoomed in) stacks the route top to
+   bottom: each box keeps a readable width rather than the owner wrapping a
+   character at a time. The arrows turn with it — toward the original is up,
+   toward the fork is down, in the same left-to-right order as before. */
+@container (max-width: 470px) {
+  .fork-route__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .fork-route__lane {
+    flex-direction: row;
+    justify-content: center;
+    gap: 18px;
+    padding: 0;
+  }
+  .fork-route__lane:empty {
+    display: none;
+  }
+  .fork-route__arrow {
+    flex-direction: row-reverse;
+    gap: 5px;
+  }
+  .fork-route__shaft {
+    width: 8px;
+    height: 24px;
+  }
+  .fork-route__shaft::before {
+    left: 3px;
+    right: auto;
+    top: 3px;
+    bottom: 3px;
+    border-top: 0;
+    border-left: 2px var(--route-style, solid) var(--route-line);
+  }
+  .fork-route__arrow--right .fork-route__shaft::after,
+  .fork-route__arrow--left .fork-route__shaft::after {
+    left: 0;
+    right: auto;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+  }
+  .fork-route__arrow--right .fork-route__shaft::after {
+    top: auto;
+    bottom: 0;
+    border-top: 7px solid var(--route-line);
+    border-bottom: 0;
+  }
+  .fork-route__arrow--left .fork-route__shaft::after {
+    border-top: 0;
+    border-bottom: 7px solid var(--route-line);
+  }
+}
+
 .clone-note--error {
   color: var(--danger-text);
 }
@@ -6994,6 +7565,11 @@ button.agent-menu__item:hover {
   padding: 14px;
   border-color: var(--accent-bright);
 }
+/* The fork card's route takes a row of its own under the copy and buttons. */
+.refs-fork-route {
+  flex: 1 0 100%;
+  min-width: 0;
+}
 .refs-fork-parent-offer strong {
   color: var(--text-primary);
   font: 650 12px/1.4 var(--font-sans);
@@ -7082,6 +7658,16 @@ button.agent-menu__item:hover {
 }
 .refs-remote-card__actions button.is-danger {
   color: var(--danger-text);
+}
+.refs-remote-card__actions button.is-primary {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.refs-remote-slug {
+  margin-left: 6px;
+  color: var(--text-secondary);
+  font: 500 10.5px/1 var(--font-mono);
 }
 .refs-remote-role {
   margin-left: 8px;
@@ -7545,6 +8131,26 @@ button.agent-menu__item:hover {
 /* Publish a branch with no upstream — the toolbar Push's question when there is
    nowhere for a plain push to go. It borrows the push review's remote rows
    (below) so the two places that ask "which remote?" draw the answer alike. */
+.publish-branch--route {
+  width: min(640px, 92vw);
+}
+.publish-branch__route {
+  margin-top: 12px;
+}
+.publish-branch__warn {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--status-warning) 34%, transparent);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--text-primary);
+  font: 500 11.5px/1.45 var(--font-sans);
+}
+/* The push the forge has said would be refused stays available, set apart
+   from the two buttons that answer the question. */
+.publish-branch__anyway {
+  margin-right: auto;
+}
 .publish-branch__lede {
   margin: 0;
   font: 500 11.5px/1.45 var(--font-sans);
@@ -7565,6 +8171,30 @@ button.agent-menu__item:hover {
   gap: 7px;
   min-height: 28px;
   cursor: pointer;
+}
+/* Publish on a fork: each remote named by its repository and what it is to
+   you, with the forge's push answer where it gave one. */
+.refs-destination--routed {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  min-height: 38px;
+}
+.refs-destination__repo {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.refs-destination__repo b {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font: 600 11px/1.2 var(--font-mono);
+}
+.refs-destination__repo small {
+  color: var(--text-muted);
+  font: 500 10.5px/1.2 var(--font-sans);
+}
+.refs-destination__repo code {
+  font: 500 10px/1 var(--font-mono);
 }
 .refs-destination__name {
   color: var(--text-primary);
@@ -10443,6 +11073,11 @@ body.is-col-resizing {
 .pull-menu {
   width: 312px;
 }
+/* A fork's choices each carry a route line, and Sync's three stops need
+   about 400px with two `owner/name` chips; longer names still wrap. */
+.pull-menu:has(.pull-menu__route) {
+  width: min(408px, calc(100vw - 24px));
+}
 .pull-menu .pull-menu__item {
   align-items: flex-start;
   gap: 6px;
@@ -10463,6 +11098,10 @@ body.is-col-resizing {
 .pull-menu__title {
   font: 600 12px/1.35 var(--font-sans);
   color: var(--text-primary);
+}
+.pull-menu__route {
+  display: flex;
+  margin: 3px 0 2px;
 }
 .pull-menu__detail {
   font: 500 11px/1.45 var(--font-sans);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Package managers follow the promoted Stable Latest release, never a build tag.
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -224,19 +224,53 @@ ManifestVersion: 1.12.0
   };
 }
 
-export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset = fetch } = {}) {
-  if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("Usage: prepare vX.Y.Z <output-directory>");
-  const report = await audit({ api });
-  if (tag !== report.stableTag) throw new Error(`Only Stable Latest ${report.stableTag} can update the package managers`);
-  const release = await api(`repos/${distribution.repo}/releases/tags/${tag}`);
+export function publicationFailures(report) {
+  return ["winget", "homebrew"].filter((channel) => report[channel].version !== report.version).map((channel) => {
+    const current = report[channel].version;
+    const pending = report.submissions[channel].filter((pr) => pr.state === "open");
+    return `${channel}: ${current ? `published ${current}` : "registration absent"}; expected ${report.version}; ${pending.length ? `open submissions: ${pending.map((pr) => pr.url).join(", ")}` : "no open submission found"}`;
+  });
+}
+
+export function checksumAsset(release) {
+  const name = "PwrGit-windows-SHA256SUMS";
+  const matches = release.assets.filter((asset) => asset.name === name);
+  const asset = matches[0];
+  if (matches.length !== 1 || asset.browser_download_url !== `https://github.com/${distribution.repo}/releases/download/${release.tag_name}/${name}` ||
+      !/^sha256:[a-f0-9]{64}$/.test(asset.digest ?? "") || asset.size <= 0) {
+    throw new Error("Missing or invalid Windows release checksum file metadata");
+  }
+  return asset;
+}
+
+// Audit timestamps, download counters and unrelated source publication do not
+// invalidate native validation. Changed bytes, manifests or validator inputs do.
+export function validationPlan(release, report, validatorDigest, windowsValidatorDigest = validatorDigest) {
+  if (![validatorDigest, windowsValidatorDigest].every((digest) => /^[a-f0-9]{64}$/.test(digest))) throw new Error("Expected SHA-256 of validator inputs");
   const assets = selectAssets(release);
-  const downloads = join(directory, "downloads");
+  const sums = checksumAsset(release);
+  const manifests = renderManifests(release, assets);
+  const identity = (asset) => ({ name: asset.name, url: asset.browser_download_url, digest: asset.digest, size: asset.size });
+  const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  const version = stableVersion(release);
+  return {
+    version,
+    arm64_cache: `distribution-installer-v1-${version}-macos-arm64-${assets[0].digest.slice(7)}`,
+    universal_cache: `distribution-installer-v1-${version}-macos-universal-${assets[1].digest.slice(7)}`,
+    windows_cache: `distribution-installer-v1-${version}-windows-x64-${assets[2].digest.slice(7)}`,
+    macos_validation: hash({ version, assets: assets.slice(0, 2).map(identity), cask: manifests["Casks/pwrgit.rb"], validatorDigest }),
+    windows_validation: hash({ version, installer: identity(assets[2]), checksum: identity(sums),
+      manifests: Object.entries(manifests).filter(([path]) => path.startsWith("manifests/")),
+      previousVersion: report.winget.version, validatorDigest: windowsValidatorDigest }),
+  };
+}
+
+export async function downloadAssets(assets, downloads, { fetch: fetchAsset = fetch } = {}) {
   mkdirSync(downloads, { recursive: true });
-  const inventory = [];
   for (const asset of assets) {
     const path = join(downloads, asset.name);
     if (!existsSync(path)) {
-      const response = await fetchAsset(asset.browser_download_url);
+      const response = await fetchAsset(asset.url);
       if (!response.ok || !response.body) throw new Error(`Download failed: ${asset.name} HTTP ${response.status}`);
       const temporaryDirectory = mkdtempSync(join(downloads, ".download-"));
       const temporaryPath = join(temporaryDirectory, asset.name);
@@ -249,23 +283,43 @@ export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset 
         rmSync(temporaryDirectory, { recursive: true, force: true });
       }
     }
+    // Exact cache hits are still untrusted bytes. A corrupt restore fails closed.
     const actual = await hashFile(path);
     if (actual.digest !== asset.digest || actual.size !== asset.size) throw new Error(`Downloaded bytes do not match GitHub: ${asset.name}`);
-    inventory.push({ name: asset.name, url: asset.browser_download_url, ...actual });
   }
-  const sumsAsset = release.assets.find((asset) => asset.name === "PwrGit-windows-SHA256SUMS");
-  if (!sumsAsset) throw new Error("Missing Windows release checksum file");
-  const sumsResponse = await fetchAsset(sumsAsset.browser_download_url);
-  if (!sumsResponse.ok) throw new Error("Windows checksum download failed");
-  const sums = await sumsResponse.text();
-  const expected = `${assets[2].digest.slice(7)}  ${assets[2].name}`;
-  if (sums.trim() !== expected) throw new Error("Windows checksum file disagrees with the downloaded signed installer");
+}
+
+export async function downloadPlatform(directory, platform, options = {}) {
+  const status = JSON.parse(readFileSync(join(directory, "distribution-status.json"), "utf8"));
+  if (!["macos", "windows", "all"].includes(platform)) throw new Error("Expected macos, windows or all");
+  const assets = status.assets.filter((asset) => platform === "all" || (platform === "macos" ? asset.name.endsWith(".dmg") : asset.name.endsWith(".exe")));
+  const downloads = join(directory, "downloads");
+  await downloadAssets(assets, downloads, options);
+  if (platform !== "macos") {
+    await downloadAssets([status.checksum], downloads, options);
+    const windows = status.assets.find((asset) => asset.name.endsWith(".exe"));
+    const sums = readFileSync(join(downloads, status.checksum.name), "utf8");
+    if (sums.trim() !== `${windows.digest.slice(7)}  ${windows.name}`) throw new Error("Windows checksum file disagrees with the downloaded signed installer");
+  }
+}
+
+export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset = fetch, metadataOnly = false, validatorDigest, windowsValidatorDigest = validatorDigest } = {}) {
+  if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("Usage: prepare vX.Y.Z <output-directory>");
+  const report = await audit({ api });
+  if (tag !== report.stableTag) throw new Error(`Only Stable Latest ${report.stableTag} can update the package managers`);
+  const release = await api(`repos/${distribution.repo}/releases/tags/${tag}`);
+  const assets = selectAssets(release);
+  const identity = (asset) => ({ name: asset.name, url: asset.browser_download_url, digest: asset.digest, size: asset.size });
+  const inventory = assets.map(identity);
+  const checksum = identity(checksumAsset(release));
+  const validation = validatorDigest ? validationPlan(release, report, validatorDigest, windowsValidatorDigest) : undefined;
   for (const [name, content] of Object.entries(renderManifests(release, assets))) {
     const path = join(directory, name);
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, content);
   }
-  writeFileSync(join(directory, "distribution-status.json"), `${JSON.stringify({ ...report, assets: inventory }, null, 2)}\n`);
+  writeFileSync(join(directory, "distribution-status.json"), `${JSON.stringify({ ...report, assets: inventory, checksum, validation }, null, 2)}\n`);
+  if (!metadataOnly) await downloadPlatform(directory, "all", { fetch: fetchAsset });
   return report;
 }
 
@@ -278,8 +332,9 @@ export async function runCli(args = process.argv.slice(2)) {
     let report;
     try {
       report = await audit();
-      if (args.includes("--check") && [report.winget.version, report.homebrew.version].some((v) => v !== report.version)) {
-        report.check = "blocked: package sources lag Stable Latest; huntharo must follow existing submissions before opening another PR";
+      const failures = publicationFailures(report);
+      if (args.includes("--check") && failures.length) {
+        report.check = `blocked: package sources lag Stable Latest; huntharo must follow existing submissions before opening another PR\n${failures.join("\n")}`;
         process.exitCode = 1;
       }
     } catch (error) {
@@ -291,8 +346,14 @@ export async function runCli(args = process.argv.slice(2)) {
     console.log(json);
   } else if (command === "prepare" && directory) {
     console.log(JSON.stringify(await prepare(tag, directory), null, 2));
+  } else if (command === "plan" && directory && args[3]) {
+    console.log(JSON.stringify(await prepare(tag, directory, { metadataOnly: true, validatorDigest: args[3], windowsValidatorDigest: args[4] ?? args[3] }), null, 2));
+    const status = JSON.parse(readFileSync(join(directory, "distribution-status.json"), "utf8"));
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(status.validation).map(([key, value]) => `${key}=${value}\n`).join(""));
+  } else if (command === "download" && tag && directory) {
+    await downloadPlatform(tag, directory);
   } else {
-    throw new Error("Usage: package-manager-release.mjs audit [--check] [--output <path>] | prepare vX.Y.Z <output-directory>");
+    throw new Error("Usage: package-manager-release.mjs audit [--check] [--output <path>] | prepare vX.Y.Z <output-directory> | plan vX.Y.Z <output-directory> <macos-validator-sha256> [windows-validator-sha256] | download <directory> <macos|windows|all>");
   }
 }
 

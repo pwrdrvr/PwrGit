@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   err,
   ok,
+  type CloneRepository,
   type ForkStatus,
   type PwrGitError,
   type SshRemoteRecovery
@@ -175,6 +176,55 @@ describe("remote handlers", () => {
 
   afterEach(() => vi.useRealTimers());
 
+  const trackingOffer = {
+    branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main",
+    parent: "team/widget", targets: [{ remote: "origin", nameWithOwner: "me/widget", ref: "origin/main" }]
+  };
+
+  it("offers another fork only when the forge confirms it forks the same parent and takes your pushes", async () => {
+    const rows = new Map([["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }]]);
+    const db = { prepare: () => ({ get: (id: string) => rows.get(id) }) } as unknown as DB;
+    const identity = {
+      host: "github" as const, hostname: "github.com", owner: "me", name: "widget",
+      nameWithOwner: "me/widget", visibility: "public" as const,
+      parent: { nameWithOwner: "team/widget", url: "https://github.com/team/widget" }
+    };
+    const candidate = (owner: string) => ({ remote: owner, nameWithOwner: `${owner}/widget`, ref: `${owner}/main` });
+    vi.mocked(inspectForkTracking).mockResolvedValueOnce(ok({
+      offer: trackingOffer,
+      candidates: ["lumen", "readonly", "stranger", "unknown", "broken"].map(candidate)
+    }));
+    const parent = { nameWithOwner: "Team/Widget", url: "https://github.com/team/widget" };
+    const answers: Record<string, unknown> = {
+      "lumen/widget": { viewerCanPush: true, parent },
+      "readonly/widget": { viewerCanPush: false, parent },
+      "stranger/widget": { viewerCanPush: true, parent: { nameWithOwner: "other/widget", url: "" } },
+      "unknown/widget": { parent }
+    };
+    let inFlight = 0;
+    let most = 0;
+    const viewForgeRepo = vi.fn(async (_identity: unknown, slug: string) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      if (slug === "broken/widget") throw new Error("forge down");
+      return (answers[slug] ?? null) as CloneRepository | null;
+    });
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() },
+      new WorktreeOperationQueue(), undefined, undefined, () => identity, undefined, viewForgeRepo);
+    expect(await bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" })).toEqual(ok({
+      ...trackingOffer, targets: [...trackingOffer.targets, candidate("lumen")]
+    }));
+    expect(viewForgeRepo.mock.calls.map(([asked, slug]) => [asked, slug])).toEqual(
+      ["lumen", "readonly", "stranger", "unknown", "broken"].map((owner) => [identity, `${owner}/widget`])
+    );
+    // Each read is a CLI process: a checkout full of remotes must not spawn
+    // them all at once.
+    expect(most).toBe(3);
+  });
+
   it("coalesces fork tracking inspections and keeps identical branch names in two profiles separate", async () => {
     const rows = new Map([
       ["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }],
@@ -187,7 +237,7 @@ describe("remote handlers", () => {
     registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue(), undefined, undefined, readIdentity);
     let release!: () => void;
     vi.mocked(inspectForkTracking).mockImplementationOnce(() => new Promise((resolve) => {
-      release = () => resolve(ok({ branch: "main", upstream: "upstream/main", target: "origin/main" }));
+      release = () => resolve(ok({ offer: trackingOffer, candidates: [] }));
     }));
     const first = bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" });
     const same = bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" });
@@ -236,6 +286,41 @@ describe("remote handlers", () => {
     expect(repairForkTracking).toHaveBeenCalledTimes(calls);
   });
 
+  it("refreshes an unselected visible repo's state and branch index, while selection and hover bypass a fresh cache", async () => {
+    vi.useFakeTimers();
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: () => sql.includes("FROM worktrees")
+          ? { path: "/repos/visible", repoId: "repo-visible", branch: "main" }
+          : { path: "/repos/visible", name: "visible", profileId: "profile-a" }
+      }))
+    } as unknown as DB;
+    const refresher = { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() } satisfies WorktreeRefresher;
+    const indexer = { refreshRepoRemoteBranches: vi.fn(async () => ok(undefined)) };
+    vi.mocked(checkSelectedRemoteTips).mockImplementation(async (_git, _path, _branch, _parent, _exclusive, fetched) => {
+      fetched();
+      return ok("checked");
+    });
+    const bus = new CommandBus();
+    const checker = registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue(), indexer);
+    try {
+      checker.report(1, ["wt-visible"]);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+      expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith("repo-visible");
+      expect(refresher.refreshWorktree).toHaveBeenCalledExactlyOnceWith("wt-visible");
+      expect(emitEvent).toHaveBeenCalledWith("graph:changed", { repoId: "repo-visible" });
+      expect(liveActivities(vi.mocked(emitEvent))).toEqual([]);
+      // Explicit selection and deliberate hover ask again, even with a fresh answer.
+      await bus.dispatch("remote:checkSelected", { worktreeId: "wt-visible" });
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(2);
+      await bus.dispatch("remote:checkSelected", { worktreeId: "wt-visible", intent: "hover" });
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(3);
+    } finally {
+      checker.stop();
+    }
+  });
+
   it("bounds automatic checks in main by queueing, and keeps same-named branches in two profiles separate", async () => {
     const rows = new Map([
       ["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }],
@@ -280,7 +365,7 @@ describe("remote handlers", () => {
     expect(await third).toEqual(ok({ status: "checked" }));
     expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" }))
       .toEqual(ok({ status: "checked" }));
-    expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(3);
+    expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(4);
   });
 
   it("checks without registering an activity, and gives way to a user fetch", async () => {
@@ -322,6 +407,46 @@ describe("remote handlers", () => {
       .toEqual(ok({ status: "checked" }));
   });
 
+  it.each(["DNS", "timeout"])("does not pause another profile after optional counterpart %s failures", async (failure) => {
+    const actual = await vi.importActual<typeof import("./auto-remote-check")>("./auto-remote-check");
+    vi.mocked(checkSelectedRemoteTips).mockImplementation(actual.checkSelectedRemoteTips);
+    const originalGit = vi.mocked(execGit).getMockImplementation()!;
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+    const oid = "a".repeat(40);
+    vi.mocked(execGit).mockImplementation(async (args, cwd) => {
+      if (args[0] === "remote") return ok({ exitCode: 0, stdout: "origin\thttps://example.test/repo (fetch)\n", stderr: "" });
+      if (args[0] === "config") return ok({ exitCode: 0, stdout: "+refs/heads/*:refs/remotes/origin/*\n", stderr: "" });
+      if (args[0] === "rev-parse") return ok({ exitCode: args.includes("@{u}") ? 128 : 0, stdout: args.includes("@{u}") ? "" : oid, stderr: "" });
+      if (args[0] === "ls-remote") {
+        if (cwd === "/wt-a") {
+          if (failure === "timeout") deadline.abort();
+          return ok({ exitCode: 128, stdout: "", stderr: "Could not resolve host: example.test" });
+        }
+        return ok({ exitCode: 0, stdout: `${oid}\trefs/heads/topic\n`, stderr: "" });
+      }
+      throw new Error(`unexpected Git command: ${args.join(" ")}`);
+    });
+    const db = { prepare: (sql: string) => ({
+      get: (id: string) => sql.includes("FROM worktrees")
+        ? { path: `/${id}`, repoId: id === "wt-a" ? "repo-a" : "repo-b", branch: "topic" }
+        : { path: `/${id}`, name: id, profileId: id === "repo-a" ? "profile-a" : "profile-b" }
+    }) } as unknown as DB;
+    const bus = new CommandBus();
+    const checker = registerRemoteHandlers(bus, db, {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue());
+    try {
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" })).toEqual(ok({ status: "unavailable" }));
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-b" })).toEqual(ok({ status: "checked" }));
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(2);
+    } finally {
+      checker.stop();
+      vi.mocked(execGit).mockImplementation(originalGit);
+      timeout.mockRestore();
+    }
+  });
+
   it("backs off quietly across profiles when the network cannot resolve a remote", async () => {
     const db = {
       prepare: vi.fn((sql: string) => ({
@@ -342,6 +467,74 @@ describe("remote handlers", () => {
     expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-b" }))
       .toEqual(ok({ status: "unavailable" }));
     expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses viewport and direct checks across profiles for two minutes, then resumes", async () => {
+    vi.useFakeTimers();
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: (id: string) => sql.includes("FROM worktrees")
+          ? { path: `/${id}`, repoId: `repo-${id}`, branch: "main" }
+          : { path: `/${id}`, name: id, profileId: id.includes("a") ? "profile-a" : "profile-b" }
+      }))
+    } as unknown as DB;
+    vi.mocked(checkSelectedRemoteTips).mockResolvedValueOnce(
+      err({ kind: "remote", code: "fetch_failed", message: "Could not resolve host: example.test" })
+    );
+    const bus = new CommandBus();
+    const checker = registerRemoteHandlers(bus, db, {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue());
+    try {
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "a" }))
+        .toEqual(ok({ status: "unavailable" }));
+      checker.report(1, ["b", "c"]);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "d", intent: "hover" }))
+        .toEqual(ok({ status: "unavailable" }));
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(119_499);
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "d" }))
+        .toEqual(ok({ status: "unavailable" }));
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "d" }))
+        .toEqual(ok({ status: "checked" }));
+      checker.tick();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(4);
+    } finally {
+      checker.stop();
+    }
+  });
+
+  it("shares timeout backoff and permits a successful explicit fetch to recover early", async () => {
+    const db = {
+      prepare: vi.fn((sql: string) => ({
+        get: (id: string) => sql.includes("FROM worktrees")
+          ? { path: `/${id}`, repoId: `repo-${id}`, branch: "main" }
+          : { path: `/${id}`, name: id, profileId: id.includes("a") ? "profile-a" : "profile-b" }
+      }))
+    } as unknown as DB;
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(AbortSignal.abort("timeout"));
+    vi.mocked(checkSelectedRemoteTips).mockResolvedValueOnce(
+      err({ kind: "remote", code: "fetch_failed", message: "Remote tip check failed." })
+    );
+    const bus = new CommandBus();
+    const checker = registerRemoteHandlers(bus, db, {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue());
+    try {
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "a" })).toEqual(ok({ status: "unavailable" }));
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "b", intent: "hover" })).toEqual(ok({ status: "unavailable" }));
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(1);
+      expect((await bus.dispatch("remote:fetch", { worktreeId: "b" })).ok).toBe(true);
+      expect(await bus.dispatch("remote:checkSelected", { worktreeId: "b" })).toEqual(ok({ status: "checked" }));
+      expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(2);
+    } finally {
+      checker.stop();
+      timeout.mockRestore();
+    }
   });
 
   it.each(["worktree", "repo", "all-remotes", "pull"] as const)(

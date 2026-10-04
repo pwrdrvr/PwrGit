@@ -16,6 +16,10 @@ on:
         description: Download release installers and run native validation (adds GitHub downloads)
         type: boolean
         default: false
+      force_validation:
+        description: Re-run native validation even when the exact inputs already passed
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       audit_only:
@@ -37,7 +41,8 @@ on:
       - scripts/lib/distribution-api*
       - docs/package-manager-distribution.md
       - .agents/skills/release/**
-      - scripts/release/verify-winget-install.ps1
+      - scripts/release/verify-*
+      - scripts/lib/cli-entrypoint.mjs
       - scripts/release/sync-homebrew*
       - .github/workflows/package-distribution.yml
       - .github/workflows/release.yml
@@ -91,7 +96,14 @@ jobs:
     # Routine audits must not add release-asset downloads. Native checks are
     # deliberate manual validation; the tap validates its own changed cask.
     if: ${{ inputs.audit_only != true && github.event_name == 'workflow_dispatch' && inputs.validate_assets == true }}
-    runs-on: macos-26
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      arm64_cache: ${{ steps.plan.outputs.arm64_cache }}
+      universal_cache: ${{ steps.plan.outputs.universal_cache }}
+      windows_cache: ${{ steps.plan.outputs.windows_cache }}
+      macos_validation: ${{ steps.plan.outputs.macos_validation }}
+      windows_validation: ${{ steps.plan.outputs.windows_validation }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -102,7 +114,8 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Compare remote package sources and generate verified manifests
+      - name: Audit publication and plan validation without downloading installers
+        id: plan
         env:
           # The organization public-read secret uses user authentication for the
           # cross-repository search; retain the workflow token for fork PRs.
@@ -112,36 +125,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "Distribution API token source: $TOKEN_SOURCE"
-          node scripts/package-manager-release.mjs prepare "$STABLE_TAG" "$RUNNER_TEMP/distribution"
-      - name: Verify both macOS architectures and signatures
-        run: |
-          set -euo pipefail
-          version="$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/distribution/distribution-status.json")).version')"
-          for arch in arm64 universal; do
-            mount="$RUNNER_TEMP/mount-$arch"
-            mkdir -p "$mount"
-            trap 'hdiutil detach "$mount" || true' EXIT
-            hdiutil attach "$RUNNER_TEMP/distribution/downloads/PwrGit-$version-$arch.dmg" -readonly -nobrowse -mountpoint "$mount"
-            app="$mount/PwrGit.app"
-            test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$version"
-            test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Contents/Info.plist")" = com.pwrdrvr.pwrgit
-            codesign --verify --deep --strict "$app"
-            codesign -dv --verbose=2 "$app" 2>&1 | grep -q 'Authority=Developer ID Application: PwrDrvr LLC'
-            spctl --assess --type execute --verbose=2 "$app"
-            slices="$(lipo -archs "$app/Contents/MacOS/PwrGit")"
-            if [ "$arch" = arm64 ]; then
-              test "$slices" = arm64
-            else
-              echo "$slices" | grep -qw arm64
-              echo "$slices" | grep -qw x86_64
-            fi
-            hdiutil detach "$mount"
-            trap - EXIT
-          done
-      - name: Upload submission files and source comparison
+          node scripts/package-manager-release.mjs plan "$STABLE_TAG" "$RUNNER_TEMP/distribution" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-macos-distribution.sh', '.github/workflows/package-distribution.yml') }}" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-winget-install.ps1', '.github/workflows/package-distribution.yml') }}"
+      - name: Upload metadata plan (native validation is separate)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: package-manager-submissions
+          name: package-manager-plan
           path: |
             ${{ runner.temp }}/distribution/Casks
             ${{ runner.temp }}/distribution/manifests
@@ -175,7 +163,7 @@ jobs:
 
   freshness:
     needs: [audit, homebrew]
-    if: ${{ inputs.audit_only != true && github.event_name == 'schedule' }}
+    if: ${{ always() && !cancelled() && inputs.audit_only != true && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -190,6 +178,70 @@ jobs:
           GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
         run: node scripts/package-manager-release.mjs audit --check
 
+  macos:
+    needs: prepare
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: validated
+        with:
+          path: ${{ runner.temp }}/distribution/.validated-macos
+          key: distribution-validated-v1-macos-26-${{ needs.prepare.outputs.macos_validation }}
+      - name: Report reused macOS validation
+        if: steps.validated.outputs.cache-hit == 'true' && !inputs.force_validation
+        run: echo 'Exact release bytes and validator inputs already passed macOS validation; no installers downloaded or mounted.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        with:
+          name: package-manager-plan
+          path: ${{ runner.temp }}/distribution
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        id: arm64
+        with:
+          path: ${{ runner.temp }}/distribution/downloads/*-arm64.dmg
+          key: ${{ needs.prepare.outputs.arm64_cache }}
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        id: universal
+        with:
+          path: ${{ runner.temp }}/distribution/downloads/*-universal.dmg
+          key: ${{ needs.prepare.outputs.universal_cache }}
+      - name: Acquire and hash macOS bytes, including cache restores
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        run: node scripts/package-manager-release.mjs download "$RUNNER_TEMP/distribution" macos
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: (steps.validated.outputs.cache-hit != 'true' || inputs.force_validation) && steps.arm64.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/distribution/downloads/*-arm64.dmg
+          key: ${{ needs.prepare.outputs.arm64_cache }}
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: (steps.validated.outputs.cache-hit != 'true' || inputs.force_validation) && steps.universal.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/distribution/downloads/*-universal.dmg
+          key: ${{ needs.prepare.outputs.universal_cache }}
+      - name: Verify both macOS architectures and signatures
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        run: bash scripts/release/verify-macos-distribution.sh
+      - name: Record successful macOS validation
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        run: echo '${{ needs.prepare.outputs.macos_validation }}' > "$RUNNER_TEMP/distribution/.validated-macos"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.validated.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/distribution/.validated-macos
+          key: distribution-validated-v1-macos-26-${{ needs.prepare.outputs.macos_validation }}
+
   windows:
     needs: prepare
     runs-on: windows-latest
@@ -198,11 +250,43 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: validated
         with:
-          name: package-manager-submissions
-          path: distribution
+          path: ${{ runner.temp }}/distribution/.validated-windows
+          key: distribution-validated-v1-windows-latest-x64-${{ needs.prepare.outputs.windows_validation }}
+      - name: Report reused Windows validation
+        if: steps.validated.outputs.cache-hit == 'true' && !inputs.force_validation
+        shell: pwsh
+        run: Add-Content $env:GITHUB_STEP_SUMMARY 'Exact release bytes and validator inputs already passed Windows validation; no installer download or installation.'
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        with:
+          name: package-manager-plan
+          path: ${{ runner.temp }}/distribution
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        id: installer
+        with:
+          path: ${{ runner.temp }}/distribution/downloads/*-windows-x64-setup.exe
+          key: ${{ needs.prepare.outputs.windows_cache }}
+      - name: Acquire and hash Windows bytes, including cache restores
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        shell: pwsh
+        run: node scripts/package-manager-release.mjs download "$env:RUNNER_TEMP/distribution" windows
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: (steps.validated.outputs.cache-hit != 'true' || inputs.force_validation) && steps.installer.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/distribution/downloads/*-windows-x64-setup.exe
+          key: ${{ needs.prepare.outputs.windows_cache }}
       - name: Install the official WinGet client
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
         env:
           GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
         shell: pwsh
@@ -210,14 +294,45 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if (Get-Command winget -ErrorAction SilentlyContinue) { winget --version }
           Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery
-          # Without -Latest, Repair only repairs the preinstalled client, which
-          # can validate a newer schema against its older embedded schema IDs.
-          # Validate as the runner account. All-users provisioning can select
-          # the image's neutral bundle during re-registration instead of x64.
+          # Use the current client/schema as the runner account, not all-users.
           Repair-WinGetPackageManager -Latest -Force
           Assert-WinGetPackageManager -Latest
           winget --version
           if ($LASTEXITCODE -ne 0) { throw 'The repaired WinGet client is not executable' }
       - name: Validate manifest, signed installer, install and upgrade
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
         shell: pwsh
-        run: ./scripts/release/verify-winget-install.ps1 -Directory distribution
+        run: ./scripts/release/verify-winget-install.ps1 -Directory "$env:RUNNER_TEMP/distribution"
+      - name: Retain WinGet install diagnostics
+        if: ${{ always() && (steps.validated.outputs.cache-hit != 'true' || inputs.force_validation) }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: winget-install-diagnostics
+          path: ${{ runner.temp }}/distribution/winget-install.log
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Record successful Windows validation
+        if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        shell: pwsh
+        run: Set-Content "$env:RUNNER_TEMP/distribution/.validated-windows" '${{ needs.prepare.outputs.windows_validation }}'
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        if: steps.validated.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/distribution/.validated-windows
+          key: distribution-validated-v1-windows-latest-x64-${{ needs.prepare.outputs.windows_validation }}
+
+  submissions:
+    needs: [prepare, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package-manager-plan
+          path: distribution
+      - name: Upload submissions after both native validators passed or were reused
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-manager-submissions
+          path: distribution
+          retention-days: 14
+          if-no-files-found: error

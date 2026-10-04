@@ -420,9 +420,11 @@ audits or for unchanged package sources. When generating a Winget submission or
 when fresh native evidence is needed, explicitly dispatch once with
 `-f validate_assets=true`, or run
 `pnpm distribution:prepare v<version> node_modules/.cache/pwrgit-distribution`
-locally and reuse its verified cache. Both paths fetch release bytes and add
-download statistics; the hosted native run also downloads the Windows installer
-again for installation and may download a predecessor for upgrade validation.
+locally and reuse its verified cache. Both paths verify cached bytes and download on cache misses, which add download
+statistics. The hosted native run reuses exact successful validation records;
+`-f validate_assets=true -f force_validation=true` deliberately repeats native
+checks while retaining installer caches. Windows reuses the verified installer
+and may download a predecessor for upgrade validation.
 Retain submission artifacts and validation links rather than rerunning them.
 
 Require immutable versioned URLs and download/hash the actual published bytes

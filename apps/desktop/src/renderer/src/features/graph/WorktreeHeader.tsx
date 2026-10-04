@@ -23,7 +23,7 @@ import type {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { PullGlyph } from "../../lib/PullGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
-import { showErrorToast } from "../../lib/toast";
+import { dismissToastKey, showErrorToast, showInfoToast } from "../../lib/toast";
 import {
   remoteActivityPhaseLabel,
   type RemoteActivityScope
@@ -39,7 +39,13 @@ import { readPullChoice, writePullChoice, type PullChoice } from "./pull-choice"
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
-import { ForkTrackingRecoveryDialog } from "../sidebar/ForkTrackingRecoveryDialog";
+import { routeBranch } from "../sidebar/fork-checkout-dialog";
+import { ForkRouteLine, RouteLine } from "../sidebar/ForkRoute";
+import {
+  ForkTrackingRecoveryDialog,
+  type ForkTrackingDone,
+  type ForkTrackingEntry
+} from "../sidebar/ForkTrackingRecoveryDialog";
 import { PublishBranchDialog } from "./PublishBranchDialog";
 import { GitForkIcon, pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 import {
@@ -101,6 +107,11 @@ function baseChip(
   const fromSource = source === null ? null : forkSourceChip(source);
   if (fromSource !== null) return fromSource;
   if (state === null) return { text: "…", tone: "muted" };
+  if (!state.hasUpstream) {
+    return state.ahead > 0
+      ? { text: `↑${state.ahead} local · no upstream`, tone: "ok", mid: `↑${state.ahead} local` }
+      : { text: "no upstream", tone: "muted" };
+  }
   if (state.behind > 0) {
     const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
     return {
@@ -112,7 +123,6 @@ function baseChip(
   if (state.ahead > 0) {
     return { text: `↑${state.ahead} ahead`, tone: "ok", mid: `↑${state.ahead}` };
   }
-  if (!state.hasUpstream) return { text: "no upstream", tone: "muted" };
   // Git names the upstream but has nothing to count against: its remote
   // branch was deleted. "up to date" was what this used to say.
   if (state.upstreamGone === true) {
@@ -152,12 +162,16 @@ function chipExplanation(
     return `${who} ${branch} is ${commits(source.behind)} behind ${source.label}.${own}${trackedLine}`;
   }
   if (state === null) return undefined;
+  if (!state.hasUpstream) {
+    const local = state.ahead > 0
+      ? `${commits(state.ahead)} not on fetched remote branches. ` : "";
+    return `${local}${branch} has no upstream configured — Push chooses a remote and sets tracking`;
+  }
   if (state.behind > 0) {
     return `${commits(state.behind)} to pull from the branch ${branch} tracks` +
       (state.ahead > 0 ? `, and ${commits(state.ahead)} to push` : "");
   }
   if (state.ahead > 0) return `${commits(state.ahead)} to push`;
-  if (!state.hasUpstream) return `${branch} tracks nothing yet — Push publishes it`;
   if (state.upstreamGone === true) {
     return `The remote branch ${branch} tracked was deleted, usually because the work landed`;
   }
@@ -275,6 +289,9 @@ function pullMenuRows(
   fork: ForkChoice,
   trackedBehind: number,
   choice: PullChoice,
+  /** `owner/name` of the original and of the fork, or their nicknames when
+   *  the forge has not named them. */
+  repos: { original: string; fork: string },
   on: {
     pick: (choice: PullChoice) => void;
     rebase: () => void;
@@ -289,6 +306,10 @@ function pullMenuRows(
       rebase review.
     </>
   );
+  // Each choice is a route; the refs in the titles name remotes, and the
+  // line under each says which repositories those are. The details then
+  // keep the counts and drop the refs they used to repeat.
+  // Design: `design/Fork Route Graphic - UX Review.dc.html`, 5b.
   const choices: PullMenuRow[] = [
     {
       key: "sync",
@@ -297,13 +318,23 @@ function pullMenuRows(
           Sync with <code>{source.label}</code>
         </>
       ),
+      route: (
+        <RouteLine
+          label={`${repos.original} to ${branch}, then to ${repos.fork}`}
+          stops={[
+            { text: repos.original, kind: "repo" },
+            { text: branch, kind: "here" },
+            { text: repos.fork, kind: "go" }
+          ]}
+        />
+      ),
       detail: own ? (
         stops
       ) : (
         <>
           Fast-forward <code>{branch}</code>
           {source.behind > 0 ? ` ${commits(source.behind)}` : ""}, then push{" "}
-          {source.behind > 0 ? "them " : ""}to <code>{tracked.label}</code>.
+          {source.behind > 0 ? "them " : ""}to your fork.
         </>
       ),
       onSelect: () => on.pick("sync")
@@ -315,12 +346,20 @@ function pullMenuRows(
           Pull <code>{source.label}</code> only
         </>
       ),
+      route: (
+        <RouteLine
+          label={`${repos.original} to ${branch}`}
+          stops={[
+            { text: repos.original, kind: "repo" },
+            { text: branch, kind: "here" }
+          ]}
+        />
+      ),
       detail: own ? (
         stops
       ) : (
         <>
-          Fast-forward <code>{branch}</code>. <code>{tracked.label}</code> stays
-          where it is until you push.
+          Fast-forward <code>{branch}</code>. Your fork waits until you push.
         </>
       ),
       onSelect: () => on.pick("source")
@@ -331,6 +370,15 @@ function pullMenuRows(
         <>
           Pull <code>{tracked.label}</code> only
         </>
+      ),
+      route: (
+        <RouteLine
+          label={`${repos.fork} to ${branch}`}
+          stops={[
+            { text: repos.fork, kind: "repo" },
+            { text: branch, kind: "here" }
+          ]}
+        />
       ),
       detail:
         trackedBehind > 0
@@ -478,6 +526,26 @@ type StatusTriggerProps = {
 };
 type RecoveryBusy = "rebase" | "reset" | null;
 
+/** One receipt at a time, taken down when the header moves to another
+ *  checkout: its Push would otherwise act on whatever is shown next. */
+const FORK_TRACKING_RECEIPT = "fork-tracking-receipt";
+
+/** Where pushes go now, in the words the dialog used. After a refused push it
+ *  carries that Push, one click away; the repair itself never pushes. */
+function showTrackingReceipt(
+  done: ForkTrackingDone,
+  push: (() => void) | null
+): void {
+  // The title is drawn as an uppercase eyebrow, which would flatten a branch
+  // name; the branch goes in the sentence.
+  showInfoToast({
+    key: FORK_TRACKING_RECEIPT,
+    title: done.target.remote === "origin" ? "Now using your fork" : "Now using another fork",
+    message: `${done.branch} pulls from and pushes to ${done.target.nameWithOwner}. Sync in the Pull menu still brings in ${done.parent}.`,
+    ...(push === null ? {} : { action: { label: "Push", run: push } })
+  });
+}
+
 export function WorktreeHeader({
   repo,
   worktree,
@@ -526,13 +594,20 @@ export function WorktreeHeader({
     operation: Exclude<Busy, null>;
     recovery: SshRemoteRecovery;
   } | null>(null);
-  /** The fork prompt, and why it opened. `{}` is the user asking for it from
-   *  the read-only chip; a `reason` is a push the forge just refused. */
-  const [forkPrompt, setForkPrompt] = useState<{ reason?: string } | null>(null);
+  /** The fork prompt, and why it opened. `tracking: null` is the user asking
+   *  to fork; an entry opens the tracking repair from a refused push or from
+   *  Pull's menu. */
+  const [forkPrompt, setForkPrompt] = useState<{ tracking: ForkTrackingEntry | null } | null>(null);
+  /** The Push button, for the receipt's own Push after a tracking repair. */
+  const pushButton = useRef<HTMLButtonElement>(null);
+  const shownWorktreeId = useRef(worktree.id);
+  shownWorktreeId.current = worktree.id;
   /** The remotes a branch with no upstream can be published to, while the
    *  question is open. Loaded BEFORE the dialog opens, so its list never
    *  arrives under a dialog the user is already reading. */
   const [publishing, setPublishing] = useState<RemoteEndpoint[] | null>(null);
+  /** Publish offered Fork… instead of a push the forge would refuse. */
+  const publishAfterFork = useRef(false);
   /** The Push button as it was clicked, so a card can hang off it once the
    *  publish question has been answered. A ref rather than the trigger
    *  factory's `cardButton`, which only points at a button while it carries
@@ -609,7 +684,10 @@ export function WorktreeHeader({
     setRecoveryBusy(null);
     setSshRecovery(null);
     setForkPrompt(null);
+    // A receipt offering Push belongs to the checkout it repaired.
+    dismissToastKey(FORK_TRACKING_RECEIPT);
     setPublishing(null);
+    publishAfterFork.current = false;
     setDivergenceFork(null);
     askingWhere.current = null;
   }, [worktree.id]);
@@ -650,14 +728,14 @@ export function WorktreeHeader({
       if (status !== "superseded") settledChecks.current.set(key, status);
       if (active) setRemoteCheck({ key, checking: false });
     };
-    const check = (): void => {
+    const check = (intent: "selected" | "periodic" = "selected"): void => {
       setRemoteCheck({ key, checking: true });
-      void dispatch("remote:checkSelected", { worktreeId: worktree.id })
+      void dispatch("remote:checkSelected", { worktreeId: worktree.id, intent })
         .then((result) => settle(result.ok ? result.value.status : "unavailable"))
         .catch(() => settle("unavailable"));
     };
     check();
-    const timer = window.setInterval(check, 60_000);
+    const timer = window.setInterval(() => check("periodic"), 60_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [worktree.id, worktree.branch, worktree.missing, checkEpoch]);
   // The card and a tooltip must never share the screen. A click leaves the
@@ -1180,7 +1258,7 @@ export function WorktreeHeader({
         // The fork prompt is a modal over the whole window; leaving a status
         // card behind it would be a second thing to dismiss for one refusal.
         status.dismiss();
-        setForkPrompt({ reason: result.error.message.split("\n")[0] });
+        setForkPrompt({ tracking: { from: "push", error: result.error.message.split("\n")[0] ?? "" } });
         return;
       }
       flashError("Push", result.error);
@@ -1446,18 +1524,33 @@ export function WorktreeHeader({
   const pullMenu =
     trackingRepair !== null
       ? {
-          note: <>{trackingRepair.branch} tracks {trackingRepair.upstream}, the fork's parent.</>,
+          note: <>
+            <ForkRouteLine branch={trackingRepair.branch}
+              original={repo.identity?.parent?.nameWithOwner ?? trackingRepair.upstream} />
+            <br />
+            {trackingRepair.branch} pulls from and pushes to the original, not your fork.
+          </>,
           actions: [{
             key: "repair-tracking",
-            title: <>Track <code>{trackingRepair.target}</code></>,
-            detail: "Use your existing fork for Pull and Push. Changes tracking only.",
-            onSelect: () => setForkPrompt({ reason: `${trackingRepair.branch} tracks ${trackingRepair.upstream} instead of your fork.` })
+            title: <>Use your fork for <code>{trackingRepair.branch}</code>…</>,
+            detail: repo.identity === undefined
+              ? "Pull and push through your fork. Shows what changes first."
+              : `Pull and push through ${repo.identity.nameWithOwner}. Shows what changes first.`,
+            onSelect: () => setForkPrompt({ tracking: { from: "pull" } })
           }],
           choices: []
         }
       : forkChoice === null
       ? null
       : pullMenuRows(forkChoice, behind, choice, {
+          original: forkChoice.source.parent ?? forkChoice.source.remote,
+          // `identity` is about origin, so it names the fork only when the
+          // branch follows origin and the forge called origin a fork.
+          fork:
+            forkChoice.tracked.remote === "origin" && repo.identity?.parent !== undefined
+              ? repo.identity.nameWithOwner
+              : forkChoice.tracked.remote
+        }, {
           pick: pickPullChoice,
           rebase: () => {
             if (running !== null) return;
@@ -1506,7 +1599,7 @@ export function WorktreeHeader({
             type="button"
             className="sync-chip sync-chip--readonly"
             {...hoverTooltip(tip, noPushTitle)}
-            onClick={() => setForkPrompt({})}
+            onClick={() => setForkPrompt({ tracking: null })}
           >
             read-only
           </button>
@@ -1664,6 +1757,7 @@ export function WorktreeHeader({
           })()}
 
           <button
+            ref={pushButton}
             className="wt-btn"
             onClick={(event) => {
               if (running !== null) return;
@@ -1710,7 +1804,7 @@ export function WorktreeHeader({
           // not have been asked yet, and the fork dialog reads `origin` itself.
           fork={{
             label: `Fork ${repo.identity?.nameWithOwner ?? repo.name}…`,
-            onSelect: () => setForkPrompt({})
+            onSelect: () => setForkPrompt({ tracking: null })
           }}
           onResetToRemote={() =>
             openResetToRemote({
@@ -1781,6 +1875,14 @@ export function WorktreeHeader({
         <PublishBranchDialog
           branch={worktree.branch}
           remotes={publishing}
+          identity={repo.identity}
+          onFork={() => {
+            // Forked from here, the question comes back afterwards with the
+            // fork as origin — the publish the user set out to do.
+            publishAfterFork.current = true;
+            setPublishing(null);
+            setForkPrompt({ tracking: null });
+          }}
           onClose={() => setPublishing(null)}
           onPublish={(target) => {
             setPublishing(null);
@@ -1793,15 +1895,21 @@ export function WorktreeHeader({
           }}
         />
       )}
-      {forkPrompt?.reason !== undefined && (
+      {forkPrompt !== null && forkPrompt.tracking !== null && (
         <ForkTrackingRecoveryDialog
           repo={repo}
           worktreeId={worktree.id}
-          reason={forkPrompt.reason}
+          entry={forkPrompt.tracking}
+          forkBranch={routeBranch(worktree)}
           onClose={() => setForkPrompt(null)}
-          onRepaired={() => {
+          onRepaired={(done) => {
+            const refused = forkPrompt.tracking?.from === "push";
             setForkPrompt(null);
-            showFlash({ text: "tracking fixed — Push again to send to your fork", tone: "ok" }, 4000);
+            showTrackingReceipt(done, refused ? () => {
+              // Only for the checkout it repaired, through the button's own
+              // click path: busy guards, the publish question, the card.
+              if (shownWorktreeId.current === worktree.id) pushButton.current?.click();
+            } : null);
           }}
           onForked={() => {
             setForkPrompt(null);
@@ -1809,17 +1917,22 @@ export function WorktreeHeader({
           }}
         />
       )}
-      {forkPrompt !== null && forkPrompt.reason === undefined && (
+      {forkPrompt !== null && forkPrompt.tracking === null && (
         <ForkCheckoutDialog
           profileId={repo.profileId}
           repoId={repo.id}
           repoName={repo.identity?.nameWithOwner ?? repo.name}
-          {...(forkPrompt.reason === undefined
-            ? {}
-            : { reason: forkPrompt.reason })}
-          onClose={() => setForkPrompt(null)}
+          branch={routeBranch(worktree)}
+          onClose={() => {
+            publishAfterFork.current = false;
+            setForkPrompt(null);
+          }}
           onForked={() => {
             setForkPrompt(null);
+            if (publishAfterFork.current) {
+              publishAfterFork.current = false;
+              void askWhereToPublish();
+            }
             // The repo row is unchanged — same folder, same name — so the
             // flash names the thing that did move.
             showFlash({ text: "origin is now your fork", tone: "ok" }, 2600);

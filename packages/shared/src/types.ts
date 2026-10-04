@@ -269,8 +269,35 @@ export type ForkDrift = {
  */
 export type ForkTrackingRepair = {
   branch: string;
+  /** What the branch tracks now, e.g. `upstream/main`. */
   upstream: string;
+  /** The remote holding it — `upstream`. Named by main, because splitting
+   *  `upstream` on its first slash misreads a remote whose name has one. */
+  upstreamRemote: string;
+  /** The default fix: `origin/<branch>`, your fork. */
   target: string;
+};
+
+/** One fork a branch could pull from and push to instead of the original. */
+export type ForkTrackingTarget = {
+  /** The remote's local nickname — `origin`, `lumen`. */
+  remote: string;
+  /** The forge repository it points at, `owner/name`. */
+  nameWithOwner: string;
+  /** `<remote>/<branch>`: what the branch would track. */
+  ref: string;
+};
+
+/**
+ * What the fork-tracking dialog draws: the repair, the original it moves
+ * away from, and every fork it could move to.
+ */
+export type ForkTrackingOffer = ForkTrackingRepair & {
+  /** The original — the fork's parent, `owner/name`. */
+  parent: string;
+  /** `origin` first and always present; any more are other forks of the same
+   *  parent the forge says you can push to. Two or more draws a chooser. */
+  targets: ForkTrackingTarget[];
 };
 
 export type ForkStatus = {
@@ -1686,6 +1713,8 @@ export type WorktreeState = {
   branch: string;
   head: string;
   hasUpstream: boolean;
+  /** Ahead of the configured upstream, or (without one) commits absent from
+   *  all fetched remote branches. Detached/unborn checkouts read zero. */
   ahead: number;
   behind: number;
   dirty: number;

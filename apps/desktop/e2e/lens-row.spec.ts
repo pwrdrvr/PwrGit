@@ -829,8 +829,10 @@ test("Focused keeps clean unpublished work after its activity window expires", a
   await lensChip(window, "All").click();
   await expandRepoGroup(window, "old-unpublished");
   // This chip is backed by the same completed state probe the repo index reads.
+  // This fixture has an initial commit plus the dated local commit, and no
+  // remote branches. Both commits therefore contribute to the local count.
   await expect(window.locator(".wt-header .sync-chip")).toHaveText(
-    "no upstream",
+    "↑2 local · no upstream",
     { timeout: 20_000 }
   );
 

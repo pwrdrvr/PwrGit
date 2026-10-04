@@ -17,7 +17,7 @@ function eligible(job, { github, needs, inputs = {}, cancelled = false, ancestor
   if (!/\b(?:success|failure|always|cancelled)\s*\(/.test(expression) && !success()) return false;
   const js = expression.replace(/needs\.([\w-]+)/g, 'needs["$1"]')
     .replace("github.event.pull_request.labels.*.name", "github.event.pull_request.labels.map(label => label.name)");
-  return runInNewContext(js, { github, needs, inputs, cancelled: () => cancelled, success,
+  return runInNewContext(js, { github, needs, inputs, cancelled: () => cancelled, success, always: () => true,
     contains: (items, value) => items.includes(value) });
 }
 
@@ -90,6 +90,9 @@ test("native validation requires an explicit manual opt-in and cannot override a
   expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true } }, distributionWorkflow)).toBe(true);
   expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true, audit_only: true } }, distributionWorkflow)).toBe(false);
   expect(eligible("prepare", { ...fixture, ancestors: ["failure"], inputs: { validate_assets: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("prepare", { ...fixture, inputs: { force_validation: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true, force_validation: true } }, distributionWorkflow)).toBe(true);
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true, force_validation: true, audit_only: true } }, distributionWorkflow)).toBe(false);
 });
 
 test.each(["pull_request", "schedule", "release"])("native-validation input cannot enable automatic downloads (%s)", (event) => {
@@ -103,6 +106,19 @@ test.each(["homebrew", "freshness"])("scheduled %s does not depend on skipped na
   const fixture = context({ event: "schedule", audit: "success" });
   fixture.github.ref = "refs/heads/main";
   expect(eligible(job, fixture, distributionWorkflow)).toBe(true);
+});
+
+test.each(["macos", "windows", "submissions"])("%s remains downstream of explicitly opted-in preparation", (job) => {
+  const body = distributionWorkflow.split(`\n  ${job}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+  expect(body.match(/^    needs: (.*)$/m)[1]).toContain("prepare");
+  // No job-level status override may bypass the skipped preparation ancestor.
+  expect(body.match(/^    if:/m)).toBeNull();
+});
+
+test("scheduled publication freshness is reported even after Homebrew synchronization fails", () => {
+  const fixture = context({ event: "schedule", audit: "success" });
+  expect(eligible("freshness", { ...fixture, ancestors: ["success", "failure"] }, distributionWorkflow)).toBe(true);
+  expect(eligible("freshness", { ...fixture, cancelled: true }, distributionWorkflow)).toBe(false);
 });
 
 test.each([{ prerelease: true, draft: false }, { prerelease: false, draft: true }])("ineligible release cannot sync Homebrew %#", (release) => {

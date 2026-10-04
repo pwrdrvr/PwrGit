@@ -3,13 +3,21 @@
 ## Workflows
 
 `package-distribution.yml` compares authoritative Winget/Homebrew sources
-against promoted Stable Latest, generates manifests from downloaded and hashed
-artifacts, and validates macOS signatures/architectures plus native Winget
-installation. It audits every release publication/edit, including prereleases,
+against promoted Stable Latest. Opt-in validation plans manifests from GitHub
+asset metadata, then validates macOS signatures/architectures plus native Winget
+installation on separate runners. It audits every release publication/edit, including prereleases,
 daily and by manual dispatch. Routine audits, including PRs, read metadata and
 never download release installers. Preparation/install checks require manual
 dispatch with `-f validate_assets=true` (default false); these deliberate checks
-add release downloads. Use `-f audit_only=true` to skip Homebrew synchronization
+can add release downloads on cache misses. Successful native validation is
+reused only for identical release bytes, manifests, validator inputs and runner
+platform; restored installer bytes are always hashed and size-checked. Use
+`-f validate_assets=true -f force_validation=true` to repeat native checks while
+retaining installer caches. `force_validation` alone never enables downloads.
+The metadata-only `package-manager-plan` artifact becomes
+`package-manager-submissions` only after both native jobs pass or reuse exact
+success records. Cache keys have no prefix fallback; PR success records cannot
+bless main. Use `-f audit_only=true` to skip Homebrew synchronization
 as well as downloads/installations. The
 daily comparison fails on version drift after Homebrew synchronization. The
 `homebrew` job dispatches the tap publisher after the source audit and verifies tap

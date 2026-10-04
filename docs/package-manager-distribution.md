@@ -84,12 +84,13 @@ is needed, run once on disposable runners:
 gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main -f validate_assets=true
 ```
 
-This downloads both DMGs, the Windows installer and its checksum file; the Windows
-job downloads the installer again and may install an indexed predecessor for
-upgrade validation. These requests add GitHub release downloads. `audit_only=true`
+This plans manifests from metadata, then verifies both DMGs, the Windows installer
+and its checksum file. Exact installer caches avoid repeated downloads; Windows
+reuses the verified installer in WinGet's temp cache and may install an indexed
+predecessor for upgrade validation. Cache misses add GitHub release downloads. `audit_only=true`
 overrides `validate_assets=true` and skips them. For local manifest generation,
 `pnpm distribution:prepare vX.Y.Z node_modules/.cache/pwrgit-distribution` reuses
-verified cached installers; its checksum-file read still fetches release bytes.
+verified cached installers and the checksum file.
 Reuse the generated submission files/evidence instead of repeating checks just
 to reconfirm unchanged sources. PR CI covers the generator with fixture tests.
 
@@ -108,6 +109,25 @@ hashes; compare `shasum -a 256 <download>` (macOS) or `Get-FileHash -Algorithm
 SHA256` (Windows) with the generated manifest/cask and GitHub digest before
 submission. Never use aliases or `releases/latest/download/`, invent a checksum,
 or substitute an unsigned preview.
+
+Daily runs retain publication and identity audits without native validation.
+An absent Winget registration still fails `audit --check` even when Homebrew is
+current; generated manifests do not constitute an upstream submission. Explicit
+native runs reuse successful validation for identical release bytes, manifests,
+validator inputs and runner platform. Each platform records success only after
+its full checks. On an opted-in run, new releases, changed inputs, a changed
+Winget upgrade baseline or a missing success cache trigger validation. Installer
+cache restores are hashed and size-checked; WinGet uses the verified installer
+for local-manifest installation. There are no fallback cache keys. PR records
+cannot bless main. Cache eviction never enables native checks on routine audits.
+
+To explicitly repeat native checks while retaining verified installer caches:
+
+```sh
+gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main -f validate_assets=true -f force_validation=true
+```
+
+`force_validation` alone does not enable native validation.
 
 Output contains `Casks/pwrgit.rb`, three Winget files under
 `manifests/p/PwrDrvr/PwrGit/X.Y.Z/`, and `distribution-status.json`. The workflow

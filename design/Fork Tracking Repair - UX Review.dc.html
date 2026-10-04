@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, LIGHT block, restated short. `.dark` restates the
+             unscoped (dark) block for the cards that check the other theme. */
+          :root, .light {
+            --app: #ffffff; --side: #f7f4ef; --panel: #fdfcfa; --elev: #ffffff;
+            --hov: #f4f0e8; --rowact: #fff5e9;
+            --line0: rgba(0,0,0,.05); --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12); --line3: rgba(0,0,0,.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64; --tsub: rgba(26,22,18,.68);
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: rgba(183,76,0,.12); --atint: rgba(183,76,0,.08); --abord: rgba(183,76,0,.42);
+            --warn: #805200; --wsoft: rgba(128,82,0,.10); --wbord: rgba(128,82,0,.32);
+            --ok: #2e7d3c; --oksoft: rgba(46,125,60,.10);
+            --bad: #8a1f12; --badsoft: rgba(138,31,18,.08); --badbord: rgba(138,31,18,.32);
+            --chip: rgba(0,0,0,.05);
+            --sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", Consolas, monospace;
+          }
+          .dark {
+            --app: #000000; --side: #050505; --panel: #0a0a0a; --elev: #101010;
+            --hov: #14110d; --rowact: #120800;
+            --line0: rgba(247,243,235,.06); --line: rgba(247,243,235,.10); --line2: rgba(247,243,235,.14); --line3: rgba(247,243,235,.20);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a; --tsub: rgba(247,243,235,.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #1a0d00;
+            --asoft: rgba(255,138,31,.12); --atint: rgba(255,138,31,.08); --abord: rgba(255,138,31,.42);
+            --warn: #d99a3d; --wsoft: rgba(217,154,61,.12); --wbord: rgba(217,154,61,.34);
+            --ok: #5fa969; --oksoft: rgba(95,169,105,.14);
+            --bad: #ffb0a1; --badsoft: rgba(185,66,50,.16); --badbord: rgba(185,66,50,.5);
+            --chip: rgba(247,243,235,.07);
+            color: var(--t1);
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #efe9df; }
+          body { margin: 0; background: #efe9df; font-family: var(--sans); color: var(--t1); -webkit-font-smoothing: antialiased; }
+          a { color: var(--acc); text-decoration: none; }
+          code { font: 500 .92em/1 var(--mono); }
+
+          /* ---- review chrome (house: "Fork While Cloning") ---- */
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid rgba(0,0,0,.08); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: #1a1612; color: #fff; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 14px/1.2 var(--sans); color: #1a1612; }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: #524a40; max-width: 860px; text-wrap: pretty; }
+          .dv-sub code { font: 500 11px/1.4 var(--mono); color: #1a1612; background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: #1a1612; border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: #b74c00; color: #fff; }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.35 var(--sans); color: #524a40; max-width: 640px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: #736c64; }
+          .note { margin: 0; max-width: 600px; font: 400 11px/1.5 var(--sans); color: #524a40; text-wrap: pretty; }
+          .note code, .fitem code { font: 500 10.5px/1.4 var(--mono); color: #1a1612; background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+          .rec { display: inline-flex; align-items: center; height: 17px; padding: 0 7px; border-radius: 999px; background: #b74c00; color: #fff; font: 600 9.5px/1 var(--mono); letter-spacing: .04em; }
+
+          /* ---- findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 999px; background: #a8472a; color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.gap { background: #805200; }
+          .pin.ok { background: #2e7d3c; }
+          .find { width: 440px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 10px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 12px/1.3 var(--sans); color: #1a1612; }
+          .fitem p { margin: 0; font: 400 11px/1.5 var(--sans); color: #524a40; text-wrap: pretty; }
+          .tag { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; margin-left: 6px; border-radius: 999px; font: 600 9px/1 var(--mono); letter-spacing: .03em; vertical-align: 1px; }
+          .tag.bug { background: rgba(168,71,42,.12); color: #a8472a; }
+          .tag.gap { background: rgba(128,82,0,.12); color: #805200; }
+
+          /* ---- dialog (app.css: .clone-dialog / .fork-checkout-dialog) ---- */
+          .dlg { position: relative; width: 600px; border: 1px solid var(--line2); border-radius: 14px; background: var(--elev); color: var(--t1); box-shadow: 0 18px 50px rgba(40,26,10,.14); overflow: hidden; }
+          .dh { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+          .dh .ic { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; border-radius: 9px; background: var(--asoft); color: var(--acc); }
+          .dh h3 { margin: 0; font: 650 15px/1.2 var(--sans); color: var(--t1); }
+          .dh p { margin: 3px 0 0; font: 400 12px/1.3 var(--sans); color: var(--t2); }
+          .dh .x { margin-left: auto; color: var(--t3); font: 400 18px/1 var(--sans); }
+          .db { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; }
+          .db p { margin: 0; font: 400 13px/1.5 var(--sans); color: var(--t1); text-wrap: pretty; }
+          .db p.quiet { font-size: 12px; color: var(--t2); }
+          .db b { font-weight: 650; }
+          .db code { font: 500 12px/1 var(--mono); }
+          .df { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+          .df .grow { flex: 1; }
+          .df .hint { font: 400 11.5px/1.3 var(--sans); color: var(--t3); }
+          .pbtn { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 16px; border-radius: 9px; background: var(--acc); color: var(--accon); font: 600 13px/1 var(--sans); white-space: nowrap; }
+          .sbtn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; border: 1px solid var(--line2); background: var(--elev); color: var(--t1); font: 500 13px/1 var(--sans); white-space: nowrap; }
+          .click { cursor: pointer; }
+          .cv { display: inline-block; width: 0; height: 0; margin: 0 1px; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-top: 4px solid currentColor; vertical-align: 2px; }
+          /* As built: the raw error sits in the amber note box. */
+          .errbox { padding: 7px 10px; border: 1px solid var(--wbord); border-radius: 8px; background: var(--wsoft); color: var(--warn); font: 500 11px/1.4 var(--mono); }
+          /* Proposed: the forge's refusal, quoted and attributed, not shouted. */
+          .refused { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 2px 9px; padding: 9px 11px; border: 1px solid var(--badbord); border-radius: 9px; background: var(--badsoft); }
+          .refused .g { grid-row: 1 / 3; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 999px; background: var(--bad); color: var(--elev); font: 700 11px/1 var(--sans); }
+          .refused b { font: 600 12px/1.3 var(--sans); color: var(--t1); }
+          .refused span { font: 500 11px/1.4 var(--mono); color: var(--t2); }
+          .gitterms { border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+          .gitterms .sum { display: flex; align-items: center; gap: 7px; padding: 8px 11px; font: 500 11.5px/1 var(--sans); color: var(--t2); }
+          .gitterms .sum .car { display: inline-block; width: 0; height: 0; border-left: 4px solid var(--t3); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+          .gitterms.open .sum .car { transform: rotate(90deg); }
+          .gitterms .body { padding: 0 11px 10px 22px; font: 400 11.5px/1.55 var(--sans); color: var(--t2); }
+          .gitterms .body code { font: 500 11px/1.5 var(--mono); color: var(--t1); background: var(--chip); padding: 0 4px; border-radius: 3px; }
+
+          /* ---- the route: where main pulls from and pushes to ---- */
+          .strip { display: flex; flex-direction: column; gap: 6px; }
+          .strip-h { display: flex; align-items: center; gap: 8px; font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+          .strip-h .st { display: inline-flex; align-items: center; height: 17px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line2); letter-spacing: .05em; }
+          .strip-h .st.now { color: var(--t2); }
+          .strip-h .st.after { color: var(--accb); border-color: var(--abord); background: var(--atint); }
+          .rt { display: grid; grid-template-columns: minmax(0,1fr) 78px minmax(0,1fr) 78px minmax(0,1fr); align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+          .rt.after { border-color: var(--abord); background: var(--rowact); }
+          .rn { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 8px 9px; border: 1px solid var(--line2); border-radius: 8px; background: var(--elev); }
+          .rn .k { font: 600 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+          .rn > b { font: 600 12px/1.15 var(--mono); color: var(--t1); }
+          /* The owner is what tells the three apart (every repo here is
+             "sparkline"), so it leads and the name wraps under it. */
+          .rn .nm { font: 500 11.5px/1.25 var(--mono); color: var(--t2); overflow-wrap: anywhere; }
+          .rn .nm b { font-weight: 650; color: var(--t1); }
+          .rn .m { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+          .rn.here { align-items: center; text-align: center; border-style: dashed; }
+          .rn.here b { font-size: 13px; }
+          .rn.dim { opacity: .5; }
+          .rn.go { border-color: var(--abord); box-shadow: 0 0 0 3px var(--atint); }
+          .rmt { display: inline-flex; align-items: center; height: 16px; padding: 0 5px; border-radius: 4px; background: var(--chip); font: 500 9.5px/1 var(--mono); color: var(--t2); }
+          .perm { display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 6px; border-radius: 999px; font: 600 9.5px/1 var(--sans); }
+          .perm.no { color: var(--bad); background: var(--badsoft); }
+          .perm.yes { color: var(--ok); background: var(--oksoft); }
+          /* A lane holds up to two arrows; each arrow is a label over a line
+             with a head at one end. */
+          .ln { display: flex; flex-direction: column; gap: 9px; padding: 0 4px; }
+          .ar { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+          .ar .lb { display: inline-flex; align-items: center; gap: 3px; font: 600 9.5px/1 var(--sans); color: var(--t2); white-space: nowrap; }
+          .ar .sh { position: relative; width: 100%; height: 8px; }
+          .ar .sh::before { content: ""; position: absolute; left: 3px; right: 3px; top: 3px; border-top: 2px solid var(--t3); }
+          .ar .sh::after { content: ""; position: absolute; top: 0; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+          .ar.r .sh::after { right: 0; border-left: 7px solid var(--t3); }
+          .ar.l .sh::after { left: 0; border-right: 7px solid var(--t3); }
+          .ar.bad .lb { color: var(--bad); }
+          .ar.bad .sh::before { border-top: 2px dashed var(--bad); }
+          .ar.bad.r .sh::after { border-left-color: var(--bad); }
+          .ar.bad.l .sh::after { border-right-color: var(--bad); }
+          .ar.go .lb { color: var(--accb); }
+          .ar.go .sh::before { border-top-color: var(--acc); }
+          .ar.go.r .sh::after { border-left-color: var(--acc); }
+          .ar.go.l .sh::after { border-right-color: var(--acc); }
+          .ar.ghost .lb { color: var(--t3); font-weight: 500; }
+          .ar.ghost .sh::before { border-top: 2px dotted var(--line3); }
+          .ar.ghost.r .sh::after { border-left-color: var(--line3); }
+          .ar.ghost.l .sh::after { border-right-color: var(--line3); }
+          .ar.gone { visibility: hidden; }
+          .xg { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border-radius: 999px; background: var(--bad); color: var(--elev); font: 700 8px/1 var(--sans); }
+          .okg { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; border-radius: 999px; background: var(--ok); color: var(--elev); font: 700 8px/1 var(--sans); }
+          .legend { display: flex; align-items: center; gap: 14px; font: 500 10.5px/1 var(--sans); color: var(--t3); }
+          .legend i { display: inline-block; width: 18px; margin-right: 5px; vertical-align: middle; border-top: 2px solid var(--t3); }
+          .legend i.bad { border-top: 2px dashed var(--bad); }
+          .legend i.go { border-top-color: var(--acc); }
+          .legend i.ghost { border-top: 2px dotted var(--line3); }
+
+          /* 2c: a From/To table. */
+          .ft { display: grid; grid-template-columns: 92px minmax(0,1fr) 22px minmax(0,1fr); gap: 8px 8px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+          .ft .h { font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+          .ft .h.after { color: var(--accb); }
+          .ft .row { font: 600 12px/1.2 var(--sans); color: var(--t1); }
+          .ft .row small { display: block; margin-top: 2px; font: 400 10.5px/1.2 var(--sans); color: var(--t3); }
+          .ft .cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 7px 9px; border: 1px solid var(--line2); border-radius: 8px; background: var(--elev); }
+          .ft .cell b { font: 600 11.5px/1.15 var(--mono); color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .ft .cell.was { color: var(--t3); }
+          .ft .cell.was b { color: var(--t2); }
+          .ft .cell.bad { border-color: var(--badbord); background: var(--badsoft); }
+          .ft .cell.go { border-color: var(--abord); background: var(--rowact); }
+          .ft .to { font: 600 13px/1 var(--sans); color: var(--t3); text-align: center; }
+          .ft .same { font: 500 11px/1.3 var(--sans); color: var(--t3); }
+
+          /* 2a: one map, two states. */
+          .map { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+          .map .rt { padding: 0; border: 0; background: transparent; }
+
+          /* ---- 4: more than one place main could push ---- */
+          .pick { display: flex; flex-direction: column; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--chip); }
+          .pick-h { display: flex; align-items: center; gap: 8px; margin-bottom: -4px; font: 600 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t1); }
+          .po { display: grid; grid-template-columns: 14px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; }
+          .po.on { border-color: var(--abord); background: var(--rowact); }
+          .po .radio { width: 13px; height: 13px; border-radius: 999px; border: 1.5px solid var(--line3); background: var(--elev); }
+          .po.on .radio { border: 4px solid var(--acc); }
+          .po b { display: block; font: 600 12px/1.2 var(--mono); color: var(--t1); }
+          .po small { display: block; margin-top: 3px; font: 400 11px/1.3 var(--sans); color: var(--t2); }
+
+          /* ---- other surfaces (Pull menu, Remotes card, receipt) ---- */
+          .menu { width: 380px; padding: 6px; border: 1px solid var(--line2); border-radius: 12px; background: var(--elev); box-shadow: 0 14px 40px rgba(40,26,10,.14); }
+          .menu .mnote { padding: 7px 10px 8px; font: 400 11.5px/1.45 var(--sans); color: var(--t2); border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+          .menu .mi { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 8px; padding: 8px 10px; border-radius: 8px; }
+          .menu .mi.hl { background: var(--hov); }
+          .menu .mi b { display: block; font: 600 12.5px/1.25 var(--sans); color: var(--t1); }
+          .menu .mi b code { font: 600 12px/1 var(--mono); }
+          .menu .mi small { display: block; margin-top: 3px; font: 400 11.5px/1.4 var(--sans); color: var(--t3); }
+          .menu .mi .ck { color: var(--acc); font: 700 12px/1.2 var(--sans); }
+          .menu .sep { height: 1px; margin: 4px 6px; background: var(--line); }
+          .mini { display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; font: 500 11px/1.4 var(--mono); color: var(--t2); }
+          .mini .nd { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--line2); border-radius: 5px; background: var(--elev); color: var(--t1); }
+          .mini .nd.bad { border-color: var(--badbord); color: var(--bad); background: var(--badsoft); }
+          .mini .nd.go { border-color: var(--abord); color: var(--accb); background: var(--rowact); }
+          .card { width: 520px; display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; padding: 12px 14px; border: 1px solid var(--line2); border-radius: 10px; background: var(--panel); }
+          .card strong { display: block; font: 700 13px/1.2 var(--mono); color: var(--t1); }
+          .card p { margin: 6px 0 0; font: 400 11.5px/1.45 var(--sans); color: var(--t2); max-width: 330px; }
+          .card .acts { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+          .card .acts span { display: inline-flex; align-items: center; height: 25px; padding: 0 8px; border: 1px solid var(--line2); border-radius: 6px; background: transparent; color: var(--t2); font: 600 9.5px/1 var(--sans); white-space: nowrap; }
+          .card .acts span.pri { border-color: var(--abord); color: var(--accb); background: var(--asoft); }
+          .toast { width: 420px; display: grid; grid-template-columns: 20px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 11px 12px; border: 1px solid var(--line2); border-radius: 11px; background: var(--elev); box-shadow: 0 14px 40px rgba(40,26,10,.14); }
+          .toast b { display: block; font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+          .toast small { display: block; margin-top: 3px; font: 400 11.5px/1.35 var(--sans); color: var(--t2); }
+          .toast .act { display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 7px; border: 1px solid var(--abord); background: var(--asoft); color: var(--accb); font: 600 12px/1 var(--sans); white-space: nowrap; }
+
+          /* ---- plan table ---- */
+          .plan { width: 1000px; border: 1px solid rgba(0,0,0,.08); border-radius: 10px; background: #fdfcfa; overflow: hidden; }
+          .pr { display: grid; grid-template-columns: 36px 250px minmax(0,1fr) 90px; gap: 14px; align-items: start; padding: 10px 14px; border-bottom: 1px solid rgba(0,0,0,.08); font: 400 11.5px/1.5 var(--sans); color: #524a40; }
+          .pr.last { border-bottom: 0; }
+          .pr.head { font: 600 9.5px/1.3 var(--mono); letter-spacing: .07em; text-transform: uppercase; color: #736c64; background: rgba(0,0,0,.025); }
+          .pr b { font: 600 12px/1.4 var(--sans); color: #1a1612; }
+          .pr code { font: 500 10.5px/1.4 var(--mono); color: #1a1612; }
+          .pr .k { font: 700 11px/1.4 var(--mono); color: #b74c00; }
+
+          /* ---- live prototype ---- */
+          .proto { display: flex; gap: 22px; align-items: flex-start; }
+          .ctl { display: flex; flex-direction: column; gap: 12px; width: 280px; }
+          .ctlg { display: flex; flex-direction: column; gap: 6px; }
+          .ctlh { font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: #736c64; }
+          .opts { display: flex; flex-wrap: wrap; gap: 5px; }
+          .opt { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid rgba(0,0,0,.12); background: #fff; font: 500 11.5px/1 var(--sans); color: #524a40; cursor: pointer; }
+          .opt.on { border-color: rgba(183,76,0,.42); background: rgba(183,76,0,.12); color: #994c00; font-weight: 600; }
+          .readout { padding: 10px 12px; border-radius: 9px; border: 1px solid rgba(0,0,0,.12); background: #fdfcfa; font: 400 11.5px/1.5 var(--sans); color: #524a40; }
+          .readout b { color: #1a1612; font-weight: 650; }
+          .stage { display: flex; flex-direction: column; gap: 14px; }
+        </style>
+      </helmet>
+
+      <div style="background:#efe9df;min-width:1340px">
+
+      <!-- ================================================================ 1 -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">As built in #379: the repair is explained only in Git's own words</span></div>
+        <p class="dv-sub">PR #379 repairs a checkout whose <code>main</code> still points at the original repository after the remotes were renamed. It shows up in three places: Pull's menu, the dialog after a refused Push, and the Remotes tab. All three describe the change as <b>Track origin/main</b>. That is <code>git branch --set-upstream-to</code>, which most people meet about once a year. Nothing on screen shows where <code>main</code> sends its pushes today, or where it will send them afterwards. Names are contrived: <code>octo-labs/sparkline</code> is the original, <code>riverbend</code> is the signed-in account, and <code>riverbend/sparkline</code> is its fork. Redrawn from the screenshots on #379.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Pull menu as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><span>Pull <i class="cv"></i> before the repair</span></div>
+            <div class="menu light">
+              <div class="mnote">main tracks upstream/main, the fork's parent.</div>
+              <div class="mi hl"><span></span><span><b>Track <code>origin/main</code></b><small>Use your existing fork for Pull and Push. Changes tracking only.</small></span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Denied push dialog as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><span>After Push is refused. Pull <i class="cv"></i> opens the same dialog, with its own sentence in the error box.</span></div>
+            <div class="dlg light">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>Use your existing fork</h3><p>Repair tracking in this checkout</p></div><span class="x">&#215;</span></div>
+              <div class="db">
+                <div class="errbox">ERROR: Permission to octo-labs/sparkline.git denied to riverbend.</div>
+                <p>Origin already points at your fork. main still tracks upstream/main instead of origin/main.</p>
+                <p>Track origin/main to use your fork for Pull and Push. This changes tracking only. Your commits and files stay in place; nothing is pushed.</p>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Track origin/main</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1c" data-screen-label="1c Remotes card as built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><span>Remotes tab: the button applies the change in place, with no dialog</span></div>
+            <div class="card light">
+              <div><strong>Fork of octo-labs/sparkline</strong><p>main still tracks upstream/main. Track origin/main to pull and push through your fork. This changes tracking only; it does not move commits or push.</p></div>
+              <div class="acts"><span>Track origin/main</span><span>Re-check origin</span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1d" data-screen-label="1d Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a><span>What goes wrong</span></div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>Every label is Git configuration<span class="tag bug">UX</span></h4><p><code>origin</code>, <code>upstream</code>, "tracks" and "tracking" all need the reader to know that remotes are nicknames and that a branch has an upstream. People who hit this have usually just renamed a remote and don't know they did it. The button names the config, not the outcome: <b>Track origin/main</b> rather than "push to my fork".</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>"upstream" means two different things here<span class="tag bug">UX</span></h4><p>The remote is named <code>upstream</code> (the original repository), and Git also calls a branch's tracked ref its "upstream". The Post-ship 2f copy pass started separating the two, but the dialog uses both senses in one sentence.</p></div></div>
+              <div class="fitem"><span class="pin gap">3</span><div><h4>No picture of what changes<span class="tag gap">GAP</span></h4><p>Two arrows change: where <code>main</code> pulls from and where it pushes to. Drawn, the fix explains itself. Written as config, it reads like a risk.</p></div></div>
+              <div class="fitem"><span class="pin gap">4</span><div><h4>The refusal is shouted, then unexplained<span class="tag gap">GAP</span></h4><p>The forge's raw <code>ERROR:</code> line sits in an amber box with no attribution. Opened from Pull <i class="cv"></i>, the same box holds a sentence that isn't an error at all.</p></div></div>
+              <div class="fitem"><span class="pin gap">5</span><div><h4>Only origin is ever offered<span class="tag gap">GAP</span></h4><p><code>forkTrackingRepair</code> always proposes <code>origin/&lt;branch&gt;</code>. A checkout that also has an organisation's fork you can push to gets no choice. That case is secondary: <a class="dv-oid" href="#t4">4</a>.</p></div></div>
+              <div class="fitem"><span class="pin gap">6</span><div><h4>Three surfaces, three sets of words<span class="tag gap">GAP</span></h4><p>The menu, the dialog and the Remotes card each word it differently, and the Remotes card changes config without the dialog's explanation.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ 2 -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Draw it: where main pulls from and pushes to, now and after</span></div>
+        <p class="dv-sub">One dialog, three ways to draw the same two changes. Each draws three things: the original, this checkout, and your fork. The remote's nickname (<code>upstream</code>, <code>origin</code>) appears only as a small tag; the owner/name is the label. The button names the outcome. Git's own words move into an <b>In Git terms</b> disclosure, closed by default, for anyone who wants the exact command. No new IPC: <code>ForkTrackingRepair</code> plus <code>repo.identity</code> (the fork and its <code>parent</code>) already carry every label drawn here. After the repair, Pull <i class="cv"></i> still offers <b>Sync</b> with the original. The dotted arrow shows that it stays one click away.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a One map, re-pointed">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span>One map: today's arrows in red, the new ones in the accent</span></div>
+            <div class="dlg light">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>Push to your fork instead</h3><p>main in ~/src/github/sparkline</p></div><span class="x">&#215;</span></div>
+              <div class="db">
+                <div class="refused"><span class="g">!</span><b>GitHub refused the push</b><span>Permission to octo-labs/sparkline.git denied to riverbend.</span></div>
+                <p>main sends its pushes to <b>the original</b>, which your account can't write to. Your fork is already set up here, so point main at it.</p>
+                <div class="map">
+                  <div class="rt">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span><span class="perm no">can't push</span></span></div>
+                    <div class="ln"><div class="ar bad l"><span class="lb"><span class="xg">&#215;</span>Push</span><span class="sh"></span></div><div class="ar r"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar go r"><span class="lb">Push<span class="okg">&#10003;</span></span><span class="sh"></span></div><div class="ar go l"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn go"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                  <div class="legend"><span><i class="bad"></i>now</span><span><i class="go"></i>after</span><span style="margin-left:auto">Pull <i class="cv"></i> Sync still brings in octo-labs's new work</span></div>
+                </div>
+                <p class="quiet">Only main's settings change. Your commits and files stay where they are, and nothing is pushed until you push.</p>
+                <div class="gitterms"><div class="sum"><span class="car"></span>In Git terms</div></div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Use my fork</span></div>
+            </div>
+            <p class="note">The most compact option. Two states in one picture asks the reader to decode a legend, and red and accent are close in hue for some readers. The dashes and the &#215; and &#10003; glyphs carry the state without colour.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Now and After strips">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span>Now, then After: two strips, one change each <span class="rec">RECOMMENDED</span></span></div>
+            <div class="dlg light">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>Push to your fork instead</h3><p>main in ~/src/github/sparkline</p></div><span class="x">&#215;</span></div>
+              <div class="db">
+                <div class="refused"><span class="g">!</span><b>GitHub refused the push</b><span>Permission to octo-labs/sparkline.git denied to riverbend.</span></div>
+                <p>main sends its pushes to <b>the original</b>, which your account can't write to. Your fork is already set up here, so point main at it.</p>
+                <div class="strip">
+                  <div class="strip-h"><span class="st now">Now</span></div>
+                  <div class="rt">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span><span class="perm no">can't push</span></span></div>
+                    <div class="ln"><div class="ar bad l"><span class="lb"><span class="xg">&#215;</span>Push</span><span class="sh"></span></div><div class="ar r"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar gone r"><span class="lb">&#160;</span><span class="sh"></span></div></div>
+                    <div class="rn dim"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                </div>
+                <div class="strip">
+                  <div class="strip-h"><span class="st after">After</span></div>
+                  <div class="rt after">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span></span></div>
+                    <div class="ln"><div class="ar ghost r"><span class="lb">Pull <i class="cv"></i> Sync</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar go r"><span class="lb">Push<span class="okg">&#10003;</span></span><span class="sh"></span></div><div class="ar go l"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn go"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                </div>
+                <p class="quiet">Only main's settings change. Your commits and files stay where they are, and nothing is pushed until you push.</p>
+                <div class="gitterms open"><div class="sum"><span class="car"></span>In Git terms</div><div class="body">Sets main's upstream to <code>origin/main</code>, the same as <code>git branch --set-upstream-to=origin/main main</code>. In this checkout <code>origin</code> is riverbend/sparkline and <code>upstream</code> is octo-labs/sparkline.</div></div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Use my fork</span></div>
+            </div>
+            <p class="note">Shown with In Git terms open. Each strip is one sentence: Now says "pushes to the original, and that fails"; After says "pulls from and pushes to your fork". The nodes sit in the same place in both strips, so the eye compares arrows, not layouts. In Now, the fork is dimmed because main doesn't use it yet.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c From and To table">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><span>A From/To table: no arrows, just the two settings, before and after</span></div>
+            <div class="dlg light">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>Push to your fork instead</h3><p>main in ~/src/github/sparkline</p></div><span class="x">&#215;</span></div>
+              <div class="db">
+                <div class="refused"><span class="g">!</span><b>GitHub refused the push</b><span>Permission to octo-labs/sparkline.git denied to riverbend.</span></div>
+                <p>main sends its pushes to <b>the original</b>, which your account can't write to. Your fork is already set up here, so point main at it.</p>
+                <div class="ft">
+                  <span></span><span class="h">Now</span><span></span><span class="h after">After</span>
+                  <span class="row">main pushes to</span>
+                  <span class="cell bad"><b>octo-labs/sparkline</b><span class="m" style="display:flex;gap:5px"><span class="rmt">upstream</span><span class="perm no">can't push</span></span></span>
+                  <span class="to">&#8594;</span>
+                  <span class="cell go"><b>riverbend/sparkline</b><span class="m" style="display:flex;gap:5px"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></span>
+                  <span class="row">main pulls from<small>Pull, plain</small></span>
+                  <span class="cell was"><b>octo-labs/sparkline</b><span class="m" style="display:flex;gap:5px"><span class="rmt">upstream</span></span></span>
+                  <span class="to">&#8594;</span>
+                  <span class="cell go"><b>riverbend/sparkline</b><span class="m" style="display:flex;gap:5px"><span class="rmt">origin</span></span></span>
+                  <span class="row">New work from the original</span>
+                  <span class="same" style="grid-column: 2 / -1">Pull <i class="cv"></i> Sync with octo-labs/sparkline, as before.</span>
+                </div>
+                <p class="quiet">Only main's settings change. Your commits and files stay where they are, and nothing is pushed until you push.</p>
+                <div class="gitterms"><div class="sum"><span class="car"></span>In Git terms</div></div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Use my fork</span></div>
+            </div>
+            <p class="note">The most literal option, and the easiest to scan if the reader already thinks in settings. It is the weakest at showing that the original is still part of the picture. It is also the only one that reuses an existing shape: the remote plan rows in Fork&#8230;.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "<a class="dv-oid" href="#2b">2b</a> without the In Git terms box" &#183; "<a class="dv-oid" href="#2a">2a</a>'s single map, but with Now and After as a toggle" &#183; "make the arrows animate on open"</p>
+      </section>
+
+      <!-- ================================================================ 3 -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname"><a class="dv-oid" href="#2b">2b</a> from its other entry, in dark, and afterwards</span></div>
+        <p class="dv-sub">Opened from Pull <i class="cv"></i>, nothing was refused, so the dialog drops the refusal box and doesn't claim you can't push to the original. That entry only knows that main uses the original while your fork goes unused, and the arrows say exactly that. After the change, the receipt names where main now pushes and offers the Push that was refused. The dialog itself still never pushes.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Dark, after a refused push">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><span>Dark theme, after a refused push</span></div>
+            <div class="dlg dark" style="box-shadow:0 18px 50px rgba(0,0,0,.4)">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>Push to your fork instead</h3><p>main in ~/src/github/sparkline</p></div><span class="x">&#215;</span></div>
+              <div class="db">
+                <div class="refused"><span class="g">!</span><b>GitHub refused the push</b><span>Permission to octo-labs/sparkline.git denied to riverbend.</span></div>
+                <p>main sends its pushes to <b>the original</b>, which your account can't write to. Your fork is already set up here, so point main at it.</p>
+                <div class="strip">
+                  <div class="strip-h"><span class="st now">Now</span></div>
+                  <div class="rt">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span><span class="perm no">can't push</span></span></div>
+                    <div class="ln"><div class="ar bad l"><span class="lb"><span class="xg">&#215;</span>Push</span><span class="sh"></span></div><div class="ar r"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar gone r"><span class="lb">&#160;</span><span class="sh"></span></div></div>
+                    <div class="rn dim"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                </div>
+                <div class="strip">
+                  <div class="strip-h"><span class="st after">After</span></div>
+                  <div class="rt after">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span></span></div>
+                    <div class="ln"><div class="ar ghost r"><span class="lb">Pull <i class="cv"></i> Sync</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar go r"><span class="lb">Push<span class="okg">&#10003;</span></span><span class="sh"></span></div><div class="ar go l"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn go"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                </div>
+                <p class="quiet">Only main's settings change. Your commits and files stay where they are, and nothing is pushed until you push.</p>
+                <div class="gitterms"><div class="sum"><span class="car"></span>In Git terms</div></div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Use my fork</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b From Pull menu">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a><span>Opened from Pull <i class="cv"></i>: no refusal, no claim about push rights</span></div>
+            <div class="dlg light">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>Use your fork for main</h3><p>main in ~/src/github/sparkline</p></div><span class="x">&#215;</span></div>
+              <div class="db">
+                <p>main pulls from and pushes to <b>the original</b>. Your fork is set up here, but main doesn't use it.</p>
+                <div class="strip">
+                  <div class="strip-h"><span class="st now">Now</span></div>
+                  <div class="rt">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span></span></div>
+                    <div class="ln"><div class="ar l"><span class="lb">Push</span><span class="sh"></span></div><div class="ar r"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar gone r"><span class="lb">&#160;</span><span class="sh"></span></div></div>
+                    <div class="rn dim"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                </div>
+                <div class="strip">
+                  <div class="strip-h"><span class="st after">After</span></div>
+                  <div class="rt after">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span></span></div>
+                    <div class="ln"><div class="ar ghost r"><span class="lb">Pull <i class="cv"></i> Sync</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar go r"><span class="lb">Push<span class="okg">&#10003;</span></span><span class="sh"></span></div><div class="ar go l"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn go"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                </div>
+                <p class="quiet">Only main's settings change. Your commits and files stay where they are, and nothing is pushed until you push.</p>
+                <div class="gitterms"><div class="sum"><span class="car"></span>In Git terms</div></div>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Use my fork</span></div>
+            </div>
+            <p class="note">The original's push arrow is plain grey here. A maintainer can have a fork and still push to the original, and from this entry PwrGit hasn't asked. <code>viewerCanPush</code> is known for origin only.</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Receipt">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a><span>Afterwards: the receipt says where pushes go, and offers the refused Push</span></div>
+            <div class="toast light">
+              <span class="okg" style="width:20px;height:20px;font-size:11px">&#10003;</span>
+              <span><b>main now uses your fork</b><small>Pushes go to riverbend/sparkline. Pull <i class="cv"></i> Sync still brings in octo-labs's new work.</small></span>
+              <span class="act">Push &#8593;2</span>
+            </div>
+            <p class="note" style="max-width:420px">The button appears only when the dialog came from a refused Push and main has commits to push. It is the same Push button the header carries, so the user still decides. Pull <i class="cv"></i>'s normal fork choices return, as #379 already does.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "<a class="dv-oid" href="#3c">3c</a> as a header chip instead of a toast" &#183; "put the receipt's Push in the dialog footer as a second button"</p>
+      </section>
+
+      <!-- ================================================================ 4 -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Secondary: more than one place main could push</span></div>
+        <p class="dv-sub">Sometimes a checkout carries a second fork you can push to, such as an organisation's copy on a remote called <code>lumen</code>. Then the After strip gets a short <b>Push to</b> list, and the picked fork becomes the right-hand node. Your own fork on <code>origin</code> stays the default and the first row. With one candidate there is no list, and the dialog is <a class="dv-oid" href="#2b">2b</a> unchanged. This needs work in main: today <code>remote:inspectForkTracking</code> confirms <code>origin</code> only. It would have to ask the forge, for every remote whose repository is a fork of the same parent, whether you can push. One card, not one per combination.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Push-to list">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a><span>Two forks you can push to: pick one, and the After strip follows</span></div>
+            <div class="dlg light">
+              <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>Push to a fork instead</h3><p>main in ~/src/github/sparkline</p></div><span class="x">&#215;</span></div>
+              <div class="db">
+                <div class="refused"><span class="g">!</span><b>GitHub refused the push</b><span>Permission to octo-labs/sparkline.git denied to riverbend.</span></div>
+                <p>main sends its pushes to <b>the original</b>, which your account can't write to. Two forks here will take them.</p>
+                <div class="pick-h">Push to</div>
+                <div class="pick">
+                  <div class="po"><span class="radio"></span><span><b>riverbend/sparkline</b><small>Your fork &#183; <code>origin</code></small></span><span class="perm yes">you can push</span></div>
+                  <div class="po on"><span class="radio"></span><span><b>lumen-co/sparkline</b><small>lumen-co's fork &#183; <code>lumen</code></small></span><span class="perm yes">you can push</span></div>
+                </div>
+                <div class="strip">
+                  <div class="strip-h"><span class="st after">After</span></div>
+                  <div class="rt after">
+                    <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span></span></div>
+                    <div class="ln"><div class="ar ghost r"><span class="lb">Pull <i class="cv"></i> Sync</span><span class="sh"></span></div></div>
+                    <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                    <div class="ln"><div class="ar go r"><span class="lb">Push<span class="okg">&#10003;</span></span><span class="sh"></span></div><div class="ar go l"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                    <div class="rn go"><span class="k">lumen-co's fork</span><span class="nm"><b>lumen-co</b><wbr />/sparkline</span><span class="m"><span class="rmt">lumen</span><span class="perm yes">you can push</span></span></div>
+                  </div>
+                </div>
+                <p class="quiet">Only main's settings change. Your commits and files stay where they are, and nothing is pushed until you push.</p>
+              </div>
+              <div class="df"><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Use lumen-co/sparkline</span></div>
+            </div>
+            <p class="note">With a choice, the Now strip moves under In Git terms: the refusal box and the first sentence already say what Now is. The button names the pick, because "Use my fork" would be wrong for an organisation's copy.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "show the list only when origin is not one of the candidates" &#183; "a quiet 'Push somewhere else&#8230;' link instead of an open list"</p>
+      </section>
+
+      <!-- ================================================================ 5 -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">The same words on #379's other two entries</span></div>
+        <p class="dv-sub">Pull <i class="cv"></i> and the Remotes card become doorways into the <a class="dv-oid" href="#2b">2b</a> dialog, so the picture appears before any setting changes. Each also shows a one-line route: the same three nodes, flattened to text. The Remotes card stops changing config in place.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Pull menu">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a><span>Pull <i class="cv"></i>: the note states the route; the row names the outcome</span></div>
+            <div class="menu light">
+              <div class="mnote"><span class="mini"><span class="nd">main</span>&#8644;<span class="nd">octo-labs/sparkline</span></span><br />main pulls from and pushes to the original, not your fork.</div>
+              <div class="mi hl"><span></span><span><b>Use your fork for main&#8230;</b><small>Pull and push through riverbend/sparkline. Shows what changes first.</small></span></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="5b" data-screen-label="5b Remotes card">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a><span>Remotes tab: the same route line, and a button that opens the dialog</span></div>
+            <div class="card light">
+              <div><strong>Fork of octo-labs/sparkline</strong><p><span class="mini"><span class="nd">main</span>&#8644;<span class="nd">octo-labs/sparkline</span></span></p><p>main pulls from and pushes to the original instead of your fork, riverbend/sparkline.</p></div>
+              <div class="acts"><span class="pri">Use your fork for main&#8230;</span><span>Re-check origin</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "drop the route line from the menu note" &#183; "show the route line on every fork's Remotes card, repaired or not"</p>
+      </section>
+
+      <!-- ================================================================ 6 -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">Live: <a class="dv-oid" href="#2b">2b</a> from each entry, with one fork or two</span></div>
+        <p class="dv-sub">Pick where the dialog was opened from, how many forks you can push to, and whether the change is done.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="6a" data-screen-label="6a Live prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a><span>Prototype</span></div>
+            <div class="proto">
+              <div class="ctl">
+                <div class="ctlg"><span class="ctlh">Opened from</span>
+                  <div class="opts"><sc-for list="{{ fromOpts }}" as="o" hint-placeholder-count="3"><span class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</span></sc-for></div>
+                </div>
+                <div class="ctlg"><span class="ctlh">Forks you can push to</span>
+                  <div class="opts"><sc-for list="{{ forkOpts }}" as="o" hint-placeholder-count="2"><span class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</span></sc-for></div>
+                </div>
+                <div class="ctlg"><span class="ctlh">Theme</span>
+                  <div class="opts"><sc-for list="{{ themeOpts }}" as="o" hint-placeholder-count="2"><span class="{{ o.cls }}" onClick="{{ o.pick }}">{{ o.label }}</span></sc-for></div>
+                </div>
+                <div class="readout"><b>{{ readTitle }}</b><br />{{ readBody }}</div>
+                <span class="opt" onClick="{{ reset }}">Start over</span>
+              </div>
+              <div class="stage">
+                <sc-if value="{{ asking }}" hint-placeholder-val="{{ true }}">
+                  <div class="{{ dlgCls }}">
+                    <div class="dh"><span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"></circle><circle cx="18" cy="5" r="2"></circle><circle cx="12" cy="19" r="2"></circle><path d="M6 7v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V7"></path><path d="M12 12v5"></path></svg></span><div><h3>{{ title }}</h3><p>main in ~/src/github/sparkline</p></div><span class="x">&#215;</span></div>
+                    <div class="db">
+                      <sc-if value="{{ refused }}" hint-placeholder-val="{{ true }}">
+                        <div class="refused"><span class="g">!</span><b>GitHub refused the push</b><span>Permission to octo-labs/sparkline.git denied to riverbend.</span></div>
+                      </sc-if>
+                      <p>{{ lead }}</p>
+                      <sc-if value="{{ showList }}" hint-placeholder-val="{{ false }}">
+                        <div class="pick-h">Push to</div>
+                        <div class="pick"><sc-for list="{{ targets }}" as="t" hint-placeholder-count="2"><div class="{{ t.cls }}" onClick="{{ t.pick }}"><span class="radio"></span><span><b>{{ t.slug }}</b><small>{{ t.who }}</small></span><span class="perm yes">you can push</span></div></sc-for></div>
+                      </sc-if>
+                      <sc-if value="{{ showNow }}" hint-placeholder-val="{{ true }}">
+                        <div class="strip">
+                          <div class="strip-h"><span class="st now">Now</span></div>
+                          <div class="rt">
+                            <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span><sc-if value="{{ refused }}" hint-placeholder-val="{{ true }}"><span class="perm no">can't push</span></sc-if></span></div>
+                            <div class="ln"><div class="{{ nowPushCls }}"><span class="lb"><sc-if value="{{ refused }}" hint-placeholder-val="{{ true }}"><span class="xg">&#215;</span></sc-if>Push</span><span class="sh"></span></div><div class="ar r"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                            <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                            <div class="ln"><div class="ar gone r"><span class="lb">&#160;</span><span class="sh"></span></div></div>
+                            <div class="rn dim"><span class="k">Your fork</span><span class="nm"><b>riverbend</b><wbr />/sparkline</span><span class="m"><span class="rmt">origin</span><span class="perm yes">you can push</span></span></div>
+                          </div>
+                        </div>
+                      </sc-if>
+                      <div class="strip">
+                        <div class="strip-h"><span class="st after">After</span></div>
+                        <div class="rt after">
+                          <div class="rn"><span class="k">The original</span><span class="nm"><b>octo-labs</b><wbr />/sparkline</span><span class="m"><span class="rmt">upstream</span></span></div>
+                          <div class="ln"><div class="ar ghost r"><span class="lb">Pull <i class="cv"></i> Sync</span><span class="sh"></span></div></div>
+                          <div class="rn here"><span class="k">This checkout</span><b>main</b></div>
+                          <div class="ln"><div class="ar go r"><span class="lb">Push<span class="okg">&#10003;</span></span><span class="sh"></span></div><div class="ar go l"><span class="lb">Pull</span><span class="sh"></span></div></div>
+                          <div class="rn go"><span class="k">{{ targetKind }}</span><span class="nm"><b>{{ targetOwner }}</b><wbr />/sparkline</span><span class="m"><span class="rmt">{{ targetRemote }}</span><span class="perm yes">you can push</span></span></div>
+                        </div>
+                      </div>
+                      <p class="quiet">Only main's settings change. Your commits and files stay where they are, and nothing is pushed until you push.</p>
+                      <div class="{{ termsCls }}" onClick="{{ toggleTerms }}"><div class="sum click"><span class="car"></span>In Git terms</div><sc-if value="{{ termsOpen }}" hint-placeholder-val="{{ false }}"><div class="body">Sets main's upstream to <code>{{ targetRef }}</code>, the same as <code>{{ targetCmd }}</code>. In this checkout <code>{{ targetRemote }}</code> is {{ targetSlug }} and <code>upstream</code> is octo-labs/sparkline.</div></sc-if></div>
+                    </div>
+                    <div class="df"><span class="grow"></span><span class="sbtn click" onClick="{{ reset }}">Cancel</span><span class="pbtn click" onClick="{{ apply }}">{{ submitLabel }}</span></div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ done }}" hint-placeholder-val="{{ false }}">
+                  <div class="{{ toastCls }}">
+                    <span class="okg" style="width:20px;height:20px;font-size:11px">&#10003;</span>
+                    <span><b>{{ doneTitle }}</b><small>{{ doneBody }}</small></span>
+                    <sc-if value="{{ refused }}" hint-placeholder-val="{{ true }}"><span class="act">Push &#8593;2</span></sc-if>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ 7 -->
+      <section class="dv-turn" id="t7">
+        <div class="dv-thd"><a class="dv-tid" href="#t7">7</a><span class="dv-tname">Build list</span></div>
+        <p class="dv-sub">All five shipped together. A to D are renderer only. E adds one forge read in main, made after the repository lock is released, so another fork is offered only when the forge confirms it forks the same parent and takes your pushes. As built, the receipt reads &#8220;Now using your fork&#8221; with main named in its sentence, because the toast draws its title as an uppercase eyebrow, and its button is a plain Push.</p>
+        <div class="plan">
+          <div class="pr head"><span>#</span><span>Change</span><span>Where</span><span>Turn</span></div>
+          <div class="pr"><span class="k">A</span><b>Route strips in the recovery dialog</b><span>A <code>ForkRoute</code> component draws the Now and After strips from <code>ForkTrackingRepair</code> and <code>repo.identity</code>. The title, lead, button and In Git terms disclosure follow <a class="dv-oid" href="#2b">2b</a>. The refusal box is labelled with the forge's name and appears only for a refused Push. <code>ForkTrackingRecoveryDialog.tsx</code>, new <code>ForkRoute.tsx</code>, <code>app.css</code></span><span>2b, 3a, 3b</span></div>
+          <div class="pr"><span class="k">B</span><b>Entry-aware wording</b><span>The dialog learns whether it opened from a refused Push or from a menu. Pull <i class="cv"></i> stops passing a sentence through <code>reason</code>, and the "can't push" claim appears only after a refusal. <code>WorktreeHeader.tsx</code>, <code>ForkTrackingRecoveryDialog.tsx</code></span><span>3b, 5a</span></div>
+          <div class="pr"><span class="k">C</span><b>Receipt with Push</b><span>After a refused-Push repair, the receipt names where pushes now go and offers the header's own Push when there are commits ahead. <code>WorktreeHeader.tsx</code></span><span>3c</span></div>
+          <div class="pr"><span class="k">D</span><b>Remotes card opens the dialog</b><span>The route line, plus "Use your fork for main&#8230;", which opens the same dialog instead of repairing in place. <code>ForkRemoteStatus.tsx</code></span><span>5b</span></div>
+          <div class="pr last"><span class="k">E</span><b>Choose among forks you can push to</b><span>Main lists every remote whose forge repository is a fork of the same parent with <code>viewerCanPush</code>, and repair takes the chosen remote. The list appears only with two or more candidates. <code>fork-tracking.ts</code>, <code>remote-handlers.ts</code>, protocol</span><span>4a</span></div>
+        </div>
+        <p class="dv-next">Open question: should "Use my fork" after a refused Push also push in one step? #379 keeps them separate on purpose. <a class="dv-oid" href="#3c">3c</a> puts Push one click away instead.</p>
+      </section>
+
+      </div>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { from: "push", forks: "one", theme: "light", pick: "origin", terms: false, done: false };
+        }
+        renderVals() {
+          const s = this.state;
+          const opts = (defs, key, field) => defs.map((d) => ({
+            label: d.label,
+            cls: d.key === key ? "opt on" : "opt",
+            pick: () => { const next = { done: false }; next[field] = d.key; if (field === "forks") next.pick = "origin"; this.setState(next); }
+          }));
+          const fromOpts = opts([
+            { key: "push", label: "Push was refused" },
+            { key: "menu", label: "Pull menu" },
+            { key: "remotes", label: "Remotes tab" }
+          ], s.from, "from");
+          const forkOpts = opts([
+            { key: "one", label: "just mine" },
+            { key: "two", label: "mine + lumen-co's" }
+          ], s.forks, "forks");
+          const themeOpts = opts([
+            { key: "light", label: "light" },
+            { key: "dark", label: "dark" }
+          ], s.theme, "theme");
+          const refused = s.from === "push";
+          const two = s.forks === "two";
+          const lumen = two && s.pick === "lumen";
+          const targetSlug = lumen ? "lumen-co/sparkline" : "riverbend/sparkline";
+          const targetRemote = lumen ? "lumen" : "origin";
+          const targetKind = lumen ? "lumen-co's fork" : "Your fork";
+          const mk = (key, slug, who) => ({
+            slug: slug,
+            who: who,
+            cls: (s.pick === key ? "po on" : "po") + " click",
+            pick: () => { this.setState({ pick: key }); }
+          });
+          const targets = [
+            mk("origin", "riverbend/sparkline", "Your fork · origin"),
+            mk("lumen", "lumen-co/sparkline", "lumen-co's fork · lumen")
+          ];
+          let lead = "main sends its pushes to the original, which your account can't write to. Your fork is already set up here, so point main at it.";
+          if (refused && two) lead = "main sends its pushes to the original, which your account can't write to. Two forks here will take them.";
+          if (!refused) lead = "main pulls from and pushes to the original. Your fork is set up here, but main doesn't use it.";
+          if (!refused && two) lead = "main pulls from and pushes to the original. Two forks you can push to are set up here, and main uses neither.";
+          let title = refused ? "Push to your fork instead" : "Use your fork for main";
+          if (two) title = refused ? "Push to a fork instead" : "Use a fork for main";
+          let readTitle = refused ? "From a refused Push" : (s.from === "menu" ? "From the Pull menu" : "From the Remotes tab");
+          let readBody = refused
+            ? "The forge's refusal is quoted and attributed, and the original is marked can't push because that is now known."
+            : "Nothing was refused, so there's no refusal box and no claim about push rights to the original.";
+          if (two) readBody = readBody + " With two forks, the Push to list replaces the Now strip; your own fork is first and the default.";
+          if (s.done) {
+            readTitle = "Done";
+            readBody = refused ? "The receipt offers the Push that was refused. The dialog itself never pushed." : "The receipt names where pushes go. The Pull menu gets its normal fork choices back.";
+          }
+          return {
+            fromOpts: fromOpts,
+            forkOpts: forkOpts,
+            themeOpts: themeOpts,
+            asking: !s.done,
+            done: s.done,
+            dlgCls: "dlg " + s.theme,
+            toastCls: "toast " + s.theme,
+            title: title,
+            refused: refused,
+            lead: lead,
+            showList: two,
+            targets: targets,
+            showNow: !two,
+            nowPushCls: refused ? "ar bad l" : "ar l",
+            targetSlug: targetSlug,
+            targetOwner: lumen ? "lumen-co" : "riverbend",
+            targetRemote: targetRemote,
+            targetKind: targetKind,
+            targetRef: targetRemote + "/main",
+            targetCmd: "git branch --set-upstream-to=" + targetRemote + "/main main",
+            termsOpen: s.terms,
+            termsCls: s.terms ? "gitterms open" : "gitterms",
+            toggleTerms: () => { this.setState({ terms: !this.state.terms }); },
+            submitLabel: two ? "Use " + targetSlug : "Use my fork",
+            apply: () => { this.setState({ done: true }); },
+            reset: () => { this.setState({ done: false, pick: "origin", terms: false }); },
+            doneTitle: lumen ? "main now uses lumen-co's fork" : "main now uses your fork",
+            doneBody: "Pushes go to " + targetSlug + ". Sync in the Pull menu still brings in octo-labs's new work.",
+            readTitle: readTitle,
+            readBody: readBody
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

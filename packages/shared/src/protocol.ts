@@ -36,7 +36,7 @@ import type {
   ForkPreflight,
   ForkProgress,
   ForkStatus,
-  ForkTrackingRepair,
+  ForkTrackingOffer,
   ForkSyncOutcome,
   ForkSyncPush,
   RepoIdentity,
@@ -1487,9 +1487,12 @@ export interface Commands {
    * Quiet, bounded check of the selected branch's tracked and fork-source
    * tips. `superseded`: a fetch, pull or push on the repository stopped it,
    * so it learned nothing — keep whatever was known before.
+   * Selection and deliberate hover use the immediate queue; periodic header
+   * checks share the background queue with visible rows. Direct interactions
+   * skip the TTL; viewport and periodic checks share a 60-second cooldown.
    */
   "remote:checkSelected": {
-    req: { worktreeId: string };
+    req: { worktreeId: string; intent?: "selected" | "hover" | "periodic" };
     res: { status: "checked" | "untracked" | "unavailable" | "superseded" };
   };
   /** Fetch each repository once, optionally applying only proven-safe FFs. */
@@ -1700,13 +1703,22 @@ export interface Commands {
   /** Repair a branch left tracking the parent after origin was renamed.
    *  Revalidates the reviewed tracking and forge relationship; moves no refs. */
   "remote:repairForkTracking": {
-    req: { worktreeId: string; branch: string; upstream: string };
+    req: {
+      worktreeId: string;
+      branch: string;
+      upstream: string;
+      /** The fork chosen from the offer's `targets`; absent is `origin`.
+       *  Carries the repository it was reviewed as, so a remote re-pointed
+       *  since the dialog opened is refused rather than tracked. */
+      target?: { remote: string; nameWithOwner: string };
+    };
     res: null;
   };
-  /** Local inspection after a denied push: origin may already be the fork. */
+  /** Inspection after a denied push, or from Pull or Remotes: origin may
+   *  already be the fork, and other remotes may be forks you can push to. */
   "remote:inspectForkTracking": {
     req: { worktreeId: string };
-    res: ForkTrackingRepair | null;
+    res: ForkTrackingOffer | null;
   };
   /**
    * The checked-out branch against its counterpart on the fork's source, or

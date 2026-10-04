@@ -1,5 +1,5 @@
 import { err, ok, type ForgeHostMap, type Result } from "@pwrgit/shared";
-import type { GitExec } from "./dugite";
+import { sanitizeGitLogDetail, type GitExec } from "./dugite";
 import {
   addForkParentRemote,
   planUpstreamRemote,
@@ -12,7 +12,7 @@ import {
   type ForkParentHint
 } from "./git-service";
 
-type Target = { remote: string; remoteRef: string; localRef: string };
+type Target = { remote: string; remoteRef: string; localRef: string; optional?: boolean };
 
 /** Make a known fork parent visible to the ordinary fork sync path. */
 export async function ensureForkParentRemote(
@@ -46,7 +46,7 @@ export async function checkSelectedRemoteTips(
   parent: ForkParentHint | null,
   exclusive: <T>(run: () => Promise<T>) => Promise<T>,
   onFetched: () => void
-): Promise<Result<"checked" | "untracked">> {
+): Promise<Result<"checked" | "untracked" | "unavailable">> {
   const endpoints = await listRemoteEndpoints(git, cwd);
   if (!endpoints.ok) return endpoints;
   const upstream = await git(["rev-parse", "--symbolic-full-name", "@{u}"], cwd);
@@ -61,6 +61,8 @@ export async function checkSelectedRemoteTips(
   }
   const trackedBranch = tracked === undefined || upstreamRef === null
     ? branch : upstreamRef.slice(`refs/remotes/${tracked.name}/`.length);
+  const source = forkSourceRemote(endpoints.value, tracked?.name ?? null, parent);
+  const counterparts = upstreamRef === null && !branch.startsWith("detached@");
   const targets: Target[] = [];
   if (tracked !== undefined && upstreamRef !== null) {
     // A custom fetch refspec can map refs/heads/main to origin/other-name.
@@ -72,9 +74,25 @@ export async function checkSelectedRemoteTips(
       return err({ kind: "remote", code: "remote_config_failed", message: "The tracked branch has no remote head." });
     }
     targets.push({ remote: tracked.name, remoteRef, localRef: upstreamRef });
+  } else if (counterparts) {
+    // A branch may be published without -u. Refresh its counterparts so
+    // local-only counts do not keep reporting commits already pushed by
+    // another client. Keep tracking configuration untouched.
+    for (const endpoint of endpoints.value) {
+      const optional = endpoint.name !== source?.remote;
+      const mappings = await git(["config", "--get-all", `remote.${endpoint.name}.fetch`], cwd);
+      if (!mappings.ok) { if (!optional) return mappings; continue; }
+      if (mappings.value.exitCode !== 0 && mappings.value.exitCode !== 1) {
+        if (!optional) return err({ kind: "remote", code: "remote_config_failed", message: "Could not read fetch mappings." });
+        continue;
+      }
+      const remoteRef = `refs/heads/${branch}`;
+      for (const localRef of mappedTrackingRefs(remoteRef, mappings.value.stdout.trim().split("\n"))) {
+        targets.push({ remote: endpoint.name, remoteRef, localRef, optional });
+      }
+    }
   }
-  const source = forkSourceRemote(endpoints.value, tracked?.name ?? null, parent);
-  if (source !== null) {
+  if (!counterparts && source !== null && !targets.some((target) => target.remote === source.remote)) {
     const prefix = `refs/remotes/${source.remote}/`;
     const sourceRef = `${prefix}${trackedBranch}`;
     targets.push({ remote: source.remote, remoteRef: `refs/heads/${trackedBranch}`, localRef: sourceRef });
@@ -104,33 +122,85 @@ export async function checkSelectedRemoteTips(
     }
   }
 
+  // Preserve the original tracked/source checks before trying additional
+  // publication counterparts. An optional endpoint may consume the timeout.
+  targets.sort((a, b) => Number(a.optional ?? false) - Number(b.optional ?? false));
+  let checked = 0;
   for (const target of targets) {
-    // Git accepts option-shaped remote names. Do not let one turn a background
-    // check into a different command, even when it came from local config.
-    if (target.remote.startsWith("-")) {
-      return err({ kind: "remote", code: "remote_config_failed", message: "The remote name cannot be checked safely." });
+    const result = await checkTrackingTip(git, cwd, target, exclusive, onFetched);
+    if (!result.ok) {
+      if (!target.optional) return result;
+      // An unrelated endpoint says nothing about process-wide connectivity.
+      // Preserve its last known ref and allow the other counterparts to run.
+      continue;
     }
-    const advertised = await git(
-      ["ls-remote", "--heads", target.remote, target.remoteRef],
-      cwd
-    );
-    if (!advertised.ok) return advertised;
-    if (advertised.value.exitCode !== 0) {
-      return err({ kind: "remote", code: "fetch_failed", message: "Remote tip check failed." });
-    }
-    const line = advertised.value.stdout.split("\n").find((row) => row.endsWith(`\t${target.remoteRef}`));
-    const remoteHead = line?.split("\t")[0] ?? "";
-    const deleted = advertised.value.stdout.trim() === "";
-    const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], cwd);
-    if (!local.ok) return local;
-    const current = local.value.exitCode === 0 ? local.value.stdout.trim() : null;
-    // The common answer is "nothing moved", and it needs no lock at all.
-    if (deleted ? current === null : current === remoteHead) continue;
-    const updated = await exclusive(() => syncTrackingRef(git, cwd, target, remoteHead, deleted));
-    if (!updated.ok) return updated;
-    if (updated.value) onFetched();
+    checked += 1;
   }
-  return ok(targets.length === 0 ? "untracked" : "checked");
+  return ok(targets.length === 0 ? "untracked" : checked === 0 ? "unavailable" : "checked");
+}
+
+/** Match Git's exact/pattern fetch mappings, including negative exclusions.
+ * Only remote-tracking refs may be written by an automatic counterpart check. */
+function mappedTrackingRefs(remoteRef: string, refspecs: string[]): string[] {
+  const match = (pattern: string): string | null => {
+    const star = pattern.indexOf("*");
+    if (star === -1) return pattern === remoteRef ? "" : null;
+    if (pattern.indexOf("*", star + 1) !== -1) return null;
+    const prefix = pattern.slice(0, star);
+    const suffix = pattern.slice(star + 1);
+    return remoteRef.startsWith(prefix) && remoteRef.endsWith(suffix) && remoteRef.length >= prefix.length + suffix.length
+      ? remoteRef.slice(prefix.length, remoteRef.length - suffix.length) : null;
+  };
+  if (refspecs.some((refspec) => refspec.startsWith("^") && match(refspec.slice(1)) !== null)) return [];
+  const destinations = new Set<string>();
+  for (const refspec of refspecs) {
+    const positive = refspec.startsWith("+") ? refspec.slice(1) : refspec;
+    const colon = positive.indexOf(":");
+    if (colon === -1 || positive.startsWith("^")) continue;
+    const from = positive.slice(0, colon);
+    const to = positive.slice(colon + 1);
+    const captured = match(from);
+    if (captured === null || from.includes("*") !== to.includes("*")) continue;
+    const destination = to.replace("*", captured);
+    if (destination.startsWith("refs/remotes/") && destination !== "refs/remotes/" && !destination.includes("*")) {
+      destinations.add(destination);
+    }
+  }
+  return [...destinations];
+}
+
+async function checkTrackingTip(
+  git: GitExec, cwd: string, target: Target,
+  exclusive: <T>(run: () => Promise<T>) => Promise<T>, onFetched: () => void
+): Promise<Result<void>> {
+  // Git accepts option-shaped remote names. Do not let one turn a background
+  // check into a different command, even when it came from local config.
+  if (target.remote.startsWith("-")) {
+    return err({ kind: "remote", code: "remote_config_failed", message: "The remote name cannot be checked safely." });
+  }
+  const advertised = await git(
+    ["ls-remote", "--heads", target.remote, target.remoteRef],
+    cwd
+  );
+  if (!advertised.ok) return advertised;
+  if (advertised.value.exitCode !== 0) {
+    return err({
+      kind: "remote", code: "fetch_failed",
+      message: sanitizeGitLogDetail(advertised.value.stderr) || "Remote tip check failed."
+    });
+  }
+  const line = advertised.value.stdout.split("\n").find((row) => row.endsWith(`\t${target.remoteRef}`));
+  const remoteHead = line?.split("\t")[0] ?? "";
+  const deleted = advertised.value.stdout.trim() === "";
+  const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], cwd);
+  if (!local.ok) return local;
+  const current = local.value.exitCode === 0 ? local.value.stdout.trim() : null;
+  // The common answer is "nothing moved", and it needs no lock at all.
+  if (deleted ? current === null : current === remoteHead) return ok(undefined);
+  const updated = await exclusive(() => syncTrackingRef(git, cwd, target, remoteHead, deleted));
+  if (!updated.ok) return updated;
+  if (updated.value) onFetched();
+  return ok(undefined);
 }
 
 /** Bring one tracking ref to the advertised tip; true when it moved. */

@@ -4,9 +4,9 @@ $status = Get-Content (Join-Path $Directory 'distribution-status.json') -Raw | C
 $manifest = Join-Path $Directory "manifests/p/PwrDrvr/PwrGit/$($status.version)"
 $installer = $status.assets | Where-Object name -Like '*-windows-x64-setup.exe'
 if (@($installer).Count -ne 1) { throw 'Expected one Windows x64 installer' }
-$download = Join-Path $env:RUNNER_TEMP $installer.name
-Invoke-WebRequest $installer.url -OutFile $download
-if ("sha256:$((Get-FileHash $download -Algorithm SHA256).Hash.ToLower())" -ne $installer.digest) {
+$download = Join-Path (Join-Path $Directory 'downloads') $installer.name
+if (-not (Test-Path -LiteralPath $download -PathType Leaf)) { throw 'Verified Windows installer is missing; run the platform download step first' }
+if ("sha256:$((Get-FileHash $download -Algorithm SHA256).Hash.ToLower())" -ne $installer.digest -or (Get-Item -LiteralPath $download).Length -ne $installer.size) {
   throw 'Windows installer checksum mismatch'
 }
 $signature = Get-AuthenticodeSignature $download
@@ -26,8 +26,40 @@ if ($status.winget.version -and $status.winget.version -ne $status.version) {
   winget install --id PwrDrvr.PwrGit --exact --source winget --version $status.winget.version --scope user --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
   if ($LASTEXITCODE -ne 0) { throw 'Previous package is not installable from the public index; investigate propagation' }
 }
-winget install --manifest $manifest --scope user --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-if ($LASTEXITCODE -ne 0) { throw 'WinGet install/upgrade failed' }
+# WinGet checks for an existing SHA-256-named installer under its temp package
+# directory before downloading. Seed that directory with the bytes just verified,
+# preserving the real manifest URL, switches, hash checks and install behavior.
+# Source: microsoft/winget-cli DownloadFlow.cpp CheckForExistingInstaller and
+# Manifest.cpp GetPathPart. Packaged clients use TEMP/WinGet; unpackaged clients
+# add defaultState. Seed both so repair/client packaging cannot cause a refetch.
+$hash = $installer.digest.Substring(7)
+foreach ($root in @((Join-Path $env:TEMP 'WinGet'), (Join-Path $env:TEMP 'WinGet/defaultState'))) {
+  $packageCache = Join-Path $root "PwrDrvr.PwrGit.$($status.version)"
+  New-Item -ItemType Directory -Path $packageCache -Force | Out-Null
+  Copy-Item -LiteralPath $download -Destination (Join-Path $packageCache $hash) -Force
+}
+$installLog = Join-Path $Directory 'winget-install.log'
+$installStarted = Get-Date
+winget install --manifest $manifest --scope user --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --verbose-logs
+$installExitCode = $LASTEXITCODE
+# --log is an installer log, not WinGet's diagnostic log. Packaged and
+# unpackaged clients use these separate diagnostic locations.
+$diagnosticRoots = @(
+  (Join-Path $env:LOCALAPPDATA 'Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir'),
+  (Join-Path $env:TEMP 'WinGet/defaultState')
+)
+$diagnosticLogs = @(foreach ($root in $diagnosticRoots) {
+  if (Test-Path -LiteralPath $root) {
+    Get-ChildItem -LiteralPath $root -Filter 'WinGet-*.log' -File | Where-Object LastWriteTime -GE $installStarted
+  }
+})
+$diagnosticLog = $diagnosticLogs | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $diagnosticLog) { throw 'WinGet install diagnostic log is missing' }
+Copy-Item -LiteralPath $diagnosticLog.FullName -Destination $installLog -Force
+if ($installExitCode -ne 0) { throw 'WinGet install/upgrade failed' }
+if (-not (Select-String -LiteralPath $installLog -SimpleMatch 'Existing installer file hash matches. Will use existing installer.' -Quiet)) {
+  throw 'WinGet did not reuse the verified installer; inspect client cache behavior before recording successful validation'
+}
 $entries = @(Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*' | Where-Object DisplayName -EQ PwrGit)
 if ($entries.Count -ne 1 -or $entries[0].DisplayVersion -ne $status.version -or $entries[0].Publisher -ne 'PwrDrvr LLC') {
   throw 'Unexpected per-user Add/Remove Programs metadata'

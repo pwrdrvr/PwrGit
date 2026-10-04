@@ -296,7 +296,10 @@ export function WorktreeRow({
             ↑{worktree.ahead}
           </span>
           <span className="a11y-sr-only">
-            {worktree.ahead} to push to the branch it tracks
+            {worktree.ahead}{" "}
+            {worktree.tracking === "unpublished"
+              ? "not on fetched remote branches; no upstream configured"
+              : "to push to the branch it tracks"}
           </span>
         </>
       )}

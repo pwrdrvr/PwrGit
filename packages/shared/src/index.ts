@@ -5,6 +5,7 @@ export * from "./forge-host-name";
 export * from "./forge-product";
 export * from "./change-request-query";
 export * from "./forge-remote";
+export * from "./fork-route";
 export * from "./fork-tracking";
 export * from "./image";
 export * from "./protocol";

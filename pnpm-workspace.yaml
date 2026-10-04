@@ -9,7 +9,9 @@ allowBuilds:
   # desktop postinstall stages both runtime-owned copies instead.
   better-sqlite3: false
   dugite: true
-  electron: true
+  # electron is absent on purpose: since Electron 42 the package has no install
+  # script, and the desktop postinstall (install:electron-binary) downloads
+  # the binary instead.
   electron-winstaller: true
   esbuild: true
 

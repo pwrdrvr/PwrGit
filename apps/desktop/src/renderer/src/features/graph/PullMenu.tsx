@@ -20,6 +20,8 @@ import {
 export type PullMenuRow = {
   key: string;
   title: ReactNode;
+  /** Where this choice moves commits, drawn as a one-line route. */
+  route?: ReactNode;
   detail: ReactNode;
   onSelect: () => void;
 };
@@ -133,6 +135,9 @@ export function PullMenu({
         <span className="pull-menu__check">{on && <CheckGlyph />}</span>
         <span className="pull-menu__text">
           <span className="pull-menu__title">{item.title}</span>
+          {item.route !== undefined && (
+            <span className="pull-menu__route">{item.route}</span>
+          )}
           <span className="pull-menu__detail">
             {radio && item.key === kept && (
               <span className="pull-menu__kept">Your default for this repo. </span>
