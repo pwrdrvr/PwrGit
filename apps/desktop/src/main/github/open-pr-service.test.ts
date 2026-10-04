@@ -65,6 +65,7 @@ describe("OpenPrService", () => {
   let token: string | null;
   let upstreamToken: string | null;
   let gitCalls: string[][];
+  let remoteListFails: boolean;
   let service: OpenPrService;
 
   // Every remote is octo/orbit, except one whose URL says upstream.
@@ -138,9 +139,13 @@ describe("OpenPrService", () => {
     token = "token";
     upstreamToken = "token";
     gitCalls = [];
+    remoteListFails = false;
     const systemGit = createSystemGit();
     service = new OpenPrService(db, (args, cwd, options) => {
       gitCalls.push(args);
+      if (remoteListFails && args[0] === "remote" && args[1] === "-v") {
+        return systemGit(["remote", "--no-such-flag"], cwd, options);
+      }
       return systemGit(args, cwd, options);
     }, {
       resolveForge: resolve,
@@ -237,6 +242,13 @@ describe("OpenPrService", () => {
       );
     });
 
+    it("reports the missing sign-in of a checkout whose only remote is not origin", async () => {
+      git(work, ["remote", "rename", "origin", "github"]);
+      token = null;
+      expect(await service.refresh("repo")).toBe(true);
+      expect((await service.list("repo")).failure?.message).toContain("Not signed in");
+    });
+
     it("lets a waiter behind an in-flight refresh return without a second call", async () => {
       list = { items: [openPr(1, "a")], truncated: false };
       const [first, second] = await Promise.all([
@@ -320,7 +332,7 @@ describe("OpenPrService", () => {
       await service.list("repo");
       await service.list("repo");
       const asked = (): number =>
-        gitCalls.filter((args) => args[0] === "config" && args[1] === "--get-regexp").length;
+        gitCalls.filter((args) => args[0] === "remote" && args[1] === "-v").length;
       expect(asked()).toBe(1);
       git(work, ["remote", "set-url", "origin", "https://github.com/octo/orbit.git"]);
       await service.list("repo");
@@ -562,6 +574,47 @@ describe("OpenPrService", () => {
       const result = await service.list("repo");
       expect(result.remotes.map((remote) => remote.name)).toEqual(["origin"]);
       expect(result.failure).toBeUndefined();
+    });
+
+    it("reads a remote through its insteadOf alias", async () => {
+      const bare = addUpstream();
+      git(work, ["remote", "remove", "upstream"]);
+      git(work, ["config", `url.${bare}.insteadOf`, "hq:"]);
+      git(work, ["remote", "add", "upstream", "hq:"]);
+      upstreamList = { items: [openPr(2, "b")], truncated: false };
+      await service.refresh("repo");
+      expect((await service.list("repo")).remotes.map((remote) => remote.name)).toEqual([
+        "origin",
+        "upstream"
+      ]);
+    });
+
+    it("keeps every list when git cannot list the remotes", async () => {
+      addUpstream();
+      list = { items: [openPr(1, "a")], truncated: false };
+      upstreamList = { items: [openPr(2, "b")], truncated: false };
+      await service.refresh("repo");
+      // A config change forces a re-read, and that read fails.
+      git(work, ["config", "pwrgit.test", "1"]);
+      remoteListFails = true;
+      now += 11 * 60_000;
+      expect(await service.refresh("repo")).toBe(false);
+      expect(stored()).toEqual([1, 2]);
+      // Not cached: the next read asks again and finds both.
+      remoteListFails = false;
+      expect((await service.list("repo")).entries).toHaveLength(2);
+    });
+
+    it("decorates your own branch with the PR you sent upstream", async () => {
+      addUpstream();
+      upstreamList = {
+        items: [openPr(412, "spike/local", { headRepoPath: "octo/orbit" })],
+        truncated: false
+      };
+      await service.refresh("repo");
+      const prs = service.branchPrs("repo");
+      expect(prs.local.get("spike/local")?.number).toBe(412);
+      expect(prs.local.has("pr/upstream/412")).toBe(false);
     });
 
     it("drops a removed remote's list", async () => {

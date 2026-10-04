@@ -1049,8 +1049,8 @@ export type ChangeRequestList = {
   entries: ChangeRequestEntry[];
   /**
    * Every forge repository asked, `origin`'s first. A remote on a host with
-   * no sign-in is never asked and is not here; `origin` is the exception,
-   * so its missing sign-in can be reported.
+   * no sign-in is never asked and is not here; the first one (`origin` when
+   * there is one) is the exception, so its missing sign-in can be reported.
    */
   remotes: ChangeRequestRemote[];
   /**

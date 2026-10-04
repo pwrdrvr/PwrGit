@@ -1,8 +1,12 @@
-import type {
-  ChangeRequestEntry,
-  ChangeRequestList,
-  ChangeRequestRemote,
-  OpenChangeRequest
+import {
+  changeRequestLabel,
+  changeRequestNoun,
+  changeRequestPluralLabel,
+  type ChangeRequestEntry,
+  type ChangeRequestList,
+  type ChangeRequestRemote,
+  type ForgeKind,
+  type OpenChangeRequest
 } from "@pwrgit/shared";
 
 /**
@@ -88,9 +92,6 @@ export function groupChangeRequests(
   return { local, remoteOnly, failing };
 }
 
-/** The lens: every remote, or one forge repository's (`forgeRepo`). */
-export type ChangeRequestLens = "all" | string;
-
 /**
  * The remotes a lens offers, each with how many it lists: only those with
  * something open, the original first (the parent of `origin`'s repository,
@@ -145,4 +146,28 @@ export function trackingRemote(location: { fullName: string; branch: string }): 
   return tracked.endsWith(`/${location.branch}`)
     ? tracked.slice(0, tracked.length - location.branch.length - 1)
     : "origin";
+}
+
+/**
+ * What a list's change requests are called: the forge's own words, unless
+ * its remotes are on forges that disagree (a GitHub repository mirrored to
+ * GitLab), where only both words are true. The sidebar section and the refs
+ * browser read the same list, so they say the same thing.
+ */
+export function changeRequestWords(
+  list: Pick<ChangeRequestList, "remotes"> | null,
+  forge: ForgeKind
+): { label: string; plural: string; noun: string } {
+  const forges = new Set(list?.remotes.map((remote) => remote.forge) ?? []);
+  return forges.size > 1
+    ? {
+        label: "Pull / merge request",
+        plural: "Pull & merge requests",
+        noun: "pull or merge request"
+      }
+    : {
+        label: changeRequestLabel(forge),
+        plural: changeRequestPluralLabel(forge),
+        noun: changeRequestNoun(forge)
+      };
 }

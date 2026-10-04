@@ -95,8 +95,8 @@ export class OpenPrService {
    */
   private readonly lastFailure = new Map<string, ChangeRequestListFailure>();
   /**
-   * When a forge repository other than `origin`'s was found to have no
-   * sign-in. It is not asked again inside the TTL, and is left out of
+   * When a forge repository other than the primary one (`origin`'s) was
+   * found to have no sign-in. It is not asked again inside the TTL, and is left out of
    * `list()`: a mirror on a forge you never connected is not a list that
    * failed. Keyed by `listKey`.
    */
@@ -179,7 +179,7 @@ export class OpenPrService {
     };
     const path = this.repoPath(repoId);
     if (path === undefined) return none;
-    const all = await this.forgeRemotes(path);
+    const all = (await this.forgeRemotes(path)) ?? [];
     const listed = all.filter((remote) => !this.unasked.has(listKey(repoId, remote.key)));
     const first = listed[0];
     if (first === undefined) return none;
@@ -265,7 +265,7 @@ export class OpenPrService {
     if (path === undefined || !Number.isSafeInteger(number) || number < 1) {
       return null;
     }
-    const all = await this.forgeRemotes(path);
+    const all = (await this.forgeRemotes(path)) ?? [];
     const target = this.targetFor(repoId, number, all, forgeRepo);
     if (target === null) return null;
     const pr = await this.findByNumber(repoId, number, target);
@@ -308,7 +308,7 @@ export class OpenPrService {
     if (path === undefined) {
       return err({ kind: "repo", code: "not_found", message: "Repository not found." });
     }
-    const all = await this.forgeRemotes(path);
+    const all = (await this.forgeRemotes(path)) ?? [];
     const target = this.targetFor(repoId, number, all, forgeRepo);
     if (target === null) {
       return err({
@@ -421,11 +421,16 @@ export class OpenPrService {
           .all(repoId) as { forge_repo: string; remote: string }[]
       ).map((row) => [row.forge_repo, row.remote] as const)
     );
-    for (const { forgeRepo, pr } of this.cachedOpen(repoId)) {
-      const remote = listedBy.get(forgeRepo) ?? "origin";
-      if (pr.headRepoPath !== undefined) {
+    for (const { forgeRepo, headForgeRepo, pr } of this.cachedOpen(repoId)) {
+      const listing = listedBy.get(forgeRepo) ?? "origin";
+      // The remote holding the head: the listing one, or — for a fork this
+      // checkout also has a remote on (your fork, for a PR sent upstream) —
+      // that one. Any other fork's head is only its numbered branch.
+      const remote =
+        headForgeRepo === null ? listing : (listedBy.get(headForgeRepo) ?? null);
+      if (remote === null) {
         if (pr.forge !== undefined) {
-          claim(local, changeRequestLocalBranch(pr.forge, pr.number, remote), pr);
+          claim(local, changeRequestLocalBranch(pr.forge, pr.number, listing), pr);
         }
         continue;
       }
@@ -449,7 +454,9 @@ export class OpenPrService {
     const path = this.repoPath(repoId);
     if (path === undefined) return false;
     const all = await this.forgeRemotes(path);
-    if (!this.isCurrent(generation)) return false;
+    // Git could not list the remotes: nothing to refresh, and nothing to
+    // prune — an unanswered question is not "every remote is gone".
+    if (all === null || !this.isCurrent(generation)) return false;
     const pruned = this.prune(repoId, all);
     const due = all.filter((remote) => {
       const key = listKey(repoId, remote.key);
@@ -461,22 +468,31 @@ export class OpenPrService {
       );
     });
     const ran = await Promise.all(
-      due.map((remote) => this.refreshRemote(repoId, remote, generation))
+      due.map((remote) =>
+        this.refreshRemote(repoId, remote, generation, remote === all[0])
+      )
     );
     return pruned || ran.some(Boolean);
   }
 
+  /**
+   * `primary` is the checkout's first forge remote — `origin` when it has
+   * one. Only its missing sign-in is a failure to report: the section is
+   * there for it, while a mirror on a forge never connected simply is not
+   * listed.
+   */
   private async refreshRemote(
     repoId: string,
     remote: ForgeRemote,
-    generation: number
+    generation: number,
+    primary: boolean
   ): Promise<boolean> {
     const key = listKey(repoId, remote.key);
     const { provider, repo } = remote.forge;
     const connection = await connectForge(provider, repo.host);
     if (!this.isCurrent(generation)) return false;
     if (connection === null) {
-      if (remote.name !== "origin") {
+      if (!primary) {
         // Not a failure to report: a forge never connected is not a list
         // that stopped refreshing. It leaves `list()` until it can be asked.
         const changed = !this.unasked.has(key);
@@ -606,18 +622,26 @@ export class OpenPrService {
     })();
   }
 
-  private cachedOpen(repoId: string): { forgeRepo: string; pr: OpenChangeRequest }[] {
+  private cachedOpen(
+    repoId: string
+  ): { forgeRepo: string; headForgeRepo: string | null; pr: OpenChangeRequest }[] {
     return (
       this.db
         .prepare(
-          `SELECT p.forge_repo AS forge_repo, ${openPrSelect("p")} FROM repo_open_pr p
+          `SELECT p.forge_repo AS forge_repo, p.head_forge_repo AS head_forge_repo,
+                  ${openPrSelect("p")} FROM repo_open_pr p
             WHERE p.repo_id = ?
             ORDER BY COALESCE(p.updated_at, p.opened_at, 0) DESC, p.number DESC`
         )
-        .all(repoId) as (Record<string, unknown> & { forge_repo: string })[]
+        .all(repoId) as (Record<string, unknown> & {
+        forge_repo: string;
+        head_forge_repo: string | null;
+      })[]
     ).flatMap((row) => {
       const pr = openPrFromRow(row);
-      return pr === undefined ? [] : [{ forgeRepo: row.forge_repo, pr }];
+      return pr === undefined
+        ? []
+        : [{ forgeRepo: row.forge_repo, headForgeRepo: row.head_forge_repo, pr }];
     });
   }
 
@@ -716,11 +740,12 @@ export class OpenPrService {
 
   /**
    * Every forge repository this checkout has a remote on, `origin`'s first,
-   * each once. Resolved each time, not cached: Settings → Forges can claim a
-   * host later.
+   * each once; null when git could not list the remotes. Resolved each time,
+   * not cached: Settings → Forges can claim a host later.
    */
-  private async forgeRemotes(repoPath: string): Promise<ForgeRemote[]> {
+  private async forgeRemotes(repoPath: string): Promise<ForgeRemote[] | null> {
     const urls = await this.remoteUrlsOf(repoPath);
+    if (urls === null) return null;
     const ordered = [
       ...urls.filter((remote) => remote.name === "origin"),
       ...urls.filter((remote) => remote.name !== "origin")
@@ -742,18 +767,22 @@ export class OpenPrService {
    * since the last answer — every way a remote is added, renamed or
    * re-pointed, in the app or a terminal, rewrites that file. A repository
    * whose config cannot be stat'ed is asked every time.
+   *
+   * `git remote -v`, not the raw `remote.*.url` values: it applies
+   * `url.<base>.insteadOf`, as `git remote get-url` does, so an aliased
+   * remote (`gh:acme/orbit`) still names its forge. Null when git could not
+   * answer — never cached, and never read as "no remotes", because a refresh
+   * drops the lists of remotes that are gone.
    */
   private async remoteUrlsOf(
     repoPath: string
-  ): Promise<{ name: string; url: string }[]> {
+  ): Promise<{ name: string; url: string }[] | null> {
     const stamp = await configStamp(repoPath);
     const cached = this.remoteUrls.get(repoPath);
     if (stamp !== null && cached?.stamp === stamp) return cached.urls;
-    const out = await this.git(
-      ["config", "--get-regexp", "^remote\\..*\\.url$"],
-      repoPath
-    );
-    const urls = out.ok && out.value.exitCode === 0 ? parseRemoteUrls(out.value.stdout) : [];
+    const out = await this.git(["remote", "-v"], repoPath);
+    if (!out.ok || out.value.exitCode !== 0) return null;
+    const urls = parseRemoteUrls(out.value.stdout);
     if (stamp !== null) this.remoteUrls.set(repoPath, { stamp, urls });
     return urls;
   }
@@ -763,7 +792,8 @@ export class OpenPrService {
    * answer search gives — rather than a `for-each-ref` per read. Local
    * branches are `local_branches` plus every worktree's branch (the index
    * drops a branch once a worktree holds it); each remote's are
-   * `remote_branches`.
+   * `remote_branches`, read only for the cached heads' names — an upstream
+   * can carry tens of thousands of branches, and this runs on every expand.
    */
   private indexedCheckoutRefs(repoId: string): CheckoutRefs {
     const worktrees = this.worktreeBranches(repoId);
@@ -778,9 +808,11 @@ export class OpenPrService {
     const remotes = new Map<string, Map<string, string>>();
     for (const row of this.db
       .prepare(
-        "SELECT remote_name, name, full_name FROM remote_branches WHERE repo_id = ?"
+        `SELECT remote_name, name, full_name FROM remote_branches
+          WHERE repo_id = ?
+            AND name IN (SELECT head_ref FROM repo_open_pr WHERE repo_id = ?)`
       )
-      .all(repoId) as { remote_name: string; name: string; full_name: string }[]) {
+      .all(repoId, repoId) as { remote_name: string; name: string; full_name: string }[]) {
       let branches = remotes.get(row.remote_name);
       if (branches === undefined) {
         branches = new Map();
@@ -853,18 +885,16 @@ function placeFor(
   };
 }
 
-/** `git config --get-regexp '^remote\..*\.url$'`, first URL per remote. */
+/** `git remote -v` (`name<TAB>url (fetch)`), the fetch URL of each remote. */
 function parseRemoteUrls(stdout: string): { name: string; url: string }[] {
   const out: { name: string; url: string }[] = [];
   const seen = new Set<string>();
   for (const line of stdout.split("\n")) {
-    const space = line.indexOf(" ");
-    if (space < 0) continue;
-    const key = line.slice(0, space);
-    const url = line.slice(space + 1).trim();
-    if (!key.startsWith("remote.") || !key.endsWith(".url") || url === "") continue;
-    const name = key.slice("remote.".length, -".url".length);
-    if (name === "" || seen.has(name)) continue;
+    const tab = line.indexOf("\t");
+    if (tab <= 0 || !line.endsWith(" (fetch)")) continue;
+    const name = line.slice(0, tab);
+    const url = line.slice(tab + 1, -" (fetch)".length).trim();
+    if (url === "" || seen.has(name)) continue;
     seen.add(name);
     out.push({ name, url });
   }

@@ -39,12 +39,15 @@ import { PinIcon } from "./WorktreeRow";
 // for a local branch, which carries neither — the branch name itself. Two local
 // branches in one repo would otherwise share a React key.
 // A change request's name is its title, which two PRs can share; its number
-// cannot be.
+// cannot be — within its forge repository. A fork checkout lists the fork's
+// and the original's, and both can have a #14.
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.repoId}:${
     hit.worktreeId ??
     hit.remoteRef ??
-    (hit.kind === "change_request" ? `#${hit.pr?.number ?? hit.name}` : hit.name)
+    (hit.kind === "change_request"
+      ? `${hit.pr?.repoPath ?? ""}#${hit.pr?.number ?? hit.name}`
+      : hit.name)
   }`;
 
 function resolvePaletteHits(

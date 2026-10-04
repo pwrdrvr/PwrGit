@@ -4,7 +4,6 @@ import {
   changeRequestMatch,
   changeRequestNoun,
   changeRequestNumberQuery,
-  changeRequestPluralLabel,
   changeRequestSigil,
   routedRemotes,
   type ForgeKind,
@@ -34,6 +33,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { CopyTarget } from "../shell/CopyTarget";
+import { changeRequestWords } from "./change-request-groups";
 import { lastSegment } from "./repo-view";
 import { BranchRenameDialog } from "./BranchRenameDialog";
 import { PushRefsDialog } from "./PushRefsDialog";
@@ -590,6 +590,8 @@ export function RepoRefsModal({
   });
   const changeRequests = useChangeRequestList(repo.id);
   const forge = changeRequests.list?.forge ?? null;
+  const words =
+    forge === null ? null : changeRequestWords(changeRequests.list, forge);
   const lookup = useChangeRequestLookup({
     repoId: repo.id,
     query,
@@ -1016,7 +1018,7 @@ export function RepoRefsModal({
                 className={tabClass("changeRequests")}
                 onClick={() => setTab("changeRequests")}
               >
-                {changeRequestPluralLabel(forge)}{" "}
+                {words?.plural}{" "}
                 <span>{tabCounts.changeRequests}</span>
               </button>
             )}
@@ -1079,7 +1081,7 @@ export function RepoRefsModal({
         {shownTab === "branches" && status === "gone" && statusCounts.gone > 0 && (
           <GoneBanner
             merged={goneWithMergedPr(refs.branches)}
-            noun={forge === null ? "pull request" : changeRequestNoun(forge)}
+            noun={words?.noun ?? "pull request"}
             onCleanUp={onCleanUpBranches}
           />
         )}
@@ -1336,7 +1338,7 @@ export function RepoRefsModal({
                         className="refs-empty-link"
                         onClick={() => setTab("changeRequests")}
                       >
-                        Show it in {changeRequestPluralLabel(forge)} →
+                        Show it in {words?.plural} →
                       </button>
                     </>
                   )}

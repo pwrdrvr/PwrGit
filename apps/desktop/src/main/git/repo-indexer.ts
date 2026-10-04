@@ -1069,13 +1069,14 @@ export class RepoIndexer {
         profile_name: string;
       }[];
       // Only a same-repository head on the remote that listed it: a
-      // same-named branch on another remote is somebody else's.
+      // same-named branch on another remote is somebody else's. A row with
+      // no state row yet (carried across 0039) was origin's.
       const openForHead = this.db.prepare(
         `SELECT ${openPrSelect("o")} FROM repo_open_pr o
-           JOIN repo_open_pr_state s
+           LEFT JOIN repo_open_pr_state s
              ON s.repo_id = o.repo_id AND s.forge_repo = o.forge_repo
           WHERE o.repo_id = ? AND o.head_ref = ? AND o.head_repo_path IS NULL
-            AND s.remote = ?
+            AND COALESCE(s.remote, 'origin') = ?
           ORDER BY COALESCE(o.updated_at, o.opened_at, 0) DESC
           LIMIT 1`
       );

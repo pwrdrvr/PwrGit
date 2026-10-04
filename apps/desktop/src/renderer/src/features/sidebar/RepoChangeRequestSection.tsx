@@ -5,8 +5,6 @@ import {
   type ReactElement
 } from "react";
 import {
-  changeRequestNoun,
-  changeRequestPluralLabel,
   forgeLabel,
   type ChangeRequestEntry,
   type ChangeRequestList,
@@ -21,11 +19,11 @@ import { shortWhen } from "../graph/graph-view";
 import { CopyTarget } from "../shell/CopyTarget";
 import {
   changeRequestKey,
+  changeRequestWords,
   forkOwner,
   groupChangeRequests,
   lensRemotes,
   shownBase,
-  type ChangeRequestLens,
   type ChangeRequestRow
 } from "./change-request-groups";
 import { ForgeMark } from "./ForgeMark";
@@ -40,46 +38,34 @@ import { SectionChevron } from "./SectionChevron";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 
 /**
- * A disclosure whose state outlives the window, per repository — the same
- * localStorage shape as the Worktrees toggle in RepoRow.
+ * A value that outlives the window, per repository — the same localStorage
+ * shape as the Worktrees toggle in RepoRow.
  */
-function usePersistedOpen(key: string): [boolean, (open: boolean) => void] {
-  const [open, setOpen] = useState(() => {
+function usePersistedValue(
+  key: string,
+  fallback: string
+): [string, (value: string) => void] {
+  const [value, setValue] = useState(() => {
     try {
-      return window.localStorage.getItem(key) === "1";
+      return window.localStorage.getItem(key) ?? fallback;
     } catch {
-      return false;
+      return fallback;
     }
   });
   useEffect(() => {
     try {
-      window.localStorage.setItem(key, open ? "1" : "0");
+      window.localStorage.setItem(key, value);
     } catch {
       // Ignore private-mode and quota failures.
     }
-  }, [key, open]);
-  return [open, setOpen];
+  }, [key, value]);
+  return [value, setValue];
 }
 
-/** The lens, per repository, the same way: "all" or a forge repository. */
-function usePersistedLens(
-  key: string
-): [ChangeRequestLens, (lens: ChangeRequestLens) => void] {
-  const [lens, setLens] = useState<ChangeRequestLens>(() => {
-    try {
-      return window.localStorage.getItem(key) ?? "all";
-    } catch {
-      return "all";
-    }
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(key, lens);
-    } catch {
-      // Ignore private-mode and quota failures.
-    }
-  }, [key, lens]);
-  return [lens, setLens];
+/** A disclosure, stored as "1" / "0". */
+function usePersistedOpen(key: string): [boolean, (open: boolean) => void] {
+  const [value, setValue] = usePersistedValue(key, "0");
+  return [value === "1", (open) => setValue(open ? "1" : "0")];
 }
 
 /** More segments than this and the lens becomes a menu, so the head never wraps. */
@@ -141,7 +127,7 @@ export function RepoChangeRequestSection({
   const [remoteOpen, setRemoteOpen] = usePersistedOpen(
     `pwrgit.changeRequestsRemoteOpen.${repo.id}`
   );
-  const [lens, setLens] = usePersistedLens(`pwrgit.changeRequestsLens.${repo.id}`);
+  const [lens, setLens] = usePersistedValue(`pwrgit.changeRequestsLens.${repo.id}`, "all");
   const [failingOnly, setFailingOnly] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [fetching, setFetching] = useState<string | null>(null);
@@ -168,8 +154,7 @@ export function RepoChangeRequestSection({
   // A checkout on GitHub with a GitLab mirror lists both kinds; the heading
   // names both only then.
   const mixed = new Set(shown.remotes.map((remote) => remote.forge)).size > 1;
-  const plural = mixed ? "Pull & merge requests" : changeRequestPluralLabel(forge);
-  const noun = mixed ? "pull or merge request" : changeRequestNoun(forge);
+  const { plural, noun } = changeRequestWords(shown, forge);
   // The lens appears only with two or more remotes that have something open,
   // and a remembered remote that no longer has any reads as All.
   const lensOptions = lensRemotes(shown, repo.identity?.parent?.nameWithOwner);

@@ -120,8 +120,10 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
     original's #14 are different PRs, and `repo_open_pr_state` has one row
     per forge repository, so each list refreshes and fails on its own.
     A remote whose host has no sign-in is left out quietly (`unasked`) —
-    except `origin`, whose missing sign-in is reported. A refresh drops the
-    rows of a forge repository no remote points at any more.
+    except the first forge remote (`origin` when there is one), whose missing
+    sign-in is reported. A refresh drops the rows of a forge repository no
+    remote points at any more — but never when `git remote -v` failed, which
+    is "unknown", not "none".
   - **A head is looked for on the remote whose repository holds it**
     (`ChangeRequestPlace`). Usually that is the listing remote. When a fork's
     head is in a repository this checkout *also* has a remote on — your fork,
@@ -133,7 +135,8 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
     every repo expand and every announcement, so heads are located against
     the branch index (`local_branches`, `remote_branches`, `worktrees` — the
     same tables ⌘K resolves PRs with), and `origin`'s URL is re-read only when
-    `.git/config` changes (all remotes' URLs, one `git config --get-regexp`). The index can trail a terminal's fetch, so a label
+    `.git/config` changes (all remotes' URLs, one `git remote -v`, which
+    applies `insteadOf` the way `git remote get-url` did). The index can trail a terminal's fetch, so a label
     may lag; the verbs never do — the renderer's `reachableLocation` sends
     every non-worktree row through `pr:fetchHead`, which locates with git.
   - **Every row is indexed** (`change_request` in `search_fts`, by trigger,
