@@ -46,7 +46,6 @@
     },
     "onlyBuiltDependencies": [
       "dugite",
-      "electron",
       "electron-winstaller",
       "esbuild",
       "sharp"
