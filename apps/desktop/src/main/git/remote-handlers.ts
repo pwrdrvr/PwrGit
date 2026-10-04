@@ -4,7 +4,9 @@ import {
   type PullProgressPhase,
   type PwrGitError,
   type RemoteActivityPhase,
+  type CloneRepository,
   type ForkStatus,
+  type ForkTrackingOffer,
   type ForgeHostMap,
   type RepoIdentity,
   type Result
@@ -205,7 +207,14 @@ export function registerRemoteHandlers(
   refreshIdentity?: (repoId: string, options?: { force?: boolean }) => void,
   /** The stored forge identity, for the reset dialog's fork-source card. */
   readIdentity?: (repoId: string) => RepoIdentity | undefined,
-  hostsForRemotes?: () => ForgeHostMap
+  hostsForRemotes?: () => ForgeHostMap,
+  /** One repository as the forge reports it, or null when the host is off,
+   *  unknown, or will not answer. Confirms the extra forks the tracking
+   *  repair may offer; without it only `origin` is ever offered. */
+  viewForgeRepo?: (
+    identity: Pick<RepoIdentity, "host" | "hostname">,
+    nameWithOwner: string
+  ) => Promise<CloneRepository | null>
 ): void {
   // Every long-running remote command reports through one registry: the live
   // status surfaces read it, and the cancel button acts on it.
@@ -1160,18 +1169,41 @@ export function registerRemoteHandlers(
     return entry.running;
   };
 
-  const trackingInspections = new Map<string, ReturnType<typeof inspectForkTracking>>();
+  const trackingInspections = new Map<string, Promise<Result<ForkTrackingOffer | null>>>();
   bus.register("remote:inspectForkTracking", async (req) => {
     const ongoing = trackingInspections.get(req.worktreeId);
     if (ongoing !== undefined) return ongoing;
     const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
-    const read = operations.run(req.worktreeId, () => operations.runRepository(
-      worktree.repoId, () => inspectForkTracking(
-        execGit, worktree.path, readIdentity?.(worktree.repoId), hostsForRemotes?.()
-      )
-    ));
+    const identity = readIdentity?.(worktree.repoId);
+    const read = (async (): Promise<Result<ForkTrackingOffer | null>> => {
+      const inspected = await operations.run(req.worktreeId, () => operations.runRepository(
+        worktree.repoId, () => inspectForkTracking(
+          execGit, worktree.path, identity, hostsForRemotes?.()
+        )
+      ));
+      if (!inspected.ok || inspected.value === null) return inspected.ok ? ok(null) : inspected;
+      const { offer, candidates } = inspected.value;
+      if (identity === undefined || viewForgeRepo === undefined || candidates.length === 0) {
+        return ok(offer);
+      }
+      // Outside the lock: these are network reads. A remote's URL says only
+      // where it points; the forge says whether that is another fork of the
+      // same parent, and whether you may push there. Anything unanswered is
+      // left out rather than offered on a guess.
+      const parent = offer.parent.toLowerCase();
+      const confirmed = await Promise.all(candidates.map(async (candidate) => {
+        const repository = await viewForgeRepo(identity, candidate.nameWithOwner).catch(() => null);
+        return repository !== null && repository.viewerCanPush === true &&
+          repository.parent?.nameWithOwner.toLowerCase() === parent
+          ? candidate : null;
+      }));
+      return ok({
+        ...offer,
+        targets: [...offer.targets, ...confirmed.filter((row) => row !== null)]
+      });
+    })();
     trackingInspections.set(req.worktreeId, read);
     try {
       return await read;

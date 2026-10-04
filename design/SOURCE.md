@@ -102,6 +102,7 @@ first.
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `Fork While Cloning - UX Review.dc.html` | Why Clone marked a repository read-only and cloned it anyway, never asking whether your fork already existed, and why Fork&hellip; on a checkout already on disk still defaulted to cloning a second copy. Then a &ldquo;Clone from&rdquo; pair (the original, or your fork) in every state the forge can answer, and Fork&hellip;'s in-place mode, whose primary button becomes Fork in place. Interactive. |
+| `Fork Tracking Repair - UX Review.dc.html` | A review of #379's tracking repair, which explained a branch left pulling from and pushing to the original only in Git's words (&ldquo;Track origin/main&rdquo;). Three ways to draw where the branch pulls from and pushes to, now and after, with 2b's Now/After strips recommended; the same dialog opened from Pull and from Remotes; the receipt; and the chooser for a checkout holding more than one fork you can push to. Interactive. |
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
 | `Person Card - UX Review.dc.html` | Who wrote this commit? The lineage byline that had a hand cursor and no action, four answers to it (the card from what PwrGit already knows, one with a GitHub profile section, one that filters the graph to one author, and a live prototype of all three), and the recommended card in every state it can be in: proven, proven with no photo, no linked account, yours, and a forge that cannot link commits to accounts. Then the wiring it borrows from the PR and SHA chips, and main's people store, the only thing that asks a forge about an author. Interactive. |
 | `Finished Branches - UX Review.dc.html` | Why the sidebar's `↑2` and `225 gone` could not be clicked, why garbage collection and `fetch --prune` never remove a gone branch, and why Maintenance › Local branches declined every squash merge. Then the counts as filter chips, a status filter in the refs browser, the evidence rules (a merged PR whose final head *is* the local tip), the redrawn review with an age guard, and garbage collection's hand-off to it. Interactive. |
@@ -380,6 +381,18 @@ choice, turn **3** draws 2a in each state preflight can answer, turn **4** is
 Fork&hellip;'s in-place mode, **5a** is a live `DCLogic` prototype, and turn
 **6** is the build list that shipped with it. Its names are contrived
 (`octo-labs/sparkline`, `riverbend`, `lumen-co`).
+
+`Fork Tracking Repair - UX Review.dc.html` was written here and pushed up
+through the `claude-design` MCP, in the same change that builds what it draws;
+the project copy was verified at the same 72,369 bytes. It reviews #379, whose
+repair changed a branch's upstream after a remote rename and said so only as
+&ldquo;Track origin/main&rdquo;. Turn **1** is the as-built pull menu, dialog
+and Remotes card with six findings. Turn **2** draws the route three ways, with
+**2b** recommended. Turn **3** covers the dark theme, the dialog opened from
+Pull, and the receipt. **4a** is the chooser among forks you can push to.
+Turn **5** covers the Pull menu and Remotes card, **6a** is a live `DCLogic`
+prototype, and turn **7** is the build list, all of which shipped with it. Its
+names are contrived (`octo-labs/sparkline`, `riverbend`, `lumen-co`).
 
 `Fork From Here - UX Review.dc.html` was written here and pushed up through the
 `claude-design` MCP, in the same change that builds what it draws; the project

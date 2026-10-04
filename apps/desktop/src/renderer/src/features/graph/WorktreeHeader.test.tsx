@@ -50,7 +50,13 @@ import {
   REMOTE_ACTIVITY_POPOVER_AFTER_MS,
   WHERE_THE_USER_IS
 } from "../remote/useRemoteActivityPopover";
-import { showErrorToast } from "../../lib/toast";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
+
+/** The latest tracking-repair receipt the header raised. */
+const receipt = () => vi.mocked(showInfoToast).mock.calls
+  .map(([toast]) => toast)
+  .filter((toast) => toast.key === "fork-tracking-receipt")
+  .at(-1);
 import {
   closeResetToRemote,
   currentResetToRemote
@@ -2072,7 +2078,7 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     [null, 0], [null, 3], ["source", 0], ["source", 3], ["tracked", 0], ["tracked", 3]
   ] as const)("runs plain Pull during tracking repair with saved choice %s and %i incoming commits", async (saved, behind) => {
     if (saved !== null) window.localStorage.setItem("pwrgit.pullChoice.repo-1", saved);
-    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    const repair = { branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main" };
     answer({ ...behindSource(), source: null,
       tracked: { ...behindSource().tracked!, label: "upstream/main", remote: "upstream", ref: "refs/remotes/upstream/main", behind },
       trackingRepair: repair
@@ -2088,31 +2094,43 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:syncFork" || name === "remote:repairForkTracking")).toHaveLength(0);
     expect(window.localStorage.getItem("pwrgit.pullChoice.repo-1")).toBe(saved);
     await openMenu();
-    expect(row("Track origin/main")).toBeDefined();
+    expect(row("Use your fork for main…")).toBeDefined();
   });
 
   it("keeps the Pull dropdown on a fork tracking its parent and offers tracking repair", async () => {
-    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    const repair = { branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main" };
     const renamed = { ...behindSource(), source: null,
       tracked: { ...behindSource().tracked!, label: "upstream/main", remote: "upstream", ref: "refs/remotes/upstream/main" },
       trackingRepair: repair };
     answer(renamed, {
       "repo:refreshIdentities": ok({ changed: 0, outcomes: [] }),
-      "remote:inspectForkTracking": ok(repair),
+      "remote:inspectForkTracking": ok({ ...repair, parent: "team/widget",
+        targets: [{ remote: "origin", nameWithOwner: "me/widget", ref: "origin/main" }] }),
       "remote:repairForkTracking": ok(null)
     });
     await remount();
     expect(caret()).not.toBeNull();
     await openMenu();
-    const fix = row("Track origin/main");
+    const fix = row("Use your fork for main…");
     expect(fix).toBeDefined();
+    expect(document.querySelector(".pull-menu__note")?.textContent).toContain("pulls from and pushes to the original");
     await act(async () => fix!.click());
-    expect(document.querySelector(".fork-checkout-dialog")?.textContent).toContain("Origin already points at your fork");
-    const button = [...document.querySelectorAll<HTMLButtonElement>(".fork-checkout-dialog button")].find((node) => node.textContent === "Track origin/main")!;
+    const dialog = document.querySelector(".fork-tracking-dialog");
+    // Opened from a menu, nothing was refused: no refusal, no claim that the
+    // original is closed to you.
+    expect(dialog?.querySelector("strong")?.textContent).toBe("Use your fork for main");
+    expect(dialog?.querySelector(".fork-tracking-refused")).toBeNull();
+    expect(dialog?.textContent).not.toContain("can't push");
+    expect([...dialog!.querySelectorAll(".fork-route__phase")].map((node) => node.textContent)).toEqual(["Now", "After"]);
+    const button = [...dialog!.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent === "Use my fork")!;
     await act(async () => button.click());
     expect(bridge.dispatch).toHaveBeenCalledWith("remote:repairForkTracking", {
-      worktreeId: "worktree-1", branch: "main", upstream: "upstream/main"
+      worktreeId: "worktree-1", branch: "main", upstream: "upstream/main",
+      target: { remote: "origin", nameWithOwner: "me/widget" }
     });
+    expect(receipt()?.title).toBe("Now using your fork");
+    // The receipt offers Push only after a refused push.
+    expect(receipt()?.action).toBeUndefined();
     expect(bridge.dispatch.mock.calls.filter(([name]) => name === "repo:forkCheckout" || name === "remote:syncFork")).toHaveLength(0);
   });
 
@@ -2124,14 +2142,14 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     answer(null);
     await remount();
     expect(caret()).toBeNull();
-    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    const repair = { branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main" };
     answer({ ...behindSource(), source: null, trackingRepair: repair });
     await act(async () => bridge.handlers.get("repo:identityChanged")?.({
       profileId: repo.profileId, identities: [{ repoId: repo.id, identity: {} }]
     }));
     expect(caret()).not.toBeNull();
     await openMenu();
-    expect(row("Track origin/main")).toBeDefined();
+    expect(row("Use your fork for main…")).toBeDefined();
   });
 
   it("reads the chip against the source, where the tracked branch says nothing", async () => {
@@ -2823,7 +2841,7 @@ describe("WorktreeHeader offers a fork when this account cannot push", () => {
 
   it("offers tracking repair after a denied Push when origin is already the user's fork", async () => {
     const own = await mount();
-    const repair = { branch: "main", upstream: "upstream/main", target: "origin/main" };
+    const repair = { branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main" };
     bridge.dispatch.mockImplementation((name: string) => {
       if (name === "remote:push") return Promise.resolve(err({
         kind: "remote", code: "push_denied",
@@ -2831,26 +2849,38 @@ describe("WorktreeHeader offers a fork when this account cannot push", () => {
       }));
       if (name === "remote:activities") return Promise.resolve(ok([]));
       if (name === "repo:refreshIdentities") return Promise.resolve(ok({ changed: 1, outcomes: [] }));
-      if (name === "remote:inspectForkTracking") return Promise.resolve(ok(repair));
+      if (name === "remote:inspectForkTracking") return Promise.resolve(ok({ ...repair, parent: "team/widget",
+        targets: [{ remote: "origin", nameWithOwner: "me/widget", ref: "origin/main" }] }));
       if (name === "remote:repairForkTracking") return Promise.resolve(ok(null));
       return new Promise(() => undefined);
     });
     const push = [...own.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === "Push")!;
     await act(async () => push.click());
-    const dialog = own.querySelector(".fork-checkout-dialog");
-    expect(dialog?.textContent).toContain("Use your existing fork");
-    expect(dialog?.textContent).toContain("Permission to team/widget.git denied");
+    const dialog = own.querySelector(".fork-tracking-dialog");
+    expect(dialog?.querySelector("strong")?.textContent).toBe("Push to your fork instead");
+    // Git's words, attributed and without the shouted prefix.
+    expect(dialog?.querySelector(".fork-tracking-refused")?.textContent).toBe(
+      "!The forge refused the pushPermission to team/widget.git denied to me."
+    );
+    expect(dialog?.querySelector(".fork-route__perm--no")?.textContent).toBe("can't push");
     expect(bridge.dispatch).toHaveBeenCalledWith("repo:refreshIdentities", {
       profileId: repo.profileId, repoId: repo.id, force: true
     });
-    const repairButton = [...dialog!.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Track origin/main")!;
+    const repairButton = [...dialog!.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Use my fork")!;
     await act(async () => repairButton.click());
     expect(bridge.dispatch).toHaveBeenCalledWith("remote:repairForkTracking", {
-      worktreeId: worktree.id, branch: "main", upstream: "upstream/main"
+      worktreeId: worktree.id, branch: "main", upstream: "upstream/main",
+      target: { remote: "origin", nameWithOwner: "me/widget" }
     });
     expect(bridge.dispatch.mock.calls.filter(([name]) => name === "repo:forkCheckoutPreflight" || name === "repo:forkCheckout")).toHaveLength(0);
+    // The repair never pushes; the receipt puts the refused Push one click away.
     expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:push")).toHaveLength(1);
-    expect(own.textContent).toContain("tracking fixed");
+    expect(receipt()).toMatchObject({
+      title: "Now using your fork",
+      message: "main pulls from and pushes to me/widget. Sync in the Pull menu still brings in team/widget."
+    });
+    await act(async () => receipt()!.action!.run());
+    expect(bridge.dispatch.mock.calls.filter(([name]) => name === "remote:push")).toHaveLength(2);
   });
 });
 

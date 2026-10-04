@@ -1059,7 +1059,13 @@ if (!gotSingleInstanceLock) {
       indexer,
       refreshIdentity,
       (repoId) => identityService.read([repoId]).get(repoId),
-      () => forgeHosts.overrides()
+      () => forgeHosts.overrides(),
+      async (identity, nameWithOwner) => {
+        // The same off switch every other forge read honours.
+        if (!forgeHosts.isEnabled(identity.hostname).enabled) return null;
+        const provider = forges.get(identity.host, identity.hostname);
+        return provider === null ? null : provider.viewRepo(nameWithOwner);
+      }
     );
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,

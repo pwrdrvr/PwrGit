@@ -55,39 +55,62 @@ const click = async (label: string) => {
   await act(async () => button.click());
 };
 
-it("explains the parent tracking and repairs the primary checkout in its own profile", async () => {
+const offer = {
+  branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main",
+  parent: "team/widget", targets: [{ remote: "origin", nameWithOwner: "me/widget", ref: "origin/main" }]
+};
+const answerReview = (repair: unknown = ok(null)) => dispatchMock.mockImplementation((name: string) =>
+  Promise.resolve(name === "repo:refreshIdentities" ? ok({ changed: 0, outcomes: [] })
+    : name === "remote:inspectForkTracking" ? ok(offer)
+      : name === "remote:repairForkTracking" ? repair : ok(null)));
+const clickIn = async (selector: string, label: string) => {
+  const button = [...document.querySelectorAll<HTMLButtonElement>(`${selector} button`)].find((node) => node.textContent === label)!;
+  await act(async () => button.click());
+};
+
+it("draws the route and repairs the primary checkout through the reviewed dialog", async () => {
+  answerReview();
   await render();
   expect(container.textContent).toContain("Fork of team/widget");
-  expect(container.textContent).toContain("main still tracks upstream/main");
-  await click("Track origin/main");
-  expect(dispatchMock).toHaveBeenCalledExactlyOnceWith("remote:repairForkTracking", {
-    worktreeId: "worktree-a", branch: "main", upstream: "upstream/main"
+  expect(container.querySelector(".fork-route-line")?.textContent).toBe("mainteam/widget");
+  expect(container.textContent).toContain("main pulls from and pushes to the original instead of your fork, me/widget.");
+  // Nothing changes from the card itself: it opens the same review Push and
+  // Pull open.
+  await click("Use your fork for main…");
+  expect(dispatchMock).not.toHaveBeenCalledWith("remote:repairForkTracking", expect.anything());
+  expect(document.querySelector(".fork-tracking-dialog strong")?.textContent).toBe("Use your fork for main");
+  await clickIn(".fork-tracking-dialog", "Use my fork");
+  expect(dispatchMock).toHaveBeenCalledWith("remote:repairForkTracking", {
+    worktreeId: "worktree-a", branch: "main", upstream: "upstream/main",
+    target: { remote: "origin", nameWithOwner: "me/widget" }
   });
   expect(refresh).toHaveBeenCalledOnce();
-  expect(container.textContent).toContain("main now tracks origin/main");
-  expect(container.textContent).not.toContain("Track origin/main");
+  expect(document.querySelector(".fork-tracking-dialog")).toBeNull();
+  expect(container.textContent).toContain("main now pulls from and pushes to me/widget");
+  expect(container.textContent).not.toContain("Use your fork for main…");
 });
 
 it("recognizes an old fork through an explicit re-check even if no metadata was stored", async () => {
   const { identity: _identity, ...unrecognized } = repo;
   dispatchMock.mockResolvedValue(ok({ changed: 1, outcomes: [{ repoId: repo.id, status: "resolved", identity }] }));
   await render(unrecognized);
-  expect(container.textContent).not.toContain("Track origin/main");
+  expect(container.textContent).not.toContain("Use your fork for main…");
   await click("Re-check origin");
   expect(dispatchMock).toHaveBeenCalledExactlyOnceWith("repo:refreshIdentities", {
     profileId: "profile-a", repoId: "repo-a", force: true
   });
   expect(container.textContent).toContain("Fork of team/widget");
-  expect(container.textContent).toContain("Track origin/main");
+  expect(container.textContent).toContain("Use your fork for main…");
 });
 
 it("keeps a failed repair visible with its reason and does not refresh as if it succeeded", async () => {
-  dispatchMock.mockResolvedValue(err({ kind: "remote", code: "stale", message: "The remotes changed." }));
+  answerReview(err({ kind: "remote", code: "stale", message: "The remotes changed." }));
   await render();
-  await click("Track origin/main");
-  expect(container.querySelector('[role="status"]')?.textContent).toBe("The remotes changed.");
+  await click("Use your fork for main…");
+  await clickIn(".fork-tracking-dialog", "Use my fork");
+  expect(document.querySelector('.fork-tracking-dialog [role="alert"]')?.textContent).toBe("The remotes changed.");
   expect(refresh).not.toHaveBeenCalled();
-  expect(container.textContent).toContain("Track origin/main");
+  expect(container.textContent).toContain("Use your fork for main…");
 });
 
 it("does not report retained metadata as a successful signed-out refresh", async () => {
@@ -101,11 +124,11 @@ it("does not report retained metadata as a successful signed-out refresh", async
 it("offers a re-check instead of asserting an old origin's fork relationship", async () => {
   await render(repo, { ...refs, remotes: refs.remotes.map((row) => row.name === "origin" ? { ...row, fetchUrl: "git@github.com:stranger/widget.git" } : row) });
   expect(container.textContent).not.toContain("Fork of team/widget");
-  expect(container.textContent).not.toContain("Track origin/main");
+  expect(container.textContent).not.toContain("Use your fork for main…");
 });
 
 it("does not offer tracking repair after the branch already tracks the fork", async () => {
   await render(repo, { ...refs, branches: refs.branches.map((row) => ({ ...row, upstream: "origin/main" })) });
   expect(container.textContent).toContain("Fork of team/widget");
-  expect(container.textContent).not.toContain("Track origin/main");
+  expect(container.textContent).not.toContain("Use your fork for main…");
 });

@@ -23,7 +23,7 @@ import type {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { PullGlyph } from "../../lib/PullGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
-import { showErrorToast } from "../../lib/toast";
+import { dismissToastKey, showErrorToast, showInfoToast } from "../../lib/toast";
 import {
   remoteActivityPhaseLabel,
   type RemoteActivityScope
@@ -39,7 +39,12 @@ import { readPullChoice, writePullChoice, type PullChoice } from "./pull-choice"
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
-import { ForkTrackingRecoveryDialog } from "../sidebar/ForkTrackingRecoveryDialog";
+import { ForkRouteLine } from "../sidebar/ForkRoute";
+import {
+  ForkTrackingRecoveryDialog,
+  type ForkTrackingDone,
+  type ForkTrackingEntry
+} from "../sidebar/ForkTrackingRecoveryDialog";
 import { PublishBranchDialog } from "./PublishBranchDialog";
 import { GitForkIcon, pushAccessTitle } from "../sidebar/RepoIdentityMarks";
 import {
@@ -478,6 +483,26 @@ type StatusTriggerProps = {
 };
 type RecoveryBusy = "rebase" | "reset" | null;
 
+/** One receipt at a time, taken down when the header moves to another
+ *  checkout: its Push would otherwise act on whatever is shown next. */
+const FORK_TRACKING_RECEIPT = "fork-tracking-receipt";
+
+/** Where pushes go now, in the words the dialog used. After a refused push it
+ *  carries that Push, one click away; the repair itself never pushes. */
+function showTrackingReceipt(
+  done: ForkTrackingDone,
+  push: (() => void) | null
+): void {
+  // The title is drawn as an uppercase eyebrow, which would flatten a branch
+  // name; the branch goes in the sentence.
+  showInfoToast({
+    key: FORK_TRACKING_RECEIPT,
+    title: done.target.remote === "origin" ? "Now using your fork" : "Now using another fork",
+    message: `${done.branch} pulls from and pushes to ${done.target.nameWithOwner}. Sync in the Pull menu still brings in ${done.parent}.`,
+    ...(push === null ? {} : { action: { label: "Push", run: push } })
+  });
+}
+
 export function WorktreeHeader({
   repo,
   worktree,
@@ -526,9 +551,14 @@ export function WorktreeHeader({
     operation: Exclude<Busy, null>;
     recovery: SshRemoteRecovery;
   } | null>(null);
-  /** The fork prompt, and why it opened. `{}` is the user asking for it from
-   *  the read-only chip; a `reason` is a push the forge just refused. */
-  const [forkPrompt, setForkPrompt] = useState<{ reason?: string } | null>(null);
+  /** The fork prompt, and why it opened. `tracking: null` is the user asking
+   *  to fork; an entry opens the tracking repair from a refused push or from
+   *  Pull's menu. */
+  const [forkPrompt, setForkPrompt] = useState<{ tracking: ForkTrackingEntry | null } | null>(null);
+  /** The Push button, for the receipt's own Push after a tracking repair. */
+  const pushButton = useRef<HTMLButtonElement>(null);
+  const shownWorktreeId = useRef(worktree.id);
+  shownWorktreeId.current = worktree.id;
   /** The remotes a branch with no upstream can be published to, while the
    *  question is open. Loaded BEFORE the dialog opens, so its list never
    *  arrives under a dialog the user is already reading. */
@@ -609,6 +639,8 @@ export function WorktreeHeader({
     setRecoveryBusy(null);
     setSshRecovery(null);
     setForkPrompt(null);
+    // A receipt offering Push belongs to the checkout it repaired.
+    dismissToastKey(FORK_TRACKING_RECEIPT);
     setPublishing(null);
     setDivergenceFork(null);
     askingWhere.current = null;
@@ -1180,7 +1212,7 @@ export function WorktreeHeader({
         // The fork prompt is a modal over the whole window; leaving a status
         // card behind it would be a second thing to dismiss for one refusal.
         status.dismiss();
-        setForkPrompt({ reason: result.error.message.split("\n")[0] });
+        setForkPrompt({ tracking: { from: "push", error: result.error.message.split("\n")[0] ?? "" } });
         return;
       }
       flashError("Push", result.error);
@@ -1446,12 +1478,19 @@ export function WorktreeHeader({
   const pullMenu =
     trackingRepair !== null
       ? {
-          note: <>{trackingRepair.branch} tracks {trackingRepair.upstream}, the fork's parent.</>,
+          note: <>
+            <ForkRouteLine branch={trackingRepair.branch}
+              original={repo.identity?.parent?.nameWithOwner ?? trackingRepair.upstream} />
+            <br />
+            {trackingRepair.branch} pulls from and pushes to the original, not your fork.
+          </>,
           actions: [{
             key: "repair-tracking",
-            title: <>Track <code>{trackingRepair.target}</code></>,
-            detail: "Use your existing fork for Pull and Push. Changes tracking only.",
-            onSelect: () => setForkPrompt({ reason: `${trackingRepair.branch} tracks ${trackingRepair.upstream} instead of your fork.` })
+            title: <>Use your fork for <code>{trackingRepair.branch}</code>…</>,
+            detail: repo.identity === undefined
+              ? "Pull and push through your fork. Shows what changes first."
+              : `Pull and push through ${repo.identity.nameWithOwner}. Shows what changes first.`,
+            onSelect: () => setForkPrompt({ tracking: { from: "pull" } })
           }],
           choices: []
         }
@@ -1506,7 +1545,7 @@ export function WorktreeHeader({
             type="button"
             className="sync-chip sync-chip--readonly"
             {...hoverTooltip(tip, noPushTitle)}
-            onClick={() => setForkPrompt({})}
+            onClick={() => setForkPrompt({ tracking: null })}
           >
             read-only
           </button>
@@ -1664,6 +1703,7 @@ export function WorktreeHeader({
           })()}
 
           <button
+            ref={pushButton}
             className="wt-btn"
             onClick={(event) => {
               if (running !== null) return;
@@ -1710,7 +1750,7 @@ export function WorktreeHeader({
           // not have been asked yet, and the fork dialog reads `origin` itself.
           fork={{
             label: `Fork ${repo.identity?.nameWithOwner ?? repo.name}…`,
-            onSelect: () => setForkPrompt({})
+            onSelect: () => setForkPrompt({ tracking: null })
           }}
           onResetToRemote={() =>
             openResetToRemote({
@@ -1793,15 +1833,20 @@ export function WorktreeHeader({
           }}
         />
       )}
-      {forkPrompt?.reason !== undefined && (
+      {forkPrompt !== null && forkPrompt.tracking !== null && (
         <ForkTrackingRecoveryDialog
           repo={repo}
           worktreeId={worktree.id}
-          reason={forkPrompt.reason}
+          entry={forkPrompt.tracking}
           onClose={() => setForkPrompt(null)}
-          onRepaired={() => {
+          onRepaired={(done) => {
+            const refused = forkPrompt.tracking?.from === "push";
             setForkPrompt(null);
-            showFlash({ text: "tracking fixed — Push again to send to your fork", tone: "ok" }, 4000);
+            showTrackingReceipt(done, refused ? () => {
+              // Only for the checkout it repaired, through the button's own
+              // click path: busy guards, the publish question, the card.
+              if (shownWorktreeId.current === worktree.id) pushButton.current?.click();
+            } : null);
           }}
           onForked={() => {
             setForkPrompt(null);
@@ -1809,14 +1854,11 @@ export function WorktreeHeader({
           }}
         />
       )}
-      {forkPrompt !== null && forkPrompt.reason === undefined && (
+      {forkPrompt !== null && forkPrompt.tracking === null && (
         <ForkCheckoutDialog
           profileId={repo.profileId}
           repoId={repo.id}
           repoName={repo.identity?.nameWithOwner ?? repo.name}
-          {...(forkPrompt.reason === undefined
-            ? {}
-            : { reason: forkPrompt.reason })}
           onClose={() => setForkPrompt(null)}
           onForked={() => {
             setForkPrompt(null);

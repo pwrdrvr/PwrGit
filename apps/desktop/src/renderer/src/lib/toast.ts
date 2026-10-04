@@ -36,6 +36,9 @@ export type Toast = {
   showLogsAction?: boolean;
   /** Offer a copy action (default true for errors). */
   showCopyAction?: boolean;
+  /** The one thing to do next, drawn as the card's leading button. Running it
+   *  also dismisses the card. */
+  action?: { label: string; run: () => void };
 };
 
 /**
@@ -105,6 +108,7 @@ export function showInfoToast(input: {
   message: string;
   notesUrl?: string;
   subject?: ToastSubject;
+  action?: { label: string; run: () => void };
 }): void {
   pushToast({
     ...input,
