@@ -45,11 +45,30 @@ after Homebrew synchronization so pending Winget review does not prevent tap
 publication. Events emitted by `GITHUB_TOKEN` cannot be relied on to start another
 workflow; the explicit dispatch above remains part of promotion through the skill.
 
-The generator accepts only public Stable Latest. It downloads arm64 and universal
-DMGs and the signed Windows x64 NSIS installer, hashes actual bytes, checks size
-and GitHub SHA-256 asset digests, and cross-checks `PwrGit-windows-SHA256SUMS`.
+The generator accepts only public Stable Latest. `distribution:prepare` downloads
+arm64 and universal DMGs and the signed Windows x64 NSIS installer, hashes actual
+bytes, checks size and GitHub SHA-256 asset digests, and cross-checks
+`PwrGit-windows-SHA256SUMS`. The workflow instead plans from release metadata, then
+downloads each platform's assets only when native validation is required.
 Generated manifests use immutable versioned URLs. Never use aliases or
 `releases/latest/download/`, invent a checksum, or substitute an unsigned preview.
+
+Daily runs retain publication and identity audits while reusing successful native
+validation for unchanged release bytes and validator inputs. An absent Winget
+registration is still a failure, even when the native installer is validated and
+Homebrew is current; generated manifests do not constitute an upstream submission.
+Each platform records success only after its full native checks. New releases,
+changed validation code/manifests/bytes, a changed Winget upgrade baseline, or a
+missing success cache trigger revalidation. Installer cache restores are hashed
+and size-checked; WinGet uses the verified cached installer for the local-manifest
+installation. There are no fallback cache keys. PR cache records cannot be reused
+on main, and cache eviction causes safe revalidation.
+
+To deliberately repeat all native checks while retaining verified installer caches:
+
+```sh
+gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main -f force_validation=true
+```
 
 Output contains `Casks/pwrgit.rb`, three Winget files under
 `manifests/p/PwrDrvr/PwrGit/X.Y.Z/`, and `distribution-status.json`. The workflow
