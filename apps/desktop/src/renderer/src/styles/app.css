@@ -3978,12 +3978,13 @@ a.forge-chip:focus-visible {
   margin: 0;
   accent-color: var(--accent-bright);
 }
+/* The margin sits on the input because the input is what focus scrolls
+   into view; it clears the row's padding, so the ring is never cut by the
+   list's edge. */
 .fork-tracking-pick__row input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-}
-.fork-tracking-pick__row:has(input:focus-visible) {
-  scroll-margin: 4px;
+  scroll-margin: 12px;
 }
 .fork-tracking-pick__copy {
   min-width: 0;

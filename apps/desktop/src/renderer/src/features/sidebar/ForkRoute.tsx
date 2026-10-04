@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
 
+/** `owner/name` split at its last slash: GitLab owners can hold slashes. */
+export function splitSlug(slug: string): { owner: string; name: string } {
+  const cut = slug.lastIndexOf("/");
+  return { owner: slug.slice(0, cut), name: slug.slice(cut) };
+}
+
 /** One repository in a route: the original, or a fork. */
 export type RouteRepo = {
   /** `owner/name`. */
@@ -72,12 +78,12 @@ function RouteNode({ repo, state, children }: {
   state?: "unused" | "chosen";
   children?: ReactNode;
 }) {
-  const cut = repo.slug.lastIndexOf("/");
+  const { owner, name } = splitSlug(repo.slug);
   return <div className={state === undefined ? "fork-route__node" : `fork-route__node fork-route__node--${state}`}>
     <span className="fork-route__role">{repo.role}</span>
     {/* Every repository here usually shares one name, so the owner leads
         and the name wraps under it rather than ellipsizing the owner away. */}
-    <span className="fork-route__slug"><b>{repo.slug.slice(0, cut)}</b><wbr />{repo.slug.slice(cut)}</span>
+    <span className="fork-route__slug"><b>{owner}</b><wbr />{name}</span>
     <span className="fork-route__tags">
       <span className="fork-route__remote">{repo.remote}</span>
       {children}

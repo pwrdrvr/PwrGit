@@ -72,7 +72,11 @@ import {
   testSshRemoteRecovery
 } from "./ssh-remote-recovery";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { mapLimit } from "../util/map-limit";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
+
+/** Forge reads at once while confirming extra forks for tracking repair. */
+const FORK_CANDIDATE_READS = 3;
 
 const seconds = (startedAt: number): string =>
   `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
@@ -1192,16 +1196,21 @@ export function registerRemoteHandlers(
       // where it points; the forge says whether that is another fork of the
       // same parent, and whether you may push there. Anything unanswered is
       // left out rather than offered on a guess.
+      // Bounded: each read is a CLI process, and a checkout can carry a
+      // remote per contributor.
       const parent = offer.parent.toLowerCase();
-      const confirmed = await Promise.all(candidates.map(async (candidate) => {
+      const confirmed = new Set<string>();
+      await mapLimit(candidates, FORK_CANDIDATE_READS, async (candidate) => {
         const repository = await viewForgeRepo(identity, candidate.nameWithOwner).catch(() => null);
-        return repository !== null && repository.viewerCanPush === true &&
+        if (
+          repository !== null && repository.viewerCanPush === true &&
           repository.parent?.nameWithOwner.toLowerCase() === parent
-          ? candidate : null;
-      }));
+        ) confirmed.add(candidate.remote);
+      });
+      // In the order the remotes are listed, not the order the forge answered.
       return ok({
         ...offer,
-        targets: [...offer.targets, ...confirmed.filter((row) => row !== null)]
+        targets: [...offer.targets, ...candidates.filter((row) => confirmed.has(row.remote))]
       });
     })();
     trackingInspections.set(req.worktreeId, read);

@@ -8,7 +8,7 @@ import {
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import { ForkCheckoutDialog } from "./ForkCheckoutDialog";
-import { ForkRoute, type RouteRepo } from "./ForkRoute";
+import { ForkRoute, splitSlug, type RouteRepo } from "./ForkRoute";
 import { GitForkIcon } from "./RepoIdentityMarks";
 
 /** Where the dialog was opened. Only a refused push proves the original is
@@ -114,10 +114,10 @@ export function ForkTrackingRecoveryDialog({
 /** "Your fork" for origin; anyone else's fork by its owner. */
 function roleOf(target: ForkTrackingTarget): string {
   if (target.remote === "origin") return "Your fork";
-  return `${target.nameWithOwner.slice(0, target.nameWithOwner.lastIndexOf("/"))}'s fork`;
+  return `${splitSlug(target.nameWithOwner).owner}'s fork`;
 }
 
-export function ForkTrackingRecoveryPanel({
+function ForkTrackingRecoveryPanel({
   repoName, forge, entry, checking, offer, pick, onPick, error, busy, onClose, onApply, onRecheck
 }: {
   repoName: string;

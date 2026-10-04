@@ -22,7 +22,7 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
 }) {
   const hosts = useForgeHostMap();
   const [identity, setIdentity] = useState(repo.identity);
-  const [busy, setBusy] = useState<"refresh" | null>(null);
+  const [busy, setBusy] = useState(false);
   /** The repair is reviewed in the same dialog Push and Pull open, with its
    *  picture of what changes, rather than applied from here unseen. */
   const [reviewing, setReviewing] = useState(false);
@@ -43,7 +43,7 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
   const recheck = async (): Promise<void> => {
     if (pending.current) return;
     pending.current = true;
-    setBusy("refresh");
+    setBusy(true);
     setMessage(null);
     try {
       const result = await dispatch("repo:refreshIdentities", {
@@ -69,7 +69,7 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
       setMessage("Could not re-check origin. See Logs.");
     } finally {
       pending.current = false;
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -87,9 +87,9 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
       {message !== null && <p role="status">{message}</p>}
     </div>
     <div className="refs-remote-card__actions">
-      {offer !== null && worktree != null && <button className="is-primary" disabled={busy !== null}
+      {offer !== null && worktree != null && <button className="is-primary" disabled={busy}
         onClick={() => setReviewing(true)}>Use your fork for {offer.branch}…</button>}
-      <button disabled={busy !== null} aria-busy={busy === "refresh"} onClick={() => void recheck()}>{busy === "refresh" ? "Checking…" : "Re-check origin"}</button>
+      <button disabled={busy} aria-busy={busy} onClick={() => void recheck()}>{busy ? "Checking…" : "Re-check origin"}</button>
     </div>
     {reviewing && worktree != null && <ForkTrackingRecoveryDialog repo={repo} worktreeId={worktree.id}
       entry={{ from: "remotes" }} onClose={() => setReviewing(false)}

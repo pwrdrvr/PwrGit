@@ -201,7 +201,13 @@ describe("remote handlers", () => {
       "stranger/widget": { viewerCanPush: true, parent: { nameWithOwner: "other/widget", url: "" } },
       "unknown/widget": { parent }
     };
+    let inFlight = 0;
+    let most = 0;
     const viewForgeRepo = vi.fn(async (_identity: unknown, slug: string) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
       if (slug === "broken/widget") throw new Error("forge down");
       return (answers[slug] ?? null) as CloneRepository | null;
     });
@@ -214,6 +220,9 @@ describe("remote handlers", () => {
     expect(viewForgeRepo.mock.calls.map(([asked, slug]) => [asked, slug])).toEqual(
       ["lumen", "readonly", "stranger", "unknown", "broken"].map((owner) => [identity, `${owner}/widget`])
     );
+    // Each read is a CLI process: a checkout full of remotes must not spawn
+    // them all at once.
+    expect(most).toBe(3);
   });
 
   it("coalesces fork tracking inspections and keeps identical branch names in two profiles separate", async () => {
