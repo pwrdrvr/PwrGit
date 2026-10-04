@@ -310,14 +310,15 @@ On failure, inspect the failed logs:
 gh run view <run-id> --log-failed
 ```
 
-After success, inspect the release and download its assets into an ignored
-temporary directory:
+After success, inspect release metadata. Reuse signature/architecture/checksum
+evidence and original Actions artifacts from the publishing run; downloading
+Actions artifacts does not fetch GitHub Release assets. Do not download every
+release asset merely to list or count it:
 
 ```bash
 gh release view v<version> --repo pwrdrvr/PwrGit
-gh release download v<version> \
-  --repo pwrdrvr/PwrGit \
-  --dir <ignored-release-directory>
+gh api repos/pwrdrvr/PwrGit/releases/tags/v<version> \
+  --jq '.assets[] | {name, size, digest}'
 ```
 
 Verify the macOS release contains:
@@ -335,6 +336,11 @@ Verify the Windows release contains Authenticode-signed
 `PwrGit.Setup.exe` alias.
 
 Do not accept a silently unsigned installer under the signed filename.
+
+If byte-level verification cannot reuse the publishing evidence, download only
+the required versioned assets into an ignored directory and verify them. Record
+these deliberate validation downloads; they contribute to release download
+statistics and must not become periodic monitoring.
 
 Verify the final release body is non-empty and matches the approved changelog
 entry:
@@ -390,7 +396,6 @@ may not trigger another workflow):
 
 ```bash
 gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main
-pnpm distribution:prepare v<version> node_modules/.cache/pwrgit-distribution
 ```
 
 If hosted cross-repository audits hit HTTP 429, inspect the logged token source.
@@ -408,7 +413,20 @@ under the same name and policy, and verification in each selected repository
 afterward. Do not infer expiry from secret update time. Follow the distribution
 runbook for bounded Retry-After/reset budgets and remaining gates.
 
-Require immutable versioned URLs and download/hash the actual published bytes.
+The default dispatch audits sources and synchronizes Homebrew without downloading
+installers in PwrGit. The tap returns if current; a changed cask verifies both
+DMGs using installer caches and downloads on cache misses. Do not repeat asset validation during daily
+audits or for unchanged package sources. When generating a Winget submission or
+when fresh native evidence is needed, explicitly dispatch once with
+`-f validate_assets=true`, or run
+`pnpm distribution:prepare v<version> node_modules/.cache/pwrgit-distribution`
+locally and reuse its verified cache. Both paths fetch release bytes and add
+download statistics; the hosted native run also downloads the Windows installer
+again for installation and may download a predecessor for upgrade validation.
+Retain submission artifacts and validation links rather than rerunning them.
+
+Require immutable versioned URLs and download/hash the actual published bytes
+for submission evidence.
 Validate arm64 versus universal DMG selection, app bundle ID/version, Developer ID
 and Gatekeeper; validate Windows x64 payload, Authenticode on installer and app,
 size and SHA-256 against GitHub and `PwrGit-windows-SHA256SUMS`. Never distribute

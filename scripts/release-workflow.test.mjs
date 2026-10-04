@@ -24,7 +24,7 @@ function eligible(job, { github, needs, inputs = {}, cancelled = false, ancestor
 function context({ event = "pull_request", action = "labeled", fork = false, label = "ci:windows-signing", audit = "skipped", prepare = "success", cancelled = false } = {}) {
   return {
     github: { repository: "pwrdrvr/PwrGit", event_name: event, event: {
-      action, label: { name: label }, pull_request: {
+      action, release: { prerelease: false, draft: false }, label: { name: label }, pull_request: {
         head: { repo: { full_name: fork ? "contributor/PwrGit" : "pwrdrvr/PwrGit" } }, labels: [{ name: label }],
       },
     } },
@@ -77,4 +77,36 @@ test("PR package validation cannot publish Homebrew", () => {
   const fixture = context({ audit: "success" });
   fixture.github.ref = "refs/heads/main";
   expect(eligible("homebrew", { ...fixture, inputs: { audit_only: false } }, distributionWorkflow)).toBe(false);
+});
+
+test.each(["pull_request", "schedule", "release", "workflow_dispatch"])("routine distribution checks never download installers (%s)", (event) => {
+  const fixture = context({ event, audit: "success" });
+  fixture.github.event.release = { prerelease: false, draft: false };
+  expect(eligible("prepare", fixture, distributionWorkflow)).toBe(false);
+});
+
+test("native validation requires an explicit manual opt-in and cannot override audit-only", () => {
+  const fixture = context({ event: "workflow_dispatch", audit: "success" });
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true } }, distributionWorkflow)).toBe(true);
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true, audit_only: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("prepare", { ...fixture, ancestors: ["failure"], inputs: { validate_assets: true } }, distributionWorkflow)).toBe(false);
+});
+
+test.each(["pull_request", "schedule", "release"])("native-validation input cannot enable automatic downloads (%s)", (event) => {
+  const fixture = context({ event, audit: "success" });
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true } }, distributionWorkflow)).toBe(false);
+});
+
+test.each(["homebrew", "freshness"])("scheduled %s does not depend on skipped native validation", (job) => {
+  const body = distributionWorkflow.split(`\n  ${job}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+  expect(body.match(/^    needs: (.*)$/m)[1]).not.toContain("prepare");
+  const fixture = context({ event: "schedule", audit: "success" });
+  fixture.github.ref = "refs/heads/main";
+  expect(eligible(job, fixture, distributionWorkflow)).toBe(true);
+});
+
+test.each([{ prerelease: true, draft: false }, { prerelease: false, draft: true }])("ineligible release cannot sync Homebrew %#", (release) => {
+  const fixture = context({ event: "release", audit: "success" });
+  fixture.github.event.release = release;
+  expect(eligible("homebrew", fixture, distributionWorkflow)).toBe(false);
 });

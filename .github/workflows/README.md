@@ -6,13 +6,18 @@
 against promoted Stable Latest, generates manifests from downloaded and hashed
 artifacts, and validates macOS signatures/architectures plus native Winget
 installation. It audits every release publication/edit, including prereleases,
-daily and by manual dispatch; preparation/install checks require an eligible
-stable release. Use `-f audit_only=true` to retain a remote comparison without
-downloads/installations; its PR gate validates changes to the generator. The
+daily and by manual dispatch. Routine audits, including PRs, read metadata and
+never download release installers. Preparation/install checks require manual
+dispatch with `-f validate_assets=true` (default false); these deliberate checks
+add release downloads. Use `-f audit_only=true` to skip Homebrew synchronization
+as well as downloads/installations. The
 daily comparison fails on version drift after Homebrew synchronization. The
-`homebrew` job dispatches the tap publisher after validation and verifies tap
+`homebrew` job dispatches the tap publisher after the source audit and verifies tap
 `main` reached Stable Latest, with a direct tap run link on failure. The tap
 commits validated cask updates automatically; routine releases have no bump PR.
+An already-current cask needs only metadata reads. A changed cask's tap validation
+uses verified installer caches and downloads on cache misses, independently of
+the product's audit-only checks.
 Immediate dispatch needs `HOMEBREW_TAP_DISPATCH_TOKEN` (fine-grained PAT for
 `pwrdrvr/homebrew-tap` only, Actions write). The public-read token below cannot
 dispatch; the tap also reconciles every 15 minutes. Winget submission and client

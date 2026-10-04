@@ -12,6 +12,10 @@ on:
         description: Compare public sources only; skip downloads and native installation
         type: boolean
         default: false
+      validate_assets:
+        description: Download release installers and run native validation (adds GitHub downloads)
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       audit_only:
@@ -84,7 +88,9 @@ jobs:
 
   prepare:
     needs: audit
-    if: ${{ inputs.audit_only != true && (github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft)) }}
+    # Routine audits must not add release-asset downloads. Native checks are
+    # deliberate manual validation; the tap validates its own changed cask.
+    if: ${{ inputs.audit_only != true && github.event_name == 'workflow_dispatch' && inputs.validate_assets == true }}
     runs-on: macos-26
     timeout-minutes: 25
     steps:
@@ -144,8 +150,8 @@ jobs:
           if-no-files-found: error
 
   homebrew:
-    needs: [audit, prepare]
-    if: ${{ inputs.audit_only != true && github.event_name != 'pull_request' && (github.event_name == 'release' || github.ref == 'refs/heads/main') }}
+    needs: audit
+    if: ${{ inputs.audit_only != true && github.event_name != 'pull_request' && (github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft)) && (github.event_name == 'release' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -168,7 +174,7 @@ jobs:
           node scripts/release/sync-homebrew.mjs "$version"
 
   freshness:
-    needs: [prepare, homebrew]
+    needs: [audit, homebrew]
     if: ${{ inputs.audit_only != true && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     steps:

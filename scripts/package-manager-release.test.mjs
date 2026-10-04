@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { audit, compareVersions, distribution, prepare, readCask, readWingetInstaller, renderManifests, selectAssets, stableVersion } from "./package-manager-release.mjs";
 
 function release(version = "0.27.0") {
@@ -71,6 +71,19 @@ test("reports missing registration and pending links without claiming publicatio
   expect(result.homebrew.version).toBeNull();
   expect(result.submissions.winget[0].url).toContain("/pull/1");
   expect(result.clientPublication).toContain("Verify");
+});
+
+test("audits published platform manifests using metadata without fetching release bytes", async () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(() => { throw new Error("Audit must not download release bytes"); });
+  try {
+    const result = await audit({ api: api({ winget: ["0.27.0"], cask: "0.27.0" }) });
+    expect(result.status).toBe("complete");
+    expect(result.winget.version).toBe("0.27.0");
+    expect(result.homebrew.version).toBe("0.27.0");
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    fetch.mockRestore();
+  }
 });
 
 test("compares authoritative versions and refuses downgrades or duplicates", async () => {

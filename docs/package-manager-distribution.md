@@ -35,7 +35,7 @@ stable version.
 For every publication, including alpha, beta and Stable candidates, record both
 channels against Stable Latest again. Prereleases intentionally leave both
 packages unchanged. The existing workflow's `audit` job runs for every published
-or edited release, separately from eligible-stable preparation. `release.yml`
+or edited release, separately from opt-in native validation. `release.yml`
 also reuses this same workflow with `audit_only: true` before preparation and
 after publication, retaining `distribution-audit-before-release` and
 `distribution-audit-after-publication`. A preflight blocker stops release
@@ -59,17 +59,39 @@ edited` event already ran it:
 ```sh
 gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main
 gh run list --repo pwrdrvr/PwrGit --workflow package-distribution.yml --limit 5
-pnpm distribution:prepare vX.Y.Z node_modules/.cache/pwrgit-distribution
 ```
 
-The workflow audits all publication/promotion/edit events and runs daily; only
-eligible stable events prepare manifests and install on disposable runners. Its `homebrew`
+The workflow audits all publication/promotion/edit events, PR changes and daily
+runs using metadata only. Its `homebrew`
 job dispatches the tap publisher and waits up to 20 minutes for the target to
 appear on tap `main`, stopping early on a failed tap run. Its summary names the
 channel, target and direct tap run link on failure. Daily freshness checks run
 after Homebrew synchronization so pending Winget review does not prevent tap
 publication. Events emitted by `GITHUB_TOKEN` cannot be relied on to start another
 workflow; the explicit dispatch above remains part of promotion through the skill.
+
+Routine audits do not request release asset bytes and therefore do not add
+installer downloads to GitHub statistics. Synchronization reads metadata and
+returns when the tap is already current. A needed tap update verifies both DMGs
+using its installer cache; cache misses download release bytes. Keep those validation downloads
+separate from estimates of user adoption.
+
+Native validation and Winget submission-file generation are explicit operations,
+not daily/PR/release-event checks. When published-byte or installation evidence
+is needed, run once on disposable runners:
+
+```sh
+gh workflow run package-distribution.yml --repo pwrdrvr/PwrGit --ref main -f validate_assets=true
+```
+
+This downloads both DMGs, the Windows installer and its checksum file; the Windows
+job downloads the installer again and may install an indexed predecessor for
+upgrade validation. These requests add GitHub release downloads. `audit_only=true`
+overrides `validate_assets=true` and skips them. For local manifest generation,
+`pnpm distribution:prepare vX.Y.Z node_modules/.cache/pwrgit-distribution` reuses
+verified cached installers; its checksum-file read still fetches release bytes.
+Reuse the generated submission files/evidence instead of repeating checks just
+to reconfirm unchanged sources. PR CI covers the generator with fixture tests.
 
 The generator accepts only public Stable Latest. It downloads arm64 and universal
 DMGs and the signed Windows x64 NSIS installer, hashes actual bytes, checks size
@@ -151,7 +173,7 @@ not prove either channel is published.
 | Intel | universal DMG digest; x86_64 and arm64 slices; same identity/version/signature checks |
 | Windows | x64 installed payload; Valid PwrDrvr LLC Authenticode on installer and app; checksum matching GitHub and release checksum file |
 
-The workflow verifies both DMGs and validates Winget with the official client. It
+The explicit `validate_assets=true` run verifies both DMGs and validates Winget with the official client. It
 installs silently for the user, checks registry name/publisher/version, checks the
 installed PE machine and uninstalls. On updates it first installs the prior indexed
 package when the manifest repository contains an older version. Initial registration
