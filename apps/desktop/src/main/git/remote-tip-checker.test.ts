@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok } from "@pwrgit/shared";
+import { ok, type Result, type Res } from "@pwrgit/shared";
 import { RemoteTipChecker, REMOTE_VISIBLE_DEBOUNCE_MS, REMOTE_VISIBLE_INTERVAL_MS, type RemoteCheckReason } from "./remote-tip-checker";
 
 describe("RemoteTipChecker", () => {
   let checker: RemoteTipChecker;
   let focused: boolean;
-  const check = vi.fn(async (_id: string, _request: { reason: RemoteCheckReason; userAction: boolean }) => ok({ status: "checked" as const }));
+  const check = vi.fn(async (_id: string, _request: { reason: RemoteCheckReason; userAction: boolean }): Promise<Result<Res<"remote:checkSelected">>> => ok({ status: "checked" }));
   beforeEach(() => {
     vi.useFakeTimers();
     check.mockReset();
@@ -89,8 +89,56 @@ describe("RemoteTipChecker", () => {
     expect(await periodic.result).toEqual(ok({ status: "superseded" }));
     const repeated = checker.request("a", "periodic");
     await settle();
-    expect(await repeated.result).toEqual(ok({ status: "superseded" }));
+    expect(await repeated.result).toEqual(ok({ status: "checked" }));
     expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["hover", "checked", "unavailable"],
+    ["hover", "unavailable", "checked"],
+    ["visible", "checked", "unavailable"],
+    ["visible", "unavailable", "checked"]
+  ] as const)("returns the latest %s answer after %s changes to %s", async (reason, before, after) => {
+    check.mockResolvedValueOnce(ok({ status: before })).mockResolvedValueOnce(ok({ status: after }));
+    expect(await checker.request("a", "selected").result).toEqual(ok({ status: before }));
+    if (reason === "visible") await vi.advanceTimersByTimeAsync(REMOTE_VISIBLE_INTERVAL_MS);
+    const refreshed = checker.request("a", reason);
+    await settle();
+    expect(await refreshed.result).toEqual(ok({ status: after }));
+    const periodic = checker.request("a", "periodic");
+    await settle();
+    expect(await periodic.result).toEqual(ok({ status: after }));
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns a thrown check's unavailable answer without extending the cooldown", async () => {
+    check.mockRejectedValueOnce(new Error("offline"));
+    expect(await checker.request("a", "hover").result).toEqual(ok({ status: "unavailable" }));
+    await vi.advanceTimersByTimeAsync(REMOTE_VISIBLE_INTERVAL_MS - 2 * REMOTE_VISIBLE_DEBOUNCE_MS);
+    const cached = checker.request("a", "periodic");
+    await settle();
+    expect(await cached.result).toEqual(ok({ status: "unavailable" }));
+    expect(check).toHaveBeenCalledTimes(1);
+    const expired = checker.request("a", "periodic");
+    await settle();
+    expect(await expired.result).toEqual(ok({ status: "checked" }));
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not share completed answers across profile worktrees or branches", async () => {
+    checker.stop();
+    let branch = "main";
+    checker = new RemoteTipChecker({ check, isFocused: () => focused, keyFor: (id) => `${id}/${branch}` });
+    check.mockResolvedValueOnce(ok({ status: "unavailable" }));
+    expect(await checker.request("profile-a/worktree", "selected").result).toEqual(ok({ status: "unavailable" }));
+    const otherProfile = checker.request("profile-b/worktree", "periodic");
+    await settle();
+    expect(await otherProfile.result).toEqual(ok({ status: "checked" }));
+    branch = "topic";
+    const otherBranch = checker.request("profile-a/worktree", "periodic");
+    await settle();
+    expect(await otherBranch.result).toEqual(ok({ status: "checked" }));
+    expect(check).toHaveBeenCalledTimes(3);
   });
 
   it("discards a queued request for a branch the checkout no longer holds", async () => {

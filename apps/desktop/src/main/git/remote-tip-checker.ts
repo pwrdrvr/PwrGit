@@ -25,7 +25,7 @@ export class RemoteTipChecker {
   private readonly visible = new Map<string, RemoteCheckHandle>();
   private readonly background = new Map<string, Entry>();
   private readonly direct = new Map<string, Entry>();
-  private readonly lastFinished = new Map<string, number>();
+  private readonly lastFinished = new Map<string, { at: number; answer: Answer }>();
   private readonly backgroundQueue: IterableQueueMapperSimple<Entry>;
   private readonly directQueue: IterableQueueMapperSimple<Entry>;
   private stopped = false;
@@ -102,13 +102,13 @@ export class RemoteTipChecker {
     }
     const now = (this.deps.now ?? Date.now)();
     // Retain freshness across scrolling/lens changes, but only for its TTL.
-    for (const [key, at] of this.lastFinished) {
+    for (const [key, { at }] of this.lastFinished) {
       if (now - at >= REMOTE_VISIBLE_INTERVAL_MS) this.lastFinished.delete(key);
     }
     if (this.stopped || !this.deps.isFocused()) return;
     for (const id of ids) {
       const key = this.deps.keyFor?.(id) ?? id;
-      if (now - (this.lastFinished.get(key) ?? -Infinity) < REMOTE_VISIBLE_INTERVAL_MS) continue;
+      if (now - (this.lastFinished.get(key)?.at ?? -Infinity) < REMOTE_VISIBLE_INTERVAL_MS) continue;
       this.visible.set(id, this.request(id, reason));
     }
   }
@@ -121,23 +121,32 @@ export class RemoteTipChecker {
     }
     const immediate = entry.reason === "selected" || entry.reason === "hover";
     const now = this.deps.now ?? Date.now;
-    if (!immediate && (!this.deps.isFocused() || now() - (this.lastFinished.get(entry.key) ?? -Infinity) < REMOTE_VISIBLE_INTERVAL_MS)) {
-      // Focus or freshness can change while queued. Skips are not refreshes.
+    if (!immediate && !this.deps.isFocused()) {
+      // Focus can change while queued. Skips are not refreshes.
       entry.cancel();
       return;
     }
     entry.started = true;
     try {
+      const latest = this.lastFinished.get(entry.key);
+      if (!immediate && latest !== undefined && now() - latest.at < REMOTE_VISIBLE_INTERVAL_MS) {
+        // Share the latest status without renewing its network freshness.
+        entry.resolve(latest.answer);
+        return;
+      }
       const answer = await this.deps.check(entry.id, {
         reason: entry.reason, userAction: entry.reason !== "periodic"
       });
       if (answer.ok && answer.value.status !== "superseded" && (this.deps.keyFor?.(entry.id) ?? entry.key) === entry.key) {
-        this.lastFinished.set(entry.key, now());
+        this.lastFinished.set(entry.key, { at: now(), answer });
       }
       entry.resolve(answer);
     } catch {
-      this.lastFinished.set(entry.key, now());
-      entry.resolve(ok({ status: "unavailable" }));
+      const answer = ok({ status: "unavailable" as const });
+      if ((this.deps.keyFor?.(entry.id) ?? entry.key) === entry.key) {
+        this.lastFinished.set(entry.key, { at: now(), answer });
+      }
+      entry.resolve(answer);
     } finally {
       const owners = entry.reason === "selected" || entry.reason === "hover" ? this.direct : this.background;
       if (owners.get(entry.key) === entry) owners.delete(entry.key);
