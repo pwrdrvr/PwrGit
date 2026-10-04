@@ -2,12 +2,30 @@
 
 ## Workflows
 
-`package-distribution.yml` compares authoritative Winget/Homebrew sources against
-promoted Stable Latest, generates manifests from downloaded and hashed artifacts,
-and validates macOS signatures/architectures plus native Winget installation. It
-runs on stable release publication/edit, daily and by manual dispatch; its PR gate
-validates changes to the generator. The daily comparison fails on version drift.
-The `homebrew` job dispatches the tap publisher after validation and verifies
+`package-distribution.yml` audits authoritative Winget/Homebrew sources against
+promoted Stable Latest and generates manifests from GitHub asset digests without
+downloading installers. Separate native jobs validate macOS signatures and both
+architectures, plus WinGet manifests, signatures, install/upgrade and uninstall.
+Successful validation is cached by release bytes, manifests, validator inputs and
+runner platform. Unchanged daily runs only look up that success record; they do
+not download, mount or install release assets. Publication audits still run and
+fail on absent/stale channels independently of native validation reuse.
+
+A new release, changed validation input, cache eviction or manual dispatch with
+`force_validation=true` runs native checks. Exact installer caches include version,
+architecture and SHA-256; restored bytes are always hashed and size-checked before
+use. Windows also cross-checks the release checksum file. WinGet reuses those
+verified bytes through its own temp cache while retaining the published manifest
+URL, and the validator requires its reuse log entry. Success records are saved by
+each native job only after all its checks pass, even if a publication audit fails.
+GitHub cache branch scopes keep PR success records from blessing main; eviction
+safely causes revalidation. Cache keys intentionally have no prefix fallbacks.
+
+The internal `package-manager-plan` artifact is metadata only. The downloadable
+`package-manager-submissions` artifact is emitted after both native jobs pass or
+reuse matching success records. The workflow runs on stable publication/edit,
+daily, manual dispatch, and PRs changing its validators.
+The `homebrew` job dispatches the tap publisher after macOS validation and verifies
 tap `main` reached Stable Latest, with a direct tap run link on failure. The tap
 commits validated cask updates automatically; routine releases have no bump PR.
 Immediate dispatch needs `HOMEBREW_TAP_DISPATCH_TOKEN` (fine-grained PAT for
