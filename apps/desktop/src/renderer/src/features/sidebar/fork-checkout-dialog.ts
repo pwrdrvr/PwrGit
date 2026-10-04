@@ -1,12 +1,15 @@
 import {
   forgeCloneUrls,
+  forgeProductOrAssumed,
   forgeRemoteUrlLike,
   isForgeKind,
   parseForgeRemote,
   type ForgeHostMap,
   type ForkCheckoutPreflight,
-  type RepoIdentity
+  type RepoIdentity,
+  type Worktree
 } from "@pwrgit/shared";
+import type { RouteArrow, RouteEnd } from "./ForkRoute";
 
 /**
  * Forking a repository that is already checked out.
@@ -125,6 +128,102 @@ export function remoteChanges(input: {
     });
   }
   return changes;
+}
+
+/**
+ * The branch Fork…'s route strips are drawn for: the checkout's own, while it
+ * follows a remote. Forking in place rewrites remotes and never a branch's
+ * settings, so a branch that tracks `origin` follows it to the fork — the
+ * change the strips show. A branch on no remote yet has no route, before or
+ * after, and the plan falls back to its list.
+ */
+export function routeBranch(
+  worktree: Pick<Worktree, "branch" | "tracking" | "missing"> | null | undefined
+): string | null {
+  if (worktree == null || worktree.missing === true || worktree.branch === "") return null;
+  return worktree.tracking === "unpublished" || worktree.tracking === "upstream_missing"
+    ? null
+    : worktree.branch;
+}
+
+type Strip = {
+  label: string;
+  caption?: string;
+  original: RouteEnd;
+  fork: RouteEnd;
+  toOriginal: RouteArrow[];
+  toFork: RouteArrow[];
+};
+
+/**
+ * Now and After for forking a checkout in place, as `main` experiences it.
+ *
+ * Now, the branch pulls from and pushes to the repository `origin` names.
+ * After, it does the same with the same settings — but `origin` names the
+ * fork, so its arrows land there. The nicknames are what move, so the After
+ * strip outlines them. "Can't push" is drawn only from the forge's answer
+ * about `origin`.
+ */
+export function forkPlanRoutes(input: {
+  preflight: ForkCheckoutPreflight;
+  branch: string;
+  /** `owner/name` of the fork. */
+  target: string;
+  /** The chosen upstream, or null when the user declined one. */
+  upstream: string | null;
+}): { now: Strip; after: Strip } {
+  const { preflight, branch, target, upstream } = input;
+  const source = preflight.origin.nameWithOwner;
+  const closed = preflight.fork.source.viewerCanPush === false;
+  const forge = forgeProductOrAssumed(preflight.fork.source.host).label;
+  // Forking a fork can keep its root as the upstream, which is then a
+  // different repository from the one `origin` names today.
+  const sameOriginal = upstream === null || upstream.toLowerCase() === source.toLowerCase();
+  const now: Strip = {
+    label: `Now: ${branch} pulls from and pushes to ${source}${closed ? ", which you can't push to" : ""}. ${target} ${preflight.fork.existing === undefined ? "doesn't exist yet" : "is not used"}.`,
+    original: {
+      role: sameOriginal ? "The original" : "Origin today",
+      slug: source,
+      remote: "origin",
+      ...(closed ? { perm: "no" as const } : {})
+    },
+    fork: {
+      role: "Your fork",
+      slug: target,
+      pending: preflight.fork.existing === undefined ? "will be created" : `on ${forge}`,
+      state: "unused"
+    },
+    toOriginal: [{ verb: "push", tone: closed ? "bad" : "plain" }, { verb: "pull", tone: "plain" }],
+    toFork: []
+  };
+  // Sync needs the upstream to carry the branch. The repository `origin`
+  // names today does, since the branch follows it; a fork's root may not.
+  const syncs = upstream !== null && sameOriginal;
+  const after: Strip = {
+    label: `After: ${branch} pulls from and pushes to ${target}.${syncs ? ` Sync in the Pull menu brings in ${upstream}.` : ""}`,
+    caption: upstream === null
+      ? `${branch} follows your fork; nothing here points at the original`
+      : `${branch} keeps following origin, and origin moves to your fork`,
+    original: upstream === null
+      ? { role: "The original", slug: source, pending: "no remote", state: "unused" }
+      : {
+        role: "The original",
+        slug: upstream,
+        remote: preflight.upstreamRemote.name,
+        remoteMoved: !preflight.upstreamRemote.existing
+      },
+    fork: {
+      role: "Your fork",
+      slug: target,
+      remote: "origin",
+      remoteMoved: true,
+      perm: "yes",
+      state: "chosen"
+    },
+    toOriginal: syncs ? [{ verb: "sync", tone: "ghost" }] : [],
+    toFork: [{ verb: "push", tone: "go", confirmed: true }, { verb: "pull", tone: "go" }]
+  };
+  return { now, after };
 }
 
 /**

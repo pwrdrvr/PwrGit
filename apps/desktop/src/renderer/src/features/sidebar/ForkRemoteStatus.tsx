@@ -4,13 +4,16 @@ import {
   isForgeKind,
   parseForgeRemote,
   remoteMatchesForgeRepo,
+  routedRemotes,
+  trackedRemoteName,
   type Repo,
+  type RepoIdentity,
   type RepoRefs,
   type Worktree
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
-import { ForkRouteLine } from "./ForkRoute";
+import { RouteStrip, type RouteArrow, type RouteEnd } from "./ForkRoute";
 import { ForkTrackingRecoveryDialog } from "./ForkTrackingRecoveryDialog";
 
 /** Keep the relationship and its repair visible where people edit remotes. */
@@ -37,6 +40,7 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
   const currentIdentity = origin !== undefined && identity !== undefined && remoteMatchesForgeRepo(origin.fetchUrl, identity, hosts) ? identity : undefined;
   const repair = branch === undefined ? null : forkTrackingRepair(currentIdentity, refs.remotes, branch, hosts);
   const offer = repair !== null && `${repair.branch}:${repair.upstream}` === repaired ? null : repair;
+  const route = branch === undefined ? null : remotesRoute(currentIdentity, refs, branch, hosts);
   const parsedOrigin = origin === undefined ? null : parseForgeRemote(origin.fetchUrl, hosts);
   if (parsedOrigin === null || !isForgeKind(parsedOrigin.host)) return null;
 
@@ -76,14 +80,11 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
   return <section className="refs-remote-card refs-fork-parent-offer">
     <div>
       <strong>{currentIdentity?.parent === undefined ? "Fork relationship" : `Fork of ${currentIdentity.parent.nameWithOwner}`}</strong>
-      {offer === null
-        ? <p>{currentIdentity?.parent === undefined
+      {offer !== null
+        ? <p>{offer.branch} pulls from and pushes to the original instead of your fork, {currentIdentity?.nameWithOwner ?? "origin"}.</p>
+        : <p>{currentIdentity?.parent === undefined
           ? "Re-check origin to recognize an existing fork, including one set up outside PwrGit."
-          : `${currentIdentity.nameWithOwner} is recognized as a fork.`}</p>
-        : <>
-          <p><ForkRouteLine branch={offer.branch} original={currentIdentity?.parent?.nameWithOwner ?? offer.upstream} /></p>
-          <p>{offer.branch} pulls from and pushes to the original instead of your fork, {currentIdentity?.nameWithOwner ?? "origin"}.</p>
-        </>}
+          : route?.lead ?? `${currentIdentity.nameWithOwner} is recognized as a fork.`}</p>}
       {message !== null && <p role="status">{message}</p>}
     </div>
     <div className="refs-remote-card__actions">
@@ -91,6 +92,7 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
         onClick={() => setReviewing(true)}>Use your fork for {offer.branch}…</button>}
       <button disabled={busy} aria-busy={busy} onClick={() => void recheck()}>{busy ? "Checking…" : "Re-check origin"}</button>
     </div>
+    {route !== null && <div className="refs-fork-route"><RouteStrip {...route.strip} /></div>}
     {reviewing && worktree != null && <ForkTrackingRecoveryDialog repo={repo} worktreeId={worktree.id}
       entry={{ from: "remotes" }} onClose={() => setReviewing(false)}
       onRepaired={(done) => {
@@ -100,4 +102,75 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
         void onRefresh();
       }} />}
   </section>;
+}
+
+/**
+ * The branch's route as it is now, for the Remotes card: drawn whenever the
+ * forge has confirmed `origin` is a fork and the branch follows the fork or
+ * its parent, whether or not anything needs repair. Plain arrows, no Now or
+ * After — this card changes nothing. The Sync arrow is drawn only where the
+ * original is known to carry this branch (its default branch, or a fetched
+ * branch of that name), since that is what Pull's Sync needs. Design: `design/Fork Route Graphic - UX Review.dc.html`, 4b and 4d.
+ */
+export function remotesRoute(
+  identity: RepoIdentity | undefined,
+  refs: Pick<RepoRefs, "remotes">,
+  branch: { name: string; upstream?: string },
+  hosts: Parameters<typeof routedRemotes>[2]
+): { lead: string; strip: Parameters<typeof RouteStrip>[0] } | null {
+  if (identity?.parent === undefined) return null;
+  const rows = routedRemotes(identity, refs.remotes, hosts);
+  const fork = rows.find((row) => row.role === "fork");
+  const original = rows.find((row) => row.role === "original");
+  if (fork === undefined) return null;
+  const tracked = trackedRemoteName(branch.upstream, refs.remotes);
+  const followsFork = tracked === fork.name;
+  const followsOriginal = original !== undefined && tracked === original.name;
+  if (!followsFork && !followsOriginal) return null;
+  const parentSlug = original?.nameWithOwner ?? identity.parent.nameWithOwner;
+  const forkSlug = fork.nameWithOwner ?? identity.nameWithOwner;
+  const originalEnd: RouteEnd = {
+    role: "The original",
+    slug: parentSlug,
+    ...(original === undefined ? { pending: "no remote" } : { remote: original.name })
+  };
+  const forkEnd: RouteEnd = {
+    role: "Your fork",
+    slug: forkSlug,
+    remote: fork.name,
+    ...(fork.canPush === true ? { perm: "yes" as const } : {}),
+    ...(followsFork ? {} : { state: "unused" as const })
+  };
+  if (followsOriginal) {
+    return {
+      lead: `${branch.name} pulls from and pushes to the original instead of your fork, ${forkSlug}.`,
+      strip: {
+        branch: branch.name,
+        label: `${branch.name} pulls from and pushes to ${parentSlug}. ${forkSlug} is not used.`,
+        original: originalEnd,
+        fork: forkEnd,
+        toOriginal: [{ verb: "push", tone: "plain" }, { verb: "pull", tone: "plain" }],
+        toFork: []
+      }
+    };
+  }
+  // Sync needs the original to carry this branch. Its default branch does,
+  // and so does any fetched branch of the same name; the preview is only a
+  // sample, so a branch missing from it proves nothing and draws no arrow.
+  const originalRemote = original === undefined
+    ? undefined : refs.remotes.find((remote) => remote.name === original.name);
+  const syncs = originalRemote !== undefined && (originalRemote.defaultBranch === branch.name ||
+    originalRemote.previewBranches.some((row) => row.name === branch.name));
+  const toOriginal: RouteArrow[] = syncs ? [{ verb: "sync", tone: "ghost" }] : [];
+  return {
+    lead: `${branch.name} pulls from and pushes to your fork.${syncs ? " Sync in the Pull menu brings in the original's new work." : ""}`,
+    strip: {
+      branch: branch.name,
+      label: `${branch.name} pulls from and pushes to ${forkSlug}.${syncs ? ` Sync in the Pull menu brings in ${parentSlug}.` : ""}`,
+      original: originalEnd,
+      fork: forkEnd,
+      toOriginal,
+      toFork: [{ verb: "push", tone: "plain" }, { verb: "pull", tone: "plain" }]
+    }
+  };
 }

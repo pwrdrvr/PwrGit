@@ -6,6 +6,7 @@ import {
   changeRequestNumberQuery,
   changeRequestPluralLabel,
   changeRequestSigil,
+  routedRemotes,
   type ForgeKind,
   type LocalBranchSummary,
   type PrSummary,
@@ -13,6 +14,7 @@ import {
   type RemoteSummary,
   type Repo,
   type RepoRefs,
+  type RoutedRemote,
   type TagSummary,
   type Worktree
 } from "@pwrgit/shared";
@@ -529,6 +531,14 @@ export function RepoRefsModal({
   const addingParentRef = useRef(false);
   const forgeHosts = useForgeHostMap();
   const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
+  // What each remote is, from the fork the forge confirmed — not its name.
+  const { remoteRoles, forkKnown } = useMemo(() => {
+    const rows = routedRemotes(repo.identity, refs.remotes, forgeHosts);
+    return {
+      remoteRoles: new Map(rows.map((row) => [row.name, row])),
+      forkKnown: rows.some((row) => row.role === "fork")
+    };
+  }, [repo.identity, refs.remotes, forgeHosts]);
   const remoteNames = useMemo(
     () => refs.remotes.map((remote) => remote.name),
     [refs.remotes]
@@ -1587,13 +1597,8 @@ export function RepoRefsModal({
                   <div className="refs-remote-card__head">
                     <div>
                       <strong>{remote.name}</strong>
-                      <span className="refs-remote-role">
-                        {remote.name === "origin"
-                          ? "Default"
-                          : remote.name === "upstream"
-                            ? "Upstream"
-                            : "Remote"}
-                      </span>
+                      <RemoteRoleTag role={remoteRoles.get(remote.name)} name={remote.name}
+                        forkKnown={forkKnown} />
                     </div>
                     <div className="refs-remote-card__actions">
                       <span>{remote.branchCount} branches</span>
@@ -1691,4 +1696,27 @@ export function RepoRefsModal({
       {tip.tooltipNode}
     </div>
   );
+}
+
+/**
+ * A remote card's role. Once the forge has named the fork and its parent,
+ * those two say so by repository — and a remote merely called `upstream`
+ * stops claiming to be the original. Without that answer the names are all
+ * there is, and the old reading stands.
+ */
+function RemoteRoleTag({ role, name, forkKnown }: {
+  role: RoutedRemote | undefined;
+  name: string;
+  /** The forge confirmed `origin` is a fork, so roles come from it. */
+  forkKnown: boolean;
+}) {
+  if (role?.role === "fork" || role?.role === "original") {
+    return <>
+      <span className="refs-remote-role">{role.role === "fork" ? "Your fork" : "The original"}</span>
+      {role.nameWithOwner !== null && <span className="refs-remote-slug">{role.nameWithOwner}</span>}
+    </>;
+  }
+  return <span className="refs-remote-role">
+    {name === "origin" ? "Default" : name === "upstream" && !forkKnown ? "Upstream" : "Remote"}
+  </span>;
 }

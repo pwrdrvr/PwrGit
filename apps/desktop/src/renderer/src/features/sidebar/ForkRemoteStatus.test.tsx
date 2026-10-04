@@ -72,7 +72,12 @@ it("draws the route and repairs the primary checkout through the reviewed dialog
   answerReview();
   await render();
   expect(container.textContent).toContain("Fork of team/widget");
-  expect(container.querySelector(".fork-route-line")?.textContent).toBe("mainteam/widget");
+  // The route as it is: main pulls from and pushes to the original, and the
+  // fork sits unused beside it — no refusal, since nothing was refused here.
+  expect(container.querySelector(".fork-route__grid")?.getAttribute("aria-label"))
+    .toBe("main pulls from and pushes to team/widget. me/widget is not used.");
+  expect(container.querySelector(".fork-route__node--unused")?.textContent).toContain("me/widget");
+  expect(container.querySelector(".fork-route__arrow--bad")).toBeNull();
   expect(container.textContent).toContain("main pulls from and pushes to the original instead of your fork, me/widget.");
   // Nothing changes from the card itself: it opens the same review Push and
   // Pull open.
@@ -88,6 +93,49 @@ it("draws the route and repairs the primary checkout through the reviewed dialog
   expect(document.querySelector(".fork-tracking-dialog")).toBeNull();
   expect(container.textContent).toContain("main now pulls from and pushes to me/widget");
   expect(container.textContent).not.toContain("Use your fork for main…");
+});
+
+it("draws a healthy fork's route every time, with Sync only where the original has the branch", async () => {
+  const healthy: RepoRefs = {
+    ...refs,
+    branches: [{ ...refs.branches[0]!, upstream: "origin/main" }],
+    remotes: refs.remotes.map((remote) => remote.name === "upstream" ? { ...remote, defaultBranch: "main" } : remote)
+  };
+  await render(repo, healthy);
+  expect(container.textContent).toContain("main pulls from and pushes to your fork. Sync in the Pull menu brings in the original's new work.");
+  expect(container.querySelector(".fork-route__grid")?.getAttribute("aria-label"))
+    .toBe("main pulls from and pushes to me/widget. Sync in the Pull menu brings in team/widget.");
+  expect(container.querySelector(".fork-route__arrow--ghost")?.textContent).toContain("Sync");
+  expect(container.textContent).not.toContain("Use your fork for main…");
+
+  await render(
+    { ...repo, worktrees: [{ ...worktree, branch: "feature" }] },
+    { ...healthy, branches: [{ ...healthy.branches[0]!, name: "feature", fullName: "refs/heads/feature", upstream: "origin/feature" }] }
+  );
+  expect(container.querySelector(".fork-route__grid")?.getAttribute("aria-label"))
+    .toBe("feature pulls from and pushes to me/widget.");
+  expect(container.querySelector(".fork-route__arrow--ghost")).toBeNull();
+
+  // A fetched branch of the same name on the original is proof enough.
+  const fetched = {
+    name: "feature", qualifiedName: "upstream/feature", fullName: "refs/remotes/upstream/feature",
+    head: "b".repeat(40), lastCommitAt: "2026-10-01T10:00:00Z", subject: "Add feature"
+  };
+  await render(
+    { ...repo, worktrees: [{ ...worktree, branch: "feature" }] },
+    {
+      ...healthy,
+      branches: [{ ...healthy.branches[0]!, name: "feature", fullName: "refs/heads/feature", upstream: "origin/feature" }],
+      remotes: healthy.remotes.map((remote) => remote.name === "upstream" ? { ...remote, previewBranches: [fetched] } : remote)
+    }
+  );
+  expect(container.querySelector(".fork-route__arrow--ghost")?.textContent).toContain("Sync");
+});
+
+it("draws nothing for a branch that follows neither the fork nor its parent", async () => {
+  await render(repo, { ...refs, branches: [{ ...refs.branches[0]!, upstream: "elsewhere/main" }] });
+  expect(container.querySelector(".fork-route")).toBeNull();
+  expect(container.textContent).toContain("me/widget is recognized as a fork.");
 });
 
 it("recognizes an old fork through an explicit re-check even if no metadata was stored", async () => {

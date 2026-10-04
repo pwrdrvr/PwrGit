@@ -2421,8 +2421,16 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
       ["Pull origin/main only", "false"]
     ]);
     expect(row("Sync with upstream/main")?.textContent).toContain(
-      "Your default for this repo. Fast-forward main 10 commits, then push them to origin/main."
+      "Your default for this repo. Fast-forward main 10 commits, then push them to your fork."
     );
+    // Each choice draws its route. The original is named by the forge's
+    // parent; with no identity for origin, the fork falls back to its
+    // nickname rather than guessing a repository.
+    const route = (title: string) =>
+      row(title)?.querySelector(".pull-menu__route [role='img']")?.getAttribute("aria-label");
+    expect(route("Sync with upstream/main")).toBe("octo-labs/sparkline to main, then to origin");
+    expect(route("Pull upstream/main only")).toBe("octo-labs/sparkline to main");
+    expect(route("Pull origin/main only")).toBe("origin to main");
     expect(row("Pull origin/main only")?.textContent).toContain("Your fork's own tip.");
     expect(row("Pull origin/main only")?.textContent).not.toContain("Your default");
 

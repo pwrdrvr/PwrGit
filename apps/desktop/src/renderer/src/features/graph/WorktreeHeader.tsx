@@ -39,7 +39,8 @@ import { readPullChoice, writePullChoice, type PullChoice } from "./pull-choice"
 import { openResetToRemote } from "./reset-to-remote";
 import { SshRemoteRecoveryDialog } from "./SshRemoteRecoveryDialog";
 import { ForkCheckoutDialog } from "../sidebar/ForkCheckoutDialog";
-import { ForkRouteLine } from "../sidebar/ForkRoute";
+import { routeBranch } from "../sidebar/fork-checkout-dialog";
+import { ForkRouteLine, RouteLine } from "../sidebar/ForkRoute";
 import {
   ForkTrackingRecoveryDialog,
   type ForkTrackingDone,
@@ -280,6 +281,9 @@ function pullMenuRows(
   fork: ForkChoice,
   trackedBehind: number,
   choice: PullChoice,
+  /** `owner/name` of the original and of the fork, or their nicknames when
+   *  the forge has not named them. */
+  repos: { original: string; fork: string },
   on: {
     pick: (choice: PullChoice) => void;
     rebase: () => void;
@@ -294,6 +298,10 @@ function pullMenuRows(
       rebase review.
     </>
   );
+  // Each choice is a route; the refs in the titles name remotes, and the
+  // line under each says which repositories those are. The details then
+  // keep the counts and drop the refs they used to repeat.
+  // Design: `design/Fork Route Graphic - UX Review.dc.html`, 5b.
   const choices: PullMenuRow[] = [
     {
       key: "sync",
@@ -302,13 +310,23 @@ function pullMenuRows(
           Sync with <code>{source.label}</code>
         </>
       ),
+      route: (
+        <RouteLine
+          label={`${repos.original} to ${branch}, then to ${repos.fork}`}
+          stops={[
+            { text: repos.original, kind: "repo" },
+            { text: branch, kind: "here" },
+            { text: repos.fork, kind: "go" }
+          ]}
+        />
+      ),
       detail: own ? (
         stops
       ) : (
         <>
           Fast-forward <code>{branch}</code>
           {source.behind > 0 ? ` ${commits(source.behind)}` : ""}, then push{" "}
-          {source.behind > 0 ? "them " : ""}to <code>{tracked.label}</code>.
+          {source.behind > 0 ? "them " : ""}to your fork.
         </>
       ),
       onSelect: () => on.pick("sync")
@@ -320,12 +338,20 @@ function pullMenuRows(
           Pull <code>{source.label}</code> only
         </>
       ),
+      route: (
+        <RouteLine
+          label={`${repos.original} to ${branch}`}
+          stops={[
+            { text: repos.original, kind: "repo" },
+            { text: branch, kind: "here" }
+          ]}
+        />
+      ),
       detail: own ? (
         stops
       ) : (
         <>
-          Fast-forward <code>{branch}</code>. <code>{tracked.label}</code> stays
-          where it is until you push.
+          Fast-forward <code>{branch}</code>. Your fork waits until you push.
         </>
       ),
       onSelect: () => on.pick("source")
@@ -336,6 +362,15 @@ function pullMenuRows(
         <>
           Pull <code>{tracked.label}</code> only
         </>
+      ),
+      route: (
+        <RouteLine
+          label={`${repos.fork} to ${branch}`}
+          stops={[
+            { text: repos.fork, kind: "repo" },
+            { text: branch, kind: "here" }
+          ]}
+        />
       ),
       detail:
         trackedBehind > 0
@@ -563,6 +598,8 @@ export function WorktreeHeader({
    *  question is open. Loaded BEFORE the dialog opens, so its list never
    *  arrives under a dialog the user is already reading. */
   const [publishing, setPublishing] = useState<RemoteEndpoint[] | null>(null);
+  /** Publish offered Fork… instead of a push the forge would refuse. */
+  const publishAfterFork = useRef(false);
   /** The Push button as it was clicked, so a card can hang off it once the
    *  publish question has been answered. A ref rather than the trigger
    *  factory's `cardButton`, which only points at a button while it carries
@@ -642,6 +679,7 @@ export function WorktreeHeader({
     // A receipt offering Push belongs to the checkout it repaired.
     dismissToastKey(FORK_TRACKING_RECEIPT);
     setPublishing(null);
+    publishAfterFork.current = false;
     setDivergenceFork(null);
     askingWhere.current = null;
   }, [worktree.id]);
@@ -1497,6 +1535,14 @@ export function WorktreeHeader({
       : forkChoice === null
       ? null
       : pullMenuRows(forkChoice, behind, choice, {
+          original: forkChoice.source.parent ?? forkChoice.source.remote,
+          // `identity` is about origin, so it names the fork only when the
+          // branch follows origin and the forge called origin a fork.
+          fork:
+            forkChoice.tracked.remote === "origin" && repo.identity?.parent !== undefined
+              ? repo.identity.nameWithOwner
+              : forkChoice.tracked.remote
+        }, {
           pick: pickPullChoice,
           rebase: () => {
             if (running !== null) return;
@@ -1821,6 +1867,14 @@ export function WorktreeHeader({
         <PublishBranchDialog
           branch={worktree.branch}
           remotes={publishing}
+          identity={repo.identity}
+          onFork={() => {
+            // Forked from here, the question comes back afterwards with the
+            // fork as origin — the publish the user set out to do.
+            publishAfterFork.current = true;
+            setPublishing(null);
+            setForkPrompt({ tracking: null });
+          }}
           onClose={() => setPublishing(null)}
           onPublish={(target) => {
             setPublishing(null);
@@ -1838,6 +1892,7 @@ export function WorktreeHeader({
           repo={repo}
           worktreeId={worktree.id}
           entry={forkPrompt.tracking}
+          forkBranch={routeBranch(worktree)}
           onClose={() => setForkPrompt(null)}
           onRepaired={(done) => {
             const refused = forkPrompt.tracking?.from === "push";
@@ -1859,9 +1914,17 @@ export function WorktreeHeader({
           profileId={repo.profileId}
           repoId={repo.id}
           repoName={repo.identity?.nameWithOwner ?? repo.name}
-          onClose={() => setForkPrompt(null)}
+          branch={routeBranch(worktree)}
+          onClose={() => {
+            publishAfterFork.current = false;
+            setForkPrompt(null);
+          }}
           onForked={() => {
             setForkPrompt(null);
+            if (publishAfterFork.current) {
+              publishAfterFork.current = false;
+              void askWhereToPublish();
+            }
             // The repo row is unchanged — same folder, same name — so the
             // flash names the thing that did move.
             showFlash({ text: "origin is now your fork", tone: "ok" }, 2600);
