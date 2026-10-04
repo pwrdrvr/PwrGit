@@ -2997,6 +2997,17 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     });
   };
 
+  it("shows local commits and missing tracking together without claiming a push destination", async () => {
+    await mount({ state: snapshot({ ahead: 1 }) });
+    const chip = container.querySelector(".sync-chip:not(.sync-chip--drift)");
+    expect(chip?.textContent).toBe("↑1 local · no upstream");
+    await act(async () => chip?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    expect(document.querySelector('[role="tooltip"]')?.textContent)
+      .toContain("1 commit not on fetched remote branches");
+    await mount({ state: snapshot({ ahead: 0 }) });
+    expect(container.querySelector(".sync-chip:not(.sync-chip--drift)")?.textContent).toBe("no upstream");
+  });
+
   it("asks where to publish, and pushes nothing until it is answered", async () => {
     await mount();
     await clickPush();

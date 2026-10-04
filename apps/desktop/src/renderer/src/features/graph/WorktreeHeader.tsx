@@ -107,6 +107,11 @@ function baseChip(
   const fromSource = source === null ? null : forkSourceChip(source);
   if (fromSource !== null) return fromSource;
   if (state === null) return { text: "…", tone: "muted" };
+  if (!state.hasUpstream) {
+    return state.ahead > 0
+      ? { text: `↑${state.ahead} local · no upstream`, tone: "ok", mid: `↑${state.ahead} local` }
+      : { text: "no upstream", tone: "muted" };
+  }
   if (state.behind > 0) {
     const ahead = state.ahead > 0 ? ` · ↑${state.ahead}` : "";
     return {
@@ -118,7 +123,6 @@ function baseChip(
   if (state.ahead > 0) {
     return { text: `↑${state.ahead} ahead`, tone: "ok", mid: `↑${state.ahead}` };
   }
-  if (!state.hasUpstream) return { text: "no upstream", tone: "muted" };
   // Git names the upstream but has nothing to count against: its remote
   // branch was deleted. "up to date" was what this used to say.
   if (state.upstreamGone === true) {
@@ -158,12 +162,16 @@ function chipExplanation(
     return `${who} ${branch} is ${commits(source.behind)} behind ${source.label}.${own}${trackedLine}`;
   }
   if (state === null) return undefined;
+  if (!state.hasUpstream) {
+    const local = state.ahead > 0
+      ? `${commits(state.ahead)} not on fetched remote branches. ` : "";
+    return `${local}${branch} has no upstream configured — Push chooses a remote and sets tracking`;
+  }
   if (state.behind > 0) {
     return `${commits(state.behind)} to pull from the branch ${branch} tracks` +
       (state.ahead > 0 ? `, and ${commits(state.ahead)} to push` : "");
   }
   if (state.ahead > 0) return `${commits(state.ahead)} to push`;
-  if (!state.hasUpstream) return `${branch} tracks nothing yet — Push publishes it`;
   if (state.upstreamGone === true) {
     return `The remote branch ${branch} tracked was deleted, usually because the work landed`;
   }

@@ -72,9 +72,20 @@ export async function checkSelectedRemoteTips(
       return err({ kind: "remote", code: "remote_config_failed", message: "The tracked branch has no remote head." });
     }
     targets.push({ remote: tracked.name, remoteRef, localRef: upstreamRef });
+  } else if (upstreamRef === null && !branch.startsWith("detached@")) {
+    // A branch may be published without -u. Refresh its counterparts so
+    // local-only counts do not keep reporting commits already pushed by
+    // another client. Keep tracking configuration untouched.
+    for (const endpoint of endpoints.value) {
+      targets.push({
+        remote: endpoint.name,
+        remoteRef: `refs/heads/${branch}`,
+        localRef: `refs/remotes/${endpoint.name}/${branch}`
+      });
+    }
   }
   const source = forkSourceRemote(endpoints.value, tracked?.name ?? null, parent);
-  if (source !== null) {
+  if (source !== null && !targets.some((target) => target.remote === source.remote)) {
     const prefix = `refs/remotes/${source.remote}/`;
     const sourceRef = `${prefix}${trackedBranch}`;
     targets.push({ remote: source.remote, remoteRef: `refs/heads/${trackedBranch}`, localRef: sourceRef });
