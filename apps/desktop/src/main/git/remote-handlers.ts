@@ -4,7 +4,9 @@ import {
   type PullProgressPhase,
   type PwrGitError,
   type RemoteActivityPhase,
+  type CloneRepository,
   type ForkStatus,
+  type ForkTrackingOffer,
   type ForgeHostMap,
   type RepoIdentity,
   type Result
@@ -71,7 +73,11 @@ import {
 } from "./ssh-remote-recovery";
 import { RemoteTipChecker } from "./remote-tip-checker";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { mapLimit } from "../util/map-limit";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
+
+/** Forge reads at once while confirming extra forks for tracking repair. */
+const FORK_CANDIDATE_READS = 3;
 
 const seconds = (startedAt: number): string =>
   `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
@@ -207,6 +213,13 @@ export function registerRemoteHandlers(
   /** The stored forge identity, for the reset dialog's fork-source card. */
   readIdentity?: (repoId: string) => RepoIdentity | undefined,
   hostsForRemotes?: () => ForgeHostMap,
+  /** One repository as the forge reports it, or null when the host is off,
+   *  unknown, or will not answer. Confirms the extra forks the tracking
+   *  repair may offer; without it only `origin` is ever offered. */
+  viewForgeRepo?: (
+    identity: Pick<RepoIdentity, "host" | "hostname">,
+    nameWithOwner: string
+  ) => Promise<CloneRepository | null>,
   isFocused: () => boolean = () => true
 ): RemoteTipChecker {
   // Every long-running remote command reports through one registry: the live
@@ -1162,18 +1175,46 @@ export function registerRemoteHandlers(
     return entry.running;
   };
 
-  const trackingInspections = new Map<string, ReturnType<typeof inspectForkTracking>>();
+  const trackingInspections = new Map<string, Promise<Result<ForkTrackingOffer | null>>>();
   bus.register("remote:inspectForkTracking", async (req) => {
     const ongoing = trackingInspections.get(req.worktreeId);
     if (ongoing !== undefined) return ongoing;
     const live = worktreeOf(req.worktreeId);
     if (!live.ok) return live;
     const worktree = live.value;
-    const read = operations.run(req.worktreeId, () => operations.runRepository(
-      worktree.repoId, () => inspectForkTracking(
-        execGit, worktree.path, readIdentity?.(worktree.repoId), hostsForRemotes?.()
-      )
-    ));
+    const identity = readIdentity?.(worktree.repoId);
+    const read = (async (): Promise<Result<ForkTrackingOffer | null>> => {
+      const inspected = await operations.run(req.worktreeId, () => operations.runRepository(
+        worktree.repoId, () => inspectForkTracking(
+          execGit, worktree.path, identity, hostsForRemotes?.()
+        )
+      ));
+      if (!inspected.ok || inspected.value === null) return inspected.ok ? ok(null) : inspected;
+      const { offer, candidates } = inspected.value;
+      if (identity === undefined || viewForgeRepo === undefined || candidates.length === 0) {
+        return ok(offer);
+      }
+      // Outside the lock: these are network reads. A remote's URL says only
+      // where it points; the forge says whether that is another fork of the
+      // same parent, and whether you may push there. Anything unanswered is
+      // left out rather than offered on a guess.
+      // Bounded: each read is a CLI process, and a checkout can carry a
+      // remote per contributor.
+      const parent = offer.parent.toLowerCase();
+      const confirmed = new Set<string>();
+      await mapLimit(candidates, FORK_CANDIDATE_READS, async (candidate) => {
+        const repository = await viewForgeRepo(identity, candidate.nameWithOwner).catch(() => null);
+        if (
+          repository !== null && repository.viewerCanPush === true &&
+          repository.parent?.nameWithOwner.toLowerCase() === parent
+        ) confirmed.add(candidate.remote);
+      });
+      // In the order the remotes are listed, not the order the forge answered.
+      return ok({
+        ...offer,
+        targets: [...offer.targets, ...candidates.filter((row) => confirmed.has(row.remote))]
+      });
+    })();
     trackingInspections.set(req.worktreeId, read);
     try {
       return await read;

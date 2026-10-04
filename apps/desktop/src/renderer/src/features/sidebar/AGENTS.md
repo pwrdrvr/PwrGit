@@ -146,3 +146,22 @@ is still that checkout: it asks `repo:forkCheckoutPreflight`, submits
 `ForkCheckoutDialog`) instead of Clone with / Check out to. Reveal still wins
 when your fork is already checked out elsewhere. Design:
 `design/Fork While Cloning - UX Review.dc.html`.
+
+## Fork tracking repair draws the route, from one dialog
+
+A branch can be left pulling from and pushing to the fork's parent after a
+remote rename. Push (refused), Pull's menu and the Remotes card all open
+`ForkTrackingRecoveryDialog`; none of them changes the branch's upstream
+without it. `ForkRoute` draws Now and After as three boxes (the original,
+this checkout, the fork), so the change reads without Git's vocabulary; the
+command itself sits under "In Git terms". Two rules:
+
+- **Only a refused push says the original is closed to you.** `viewerCanPush`
+  is known for `origin` alone, and a maintainer can have a fork and still push
+  upstream, so the Pull and Remotes entries draw no refusal and no "can't push".
+- **A fork other than `origin` is offered only once the forge confirms it**
+  forks the same parent and takes your pushes. `remote:inspectForkTracking`
+  asks after releasing the repository lock; the renderer never guesses from a
+  remote's URL. Two or more draws the scrolling Push to list.
+
+Design: `design/Fork Tracking Repair - UX Review.dc.html`, 2b and 4a.

@@ -10,6 +10,8 @@ import {
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { useForgeHostMap } from "../../lib/useForgeHostMap";
+import { ForkRouteLine } from "./ForkRoute";
+import { ForkTrackingRecoveryDialog } from "./ForkTrackingRecoveryDialog";
 
 /** Keep the relationship and its repair visible where people edit remotes. */
 export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
@@ -20,7 +22,10 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
 }) {
   const hosts = useForgeHostMap();
   const [identity, setIdentity] = useState(repo.identity);
-  const [busy, setBusy] = useState<"refresh" | "repair" | null>(null);
+  const [busy, setBusy] = useState(false);
+  /** The repair is reviewed in the same dialog Push and Pull open, with its
+   *  picture of what changes, rather than applied from here unseen. */
+  const [reviewing, setReviewing] = useState(false);
   const pending = useRef(false);
   const [message, setMessage] = useState<string | null>(null);
   const [repaired, setRepaired] = useState<string | null>(null);
@@ -35,48 +40,36 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
   const parsedOrigin = origin === undefined ? null : parseForgeRemote(origin.fetchUrl, hosts);
   if (parsedOrigin === null || !isForgeKind(parsedOrigin.host)) return null;
 
-  const run = async (kind: "refresh" | "repair"): Promise<void> => {
+  const recheck = async (): Promise<void> => {
     if (pending.current) return;
     pending.current = true;
-    setBusy(kind);
+    setBusy(true);
     setMessage(null);
     try {
-      if (kind === "repair" && offer !== null && worktree !== undefined && worktree !== null) {
-        const result = await dispatch("remote:repairForkTracking", {
-          worktreeId: worktree.id, branch: offer.branch, upstream: offer.upstream
-        });
-        if (!result.ok) setMessage(result.error.message);
-        else {
-          setRepaired(`${offer.branch}:${offer.upstream}`);
-          setMessage(`${offer.branch} now tracks ${offer.target}. Branch commits and files are unchanged.`);
-          await onRefresh();
-        }
-      } else if (kind === "refresh") {
-        const result = await dispatch("repo:refreshIdentities", {
-          profileId: repo.profileId, repoId: repo.id, force: true
-        });
-        if (!result.ok) setMessage(result.error.message);
-        else {
-          const outcome = result.value.outcomes.find((row) => row.repoId === repo.id);
-          if (outcome?.status === "resolved") {
-            setIdentity(outcome.identity);
-            setMessage(outcome.identity?.parent === undefined
-              ? "The forge reports that origin is not a fork."
-              : "Fork relationship refreshed.");
-          } else {
-            setMessage(outcome?.status === "signed_out"
-              ? "Sign in in Settings → Forges, then re-check origin."
-              : outcome?.status === "host_disabled"
-                ? `${outcome.hostname} is switched off in Settings → Forges.`
-                : "Could not determine the fork relationship. Check Settings → Forges or Logs, then re-check origin.");
-          }
+      const result = await dispatch("repo:refreshIdentities", {
+        profileId: repo.profileId, repoId: repo.id, force: true
+      });
+      if (!result.ok) setMessage(result.error.message);
+      else {
+        const outcome = result.value.outcomes.find((row) => row.repoId === repo.id);
+        if (outcome?.status === "resolved") {
+          setIdentity(outcome.identity);
+          setMessage(outcome.identity?.parent === undefined
+            ? "The forge reports that origin is not a fork."
+            : "Fork relationship refreshed.");
+        } else {
+          setMessage(outcome?.status === "signed_out"
+            ? "Sign in in Settings → Forges, then re-check origin."
+            : outcome?.status === "host_disabled"
+              ? `${outcome.hostname} is switched off in Settings → Forges.`
+              : "Could not determine the fork relationship. Check Settings → Forges or Logs, then re-check origin.");
         }
       }
     } catch {
-      setMessage("Could not update fork tracking. Re-check origin or see Logs.");
+      setMessage("Could not re-check origin. See Logs.");
     } finally {
       pending.current = false;
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -87,12 +80,24 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
         ? <p>{currentIdentity?.parent === undefined
           ? "Re-check origin to recognize an existing fork, including one set up outside PwrGit."
           : `${currentIdentity.nameWithOwner} is recognized as a fork.`}</p>
-        : <p>{offer.branch} still tracks {offer.upstream}. Track {offer.target} to pull and push through your fork. This changes tracking only; it does not move commits or push.</p>}
+        : <>
+          <p><ForkRouteLine branch={offer.branch} original={currentIdentity?.parent?.nameWithOwner ?? offer.upstream} /></p>
+          <p>{offer.branch} pulls from and pushes to the original instead of your fork, {currentIdentity?.nameWithOwner ?? "origin"}.</p>
+        </>}
       {message !== null && <p role="status">{message}</p>}
     </div>
     <div className="refs-remote-card__actions">
-      {offer !== null && <button disabled={busy !== null} aria-busy={busy === "repair"} onClick={() => void run("repair")}>{busy === "repair" ? "Updating…" : `Track ${offer.target}`}</button>}
-      <button disabled={busy !== null} aria-busy={busy === "refresh"} onClick={() => void run("refresh")}>{busy === "refresh" ? "Checking…" : "Re-check origin"}</button>
+      {offer !== null && worktree != null && <button className="is-primary" disabled={busy}
+        onClick={() => setReviewing(true)}>Use your fork for {offer.branch}…</button>}
+      <button disabled={busy} aria-busy={busy} onClick={() => void recheck()}>{busy ? "Checking…" : "Re-check origin"}</button>
     </div>
+    {reviewing && worktree != null && <ForkTrackingRecoveryDialog repo={repo} worktreeId={worktree.id}
+      entry={{ from: "remotes" }} onClose={() => setReviewing(false)}
+      onRepaired={(done) => {
+        setReviewing(false);
+        if (offer !== null) setRepaired(`${offer.branch}:${offer.upstream}`);
+        setMessage(`${done.branch} now pulls from and pushes to ${done.target.nameWithOwner}. Its commits and files are unchanged.`);
+        void onRefresh();
+      }} />}
   </section>;
 }
