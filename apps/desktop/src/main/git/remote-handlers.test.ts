@@ -49,7 +49,7 @@ import {
 import type { WorktreeRefresher } from "./worktree-handlers";
 import type { RepoIndexer } from "./repo-indexer";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
-import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
+import { checkRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import { execGit } from "./dugite";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
 
@@ -86,8 +86,12 @@ vi.mock("./dugite", async (importOriginal) => {
 });
 vi.mock("../ipc", () => ({ emitEvent: vi.fn() }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
+const { checkSelectedRemoteTips } = vi.hoisted(() => ({ checkSelectedRemoteTips: vi.fn() }));
 vi.mock("./auto-remote-check", () => ({
-  checkSelectedRemoteTips: vi.fn(),
+  checkRemoteTips: vi.fn(async (git, worktrees, parent, exclusive, fetched) =>
+    new Map(await Promise.all(worktrees.map(async (w: { id: string; path: string; branch: string }) =>
+      [w.id, await checkSelectedRemoteTips(git, w.path, w.branch, parent, exclusive, fetched)] as const)))
+  ),
   ensureForkParentRemote: vi.fn()
 }));
 vi.mock("./ssh-remote-recovery", () => ({
@@ -366,6 +370,35 @@ describe("remote handlers", () => {
     expect(await bus.dispatch("remote:checkSelected", { worktreeId: "wt-a" }))
       .toEqual(ok({ status: "checked" }));
     expect(checkSelectedRemoteTips).toHaveBeenCalledTimes(4);
+  });
+
+  it("sends visible worktrees of one canonical repo in a single batch and retains its cooldown across branches", async () => {
+    vi.useFakeTimers();
+    const rows = new Map([
+      ["wt-main", { path: "/repo", repoId: "repo-a", branch: "main" }],
+      ["wt-topic", { path: "/linked", repoId: "repo-a", branch: "topic" }]
+    ]);
+    const db = { prepare: (sql: string) => ({
+      get: (id: string) => sql.includes("FROM worktrees") ? rows.get(id)
+        : { path: "/repo", name: "repo", profileId: "profile-a" }
+    }) } as unknown as DB;
+    const checker = registerRemoteHandlers(new CommandBus(), db, {
+      refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn()
+    }, new WorktreeOperationQueue());
+    try {
+      checker.report(1, ["wt-main", "wt-topic"]);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(checkRemoteTips).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(checkRemoteTips).mock.calls[0]?.[1].map((w) => w.branch)).toEqual(["main", "topic"]);
+      rows.get("wt-topic")!.branch = "changed";
+      checker.report(1, ["wt-topic"]);
+      checker.focus();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(checkRemoteTips).toHaveBeenCalledTimes(1);
+      await checker.request("wt-topic", "hover").result;
+      expect(checkRemoteTips).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(checkRemoteTips).mock.calls[1]?.[1].map((w) => w.branch)).toEqual(["changed"]);
+    } finally { checker.stop(); }
   });
 
   it("checks without registering an activity, and gives way to a user fetch", async () => {

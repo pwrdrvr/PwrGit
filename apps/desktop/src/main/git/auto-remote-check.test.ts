@@ -7,7 +7,7 @@ import { ok } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
 import { createSystemGit } from "./test-support/system-git";
 import { timedGitSync } from "./test-support/git-tripwire";
-import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
+import { checkRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import { RemoteTipChecker } from "./remote-tip-checker";
 import { resolveForkStatus } from "./git-service";
 
@@ -19,6 +19,13 @@ function git(cwd: string, ...args: string[]): string {
       cwd: tmpdir(), encoding: "utf8"
     }).trim()
   );
+}
+
+async function checkSelectedRemoteTips(
+  git: GitExec, cwd: string, branch: string, parent: Parameters<typeof checkRemoteTips>[2],
+  exclusive: Parameters<typeof checkRemoteTips>[3], onFetched: () => void
+) {
+  return (await checkRemoteTips(git, [{ id: "selected", path: cwd, branch }], parent, exclusive, onFetched)).get("selected")!;
 }
 
 function forkFixture(): { origin: string; source: string; writer: string; local: string } {
@@ -47,6 +54,42 @@ function forkFixture(): { origin: string; source: string; writer: string; local:
 const unlocked = <T>(run: () => Promise<T>): Promise<T> => run();
 
 describe("automatic selected-branch remote check", () => {
+  it("advertises each remote once for two real worktrees and applies each branch's distinct tip", async () => {
+    const { writer, local } = forkFixture();
+    git(writer, "push", "origin", "main:topic");
+    git(local, "fetch", "origin");
+    const linked = join(mkdtempSync(join(tmpdir(), "pwrgit-batched-worktree-")), "topic");
+    git(local, "worktree", "add", "-b", "topic", linked, "origin/topic");
+    git(writer, "commit", "--allow-empty", "-m", "main 1");
+    git(writer, "push", "origin", "main:topic");
+    git(writer, "commit", "--allow-empty", "-m", "main 2");
+    git(writer, "push", "origin", "main");
+    const commands: string[][] = [];
+    const recorded: GitExec = (args, cwd, options) => {
+      commands.push(args);
+      return systemGit(args, cwd, options);
+    };
+    const answers = await checkRemoteTips(recorded, [
+      { id: "main", path: local, branch: "main" },
+      { id: "topic", path: linked, branch: "topic" }
+    ], null, unlocked, () => undefined);
+    expect(answers).toEqual(new Map([["main", ok("checked")], ["topic", ok("checked")]]));
+    expect(commands.filter(([name]) => name === "ls-remote")).toEqual([
+      ["ls-remote", "--heads", "origin", "refs/heads/main", "refs/heads/topic"],
+      ["ls-remote", "--heads", "upstream", "refs/heads/main", "refs/heads/topic"]
+    ]);
+    expect(git(local, "rev-list", "--count", "HEAD..origin/main")).toBe("2");
+    expect(git(linked, "rev-list", "--count", "HEAD..origin/topic")).toBe("1");
+    // Absence is per ref, even when another requested head is advertised.
+    git(writer, "push", "origin", "--delete", "topic");
+    expect((await checkRemoteTips(recorded, [
+      { id: "main", path: local, branch: "main" },
+      { id: "topic", path: linked, branch: "topic" }
+    ], null, unlocked, () => undefined)).get("main")).toEqual(ok("checked"));
+    expect(git(local, "branch", "-r")).toContain("origin/main");
+    expect(git(local, "branch", "-r")).not.toContain("origin/topic");
+  });
+
   it("preserves sanitized DNS failure detail so the shared checker can pause the network", async () => {
     const { local } = forkFixture();
     const failingGit: GitExec = (args, cwd, options) => args[0] === "ls-remote"
@@ -76,13 +119,13 @@ describe("automatic selected-branch remote check", () => {
     const checked: string[] = [];
     const checker = new RemoteTipChecker({
       isFocused: () => true,
-      check: async (id) => {
-        checked.push(id);
+      check: async (ids) => {
+        checked.push(...ids);
         const result = await checkSelectedRemoteTips(
           systemGit, local, "main", null, unlocked, () => undefined
         );
         behind = Number(git(local, "rev-list", "--count", "HEAD..origin/main"));
-        return result.ok ? ok({ status: result.value }) : result;
+        return new Map(ids.map((id) => [id, result.ok ? ok({ status: result.value }) : result]));
       }
     });
     try {

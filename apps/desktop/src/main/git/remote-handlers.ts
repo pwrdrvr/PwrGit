@@ -17,7 +17,7 @@ import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import { execGit, sanitizeGitLogDetail, type GitExec } from "./dugite";
 import { addForkParentRemote } from "./fork-remotes";
-import { checkSelectedRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
+import { checkRemoteTips, ensureForkParentRemote } from "./auto-remote-check";
 import {
   addRemote,
   commitsSince,
@@ -399,8 +399,6 @@ export function registerRemoteHandlers(
   // operation on the same repository (see `yieldAutoChecks` in `tracked`).
   type AutoCheckStatus = "checked" | "untracked" | "unavailable" | "superseded";
   const AUTO_CHECK_SUPERSEDED = "superseded by a remote operation";
-  const autoChecks = new Map<string, Promise<{ status: AutoCheckStatus }>>();
-  const autoCheckCache = new Map<string, { at: number; repoId: string; status: Exclude<AutoCheckStatus, "superseded"> }>();
   const autoCheckAborts = new Map<string, Set<AbortController>>();
   let networkPausedUntil = 0;
 
@@ -408,117 +406,95 @@ export function registerRemoteHandlers(
     for (const controller of autoCheckAborts.get(repoId) ?? []) {
       controller.abort(AUTO_CHECK_SUPERSEDED);
     }
-    // The operation about to run answers the question itself; the next
-    // check after it must ask the remote again rather than repeat a stale
-    // "unavailable" from before it.
-    for (const [key, entry] of autoCheckCache) {
-      if (entry.repoId === repoId) autoCheckCache.delete(key);
-    }
+    tipChecker.invalidateRepository(repoId);
   };
   remoteOperationSucceeded = () => { networkPausedUntil = 0; };
 
   const tipChecker = new RemoteTipChecker({
     isFocused,
     keyFor: (id) => {
-      const row = db.prepare("SELECT branch FROM worktrees WHERE id = ?").get(id) as { branch: string | null } | undefined;
-      return `${id}\0${row?.branch ?? ""}`;
+      const row = worktreeOf(id);
+      return `${id}\0${row.ok ? row.value.branch ?? "" : ""}`;
     },
-    check: async (worktreeId, request) => {
-      const req = { worktreeId };
-      const live = worktreeOf(req.worktreeId);
-      if (!live.ok) return live;
-      const worktree = live.value;
-      if (worktree.branch === null) return ok({ status: "untracked" as const });
-      const branch = worktree.branch;
-      const repo = repoOf(worktree.repoId);
-      if (repo === null) return ok({ status: "unavailable" as const });
-      const key = `${req.worktreeId}\0${branch}`;
-      const pending = autoChecks.get(key);
-      if (pending !== undefined) return ok(await pending);
-      const cached = autoCheckCache.get(key);
-      const immediate = request.reason === "selected" || request.reason === "hover";
-      if (!immediate && cached !== undefined && Date.now() - cached.at < 60_000) {
-        return ok({ status: cached.status });
+    // RepoIndexer canonicalizes linked worktrees to their common Git-dir
+    // owner's primary path; its repo id is shared across all those checkouts.
+    repositoryFor: (id) => {
+      const row = worktreeOf(id);
+      return row.ok ? row.value.repoId : `missing:${id}`;
+    },
+    check: async (ids, request) => {
+      const answers = new Map<string, Result<{ status: AutoCheckStatus }>>();
+      const worktrees: { id: string; path: string; repoId: string; branch: string }[] = [];
+      for (const id of ids) {
+        const live = worktreeOf(id);
+        if (!live.ok) { answers.set(id, live); continue; }
+        if (live.value.branch === null) { answers.set(id, ok({ status: "untracked" })); continue; }
+        worktrees.push({ id, ...live.value, branch: live.value.branch });
       }
-      if (Date.now() < networkPausedUntil) {
-        return ok({ status: "unavailable" as const });
-      }
+      const first = worktrees[0];
+      if (first === undefined) return answers;
+      const repo = repoOf(first.repoId);
+      const finishAll = (status: AutoCheckStatus): typeof answers => {
+        for (const w of worktrees) answers.set(w.id, ok({ status }));
+        return answers;
+      };
+      if (repo === null || Date.now() < networkPausedUntil) return finishAll("unavailable");
       const controller = new AbortController();
-      const aborts = autoCheckAborts.get(worktree.repoId) ?? new Set();
+      const aborts = autoCheckAborts.get(first.repoId) ?? new Set();
       aborts.add(controller);
-      autoCheckAborts.set(worktree.repoId, aborts);
-      const checking = (async (): Promise<{ status: AutoCheckStatus }> => {
-        const timeout = AbortSignal.timeout(12_000);
-        const signal = AbortSignal.any([controller.signal, timeout]);
-        const git = controlledGit(execGit, { signal });
-        // Time spent queued behind someone else's lock is not the network
-        // being slow, and must not pause every other check for two minutes.
-        let waitedForLock = false;
-        const exclusive = <T>(run: () => Promise<T>): Promise<T> => {
-          const queuedAt = Date.now();
-          return operations.runRepository(worktree.repoId, () => {
-            if (Date.now() - queuedAt > 250) waitedForLock = true;
-            return run();
-          });
-        };
-        let fetched = false;
-        try {
-          if (controller.signal.aborted) return { status: "superseded" };
-          const result = await (async (): Promise<Result<"checked" | "untracked">> => {
-            const identity = readIdentity?.(worktree.repoId);
-            if (identity?.parent !== undefined) {
-              const parent = {
-                hostname: identity.hostname,
-                nameWithOwner: identity.parent.nameWithOwner
-              };
-              const ensured = await exclusive(() => ensureForkParentRemote(
-                git, worktree.path, parent,
-                { hostname: identity.hostname, nameWithOwner: identity.nameWithOwner },
-                hostsForRemotes?.() ?? {}
-              ));
-              if (!ensured.ok) return ensured;
-            }
-            return checkSelectedRemoteTips(
-              git, worktree.path, branch, forkParentOf(worktree.repoId),
-              exclusive,
-              () => { fetched = true; }
-            );
-          })();
-          if (controller.signal.aborted) return { status: "superseded" };
-          if (!result.ok) {
-            if ((timeout.aborted && !waitedForLock) || /network is unreachable|could not resolve|failed to connect|connection timed out|no route to host/i.test(result.error.message)) {
-              networkPausedUntil = Date.now() + 2 * 60_000;
-            }
-            logMain("debug", "remote", `automatic tip check (${request.reason}, userAction=${request.userAction}) unavailable for ${repo.path}: ${sanitizeGitLogDetail(result.error.message)}`);
-            return { status: "unavailable" };
-          }
-          return { status: result.value };
-        } catch (cause) {
-          if (controller.signal.aborted) return { status: "superseded" };
-          if (timeout.aborted && !waitedForLock) networkPausedUntil = Date.now() + 2 * 60_000;
-          logMain("debug", "remote", `automatic tip check (${request.reason}, userAction=${request.userAction}) unavailable for ${repo.path}: ${sanitizeGitLogDetail(cause)}`);
-          return { status: "unavailable" };
-        } finally {
-          if (fetched) {
-            await refreshRemoteBranches(worktree.repoId, "automatic check");
-            await refresher.refreshWorktree(req.worktreeId);
-            emitEvent("graph:changed", { repoId: worktree.repoId });
-          }
+      autoCheckAborts.set(first.repoId, aborts);
+      const timeout = AbortSignal.timeout(12_000);
+      const signal = AbortSignal.any([controller.signal, timeout]);
+      const git = controlledGit(execGit, { signal });
+      let waitedForLock = false;
+      const exclusive = <T>(run: () => Promise<T>): Promise<T> => {
+        const queuedAt = Date.now();
+        return operations.runRepository(first.repoId, () => {
+          if (Date.now() - queuedAt > 250) waitedForLock = true;
+          return run();
+        });
+      };
+      const unavailable = (cause: unknown): void => {
+        const detail = sanitizeGitLogDetail(cause);
+        if ((timeout.aborted && !waitedForLock) || /network is unreachable|could not resolve|failed to connect|connection timed out|no route to host/i.test(detail)) {
+          networkPausedUntil = Date.now() + 2 * 60_000;
         }
-      })();
-      autoChecks.set(key, checking);
+        logMain("debug", "remote", `automatic tip check (${request.reason}, userAction=${request.userAction}) unavailable for ${repo.path}: ${detail}`);
+      };
+      let fetched = false;
       try {
-        const answer = await checking;
-        // A superseded check learned nothing; caching it would hide the answer
-        // the next check gets once the user's own operation is done.
-        if (answer.status !== "superseded") {
-          autoCheckCache.set(key, { at: Date.now(), repoId: worktree.repoId, status: answer.status });
+        const identity = readIdentity?.(first.repoId);
+        if (identity?.parent !== undefined) {
+          const ensured = await exclusive(() => ensureForkParentRemote(
+            git, first.path,
+            { hostname: identity.hostname, nameWithOwner: identity.parent!.nameWithOwner },
+            { hostname: identity.hostname, nameWithOwner: identity.nameWithOwner },
+            hostsForRemotes?.() ?? {}
+          ));
+          if (controller.signal.aborted) return finishAll("superseded");
+          if (!ensured.ok) { unavailable(ensured.error.message); return finishAll("unavailable"); }
         }
-        return ok(answer);
+        const result = await checkRemoteTips(git, worktrees, forkParentOf(first.repoId), exclusive, () => { fetched = true; });
+        if (controller.signal.aborted) return finishAll("superseded");
+        for (const w of worktrees) {
+          const answer = result.get(w.id);
+          if (answer !== undefined && !answer.ok) unavailable(answer.error.message);
+          answers.set(w.id, ok({ status: answer?.ok ? answer.value : "unavailable" }));
+        }
+        return answers;
+      } catch (cause) {
+        if (controller.signal.aborted) return finishAll("superseded");
+        unavailable(cause);
+        return finishAll("unavailable");
       } finally {
-        autoChecks.delete(key);
         aborts.delete(controller);
-        if (aborts.size === 0) autoCheckAborts.delete(worktree.repoId);
+        if (aborts.size === 0) autoCheckAborts.delete(first.repoId);
+        if (fetched) {
+          await refreshRemoteBranches(first.repoId, "automatic check");
+          // Keep each queue slot to one Git-producing probe at a time.
+          for (const w of worktrees) await refresher.refreshWorktree(w.id);
+          emitEvent("graph:changed", { repoId: first.repoId });
+        }
       }
     }
   });
