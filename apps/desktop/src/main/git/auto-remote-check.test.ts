@@ -54,6 +54,50 @@ function forkFixture(): { origin: string; source: string; writer: string; local:
 const unlocked = <T>(run: () => Promise<T>): Promise<T> => run();
 
 describe("automatic selected-branch remote check", () => {
+  it.each([false, true])("resolves each worktree's effective tracking before batching (different endpoint: %s)", async (differentEndpoint) => {
+    const { writer, local, source, origin } = forkFixture();
+    git(local, "remote", "remove", "upstream");
+    git(writer, "push", "origin", "main:topic");
+    git(local, "fetch", "origin");
+    const linked = join(mkdtempSync(join(tmpdir(), "pwrgit-worktree-config-")), "topic");
+    git(local, "worktree", "add", "--no-track", "-b", "topic", linked, "origin/topic");
+    git(local, "config", "extensions.worktreeConfig", "true");
+    git(local, "config", "branch.topic.remote", "origin");
+    git(linked, "config", "--worktree", "branch.topic.merge", "refs/heads/topic");
+    if (differentEndpoint) {
+      // URL values are multi-valued, so keep each endpoint only in its own
+      // config.worktree rather than appending to the common URL list.
+      git(local, "config", "--local", "--unset-all", "remote.origin.url");
+      git(local, "config", "--worktree", "remote.origin.url", origin);
+      git(linked, "config", "--worktree", "remote.origin.url", source);
+      git(writer, "remote", "add", "alternate", source);
+    }
+    // The merge ref is visible only from the linked checkout's config.worktree.
+    expect(git(local, "for-each-ref", "--format=%(upstream)", "refs/heads/topic")).toBe("");
+    expect(git(linked, "rev-parse", "--symbolic-full-name", "@{u}")).toBe("refs/remotes/origin/topic");
+    git(writer, "commit", "--allow-empty", "-m", "topic 1");
+    git(writer, "push", differentEndpoint ? "alternate" : "origin", "main:topic");
+    git(writer, "commit", "--allow-empty", "-m", "main 2");
+    git(writer, "push", "origin", "main");
+    const advertisements: { args: string[]; cwd: string }[] = [];
+    const recorded: GitExec = (args, cwd, options) => {
+      if (args[0] === "ls-remote") advertisements.push({ args, cwd });
+      return systemGit(args, cwd, options);
+    };
+    expect(await checkRemoteTips(recorded, [
+      { id: "main", path: local, branch: "main" },
+      { id: "topic", path: linked, branch: "topic" }
+    ], null, unlocked, () => undefined)).toEqual(new Map([["main", ok("checked")], ["topic", ok("checked")]]));
+    expect(git(local, "rev-list", "--count", "HEAD..origin/main")).toBe("2");
+    expect(git(linked, "rev-list", "--count", "HEAD..origin/topic")).toBe("1");
+    expect(advertisements).toEqual(differentEndpoint ? [
+      { args: ["ls-remote", "--heads", "origin", "refs/heads/main"], cwd: local },
+      { args: ["ls-remote", "--heads", "origin", "refs/heads/topic"], cwd: linked }
+    ] : [
+      { args: ["ls-remote", "--heads", "origin", "refs/heads/main", "refs/heads/topic"], cwd: local }
+    ]);
+  });
+
   it("advertises each remote once for two real worktrees and applies each branch's distinct tip", async () => {
     const { writer, local } = forkFixture();
     git(writer, "push", "origin", "main:topic");

@@ -45,55 +45,43 @@ export async function checkRemoteTips(
   onFetched: () => void
 ): Promise<Map<string, TipAnswer>> {
   const answers = new Map<string, TipAnswer>();
-  const cwd = worktrees[0]?.path;
-  if (cwd === undefined) return answers;
-  const endpoints = await listRemoteEndpoints(git, cwd);
-  if (!endpoints.ok) return new Map(worktrees.map((w) => [w.id, endpoints]));
-  const tracking = await git([
-    "for-each-ref", "--format=%(refname)%00%(upstream)", "refs/heads"
-  ], cwd);
-  if (!tracking.ok) return new Map(worktrees.map((w) => [w.id, tracking]));
-  if (tracking.value.exitCode !== 0) return new Map(worktrees.map((w) => [w.id, err({
-    kind: "remote", code: "remote_config_failed", message: "Could not read branch tracking."
-  })]));
-  const upstreams = new Map(tracking.value.stdout.trim().split("\n").map((line) => {
-    const [ref, upstream] = line.split("\0");
-    return [ref?.slice("refs/heads/".length), upstream || null] as const;
-  }));
-  const config = await git(["config", "--get-regexp", "^branch\\..*\\.merge$"], cwd);
-  if (!config.ok) return new Map(worktrees.map((w) => [w.id, config]));
-  if (config.value.exitCode !== 0 && config.value.exitCode !== 1) return new Map(worktrees.map((w) => [w.id, err({
-    kind: "remote", code: "remote_config_failed", message: "Could not read branch merge refs."
-  })]));
-  const merges = new Map(config.value.stdout.trim().split("\n").map((line) => {
-    const split = line.indexOf(" ");
-    return [line.slice(0, split), line.slice(split + 1)] as const;
-  }));
   const symbolicHeads = new Map<string, Promise<Awaited<ReturnType<GitExec>>>>();
-  const symbolicHead = (ref: string): ReturnType<GitExec> => {
-    let result = symbolicHeads.get(ref);
-    if (result === undefined) {
-      result = git(["symbolic-ref", "--quiet", ref], cwd);
-      symbolicHeads.set(ref, result);
-    }
-    return result;
-  };
-  const byRemote = new Map<string, Map<string, { target: Target; owners: Set<string> }>>();
+  const byRemote = new Map<string, {
+    remote: string; cwd: string;
+    targets: Map<string, { target: Target; cwd: string; owners: Set<string> }>
+  }>();
   for (const worktree of worktrees) {
-    const planned = await remoteTargets(worktree.branch, parent, endpoints.value,
-      upstreams.get(worktree.branch) ?? null, merges.get(`branch.${worktree.branch}.merge`) ?? "", symbolicHead);
+    // Tracking, conditional includes, and remote URLs are effective checkout
+    // configuration, even though these worktrees share the same ref storage.
+    const config = await readTrackingConfiguration(git, worktree.path, worktree.branch);
+    if (!config.ok) { answers.set(worktree.id, config); continue; }
+    const { endpoints, upstreamRef, mergeRef } = config.value;
+    const symbolicHead = (ref: string): ReturnType<GitExec> => {
+      const key = `${worktree.path}\0${ref}`;
+      let result = symbolicHeads.get(key);
+      if (result === undefined) {
+        result = git(["symbolic-ref", "--quiet", ref], worktree.path);
+        symbolicHeads.set(key, result);
+      }
+      return result;
+    };
+    const planned = await remoteTargets(worktree.branch, parent, endpoints, upstreamRef, mergeRef, symbolicHead);
     if (!planned.ok) { answers.set(worktree.id, planned); continue; }
     answers.set(worktree.id, ok(planned.value.length === 0 ? "untracked" : "checked"));
     for (const target of planned.value) {
-      const targets = byRemote.get(target.remote) ?? new Map();
-      byRemote.set(target.remote, targets);
-      const key = `${target.remoteRef}\0${target.localRef}`;
-      const entry = targets.get(key) ?? { target, owners: new Set<string>() };
+      const endpoint = endpoints.find((endpoint) => endpoint.name === target.remote)!;
+      // A worktree override can give the same remote name a different URL.
+      // Only advertisements for the same effective endpoint may be shared.
+      const key = `${target.remote}\0${endpoint.fetchUrl}`;
+      const group = byRemote.get(key) ?? { remote: target.remote, cwd: worktree.path, targets: new Map() };
+      byRemote.set(key, group);
+      const refKey = `${target.remoteRef}\0${target.localRef}`;
+      const entry = group.targets.get(refKey) ?? { target, cwd: worktree.path, owners: new Set<string>() };
       entry.owners.add(worktree.id);
-      targets.set(key, entry);
+      group.targets.set(refKey, entry);
     }
   }
-  for (const [remote, targets] of byRemote) {
+  for (const { remote, cwd, targets } of byRemote.values()) {
     const fail = (answer: TipAnswer): void => {
       for (const { owners } of targets.values()) for (const id of owners) answers.set(id, answer);
     };
@@ -115,19 +103,46 @@ export async function checkRemoteTips(
       const [oid, ref] = line.split("\t");
       return [ref, oid] as const;
     }));
-    for (const { target, owners } of targets.values()) {
+    for (const { target, cwd: targetCwd, owners } of targets.values()) {
       const remoteHead = heads.get(target.remoteRef) ?? "";
       const deleted = !heads.has(target.remoteRef);
-      const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], cwd);
+      const local = await git(["rev-parse", "--verify", "--quiet", target.localRef], targetCwd);
       if (!local.ok) { for (const id of owners) answers.set(id, local); continue; }
       const current = local.value.exitCode === 0 ? local.value.stdout.trim() : null;
       if (deleted ? current === null : current === remoteHead) continue;
-      const updated = await exclusive(() => syncTrackingRef(git, cwd, target, remoteHead, deleted));
+      const updated = await exclusive(() => syncTrackingRef(git, targetCwd, target, remoteHead, deleted));
       if (!updated.ok) { for (const id of owners) answers.set(id, updated); continue; }
       if (updated.value) onFetched();
     }
   }
   return answers;
+}
+
+/** Git applies config.worktree and conditional includes in this context. */
+async function readTrackingConfiguration(git: GitExec, cwd: string, branch: string): Promise<Result<{
+  endpoints: RemoteEndpoint[];
+  upstreamRef: string | null;
+  mergeRef: string;
+}>> {
+  const endpoints = await listRemoteEndpoints(git, cwd);
+  if (!endpoints.ok) return endpoints;
+  const head = `refs/heads/${branch}`;
+  const tracking = await git([
+    "for-each-ref", "--format=%(refname)%00%(upstream)", head
+  ], cwd);
+  if (!tracking.ok) return tracking;
+  if (tracking.value.exitCode !== 0) return err({
+    kind: "remote", code: "remote_config_failed", message: "Could not read branch tracking."
+  });
+  // for-each-ref also includes descendants of this name; select the exact ref.
+  const upstreamRef = tracking.value.stdout.split("\n")
+    .find((line) => line.startsWith(`${head}\0`))?.slice(head.length + 1).trim() || null;
+  const config = await git(["config", "--get", `branch.${branch}.merge`], cwd);
+  if (!config.ok) return config;
+  if (config.value.exitCode !== 0 && config.value.exitCode !== 1) return err({
+    kind: "remote", code: "remote_config_failed", message: "Could not read branch merge refs."
+  });
+  return ok({ endpoints: endpoints.value, upstreamRef, mergeRef: config.value.stdout.trim() });
 }
 
 async function remoteTargets(
