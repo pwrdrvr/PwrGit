@@ -172,6 +172,18 @@ function ToastCard({
           url={toast.notesUrl}
           className="app-toast__notes"
         />
+        {toast.action !== undefined && (
+          <button
+            className="app-toast__button app-toast__button--primary"
+            type="button"
+            onClick={() => {
+              dismissToast(toast.id);
+              toast.action?.run();
+            }}
+          >
+            {toast.action.label}
+          </button>
+        )}
         {toast.showLogsAction !== false && (
           <button
             className="app-toast__button"

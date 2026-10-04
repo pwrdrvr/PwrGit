@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   err,
   ok,
+  type CloneRepository,
   type ForkStatus,
   type PwrGitError,
   type SshRemoteRecovery
@@ -175,6 +176,55 @@ describe("remote handlers", () => {
 
   afterEach(() => vi.useRealTimers());
 
+  const trackingOffer = {
+    branch: "main", upstream: "upstream/main", upstreamRemote: "upstream", target: "origin/main",
+    parent: "team/widget", targets: [{ remote: "origin", nameWithOwner: "me/widget", ref: "origin/main" }]
+  };
+
+  it("offers another fork only when the forge confirms it forks the same parent and takes your pushes", async () => {
+    const rows = new Map([["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }]]);
+    const db = { prepare: () => ({ get: (id: string) => rows.get(id) }) } as unknown as DB;
+    const identity = {
+      host: "github" as const, hostname: "github.com", owner: "me", name: "widget",
+      nameWithOwner: "me/widget", visibility: "public" as const,
+      parent: { nameWithOwner: "team/widget", url: "https://github.com/team/widget" }
+    };
+    const candidate = (owner: string) => ({ remote: owner, nameWithOwner: `${owner}/widget`, ref: `${owner}/main` });
+    vi.mocked(inspectForkTracking).mockResolvedValueOnce(ok({
+      offer: trackingOffer,
+      candidates: ["lumen", "readonly", "stranger", "unknown", "broken"].map(candidate)
+    }));
+    const parent = { nameWithOwner: "Team/Widget", url: "https://github.com/team/widget" };
+    const answers: Record<string, unknown> = {
+      "lumen/widget": { viewerCanPush: true, parent },
+      "readonly/widget": { viewerCanPush: false, parent },
+      "stranger/widget": { viewerCanPush: true, parent: { nameWithOwner: "other/widget", url: "" } },
+      "unknown/widget": { parent }
+    };
+    let inFlight = 0;
+    let most = 0;
+    const viewForgeRepo = vi.fn(async (_identity: unknown, slug: string) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      if (slug === "broken/widget") throw new Error("forge down");
+      return (answers[slug] ?? null) as CloneRepository | null;
+    });
+    const bus = new CommandBus();
+    registerRemoteHandlers(bus, db, { refreshWorktree: vi.fn(), refreshRepoWorktrees: vi.fn() },
+      new WorktreeOperationQueue(), undefined, undefined, () => identity, undefined, viewForgeRepo);
+    expect(await bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" })).toEqual(ok({
+      ...trackingOffer, targets: [...trackingOffer.targets, candidate("lumen")]
+    }));
+    expect(viewForgeRepo.mock.calls.map(([asked, slug]) => [asked, slug])).toEqual(
+      ["lumen", "readonly", "stranger", "unknown", "broken"].map((owner) => [identity, `${owner}/widget`])
+    );
+    // Each read is a CLI process: a checkout full of remotes must not spawn
+    // them all at once.
+    expect(most).toBe(3);
+  });
+
   it("coalesces fork tracking inspections and keeps identical branch names in two profiles separate", async () => {
     const rows = new Map([
       ["wt-a", { path: "/a/main", repoId: "repo-a", branch: "main" }],
@@ -187,7 +237,7 @@ describe("remote handlers", () => {
     registerRemoteHandlers(bus, db, refresher, new WorktreeOperationQueue(), undefined, undefined, readIdentity);
     let release!: () => void;
     vi.mocked(inspectForkTracking).mockImplementationOnce(() => new Promise((resolve) => {
-      release = () => resolve(ok({ branch: "main", upstream: "upstream/main", target: "origin/main" }));
+      release = () => resolve(ok({ offer: trackingOffer, candidates: [] }));
     }));
     const first = bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" });
     const same = bus.dispatch("remote:inspectForkTracking", { worktreeId: "wt-a" });

@@ -65,7 +65,7 @@ process.exit(result.status === null ? 1 : result.status);
   const caret = window.locator(".wt-split__caret");
   await expect(caret).toBeEnabled();
   await caret.click();
-  await expect(window.getByRole("menuitem", { name: /Track origin\/main/ })).toBeVisible();
+  await expect(window.getByRole("menuitem", { name: /Use your fork for main/ })).toBeVisible();
   await window.locator(".pull-menu").screenshot({ path: testInfo.outputPath("pull-tracking-repair.png") });
   await window.keyboard.press("Escape");
 
@@ -76,11 +76,12 @@ process.exit(result.status === null ? 1 : result.status);
   expect(box.git(checkout.path, "rev-parse", "--abbrev-ref", "@{u}")).toBe("upstream/main");
 
   await window.getByRole("button", { name: "Push", exact: true }).click();
-  const recovery = window.getByRole("dialog", { name: "Set up fork tracking" });
-  await expect(recovery).toContainText("Use your existing fork");
+  const recovery = window.getByRole("dialog", { name: "Push to your fork instead" });
+  await expect(recovery).toContainText("GitHub refused the push");
   await expect(recovery).toContainText("Permission to team/widget.git denied");
+  await expect(recovery.getByRole("img", { name: /^After: main pulls from and pushes to tester\/widget/ })).toBeVisible();
   await recovery.screenshot({ path: testInfo.outputPath("denied-push-repair.png") });
-  await recovery.getByRole("button", { name: "Track origin/main", exact: true }).click();
+  await recovery.getByRole("button", { name: "Use my fork", exact: true }).click();
   await expect(recovery).toBeHidden();
   expect(box.git(checkout.path, "rev-parse", "--abbrev-ref", "@{u}")).toBe("origin/main");
   expect(box.git(checkout.path, "rev-parse", "HEAD")).toBe(head);
@@ -89,12 +90,17 @@ process.exit(result.status === null ? 1 : result.status);
   expect(readFileSync(transports, "utf8")).not.toContain("push fork");
   expect(fixture.calls().some((call) => call.operation === "fork")).toBe(false);
 
+  // The receipt carries the refused Push; the repair itself never pushed.
+  // Clicked first: the card counts down from the moment it appears.
+  const receipt = window.locator(".app-toast").filter({ hasText: "Now using your fork" });
+  await expect(receipt).toContainText("main pulls from and pushes to tester/widget");
+  await receipt.getByRole("button", { name: "Push", exact: true }).click();
+  await expect.poll(() => readFileSync(transports, "utf8")).toContain("push fork");
+  await expect(window.locator(".sync-chip").first()).toContainText("pushed");
+
   await caret.click();
   await expect(window.getByRole("menuitemradio", { name: /Sync with upstream\/main/ })).toBeVisible();
   await expect(window.getByRole("menuitemradio", { name: /Pull origin\/main only/ })).toBeVisible();
   await window.locator(".pull-menu").screenshot({ path: testInfo.outputPath("pull-fork-options.png") });
   await window.keyboard.press("Escape");
-  await window.getByRole("button", { name: "Push", exact: true }).click();
-  await expect.poll(() => readFileSync(transports, "utf8")).toContain("push fork");
-  await expect(window.locator(".sync-chip").first()).toContainText("pushed");
 });
