@@ -1012,6 +1012,7 @@ if (!gotSingleInstanceLock) {
     bus.register("worktree:reportVisible", (req, ctx) => {
       if (ctx.webContentsId !== undefined) {
         visibleRefresher.report(ctx.webContentsId, req.worktreeIds);
+        remoteTipChecker.report(ctx.webContentsId, req.worktreeIds);
       }
       return ok(null);
     });
@@ -1051,7 +1052,7 @@ if (!gotSingleInstanceLock) {
         });
     };
     registerCloneHandlers(bus, cloneService, refreshIdentity);
-    registerRemoteHandlers(
+    const remoteTipChecker = registerRemoteHandlers(
       bus,
       db,
       refresher,
@@ -1065,7 +1066,8 @@ if (!gotSingleInstanceLock) {
         if (!forgeHosts.isEnabled(identity.hostname).enabled) return null;
         const provider = forges.get(identity.host, identity.hostname);
         return provider === null ? null : provider.viewRepo(nameWithOwner);
-      }
+      },
+      () => BrowserWindow.getFocusedWindow() !== null
     );
     const bulkSyncHandlers = registerBulkSyncHandlers(
       bus,
@@ -1210,6 +1212,7 @@ if (!gotSingleInstanceLock) {
         pruneHandlers.releaseWebContents(webContentsId);
         fileInsightHandlers.releaseWebContents(webContentsId);
         visibleRefresher.releaseWebContents(webContentsId);
+        remoteTipChecker.releaseWebContents(webContentsId);
         agentHandlers.releaseWebContents(webContentsId);
       }
     });
@@ -1299,6 +1302,7 @@ if (!gotSingleInstanceLock) {
     };
     app.on("browser-window-focus", () => {
       refreshActive();
+      remoteTipChecker.focus();
       refreshMenu();
     });
     const activeStatePoll = setInterval(() => {
@@ -1307,6 +1311,7 @@ if (!gotSingleInstanceLock) {
     // The rows on screen, not just the selected one: a round every 5s decides
     // what is due (see VisibleWorktreeRefresher) and is usually a few stats.
     const visibleStatePoll = setInterval(() => {
+      remoteTipChecker.tick();
       void visibleRefresher.tick().catch((cause: unknown) =>
         logMain("warn", "state", "visible-row refresh failed:", cause)
       );
@@ -1314,6 +1319,7 @@ if (!gotSingleInstanceLock) {
     app.on("before-quit", () => {
       clearInterval(activeStatePoll);
       clearInterval(visibleStatePoll);
+      remoteTipChecker.stop();
       githubHandlers.stop();
       appearance.dispose();
     });

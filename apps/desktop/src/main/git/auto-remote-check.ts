@@ -1,5 +1,5 @@
 import { err, ok, type ForgeHostMap, type Result } from "@pwrgit/shared";
-import type { GitExec } from "./dugite";
+import { sanitizeGitLogDetail, type GitExec } from "./dugite";
 import {
   addForkParentRemote,
   planUpstreamRemote,
@@ -116,7 +116,10 @@ export async function checkSelectedRemoteTips(
     );
     if (!advertised.ok) return advertised;
     if (advertised.value.exitCode !== 0) {
-      return err({ kind: "remote", code: "fetch_failed", message: "Remote tip check failed." });
+      return err({
+        kind: "remote", code: "fetch_failed",
+        message: sanitizeGitLogDetail(advertised.value.stderr) || "Remote tip check failed."
+      });
     }
     const line = advertised.value.stdout.split("\n").find((row) => row.endsWith(`\t${target.remoteRef}`));
     const remoteHead = line?.split("\t")[0] ?? "";

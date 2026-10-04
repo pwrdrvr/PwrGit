@@ -33,6 +33,7 @@ const PUBLIC_DEPENDENCY_VENDOR = ["shutter", "stock"].join("");
 const PUBLIC_DEPENDENCY_REFERENCE_PATHS = new Set([
   "THIRD_PARTY_LICENSES",
   "apps/desktop/package.json",
+  "apps/desktop/src/main/git/remote-tip-checker.ts",
   "apps/desktop/src/main/util/map-limit.ts",
   "apps/desktop/src/renderer/src/lib/asyncFill.ts",
   "pnpm-lock.yaml",

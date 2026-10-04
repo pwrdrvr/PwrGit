@@ -1487,9 +1487,12 @@ export interface Commands {
    * Quiet, bounded check of the selected branch's tracked and fork-source
    * tips. `superseded`: a fetch, pull or push on the repository stopped it,
    * so it learned nothing — keep whatever was known before.
+   * Selection and deliberate hover use the immediate queue; periodic header
+   * checks share the background queue with visible rows. Direct interactions
+   * skip the TTL; viewport and periodic checks share a 60-second cooldown.
    */
   "remote:checkSelected": {
-    req: { worktreeId: string };
+    req: { worktreeId: string; intent?: "selected" | "hover" | "periodic" };
     res: { status: "checked" | "untracked" | "unavailable" | "superseded" };
   };
   /** Fetch each repository once, optionally applying only proven-safe FFs. */
