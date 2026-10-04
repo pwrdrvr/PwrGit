@@ -58,6 +58,7 @@ import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { PinnedBranchRow, pinnedBranchRowId } from "./PinnedBranchRow";
 import { RepoRefsSections } from "./RepoRefsSections";
+import type { CreateWorktreeFromRef } from "./RepoChangeRequestSection";
 
 /** Distinguishes worktree drags from repo drags (see useListReorder). */
 const WORKTREE_MIME = "application/x-pwrgit-worktree";
@@ -179,11 +180,7 @@ export function RepoRow({
   onNewWorktree: () => void;
   onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
-  onCreateWorktreeFromRef: (
-    branch: string,
-    newBranch: boolean,
-    startPoint?: string
-  ) => void;
+  onCreateWorktreeFromRef: CreateWorktreeFromRef;
   /** Open the fork prompt for this repository — raised by the read-only mark,
    *  the `origin` row under REMOTES, and the row's own actions menu. */
   onForkRepo: () => void;

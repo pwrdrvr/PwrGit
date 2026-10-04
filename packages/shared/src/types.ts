@@ -1000,6 +1000,14 @@ export type ChangeRequestEntry = {
   location: ChangeRequestLocation;
 };
 
+/** The last refresh of an open list that could not finish. */
+export type ChangeRequestListFailure = {
+  /** Epoch ms it failed. */
+  at: number;
+  /** One line a person can act on: a forge refusal, or a missing sign-in. */
+  message: string;
+};
+
 /** `pr:openList` — a repository's open change requests, from main's cache. */
 export type ChangeRequestList = {
   /** The forge `origin` resolves to; null means none, and so no list at all. */
@@ -1009,6 +1017,12 @@ export type ChangeRequestList = {
   /** The forge had more open than one refresh walks; these are the newest. */
   truncated: boolean;
   entries: ChangeRequestEntry[];
+  /**
+   * Present while the latest refresh failed: the entries are the last good
+   * list (from `fetchedAt`), and this says why it is not newer. Cleared by
+   * the next refresh that lands.
+   */
+  failure?: ChangeRequestListFailure;
 };
 
 export type Repo = {

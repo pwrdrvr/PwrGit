@@ -105,9 +105,19 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   tab and ⌘K search read, and the only cache that knows a PR whose head was
   never fetched. Same shape as `PrService`, deliberately separate state: its
   own TTLs (10 min on the repo-expand sweep, 60 s when the refs browser opens),
-  its own `lastFailedAt`, its own generation guard. Reads never wait on a
+  its own `lastFailure`, its own generation guard. Reads never wait on a
   forge: `pr:openList` answers from the table and re-lists behind it,
-  announcing `pr:openChanged` only when the diff-written list actually moved.
+  announcing `pr:openChanged` whenever a refresh ran — rows, `fetchedAt` and
+  `failure` are all part of the answer (the sidebar shows how old the list is
+  and why it is not newer). Rows are still diff-written, so an unchanged list
+  re-indexes nothing.
+  - **`list()` spawns nothing in the common case.** The sidebar calls it on
+    every repo expand and every announcement, so heads are located against
+    the branch index (`local_branches`, `remote_branches`, `worktrees` — the
+    same tables ⌘K resolves PRs with), and `origin`'s URL is re-read only when
+    `.git/config` changes. The index can trail a terminal's fetch, so a label
+    may lag; the verbs never do — the renderer's `reachableLocation` sends
+    every non-worktree row through `pr:fetchHead`, which locates with git.
   - **Every row is indexed** (`change_request` in `search_fts`, by trigger), and
     `RepoIndexer.searchAll` answers a hit on one with the worktree, local branch
     or origin branch holding its head — carrying the PR — so ⌘K returns the

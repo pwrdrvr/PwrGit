@@ -1,12 +1,14 @@
-import { useState } from "react";
-import type { Repo } from "@pwrgit/shared";
+import { useRef, useState } from "react";
+import type { OpenChangeRequest, Repo } from "@pwrgit/shared";
 import { useModal } from "../../lib/useModal";
+import { PrChip } from "./PrChip";
 
 export function NewWorktreeModal({
   repo,
   initialBranch = "",
   initialNewBranch = true,
   startPoint,
+  changeRequest,
   onCreate,
   onClose
 }: {
@@ -14,6 +16,9 @@ export function NewWorktreeModal({
   initialBranch?: string;
   initialNewBranch?: boolean;
   startPoint?: string;
+  /** Opened from a PR row: name the PR, so the branch field is not the only
+   *  clue to what is being checked out. */
+  changeRequest?: OpenChangeRequest;
   onCreate: (
     branch: string,
     newBranch: boolean,
@@ -36,7 +41,11 @@ export function NewWorktreeModal({
     else setError(message);
   };
 
-  const modalRef = useModal<HTMLDivElement>({ onClose });
+  // The branch field, not the first tabbable control: with a PR strip above
+  // it, that would be the chip, whose focus opens its status card over the
+  // title.
+  const inputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useModal<HTMLDivElement>({ onClose, initialFocusRef: inputRef });
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
@@ -46,7 +55,14 @@ export function NewWorktreeModal({
         tabIndex={-1}
         className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__title">New worktree · {repo.name}</div>
+        {changeRequest !== undefined && (
+          <div className="modal__subject">
+            <PrChip pr={changeRequest} />
+            <span className="modal__subject-title">{changeRequest.title}</span>
+          </div>
+        )}
         <input
+          ref={inputRef}
           className="modal__input"
           autoFocus
           value={branch}

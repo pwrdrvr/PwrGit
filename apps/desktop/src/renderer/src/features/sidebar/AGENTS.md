@@ -60,6 +60,36 @@ shared `changeRequestMatch`, so `106` means #106 — never #1060 — in both pla
 With a query typed, every tab shows its own hit count, which is why the tag and
 remote searches run while their tabs are hidden.
 
+## The sidebar's PR section reads a cache and asks nothing per PR
+
+`RepoChangeRequestSection` (between Worktrees and Branches) draws main's open
+list — one forge list call per repository, refreshed by the repo-expand sweep.
+It mounts with `refreshOnOpen: false`, so opening a repository costs no extra
+call; only ⟳ asks, with `wait: true` so the button can stay busy until the
+answer lands. Don't add a per-row lookup: a list of 30 rows would become 30
+API calls on every expand.
+
+- **Local is `refs/heads`, not "fetched".** A worktree or local branch holds
+  the head; a fetched `origin/…` head is still Remote only, because + Worktree
+  is the step that makes it yours (`change-request-groups.ts`).
+- **Remote only starts closed**, per repository
+  (`pwrgit.changeRequestsRemoteOpen.<repoId>`). On a busy repository it is
+  mostly other people's work.
+- **+ Worktree goes through `reachableLocation`**, the refs browser's path:
+  main re-locates the head with git (fetching it if it is not here), then the
+  PR goes to `NewWorktreeModal` so the dialog names it. The list's locations
+  come from the branch index and can lag a terminal; the action must not.
+- **It must not shift the sections below it.** The heading renders before
+  the first answer whenever `repo.identity` names a forge (count `…`), and
+  `useChangeRequestList` keeps each repo's last answer for the session, so a
+  re-expand paints at once. What is left is a first expand, per session, of a
+  repo with no identity yet or a section left open — keep it that way.
+- **A failed refresh is shown, not swallowed**: `list.failure` draws a
+  warning line under the heading and tints ⟳; the entries stay the last good
+  list.
+
+Design: `design/Change Requests in Sidebar - UX Review.dc.html`, 2b.
+
 ## The palette asks in this window's profile
 
 `repo:search` carries `windowProfileId()`, and main answers from that profile

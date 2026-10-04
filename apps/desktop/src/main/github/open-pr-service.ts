@@ -1,10 +1,14 @@
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   changeRequestHeadRef,
   changeRequestLocalBranch,
   err,
+  forgeSignInCommand,
   ok,
   type ChangeRequestEntry,
   type ChangeRequestList,
+  type ChangeRequestListFailure,
   type ChangeRequestLocation,
   type OpenChangeRequest,
   type PrSummary,
@@ -61,8 +65,13 @@ export class OpenPrService {
   private readonly now: () => number;
   private writeGeneration = 0;
   private readonly pending = new Map<string, Promise<boolean>>();
-  /** See `PrService.lastFailedAt`: never cache a failure, but remember it. */
-  private readonly lastFailedAt = new Map<string, number>();
+  /**
+   * See `PrService.lastFailedAt`: never cache a failure, but remember it —
+   * here with its reason too, because `list()` reports it to the reader.
+   */
+  private readonly lastFailure = new Map<string, ChangeRequestListFailure>();
+  /** `origin`'s URL per repository path, stamped with its config file. */
+  private readonly originUrls = new Map<string, { stamp: string; url: string | null }>();
   private readonly lookups = new Map<
     string,
     { at: number; pr: OpenChangeRequest | null }
@@ -80,16 +89,18 @@ export class OpenPrService {
   /** Profile deletion: nothing in flight may write, and no backoff survives. */
   invalidatePendingWrites(): void {
     this.writeGeneration += 1;
-    this.lastFailedAt.clear();
+    this.lastFailure.clear();
     this.lookups.clear();
   }
 
   /**
    * Re-list the repository's open change requests unless the cached list is
-   * fresh enough for `trigger`. Resolves true only when the stored list
-   * changed, so the caller knows whether to announce it. A caller that arrives
-   * while a refresh is in flight waits for it and resolves false — the first
-   * caller announces.
+   * fresh enough for `trigger`. Resolves true when a refresh ran to an answer
+   * — a list stored, or a failure recorded — because either moves what
+   * `list()` reports (its entries, its `fetchedAt`, its `failure`), so the
+   * caller should announce it. Resolves false when nothing ran: fresh, backing
+   * off, no forge, or superseded. A caller that arrives while a refresh is in
+   * flight waits for it and resolves false — the first caller announces.
    */
   async refresh(
     repoId: string,
@@ -114,7 +125,15 @@ export class OpenPrService {
     }
   }
 
-  /** The cached list, each entry located in this checkout. */
+  /**
+   * The cached list, each entry located in this checkout.
+   *
+   * Spawns nothing in the common case: the sidebar reads this on every repo
+   * expand and every announcement. Heads are located against the branch index
+   * (`indexedCheckoutRefs`), and `origin` is re-read only when the repo's
+   * config changes. The verbs that act on a location re-locate it against git
+   * first (`fetchHead`), so a stale index costs a label, never a wrong action.
+   */
   async list(repoId: string): Promise<ChangeRequestList> {
     const none: ChangeRequestList = {
       forge: null,
@@ -131,7 +150,8 @@ export class OpenPrService {
         "SELECT fetched_at, truncated FROM repo_open_pr_state WHERE repo_id = ?"
       )
       .get(repoId) as { fetched_at: number; truncated: number } | undefined;
-    const refs = await this.checkoutRefs(repoId, path);
+    const refs = this.indexedCheckoutRefs(repoId);
+    const failure = this.lastFailure.get(repoId);
     return {
       forge: forge.repo.kind,
       fetchedAt: state?.fetched_at ?? null,
@@ -139,7 +159,8 @@ export class OpenPrService {
       entries: this.cachedOpen(repoId).map((pr) => ({
         pr,
         location: locateChangeRequest(pr, forge.repo.kind, refs)
-      }))
+      })),
+      ...(failure === undefined ? {} : { failure })
     };
   }
 
@@ -303,17 +324,29 @@ export class OpenPrService {
     const forge = await this.originForge(path);
     if (forge === null || !this.isCurrent(generation)) return false;
     const connection = await connectForge(forge.provider, forge.repo.host);
-    if (connection === null || !this.isCurrent(generation)) return false;
+    if (!this.isCurrent(generation)) return false;
+    if (connection === null) {
+      return this.fail(
+        repoId,
+        `Not signed in to ${forge.repo.host}. Run ${forgeSignInCommand(forge.repo.kind, forge.repo.host)}.`
+      );
+    }
     let list: OpenPrList;
     try {
       list = await connection.fetchOpenPrs(forge.repo);
-    } catch {
-      if (this.isCurrent(generation)) this.lastFailedAt.set(repoId, this.now());
-      return false;
+    } catch (cause) {
+      if (!this.isCurrent(generation)) return false;
+      return this.fail(repoId, failureMessage(cause));
     }
     if (!this.isCurrent(generation)) return false;
-    this.lastFailedAt.delete(repoId);
-    return this.write(repoId, list);
+    this.lastFailure.delete(repoId);
+    this.write(repoId, list);
+    return true;
+  }
+
+  private fail(repoId: string, message: string): boolean {
+    this.lastFailure.set(repoId, { at: this.now(), message });
+    return true;
   }
 
   /**
@@ -322,9 +355,9 @@ export class OpenPrService {
    * re-indexes that PR's search row, and a busy repository's list is mostly
    * unchanged from one refresh to the next.
    */
-  private write(repoId: string, list: OpenPrList): boolean {
+  private write(repoId: string, list: OpenPrList): void {
     if (this.db.prepare("SELECT 1 FROM repos WHERE id = ?").get(repoId) === undefined) {
-      return false;
+      return;
     }
     const before = new Map(
       (
@@ -345,24 +378,14 @@ export class OpenPrService {
        VALUES (@repo_id, ${COLUMN_PARAMS})
        ON CONFLICT(repo_id, number) DO UPDATE SET ${COLUMN_UPDATES}`
     );
-    let changed = false;
     this.db.transaction(() => {
       for (const number of before.keys()) {
         if (next.has(number)) continue;
         remove.run(repoId, number);
-        changed = true;
       }
       for (const [number, row] of next) {
         if (sameRow(before.get(number), row)) continue;
         upsert.run({ repo_id: repoId, ...row });
-        changed = true;
-      }
-      const priorState = this.db
-        .prepare("SELECT truncated FROM repo_open_pr_state WHERE repo_id = ?")
-        .get(repoId) as { truncated: number } | undefined;
-      const truncated = list.truncated ? 1 : 0;
-      if (priorState === undefined || priorState.truncated !== truncated) {
-        changed = true;
       }
       this.db
         .prepare(
@@ -371,9 +394,8 @@ export class OpenPrService {
            ON CONFLICT(repo_id) DO UPDATE SET
              fetched_at = excluded.fetched_at, truncated = excluded.truncated`
         )
-        .run(repoId, this.now(), truncated);
+        .run(repoId, this.now(), list.truncated ? 1 : 0);
     })();
-    return changed;
   }
 
   private cachedOpen(repoId: string): OpenChangeRequest[] {
@@ -426,15 +448,7 @@ export class OpenPrService {
   }
 
   private async checkoutRefs(repoId: string, path: string): Promise<CheckoutRefs> {
-    const worktrees = new Map(
-      (
-        this.db
-          .prepare(
-            "SELECT id, branch FROM worktrees WHERE repo_id = ? AND missing = 0"
-          )
-          .all(repoId) as { id: string; branch: string }[]
-      ).map((row) => [row.branch, row.id] as const)
-    );
+    const worktrees = this.worktreeBranches(repoId);
     const out = await this.git(
       ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin"],
       path
@@ -461,9 +475,60 @@ export class OpenPrService {
   }
 
   private async originForge(repoPath: string): Promise<ResolvedForge | null> {
+    const url = await this.originUrl(repoPath);
+    // Resolved each time, not cached: Settings → Forges can claim a host later.
+    return url === null ? null : this.resolveForge(url);
+  }
+
+  /**
+   * `origin`'s URL, asked of git only when `.git/config` has changed since the
+   * last answer — every way a remote is added, renamed or re-pointed, in the
+   * app or a terminal, rewrites that file. A repository whose config cannot be
+   * stat'ed is asked every time.
+   */
+  private async originUrl(repoPath: string): Promise<string | null> {
+    const stamp = await configStamp(repoPath);
+    const cached = this.originUrls.get(repoPath);
+    if (stamp !== null && cached?.stamp === stamp) return cached.url;
     const out = await this.git(["remote", "get-url", "origin"], repoPath);
-    if (!out.ok || out.value.exitCode !== 0) return null;
-    return this.resolveForge(out.value.stdout);
+    const url = out.ok && out.value.exitCode === 0 ? out.value.stdout : null;
+    if (stamp !== null) this.originUrls.set(repoPath, { stamp, url });
+    return url;
+  }
+
+  /**
+   * `CheckoutRefs` from the branch index the indexer keeps for ⌘K — the same
+   * answer search gives — rather than a `for-each-ref` per read. Local
+   * branches are `local_branches` plus every worktree's branch (the index
+   * drops a branch once a worktree holds it); `origin`'s are
+   * `remote_branches`.
+   */
+  private indexedCheckoutRefs(repoId: string): CheckoutRefs {
+    const worktrees = this.worktreeBranches(repoId);
+    const refnames = (
+      this.db
+        .prepare(
+          `SELECT 'refs/heads/' || name AS ref FROM local_branches WHERE repo_id = ?
+           UNION ALL
+           SELECT full_name AS ref FROM remote_branches
+            WHERE repo_id = ? AND remote_name = 'origin'`
+        )
+        .all(repoId, repoId) as { ref: string }[]
+    ).map((row) => row.ref);
+    for (const branch of worktrees.keys()) refnames.push(`refs/heads/${branch}`);
+    return checkoutRefsFromRefnames(refnames.join("\n"), worktrees);
+  }
+
+  private worktreeBranches(repoId: string): Map<string, string> {
+    return new Map(
+      (
+        this.db
+          .prepare(
+            "SELECT id, branch FROM worktrees WHERE repo_id = ? AND missing = 0"
+          )
+          .all(repoId) as { id: string; branch: string }[]
+      ).map((row) => [row.branch, row.id] as const)
+    );
   }
 
   private isFresh(repoId: string, ttlMs: number): boolean {
@@ -477,7 +542,7 @@ export class OpenPrService {
   }
 
   private failedWithin(repoId: string, ttlMs: number): boolean {
-    const failedAt = this.lastFailedAt.get(repoId);
+    const failedAt = this.lastFailure.get(repoId)?.at;
     if (failedAt === undefined) return false;
     const now = this.now();
     return failedAt <= now && failedAt > now - ttlMs;
@@ -486,6 +551,24 @@ export class OpenPrService {
   private isCurrent(generation: number): boolean {
     return generation === this.writeGeneration;
   }
+}
+
+/** The config file's identity, or null when it cannot be read. */
+async function configStamp(repoPath: string): Promise<string | null> {
+  try {
+    const info = await stat(join(repoPath, ".git", "config"));
+    return `${info.mtimeMs}:${info.size}`;
+  } catch {
+    return null;
+  }
+}
+
+/** A forge error as one line for the sidebar: its first line, capped. */
+function failureMessage(cause: unknown): string {
+  const text = cause instanceof Error ? cause.message : String(cause);
+  const line = text.split("\n")[0]?.trim() ?? "";
+  if (line === "") return "The forge did not answer.";
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
 function invalidHead(name: string): Result<ChangeRequestLocation> {
