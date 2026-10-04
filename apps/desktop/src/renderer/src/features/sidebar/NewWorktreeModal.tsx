@@ -1,12 +1,14 @@
 import { useState } from "react";
-import type { Repo } from "@pwrgit/shared";
+import type { OpenChangeRequest, Repo } from "@pwrgit/shared";
 import { useModal } from "../../lib/useModal";
+import { PrChip } from "./PrChip";
 
 export function NewWorktreeModal({
   repo,
   initialBranch = "",
   initialNewBranch = true,
   startPoint,
+  changeRequest,
   onCreate,
   onClose
 }: {
@@ -14,6 +16,9 @@ export function NewWorktreeModal({
   initialBranch?: string;
   initialNewBranch?: boolean;
   startPoint?: string;
+  /** Opened from a PR row: name the PR, so the branch field is not the only
+   *  clue to what is being checked out. */
+  changeRequest?: OpenChangeRequest;
   onCreate: (
     branch: string,
     newBranch: boolean,
@@ -46,6 +51,12 @@ export function NewWorktreeModal({
         tabIndex={-1}
         className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal__title">New worktree · {repo.name}</div>
+        {changeRequest !== undefined && (
+          <div className="modal__subject">
+            <PrChip pr={changeRequest} />
+            <span className="modal__subject-title">{changeRequest.title}</span>
+          </div>
+        )}
         <input
           className="modal__input"
           autoFocus

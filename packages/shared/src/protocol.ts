@@ -1128,9 +1128,14 @@ export interface Commands {
    * with where its head lives in this checkout. `refresh` also re-lists them
    * from the forge in the background — throttled like every other PR read —
    * and `pr:openChanged` announces a list that moved.
+   *
+   * `wait` makes the refresh part of the answer instead: the read waits for it
+   * and returns the list it left behind. That is for a control that asked for
+   * the refresh and needs to know when it is over (the sidebar's ⟳); a read
+   * that paints should never set it.
    */
   "pr:openList": {
-    req: { repoId: string; refresh?: boolean };
+    req: { repoId: string; refresh?: boolean; wait?: boolean };
     res: ChangeRequestList;
   };
   /**

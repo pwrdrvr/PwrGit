@@ -28,19 +28,33 @@ import { lastSegment } from "./repo-view";
  * Opening asks main to re-list in the background (it declines inside its own
  * TTL), and `pr:openChanged` says when a re-read is worth doing. The first
  * paint is whatever the cache holds, so the tab never waits on a forge.
+ *
+ * `refreshOnOpen: false` is for a surface that mounts with the repo row (the
+ * sidebar section): expanding a repo already re-lists through the repo sweep,
+ * at the scheduled TTL, so a second ask at the user TTL would spend a forge
+ * call per expand for nothing. `refresh()` is the explicit ask — it waits, so
+ * its caller can show the work and knows when it is over.
  */
-export function useChangeRequestList(repoId: string): {
+export function useChangeRequestList(
+  repoId: string,
+  { refreshOnOpen = true }: { refreshOnOpen?: boolean } = {}
+): {
   list: ChangeRequestList | null;
   error: string | null;
+  refresh: () => Promise<void>;
 } {
   const [list, setList] = useState<ChangeRequestList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
 
   const load = useCallback(
-    async (refresh: boolean): Promise<void> => {
+    async (refresh: boolean, wait = false): Promise<void> => {
       const stamp = ++generation.current;
-      const result = await dispatch("pr:openList", { repoId, refresh });
+      const result = await dispatch("pr:openList", {
+        repoId,
+        refresh,
+        ...(wait ? { wait } : {})
+      });
       if (stamp !== generation.current) return;
       if (!result.ok) {
         setError(result.error.message.split("\n")[0] ?? "Load failed");
@@ -53,7 +67,7 @@ export function useChangeRequestList(repoId: string): {
   );
 
   useEffect(() => {
-    void load(true);
+    void load(refreshOnOpen);
     const stop = subscribe("pr:openChanged", (event) => {
       if (event.repoId === repoId) void load(false);
     });
@@ -61,9 +75,11 @@ export function useChangeRequestList(repoId: string): {
       generation.current += 1;
       stop();
     };
-  }, [load, repoId]);
+  }, [load, repoId, refreshOnOpen]);
 
-  return { list, error };
+  const refresh = useCallback(() => load(true, true), [load]);
+
+  return { list, error, refresh };
 }
 
 /** Matched entries, the one the query names by number first. */
@@ -212,7 +228,7 @@ const toIso = (ms: number | undefined): string | null =>
  * unfetched or fork head, nothing for one already here. Null when there is
  * nothing to switch to (and the reason has been reported).
  */
-async function reachableLocation(
+export async function reachableLocation(
   repoId: string,
   entry: ChangeRequestEntry
 ): Promise<ChangeRequestLocation | null> {

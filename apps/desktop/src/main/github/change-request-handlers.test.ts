@@ -45,6 +45,32 @@ describe("change-request handlers", () => {
     expect(service.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("waits for the refresh when asked, and answers with the list it left", async () => {
+    const after = { ...emptyList, fetchedAt: 2 };
+    const list = vi.fn(async () => emptyList);
+    const service = fakeService({
+      list,
+      refresh: vi.fn(async () => {
+        list.mockResolvedValue(after);
+        return true;
+      })
+    });
+    const bus = new CommandBus();
+    registerChangeRequestHandlers(bus, service);
+
+    expect(
+      await bus.dispatch("pr:openList", { repoId: "r", refresh: true, wait: true })
+    ).toEqual(ok(after));
+    expect(service.refresh).toHaveBeenCalledWith("r", { trigger: "user" });
+    expect(emitEvent).toHaveBeenCalledWith("pr:openChanged", { repoId: "r" });
+
+    // A refresh that throws still answers with the cache.
+    (service.refresh as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("offline"));
+    expect(
+      await bus.dispatch("pr:openList", { repoId: "r", refresh: true, wait: true })
+    ).toEqual(ok(after));
+  });
+
   it("re-indexes and announces after fetching a head, and not after a failure", async () => {
     const onHeadFetched = vi.fn(async () => undefined);
     const service = fakeService();

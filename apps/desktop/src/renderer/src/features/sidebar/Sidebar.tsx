@@ -12,6 +12,7 @@ import type {
   CloneRepository,
   TagSummary,
   Lens,
+  OpenChangeRequest,
   Profile,
   Repo,
   Worktree,
@@ -124,6 +125,8 @@ type NewWorktreeState = {
   initialBranch?: string;
   initialNewBranch?: boolean;
   startPoint?: string;
+  /** The open PR whose head this is, when it came from the PR section. */
+  changeRequest?: OpenChangeRequest;
 };
 
 /** Lucide `trash-2`, at the size the sidebar's bulk-action buttons use. */
@@ -999,12 +1002,13 @@ export function Sidebar({
           clearSel();
           onSelectWorktree(repo, worktree);
         }}
-        onCreateWorktreeFromRef={(branch, newBranch, startPoint) =>
+        onCreateWorktreeFromRef={(branch, newBranch, startPoint, changeRequest) =>
           setNewWorktree({
             repo,
             initialBranch: branch,
             initialNewBranch: newBranch,
-            ...(startPoint === undefined ? {} : { startPoint })
+            ...(startPoint === undefined ? {} : { startPoint }),
+            ...(changeRequest === undefined ? {} : { changeRequest })
           })
         }
         arrangeable={arrangeable}
@@ -1362,6 +1366,9 @@ export function Sidebar({
           {...(newWorktree.startPoint === undefined
             ? {}
             : { startPoint: newWorktree.startPoint })}
+          {...(newWorktree.changeRequest === undefined
+            ? {}
+            : { changeRequest: newWorktree.changeRequest })}
           onCreate={(branch, newBranch, startPoint) =>
             onCreateWorktree(newWorktree.repo.id, branch, newBranch, startPoint)
           }

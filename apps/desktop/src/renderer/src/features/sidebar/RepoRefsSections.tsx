@@ -36,6 +36,10 @@ import { branchStatusCounts, type BranchStatusFilter } from "./branch-status";
 import { remoteForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
 import { remoteUrlLines, remoteWebUrl, remoteWhere } from "./remote-info";
+import {
+  RepoChangeRequestSection,
+  type CreateWorktreeFromRef
+} from "./RepoChangeRequestSection";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 import {
@@ -44,7 +48,7 @@ import {
   trackingLabel
 } from "./RepoRefsModal";
 
-type RefSection = "branches" | "tags" | "remotes";
+type RefSection = "branches" | "tags" | "remotes" | "changeRequests";
 
 /** How many branches the collapsed slice shows before "View all …". */
 const BRANCH_SLICE = 6;
@@ -106,11 +110,9 @@ export function RepoRefsSections({
   focusedWorktree: Worktree | null;
   onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
-  onCreateWorktree: (
-    branch: string,
-    newBranch: boolean,
-    startPoint?: string
-  ) => void;
+  /** `changeRequest` rides along when the ref is an open PR's head, so the
+   *  dialog can say which one it is checking out. */
+  onCreateWorktree: CreateWorktreeFromRef;
   /** Fork what `origin` points at and re-point this checkout at the fork. */
   onFork: () => void;
   /** A tab the repo row's menu asked to open the refs browser on ("Manage
@@ -501,6 +503,13 @@ export function RepoRefsSections({
 
   return (
     <>
+      <RepoChangeRequestSection
+        repo={repo}
+        now={now}
+        onRevealWorktree={onRevealWorktree}
+        onCreateWorktree={onCreateWorktree}
+        onOpenBrowser={() => setBrowser("changeRequests")}
+      />
       <div className="ref-section">
         {/* These are disclosures — they were rendering a rotating caret and no
             `aria-expanded`, so open and closed were indistinguishable to
