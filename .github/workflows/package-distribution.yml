@@ -237,6 +237,14 @@ jobs:
         if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
         shell: pwsh
         run: ./scripts/release/verify-winget-install.ps1 -Directory "$env:RUNNER_TEMP/distribution"
+      - name: Retain WinGet install diagnostics
+        if: ${{ always() && (steps.validated.outputs.cache-hit != 'true' || inputs.force_validation) }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: winget-install-diagnostics
+          path: ${{ runner.temp }}/distribution/winget-install.log
+          retention-days: 14
+          if-no-files-found: warn
       - name: Record successful Windows validation
         if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
         shell: pwsh

@@ -39,8 +39,24 @@ foreach ($root in @((Join-Path $env:TEMP 'WinGet'), (Join-Path $env:TEMP 'WinGet
   Copy-Item -LiteralPath $download -Destination (Join-Path $packageCache $hash) -Force
 }
 $installLog = Join-Path $Directory 'winget-install.log'
-winget install --manifest $manifest --scope user --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --verbose-logs --log $installLog
-if ($LASTEXITCODE -ne 0) { throw 'WinGet install/upgrade failed' }
+$installStarted = Get-Date
+winget install --manifest $manifest --scope user --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --verbose-logs
+$installExitCode = $LASTEXITCODE
+# --log is an installer log, not WinGet's diagnostic log. Packaged and
+# unpackaged clients use these separate diagnostic locations.
+$diagnosticRoots = @(
+  (Join-Path $env:LOCALAPPDATA 'Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir'),
+  (Join-Path $env:TEMP 'WinGet/defaultState')
+)
+$diagnosticLogs = @(foreach ($root in $diagnosticRoots) {
+  if (Test-Path -LiteralPath $root) {
+    Get-ChildItem -LiteralPath $root -Filter 'WinGet-*.log' -File | Where-Object LastWriteTime -GE $installStarted
+  }
+})
+$diagnosticLog = $diagnosticLogs | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $diagnosticLog) { throw 'WinGet install diagnostic log is missing' }
+Copy-Item -LiteralPath $diagnosticLog.FullName -Destination $installLog -Force
+if ($installExitCode -ne 0) { throw 'WinGet install/upgrade failed' }
 if (-not (Select-String -LiteralPath $installLog -SimpleMatch 'Existing installer file hash matches. Will use existing installer.' -Quiet)) {
   throw 'WinGet did not reuse the verified installer; inspect client cache behavior before recording successful validation'
 }
