@@ -27,6 +27,86 @@ describe("RemoteTipChecker", () => {
     expect(check).toHaveBeenCalledWith("repo-119", { reason: "visible", userAction: true });
   });
 
+  it("keeps the 60-second cooldown across repeated scrolling and focus changes", async () => {
+    checker.report(1, ["a"]);
+    await settle();
+    for (let i = 0; i < 5; i += 1) {
+      checker.report(1, []);
+      await vi.advanceTimersByTimeAsync(5_000);
+      checker.report(1, ["a"]);
+      checker.focus();
+      await settle();
+    }
+    expect(check).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(REMOTE_VISIBLE_INTERVAL_MS);
+    checker.tick();
+    await settle();
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("remembers a check that finishes after its row leaves view", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    check.mockImplementation(async () => { await gate; return ok({ status: "checked" }); });
+    checker.report(1, ["a"]);
+    await settle();
+    checker.report(1, []);
+    release();
+    await settle();
+    checker.report(1, ["a"]);
+    await settle();
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["selected", "hover"] as const)("allows %s to refresh inside the viewport cooldown", async (reason) => {
+    checker.report(1, ["a"]);
+    await settle();
+    expect(await checker.request("a", reason).result).toEqual(ok({ status: "checked" }));
+    expect(check).toHaveBeenCalledTimes(2);
+    checker.report(1, []);
+    checker.report(1, ["a"]);
+    checker.focus();
+    await settle();
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps freshness separate across branch changes", async () => {
+    checker.stop();
+    let branch = "main";
+    checker = new RemoteTipChecker({ check, isFocused: () => focused, keyFor: (id) => `${id}/${branch}` });
+    checker.report(1, ["a"]);
+    await settle();
+    branch = "topic";
+    checker.report(1, ["a"]);
+    await settle();
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a debounced periodic check if an explicit check already refreshed it", async () => {
+    const periodic = checker.request("a", "periodic");
+    expect(await checker.request("a", "selected").result).toEqual(ok({ status: "checked" }));
+    await settle();
+    expect(await periodic.result).toEqual(ok({ status: "superseded" }));
+    const repeated = checker.request("a", "periodic");
+    await settle();
+    expect(await repeated.result).toEqual(ok({ status: "superseded" }));
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a queued request for a branch the checkout no longer holds", async () => {
+    checker.stop();
+    let branch = "main";
+    checker = new RemoteTipChecker({ check, isFocused: () => focused, keyFor: (id) => `${id}/${branch}` });
+    const stale = checker.request("a", "visible");
+    branch = "topic";
+    await settle();
+    expect(await stale.result).toEqual(ok({ status: "superseded" }));
+    expect(check).not.toHaveBeenCalled();
+    checker.report(1, ["a"]);
+    await settle();
+    expect(check).toHaveBeenCalledTimes(1);
+  });
+
   it("caps background work at four and discards cancelled queued checks", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -169,6 +249,7 @@ describe("RemoteTipChecker", () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     check.mockImplementation(async () => { await gate; return ok({ status: "checked" }); });
     const first = checker.request("a", "selected");
+    await vi.advanceTimersByTimeAsync(0);
     branch = "topic";
     const second = checker.request("a", "selected");
     await vi.advanceTimersByTimeAsync(0);

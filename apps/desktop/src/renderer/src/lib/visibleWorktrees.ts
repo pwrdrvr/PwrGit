@@ -12,6 +12,31 @@ const seen = new Set<Element>();
 let observer: IntersectionObserver | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let lastSent = "";
+let withdrawalQueued = false;
+let pointer: { x: number; y: number } | undefined;
+let hoverBlockedByLayout = false;
+const pendingHovers = new Set<() => void>();
+
+function blockLayoutHover(): void {
+  hoverBlockedByLayout = true;
+  for (const cancel of pendingHovers) cancel();
+}
+
+function movedPointer(event: MouseEvent): boolean {
+  return pointer !== undefined && (event.clientX !== pointer.x || event.clientY !== pointer.y);
+}
+
+function withdraw(): void {
+  if (withdrawalQueued) return;
+  withdrawalQueued = true;
+  blockLayoutHover();
+  // A lens change can unmount every row in one React commit. Withdraw once
+  // after that commit, rather than scan/report the shrinking set per row.
+  queueMicrotask(() => {
+    withdrawalQueued = false;
+    send();
+  });
+}
 
 function send(): void {
   clearTimeout(timer);
@@ -35,6 +60,15 @@ function schedule(): void {
 
 function sharedObserver(): IntersectionObserver | null {
   if (typeof IntersectionObserver === "undefined") return null;
+  if (observer === null) {
+    // One pair of listeners for the window. Layout-generated mouse events at
+    // unchanged coordinates are not a deliberate hover after scrolling.
+    document.addEventListener("scroll", blockLayoutHover, true);
+    document.addEventListener("mousemove", (event) => {
+      if (movedPointer(event)) hoverBlockedByLayout = false;
+      pointer = { x: event.clientX, y: event.clientY };
+    }, { passive: true });
+  }
   observer ??= new IntersectionObserver((entries) => {
     let left = false;
     for (const entry of entries) {
@@ -71,22 +105,37 @@ export function useReportVisible(
     rows.set(el, worktreeId);
     io.observe(el);
     let hoverTimer: ReturnType<typeof setTimeout> | undefined;
-    const leave = (): void => { clearTimeout(hoverTimer); };
-    const enter = (): void => {
+    const leave = (): void => {
+      clearTimeout(hoverTimer);
+      pendingHovers.delete(leave);
+    };
+    const enter = (raw: Event): void => {
+      const event = raw as MouseEvent;
       leave();
+      if (hoverBlockedByLayout && !movedPointer(event)) return;
+      hoverBlockedByLayout = false;
+      pointer = { x: event.clientX, y: event.clientY };
+      pendingHovers.add(leave);
       hoverTimer = setTimeout(() => {
+        pendingHovers.delete(leave);
         void dispatch("remote:checkSelected", { worktreeId, intent: "hover" });
       }, REMOTE_HOVER_DWELL_MS);
     };
+    const move = (raw: Event): void => {
+      const event = raw as MouseEvent;
+      if (hoverBlockedByLayout && movedPointer(event)) enter(event);
+    };
     el.addEventListener("mouseenter", enter);
     el.addEventListener("mouseleave", leave);
+    el.addEventListener("mousemove", move);
     return () => {
       leave();
       el.removeEventListener("mouseenter", enter);
       el.removeEventListener("mouseleave", leave);
+      el.removeEventListener("mousemove", move);
       io.unobserve(el);
       rows.delete(el);
-      if (seen.delete(el)) send();
+      if (seen.delete(el)) withdraw();
     };
   }, [ref, worktreeId]);
 }

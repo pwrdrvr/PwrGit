@@ -1488,7 +1488,8 @@ export interface Commands {
    * tips. `superseded`: a fetch, pull or push on the repository stopped it,
    * so it learned nothing — keep whatever was known before.
    * Selection and deliberate hover use the immediate queue; periodic header
-   * checks share the background queue with visible rows. Hover skips the TTL.
+   * checks share the background queue with visible rows. Direct interactions
+   * skip the TTL; viewport and periodic checks share a 60-second cooldown.
    */
   "remote:checkSelected": {
     req: { worktreeId: string; intent?: "selected" | "hover" | "periodic" };

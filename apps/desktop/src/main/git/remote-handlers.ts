@@ -436,8 +436,8 @@ export function registerRemoteHandlers(
       const pending = autoChecks.get(key);
       if (pending !== undefined) return ok(await pending);
       const cached = autoCheckCache.get(key);
-      const ttl = cached?.status === "checked" ? 30_000 : 60_000;
-      if (request.reason !== "hover" && cached !== undefined && Date.now() - cached.at < ttl) {
+      const immediate = request.reason === "selected" || request.reason === "hover";
+      if (!immediate && cached !== undefined && Date.now() - cached.at < 60_000) {
         return ok({ status: cached.status });
       }
       if (Date.now() < networkPausedUntil) {

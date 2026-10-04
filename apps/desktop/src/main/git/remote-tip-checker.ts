@@ -84,7 +84,7 @@ export class RemoteTipChecker {
     this.reconcile("visible");
   }
 
-  focus(): void { this.reconcile("focus", true); }
+  focus(): void { this.reconcile("focus"); }
   tick(): void { this.reconcile("periodic"); }
 
   stop(): void {
@@ -95,39 +95,52 @@ export class RemoteTipChecker {
     this.lastFinished.clear();
   }
 
-  private reconcile(reason: RemoteCheckReason, force = false): void {
+  private reconcile(reason: RemoteCheckReason): void {
     const ids = new Set([...this.reports.values()].flatMap((set) => [...set]));
     for (const [id, handle] of this.visible) {
-      if (!ids.has(id)) { handle.cancel(); this.visible.delete(id); this.lastFinished.delete(id); }
+      if (!ids.has(id)) { handle.cancel(); this.visible.delete(id); }
+    }
+    const now = (this.deps.now ?? Date.now)();
+    // Retain freshness across scrolling/lens changes, but only for its TTL.
+    for (const [key, at] of this.lastFinished) {
+      if (now - at >= REMOTE_VISIBLE_INTERVAL_MS) this.lastFinished.delete(key);
     }
     if (this.stopped || !this.deps.isFocused()) return;
-    const now = (this.deps.now ?? Date.now)();
     for (const id of ids) {
-      const newlyVisible = !this.visible.has(id);
-      if (!force && !newlyVisible && now - (this.lastFinished.get(id) ?? -Infinity) < REMOTE_VISIBLE_INTERVAL_MS) continue;
+      const key = this.deps.keyFor?.(id) ?? id;
+      if (now - (this.lastFinished.get(key) ?? -Infinity) < REMOTE_VISIBLE_INTERVAL_MS) continue;
       this.visible.set(id, this.request(id, reason));
     }
   }
 
   private async run(entry: Entry): Promise<void> {
     if (entry.canceled || this.stopped) return;
-    if (entry.reason !== "selected" && entry.reason !== "hover" && !this.deps.isFocused()) {
-      // Focus can change during debounce or queue waiting. Settle the handle
-      // without recording a refresh, so the next focused round can retry it.
+    if (this.deps.keyFor !== undefined && this.deps.keyFor(entry.id) !== entry.key) {
+      entry.cancel(); // A checkout changed branch while this request waited.
+      return;
+    }
+    const immediate = entry.reason === "selected" || entry.reason === "hover";
+    const now = this.deps.now ?? Date.now;
+    if (!immediate && (!this.deps.isFocused() || now() - (this.lastFinished.get(entry.key) ?? -Infinity) < REMOTE_VISIBLE_INTERVAL_MS)) {
+      // Focus or freshness can change while queued. Skips are not refreshes.
       entry.cancel();
       return;
     }
     entry.started = true;
     try {
-      entry.resolve(await this.deps.check(entry.id, {
+      const answer = await this.deps.check(entry.id, {
         reason: entry.reason, userAction: entry.reason !== "periodic"
-      }));
+      });
+      if (answer.ok && answer.value.status !== "superseded" && (this.deps.keyFor?.(entry.id) ?? entry.key) === entry.key) {
+        this.lastFinished.set(entry.key, now());
+      }
+      entry.resolve(answer);
     } catch {
+      this.lastFinished.set(entry.key, now());
       entry.resolve(ok({ status: "unavailable" }));
     } finally {
       const owners = entry.reason === "selected" || entry.reason === "hover" ? this.direct : this.background;
       if (owners.get(entry.key) === entry) owners.delete(entry.key);
-      if (this.visible.has(entry.id)) this.lastFinished.set(entry.id, (this.deps.now ?? Date.now)());
     }
   }
 }

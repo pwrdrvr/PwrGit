@@ -47,6 +47,21 @@ function forkFixture(): { origin: string; source: string; writer: string; local:
 const unlocked = <T>(run: () => Promise<T>): Promise<T> => run();
 
 describe("automatic selected-branch remote check", () => {
+  it("preserves sanitized DNS failure detail so the shared checker can pause the network", async () => {
+    const { local } = forkFixture();
+    const failingGit: GitExec = (args, cwd, options) => args[0] === "ls-remote"
+      ? Promise.resolve(ok({
+        exitCode: 128, stdout: "",
+        stderr: "fatal: unable to access 'https://user:secret-value@example.test/repo': Could not resolve host: example.test"
+      }))
+      : systemGit(args, cwd, options);
+    const result = await checkSelectedRemoteTips(failingGit, local, "main", null, unlocked, () => undefined);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Could not resolve host");
+    expect(result.error.message).not.toContain("secret-value");
+  });
+
   it("discovers two remote commits for a visible repository without selecting or changing its checkout", async () => {
     const { writer, local } = forkFixture();
     const head = git(local, "rev-parse", "HEAD");

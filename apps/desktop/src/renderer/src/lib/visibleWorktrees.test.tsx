@@ -10,6 +10,7 @@ vi.mock("./pwrgit", () => ({ dispatch }));
 let callback: IntersectionObserverCallback;
 let root: Root;
 let container: HTMLDivElement;
+const observe = vi.fn();
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const render = (children: React.ReactNode) => {
   act(() => root.render(children));
@@ -39,14 +40,16 @@ describe("visible worktree reporting and remote hover", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: -1, clientY: -1 }));
     dispatch.mockReset().mockResolvedValue(ok(null));
+    observe.mockClear();
     vi.stubGlobal("IntersectionObserver", class {
       constructor(cb: IntersectionObserverCallback) { callback = cb; }
-      observe(): void {}
+      observe(): void { observe(); }
       unobserve(): void {}
     });
   });
-  afterEach(() => { act(() => root.unmount()); container.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
   it("debounces arrivals but withdraws departing rows immediately during a scroll", async () => {
     const view = render(<><Row id="a" /><Row id="b" /></>);
@@ -74,15 +77,58 @@ describe("visible worktree reporting and remote hover", () => {
     expect(dispatch).toHaveBeenLastCalledWith("remote:checkSelected", { worktreeId: "hovered", intent: "hover" });
   });
 
+  it("does not mistake scrolling beneath a stationary pointer for deliberate hover", async () => {
+    const view = render(<Row id="hovered" />);
+    const row = view.getByTestId("hovered");
+    document.dispatchEvent(new MouseEvent("mousemove", { clientX: 50, clientY: 50 }));
+    for (let i = 0; i < 5; i += 1) {
+      act(() => document.dispatchEvent(new Event("scroll")));
+      act(() => row.dispatchEvent(new MouseEvent("mouseenter", { clientX: 50, clientY: 50 })));
+      act(() => row.dispatchEvent(new MouseEvent("mousemove", { clientX: 50, clientY: 50, bubbles: true })));
+      await act(() => vi.advanceTimersByTimeAsync(REMOTE_HOVER_DWELL_MS));
+    }
+    expect(dispatch).not.toHaveBeenCalledWith("remote:checkSelected", expect.anything());
+    // Actual movement inside the row re-arms deliberate hover.
+    act(() => row.dispatchEvent(new MouseEvent("mousemove", { clientX: 55, clientY: 50, bubbles: true })));
+    await act(() => vi.advanceTimersByTimeAsync(REMOTE_HOVER_DWELL_MS));
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith("remote:checkSelected", { worktreeId: "hovered", intent: "hover" });
+  });
+
+  it("cancels a pending deliberate hover when scrolling begins", async () => {
+    const view = render(<Row id="hovered" />);
+    fireEvent.mouseEnter(view.getByTestId("hovered"));
+    await act(() => vi.advanceTimersByTimeAsync(REMOTE_HOVER_DWELL_MS - 1));
+    act(() => document.dispatchEvent(new Event("scroll")));
+    await act(() => vi.advanceTimersByTimeAsync(REMOTE_HOVER_DWELL_MS));
+    expect(dispatch).not.toHaveBeenCalledWith("remote:checkSelected", expect.anything());
+  });
+
   it("deduplicates primary repo and checkout rows and removes reports on lens unmount", async () => {
     const view = render(<><Row id="shared" /><Row id="shared" /></>);
     for (const row of view.getAllByTestId("shared")) intersect(row, true);
     await act(() => vi.advanceTimersByTimeAsync(VISIBLE_REPORT_DEBOUNCE_MS));
     expect(dispatch).toHaveBeenLastCalledWith("worktree:reportVisible", { worktreeIds: ["shared"] });
     fireEvent.mouseEnter(view.getAllByTestId("shared")[0]!);
-    view.unmount();
+    await act(async () => view.unmount());
     expect(dispatch).toHaveBeenLastCalledWith("worktree:reportVisible", { worktreeIds: [] });
     await act(() => vi.advanceTimersByTimeAsync(REMOTE_HOVER_DWELL_MS));
     expect(dispatch).not.toHaveBeenCalledWith("remote:checkSelected", expect.anything());
+  });
+
+  it("batches a lens change into one withdrawal report and does not reobserve stable rerenders", async () => {
+    const ids = Array.from({ length: 120 }, (_, i) => `repo-${i}`);
+    const children = ids.map((id) => <Row key={id} id={id} />);
+    const view = render(<>{children}</>);
+    expect(observe).toHaveBeenCalledTimes(120);
+    const rows = ids.map((id) => view.getByTestId(id));
+    act(() => callback(rows.map((target) => ({ target, isIntersecting: true } as IntersectionObserverEntry)), {} as IntersectionObserver));
+    await act(() => vi.advanceTimersByTimeAsync(VISIBLE_REPORT_DEBOUNCE_MS));
+    dispatch.mockClear();
+    for (let i = 0; i < 10; i += 1) render(<>{ids.map((id) => <Row key={id} id={id} />)}</>);
+    await act(() => vi.advanceTimersByTimeAsync(VISIBLE_REPORT_DEBOUNCE_MS));
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledTimes(120);
+    await act(async () => view.unmount());
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith("worktree:reportVisible", { worktreeIds: [] });
   });
 });
