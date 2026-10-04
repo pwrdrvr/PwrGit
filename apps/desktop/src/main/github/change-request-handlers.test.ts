@@ -11,7 +11,13 @@ const { emitEvent } = vi.hoisted(() => ({ emitEvent: vi.fn() }));
 vi.mock("../ipc", () => ({ emitEvent }));
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 
-const emptyList = { forge: "github" as const, fetchedAt: 1, truncated: false, entries: [] };
+const emptyList = {
+  forge: "github" as const,
+  fetchedAt: 1,
+  truncated: false,
+  entries: [],
+  remotes: []
+};
 
 function fakeService(overrides: Partial<OpenPrService> = {}): OpenPrService {
   return {

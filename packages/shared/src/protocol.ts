@@ -1142,19 +1142,24 @@ export interface Commands {
    * One change request by number, open or not: the numbered query the open
    * list could not answer (a merged PR, or one opened since the last list).
    * Null when the forge has no such number, or cannot be asked.
+   *
+   * `forgeRepo` (`ChangeRequestEntry.forgeRepo`) says whose #N is meant when
+   * a checkout lists more than one forge repository; without it, the remote
+   * listing that number answers, else `origin`.
    */
   "pr:lookup": {
-    req: { repoId: string; number: number };
+    req: { repoId: string; number: number; forgeRepo?: string };
     res: ChangeRequestEntry | null;
   };
   /**
    * Bring a change request's head into this checkout so the branch verbs can
-   * take over: a same-repository head is fetched into origin's remote-tracking
-   * ref, a fork's through the forge's change-request ref into a new local
-   * branch. Answers where the head now lives.
+   * take over: a head in a repository this checkout has a remote on is
+   * fetched into that remote's tracking ref, any other fork's through the
+   * forge's change-request ref into a new local branch. Answers where the
+   * head now lives. `forgeRepo` as for `pr:lookup`.
    */
   "pr:fetchHead": {
-    req: { repoId: string; number: number };
+    req: { repoId: string; number: number; forgeRepo?: string };
     res: ChangeRequestLocation;
   };
   /**

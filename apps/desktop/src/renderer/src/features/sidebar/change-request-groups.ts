@@ -1,7 +1,25 @@
-import type {
-  ChangeRequestEntry,
-  OpenChangeRequest
+import {
+  changeRequestLabel,
+  changeRequestNoun,
+  changeRequestPluralLabel,
+  type ChangeRequestEntry,
+  type ChangeRequestList,
+  type ChangeRequestRemote,
+  type ForgeKind,
+  type OpenChangeRequest
 } from "@pwrgit/shared";
+
+/**
+ * One row of the section: a change request, and — in the Local group — any
+ * others whose head is the same branch of yours. A fork checkout's branch
+ * usually has two: the CI PR on your fork (`origin`) and the PR you sent to
+ * the original. The row is the branch, so it appears once, led by the PR that
+ * leaves your repository; the rest ride along as `paired`.
+ */
+export type ChangeRequestRow = {
+  entry: ChangeRequestEntry;
+  paired: ChangeRequestEntry[];
+};
 
 /**
  * The sidebar's Pull requests section in two groups: what this machine holds
@@ -12,8 +30,8 @@ import type {
  * work on until a branch exists, and that is the step + Worktree takes.
  */
 export type ChangeRequestGroups = {
-  local: ChangeRequestEntry[];
-  remoteOnly: ChangeRequestEntry[];
+  local: ChangeRequestRow[];
+  remoteOnly: ChangeRequestRow[];
   /** Open ones whose checks fail or that conflict, across both groups — what
    *  the header's chip counts, filter or not. */
   failing: number;
@@ -31,6 +49,11 @@ export function isFailingChangeRequest(pr: OpenChangeRequest): boolean {
   );
 }
 
+/** One entry's identity across remotes: the fork's #14 is not the original's. */
+export function changeRequestKey(entry: ChangeRequestEntry): string {
+  return `${entry.forgeRepo}#${entry.pr.number}`;
+}
+
 /**
  * Split the list, keeping main's order (newest update first) inside each
  * group. `failingOnly` is the header chip's filter; it narrows the rows and
@@ -40,16 +63,57 @@ export function groupChangeRequests(
   entries: readonly ChangeRequestEntry[],
   { failingOnly = false }: { failingOnly?: boolean } = {}
 ): ChangeRequestGroups {
-  const local: ChangeRequestEntry[] = [];
-  const remoteOnly: ChangeRequestEntry[] = [];
+  const local: ChangeRequestRow[] = [];
+  const byBranch = new Map<string, ChangeRequestRow>();
+  const remoteOnly: ChangeRequestRow[] = [];
   let failing = 0;
   for (const entry of entries) {
     const fails = isFailingChangeRequest(entry.pr);
     if (fails) failing += 1;
     if (failingOnly && !fails) continue;
-    (isLocalChangeRequest(entry) ? local : remoteOnly).push(entry);
+    const { location } = entry;
+    if (location.kind !== "worktree" && location.kind !== "local") {
+      remoteOnly.push({ entry, paired: [] });
+      continue;
+    }
+    const row = byBranch.get(location.branch);
+    if (row === undefined) {
+      const fresh = { entry, paired: [] };
+      byBranch.set(location.branch, fresh);
+      local.push(fresh);
+    } else if (row.entry.remote === "origin" && entry.remote !== "origin") {
+      // The PR that leaves your repository leads; your fork's rides along.
+      row.paired.unshift(row.entry);
+      row.entry = entry;
+    } else {
+      row.paired.push(entry);
+    }
   }
   return { local, remoteOnly, failing };
+}
+
+/**
+ * The remotes a lens offers, each with how many it lists: only those with
+ * something open, the original first (the parent of `origin`'s repository,
+ * which `RepoIdentity` knows), then `origin`, then the rest in main's order.
+ * Fewer than two means there is nothing to choose, and no lens is drawn.
+ */
+export function lensRemotes(
+  list: ChangeRequestList,
+  parentPath: string | undefined
+): { remote: ChangeRequestRemote; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const entry of list.entries) {
+    counts.set(entry.forgeRepo, (counts.get(entry.forgeRepo) ?? 0) + 1);
+  }
+  const parent = parentPath?.toLowerCase();
+  const rank = (remote: ChangeRequestRemote): number =>
+    remote.path.toLowerCase() === parent ? 0 : remote.name === "origin" ? 1 : 2;
+  return list.remotes
+    .map((remote, index) => ({ remote, count: counts.get(remote.forgeRepo) ?? 0, index }))
+    .filter((item) => item.count > 0)
+    .sort((a, b) => rank(a.remote) - rank(b.remote) || a.index - b.index)
+    .map(({ remote, count }) => ({ remote, count }));
 }
 
 /**
@@ -70,4 +134,40 @@ export function shownBase(
 export function forkOwner(headRepoPath: string): string {
   const slash = headRepoPath.indexOf("/");
   return slash <= 0 ? headRepoPath : headRepoPath.slice(0, slash);
+}
+
+/**
+ * The remote a fetched head's tracking ref is under: `refs/remotes/upstream/
+ * feat/x` with branch `feat/x` is `upstream`. Read from the ref rather than
+ * split on `/`, because both the remote's name and the branch may hold one.
+ */
+export function trackingRemote(location: { fullName: string; branch: string }): string {
+  const tracked = location.fullName.replace(/^refs\/remotes\//, "");
+  return tracked.endsWith(`/${location.branch}`)
+    ? tracked.slice(0, tracked.length - location.branch.length - 1)
+    : "origin";
+}
+
+/**
+ * What a list's change requests are called: the forge's own words, unless
+ * its remotes are on forges that disagree (a GitHub repository mirrored to
+ * GitLab), where only both words are true. The sidebar section and the refs
+ * browser read the same list, so they say the same thing.
+ */
+export function changeRequestWords(
+  list: Pick<ChangeRequestList, "remotes"> | null,
+  forge: ForgeKind
+): { label: string; plural: string; noun: string } {
+  const forges = new Set(list?.remotes.map((remote) => remote.forge) ?? []);
+  return forges.size > 1
+    ? {
+        label: "Pull / merge request",
+        plural: "Pull & merge requests",
+        noun: "pull or merge request"
+      }
+    : {
+        label: changeRequestLabel(forge),
+        plural: changeRequestPluralLabel(forge),
+        noun: changeRequestNoun(forge)
+      };
 }

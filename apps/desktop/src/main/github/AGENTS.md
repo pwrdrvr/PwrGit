@@ -111,14 +111,36 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   `failure` are all part of the answer (the sidebar shows how old the list is
   and why it is not newer). Rows are still diff-written, so an unchanged list
   re-indexes nothing.
+  - **One list per forge repository, not per checkout** (migration 0039).
+    Every remote a product claims is asked, deduplicated by `forgeRepoKey`
+    (`host/path`, lowercased) and named after its first remote, `origin`
+    first. A fork checkout's `origin` is your own repository; the PR you
+    sent to the original is only on `upstream`'s list. Rows are keyed
+    `(repo_id, forge_repo, number)` because the fork's #14 and the
+    original's #14 are different PRs, and `repo_open_pr_state` has one row
+    per forge repository, so each list refreshes and fails on its own.
+    A remote whose host has no sign-in is left out quietly (`unasked`) —
+    except the first forge remote (`origin` when there is one), whose missing
+    sign-in is reported. A refresh drops the rows of a forge repository no
+    remote points at any more — but never when `git remote -v` failed, which
+    is "unknown", not "none".
+  - **A head is looked for on the remote whose repository holds it**
+    (`ChangeRequestPlace`). Usually that is the listing remote. When a fork's
+    head is in a repository this checkout *also* has a remote on — your fork,
+    for a PR you sent upstream — it is that remote, so the PR lands in Local
+    on your own branch. Any other fork's head is the numbered branch, which
+    names its remote off `origin`: `pr/upstream/405`, so two lists' #405
+    never share one branch.
   - **`list()` spawns nothing in the common case.** The sidebar calls it on
     every repo expand and every announcement, so heads are located against
     the branch index (`local_branches`, `remote_branches`, `worktrees` — the
     same tables ⌘K resolves PRs with), and `origin`'s URL is re-read only when
-    `.git/config` changes. The index can trail a terminal's fetch, so a label
+    `.git/config` changes (all remotes' URLs, one `git remote -v`, which
+    applies `insteadOf` the way `git remote get-url` did). The index can trail a terminal's fetch, so a label
     may lag; the verbs never do — the renderer's `reachableLocation` sends
     every non-worktree row through `pr:fetchHead`, which locates with git.
-  - **Every row is indexed** (`change_request` in `search_fts`, by trigger), and
+  - **Every row is indexed** (`change_request` in `search_fts`, by trigger,
+    under the row's integer `id`), and
     `RepoIndexer.searchAll` answers a hit on one with the worktree, local branch
     or origin branch holding its head — carrying the PR — so ⌘K returns the
     thing to act on. Only a head nothing here holds comes back as a

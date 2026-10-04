@@ -87,8 +87,20 @@ API calls on every expand.
 - **A failed refresh is shown, not swallowed**: `list.failure` draws a
   warning line under the heading and tints ⟳; the entries stay the last good
   list.
+- **More than one remote: a lens, only when it has something to say.** Main
+  lists every forge remote (`list.remotes`). With two or more of them
+  listing something, a lens under the heading picks All or one remote
+  (remembered per repo, `pwrgit.changeRequestsLens.<repoId>`; past three it
+  is a `<select>`), the original first (`identity.parent`). On All each row
+  carries a `RemoteChip`; on one remote the lens already says it. The
+  heading says "Pull & merge requests" only when the forges differ.
+- **Local is keyed by branch** (`groupChangeRequests`): a fork checkout's
+  branch with a CI PR on `origin` and the PR sent upstream draws once, led
+  by the one that leaves your repository, the other as a paired chip.
+  Rows are keyed `changeRequestKey` (forge repository + number), never the
+  number alone, and every verb passes `entry.forgeRepo` to `pr:fetchHead`.
 
-Design: `design/Change Requests in Sidebar - UX Review.dc.html`, 2b.
+Design: `design/Change Requests in Sidebar - UX Review.dc.html`, 2b and 3.
 
 ## The palette asks in this window's profile
 

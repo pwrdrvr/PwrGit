@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type {
   ChangeRequestEntry,
+  ChangeRequestList,
   ChangeRequestLocation,
+  ChangeRequestRemote,
   OpenChangeRequest
 } from "@pwrgit/shared";
 import {
   forkOwner,
   groupChangeRequests,
   isFailingChangeRequest,
+  lensRemotes,
   shownBase
 } from "./change-request-groups";
 
@@ -20,14 +23,24 @@ const pr = (number: number, extra: Partial<OpenChangeRequest> = {}): OpenChangeR
   forge: "github",
   ...extra
 });
+const ORIGIN = "github.com/octo/orbit";
+const UPSTREAM = "github.com/orbit-hq/orbit";
 const entry = (
   number: number,
   location: ChangeRequestLocation,
-  extra: Partial<OpenChangeRequest> = {}
-): ChangeRequestEntry => ({ pr: pr(number, extra), location });
+  extra: Partial<OpenChangeRequest> = {},
+  remote = "origin"
+): ChangeRequestEntry => ({
+  pr: pr(number, extra),
+  location,
+  remote,
+  forgeRepo: remote === "origin" ? ORIGIN : UPSTREAM
+});
+const numbers = (rows: { entry: ChangeRequestEntry }[]): number[] =>
+  rows.map((row) => row.entry.pr.number);
 
 const list: ChangeRequestEntry[] = [
-  entry(381, { kind: "unfetched", branch: "fix/audit" }),
+  entry(381, { kind: "unfetched", branch: "fix/audit", remote: "origin" }),
   entry(376, { kind: "worktree", branch: "feat/plan", worktreeId: "wt-9" }),
   entry(342, { kind: "remote", branch: "fix/links", fullName: "refs/remotes/origin/fix/links" }, { checkState: "failing" }),
   entry(320, { kind: "local", branch: "build/electron-44" }, { mergeState: "conflicting" }),
@@ -36,6 +49,7 @@ const list: ChangeRequestEntry[] = [
     branch: "typo",
     headRepoPath: "octo-contrib/orbit",
     localBranch: "pr/121",
+    remote: "origin",
     fetchable: true
   }),
   entry(98, { kind: "missing", branch: null })
@@ -44,17 +58,79 @@ const list: ChangeRequestEntry[] = [
 describe("groupChangeRequests", () => {
   it("puts worktree and local-branch heads in Local, everything else in Remote only, in order", () => {
     const groups = groupChangeRequests(list);
-    expect(groups.local.map((e) => e.pr.number)).toEqual([376, 320]);
+    expect(numbers(groups.local)).toEqual([376, 320]);
     // A fetched head (342) is still remote only: no branch is yours yet.
-    expect(groups.remoteOnly.map((e) => e.pr.number)).toEqual([381, 342, 121, 98]);
+    expect(numbers(groups.remoteOnly)).toEqual([381, 342, 121, 98]);
     expect(groups.failing).toBe(2);
   });
 
   it("narrows both groups to failing ones without changing the failing count", () => {
     const groups = groupChangeRequests(list, { failingOnly: true });
-    expect(groups.local.map((e) => e.pr.number)).toEqual([320]);
-    expect(groups.remoteOnly.map((e) => e.pr.number)).toEqual([342]);
+    expect(numbers(groups.local)).toEqual([320]);
+    expect(numbers(groups.remoteOnly)).toEqual([342]);
     expect(groups.failing).toBe(2);
+  });
+});
+
+describe("groupChangeRequests across remotes", () => {
+  it("draws a branch once, led by the PR that leaves your repository", () => {
+    const branch = { kind: "local", branch: "tenant-deploy" } as const;
+    const groups = groupChangeRequests([
+      // Your fork's CI PR is newer, so main lists it first.
+      entry(14, branch),
+      entry(412, branch, {}, "upstream"),
+      entry(405, { kind: "unfetched", branch: "fix/x", remote: "upstream" }, {}, "upstream"),
+      entry(13, { kind: "unfetched", branch: "fix/x", remote: "origin" })
+    ]);
+    expect(groups.local).toHaveLength(1);
+    expect(groups.local[0]?.entry.pr.number).toBe(412);
+    expect(groups.local[0]?.paired.map((paired) => paired.pr.number)).toEqual([14]);
+    // Remote only is one row per PR, even on a shared head name.
+    expect(numbers(groups.remoteOnly)).toEqual([405, 13]);
+  });
+});
+
+describe("lensRemotes", () => {
+  const remote = (name: string, forgeRepo: string, path: string): ChangeRequestRemote => ({
+    name,
+    forge: "github",
+    forgeRepo,
+    path,
+    fetchedAt: 1,
+    truncated: false
+  });
+  const of = (entries: ChangeRequestEntry[]): ChangeRequestList => ({
+    forge: "github",
+    fetchedAt: 1,
+    truncated: false,
+    entries,
+    remotes: [
+      remote("origin", ORIGIN, "octo/orbit"),
+      remote("upstream", UPSTREAM, "orbit-hq/Orbit")
+    ]
+  });
+
+  it("offers each remote with something open, the original first", () => {
+    const lens = lensRemotes(
+      of([
+        entry(1, { kind: "local", branch: "a" }),
+        entry(2, { kind: "local", branch: "b" }),
+        entry(3, { kind: "local", branch: "c" }, {}, "upstream")
+      ]),
+      "orbit-hq/orbit"
+    );
+    expect(lens.map((item) => [item.remote.name, item.count])).toEqual([
+      ["upstream", 1],
+      ["origin", 2]
+    ]);
+  });
+
+  it("leaves out a remote with nothing open", () => {
+    expect(
+      lensRemotes(of([entry(1, { kind: "local", branch: "a" })]), undefined).map(
+        (item) => item.remote.name
+      )
+    ).toEqual(["origin"]);
   });
 });
 
