@@ -40,6 +40,64 @@ describe("RemoteTipChecker", () => {
     expect(check.mock.calls.map(([id]) => id)).toEqual(["a", "b", "c", "d", "keep-me"]);
   });
 
+  it.each(["visible", "focus", "periodic"] as const)(
+    "settles a %s check skipped after focus is lost during debounce and allows retry",
+    async (reason) => {
+      const handle = checker.request("a", reason);
+      focused = false;
+      await settle();
+      expect(check).not.toHaveBeenCalled();
+      expect(await handle.result).toEqual(ok({ status: "superseded" }));
+      focused = true;
+      const retry = checker.request("a", reason);
+      await settle();
+      expect(await retry.result).toEqual(ok({ status: "checked" }));
+      expect(check).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("skips queued viewport checks after focus is lost without marking them fresh", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    check.mockImplementation(async () => { await gate; return ok({ status: "checked" }); });
+    checker.report(1, ["a", "b", "c", "d", "waiting-a", "waiting-b"]);
+    await settle();
+    expect(check).toHaveBeenCalledTimes(4);
+    const waiting = ["waiting-a", "waiting-b"].map((id) => checker.request(id, "visible"));
+    focused = false;
+    release();
+    await settle();
+    expect(check).toHaveBeenCalledTimes(4);
+    expect(await Promise.all(waiting.map((handle) => handle.result)))
+      .toEqual([ok({ status: "superseded" }), ok({ status: "superseded" })]);
+    focused = true;
+    checker.tick();
+    await settle();
+    expect(check.mock.calls.map(([id]) => id)).toEqual(["a", "b", "c", "d", "waiting-a", "waiting-b"]);
+  });
+
+  it("reschedules visible rows when focus returns after their checks were skipped", async () => {
+    checker.report(1, ["a"]);
+    focused = false;
+    await settle();
+    expect(check).not.toHaveBeenCalled();
+    focused = true;
+    checker.focus();
+    await settle();
+    expect(check).toHaveBeenCalledExactlyOnceWith("a", { reason: "focus", userAction: true });
+  });
+
+  it.each(["selected", "hover"] as const)(
+    "allows %s to promote queued viewport work even after focus is lost",
+    async (reason) => {
+      checker.report(1, ["a"]);
+      focused = false;
+      expect(await checker.request("a", reason).result).toEqual(ok({ status: "checked" }));
+      await settle();
+      expect(check).toHaveBeenCalledExactlyOnceWith("a", { reason, userAction: true });
+    }
+  );
+
   it("promotes hover ahead of a saturated background lane and cancels its old queued copy", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

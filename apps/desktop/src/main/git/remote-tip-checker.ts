@@ -111,6 +111,12 @@ export class RemoteTipChecker {
 
   private async run(entry: Entry): Promise<void> {
     if (entry.canceled || this.stopped) return;
+    if (entry.reason !== "selected" && entry.reason !== "hover" && !this.deps.isFocused()) {
+      // Focus can change during debounce or queue waiting. Settle the handle
+      // without recording a refresh, so the next focused round can retry it.
+      entry.cancel();
+      return;
+    }
     entry.started = true;
     try {
       entry.resolve(await this.deps.check(entry.id, {
