@@ -61,7 +61,7 @@ jobs:
           set -euo pipefail
           echo "Distribution API token source: $TOKEN_SOURCE"
           tag="$(gh api repos/pwrdrvr/PwrGit/releases/latest --jq .tag_name)"
-          node scripts/package-manager-release.mjs plan "$tag" "$RUNNER_TEMP/distribution" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-*', '.github/workflows/package-distribution.yml') }}"
+          node scripts/package-manager-release.mjs plan "$tag" "$RUNNER_TEMP/distribution" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-macos-distribution.sh', '.github/workflows/package-distribution.yml') }}" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-winget-install.ps1', '.github/workflows/package-distribution.yml') }}"
       - name: Upload metadata plan (native validation is separate)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

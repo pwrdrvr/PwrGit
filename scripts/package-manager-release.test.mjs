@@ -240,6 +240,9 @@ test("validation identity ignores routine metadata but changes for relevant inpu
   expect(logicPlan.macos_validation).not.toBe(plan.macos_validation);
   expect(logicPlan.windows_validation).not.toBe(plan.windows_validation);
   expect(logicPlan.windows_cache).toBe(plan.windows_cache);
+  const windowsLogicPlan = validationPlan(value, report, digest, "b".repeat(64));
+  expect(windowsLogicPlan.macos_validation).toBe(plan.macos_validation);
+  expect(windowsLogicPlan.windows_validation).not.toBe(plan.windows_validation);
   const upgradePlan = validationPlan(value, { ...report, winget: { version: "0.26.0" } }, digest);
   expect(upgradePlan.windows_validation).not.toBe(plan.windows_validation);
   expect(upgradePlan.macos_validation).toBe(plan.macos_validation);

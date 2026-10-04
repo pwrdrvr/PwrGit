@@ -217,8 +217,8 @@ export function checksumAsset(release) {
 
 // Audit timestamps, download counters and unrelated source publication do not
 // invalidate native validation. Changed bytes, manifests or validator inputs do.
-export function validationPlan(release, report, validatorDigest) {
-  if (!/^[a-f0-9]{64}$/.test(validatorDigest)) throw new Error("Expected SHA-256 of validator inputs");
+export function validationPlan(release, report, validatorDigest, windowsValidatorDigest = validatorDigest) {
+  if (![validatorDigest, windowsValidatorDigest].every((digest) => /^[a-f0-9]{64}$/.test(digest))) throw new Error("Expected SHA-256 of validator inputs");
   const assets = selectAssets(release);
   const sums = checksumAsset(release);
   const manifests = renderManifests(release, assets);
@@ -233,7 +233,7 @@ export function validationPlan(release, report, validatorDigest) {
     macos_validation: hash({ version, assets: assets.slice(0, 2).map(identity), cask: manifests["Casks/pwrgit.rb"], validatorDigest }),
     windows_validation: hash({ version, installer: identity(assets[2]), checksum: identity(sums),
       manifests: Object.entries(manifests).filter(([path]) => path.startsWith("manifests/")),
-      previousVersion: report.winget.version, validatorDigest }),
+      previousVersion: report.winget.version, validatorDigest: windowsValidatorDigest }),
   };
 }
 
@@ -275,7 +275,7 @@ export async function downloadPlatform(directory, platform, options = {}) {
   }
 }
 
-export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset = fetch, metadataOnly = false, validatorDigest } = {}) {
+export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset = fetch, metadataOnly = false, validatorDigest, windowsValidatorDigest = validatorDigest } = {}) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("Usage: prepare vX.Y.Z <output-directory>");
   const report = await audit({ api });
   if (tag !== report.stableTag) throw new Error(`Only Stable Latest ${report.stableTag} can update the package managers`);
@@ -284,7 +284,7 @@ export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset 
   const identity = (asset) => ({ name: asset.name, url: asset.browser_download_url, digest: asset.digest, size: asset.size });
   const inventory = assets.map(identity);
   const checksum = identity(checksumAsset(release));
-  const validation = validatorDigest ? validationPlan(release, report, validatorDigest) : undefined;
+  const validation = validatorDigest ? validationPlan(release, report, validatorDigest, windowsValidatorDigest) : undefined;
   for (const [name, content] of Object.entries(renderManifests(release, assets))) {
     const path = join(directory, name);
     mkdirSync(join(path, ".."), { recursive: true });
@@ -307,13 +307,13 @@ export async function runCli(args = process.argv.slice(2)) {
   } else if (command === "prepare" && directory) {
     console.log(JSON.stringify(await prepare(tag, directory), null, 2));
   } else if (command === "plan" && directory && args[3]) {
-    console.log(JSON.stringify(await prepare(tag, directory, { metadataOnly: true, validatorDigest: args[3] }), null, 2));
+    console.log(JSON.stringify(await prepare(tag, directory, { metadataOnly: true, validatorDigest: args[3], windowsValidatorDigest: args[4] ?? args[3] }), null, 2));
     const status = JSON.parse(readFileSync(join(directory, "distribution-status.json"), "utf8"));
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(status.validation).map(([key, value]) => `${key}=${value}\n`).join(""));
   } else if (command === "download" && tag && directory) {
     await downloadPlatform(tag, directory);
   } else {
-    throw new Error("Usage: package-manager-release.mjs audit [--check] | prepare vX.Y.Z <output-directory> | plan vX.Y.Z <output-directory> <validator-sha256> | download <directory> <macos|windows|all>");
+    throw new Error("Usage: package-manager-release.mjs audit [--check] | prepare vX.Y.Z <output-directory> | plan vX.Y.Z <output-directory> <macos-validator-sha256> [windows-validator-sha256] | download <directory> <macos|windows|all>");
   }
 }
 
