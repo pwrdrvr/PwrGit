@@ -161,7 +161,8 @@ export function AppUpdateToast() {
           message: `${copy.message} ${manual.description}`,
           ...(manual.command ? { detail: manual.command, copyText: manual.command, copyLabel: "Copy update command" } : {}),
           showCopyAction: manual.command !== undefined,
-          sticky: true
+          sticky: true,
+          layout: "stacked" as const
         } : {};
         if (copy.isError) {
           showErrorToast({
@@ -275,7 +276,7 @@ export function AppUpdateToast() {
         </aside>
       )}
       {offered && (
-        <aside className="app-toast" role="status" aria-live="polite">
+        <aside className={restartManualUpdate ? "app-toast app-toast--stacked" : "app-toast"} role="status" aria-live="polite">
           <div className="app-toast__content">
             <p className="app-toast__eyebrow app-toast__eyebrow--info">
               Update ready

@@ -32,6 +32,8 @@ export type Toast = {
    *  conditions that stay true until acted on, where auto-hiding would just
    *  un-report an unresolved problem. */
   sticky?: boolean;
+  /** Put long instructions above their actions, leaving the full card width. */
+  layout?: "stacked";
   /** Offer an "Open Logs" action (default true for errors). */
   showLogsAction?: boolean;
   /** Offer a copy action (default true for errors). */

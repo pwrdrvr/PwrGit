@@ -299,4 +299,6 @@ node apps/desktop/scripts/verify-linux-packages.mjs apps/desktop/release-stage/d
 
 AppImage is not a target. PwrGit has no approval for the additional AppImage
 runtime licensing/source obligations; approvals in another product do not apply.
+Linux prunes the unused Git Credential Manager/.NET UI runtime, as macOS does.
+Git and Git LFS retain PwrGit's existing runtime notices and source pointers.
 No new shipped npm dependency or license-policy exception is needed here.

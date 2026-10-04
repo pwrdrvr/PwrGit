@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { LINUX_FORMATS, linuxArtifactName, writeLinuxReleaseArtifacts } from "./linux-release-artifacts.mjs";
 
@@ -32,6 +32,10 @@ export function packageLinux({ stageDir, desktopRoot, builderCli, runChecked, ar
       if (readFileSync(join(resources, "package-type"), "utf8").trim() !== format) throw new Error(`Wrong ${format} updater backend marker`);
       const config = readFileSync(join(resources, "app-update.yml"), "utf8");
       if (!config.includes("repo: PwrGit") || !config.includes("owner: pwrdrvr")) throw new Error("Wrong Linux updater provider");
+    }
+    const gitCore = join(resources, "git", "libexec", "git-core");
+    if (readdirSync(gitCore).some(name => name.startsWith("git-credential-manager") || name.endsWith(".dll") || name.endsWith(".so"))) {
+      throw new Error("Unused Git Credential Manager runtime leaked into Linux package");
     }
     for (const path of [
       join(builtApp, "pwrgit"),

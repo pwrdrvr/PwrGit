@@ -18625,3 +18625,15 @@ button.agent-auth-node:focus-visible,
 .manual-update-instructions button {
   justify-self: start;
 }
+
+.app-toast--stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-toast--stacked .app-toast__actions {
+  justify-self: end;
+}
+
+.app-toast--stacked .app-toast__detail {
+  max-height: none;
+}
