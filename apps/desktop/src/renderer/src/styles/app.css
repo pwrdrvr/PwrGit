@@ -3957,12 +3957,12 @@ a.forge-chip:focus-visible {
   border-bottom: 2px solid transparent;
 }
 .fork-route-line__arrows i:first-child::after {
-  right: 0;
-  border-left: 4px solid currentColor;
-}
-.fork-route-line__arrows i:last-child::after {
   left: 0;
   border-right: 4px solid currentColor;
+}
+.fork-route-line__arrows i:last-child::after {
+  right: 0;
+  border-left: 4px solid currentColor;
 }
 /* The step form: one-way arrows between boxes, wrapping between stops so an
    arrow never strands at the end of a line without its box. */

@@ -159,14 +159,16 @@ function arrowLabel(arrow: RouteArrow): ReactNode {
   </>;
 }
 
-/** The route flattened to one line, for a menu note or a card. */
+/** The route flattened to one line, for the Pull menu's repair note. */
 export function ForkRouteLine({ branch, original }: { branch: string; original: string }) {
-  return <span className="fork-route-line" aria-label={`${branch} pulls from and pushes to ${original}`}>
-    <span className="fork-route-line__node">{branch}</span>
+  // Read left to right like `RouteStrip`: the original, then this checkout,
+  // dashed. Push is the top arrow, pointing at the original; Pull the bottom.
+  return <span className="fork-route-line" role="img" aria-label={`${branch} pulls from and pushes to ${original}`}>
+    <span className="fork-route-line__node">{original}</span>
     {/* Drawn, not typed: no bundled face carries U+21C4, so the glyph would
         come from whatever font the platform falls back to. */}
     <span className="fork-route-line__arrows" aria-hidden="true"><i /><i /></span>
-    <span className="fork-route-line__node">{original}</span>
+    <span className="fork-route-line__node fork-route-line__node--here">{branch}</span>
   </span>;
 }
 

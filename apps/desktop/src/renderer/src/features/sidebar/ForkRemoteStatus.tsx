@@ -154,8 +154,13 @@ export function remotesRoute(
       }
     };
   }
-  const syncs = original !== undefined &&
-    refs.remotes.find((remote) => remote.name === original.name)?.defaultBranch === branch.name;
+  // Sync needs the original to carry this branch. Its default branch does,
+  // and so does any fetched branch of the same name; the preview is only a
+  // sample, so a branch missing from it proves nothing and draws no arrow.
+  const originalRemote = original === undefined
+    ? undefined : refs.remotes.find((remote) => remote.name === original.name);
+  const syncs = originalRemote !== undefined && (originalRemote.defaultBranch === branch.name ||
+    originalRemote.previewBranches.some((row) => row.name === branch.name));
   const toOriginal: RouteArrow[] = syncs ? [{ verb: "sync", tone: "ghost" }] : [];
   return {
     lead: `${branch.name} pulls from and pushes to your fork.${syncs ? " Sync in the Pull menu brings in the original's new work." : ""}`,

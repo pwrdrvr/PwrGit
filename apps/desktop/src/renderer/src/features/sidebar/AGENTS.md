@@ -157,8 +157,10 @@ this checkout, the fork), so the change reads without Git's vocabulary; the
 command itself sits under "In Git terms". Two rules:
 
 - **Only a refused push says the original is closed to you.** `viewerCanPush`
-  is known for `origin` alone, and a maintainer can have a fork and still push
-  upstream, so the Pull and Remotes entries draw no refusal and no "can't push".
+  is known for `origin` alone, and here `origin` is the fork; a maintainer can
+  have a fork and still push upstream, so the Pull and Remotes entries draw no
+  refusal and no "can't push". (Publish and Fork&hellip; may say it from
+  `viewerCanPush: false`, because there `origin` *is* the original.)
 - **A fork other than `origin` is offered only once the forge confirms it**
   forks the same parent and takes your pushes. `remote:inspectForkTracking`
   asks after releasing the repository lock; the renderer never guesses from a
@@ -182,8 +184,13 @@ name:
 - **"You can push" is drawn only from `viewerCanPush`, and only for a remote
   whose push URL is origin's repository.** No pill means "not asked", which is
   why Publish to the original says PwrGit hasn't asked.
-- **Sync's dotted arrow appears only where the original's default branch is
-  the branch's name.** A feature branch on a fork has nothing to sync.
+- **Sync's dotted arrow appears only where the original is known to carry the
+  branch**: its default branch, a fetched branch of that name, or the branch it
+  tracks now (the repair). Absent from the preview sample proves nothing, so
+  it draws no arrow rather than a guess.
+- **One-line routes read in the strip's order**, the original first and this
+  checkout dashed: `RouteLine` in Pull's choices, `ForkRouteLine` in its
+  repair note.
 - **Fork&hellip; draws strips only for a branch that tracks a remote**
   (`routeBranch`). An unpublished branch has no route to change, so it keeps
   the "Afterwards" list.
