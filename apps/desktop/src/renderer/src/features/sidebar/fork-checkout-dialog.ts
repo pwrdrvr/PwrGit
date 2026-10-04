@@ -196,8 +196,11 @@ export function forkPlanRoutes(input: {
     toOriginal: [{ verb: "push", tone: closed ? "bad" : "plain" }, { verb: "pull", tone: "plain" }],
     toFork: []
   };
+  // Sync needs the upstream to carry the branch. The repository `origin`
+  // names today does, since the branch follows it; a fork's root may not.
+  const syncs = upstream !== null && sameOriginal;
   const after: Strip = {
-    label: `After: ${branch} pulls from and pushes to ${target}.${upstream === null ? "" : ` Sync in the Pull menu brings in ${upstream}.`}`,
+    label: `After: ${branch} pulls from and pushes to ${target}.${syncs ? ` Sync in the Pull menu brings in ${upstream}.` : ""}`,
     caption: upstream === null
       ? `${branch} follows your fork; nothing here points at the original`
       : `${branch} keeps following origin, and origin moves to your fork`,
@@ -217,7 +220,7 @@ export function forkPlanRoutes(input: {
       perm: "yes",
       state: "chosen"
     },
-    toOriginal: upstream === null ? [] : [{ verb: "sync", tone: "ghost" }],
+    toOriginal: syncs ? [{ verb: "sync", tone: "ghost" }] : [],
     toFork: [{ verb: "push", tone: "go", confirmed: true }, { verb: "pull", tone: "go" }]
   };
   return { now, after };

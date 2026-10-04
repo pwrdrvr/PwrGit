@@ -532,9 +532,13 @@ export function RepoRefsModal({
   const forgeHosts = useForgeHostMap();
   const parentOffer = forkParentOffer(repo.identity, refs.remotes, forgeHosts);
   // What each remote is, from the fork the forge confirmed — not its name.
-  const remoteRoles = new Map(
-    routedRemotes(repo.identity, refs.remotes, forgeHosts).map((row) => [row.name, row])
-  );
+  const { remoteRoles, forkKnown } = useMemo(() => {
+    const rows = routedRemotes(repo.identity, refs.remotes, forgeHosts);
+    return {
+      remoteRoles: new Map(rows.map((row) => [row.name, row])),
+      forkKnown: rows.some((row) => row.role === "fork")
+    };
+  }, [repo.identity, refs.remotes, forgeHosts]);
   const remoteNames = useMemo(
     () => refs.remotes.map((remote) => remote.name),
     [refs.remotes]
@@ -1594,7 +1598,7 @@ export function RepoRefsModal({
                     <div>
                       <strong>{remote.name}</strong>
                       <RemoteRoleTag role={remoteRoles.get(remote.name)} name={remote.name}
-                        forkKnown={[...remoteRoles.values()].some((row) => row.role === "fork")} />
+                        forkKnown={forkKnown} />
                     </div>
                     <div className="refs-remote-card__actions">
                       <span>{remote.branchCount} branches</span>

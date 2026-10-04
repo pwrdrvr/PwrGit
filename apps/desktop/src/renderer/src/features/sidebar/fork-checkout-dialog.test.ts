@@ -335,5 +335,8 @@ describe("forkPlanRoutes", () => {
     });
     expect(now.original).toMatchObject({ role: "Origin today", slug: "alice/dugite" });
     expect(after.original).toMatchObject({ role: "The original", slug: "desktop/dugite" });
+    // The root may not carry the branch, so no Sync is promised from it.
+    expect(after.toOriginal).toEqual([]);
+    expect(after.label).toBe("After: main pulls from and pushes to huntharo/dugite.");
   });
 });

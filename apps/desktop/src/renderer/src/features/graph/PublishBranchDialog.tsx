@@ -53,9 +53,10 @@ export function publishRoute(input: {
   toFork: RouteArrow[];
 } | null {
   const { branch, rows, picked } = input;
-  const fork = rows.find((row) => row.role === "fork");
-  const original = rows.find((row) => row.role === "original");
   const target = rows.find((row) => row.name === picked);
+  // Two remotes can name one repository; draw the one picked.
+  const fork = target?.role === "fork" ? target : rows.find((row) => row.role === "fork");
+  const original = target?.role === "original" ? target : rows.find((row) => row.role === "original");
   if (target === undefined || target.role === "other") return null;
   if (fork === undefined && original?.canPush !== false) return null;
   const originalSlug = original?.nameWithOwner ?? input.parent;
@@ -196,8 +197,11 @@ export function PublishBranchDialog({
           <p className="publish-branch__warn" role="note">
             The forge says this account can't push to{" "}
             <b>{picked.nameWithOwner}</b>, so publishing there would be
-            refused. Fork it first: {branch} comes with you, and nothing is
-            pushed until you publish.
+            refused.
+            {offerFork && <>
+              {" "}Fork it first: {branch} comes with you, and nothing is
+              pushed until you publish.
+            </>}
           </p>
         ) : (
           <p className="publish-branch__lede">

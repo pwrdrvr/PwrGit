@@ -77,11 +77,22 @@ it("does not call a remote the original because it is named upstream", async () 
   expect(container.querySelector(".fork-route__perm--pending")?.textContent).toBe("no remote");
 });
 
+it("advises forking only where Fork… is offered", async () => {
+  // Your fork, refusing pushes: there is nothing to fork, so no such advice.
+  await open([endpoint("origin", "riverbend/sparkline")], { ...fork, viewerCanPush: false });
+  expect(container.querySelector("[role=note]")?.textContent).toContain("can't push to riverbend/sparkline");
+  expect(container.querySelector("[role=note]")?.textContent).not.toContain("Fork it first");
+  expect(button("Publish")).toBeDefined();
+});
+
 it("offers Fork… before a push the forge has said would be refused", async () => {
   await open([endpoint("origin", "octo-labs/sparkline")], readOnly);
   expect(container.querySelector("[role=note]")?.textContent).toContain("can't push to octo-labs/sparkline");
   expect(strip()).toBe("If you publish now, the push to octo-labs/sparkline is refused: this account can't push there.");
   expect(container.querySelector(".fork-route__arrow--bad")).not.toBeNull();
+  // No slash to split at: the fork box reads whole, not "none ye" + "t".
+  const forkSlug = [...container.querySelectorAll(".fork-route__slug")].at(-1)!;
+  expect(forkSlug.querySelector("b")?.textContent).toBe("none yet");
   expect(button("Publish")).toBeUndefined();
   await act(async () => button("Fork octo-labs/sparkline…")?.click());
   expect(onFork).toHaveBeenCalledOnce();

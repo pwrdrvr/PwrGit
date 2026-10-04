@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 
-/** `owner/name` split at its last slash: GitLab owners can hold slashes. */
+/** `owner/name` split at its last slash: GitLab owners can hold slashes.
+ *  Text with no slash ("none yet", a bare nickname) is all owner. */
 export function splitSlug(slug: string): { owner: string; name: string } {
   const cut = slug.lastIndexOf("/");
+  if (cut < 0) return { owner: slug, name: "" };
   return { owner: slug.slice(0, cut), name: slug.slice(cut) };
 }
 

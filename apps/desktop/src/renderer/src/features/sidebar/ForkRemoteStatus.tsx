@@ -109,8 +109,8 @@ export function ForkRemoteStatus({ repo, refs, focusedWorktree, onRefresh }: {
  * forge has confirmed `origin` is a fork and the branch follows the fork or
  * its parent, whether or not anything needs repair. Plain arrows, no Now or
  * After — this card changes nothing. The Sync arrow is drawn only where the
- * original's default branch is this branch, since that is what Pull's Sync
- * offers. Design: `design/Fork Route Graphic - UX Review.dc.html`, 4b and 4d.
+ * original is known to carry this branch (its default branch, or a fetched
+ * branch of that name), since that is what Pull's Sync needs. Design: `design/Fork Route Graphic - UX Review.dc.html`, 4b and 4d.
  */
 export function remotesRoute(
   identity: RepoIdentity | undefined,
