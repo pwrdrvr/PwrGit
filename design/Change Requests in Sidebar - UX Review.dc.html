@@ -257,6 +257,7 @@
       <section class="dv-turn" id="t2">
         <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">The section: what you have locally first, what is only on the forge behind it</span></div>
         <p class="dv-sub">The new section goes between <b>Worktrees</b> and <b>Branches</b>, because it is the one you will open more often. Its header follows the forge's own noun (<code>changeRequestPluralLabel</code>), so it reads <b>Pull requests</b> on GitHub and GitCafe and <b>Merge requests</b> on GitLab. <b>Local</b> means the head is a branch in <code>refs/heads</code> or is checked out in a worktree. <b>Remote only</b> means the forge has the PR and this machine has no local branch for it. Titles are PwrGit's real open list on 2026-10-04. Which PRs are local has been rearranged for the walk. Every frame is 320&#8239;px, the default sidebar width.</p>
+        <p class="dv-sub" style="border-left:3px solid var(--rv-acc);padding-left:12px"><b>Decided 2026-10-04: 2b.</b> Remote only starts collapsed on every repository, not only past a threshold, and remembers being opened per repository. In the build, each row's verb is the sidebar's own mini action in the shared right-hand column: <b>⌂</b> goes to the worktree that holds the head, <b>+</b> opens New worktree (fetching an unfetched or fork head first), and the dialog names the PR. The first build reads <code>origin</code>'s list only; the lens in turn 3 follows.</p>
         <div class="dv-opts">
           <div class="dv-opt" id="2a" data-screen-label="2a Tabs">
             <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Two tabs: Local | Remote only</div>
@@ -282,7 +283,7 @@
           </div>
 
           <div class="dv-opt" id="2b" data-screen-label="2b Two groups">
-            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span class="rec">Recommended</span> Two groups, like Worktrees' Pinned and Working</div>
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span class="rec">Chosen</span> Two groups, like Worktrees' Pinned and Working</div>
             <div class="stage th-light">
               <div class="sb">
                 <div class="repo"><span class="chev"></span><span class="rname">PwrGit</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">38 wts</span></div>
@@ -652,7 +653,7 @@
           <div class="dv-opt" id="5c" data-screen-label="5c Open questions">
             <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>Open questions for Harold</div>
             <div class="find" style="width:420px">
-              <div class="fitem"><span class="pin q">A</span><div><h4>2a, 2b or 2c?</h4><p>2b is recommended. Should Remote only start collapsed on a repo with more than about 15 PRs that are only on the forge?</p></div></div>
+              <div class="fitem"><span class="pin q">A</span><div><h4>2a, 2b or 2c?</h4><p><b>Answered: 2b.</b> Remote only starts collapsed on every repository, whatever its size.</p></div></div>
               <div class="fitem"><span class="pin q">B</span><div><h4>Hide bots in Remote only?</h4><p>Dependabot and Renovate can be most of a list. A <code>bots</code> header chip that filters them in or out would be cheap, because the author is already in the list.</p></div></div>
               <div class="fitem"><span class="pin q">C</span><div><h4>Should Local ignore the lens?</h4><p>With the lens on <code>origin</code>, your branch with #412 upstream still has #14 on origin, so it stays. A branch whose only PR is upstream drops out. Is that right, or is Local always the whole list?</p></div></div>
               <div class="fitem"><span class="pin q">D</span><div><h4>Recently merged</h4><p>Not in the list call, so not shown. A merged PR whose branch is still local already shows a purple chip on its worktree, and Finished Branches handles cleaning those up.</p></div></div>
@@ -803,7 +804,7 @@
       class Component extends DCLogic {
         constructor(props) {
           super(props);
-          this.state = { repo: "pwrgit", lens: { pwrgit: "all", orbit: "all", relay: "all" }, remoteOpen: true, created: {}, dlg: null, toast: "" };
+          this.state = { repo: "pwrgit", lens: { pwrgit: "all", orbit: "all", relay: "all" }, remoteOpen: false, created: {}, dlg: null, toast: "" };
         }
         renderVals() {
           const s = this.state;
@@ -840,7 +841,7 @@
             pRepos: [["pwrgit", "PwrGit · one remote"], ["orbit", "orbit-deploy · fork"], ["relay", "relay-cache · GitHub + GitLab"]].map((c) => ({
               label: c[1], cls: s.repo === c[0] ? "on" : "", on: () => { this.setState({ repo: c[0], dlg: null, toast: "" }); }
             })),
-            pReset: () => { this.setState({ lens: { pwrgit: "all", orbit: "all", relay: "all" }, remoteOpen: true, created: {}, dlg: null, toast: "" }); },
+            pReset: () => { this.setState({ lens: { pwrgit: "all", orbit: "all", relay: "all" }, remoteOpen: false, created: {}, dlg: null, toast: "" }); },
             pToggleRemote: () => { this.setState({ remoteOpen: !this.state.remoteOpen }); },
             p: Object.assign({}, p, {
               name: repo.name,

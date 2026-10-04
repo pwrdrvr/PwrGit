@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { OpenChangeRequest, Repo } from "@pwrgit/shared";
 import { useModal } from "../../lib/useModal";
 import { PrChip } from "./PrChip";
@@ -41,7 +41,11 @@ export function NewWorktreeModal({
     else setError(message);
   };
 
-  const modalRef = useModal<HTMLDivElement>({ onClose });
+  // The branch field, not the first tabbable control: with a PR strip above
+  // it, that would be the chip, whose focus opens its status card over the
+  // title.
+  const inputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useModal<HTMLDivElement>({ onClose, initialFocusRef: inputRef });
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
@@ -58,6 +62,7 @@ export function NewWorktreeModal({
           </div>
         )}
         <input
+          ref={inputRef}
           className="modal__input"
           autoFocus
           value={branch}
