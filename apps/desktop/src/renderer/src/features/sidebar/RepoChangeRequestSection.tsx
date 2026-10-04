@@ -20,11 +20,17 @@ import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { shortWhen } from "../graph/graph-view";
 import { CopyTarget } from "../shell/CopyTarget";
 import {
+  changeRequestKey,
   forkOwner,
   groupChangeRequests,
-  shownBase
+  lensRemotes,
+  shownBase,
+  type ChangeRequestLens,
+  type ChangeRequestRow
 } from "./change-request-groups";
+import { ForgeMark } from "./ForgeMark";
 import { PrChip } from "./PrChip";
+import { RemoteChip } from "./RemoteChip";
 import {
   reachableLocation,
   useChangeRequestList,
@@ -54,6 +60,30 @@ function usePersistedOpen(key: string): [boolean, (open: boolean) => void] {
   }, [key, open]);
   return [open, setOpen];
 }
+
+/** The lens, per repository, the same way: "all" or a forge repository. */
+function usePersistedLens(
+  key: string
+): [ChangeRequestLens, (lens: ChangeRequestLens) => void] {
+  const [lens, setLens] = useState<ChangeRequestLens>(() => {
+    try {
+      return window.localStorage.getItem(key) ?? "all";
+    } catch {
+      return "all";
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, lens);
+    } catch {
+      // Ignore private-mode and quota failures.
+    }
+  }, [key, lens]);
+  return [lens, setLens];
+}
+
+/** More segments than this and the lens becomes a menu, so the head never wraps. */
+const LENS_SEGMENTS_MAX = 3;
 
 /** The leading unit of `shortWhen`: "2h 13m" is two columns of a row with none. */
 function compactAge(updatedAt: number | undefined, now: number): string | null {
@@ -111,9 +141,10 @@ export function RepoChangeRequestSection({
   const [remoteOpen, setRemoteOpen] = usePersistedOpen(
     `pwrgit.changeRequestsRemoteOpen.${repo.id}`
   );
+  const [lens, setLens] = usePersistedLens(`pwrgit.changeRequestsLens.${repo.id}`);
   const [failingOnly, setFailingOnly] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [fetching, setFetching] = useState<number | null>(null);
+  const [fetching, setFetching] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
 
   // No forge on origin: no section at all, rather than a heading that can only
@@ -131,11 +162,30 @@ export function RepoChangeRequestSection({
     forge,
     fetchedAt: null,
     truncated: false,
-    entries: []
+    entries: [],
+    remotes: []
   };
-  const plural = changeRequestPluralLabel(forge);
-  const noun = changeRequestNoun(forge);
-  const groups = groupChangeRequests(shown.entries, { failingOnly });
+  // A checkout on GitHub with a GitLab mirror lists both kinds; the heading
+  // names both only then.
+  const mixed = new Set(shown.remotes.map((remote) => remote.forge)).size > 1;
+  const plural = mixed ? "Pull & merge requests" : changeRequestPluralLabel(forge);
+  const noun = mixed ? "pull or merge request" : changeRequestNoun(forge);
+  // The lens appears only with two or more remotes that have something open,
+  // and a remembered remote that no longer has any reads as All.
+  const lensOptions = lensRemotes(shown, repo.identity?.parent?.nameWithOwner);
+  const activeLens =
+    lensOptions.length >= 2 &&
+    lensOptions.some((option) => option.remote.forgeRepo === lens)
+      ? lens
+      : "all";
+  const visible =
+    activeLens === "all"
+      ? shown.entries
+      : shown.entries.filter((entry) => entry.forgeRepo === activeLens);
+  // On All, each row says which remote it is from; a lens on one says it once.
+  const remoteChips = lensOptions.length >= 2 && activeLens === "all";
+  const manyRemotes = shown.remotes.length > 1;
+  const groups = groupChangeRequests(visible, { failingOnly });
   const rows = remoteOpen
     ? [...groups.local, ...groups.remoteOnly]
     : groups.local;
@@ -160,7 +210,7 @@ export function RepoChangeRequestSection({
 
   const act = async (entry: ChangeRequestEntry): Promise<void> => {
     if (fetching !== null) return;
-    setFetching(entry.pr.number);
+    setFetching(changeRequestKey(entry));
     const location = await reachableLocation(repo.id, entry);
     setFetching(null);
     if (location === null) return;
@@ -184,7 +234,7 @@ export function RepoChangeRequestSection({
       case "remote":
         return `New worktree on ${location.branch}, from ${location.fullName.replace(/^refs\/remotes\//, "")}`;
       case "unfetched":
-        return `New worktree from #${pr.number} — fetches origin/${location.branch} first`;
+        return `New worktree from #${pr.number} — fetches ${location.remote}/${location.branch} first`;
       case "fork":
         return location.fetchable
           ? `New worktree from #${pr.number} — fetches it from ${location.headRepoPath} as ${location.localBranch}`
@@ -224,8 +274,9 @@ export function RepoChangeRequestSection({
     }
   };
 
-  const row = (entry: ChangeRequestEntry, index: number): ReactElement => {
+  const row = ({ entry, paired }: ChangeRequestRow, index: number): ReactElement => {
     const { pr, location } = entry;
+    const key = changeRequestKey(entry);
     const age = compactAge(pr.updatedAt ?? pr.createdAt, now);
     // Null only for a missing head the forge did not name either: nothing to
     // copy, so no copy target.
@@ -241,17 +292,17 @@ export function RepoChangeRequestSection({
         ? null
         : worktreeFolderLabel(holder.branch, holder.path, [repo.name]);
     const hint = worktreeHint(entry);
-    const pending = fetching === pr.number;
+    const pending = fetching === key;
     const cursorIndex = Math.min(cursor, rows.length - 1);
     return (
       <div
         className={`ref-cr-row${location.kind === "worktree" ? " is-checked-out" : ""}`}
-        key={pr.number}
+        key={key}
         role="treeitem"
         aria-level={3}
         aria-posinset={index + 1}
         aria-setsize={rows.length}
-        aria-label={`#${pr.number} ${pr.title}`}
+        aria-label={`#${pr.number} ${pr.title}${manyRemotes ? `, on ${entry.remote}` : ""}`}
         tabIndex={index === cursorIndex ? 0 : -1}
         onFocus={(event) => {
           if (event.target === event.currentTarget) setCursor(index);
@@ -308,6 +359,21 @@ export function RepoChangeRequestSection({
           )}
         </div>
         <div className="ref-cr-row__where">
+          {remoteChips && (
+            <RemoteChip remote={entry.remote} forge={pr.forge ?? forge} tip={tip} />
+          )}
+          {paired.map((other) => (
+            <span
+              className="ref-cr-paired"
+              key={changeRequestKey(other)}
+              aria-label={`Also #${other.pr.number} on ${other.remote}`}
+            >
+              <PrChip pr={other.pr} />
+              {manyRemotes && (
+                <span className="ref-cr-paired__remote">{other.remote}</span>
+              )}
+            </span>
+          ))}
           {location.kind === "worktree" && (
             <button
               className="ref-checkout-chip is-here"
@@ -379,7 +445,7 @@ export function RepoChangeRequestSection({
           <SectionChevron open={open} />
           <span className="ref-section__label">{plural}</span>
           <span className="ref-section__count">
-            {loading ? "…" : unlisted ? "–" : shown.entries.length}
+            {loading ? "…" : unlisted ? "–" : visible.length}
           </span>
         </button>
         {/* Kept while the filter is on even after a refresh leaves nothing
@@ -407,7 +473,7 @@ export function RepoChangeRequestSection({
                 setOpen(true);
                 // "Show only these" has to show them: a failing PR that is
                 // only on the forge would otherwise sit in a closed group.
-                if (groupChangeRequests(shown.entries, { failingOnly: true }).remoteOnly.length > 0) {
+                if (groupChangeRequests(visible, { failingOnly: true }).remoteOnly.length > 0) {
                   setRemoteOpen(true);
                 }
               }}
@@ -445,11 +511,71 @@ export function RepoChangeRequestSection({
                 : ` Showing the list from ${since(shown.fetchedAt)}.`}
             </div>
           )}
+          {lensOptions.length >= 2 &&
+            (lensOptions.length <= LENS_SEGMENTS_MAX ? (
+              <div
+                className="ref-cr-lens"
+                role="group"
+                aria-label={`Show ${plural.toLowerCase()} from`}
+              >
+                {[
+                  { value: "all", label: "All", count: shown.entries.length, forge: null },
+                  ...lensOptions.map((option) => ({
+                    value: option.remote.forgeRepo,
+                    label: option.remote.name,
+                    count: option.count,
+                    forge: option.remote.forge
+                  }))
+                ].map((segment) => (
+                  <button
+                    key={segment.value}
+                    className={`ref-cr-lens__seg${activeLens === segment.value ? " is-active" : ""}`}
+                    aria-pressed={activeLens === segment.value}
+                    {...hoverTooltip(
+                      tip,
+                      segment.value === "all"
+                        ? "Every remote's open list"
+                        : `Only what ${segment.label} lists`
+                    )}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setLens(segment.value);
+                    }}
+                  >
+                    {/* The mark only where the forges differ: there a remote's
+                        name alone ("gitlab") would be a coincidence. */}
+                    {mixed && segment.forge !== null && (
+                      <ForgeMark kind={segment.forge} size={10} />
+                    )}
+                    <span className="ref-cr-lens__label">{segment.label}</span>
+                    <span className="ref-section__count">{segment.count}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <label
+                className="ref-cr-lens ref-cr-lens--menu"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <span className="ref-cr-lens__label">Remote</span>
+                <select
+                  value={activeLens}
+                  onChange={(event) => setLens(event.target.value)}
+                >
+                  <option value="all">All ({shown.entries.length})</option>
+                  {lensOptions.map((option) => (
+                    <option key={option.remote.forgeRepo} value={option.remote.forgeRepo}>
+                      {option.remote.name} ({option.count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
           {loading ? null : unlisted ? (
             <div className="ref-section__empty">
               Not listed yet — ⟳ asks {forgeLabel(forge)}.
             </div>
-          ) : shown.entries.length === 0 ? (
+          ) : visible.length === 0 ? (
             <div className="ref-section__empty">No open {plural.toLowerCase()}.</div>
           ) : (
             <div
@@ -461,7 +587,7 @@ export function RepoChangeRequestSection({
                 <span className="ref-cr-subhead__label">Local</span>
                 <span className="ref-section__count">{groups.local.length}</span>
               </div>
-              {groups.local.map((entry, index) => row(entry, index))}
+              {groups.local.map((item, index) => row(item, index))}
               {groups.local.length === 0 && (
                 <div className="ref-section__empty">
                   {failingOnly
@@ -482,8 +608,8 @@ export function RepoChangeRequestSection({
                 <span className="ref-section__count">{groups.remoteOnly.length}</span>
               </button>
               {remoteOpen &&
-                groups.remoteOnly.map((entry, index) =>
-                  row(entry, groups.local.length + index)
+                groups.remoteOnly.map((item, index) =>
+                  row(item, groups.local.length + index)
                 )}
             </div>
           )}

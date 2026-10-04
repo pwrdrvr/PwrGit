@@ -7,6 +7,7 @@ import {
   ok,
   type ChangeRequestEntry,
   type ChangeRequestList,
+  type ChangeRequestRemote,
   type Repo,
   type Worktree
 } from "@pwrgit/shared";
@@ -48,11 +49,14 @@ const repo: Repo = {
   worktrees: [worktree("wt-1", "main", true), worktree("wt-9", "feat/plan")]
 };
 
+const ORIGIN = "github.com/acme/orbit";
+const UPSTREAM = "github.com/orbit-hq/orbit";
 const entry = (
   number: number,
   title: string,
   location: ChangeRequestEntry["location"],
-  baseRefName = "main"
+  baseRefName = "main",
+  remote = "origin"
 ): ChangeRequestEntry => ({
   pr: {
     number,
@@ -66,7 +70,18 @@ const entry = (
       ? {}
       : { headRefName: location.branch })
   },
-  location
+  location,
+  remote,
+  forgeRepo: remote === "origin" ? ORIGIN : UPSTREAM
+});
+
+const remote = (name: string, forgeRepo: string, path: string): ChangeRequestRemote => ({
+  name,
+  forge: "github",
+  forgeRepo,
+  path,
+  fetchedAt: 1,
+  truncated: false
 });
 
 const list: ChangeRequestList = {
@@ -74,7 +89,7 @@ const list: ChangeRequestList = {
   fetchedAt: 1,
   truncated: false,
   entries: [
-    entry(381, "Audit log export", { kind: "unfetched", branch: "fix/audit" }),
+    entry(381, "Audit log export", { kind: "unfetched", branch: "fix/audit", remote: "origin" }),
     entry(376, "Plan view", { kind: "worktree", branch: "feat/plan", worktreeId: "wt-9" }),
     entry(342, "Fix links", {
       kind: "remote",
@@ -82,7 +97,8 @@ const list: ChangeRequestList = {
       fullName: "refs/remotes/origin/fix/links"
     }, "feat/plan"),
     entry(320, "Electron 44", { kind: "local", branch: "build/electron-44" })
-  ]
+  ],
+  remotes: [remote("origin", ORIGIN, "acme/orbit")]
 };
 
 let container: HTMLDivElement;
@@ -186,7 +202,11 @@ describe("RepoChangeRequestSection", () => {
     window.localStorage.setItem("pwrgit.changeRequestsRemoteOpen.repo-1", "1");
     await render();
     await act(async () => button("New worktree for #381")?.click());
-    expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", { repoId: "repo-1", number: 381 });
+    expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", {
+      repoId: "repo-1",
+      number: 381,
+      forgeRepo: ORIGIN
+    });
     expect(onCreateWorktree).toHaveBeenCalledWith(
       "fix/audit",
       true,
@@ -198,7 +218,11 @@ describe("RepoChangeRequestSection", () => {
     // has it, since the list located it from the index.
     dispatchMock.mockClear();
     await act(async () => button("New worktree for #320")?.click());
-    expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", { repoId: "repo-1", number: 320 });
+    expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", {
+      repoId: "repo-1",
+      number: 320,
+      forgeRepo: ORIGIN
+    });
     expect(onCreateWorktree).toHaveBeenLastCalledWith(
       "build/electron-44",
       false,
@@ -340,5 +364,119 @@ describe("RepoChangeRequestSection", () => {
     expect(refresh?.getAttribute("aria-busy")).toBe("true");
     await act(async () => finish());
     expect(refresh?.getAttribute("aria-busy")).toBe("false");
+  });
+
+  describe("with more than one remote", () => {
+    // A fork checkout: origin is yours, upstream the original. Your branch
+    // carries the CI PR on your fork (#14) and the one you sent up (#412).
+    const fork: ChangeRequestList = {
+      forge: "github",
+      fetchedAt: 1,
+      truncated: false,
+      entries: [
+        entry(14, "Deploy on Windows (CI)", { kind: "local", branch: "tenant-deploy" }),
+        entry(412, "Deploy on Windows", { kind: "local", branch: "tenant-deploy" }, "main", "upstream"),
+        entry(405, "Fix quartz", { kind: "unfetched", branch: "fix/quartz", remote: "upstream" }, "main", "upstream"),
+        entry(13, "CI only", { kind: "unfetched", branch: "ci/only", remote: "origin" })
+      ],
+      remotes: [remote("origin", ORIGIN, "acme/orbit"), remote("upstream", UPSTREAM, "orbit-hq/orbit")]
+    };
+    const segments = (): string[] =>
+      [...container.querySelectorAll(".ref-cr-lens__seg")].map(
+        (segment) => segment.textContent ?? ""
+      );
+    const segment = (label: string): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll<HTMLButtonElement>(".ref-cr-lens__seg")].find(
+        (candidate) => candidate.querySelector(".ref-cr-lens__label")?.textContent === label
+      );
+
+    beforeEach(() => {
+      answer = fork;
+      window.localStorage.setItem("pwrgit.changeRequestsOpen.repo-1", "1");
+      window.localStorage.setItem("pwrgit.changeRequestsRemoteOpen.repo-1", "1");
+    });
+
+    it("draws a branch once, with its other PR and each row's remote", async () => {
+      await render();
+      expect(segments()).toEqual(["All4", "origin2", "upstream2"]);
+      expect(rowNumbers()).toEqual(["#412", "#405", "#13"]);
+      const local = container.querySelector(".ref-cr-row");
+      expect(local?.querySelector(".ref-cr-paired")?.textContent).toContain("#14");
+      expect(local?.querySelector(".ref-cr-paired__remote")?.textContent).toBe("origin");
+      expect(
+        [...container.querySelectorAll(".ref-cr-remote__name")].map((chip) => chip.textContent)
+      ).toEqual(["upstream", "upstream", "origin"]);
+    });
+
+    it("narrows to one remote, drops the chips it no longer needs, and remembers", async () => {
+      await render();
+      await act(async () => segment("upstream")?.click());
+      expect(head()?.textContent).toContain("2");
+      expect(rowNumbers()).toEqual(["#412", "#405"]);
+      expect(container.querySelector(".ref-cr-remote")).toBeNull();
+      expect(container.querySelector(".ref-cr-paired")).toBeNull();
+      expect(window.localStorage.getItem("pwrgit.changeRequestsLens.repo-1")).toBe(UPSTREAM);
+
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await render();
+      expect(segment("upstream")?.getAttribute("aria-pressed")).toBe("true");
+      expect(rowNumbers()).toEqual(["#412", "#405"]);
+    });
+
+    it("fetches a row's head from the forge repository that listed it", async () => {
+      await render();
+      await act(async () => button("New worktree for #405")?.click());
+      expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", {
+        repoId: "repo-1",
+        number: 405,
+        forgeRepo: UPSTREAM
+      });
+    });
+
+    it("draws no lens when only one remote lists anything", async () => {
+      answer = { ...fork, entries: fork.entries.filter((item) => item.remote === "origin") };
+      await render();
+      expect(container.querySelector(".ref-cr-lens")).toBeNull();
+      expect(container.querySelector(".ref-cr-remote")).toBeNull();
+    });
+
+    it("names both kinds, and marks each segment, when the forges differ", async () => {
+      const mirror = "gitlab.com/acme/orbit";
+      answer = {
+        ...fork,
+        entries: [
+          entry(1, "On GitHub", { kind: "unfetched", branch: "a", remote: "origin" }),
+          { ...entry(2, "On GitLab", { kind: "unfetched", branch: "b", remote: "gitlab" }), remote: "gitlab", forgeRepo: mirror }
+        ],
+        remotes: [remote("origin", ORIGIN, "acme/orbit"), { ...remote("gitlab", mirror, "acme/orbit"), forge: "gitlab" }]
+      };
+      await render();
+      expect(head()?.textContent).toContain("Pull & merge requests");
+      expect(segment("gitlab")?.querySelector("img")).not.toBeNull();
+    });
+
+    it("becomes a menu past three remotes", async () => {
+      const names = ["origin", "upstream", "mirror", "backup"];
+      answer = {
+        ...fork,
+        entries: names.map((name, index) => ({
+          ...entry(index + 1, `PR ${index + 1}`, { kind: "unfetched", branch: `b${index}`, remote: name }),
+          remote: name,
+          forgeRepo: `github.com/${name}/orbit`
+        })),
+        remotes: names.map((name) => remote(name, `github.com/${name}/orbit`, `${name}/orbit`))
+      };
+      await render();
+      expect(container.querySelector(".ref-cr-lens__seg")).toBeNull();
+      const menu = container.querySelector<HTMLSelectElement>(".ref-cr-lens--menu select");
+      expect([...(menu?.options ?? [])].map((option) => option.textContent)).toEqual([
+        "All (4)",
+        "origin (1)",
+        "upstream (1)",
+        "mirror (1)",
+        "backup (1)"
+      ]);
+    });
   });
 });

@@ -18,7 +18,9 @@ const entry = (
     headRefName: head,
     author
   },
-  location: { kind: "unfetched", branch: head }
+  location: { kind: "unfetched", branch: head, remote: "origin" },
+  remote: "origin",
+  forgeRepo: "github.com/octo/orbit"
 });
 
 describe("filterChangeRequests", () => {

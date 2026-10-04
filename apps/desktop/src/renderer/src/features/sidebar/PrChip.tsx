@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import {
   ASSUMED_FORGE_KIND,
   changeRequestLabel,
+  changeRequestSigil,
   type PrSummary
 } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
@@ -51,12 +52,15 @@ export function PrChip({
   // PwrAgnt: the bar is an affordance for open drafts only.
   const status = prPresentation(pr);
   const isDraft = status.draft;
+  // The forge's own sigil: a GitLab merge request is !41, and in a list that
+  // mixes forges it is one of the two things saying which is which.
+  const sigil = changeRequestSigil(pr.forge ?? ASSUMED_FORGE_KIND);
   const label =
     pr.state === "merged"
-      ? `merged #${pr.number}`
+      ? `merged ${sigil}${pr.number}`
       : pr.state === "closed"
-      ? `closed #${pr.number}`
-        : `#${pr.number}`;
+      ? `closed ${sigil}${pr.number}`
+        : `${sigil}${pr.number}`;
   const card = <PrStatusCard pr={pr} />;
   const open = (): void => void dispatch("shell:openExternal", { url: pr.url });
   const activate = (altKey: boolean): void => {

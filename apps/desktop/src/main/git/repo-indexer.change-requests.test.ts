@@ -45,10 +45,10 @@ function openPr(
 ): void {
   db.prepare(
     `INSERT INTO repo_open_pr
-       (repo_id, number, url, title, state, is_draft, forge, host, repo_path,
-        head_ref, base_ref, head_repo_path, updated_at)
-     VALUES (?, ?, ?, ?, 'open', 0, 'github', 'github.com', 'octo/orbit',
-             ?, 'main', ?, ?)`
+       (repo_id, forge_repo, number, url, title, state, is_draft, forge, host,
+        repo_path, head_ref, base_ref, head_repo_path, head_forge_repo, updated_at)
+     VALUES (?, 'github.com/octo/orbit', ?, ?, ?, 'open', 0, 'github',
+             'github.com', 'octo/orbit', ?, 'main', ?, ?, ?)`
   ).run(
     repoId,
     number,
@@ -56,6 +56,9 @@ function openPr(
     title,
     head,
     extra.headRepoPath ?? null,
+    extra.headRepoPath === undefined
+      ? null
+      : `github.com/${extra.headRepoPath}`.toLowerCase(),
     extra.updatedAt ?? 1_700_000_000_000 + number
   );
 }
@@ -167,6 +170,48 @@ describe("searchAll with open change requests", () => {
       kind: "local_branch",
       name: "pr/121",
       pr: { number: 121 }
+    });
+  });
+
+  // A fork checkout lists the original too. Its #412 came from your fork —
+  // origin's repository — so its head is your own branch; its #405 came from
+  // a stranger's fork and lands on `pr/upstream/405`.
+  it("answers a PR listed on another remote with the branch holding its head", () => {
+    const state = db.prepare(
+      `INSERT INTO repo_open_pr_state (repo_id, forge_repo, remote, fetched_at)
+       VALUES (?, ?, ?, 1)`
+    );
+    state.run(repoId, "github.com/octo/orbit", "origin");
+    state.run(repoId, "github.com/orbit-hq/orbit", "upstream");
+    const upstreamPr = db.prepare(
+      `INSERT INTO repo_open_pr
+         (repo_id, forge_repo, number, url, title, state, is_draft, forge, host,
+          repo_path, head_ref, base_ref, head_repo_path, head_forge_repo)
+       VALUES (?, 'github.com/orbit-hq/orbit', ?, ?, ?, 'open', 0, 'github',
+               'github.com', 'orbit-hq/orbit', ?, 'main', ?, ?)`
+    );
+    upstreamPr.run(
+      repoId, 412, "https://github.com/orbit-hq/orbit/pull/412",
+      "feat: sent upstream from the fork", "spike/local-pr",
+      "octo/orbit", "github.com/octo/orbit"
+    );
+    upstreamPr.run(
+      repoId, 405, "https://github.com/orbit-hq/orbit/pull/405",
+      "fix: a stranger's quartz patch", "fix/quartz",
+      "stranger/orbit", "github.com/stranger/orbit"
+    );
+    git(repoPath, ["branch", "pr/upstream/405"]);
+    return indexer.refreshRepoRemoteBranches(repoId).then((done) => {
+      expect(done.ok).toBe(true);
+      expect(indexer.searchAll("sent upstream")[0]).toMatchObject({
+        kind: "local_branch",
+        name: "spike/local-pr"
+      });
+      expect(indexer.searchAll("quartz")[0]).toMatchObject({
+        kind: "local_branch",
+        name: "pr/upstream/405",
+        pr: { number: 405 }
+      });
     });
   });
 

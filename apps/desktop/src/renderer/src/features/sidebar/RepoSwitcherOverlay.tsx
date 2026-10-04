@@ -5,6 +5,7 @@ import {
   changeRequestLabel,
   changeRequestNoun,
   changeRequestNumberQuery,
+  forgeRepoKey,
   type ChangeRequestLocation,
   type Commit,
   type FileSearchHit,
@@ -26,6 +27,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { shortWhen } from "../graph/graph-view";
+import { trackingRemote } from "./change-request-groups";
 import { commitHashQuery, searchCommits } from "./commit-search";
 import { ContextMenu } from "../shell/ContextMenu";
 import { SettingsSegmented } from "../settings/SettingsLayout";
@@ -356,7 +358,7 @@ export function hitForLocation(
         kind: "remote_branch",
         name: location.branch,
         remoteRef: location.fullName,
-        remoteName: "origin"
+        remoteName: trackingRemote(location)
       };
     default:
       return null;
@@ -714,9 +716,14 @@ export function RepoSwitcherOverlay({
     if (pr === undefined || fetchingPr !== null) return;
     setBranchError(null);
     setFetchingPr(hitKey(hit));
+    // The listing repository says whose #N this is when a checkout lists
+    // more than one (a fork and its original).
     const result = await dispatch("pr:fetchHead", {
       repoId: hit.repoId,
-      number: pr.number
+      number: pr.number,
+      ...(pr.host === undefined || pr.repoPath === undefined
+        ? {}
+        : { forgeRepo: forgeRepoKey(pr.host, pr.repoPath) })
     });
     if (!mounted.current) return;
     setFetchingPr(null);

@@ -49,11 +49,11 @@ export function registerChangeRequestHandlers(
   });
 
   bus.register("pr:lookup", async (req) =>
-    ok(await openPrs.lookup(req.repoId, req.number))
+    ok(await openPrs.lookup(req.repoId, req.number, req.forgeRepo))
   );
 
   bus.register("pr:fetchHead", async (req) => {
-    const fetched = await openPrs.fetchHead(req.repoId, req.number);
+    const fetched = await openPrs.fetchHead(req.repoId, req.number, req.forgeRepo);
     if (!fetched.ok) return fetched;
     try {
       await deps.onHeadFetched?.(req.repoId);

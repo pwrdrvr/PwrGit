@@ -11,6 +11,8 @@ import { createSystemGit } from "../git/test-support/system-git";
 import { OpenPrService } from "./open-pr-service";
 
 const ORIGIN: ForgeRepo = { kind: "github", host: "github.com", path: "octo/orbit" };
+/** The repository `octo/orbit` was forked from, for the multi-remote cases. */
+const UPSTREAM: ForgeRepo = { kind: "github", host: "github.com", path: "orbit-hq/orbit" };
 
 function git(dir: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -53,18 +55,24 @@ describe("OpenPrService", () => {
   let work: string;
   let now: number;
   let list: OpenPrList;
+  let upstreamList: OpenPrList;
   let listCalls: number;
   let listFails: boolean;
+  let upstreamFails: boolean;
+  let root: string;
   let byNumber: Map<number, PrSummary | null>;
   let numberCalls: number[][];
   let token: string | null;
+  let upstreamToken: string | null;
   let gitCalls: string[][];
   let service: OpenPrService;
 
-  const resolve = (): ResolvedForge => {
+  // Every remote is octo/orbit, except one whose URL says upstream.
+  const resolve = (url: string): ResolvedForge => {
+    const repo = url.includes("upstream") ? UPSTREAM : ORIGIN;
     const provider: TokenForgeProvider = {
       kind: "github",
-      getToken: async () => token,
+      getToken: async () => (repo === UPSTREAM ? upstreamToken : token),
       fetchPrsForBranches: async () => new Map(),
       fetchPrsForCommits: async () => new Map(),
       fetchPrsByNumbers: async (_token, _repo, numbers) => {
@@ -73,17 +81,21 @@ describe("OpenPrService", () => {
           numbers.filter((n) => byNumber.has(n)).map((n) => [n, byNumber.get(n) ?? null])
         );
       },
-      fetchOpenPrs: async () => {
+      fetchOpenPrs: async (_token, asked) => {
         listCalls += 1;
+        if (asked === UPSTREAM) {
+          if (upstreamFails) throw new Error("refused");
+          return upstreamList;
+        }
         if (listFails) throw new Error("refused");
         return list;
       }
     };
-    return { provider, repo: ORIGIN };
+    return { provider, repo };
   };
 
   beforeEach(() => {
-    const root = mkdtempSync(join(tmpdir(), "pwrgit-open-pr-"));
+    root = mkdtempSync(join(tmpdir(), "pwrgit-open-pr-"));
     const bare = join(root, "orbit.git");
     execFileSync("git", ["init", "--bare", "-b", "main", bare], { stdio: "ignore" });
     const seed = join(root, "seed");
@@ -117,11 +129,14 @@ describe("OpenPrService", () => {
 
     now = 10_000_000;
     list = { items: [], truncated: false };
+    upstreamList = { items: [], truncated: false };
     listCalls = 0;
     listFails = false;
+    upstreamFails = false;
     byNumber = new Map();
     numberCalls = [];
     token = "token";
+    upstreamToken = "token";
     gitCalls = [];
     const systemGit = createSystemGit();
     service = new OpenPrService(db, (args, cwd, options) => {
@@ -279,23 +294,33 @@ describe("OpenPrService", () => {
         branch: "feat/fetched",
         fullName: "refs/remotes/origin/feat/fetched"
       });
-      expect(where[130]).toEqual({ kind: "unfetched", branch: "feat/unfetched" });
+      // feat/unfetched is on another remote too, and that is not origin's.
+      expect(where[130]).toEqual({
+        kind: "unfetched",
+        branch: "feat/unfetched",
+        remote: "origin"
+      });
       expect(where[121]).toEqual({
         kind: "fork",
         branch: "fix/typo",
         headRepoPath: "octo-contrib/orbit",
         localBranch: "pr/121",
+        remote: "origin",
         fetchable: true
+      });
+      expect(result.entries[0]).toMatchObject({
+        remote: "origin",
+        forgeRepo: "github.com/octo/orbit"
       });
       // Newest update first, the way the forge sorts them.
       expect(result.entries.map((entry) => entry.pr.number)).toEqual([130, 121, 119, 106, 7]);
     });
 
-    it("asks git for origin again only once the config changes", async () => {
+    it("asks git for the remotes again only once the config changes", async () => {
       await service.list("repo");
       await service.list("repo");
       const asked = (): number =>
-        gitCalls.filter((args) => args.join(" ") === "remote get-url origin").length;
+        gitCalls.filter((args) => args[0] === "config" && args[1] === "--get-regexp").length;
       expect(asked()).toBe(1);
       git(work, ["remote", "set-url", "origin", "https://github.com/octo/orbit.git"]);
       await service.list("repo");
@@ -413,6 +438,145 @@ describe("OpenPrService", () => {
     });
   });
 
+  describe("more than one remote", () => {
+    /**
+     * The fork checkout: origin is octo/orbit (yours), and `upstream` is the
+     * original, orbit-hq/orbit, with a branch of its own (feat/up) and a
+     * third party's PR head at refs/pull/405/head.
+     */
+    const addUpstream = (): string => {
+      const bare = join(root, "upstream.git");
+      execFileSync("git", ["init", "--bare", "-b", "main", bare], { stdio: "ignore" });
+      const seed = join(root, "seed");
+      git(seed, ["push", bare, "main", "main:feat/up"]);
+      git(bare, ["update-ref", "refs/pull/405/head", git(seed, ["rev-parse", "HEAD"])]);
+      git(work, ["remote", "add", "upstream", bare]);
+      // list() reads the branch index, which the indexer would keep.
+      db.prepare(
+        "INSERT INTO local_branches (id, repo_id, name, full_name) VALUES ('l1', 'repo', 'spike/local', 'refs/heads/spike/local')"
+      ).run();
+      return bare;
+    };
+
+    it("lists each forge repository once, and keeps their numbers apart", async () => {
+      addUpstream();
+      // A second name for origin's repository is not a second list.
+      git(work, ["remote", "add", "mirror", git(work, ["remote", "get-url", "origin"])]);
+      list = { items: [openPr(14, "spike/local")], truncated: false };
+      upstreamList = { items: [openPr(14, "feat/up")], truncated: false };
+      expect(await service.refresh("repo")).toBe(true);
+      expect(listCalls).toBe(2);
+      expect(stored()).toEqual([14, 14]);
+      const result = await service.list("repo");
+      expect(result.remotes.map((remote) => [remote.name, remote.forgeRepo])).toEqual([
+        ["origin", "github.com/octo/orbit"],
+        ["upstream", "github.com/orbit-hq/orbit"]
+      ]);
+      expect(
+        result.entries
+          .map((entry) => [entry.remote, entry.pr.number, entry.location.kind])
+          .sort()
+      ).toEqual([
+        ["origin", 14, "local"],
+        ["upstream", 14, "unfetched"]
+      ]);
+    });
+
+    it("finds a PR you sent upstream on your own branch", async () => {
+      addUpstream();
+      upstreamList = {
+        items: [
+          // From your fork (origin's repository): its head is your branch.
+          openPr(412, "spike/local", { headRepoPath: "octo/orbit" }),
+          // From someone else's fork.
+          openPr(405, "fix/typo", { headRepoPath: "someone/orbit" })
+        ],
+        truncated: false
+      };
+      await service.refresh("repo");
+      const where = Object.fromEntries(
+        (await service.list("repo")).entries.map((entry) => [entry.pr.number, entry.location])
+      );
+      expect(where[412]).toEqual({ kind: "local", branch: "spike/local" });
+      expect(where[405]).toMatchObject({
+        kind: "fork",
+        localBranch: "pr/upstream/405",
+        remote: "upstream"
+      });
+    });
+
+    it("fetches each head from the remote that has it", async () => {
+      addUpstream();
+      upstreamList = {
+        items: [
+          openPr(400, "feat/up"),
+          openPr(405, "fix/typo", { headRepoPath: "someone/orbit" })
+        ],
+        truncated: false
+      };
+      await service.refresh("repo");
+      const upstream = "github.com/orbit-hq/orbit";
+      expect(await service.fetchHead("repo", 400, upstream)).toEqual({
+        ok: true,
+        value: {
+          kind: "remote",
+          branch: "feat/up",
+          fullName: "refs/remotes/upstream/feat/up"
+        }
+      });
+      expect(await service.fetchHead("repo", 405, upstream)).toEqual({
+        ok: true,
+        value: { kind: "local", branch: "pr/upstream/405" }
+      });
+      expect(git(work, ["config", "branch.pr/upstream/405.remote"])).toBe("upstream");
+      expect(git(work, ["config", "branch.pr/upstream/405.merge"])).toBe("refs/pull/405/head");
+      // Without a forge repository, a number only upstream lists is still found.
+      expect(await service.fetchHead("repo", 400)).toMatchObject({
+        ok: true,
+        value: { kind: "remote", fullName: "refs/remotes/upstream/feat/up" }
+      });
+    });
+
+    it("refreshes and fails each remote on its own", async () => {
+      addUpstream();
+      list = { items: [openPr(1, "a")], truncated: false };
+      upstreamList = { items: [openPr(2, "b")], truncated: false };
+      await service.refresh("repo");
+      now += 11 * 60_000;
+      upstreamFails = true;
+      list = { items: [openPr(1, "a"), openPr(3, "c")], truncated: false };
+      expect(await service.refresh("repo")).toBe(true);
+      // origin's list moved on; upstream's last good list stays.
+      expect(stored()).toEqual([1, 2, 3]);
+      const result = await service.list("repo");
+      expect(result.failure?.message).toBe("upstream: refused");
+      expect(result.remotes.find((remote) => remote.name === "origin")?.failure).toBeUndefined();
+      expect(listCalls).toBe(4);
+    });
+
+    it("leaves out a remote on a forge you never signed in to", async () => {
+      addUpstream();
+      upstreamToken = null;
+      list = { items: [openPr(1, "a")], truncated: false };
+      await service.refresh("repo");
+      const result = await service.list("repo");
+      expect(result.remotes.map((remote) => remote.name)).toEqual(["origin"]);
+      expect(result.failure).toBeUndefined();
+    });
+
+    it("drops a removed remote's list", async () => {
+      addUpstream();
+      upstreamList = { items: [openPr(2, "b")], truncated: false };
+      await service.refresh("repo");
+      expect(stored()).toEqual([2]);
+      git(work, ["remote", "remove", "upstream"]);
+      expect((await service.list("repo")).entries).toEqual([]);
+      // Fresh, so nothing is asked; the rows still go, and that is news.
+      expect(await service.refresh("repo")).toBe(true);
+      expect(stored()).toEqual([]);
+    });
+  });
+
   it("keys origin's branches and each fork's numbered branch for row decoration", async () => {
     list = {
       items: [
@@ -423,10 +587,10 @@ describe("OpenPrService", () => {
     };
     await service.refresh("repo");
     const prs = service.branchPrs("repo");
-    expect(prs.origin.get("feat/fetched")?.number).toBe(119);
+    expect(prs.remotes.get("origin")?.get("feat/fetched")?.number).toBe(119);
     expect(prs.local.get("pr/121")?.number).toBe(121);
     // A fork's `main` is not ours.
     expect(prs.local.has("main")).toBe(false);
-    expect(prs.origin.has("main")).toBe(false);
+    expect(prs.remotes.get("origin")?.has("main")).toBe(false);
   });
 });

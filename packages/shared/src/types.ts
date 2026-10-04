@@ -976,20 +976,23 @@ export type ChangeRequestLocation =
   | { kind: "worktree"; branch: string; worktreeId: WorktreeId }
   /** A local branch nothing has checked out. */
   | { kind: "local"; branch: string }
-  /** Fetched from origin (`fullName` is the remote-tracking ref), never checked out. */
+  /** Fetched from a remote (`fullName` is the remote-tracking ref), never checked out. */
   | { kind: "remote"; branch: string; fullName: string }
-  /** On origin but not fetched yet; one fetch away from `remote`. */
-  | { kind: "unfetched"; branch: string }
+  /** On `remote` but not fetched yet; one fetch away from `remote`. */
+  | { kind: "unfetched"; branch: string; remote: string }
   /**
-   * In another repository. `localBranch` is what checking it out creates, and
-   * `fetchable` is false when the forge publishes no change-request ref PwrGit
-   * has verified — the row then has nothing to switch to.
+   * In a repository this checkout has no remote on. `localBranch` is what
+   * checking it out creates, fetched through `remote` (the one the list came
+   * from), and `fetchable` is false when the forge publishes no
+   * change-request ref PwrGit has verified — the row then has nothing to
+   * switch to.
    */
   | {
       kind: "fork";
       branch: string;
       headRepoPath: string;
       localBranch: string;
+      remote: string;
       fetchable: boolean;
     }
   /** A merged or closed change request whose branch is gone everywhere. */
@@ -998,6 +1001,11 @@ export type ChangeRequestLocation =
 export type ChangeRequestEntry = {
   pr: OpenChangeRequest;
   location: ChangeRequestLocation;
+  /** The git remote whose forge repository listed it. */
+  remote: string;
+  /** That forge repository, `host/path` lowercased — the cache's key, and
+   *  what `pr:fetchHead` takes to say which #N is meant. */
+  forgeRepo: string;
 };
 
 /** The last refresh of an open list that could not finish. */
@@ -1008,19 +1016,48 @@ export type ChangeRequestListFailure = {
   message: string;
 };
 
+/**
+ * One forge repository a checkout's open list is drawn from. Remotes that
+ * point at the same repository are one of these, named after the first
+ * (`origin` before the rest).
+ */
+export type ChangeRequestRemote = {
+  name: string;
+  forge: ForgeKind;
+  /** `host/path`, lowercased: `ChangeRequestEntry.forgeRepo`. */
+  forgeRepo: string;
+  /** The forge's own path, `owner/name`, as the remote spells it. */
+  path: string;
+  /** Epoch ms its last complete list landed, or null before the first. */
+  fetchedAt: number | null;
+  truncated: boolean;
+  /** Present while its latest refresh failed; see `ChangeRequestList.failure`. */
+  failure?: ChangeRequestListFailure;
+};
+
 /** `pr:openList` — a repository's open change requests, from main's cache. */
 export type ChangeRequestList = {
-  /** The forge `origin` resolves to; null means none, and so no list at all. */
+  /**
+   * The forge `origin` resolves to, else the first forge remote's; null means
+   * no remote is on a forge, and so no list at all.
+   */
   forge: ForgeKind | null;
-  /** Epoch ms the last complete list landed, or null before the first. */
+  /** Epoch ms the oldest of the remotes' lists landed, or null before any. */
   fetchedAt: number | null;
-  /** The forge had more open than one refresh walks; these are the newest. */
+  /** Some forge had more open than one refresh walks; these are the newest. */
   truncated: boolean;
   entries: ChangeRequestEntry[];
   /**
-   * Present while the latest refresh failed: the entries are the last good
-   * list (from `fetchedAt`), and this says why it is not newer. Cleared by
-   * the next refresh that lands.
+   * Every forge repository asked, `origin`'s first. A remote on a host with
+   * no sign-in is never asked and is not here; `origin` is the exception,
+   * so its missing sign-in can be reported.
+   */
+  remotes: ChangeRequestRemote[];
+  /**
+   * Present while a remote's latest refresh failed: its entries are the last
+   * good list, and this says why it is not newer — the most recent failure,
+   * its message led by the remote's name when there is more than one.
+   * Cleared by the next refresh of that remote that lands.
    */
   failure?: ChangeRequestListFailure;
 };

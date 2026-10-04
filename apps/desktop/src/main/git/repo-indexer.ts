@@ -1068,11 +1068,14 @@ export class RepoIndexer {
         profile_id: string;
         profile_name: string;
       }[];
-      // Only origin's branches: the open list is origin's, and a same-named
-      // branch on another remote is somebody else's.
+      // Only a same-repository head on the remote that listed it: a
+      // same-named branch on another remote is somebody else's.
       const openForHead = this.db.prepare(
         `SELECT ${openPrSelect("o")} FROM repo_open_pr o
+           JOIN repo_open_pr_state s
+             ON s.repo_id = o.repo_id AND s.forge_repo = o.forge_repo
           WHERE o.repo_id = ? AND o.head_ref = ? AND o.head_repo_path IS NULL
+            AND s.remote = ?
           ORDER BY COALESCE(o.updated_at, o.opened_at, 0) DESC
           LIMIT 1`
       );
@@ -1090,13 +1093,11 @@ export class RepoIndexer {
           remoteRef: branch.full_name,
           remoteName: branch.remote_name
         };
-        if (branch.remote_name === "origin") {
-          const row = openForHead.get(branch.repo_id, branch.name) as
-            | Record<string, unknown>
-            | undefined;
-          const pr = row === undefined ? undefined : openPrFromRow(row);
-          if (pr !== undefined) hit.pr = pr;
-        }
+        const row = openForHead.get(branch.repo_id, branch.name, branch.remote_name) as
+          | Record<string, unknown>
+          | undefined;
+        const pr = row === undefined ? undefined : openPrFromRow(row);
+        if (pr !== undefined) hit.pr = pr;
         remoteBranchHits.set(branch.id, hit);
       }
     }
@@ -1199,14 +1200,18 @@ export class RepoIndexer {
   }
 
   /**
-   * Hydrate matched `change_request` index rows (`<repoId>:<number>`), keeping
-   * only those the query named for a reason of their own, and find the ref in
-   * this checkout that holds each one's head.
+   * Hydrate matched `change_request` index rows (the `repo_open_pr` row id),
+   * keeping only those the query named for a reason of their own, and find
+   * the ref in this checkout that holds each one's head.
    *
-   * Same-repository heads are looked up by name, worktree first — the order
-   * the derived branch tables already imply, since `local_branches` drops
-   * anything checked out and `remote_branches` anything with a local branch.
-   * A fork's head is only ever the product's numbered branch (`pr/121`).
+   * A head in a repository this checkout has a remote on — the listing one,
+   * or another listed one (your fork, for a PR sent to the original) — is
+   * looked up by name, worktree first, then that remote's tracking ref: the
+   * order the derived branch tables already imply, since `local_branches`
+   * drops anything checked out and `remote_branches` anything with a local
+   * branch. Which remote is which comes from the state rows the last refresh
+   * wrote; a row from before 0039 has none and was origin's. Any other
+   * fork's head is only ever the product's numbered branch (`pr/121`).
    */
   private changeRequestMatches(
     entityIds: string[],
@@ -1215,12 +1220,20 @@ export class RepoIndexer {
     const out = new Map<string, ChangeRequestMatch>();
     if (entityIds.length === 0) return out;
     const read = this.db.prepare(
-      `SELECT ${openPrSelect("o")},
+      `SELECT ${openPrSelect("o")}, o.repo_id AS repo_id,
+              COALESCE(listed.remote, 'origin') AS listed_remote,
+              CASE WHEN o.head_forge_repo IS NULL
+                   THEN COALESCE(listed.remote, 'origin')
+                   ELSE head.remote END AS head_remote,
               r.name AS repo_name, r.path, r.profile_id, p.name AS profile_name
          FROM repo_open_pr o
          JOIN repos r ON r.id = o.repo_id
          JOIN profiles p ON p.id = r.profile_id
-        WHERE o.repo_id = ? AND o.number = ?`
+         LEFT JOIN repo_open_pr_state listed
+           ON listed.repo_id = o.repo_id AND listed.forge_repo = o.forge_repo
+         LEFT JOIN repo_open_pr_state head
+           ON head.repo_id = o.repo_id AND head.forge_repo = o.head_forge_repo
+        WHERE o.id = ?`
     );
     const worktreeFor = this.db.prepare(
       "SELECT id FROM worktrees WHERE repo_id = ? AND branch = ? LIMIT 1"
@@ -1228,19 +1241,20 @@ export class RepoIndexer {
     const localFor = this.db.prepare(
       "SELECT id FROM local_branches WHERE repo_id = ? AND name = ? LIMIT 1"
     );
-    const originFor = this.db.prepare(
+    const remoteFor = this.db.prepare(
       `SELECT id FROM remote_branches
-        WHERE repo_id = ? AND remote_name = 'origin' AND name = ? LIMIT 1`
+        WHERE repo_id = ? AND remote_name = ? AND name = ? LIMIT 1`
     );
     const idOf = (row: unknown): string | null =>
       (row as { id: string } | undefined)?.id ?? null;
     for (const entityId of entityIds) {
-      const colon = entityId.lastIndexOf(":");
-      const number = Number(entityId.slice(colon + 1));
-      if (colon < 1 || !Number.isSafeInteger(number)) continue;
-      const repoId = entityId.slice(0, colon);
-      const row = read.get(repoId, number) as
+      const id = Number(entityId);
+      if (!Number.isSafeInteger(id)) continue;
+      const row = read.get(id) as
         | (Record<string, unknown> & {
+            repo_id: string;
+            listed_remote: string;
+            head_remote: string | null;
             repo_name: string;
             path: string;
             profile_id: string;
@@ -1250,19 +1264,21 @@ export class RepoIndexer {
       const pr = row === undefined ? undefined : openPrFromRow(row);
       if (row === undefined || pr === undefined) continue;
       if (!changeRequestAnswersQuery(pr, row.repo_name, query)) continue;
-      const fork = pr.headRepoPath !== undefined;
-      const branch = fork
-        ? pr.forge === undefined
-          ? null
-          : changeRequestLocalBranch(pr.forge, pr.number)
-        : (pr.headRefName ?? null);
+      const repoId = row.repo_id;
+      const headRemote = row.head_remote;
+      const branch =
+        headRemote === null
+          ? pr.forge === undefined
+            ? null
+            : changeRequestLocalBranch(pr.forge, pr.number, row.listed_remote)
+          : (pr.headRefName ?? null);
       let heldBy: ChangeRequestMatch["heldBy"] = null;
       if (branch !== null) {
         const worktree = idOf(worktreeFor.get(repoId, branch));
         const local = worktree === null ? idOf(localFor.get(repoId, branch)) : null;
         const remote =
-          worktree === null && local === null && !fork
-            ? idOf(originFor.get(repoId, branch))
+          worktree === null && local === null && headRemote !== null
+            ? idOf(remoteFor.get(repoId, headRemote, branch))
             : null;
         heldBy =
           worktree !== null

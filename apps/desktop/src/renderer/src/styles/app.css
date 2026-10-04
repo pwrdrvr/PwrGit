@@ -2033,6 +2033,107 @@ a.forge-chip:focus-visible {
   opacity: 0.4;
   cursor: not-allowed;
 }
+/* More than one remote lists something (a fork and its original, or a
+   mirror on another forge): the lens picks whose list the rows show. A row of
+   segments, each a remote and its count, under the heading so ⟳ never moves
+   when it appears; past three remotes it is a menu instead, so it never
+   wraps. */
+.ref-cr-lens {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  min-width: 0;
+  margin: 2px 4px 4px;
+}
+.ref-cr-lens__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: calc(var(--sidebar-eyebrow-size) + 12px);
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ref-cr-lens__seg:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+.ref-cr-lens__seg.is-active {
+  color: var(--accent-bright);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.ref-cr-lens__seg:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.ref-cr-lens__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ref-cr-lens--menu {
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+}
+.ref-cr-lens--menu select {
+  min-width: 0;
+  max-width: 100%;
+  height: calc(var(--sidebar-eyebrow-size) + 12px);
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--bg-sidebar);
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.ref-cr-lens--menu select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* Which remote a row is from, on All only: the forge's mark and the remote's
+   name. The name is capped and ellipsizes inside the cap, so the head branch
+   beside it keeps its room. */
+.ref-cr-remote {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  max-width: 84px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+}
+.ref-cr-remote__name,
+.ref-cr-paired__remote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The branch's other change request (your fork's CI PR beside the one you
+   sent upstream): its own chip, so its checks read on their own. */
+.ref-cr-paired {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  max-width: 96px;
+  color: var(--text-subtle);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+}
 
 /* "on main" at the Branches heading's far end — the pair, readable while the
    section is collapsed. It sat beside the count and read as one phrase with

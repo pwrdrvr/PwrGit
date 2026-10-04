@@ -4351,11 +4351,12 @@ export type RemoteBranchPageOptions = {
   offset?: number;
   limit?: number;
   /**
-   * Origin's open change requests by head branch. An origin row whose head
-   * one of them is carries it as `pr`, and the query matches that PR's number
-   * and title as well as the ref — `106` finds #106's branch, first.
+   * Open change requests by the remote that listed them, then head branch. A
+   * row whose head one of them is carries it as `pr`, and the query matches
+   * that PR's number and title as well as the ref — `106` finds #106's
+   * branch, first.
    */
-  originPrs?: ReadonlyMap<string, OpenChangeRequest>;
+  remotePrs?: ReadonlyMap<string, ReadonlyMap<string, OpenChangeRequest>>;
 };
 
 /**
@@ -4376,7 +4377,7 @@ export async function listRemoteBranchPage(
     query = "",
     offset = 0,
     limit = REMOTE_BRANCH_PAGE_SIZE,
-    originPrs
+    remotePrs
   } = options;
   // The configured remotes are both the guard on `remote` and what makes the
   // ref split exact — a name the repository does not have cannot reach argv,
@@ -4421,7 +4422,7 @@ export async function listRemoteBranchPage(
     // genuinely named `feature/HEAD` is a branch, and stays listed.
     if (name === "HEAD") continue;
     const subject = fields.slice(4).join("\t");
-    const pr = split.remote === "origin" ? originPrs?.get(name) : undefined;
+    const pr = remotePrs?.get(split.remote)?.get(name);
     if (
       needle !== "" &&
       !`${shortName} ${subject}`.toLowerCase().includes(needle) &&
