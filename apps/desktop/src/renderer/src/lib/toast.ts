@@ -102,19 +102,12 @@ export function showErrorToast(input: Omit<Toast, "id" | "tone">): void {
   });
 }
 
-export function showInfoToast(input: {
-  key?: string;
-  title: string;
-  message: string;
-  notesUrl?: string;
-  subject?: ToastSubject;
-  action?: { label: string; run: () => void };
-}): void {
+export function showInfoToast(input: Omit<Toast, "id" | "tone">): void {
   pushToast({
-    ...input,
-    tone: "info",
     showLogsAction: false,
-    showCopyAction: false
+    showCopyAction: false,
+    ...input,
+    tone: "info"
   });
 }
 
