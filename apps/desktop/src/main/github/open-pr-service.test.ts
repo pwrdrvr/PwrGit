@@ -57,12 +57,14 @@ describe("OpenPrService", () => {
   let listFails: boolean;
   let byNumber: Map<number, PrSummary | null>;
   let numberCalls: number[][];
+  let token: string | null;
+  let gitCalls: string[][];
   let service: OpenPrService;
 
   const resolve = (): ResolvedForge => {
     const provider: TokenForgeProvider = {
       kind: "github",
-      getToken: async () => "token",
+      getToken: async () => token,
       fetchPrsForBranches: async () => new Map(),
       fetchPrsForCommits: async () => new Map(),
       fetchPrsByNumbers: async (_token, _repo, numbers) => {
@@ -119,7 +121,13 @@ describe("OpenPrService", () => {
     listFails = false;
     byNumber = new Map();
     numberCalls = [];
-    service = new OpenPrService(db, createSystemGit(), {
+    token = "token";
+    gitCalls = [];
+    const systemGit = createSystemGit();
+    service = new OpenPrService(db, (args, cwd, options) => {
+      gitCalls.push(args);
+      return systemGit(args, cwd, options);
+    }, {
       resolveForge: resolve,
       now: () => now
     });
@@ -135,15 +143,19 @@ describe("OpenPrService", () => {
     ).map((row) => row.number);
 
   describe("refresh", () => {
-    it("stores the list, and says whether it changed", async () => {
+    it("stores the list, and announces every refresh that ran", async () => {
       list = { items: [openPr(1, "a"), openPr(2, "b")], truncated: false };
       expect(await service.refresh("repo")).toBe(true);
       expect(stored()).toEqual([1, 2]);
 
-      // Same list, past the TTL: asked again, nothing changed.
+      // Same list, past the TTL: asked again. Its rows are unchanged, but its
+      // stamp moved, and the reader shows how old the list is.
       now += 11 * 60_000;
-      expect(await service.refresh("repo")).toBe(false);
+      expect(await service.refresh("repo")).toBe(true);
       expect(listCalls).toBe(2);
+      expect((await service.list("repo")).fetchedAt).toBe(now);
+      // Inside the TTL nothing runs, and nothing is announced.
+      expect(await service.refresh("repo")).toBe(false);
 
       // #1 closed, #2 retitled.
       now += 11 * 60_000;
@@ -177,20 +189,37 @@ describe("OpenPrService", () => {
       expect(listCalls).toBe(3);
     });
 
-    it("keeps the cached list through a failure, and backs off", async () => {
+    it("keeps the cached list through a failure, says why, and backs off", async () => {
       list = { items: [openPr(1, "a")], truncated: false };
       await service.refresh("repo");
+      const listedAt = now;
       now += 11 * 60_000;
       listFails = true;
-      expect(await service.refresh("repo")).toBe(false);
+      // A failure is announced: the reader has a reason to show.
+      expect(await service.refresh("repo")).toBe(true);
       expect(stored()).toEqual([1]);
+      expect(await service.list("repo")).toMatchObject({
+        fetchedAt: listedAt,
+        failure: { at: now, message: "refused" }
+      });
       // A failure writes no row, so only the mark stops the retry.
       now += 60_000;
       await service.refresh("repo");
       expect(listCalls).toBe(2);
       now += 10 * 60_000;
+      listFails = false;
       await service.refresh("repo");
       expect(listCalls).toBe(3);
+      expect((await service.list("repo")).failure).toBeUndefined();
+    });
+
+    it("reports a missing sign-in, with the command that fixes it", async () => {
+      token = null;
+      expect(await service.refresh("repo")).toBe(true);
+      expect(listCalls).toBe(0);
+      expect((await service.list("repo")).failure?.message).toBe(
+        "Not signed in to github.com. Run gh auth login --hostname github.com."
+      );
     });
 
     it("lets a waiter behind an in-flight refresh return without a second call", async () => {
@@ -213,9 +242,17 @@ describe("OpenPrService", () => {
   });
 
   describe("list", () => {
-    it("locates each head in the checkout", async () => {
-      git(work, ["fetch", "origin"]);
-      git(work, ["update-ref", "-d", "refs/remotes/origin/feat/unfetched"]);
+    it("locates each head from the branch index, spawning nothing", async () => {
+      // The index the indexer keeps for ⌘K: spike/local, and origin's fetched
+      // branch. feat/console is held by a worktree, so the index drops it.
+      db.prepare(
+        "INSERT INTO local_branches (id, repo_id, name, full_name) VALUES ('l1', 'repo', 'spike/local', 'refs/heads/spike/local')"
+      ).run();
+      db.prepare(
+        `INSERT INTO remote_branches (id, repo_id, name, full_name, remote_name) VALUES
+          ('r1', 'repo', 'feat/fetched', 'refs/remotes/origin/feat/fetched', 'origin'),
+          ('r2', 'repo', 'feat/unfetched', 'refs/remotes/upstream/feat/unfetched', 'upstream')`
+      ).run();
       list = {
         items: [
           openPr(106, "feat/console"),
@@ -227,7 +264,10 @@ describe("OpenPrService", () => {
         truncated: false
       };
       await service.refresh("repo");
+      gitCalls = [];
       const result = await service.list("repo");
+      // origin's URL was read by the refresh and the config has not changed.
+      expect(gitCalls).toEqual([]);
       expect(result.forge).toBe("github");
       const where = Object.fromEntries(
         result.entries.map((entry) => [entry.pr.number, entry.location])
@@ -249,6 +289,17 @@ describe("OpenPrService", () => {
       });
       // Newest update first, the way the forge sorts them.
       expect(result.entries.map((entry) => entry.pr.number)).toEqual([130, 121, 119, 106, 7]);
+    });
+
+    it("asks git for origin again only once the config changes", async () => {
+      await service.list("repo");
+      await service.list("repo");
+      const asked = (): number =>
+        gitCalls.filter((args) => args.join(" ") === "remote get-url origin").length;
+      expect(asked()).toBe(1);
+      git(work, ["remote", "set-url", "origin", "https://github.com/octo/orbit.git"]);
+      await service.list("repo");
+      expect(asked()).toBe(2);
     });
 
     it("names no forge for an origin nobody claims", async () => {

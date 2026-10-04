@@ -9,6 +9,7 @@ import {
   changeRequestPluralLabel,
   forgeLabel,
   type ChangeRequestEntry,
+  type ChangeRequestList,
   type OpenChangeRequest,
   type Repo
 } from "@pwrgit/shared";
@@ -96,7 +97,10 @@ export function RepoChangeRequestSection({
   onOpenBrowser: () => void;
 }): ReactElement | null {
   const { list, error, refresh } = useChangeRequestList(repo.id, {
-    refreshOnOpen: false
+    refreshOnOpen: false,
+    // A worktree created from a row (or removed) moves that row between the
+    // groups without any change to the open list itself.
+    relocateKey: repo.worktrees.map((w) => `${w.id}:${w.branch}`).join("|")
   });
   const tip = useViewportTooltip();
   const [open, setOpen] = usePersistedOpen(
@@ -112,13 +116,26 @@ export function RepoChangeRequestSection({
   const [fetching, setFetching] = useState<number | null>(null);
   const [cursor, setCursor] = useState(0);
 
-  // No forge on origin, or not loaded yet: no section at all, rather than a
-  // heading that can only ever say 0.
-  if (list?.forge == null) return null;
-  const forge = list.forge;
+  // No forge on origin: no section at all, rather than a heading that can only
+  // ever say 0. Before this session's first answer, origin's identity predicts
+  // the forge, so the heading arrives with Branches and Tags instead of
+  // pushing them down a moment later.
+  const predicted =
+    repo.identity === undefined || repo.identity.host === "other"
+      ? null
+      : repo.identity.host;
+  const loading = list == null;
+  const forge = loading ? predicted : (list.forge ?? null);
+  if (forge === null) return null;
+  const shown: ChangeRequestList = list ?? {
+    forge,
+    fetchedAt: null,
+    truncated: false,
+    entries: []
+  };
   const plural = changeRequestPluralLabel(forge);
   const noun = changeRequestNoun(forge);
-  const groups = groupChangeRequests(list.entries, { failingOnly });
+  const groups = groupChangeRequests(shown.entries, { failingOnly });
   const rows = remoteOpen
     ? [...groups.local, ...groups.remoteOnly]
     : groups.local;
@@ -126,12 +143,19 @@ export function RepoChangeRequestSection({
   const worktreesById = new Map(repo.worktrees.map((w) => [w.id, w]));
   // Nothing cached yet: the repo sweep lists it shortly, or ⟳ does now. Not a
   // spinner — with the forge unreachable it would spin forever.
-  const unlisted = list.fetchedAt === null && list.entries.length === 0;
+  const unlisted = !loading && shown.fetchedAt === null && shown.entries.length === 0;
+  const failure = shown.failure;
+  const since = (at: number): string => {
+    const ago = shortWhen(new Date(at).toISOString(), now);
+    return ago === "just now" ? "just now" : `${ago} ago`;
+  };
 
   const refreshedHint = (): string => {
-    if (list.fetchedAt === null) return `Ask the forge for open ${plural.toLowerCase()}`;
-    const ago = shortWhen(new Date(list.fetchedAt).toISOString(), now);
-    return `Refreshed ${ago === "just now" ? "just now" : `${ago} ago`} — ask again`;
+    if (failure !== undefined) {
+      return `Couldn't refresh (${since(failure.at)}): ${failure.message} — try again`;
+    }
+    if (shown.fetchedAt === null) return `Ask the forge for open ${plural.toLowerCase()}`;
+    return `Refreshed ${since(shown.fetchedAt)} — ask again`;
   };
 
   const act = async (entry: ChangeRequestEntry): Promise<void> => {
@@ -355,7 +379,7 @@ export function RepoChangeRequestSection({
           <SectionChevron open={open} />
           <span className="ref-section__label">{plural}</span>
           <span className="ref-section__count">
-            {unlisted ? "–" : list.entries.length}
+            {loading ? "…" : unlisted ? "–" : shown.entries.length}
           </span>
         </button>
         {/* Kept while the filter is on even after a refresh leaves nothing
@@ -383,7 +407,7 @@ export function RepoChangeRequestSection({
                 setOpen(true);
                 // "Show only these" has to show them: a failing PR that is
                 // only on the forge would otherwise sit in a closed group.
-                if (groupChangeRequests(list.entries, { failingOnly: true }).remoteOnly.length > 0) {
+                if (groupChangeRequests(shown.entries, { failingOnly: true }).remoteOnly.length > 0) {
                   setRemoteOpen(true);
                 }
               }}
@@ -393,8 +417,10 @@ export function RepoChangeRequestSection({
           </span>
         )}
         <button
-          className="ref-fetch-all"
-          aria-label={`Refresh open ${plural.toLowerCase()} for ${repo.name}`}
+          className={`ref-fetch-all${failure === undefined ? "" : " is-warn"}`}
+          aria-label={`Refresh open ${plural.toLowerCase()} for ${repo.name}${
+            failure === undefined ? "" : ", last refresh failed"
+          }`}
           aria-busy={refreshing}
           aria-disabled={refreshing}
           {...hoverTooltip(tip, refreshedHint())}
@@ -411,11 +437,19 @@ export function RepoChangeRequestSection({
       {open && (
         <div className="ref-section__body">
           {error !== null && <div className="ref-section__error">{error}</div>}
-          {unlisted ? (
+          {failure !== undefined && (
+            <div className="ref-cr-stale" role="status">
+              Couldn't refresh: {failure.message}
+              {shown.fetchedAt === null
+                ? ""
+                : ` Showing the list from ${since(shown.fetchedAt)}.`}
+            </div>
+          )}
+          {loading ? null : unlisted ? (
             <div className="ref-section__empty">
               Not listed yet — ⟳ asks {forgeLabel(forge)}.
             </div>
-          ) : list.entries.length === 0 ? (
+          ) : shown.entries.length === 0 ? (
             <div className="ref-section__empty">No open {plural.toLowerCase()}.</div>
           ) : (
             <div
@@ -453,7 +487,7 @@ export function RepoChangeRequestSection({
                 )}
             </div>
           )}
-          {list.truncated && (
+          {shown.truncated && (
             <div className="ref-section__empty">
               Only the most recently updated are listed.
             </div>

@@ -34,16 +34,30 @@ import { lastSegment } from "./repo-view";
  * at the scheduled TTL, so a second ask at the user TTL would spend a forge
  * call per expand for nothing. `refresh()` is the explicit ask — it waits, so
  * its caller can show the work and knows when it is over.
+ *
+ * The last answer per repository is kept for the session (`lastLists`), so a
+ * surface that mounts again — a repo collapsed and re-expanded — paints the
+ * list it had at once instead of growing into it a moment later. `relocateKey`
+ * re-reads when something the locations depend on changed without a
+ * `pr:openChanged` (a worktree created or removed).
  */
+/** Each repository's last answer this session, for an instant repaint. */
+const lastLists = new Map<string, ChangeRequestList>();
+
 export function useChangeRequestList(
   repoId: string,
-  { refreshOnOpen = true }: { refreshOnOpen?: boolean } = {}
+  {
+    refreshOnOpen = true,
+    relocateKey = ""
+  }: { refreshOnOpen?: boolean; relocateKey?: string } = {}
 ): {
   list: ChangeRequestList | null;
   error: string | null;
   refresh: () => Promise<void>;
 } {
-  const [list, setList] = useState<ChangeRequestList | null>(null);
+  const [list, setList] = useState<ChangeRequestList | null>(
+    () => lastLists.get(repoId) ?? null
+  );
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
 
@@ -61,6 +75,7 @@ export function useChangeRequestList(
         return;
       }
       setError(null);
+      lastLists.set(repoId, result.value);
       setList(result.value);
     },
     [repoId]
@@ -75,7 +90,7 @@ export function useChangeRequestList(
       generation.current += 1;
       stop();
     };
-  }, [load, repoId, refreshOnOpen]);
+  }, [load, repoId, refreshOnOpen, relocateKey]);
 
   const refresh = useCallback(() => load(true, true), [load]);
 
@@ -247,16 +262,20 @@ export function worktreeArgsFor(
 }
 
 /**
- * Bring a change request's head within reach of `git switch`: a fetch for an
- * unfetched or fork head, nothing for one already here. Null when there is
- * nothing to switch to (and the reason has been reported).
+ * Bring a change request's head within reach of `git switch`, as git sees it
+ * now: a fetch for an unfetched or fork head, nothing for one already here.
+ * Null when there is nothing to switch to (and the reason has been reported).
  */
 export async function reachableLocation(
   repoId: string,
   entry: ChangeRequestEntry
 ): Promise<ChangeRequestLocation | null> {
   const { location } = entry;
-  if (location.kind !== "unfetched" && location.kind !== "fork") return location;
+  // Everything else is re-located against git first: a list locates heads
+  // from the branch index, which can trail a terminal's fetch or delete, and
+  // this answer is about to become a `git worktree add`. A head already here
+  // costs no fetch; main returns it as-is.
+  if (location.kind === "worktree") return location;
   const result = await dispatch("pr:fetchHead", {
     repoId,
     number: entry.pr.number

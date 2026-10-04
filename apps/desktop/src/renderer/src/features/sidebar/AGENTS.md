@@ -76,8 +76,17 @@ API calls on every expand.
   (`pwrgit.changeRequestsRemoteOpen.<repoId>`). On a busy repository it is
   mostly other people's work.
 - **+ Worktree goes through `reachableLocation`**, the refs browser's path:
-  fetch an unfetched or fork head first, then hand the PR to
-  `NewWorktreeModal` so the dialog names it.
+  main re-locates the head with git (fetching it if it is not here), then the
+  PR goes to `NewWorktreeModal` so the dialog names it. The list's locations
+  come from the branch index and can lag a terminal; the action must not.
+- **It must not shift the sections below it.** The heading renders before
+  the first answer whenever `repo.identity` names a forge (count `…`), and
+  `useChangeRequestList` keeps each repo's last answer for the session, so a
+  re-expand paints at once. What is left is a first expand, per session, of a
+  repo with no identity yet or a section left open — keep it that way.
+- **A failed refresh is shown, not swallowed**: `list.failure` draws a
+  warning line under the heading and tints ⟳; the entries stay the last good
+  list.
 
 Design: `design/Change Requests in Sidebar - UX Review.dc.html`, 2b.
 

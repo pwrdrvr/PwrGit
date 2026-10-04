@@ -92,11 +92,14 @@ let answer: ChangeRequestList;
 beforeEach(() => {
   answer = list;
   window.localStorage.clear();
-  dispatchMock.mockImplementation((channel: string) => {
+  dispatchMock.mockImplementation((channel: string, req: { number?: number }) => {
     if (channel === "pr:openList") return Promise.resolve(ok(answer));
     if (channel === "pr:fetchHead") {
+      // Main re-locates against git: a fetched head, or a local branch as-is.
       return Promise.resolve(
-        ok({ kind: "remote", branch: "fix/audit", fullName: "refs/remotes/origin/fix/audit" })
+        req.number === 320
+          ? ok({ kind: "local", branch: "build/electron-44" })
+          : ok({ kind: "remote", branch: "fix/audit", fullName: "refs/remotes/origin/fix/audit" })
       );
     }
     return Promise.resolve(ok(undefined));
@@ -115,11 +118,11 @@ afterEach(async () => {
 const onCreateWorktree = vi.fn();
 const onRevealWorktree = vi.fn();
 
-async function render(): Promise<void> {
+async function render(shownRepo: Repo = repo): Promise<void> {
   await act(async () => {
     root.render(
       <RepoChangeRequestSection
-        repo={repo}
+        repo={shownRepo}
         now={0}
         onRevealWorktree={onRevealWorktree}
         onCreateWorktree={onCreateWorktree}
@@ -191,10 +194,11 @@ describe("RepoChangeRequestSection", () => {
       expect.objectContaining({ number: 381 })
     );
 
-    // A local branch is checked out as itself, no fetch.
+    // A local branch is checked out as itself — after main confirms git still
+    // has it, since the list located it from the index.
     dispatchMock.mockClear();
     await act(async () => button("New worktree for #320")?.click());
-    expect(dispatchMock).not.toHaveBeenCalledWith("pr:fetchHead", expect.anything());
+    expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", { repoId: "repo-1", number: 320 });
     expect(onCreateWorktree).toHaveBeenLastCalledWith(
       "build/electron-44",
       false,
@@ -251,6 +255,70 @@ describe("RepoChangeRequestSection", () => {
     expect(container.querySelector(".ref-cr-row .copyable")).toBeNull();
     expect(container.querySelector(".ref-cr-row__head")?.textContent).toBe("—");
     expect(button("New worktree for #98 — unavailable")?.disabled).toBe(true);
+  });
+
+  it("holds its place before the first answer when origin's identity names a forge", async () => {
+    const identified: Repo = {
+      ...repo,
+      id: "repo-identified",
+      identity: {
+        host: "github",
+        hostname: "github.com",
+        owner: "acme",
+        name: "orbit",
+        nameWithOwner: "acme/orbit",
+        visibility: "public"
+      }
+    };
+    let answerNow: () => void = () => undefined;
+    dispatchMock.mockImplementation(
+      () => new Promise((resolve) => { answerNow = () => resolve(ok(list)); })
+    );
+    await render(identified);
+    // The heading is there already, counting nothing yet.
+    expect(head()?.textContent).toContain("Pull requests");
+    expect(head()?.textContent).toContain("…");
+    await act(async () => answerNow());
+    expect(head()?.textContent).toContain("4");
+
+    // Without an identity there is nothing to predict from: no heading yet.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render({ ...repo, id: "repo-unknown" });
+    expect(container.querySelector(".ref-cr-section")).toBeNull();
+  });
+
+  it("paints the last answer at once when it mounts again", async () => {
+    const seen: Repo = { ...repo, id: "repo-seen" };
+    await render(seen);
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    dispatchMock.mockImplementation(() => new Promise(() => undefined));
+    await render(seen);
+    expect(head()?.textContent).toContain("4");
+  });
+
+  it("re-reads when a worktree comes or goes", async () => {
+    await render();
+    const reads = (): number =>
+      dispatchMock.mock.calls.filter(([channel]) => channel === "pr:openList").length;
+    expect(reads()).toBe(1);
+    await render({
+      ...repo,
+      worktrees: [...repo.worktrees, worktree("wt-10", "fix/audit")]
+    });
+    expect(reads()).toBe(2);
+  });
+
+  it("says when the last refresh failed, and that the list is older", async () => {
+    answer = { ...list, failure: { at: 1, message: "API rate limit exceeded" } };
+    window.localStorage.setItem("pwrgit.changeRequestsOpen.repo-1", "1");
+    await render();
+    expect(container.querySelector(".ref-cr-stale")?.textContent).toContain(
+      "Couldn't refresh: API rate limit exceeded"
+    );
+    const refresh = button("Refresh open pull requests for orbit, last refresh failed");
+    expect(refresh?.classList.contains("is-warn")).toBe(true);
   });
 
   it("waits on ⟳ and marks itself busy until the list is back", async () => {

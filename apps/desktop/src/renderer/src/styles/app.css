@@ -1901,6 +1901,22 @@ a.forge-chip:focus-visible {
   border-color: var(--danger-border);
   background: var(--danger-soft);
 }
+/* The last refresh failed: the list below is the last good one. Warning, not
+   danger — nothing is lost, it is just older than it says on the tin. The
+   line sits under the heading, so ⟳ never moves when it appears or clears. */
+.ref-fetch-all.is-warn {
+  border-color: color-mix(in srgb, var(--status-warning) 45%, transparent);
+  color: var(--status-warning);
+}
+.ref-cr-stale {
+  margin: 2px 4px 4px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--status-warning) 10%, transparent);
+  color: var(--status-warning);
+  font: 500 10.5px/1.35 var(--font-sans);
+  overflow-wrap: anywhere;
+}
 .ref-cr-subhead {
   display: flex;
   align-items: center;
