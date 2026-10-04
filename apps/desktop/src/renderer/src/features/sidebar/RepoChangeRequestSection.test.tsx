@@ -211,6 +211,48 @@ describe("RepoChangeRequestSection", () => {
     expect(bases).toEqual(["→ feat/plan"]);
   });
 
+  it("shows failing ones wherever they are, and keeps the way back to all of them", async () => {
+    answer = {
+      ...list,
+      entries: list.entries.map((e) =>
+        e.pr.number === 342 ? { ...e, pr: { ...e.pr, checkState: "failing" as const } } : e
+      )
+    };
+    await render();
+    const chip = (): HTMLButtonElement | null =>
+      container.querySelector<HTMLButtonElement>(".ref-section__chip.is-failing");
+    expect(chip()?.textContent).toBe("1 failing");
+
+    // #342 is only on the forge: the filter opens Remote only to show it.
+    await act(async () => chip()?.click());
+    expect(head()?.getAttribute("aria-expanded")).toBe("true");
+    expect(rowNumbers()).toEqual(["#342"]);
+
+    // A refresh fixes it; the chip stays, pressed, so the filter can be undone.
+    answer = list;
+    await act(async () => {
+      await button("Refresh open pull requests for orbit")?.click();
+    });
+    expect(rowNumbers()).toEqual([]);
+    expect(chip()?.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => chip()?.click());
+    expect(rowNumbers()).toEqual(["#376", "#320", "#381", "#342"]);
+    expect(chip()).toBeNull();
+  });
+
+  it("offers no copy for a head nobody can name", async () => {
+    answer = {
+      ...list,
+      entries: [entry(98, "Gone", { kind: "missing", branch: null })]
+    };
+    window.localStorage.setItem("pwrgit.changeRequestsOpen.repo-1", "1");
+    window.localStorage.setItem("pwrgit.changeRequestsRemoteOpen.repo-1", "1");
+    await render();
+    expect(container.querySelector(".ref-cr-row .copyable")).toBeNull();
+    expect(container.querySelector(".ref-cr-row__head")?.textContent).toBe("—");
+    expect(button("New worktree for #98 — unavailable")?.disabled).toBe(true);
+  });
+
   it("waits on ⟳ and marks itself busy until the list is back", async () => {
     let finish: () => void = () => undefined;
     await render();

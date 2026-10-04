@@ -24,7 +24,12 @@ import {
   shownBase
 } from "./change-request-groups";
 import { PrChip } from "./PrChip";
-import { reachableLocation, useChangeRequestList } from "./RepoChangeRequests";
+import {
+  reachableLocation,
+  useChangeRequestList,
+  worktreeArgsFor
+} from "./RepoChangeRequests";
+import { SectionChevron } from "./SectionChevron";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 
 /**
@@ -47,10 +52,6 @@ function usePersistedOpen(key: string): [boolean, (open: boolean) => void] {
     }
   }, [key, open]);
   return [open, setOpen];
-}
-
-function SectionChevron({ open }: { open: boolean }) {
-  return <span className={`ref-section__chev${open ? " is-open" : ""}`} />;
 }
 
 /** The leading unit of `shortWhen`: "2h 13m" is two columns of a row with none. */
@@ -138,16 +139,14 @@ export function RepoChangeRequestSection({
     setFetching(entry.pr.number);
     const location = await reachableLocation(repo.id, entry);
     setFetching(null);
-    if (location === null || location.kind === "missing") return;
+    if (location === null) return;
     if (location.kind === "worktree") {
       onRevealWorktree(location.worktreeId);
       return;
     }
-    if (location.kind === "remote") {
-      onCreateWorktree(location.branch, true, location.fullName, entry.pr);
-    } else {
-      onCreateWorktree(location.branch, false, undefined, entry.pr);
-    }
+    const args = worktreeArgsFor(location);
+    if (args === null) return;
+    onCreateWorktree(args.branch, args.newBranch, args.startPoint, entry.pr);
   };
 
   /** What + Worktree will do, said before the click. Null: it cannot. */
@@ -204,10 +203,12 @@ export function RepoChangeRequestSection({
   const row = (entry: ChangeRequestEntry, index: number): ReactElement => {
     const { pr, location } = entry;
     const age = compactAge(pr.updatedAt ?? pr.createdAt, now);
+    // Null only for a missing head the forge did not name either: nothing to
+    // copy, so no copy target.
     const head =
       location.kind === "fork"
         ? (pr.headRefName ?? location.localBranch)
-        : (pr.headRefName ?? location.branch ?? "—");
+        : (pr.headRefName ?? location.branch);
     const base = shownBase(pr, defaultBranch);
     const holder =
       location.kind === "worktree" ? worktreesById.get(location.worktreeId) : undefined;
@@ -318,18 +319,22 @@ export function RepoChangeRequestSection({
           {location.kind === "missing" && (
             <span className="ref-cr-tag is-missing">branch gone</span>
           )}
-          <CopyTarget
-            value={location.kind === "fork" ? location.localBranch : head}
-            label={`Copy branch name ${location.kind === "fork" ? location.localBranch : head}`}
-            hint={
-              location.kind === "fork"
-                ? `${location.headRepoPath}:${head}\nClick to copy ${location.localBranch}`
-                : `${head}\nClick to copy branch name`
-            }
-            className="ref-cr-row__head refs-copyable-name copyable"
-          >
-            <span className="refs-copyable-name__text">{head}</span>
-          </CopyTarget>
+          {head === null ? (
+            <span className="ref-cr-row__head">—</span>
+          ) : (
+            <CopyTarget
+              value={location.kind === "fork" ? location.localBranch : head}
+              label={`Copy branch name ${location.kind === "fork" ? location.localBranch : head}`}
+              hint={
+                location.kind === "fork"
+                  ? `${location.headRepoPath}:${head}\nClick to copy ${location.localBranch}`
+                  : `${head}\nClick to copy branch name`
+              }
+              className="ref-cr-row__head refs-copyable-name copyable"
+            >
+              <span className="refs-copyable-name__text">{head}</span>
+            </CopyTarget>
+          )}
           {base !== null && <span className="ref-cr-row__base">→ {base}</span>}
         </div>
       </div>
@@ -353,7 +358,9 @@ export function RepoChangeRequestSection({
             {unlisted ? "–" : list.entries.length}
           </span>
         </button>
-        {groups.failing > 0 && (
+        {/* Kept while the filter is on even after a refresh leaves nothing
+            failing: it is the only way to turn the filter back off. */}
+        {(groups.failing > 0 || failingOnly) && (
           <span className="ref-section__chips">
             <button
               className={`ref-section__chip is-failing${failingOnly ? " is-active" : ""}`}
@@ -372,7 +379,13 @@ export function RepoChangeRequestSection({
               onClick={(event) => {
                 event.stopPropagation();
                 setFailingOnly(!failingOnly);
-                if (!failingOnly) setOpen(true);
+                if (failingOnly) return;
+                setOpen(true);
+                // "Show only these" has to show them: a failing PR that is
+                // only on the forge would otherwise sit in a closed group.
+                if (groupChangeRequests(list.entries, { failingOnly: true }).remoteOnly.length > 0) {
+                  setRemoteOpen(true);
+                }
               }}
             >
               {groups.failing} failing

@@ -224,6 +224,29 @@ const toIso = (ms: number | undefined): string | null =>
   ms === undefined ? null : new Date(ms).toISOString();
 
 /**
+ * The New worktree arguments for a head `reachableLocation` brought within
+ * reach: a fetched remote head starts a new branch from its tracking ref, a
+ * local branch is checked out as itself. Null where there is no branch to
+ * check out (it is in a worktree already, or gone).
+ */
+export function worktreeArgsFor(
+  location: ChangeRequestLocation
+): { branch: string; newBranch: boolean; startPoint?: string } | null {
+  switch (location.kind) {
+    case "remote":
+      return { branch: location.branch, newBranch: true, startPoint: location.fullName };
+    case "local":
+    case "unfetched":
+      return { branch: location.branch, newBranch: false };
+    case "fork":
+      return { branch: location.localBranch, newBranch: false };
+    case "worktree":
+    case "missing":
+      return null;
+  }
+}
+
+/**
  * Bring a change request's head within reach of `git switch`: a fetch for an
  * unfetched or fork head, nothing for one already here. Null when there is
  * nothing to switch to (and the reason has been reported).
@@ -321,11 +344,9 @@ export function ChangeRequestTable({
       await onSwitch(rowKey, branch);
       return;
     }
-    if (location.kind === "remote") {
-      onCreateWorktree(branch, true, location.fullName);
-    } else {
-      onCreateWorktree(branch, false);
-    }
+    const args = worktreeArgsFor(location);
+    if (args === null) return;
+    onCreateWorktree(args.branch, args.newBranch, args.startPoint);
     onClose();
   };
 

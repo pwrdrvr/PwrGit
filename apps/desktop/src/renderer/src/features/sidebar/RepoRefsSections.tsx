@@ -36,6 +36,7 @@ import { branchStatusCounts, type BranchStatusFilter } from "./branch-status";
 import { remoteForgeChip } from "./forge-chip";
 import { ForgeChip } from "./ForgeChip";
 import { remoteUrlLines, remoteWebUrl, remoteWhere } from "./remote-info";
+import { SectionChevron } from "./SectionChevron";
 import {
   RepoChangeRequestSection,
   type CreateWorktreeFromRef
@@ -52,10 +53,6 @@ type RefSection = "branches" | "tags" | "remotes" | "changeRequests";
 
 /** How many branches the collapsed slice shows before "View all …". */
 const BRANCH_SLICE = 6;
-
-function SectionChevron({ open }: { open: boolean }) {
-  return <span className={`ref-section__chev${open ? " is-open" : ""}`} />;
-}
 
 /**
  * The 82px-wide sidebar spelling of a branch's tracking state.
