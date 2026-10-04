@@ -84,6 +84,13 @@ const hoverCard = async (
   return text;
 };
 
+it("labels no-upstream commit counts without inventing a tracked destination", () => {
+  const markup = render(worktree({ ahead: 1, tracking: "unpublished" }));
+  expect(markup).toContain("↑1");
+  expect(markup).toContain("not on fetched remote branches; no upstream configured");
+  expect(markup).not.toContain("to push to the branch it tracks");
+});
+
 describe("WorktreeRow — what Pull would bring in", () => {
   const source = {
     remote: "upstream",

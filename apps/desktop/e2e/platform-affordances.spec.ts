@@ -94,6 +94,12 @@ test("renderer affordances follow the real OS platform", async () => {
     .getByRole("button", { name: "Pin repo" })
     .click();
   await lensChip(window, "Pinned").click();
+  // Reordering and changing lenses move rows beneath the pointer. Dismiss
+  // cards from those earlier interactions before probing the repo grip;
+  // each row owns a tooltip, so more than one can otherwise remain open.
+  await window.mouse.move(0, 0);
+  await window.keyboard.press("Escape");
+  await expect(window.getByRole("tooltip")).toHaveCount(0);
   await repoGroup(window, "alpha").locator(".repo-row__handle").hover();
   await expect(window.getByRole("tooltip")).toHaveText(
     `Drag to reorder — or ${reorder} from the keyboard`

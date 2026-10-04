@@ -464,7 +464,7 @@ export function registerRemoteHandlers(
         let fetched = false;
         try {
           if (controller.signal.aborted) return { status: "superseded" };
-          const result = await (async (): Promise<Result<"checked" | "untracked">> => {
+          const result = await (async (): Promise<Result<"checked" | "untracked" | "unavailable">> => {
             const identity = readIdentity?.(worktree.repoId);
             if (identity?.parent !== undefined) {
               const parent = {
