@@ -83,7 +83,7 @@ export function ForkRepoDialog({
    *  operation `ForkCheckoutDialog` runs: origin moves to the fork, the
    *  original stays as upstream, nothing is cloned. Cloning a second copy is
    *  the rare case, one quiet link away. See design/Fork While Cloning, turn 4. */
-  inPlace?: { repoId: string; repoName: string };
+  inPlace?: { repoId: string; repoName: string; branch?: string | null };
   onForked: (repo: Repo) => void;
   onReveal: (path: string) => void;
   onClose: () => void;
@@ -1030,6 +1030,7 @@ export function ForkRepoDialog({
           {inPlaceMode && action.kind !== "reveal_existing" && (
             <ForkRemotePlan
               preflight={checkoutPreflight}
+              branch={inPlace?.branch ?? null}
               target={
                 nameProblem === null && targetOwner !== null
                   ? `${targetOwner.login}/${forkName.trim()}`

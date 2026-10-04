@@ -29,11 +29,13 @@ export type ForkTrackingDone = {
  *  origin is already the user's fork — a remote rename carries tracking with
  *  it. Draw where it goes now and where it would go, and move it. */
 export function ForkTrackingRecoveryDialog({
-  repo, worktreeId, entry, onForked, onRepaired, onClose
+  repo, worktreeId, entry, forkBranch = null, onForked, onRepaired, onClose
 }: {
   repo: Pick<Repo, "id" | "profileId" | "name" | "identity">;
   worktreeId: string;
   entry: ForkTrackingEntry;
+  /** The branch the fork offer draws its route for (`routeBranch`). */
+  forkBranch?: string | null;
   /** After a refused push with nothing to repair, the dialog becomes the
    *  offer to fork instead. */
   onForked?: (repo: Repo) => void;
@@ -100,6 +102,7 @@ export function ForkTrackingRecoveryDialog({
     return <ForkCheckoutDialog
       profileId={repo.profileId} repoId={repo.id}
       repoName={repo.identity?.nameWithOwner ?? repo.name}
+      branch={forkBranch}
       reason={entry.error} onForked={onForked} onClose={onClose}
     />;
   }

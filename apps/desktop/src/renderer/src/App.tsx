@@ -33,6 +33,7 @@ import { OnboardingWizard } from "./features/onboarding/OnboardingWizard";
 import { CloneRepoDialog } from "./features/sidebar/CloneRepoDialog";
 import { ForkRepoDialog } from "./features/sidebar/ForkRepoDialog";
 import { ForkCheckoutDialog } from "./features/sidebar/ForkCheckoutDialog";
+import { routeBranch } from "./features/sidebar/fork-checkout-dialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { RepositorySetupSheet } from "./features/sidebar/RepositorySetupSheet";
@@ -78,20 +79,27 @@ export function App() {
    *  the sidebar's read-only mark. Held here rather than in the row so the
    *  dialog outlives a re-render of the tree beneath it. */
   const [forkCheckout, setForkCheckout] = useState<
-    { profileId: string; repoId: string; repoName: string } | null
+    { profileId: string; repoId: string; repoName: string; branch: string | null } | null
   >(null);
   const openForkCheckout = (repo: Repo): void =>
     setForkCheckout({
       profileId: repo.profileId,
       repoId: repo.id,
-      repoName: repo.identity?.nameWithOwner ?? repo.name
+      repoName: repo.identity?.nameWithOwner ?? repo.name,
+      branch: routeBranch(repo.worktrees.find((row) => row.isPrimary))
     });
   /** The checkout the fork dialog was opened from, when there is one: the
    *  dialog forks it in place rather than cloning it a second time. */
   const inPlaceFor = (checkout: Repo | null) =>
     checkout === null
       ? {}
-      : { inPlace: { repoId: checkout.id, repoName: checkout.name } };
+      : {
+          inPlace: {
+            repoId: checkout.id,
+            repoName: checkout.name,
+            branch: routeBranch(checkout.worktrees.find((row) => row.isPrimary))
+          }
+        };
   // A ⌘F pick on a branch with no worktree — the New worktree modal, primed to
   // branch from a fetched ref (remote-only) or to check the branch out (local).
   const [searchNewWorktree, setSearchNewWorktree] = useState<{
@@ -1078,6 +1086,7 @@ export function App() {
           profileId={forkCheckout.profileId}
           repoId={forkCheckout.repoId}
           repoName={forkCheckout.repoName}
+          branch={forkCheckout.branch}
           onClose={() => setForkCheckout(null)}
           onForked={() => setForkCheckout(null)}
         />

@@ -4,8 +4,10 @@ import {
   forkCheckoutAction,
   forkInPlaceAction,
   forkCheckoutLead,
+  forkPlanRoutes,
   originForkOffer,
   remoteChanges,
+  routeBranch,
   upstreamAnswerIsCurrent
 } from "./fork-checkout-dialog";
 
@@ -267,5 +269,71 @@ describe("originForkOffer", () => {
     expect(
       originForkOffer("git@git.corp.example:team/app.git", undefined, {})
     ).toBeNull();
+  });
+});
+
+describe("routeBranch", () => {
+  it("draws a branch that follows a remote, and nothing for one that doesn't", () => {
+    expect(routeBranch({ branch: "main", tracking: "up_to_date" })).toBe("main");
+    expect(routeBranch({ branch: "main" })).toBe("main");
+    expect(routeBranch({ branch: "fix", tracking: "unpublished" })).toBeNull();
+    expect(routeBranch({ branch: "fix", tracking: "upstream_missing" })).toBeNull();
+    expect(routeBranch({ branch: "main", tracking: "behind", missing: true })).toBeNull();
+    expect(routeBranch(undefined)).toBeNull();
+  });
+});
+
+describe("forkPlanRoutes", () => {
+  const routes = (over: Partial<Parameters<typeof forkPlanRoutes>[0]> = {}) =>
+    forkPlanRoutes({
+      preflight: preflight(),
+      branch: "main",
+      target: "huntharo/dugite",
+      upstream: "desktop/dugite",
+      ...over
+    });
+
+  it("draws origin moving to the fork, with the refused push only when the forge said so", () => {
+    const { now, after } = routes();
+    expect(now.original).toEqual({ role: "The original", slug: "desktop/dugite", remote: "origin", perm: "no" });
+    expect(now.toOriginal).toEqual([{ verb: "push", tone: "bad" }, { verb: "pull", tone: "plain" }]);
+    expect(now.fork).toMatchObject({ slug: "huntharo/dugite", pending: "will be created", state: "unused" });
+    expect(after.original).toEqual({ role: "The original", slug: "desktop/dugite", remote: "upstream", remoteMoved: true });
+    expect(after.fork).toMatchObject({ remote: "origin", remoteMoved: true, perm: "yes", state: "chosen" });
+    expect(after.toOriginal).toEqual([{ verb: "sync", tone: "ghost" }]);
+    expect(after.caption).toBe("main keeps following origin, and origin moves to your fork");
+
+    const open = forkPlanRoutes({
+      preflight: preflight({ fork: { ...preflight().fork, source: { ...source, viewerCanPush: true } } }),
+      branch: "main", target: "huntharo/dugite", upstream: "desktop/dugite"
+    });
+    expect(open.now.original).not.toHaveProperty("perm");
+    expect(open.now.toOriginal[0]).toEqual({ verb: "push", tone: "plain" });
+  });
+
+  it("keeps no original once the user declines one", () => {
+    const { after } = routes({ upstream: null });
+    expect(after.original).toEqual({ role: "The original", slug: "desktop/dugite", pending: "no remote", state: "unused" });
+    expect(after.toOriginal).toEqual([]);
+    expect(after.label).toBe("After: main pulls from and pushes to huntharo/dugite.");
+  });
+
+  it("names an adopted fork as already there, and an existing upstream as unmoved", () => {
+    const { now, after } = routes({
+      preflight: preflight({
+        fork: { ...preflight().fork, existing: { ...source, owner: "huntharo", nameWithOwner: "huntharo/dugite" } },
+        upstreamRemote: { name: "upstream", existing: true }
+      })
+    });
+    expect(now.fork.pending).toBe("on GitHub");
+    expect(after.original.remoteMoved).toBe(false);
+  });
+
+  it("tells a fork-of-a-fork's origin apart from the root it keeps as upstream", () => {
+    const { now, after } = routes({
+      preflight: preflight({ origin: { url: "git@github.com:alice/dugite.git", nameWithOwner: "alice/dugite" } })
+    });
+    expect(now.original).toMatchObject({ role: "Origin today", slug: "alice/dugite" });
+    expect(after.original).toMatchObject({ role: "The original", slug: "desktop/dugite" });
   });
 });

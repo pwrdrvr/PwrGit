@@ -35,6 +35,7 @@ export function ForkCheckoutDialog({
   profileId,
   repoId,
   repoName,
+  branch = null,
   /** Why the dialog opened, when something specific raised it. Shown above the
    *  fold so the answer arrives with the question. */
   reason,
@@ -44,6 +45,9 @@ export function ForkCheckoutDialog({
   profileId: string;
   repoId: string;
   repoName: string;
+  /** The branch "Where it goes" is drawn for — `routeBranch` — or null to
+   *  show the remote list alone. */
+  branch?: string | null;
   reason?: string;
   onForked: (repo: Repo) => void;
   onClose: () => void;
@@ -438,6 +442,7 @@ export function ForkCheckoutDialog({
           {/* ── What this changes ──────────────────────────────── */}
           <ForkRemotePlan
             preflight={preflight}
+            branch={branch}
             target={
               nameProblem === null && targetOwner !== null
                 ? `${targetOwner.login}/${forkName.trim()}`

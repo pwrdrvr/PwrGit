@@ -165,3 +165,27 @@ command itself sits under "In Git terms". Two rules:
   remote's URL. Two or more draws the scrolling Push to list.
 
 Design: `design/Fork Tracking Repair - UX Review.dc.html`, 2b and 4a.
+
+## The route is drawn wherever a fork changes where a branch goes
+
+`RouteStrip` (in `ForkRoute.tsx`) is the repair's strip made general: three
+boxes, arrows whose direction follows the verb, and a phase pill. It also
+draws Fork&hellip;'s plan (`forkPlanRoutes`), Publish's destination
+(`publishRoute`), and the Remotes card in the healthy case too
+(`remotesRoute`). `RouteLine` is the one-line form under each Pull menu choice.
+Roles come from `routedRemotes` in `@pwrgit/shared`, never from a remote's
+name:
+
+- **The forge's identity names the fork and the original only while origin's
+  URL still matches it.** A remote called `upstream` that is not the parent is
+  "other" and gets no role.
+- **"You can push" is drawn only from `viewerCanPush`, and only for a remote
+  whose push URL is origin's repository.** No pill means "not asked", which is
+  why Publish to the original says PwrGit hasn't asked.
+- **Sync's dotted arrow appears only where the original's default branch is
+  the branch's name.** A feature branch on a fork has nothing to sync.
+- **Fork&hellip; draws strips only for a branch that tracks a remote**
+  (`routeBranch`). An unpublished branch has no route to change, so it keeps
+  the "Afterwards" list.
+
+Design: `design/Fork Route Graphic - UX Review.dc.html`.
