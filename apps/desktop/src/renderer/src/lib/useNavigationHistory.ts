@@ -158,12 +158,22 @@ export function pruneNavigation(
   stacks: NavigationStacks,
   live: ReadonlySet<string>
 ): NavigationStacks {
-  const back = prune(stacks.back, live);
-  const forward = prune(stacks.forward, live);
+  let back = prune(stacks.back, live);
+  let forward = prune(stacks.forward, live);
   const cursor =
     stacks.cursor !== undefined && live.has(stacks.cursor.worktreeId)
       ? stacks.cursor
       : undefined;
+  // A removal can also leave the place on screen next to itself: A, dead, A
+  // with the cursor on the second A. Back must never lead to where you are.
+  if (cursor !== undefined) {
+    while (back.length > 0 && samePlace(back[back.length - 1]!, cursor)) {
+      back = back.slice(0, -1);
+    }
+    while (forward.length > 0 && samePlace(forward[0]!, cursor)) {
+      forward = forward.slice(1);
+    }
+  }
   if (
     back === stacks.back &&
     forward === stacks.forward &&

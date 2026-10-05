@@ -566,7 +566,7 @@ export function RepoRow({
 
   const renderWorktree = (
     worktree: Worktree,
-    ghostTag?: { tag: string; tooltip: string }
+    ghostTag?: { tag: string; tooltip: string; spoken: string }
   ) => (
     <WorktreeRow
       key={worktree.id}
@@ -968,7 +968,8 @@ export function RepoRow({
             {ghost !== undefined &&
               renderWorktree(ghost, {
                 tag: worktreesLabel.split(" ")[0] ?? worktreesLabel,
-                tooltip: `Lives in ${worktreesLabel} (${remaining.length}). It is shown here because you're on it; pin it to keep it in Pinned.`
+                tooltip: `Lives in ${worktreesLabel} (${remaining.length}). It is shown here because you're on it; pin it to keep it in Pinned.`,
+                spoken: `from ${worktreesLabel}`
               })}
           </div>
 

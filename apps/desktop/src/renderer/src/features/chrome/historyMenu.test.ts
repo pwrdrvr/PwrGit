@@ -53,10 +53,10 @@ describe("buildHistoryMenu", () => {
 });
 
 describe("agoLabel", () => {
-  it("rounds to the coarsest unit that still says something", () => {
-    expect(agoLabel(10_000)).toBe("just now");
-    expect(agoLabel(9 * 60_000)).toBe("9m ago");
-    expect(agoLabel(5 * 3_600_000)).toBe("5h ago");
-    expect(agoLabel(3 * 86_400_000)).toBe("3d ago");
+  it("phrases elapsed time the way the PR section's refresh line does", () => {
+    expect(agoLabel(NOW - 10_000, NOW)).toBe("just now");
+    expect(agoLabel(NOW - 9 * 60_000, NOW)).toBe("9m ago");
+    expect(agoLabel(NOW - 5 * 3_600_000, NOW)).toBe("5h ago");
+    expect(agoLabel(NOW - 3 * 86_400_000, NOW)).toBe("3d ago");
   });
 });

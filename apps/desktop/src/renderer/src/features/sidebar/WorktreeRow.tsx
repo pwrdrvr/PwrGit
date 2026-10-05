@@ -86,8 +86,9 @@ export function WorktreeRow({
   setsize: number;
   /** Drawn as a visitor: the row really lives in a closed disclosure below,
    *  and is shown here only because the window is on it. `tag` names that
-   *  disclosure; `tooltip` says why the row is here and how to keep it. */
-  ghost?: { tag: string; tooltip: string };
+   *  disclosure; `tooltip` says why the row is here and how to keep it;
+   *  `spoken` is the short form read as part of the row's name. */
+  ghost?: { tag: string; tooltip: string; spoken: string };
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -237,7 +238,8 @@ export function WorktreeRow({
           >
             ↓<span className="wt-ghost-tag__text">{ghost.tag}</span>
           </span>
-          <span className="a11y-sr-only">{ghost.tooltip}</span>
+          {/* Short: it is part of the row's name, read on every arrow key. */}
+          <span className="a11y-sr-only">{ghost.spoken}</span>
         </>
       )}
       {worktree.isPrimary && (

@@ -2,18 +2,16 @@ import type {
   NavigationLocation,
   NavigationStacks
 } from "../../lib/useNavigationHistory";
+import { shortWhen } from "../graph/graph-view";
 import type { MenuItem } from "../shell/ContextMenu";
 
 /** Entries per direction. Fifty would be a wall; "back three" is the case. */
 export const HISTORY_MENU_DEPTH = 12;
 
-export function agoLabel(ms: number): string {
-  const minutes = Math.round(ms / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
+/** The PR section's "refreshed … ago" phrasing, from the same formatter. */
+export function agoLabel(at: number, now: number): string {
+  const ago = shortWhen(new Date(at).toISOString(), now);
+  return ago === "just now" ? ago : `${ago} ago`;
 }
 
 function detail(location: NavigationLocation, now: number): string {
@@ -21,7 +19,7 @@ function detail(location: NavigationLocation, now: number): string {
     location.commit === undefined
       ? null
       : `commit ${location.commit.hash.slice(0, 7)}`,
-    location.leftAt === undefined ? null : agoLabel(now - location.leftAt)
+    location.leftAt === undefined ? null : agoLabel(location.leftAt, now)
   ]
     .filter((part): part is string => part !== null)
     .join(" · ");

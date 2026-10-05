@@ -118,6 +118,14 @@ describe("pruneNavigation", () => {
     expect(pruned.cursor?.worktreeId).toBe("b");
   });
 
+  it("never leaves Back pointing at the place on screen", () => {
+    // A, B, A — then B is removed: Back must not offer A while on A.
+    const stacks = walk("a", "b", "a");
+    const pruned = pruneNavigation(stacks, new Set(["a"]));
+    expect(pruned.back).toEqual([]);
+    expect(pruned.cursor?.worktreeId).toBe("a");
+  });
+
   it("returns the same stacks when everything is still there", () => {
     const stacks = walk("a", "b");
     expect(pruneNavigation(stacks, new Set(["a", "b"]))).toBe(stacks);

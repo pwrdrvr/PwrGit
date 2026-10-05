@@ -369,7 +369,7 @@ textarea,
   cursor: pointer;
   transition: color 80ms ease, background 80ms ease;
 }
-.history-nav__chip:hover {
+.history-nav__chip:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--bg-row-active);
 }

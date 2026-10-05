@@ -134,7 +134,6 @@ export function HistoryNavButtons(
         type="button"
         className="history-nav__chip"
         aria-label="Back"
-        aria-haspopup="menu"
         {...(props.canGoBack && props.backLabel !== undefined
           ? { "aria-description": props.backLabel }
           : {})}
@@ -151,7 +150,6 @@ export function HistoryNavButtons(
         type="button"
         className="history-nav__chip"
         aria-label="Forward"
-        aria-haspopup="menu"
         {...(props.canGoForward && props.forwardLabel !== undefined
           ? { "aria-description": props.forwardLabel }
           : {})}
@@ -170,7 +168,12 @@ export function HistoryNavButtons(
           label="History"
           items={menu.items}
           triggerRef={menu.trigger === "back" ? backRef : forwardRef}
-          onClose={() => setMenu(null)}
+          onClose={() => {
+            // A hold released off the chip sends no click to swallow, so the
+            // flag must not outlive the menu it opened.
+            held.current = false;
+            setMenu(null);
+          }}
         />
       )}
       {tip.tooltipNode}

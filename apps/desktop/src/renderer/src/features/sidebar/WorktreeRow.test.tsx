@@ -357,10 +357,11 @@ describe("WorktreeRow — ghost", () => {
   const ghost = {
     tag: "Other",
     tooltip:
-      "Lives in Other worktrees (190). It is shown here because you're on it; pin it to keep it in Pinned."
+      "Lives in Other worktrees (190). It is shown here because you're on it; pin it to keep it in Pinned.",
+    spoken: "from Other worktrees"
   };
 
-  it("draws a visitor: the ghost class, a tag naming its disclosure, and the reason for AT", () => {
+  it("draws a visitor: the ghost class, a tag naming its disclosure, and a short reason for AT", () => {
     const markup = renderToStaticMarkup(
       <WorktreeRow
         worktree={worktree({})}
@@ -387,7 +388,9 @@ describe("WorktreeRow — ghost", () => {
     // Same row identity, so reveals and the anchor find it like the real one.
     expect(markup).toContain('data-wt-id="wt1"');
     expect(markup).toContain('<span class="wt-ghost-tag__text">Other</span>');
-    expect(markup).toContain(`<span class="a11y-sr-only">${ghost.tooltip.replace("'", "&#x27;")}</span>`);
+    // The row's name gets the short form; the sentence stays on the card.
+    expect(markup).toContain('<span class="a11y-sr-only">from Other worktrees</span>');
+    expect(markup).not.toContain("Lives in Other worktrees");
   });
 
   it("draws nothing extra on an ordinary row", () => {
