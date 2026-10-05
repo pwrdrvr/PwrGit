@@ -166,15 +166,28 @@ describe("quitWithExitFailSafe", () => {
     const model = new ElectronQuitModel(["main"]);
     deferOnce(model, "will-quit", "microtask");
     const warn = vi.fn();
+    // Only the fail-safe's setTimeout is faked: settle() and the model's
+    // window closes run on setImmediate, which must stay real or settle()
+    // never returns. With the deadline on the fake clock, however long
+    // settle() takes on a loaded machine, the fail-safe cannot fire first.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      quitWithExitFailSafe(model, { afterMs: 20, warn });
+      await model.settle();
+      expect(model.emitted.at(-1)).toBe("will-quit");
+      expect(model.hasQuit).toBe(false);
 
-    quitWithExitFailSafe(model, { afterMs: 20, warn });
-    await model.settle();
-    expect(model.hasQuit).toBe(false);
-    await wait(40);
+      vi.advanceTimersByTime(19);
+      expect(model.exitCode).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
 
-    expect(model.exitCode).toBe(0);
-    expect(warn).toHaveBeenCalledWith(
-      "quit had not completed 20 ms after resuming; exiting"
-    );
+      vi.advanceTimersByTime(1);
+      expect(model.exitCode).toBe(0);
+      expect(warn).toHaveBeenCalledWith(
+        "quit had not completed 20 ms after resuming; exiting"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
