@@ -71,8 +71,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@shutterstock/p-map-iterable':
-        specifier: 1.2.0-prerelease.1
-        version: 1.2.0-prerelease.1(aggregate-error@3.1.0)
+        specifier: 1.2.0
+        version: 1.2.0(aggregate-error@3.1.0)
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
@@ -1107,8 +1107,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@shutterstock/p-map-iterable@1.2.0-prerelease.1':
-    resolution: {integrity: sha512-KCe++Fx3VgkdWz8ForiImzlWQ6b5+A/ep66tLf/oFqMGIxzyXsaQt/YuOw6O//8TMSFpgy4Xy8fqPDwD68WUXA==}
+  '@shutterstock/p-map-iterable@1.2.0':
+    resolution: {integrity: sha512-waqNJVOz35MaGZgxNl+kxDCxeBLOOVHL/XvgcZDAy9gazjRRkt9ZmUz48S3AoejC3EUJKjEYgjQW1UtRKJLb0g==}
     peerDependencies:
       aggregate-error: ^3.1.0
 
@@ -3805,7 +3805,7 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
 
-  '@shutterstock/p-map-iterable@1.2.0-prerelease.1(aggregate-error@3.1.0)':
+  '@shutterstock/p-map-iterable@1.2.0(aggregate-error@3.1.0)':
     dependencies:
       aggregate-error: 3.1.0
 

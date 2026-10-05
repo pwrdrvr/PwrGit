@@ -156,7 +156,7 @@ describe("first-party name policy", () => {
     });
     write(
       join(root, "pnpm-workspace.yaml"),
-      `minimumReleaseAgeExclude:\n  - "@${vendor}/p-map-iterable@1.2.0-prerelease.1"\n`,
+      `minimumReleaseAgeExclude:\n  - "@${vendor}/p-map-iterable@1.2.0"\n`,
     );
     write(join(root, "README.md"), "first-party project\n");
     runGit(root, ["add", "."]);

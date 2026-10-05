@@ -43,9 +43,9 @@ minimumReleaseAgeExclude:
   - "@pwrdrvr/agent-acp"
   - "@pwrdrvr/agent-chat-react"
 
-  # Owner-approved trial of huntharo's freshly published library prerelease.
+  # Owner-approved trial of huntharo's freshly published library release.
   # Exempt only this version; remove once it matures or leaves the lockfile.
-  - "@shutterstock/p-map-iterable@1.2.0-prerelease.1"
+  - "@shutterstock/p-map-iterable@1.2.0"
 
   # zod 4.5.1 arrived via Dependabot (#183) one day after publication, before
   # this repo declared any cooldown, and was merged and shipped through CI on
