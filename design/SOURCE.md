@@ -109,6 +109,7 @@ first.
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
 | `Person Card - UX Review.dc.html` | Who wrote this commit? The lineage byline that had a hand cursor and no action, four answers to it (the card from what PwrGit already knows, one with a GitHub profile section, one that filters the graph to one author, and a live prototype of all three), and the recommended card in every state it can be in: proven, proven with no photo, no linked account, yours, and a forge that cannot link commits to accounts. Then the wiring it borrows from the PR and SHA chips, and main's people store, the only thing that asks a forge about an author. Interactive. |
 | `Finished Branches - UX Review.dc.html` | Why the sidebar's `↑2` and `225 gone` could not be clicked, why garbage collection and `fetch --prune` never remove a gone branch, and why Maintenance › Local branches declined every squash merge. Then the counts as filter chips, a status filter in the refs browser, the evidence rules (a merged PR whose final head *is* the local tip), the redrawn review with an age guard, and garbage collection's hand-off to it. Interactive. |
+| `Worktree List Cap - UX Review.dc.html` | Why Other worktrees is the one sidebar list with no cap, and why its Recent order puts already-merged work on top; a slice of six in-flight rows with a Finished count and View all into a new Worktrees tab of the refs browser; the "finished" predicate (landed, clean, nothing unshipped); ghost rows for a selection outside the six, reusing Back Forward Navigation's rules; and the gone-versus-PR-chip precedence, with a gone transition forcing a PR refresh. Interactive. |
 | `Maintenance Combined - UX Review.dc.html` | Repository maintenance's Combined tab: why a run could not say which step it was on, why the branch review listed all 82 repositories, and why it stopped showing the rules it had applied. Then one anatomy for all four tabs, the plan as numbered step cards that become a step rail during the run, a rules-in-force strip above every review, cards only for repositories that propose something, a per-step receipt, and the Worktrees tab brought in line with its siblings. Written here and pushed up; all data is invented. |
 | `Git Discovery - UX Review.dc.html` | Git features PwrGit runs or could use but never mentions &mdash; hooks, `.git/info/exclude` and the global excludes file, and fifteen more &mdash; and one discovery system for all of them: a receipt only when Git has acted, one explain popover, a per-repo Repository setup sheet reached from a hooks chip beside LFS, and Settings &rsaquo; Git defaults that show the `git config` line they write. The rejected-commit panel, the hook map, the three-destination Ignore&hellip; dialog, and an ignore-rule path tester. A proposal; nothing in it is built. Interactive. |
 | `Worktree Chip Glyphs - UX Review.dc.html` | Why the worktree holder chip's `⌂` and `⑂` looked wrong: neither character is in a bundled face, so an OS fallback font drew them, and the sidebar's PR chip drew `⌂` for every worktree. Then the four ways to draw primary vs linked worktree (house plus the palette's 3a mark recommended), and where it lands: one branch, worktree, checkout and repository drawing on every surface. Written here and pushed up; every specimen is live SVG and contrived names, no captures. |
@@ -504,6 +505,17 @@ prototype of the review with the age dropdown and PR-proof toggle, and turn
 **6** is the build list. Its repository, branches, PR numbers and SHAs
 (`orbit-deploy`, `fix/tooltip-flicker`, `#412`) are invented; the counts in the
 report were rounded into invented ones. It carries no `assets/`.
+
+`Worktree List Cap - UX Review.dc.html` was written here and pushed up through
+the `claude-design` MCP's `write_files`; the served copy, with lines 4–6
+stripped, is byte-identical to this file (70,229 bytes). It is a proposal:
+nothing in the app changed with it. Turn **1** is the diagnosis, with tallies
+measured on a local PwrAgnt checkout on 2026-10-05 (202 checkouts: 145 gone, 35
+detached, 15 live, 7 never pushed, 31 finished-but-dirty). Turn **2** is the
+cap, turn **3** the ghost rows, turn **4** the gone / PR precedence, **5a** a
+live `DCLogic` prototype over 198 contrived worktrees, and turn **6** the build
+order. Its branch names, folders and PR numbers are invented. It carries no
+`assets/`.
 
 ## Deliberately NOT copied in
 
