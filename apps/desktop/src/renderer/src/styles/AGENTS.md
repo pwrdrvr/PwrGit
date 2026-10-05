@@ -237,8 +237,9 @@ rasters and what was kept as typography (and why) are in
 [design/Text Glyph Icons - UX Review.dc.html](../../../../../../design/Text%20Glyph%20Icons%20-%20UX%20Review.dc.html).
 
 `text-glyph-coverage.test.ts` now sweeps the renderer: every non-ASCII
-character in JSX text and string literals must draw in a bundled face **in
-both `--font-sans` and `--font-mono`**. Coverage is read from the `.woff`
+character in JSX text and string literals (`.tsx` and `.ts` alike — keycap
+labels are built in `lib/platform.ts`) and in stylesheet `content:` strings
+must draw in a bundled face **in both `--font-sans` and `--font-mono`**. Coverage is read from the `.woff`
 files' `cmap`, narrowed by each face's `unicode-range`. It cannot see which
 stack a site uses, so it asks both. A stack counts only its leading run of
 bundled families, which makes a fallthrough placed behind an OS font fail. It
@@ -246,7 +247,8 @@ also holds the fallthrough's range disjoint from the face ahead of it, and its
 weights equal to that face's. A character only Geist Mono has, such as box
 drawing, would fail the sans stack. The fix then is a symmetric fallthrough,
 not an exception. The `PENDING` list names the characters still drawn from
-text and who is replacing them.
+text that no Geist face has — today the macOS `⌘` `⌥` keycaps and the refs
+browser's `⧉` copy mark — and what is to replace them.
 
 **An SVG in a flex button needs `flex: 0 0 auto`, and the label needs its own
 element.** Both fall out of the swap and neither announces itself. A text node

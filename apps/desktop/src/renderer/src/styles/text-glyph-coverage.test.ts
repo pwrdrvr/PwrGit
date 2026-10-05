@@ -37,10 +37,11 @@ const require = createRequire(import.meta.url);
  *  fails the last test. */
 const PENDING: Record<string, string> = {
   // Keycap symbols, not icons: `lib/platform.ts` spells macOS shortcuts with
-  // them. They fall back like the mono arrows do, and belong to the same
-  // font-stack follow-up to the text-glyph pass, not to a lib glyph.
-  "⌥": "keycaps — font-stack follow-up",
-  "⌘": "keycaps — font-stack follow-up"
+  // them. The mono stack's Geist Sans fallthrough cannot reach them either —
+  // neither Geist face has U+2318 or U+2325.
+  "⌘": "lib/platform.ts shortcutLabel's macOS keycaps (sidebar, ⌘K switcher, General settings) — needs a keycap glyph",
+  "⌥": "lib/platform.ts shortcutLabel's macOS keycaps, with ⌘",
+  "⧉": "the refs browser's copy affordance (`.refs-copyable-name::after` in app.css) — no Geist face has U+29C9; needs a copy glyph"
 };
 
 /** The codepoints a WOFF 1.0 face maps to a real glyph. WOFF tables are
@@ -108,7 +109,7 @@ function rangeOf(descriptor: string | undefined): (cp: number) => boolean {
   return (cp) => spans.some(([lo, hi]) => cp >= lo && cp <= hi);
 }
 
-type Face = { family: string; weight: string; file: string; codepoints: Set<number> };
+type Face = { family: string; weight: string; style: string; file: string; codepoints: Set<number> };
 
 const strip = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "");
 const unquote = (family: string): string => family.trim().replace(/^(["'])(.*)\1$/, "$2");
@@ -129,13 +130,16 @@ function facesIn(cssPath: string, css: string): Face[] {
     return {
       family: unquote(descriptor("font-family")!),
       weight: descriptor("font-weight")!,
+      style: descriptor("font-style") ?? "normal",
       file,
       codepoints: new Set([...cmapOf(file)].filter(inRange))
     };
   });
 }
 
-/** Every face fonts.css loads: those its `@import`s declare, then its own. */
+/** Every upright face fonts.css loads: those its `@import`s declare, then its
+ *  own. An italic face draws none of the renderer's upright text, so a glyph
+ *  only it has would still fall back. */
 function bundledFaces(): Face[] {
   const fontsPath = resolve(here, "fonts.css");
   const fontsCss = strip(readFileSync(fontsPath, "utf8"));
@@ -145,7 +149,7 @@ function bundledFaces(): Face[] {
     faces.push(...facesIn(cssPath, readFileSync(cssPath, "utf8")));
   }
   faces.push(...facesIn(fontsPath, fontsCss));
-  return faces;
+  return faces.filter((face) => face.style === "normal");
 }
 
 /** Each font token's stacks, cut to the leading run of bundled families: the
@@ -167,35 +171,52 @@ function bundledStacks(faces: Face[]): { token: string; families: string[] }[] {
 const codepointsOf = (faces: Face[], families: string[]): Set<number> =>
   new Set(faces.filter((face) => families.includes(face.family)).flatMap((face) => [...face.codepoints]));
 
-/** Non-ASCII characters in the text a component draws: JSX text, string
- *  literals and template text. The AST keeps comments out, which is where
- *  most of the renderer's arrows and check marks live. Plain `.ts` is walked
- *  too: helpers such as `lib/platform.ts` and the menu builders hand strings
- *  to components that draw them. */
+/** Non-ASCII characters in the text the renderer draws: JSX text, string
+ *  literals and template text in every `.ts`/`.tsx` module (a label is as often
+ *  built in a `.ts` helper — `lib/platform.ts`'s shortcut glyphs — as written in
+ *  JSX), and the strings stylesheets draw with `content:`. The AST keeps
+ *  comments out, which is where most of the renderer's arrows and check marks
+ *  live. */
 function drawnCharacters(): Map<string, string[]> {
   const found = new Map<string, string[]>();
+  const record = (text: string, where: string): void => {
+    for (const ch of text) {
+      // ASCII is in every face; a format control (the \200E marks that keep
+      // file paths LTR) draws nothing to fall back.
+      if (ch.codePointAt(0)! <= 0x7f || /\p{Cf}/u.test(ch)) continue;
+      const at = found.get(ch);
+      if (at === undefined) found.set(ch, [where]);
+      else at.push(where);
+    }
+  };
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts") && !entry.name.includes(".test.")) scan(path);
+      else if (entry.name.includes(".test.") || entry.name.endsWith(".d.ts")) continue;
+      else if (/\.tsx?$/.test(entry.name)) scanScript(path);
+      else if (entry.name.endsWith(".css")) scanStylesheet(path);
     }
   };
-  const scan = (path: string): void => {
+  const scanScript = (path: string): void => {
     // By extension: a `.ts` file read as TSX misparses `<T>expr` casts.
     const kind = path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
     const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, kind);
     const visit = (node: ts.Node): void => {
       if (ts.isJsxText(node) || ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateLiteralToken(node)) {
-        for (const ch of node.text) {
-          if (ch.codePointAt(0)! <= 0x7f) continue;
-          const where = `${relative(rendererRoot, path)}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}`;
-          found.set(ch, [...(found.get(ch) ?? []), where]);
-        }
+        record(node.text, `${relative(rendererRoot, path)}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
       }
       ts.forEachChild(node, visit);
     };
     visit(source);
+  };
+  const scanStylesheet = (path: string): void => {
+    // Blank comments rather than delete them, so offsets still give lines.
+    const css = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, " "));
+    for (const m of css.matchAll(/content\s*:\s*(["'])((?:\\.|(?!\1).)*)\1/g)) {
+      const text = m[2]!.replace(/\\([0-9a-f]{1,6})\s?/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)));
+      record(text, `${relative(rendererRoot, path)}:${css.slice(0, m.index).split("\n").length}`);
+    }
   };
   walk(rendererRoot);
   return found;
