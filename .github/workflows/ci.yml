@@ -195,9 +195,12 @@ jobs:
         run: pnpm --filter @pwrgit/desktop run rebuild:electron-native
 
       - name: Test
-        run: pnpm run test
+        run: |
+          git --version
+          pnpm run test
         env:
           PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-tripwires
+          PWRGIT_TEST_GIT: installed
 
       - name: Upload Git tripwires
         if: always()
@@ -440,9 +443,12 @@ jobs:
         run: pnpm run build
 
       - name: Test
-        run: pnpm run test
+        run: |
+          git --version
+          pnpm run test
         env:
           PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-tripwires
+          PWRGIT_TEST_GIT: installed
 
       - name: Upload Git tripwires
         if: always()

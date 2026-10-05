@@ -323,7 +323,9 @@ there:
 - IPC goes through the typed command bus (`command-bus.ts` / `ipc.ts`);
   handlers return `Result`, never throw across the boundary.
 - Migrations are `.sql` files copied beside the bundle by `electron.vite.config.ts`.
-- git runs through the injected `GitExec` (dugite in prod; system git in tests).
+- git runs through the injected `GitExec`: `execGit` in prod, `createSystemGit`
+  in tests. Both run the bundled Git by default; `src/main/git/AGENTS.md` says
+  when they do not.
 - The app log is `app.getPath("logs")/main.log` — `~/Library/Logs/PwrGit` on
   macOS, `<userData>/logs` elsewhere — buffered in `src/main/logs.ts` and shown
   by Help › Logs. `src/main/process-ids.ts` puts the main, GPU, renderer and

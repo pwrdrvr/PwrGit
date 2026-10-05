@@ -4,7 +4,7 @@ Notes for the git layer. See `apps/desktop/AGENTS.md` for app-wide facts.
 
 ## Real-git tests run on Windows CI too
 
-Many suites here drive the system `git` against temp repos. Some hazards only
+Many suites here drive a real Git against temp repos. Some hazards only
 fail on the Windows runner, so a green local run proves nothing about them:
 
 - **Never give a Git process a native cwd inside a directory we may remove.**
@@ -26,6 +26,20 @@ fail on the Windows runner, so a green local run proves nothing about them:
   and production Dugite calls are outside this narrow coverage. Reports omit
   raw arguments, paths, output and environment. A `killed` flag is a signal
   request, not observed termination. No diagnostic changes timeouts or cleanup.
+
+- **Code under test runs the bundled Git. Fixtures run the Git on PATH.**
+  Despite its name, `createSystemGit` launches Dugite's bundle the way
+  production does: `gitExecutionEnvironment` puts the bundle first on PATH
+  and sets `GIT_EXEC_PATH`. Its version therefore follows the lockfile, not
+  the machine. Fixture helpers that call `execFileSync("git")` run the first
+  `git` on PATH. `PWRGIT_TEST_GIT=installed` makes the code under test run
+  that same Git, through `installedGitEnvironment`, the way production runs
+  a Git chosen in Settings. CI runs only the default, so no CI run tests an
+  installed Git. If a change depends on Git's version, run the suite with the
+  switch, then again with another Git first on PATH. On macOS that can be a
+  scratch directory holding a symlink to `/usr/bin/git`. The switch does not
+  reach suites that call production's `execGit`. Those follow
+  `useInstalledGit`, which is the bundle unless a test sets it.
 
 - **`core.autocrlf` defaults to true on Windows.** Anything restored out of
   HEAD comes back with CRLF, and a test comparing file *contents* against the
