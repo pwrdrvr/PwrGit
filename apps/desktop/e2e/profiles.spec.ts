@@ -146,7 +146,13 @@ test("creating a profile opens its own window with repos from all roots", async 
   ).toHaveCount(0);
 
   await optionsButton.click();
-  await acmeWindow.getByRole("menuitem", { name: /Group by folder/ }).click();
+  // A toggle, so a checkbox item: its state is `aria-checked`, and the check
+  // mark is a glyph outside the accessible name.
+  const groupByFolder = acmeWindow.getByRole("menuitemcheckbox", {
+    name: "Group by folder"
+  });
+  await expect(groupByFolder).toHaveAttribute("aria-checked", "true");
+  await groupByFolder.click();
   await expect(acmeWindow.locator(".repo-group")).toHaveCount(0);
 
   // Picking the profile again anywhere focuses the existing window — never a
