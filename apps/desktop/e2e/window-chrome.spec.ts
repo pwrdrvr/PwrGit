@@ -77,6 +77,13 @@ test("nothing can scroll the window chrome, whatever overflows a pane", async ()
       dirty: i % 3 === 0
     });
   }
+  // Other worktrees draws six rows however many there are, so the twenty
+  // above no longer overflow the list on their own. Collapsed repositories
+  // below it do, at any window height: the overflow is what the reveals
+  // below need, not any particular row.
+  for (let i = 0; i < 24; i += 1) {
+    sandbox.makeRepo(`zz-pad-${String(i).padStart(2, "0")}`);
+  }
 
   handle = await launchApp();
   const { window } = handle;
