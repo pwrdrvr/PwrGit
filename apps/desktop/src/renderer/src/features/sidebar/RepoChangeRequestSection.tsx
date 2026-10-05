@@ -8,7 +8,6 @@ import {
   forgeLabel,
   type ChangeRequestEntry,
   type ChangeRequestList,
-  type OpenChangeRequest,
   type Repo
 } from "@pwrgit/shared";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
@@ -32,7 +31,8 @@ import { RemoteChip } from "./RemoteChip";
 import {
   reachableLocation,
   useChangeRequestList,
-  worktreeArgsFor
+  worktreeArgsFor,
+  type CreateWorktreeFromRef
 } from "./RepoChangeRequests";
 import { SectionChevron } from "./SectionChevron";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
@@ -78,12 +78,7 @@ function compactAge(updatedAt: number | undefined, now: number): string | null {
   return when === "just now" ? "now" : (when.split(" ")[0] ?? when);
 }
 
-export type CreateWorktreeFromRef = (
-  branch: string,
-  newBranch: boolean,
-  startPoint?: string,
-  changeRequest?: OpenChangeRequest
-) => void;
+export type { CreateWorktreeFromRef } from "./RepoChangeRequests";
 
 /**
  * The repository's open pull or merge requests, between Worktrees and

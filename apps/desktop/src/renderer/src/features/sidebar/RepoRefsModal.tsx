@@ -47,7 +47,13 @@ import { TagRemoteDialog } from "./TagRemoteDialog";
 import { PrChip } from "./PrChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { PinIcon } from "./WorktreeRow";
-import { focusFirstRefsRow, handleRefsRowKey } from "../../lib/refsRowKeys";
+import {
+  focusFirstRefsRow,
+  handleRefsRowDoubleClick,
+  handleRefsRowKey
+} from "../../lib/refsRowKeys";
+import { holderWorktreeId } from "./branch-focus";
+import { WorktreeHolderChip } from "./WorktreeHolderChip";
 import { copyText } from "../../lib/copyText";
 import {
   BRANCH_STATUS_FILTERS,
@@ -60,7 +66,8 @@ import {
   ChangeRequestTable,
   filterChangeRequests,
   useChangeRequestList,
-  useChangeRequestLookup
+  useChangeRequestLookup,
+  type CreateWorktreeFromRef
 } from "./RepoChangeRequests";
 
 export function trackingLabel(branch: LocalBranchSummary): string {
@@ -208,6 +215,9 @@ function BranchIdentity({
             label={`Copy branch name ${name}`}
             hint={hint}
             className="refs-copyable-name copyable"
+            // The row runs its primary action on double-click; without the
+            // deferral that would also replace the clipboard.
+            deferForDoubleClick
           >
             <strong>{name}</strong>
           </CopyTarget>
@@ -391,16 +401,20 @@ function GoneBanner({
 /** One remote's branches, paged rather than listed whole. */
 function RemoteBranchList({
   repoId,
+  repoName,
   remote,
   query,
   now,
   refs,
   focusedWorktree,
   switching,
+  holderOf,
   onSwitch,
-  onPick
+  onPick,
+  onReveal
 }: {
   repoId: string;
+  repoName: string;
   remote: string;
   query: string;
   now: number;
@@ -408,17 +422,27 @@ function RemoteBranchList({
   focusedWorktree: Worktree | null;
   /** The `fullName` of the row whose switch is running, or null. */
   switching: string | null;
+  /** The worktree holding a local branch, as the sidebar picks it. */
+  holderOf: (branch: LocalBranchSummary) => Worktree | undefined;
   onSwitch: (rowKey: string, branch: string) => void;
   onPick: (branch: RemoteBranchSummary) => void;
+  onReveal: (worktreeId: string) => void;
 }) {
   const search = useRemoteBranchSearch({ repoId, remote, query });
+  const tip = useViewportTooltip();
   return (
     <div className="refs-remote-branches">
       {search.rows.map((branch) => {
         const local = localBranchForRemote(refs, branch);
         const checkedOut = (local?.checkedOutWorktreeIds.length ?? 0) > 0;
+        const holder = local === undefined || !checkedOut ? undefined : holderOf(local);
         return (
-          <div className="refs-remote-branch" key={branch.fullName}>
+          <div
+            className="refs-remote-branch"
+            key={branch.fullName}
+            data-refs-row=""
+            tabIndex={-1}
+          >
             <span className="refs-branch-icon" aria-hidden="true">⑂</span>
             <div>
               <span className="refs-branch-name-line">
@@ -427,10 +451,21 @@ function RemoteBranchList({
                   label={`Copy branch name ${branch.name}`}
                   hint={`${branch.qualifiedName}\nClick to copy branch name`}
                   className="refs-copyable-name copyable"
+                  deferForDoubleClick
                 >
                   <strong>{branch.name}</strong>
                 </CopyTarget>
                 {branch.pr !== undefined && <PrChip pr={branch.pr} />}
+                {holder !== undefined && local !== undefined && (
+                  <WorktreeHolderChip
+                    holder={holder}
+                    here={holder.id === focusedWorktree?.id}
+                    subject={local.name}
+                    repoName={repoName}
+                    tip={tip}
+                    onReveal={onReveal}
+                  />
+                )}
               </span>
               {branch.subject !== undefined && <small>{branch.subject}</small>}
             </div>
@@ -443,22 +478,40 @@ function RemoteBranchList({
               {/* A branch a worktree already holds is a navigation problem, not
                   a checkout one — git refuses the second checkout anyway, so
                   the row offers the worktree instead of a switch that cannot
-                  succeed. */}
+                  succeed. Whichever leads is what Enter and double-click
+                  press (lib/refsRowKeys.ts). */}
+              <span className="refs-remote-branch__primary" data-refs-primary="">
+                {checkedOut ? (
+                  <button
+                    className="refs-row-action"
+                    {...(holder === undefined
+                      ? {}
+                      : {
+                          "aria-label": `Show worktree ${lastSegment(holder.path)}`,
+                          ...hoverTooltip(tip, holder.path)
+                        })}
+                    onClick={() => onPick(branch)}
+                  >
+                    Show worktree
+                  </button>
+                ) : (
+                  <SwitchHereButton
+                    branch={branch.name}
+                    worktree={focusedWorktree}
+                    rowKey={branch.fullName}
+                    inFlight={switching}
+                    onSwitch={() => onSwitch(branch.fullName, branch.name)}
+                  />
+                )}
+              </span>
               {!checkedOut && (
-                <SwitchHereButton
-                  branch={branch.name}
-                  worktree={focusedWorktree}
-                  rowKey={branch.fullName}
-                  inFlight={switching}
-                  onSwitch={() => onSwitch(branch.fullName, branch.name)}
-                />
+                <button
+                  className="refs-row-action refs-row-action--quiet"
+                  onClick={() => onPick(branch)}
+                >
+                  New worktree
+                </button>
               )}
-              <button
-                className={`refs-row-action${checkedOut ? "" : " refs-row-action--quiet"}`}
-                onClick={() => onPick(branch)}
-              >
-                {checkedOut ? "Show worktree" : "New worktree"}
-              </button>
             </div>
           </div>
         );
@@ -473,6 +526,7 @@ function RemoteBranchList({
         total={search.total}
         search={search}
       />
+      {tip.tooltipNode}
     </div>
   );
 }
@@ -508,11 +562,9 @@ export function RepoRefsModal({
   onRefresh: () => void | Promise<void>;
   onLocateTag?: ((repoId: string, tag: TagSummary) => void) | undefined;
   onRevealWorktree: (worktreeId: string) => void;
-  onCreateWorktree: (
-    branch: string,
-    newBranch: boolean,
-    startPoint?: string
-  ) => void;
+  /** The PR rides along from the Pull requests tab, as it does from the
+   *  sidebar's +, so `NewWorktreeModal` names it. */
+  onCreateWorktree: CreateWorktreeFromRef;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
@@ -717,10 +769,24 @@ export function RepoRefsModal({
     if (outcome === "switched") await onRefresh();
   };
 
+  /** The worktree holding a branch, picked as the sidebar picks it: another
+   *  checkout before the working target, since that is the one to go to. */
+  const holderIdOf = (branch: LocalBranchSummary): string | null =>
+    holderWorktreeId(branch, focusedWorktree?.id ?? null);
+  const holderOf = (branch: LocalBranchSummary): Worktree | undefined => {
+    const id = holderIdOf(branch);
+    return id === null ? undefined : repo.worktrees.find((w) => w.id === id);
+  };
+  /** Going to a worktree is a navigation, so the browser closes. */
+  const reveal = (worktreeId: string): void => {
+    onRevealWorktree(worktreeId);
+    onClose();
+  };
+
   const createRemoteWorktree = (branch: RemoteBranchSummary): void => {
     const local = localBranchForRemote(refs, branch);
-    const checkedOutId = local?.checkedOutWorktreeIds[0];
-    if (checkedOutId !== undefined) onRevealWorktree(checkedOutId);
+    const checkedOutId = local === undefined ? null : holderIdOf(local);
+    if (checkedOutId !== null) onRevealWorktree(checkedOutId);
     else if (local !== undefined) onCreateWorktree(local.name, false);
     else onCreateWorktree(branch.name, true, branch.fullName);
     onClose();
@@ -1095,6 +1161,10 @@ export function RepoRefsModal({
               searchRef.current?.focus()
             );
           }}
+          onDoubleClick={(event) => {
+            if (bodyRef.current === null) return;
+            handleRefsRowDoubleClick(event, bodyRef.current);
+          }}
         >
           {shownTab === "branches" && (
             <div className="refs-table">
@@ -1128,6 +1198,7 @@ export function RepoRefsModal({
                         label={`Copy remote branch ${branch.qualifiedName}`}
                         hint={`${branch.qualifiedName}\nClick to copy remote branch`}
                         className="refs-table__muted refs-copyable-upstream copyable"
+                        deferForDoubleClick
                       >
                         <span className="refs-copyable-upstream__text">
                           {upstreamShorthand(branch.qualifiedName, branch.name, remoteNames)}
@@ -1184,6 +1255,8 @@ export function RepoRefsModal({
                 }
                 const branch = item.branch;
                 const checkedOut = branch.checkedOutWorktreeIds.length > 0;
+                const holderId = holderIdOf(branch);
+                const holder = holderOf(branch);
                 return (
                   <div
                     className={`refs-table__row${isPinned(branch) ? " is-pinned" : ""}`}
@@ -1211,6 +1284,7 @@ export function RepoRefsModal({
                         label={`Copy upstream branch ${branch.upstream}`}
                         hint={`${branch.upstream}\nClick to copy upstream branch`}
                         className="refs-table__muted refs-copyable-upstream copyable"
+                        deferForDoubleClick
                       >
                         {/* Its own box: the cell is inline-flex, and a bare
                             text node there could not draw an ellipsis. */}
@@ -1229,14 +1303,16 @@ export function RepoRefsModal({
                     </span>
                     <RefRowActions
                       primary={
-                        branch.checkedOutWorktreeIds.length > 0 ? (
+                        holderId !== null ? (
                           <button
                             className="refs-row-action"
-                            onClick={() => {
-                              const id = branch.checkedOutWorktreeIds[0];
-                              if (id !== undefined) onRevealWorktree(id);
-                              onClose();
-                            }}
+                            {...(holder === undefined
+                              ? {}
+                              : {
+                                  "aria-label": `Show worktree ${lastSegment(holder.path)}`,
+                                  ...hoverTooltip(tip, holder.path)
+                                })}
+                            onClick={() => reveal(holderId)}
                           >
                             Show worktree
                           </button>
@@ -1252,8 +1328,23 @@ export function RepoRefsModal({
                           />
                         )
                       }
+                      // Where the sidebar row draws its chip — in place of +,
+                      // which a held branch cannot offer — and it says which
+                      // worktree "Show worktree" goes to.
                       secondary={
-                        branch.checkedOutWorktreeIds.length > 0 ? undefined : (
+                        holderId !== null ? (
+                          holder !== undefined && (
+                            <WorktreeHolderChip
+                              holder={holder}
+                              here={holder.id === focusedWorktree?.id}
+                              subject={branch.name}
+                              repoName={repo.name}
+                              alwaysNameFolder
+                              tip={tip}
+                              onReveal={reveal}
+                            />
+                          )
+                        ) : (
                           <button
                             className="refs-row-action refs-row-action--quiet"
                             onClick={() => {
@@ -1371,6 +1462,8 @@ export function RepoRefsModal({
             changeRequests.list !== null && (
               <ChangeRequestTable
                 repoId={repo.id}
+                repoName={repo.name}
+                worktrees={repo.worktrees}
                 forge={forge}
                 list={changeRequests.list}
                 matches={changeRequestMatches}
@@ -1419,6 +1512,7 @@ export function RepoRefsModal({
                         label={`Copy tag name ${tag.name}`}
                         hint={`${tag.fullName}\nClick to copy tag name`}
                         className="refs-copyable-name copyable"
+                        deferForDoubleClick
                       >
                         <strong>{tag.name}</strong>
                       </CopyTarget>
@@ -1436,6 +1530,7 @@ export function RepoRefsModal({
                       label={`Copy tag target ${tag.targetId}`}
                       hint={`${tag.targetId}\nClick to copy tag target`}
                       className="refs-plan__copy copyable"
+                      deferForDoubleClick
                     >
                       {tag.targetId.slice(0, 12)}
                     </CopyTarget>
@@ -1448,6 +1543,7 @@ export function RepoRefsModal({
                         label={`Copy tag object ${tag.objectId}`}
                         hint={`${tag.objectId}\nClick to copy the ${tag.objectType} object`}
                         className="refs-tag-object__via copyable"
+                        deferForDoubleClick
                       >
                         via {tag.objectType} {tag.objectId.slice(0, 8)}
                       </CopyTarget>
@@ -1623,14 +1719,17 @@ export function RepoRefsModal({
                   </div>
                   <RemoteBranchList
                     repoId={repo.id}
+                    repoName={repo.name}
                     remote={remote.name}
                     query={query}
                     now={now}
                     refs={refs}
                     focusedWorktree={focusedWorktree}
                     switching={switching}
+                    holderOf={holderOf}
                     onSwitch={(rowKey, branch) => void switchHere(rowKey, branch)}
                     onPick={createRemoteWorktree}
+                    onReveal={reveal}
                   />
                 </section>
               ))}

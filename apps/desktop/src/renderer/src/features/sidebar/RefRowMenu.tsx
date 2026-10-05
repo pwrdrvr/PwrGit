@@ -80,7 +80,11 @@ export function RefRowActions({
 }) {
   return (
     <div className="refs-row-actions">
-      <span className="refs-row-slot refs-row-slot--primary">{primary}</span>
+      {/* `data-refs-primary` is what Enter and double-click on the row press
+          (lib/refsRowKeys.ts). */}
+      <span className="refs-row-slot refs-row-slot--primary" data-refs-primary="">
+        {primary}
+      </span>
       <span className="refs-row-slot refs-row-slot--secondary">{secondary}</span>
       <span className="refs-row-slot refs-row-slot--menu">{menu}</span>
     </div>

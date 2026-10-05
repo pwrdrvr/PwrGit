@@ -20,6 +20,7 @@ vi.mock("../../lib/pwrgit", () => ({
 vi.mock("../../lib/toast", () => ({ showErrorToast: vi.fn(), showInfoToast: vi.fn() }));
 
 import { RepoChangeRequestSection } from "./RepoChangeRequestSection";
+import { ChangeRequestTable } from "./RepoChangeRequests";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -478,5 +479,65 @@ describe("RepoChangeRequestSection", () => {
         "backup (1)"
       ]);
     });
+  });
+});
+
+// The refs browser's Pull requests tab is where the rows past this section's
+// reach are, so a verb here must do the same thing there.
+describe("parity with the refs browser's Pull requests tab", () => {
+  const onClose = vi.fn();
+  async function renderTable(): Promise<void> {
+    await act(async () => {
+      root.render(
+        <ChangeRequestTable
+          repoId="repo-1"
+          repoName={repo.name}
+          worktrees={repo.worktrees}
+          forge="github"
+          list={list}
+          matches={list.entries}
+          error={null}
+          query=""
+          lookup={{ state: "idle" }}
+          now={0}
+          focusedWorktree={null}
+          switching={null}
+          onSwitch={() => Promise.resolve()}
+          onRevealWorktree={onRevealWorktree}
+          onCreateWorktree={onCreateWorktree}
+          onClose={onClose}
+        />
+      );
+    });
+  }
+
+  beforeEach(() => {
+    window.localStorage.setItem("pwrgit.changeRequestsOpen.repo-1", "1");
+    window.localStorage.setItem("pwrgit.changeRequestsRemoteOpen.repo-1", "1");
+  });
+
+  it("opens New worktree with the same arguments, the PR included", async () => {
+    await render();
+    await act(async () => button("New worktree for #381")?.click());
+    const fromSidebar = onCreateWorktree.mock.lastCall;
+    expect(fromSidebar?.[3]).toMatchObject({ number: 381 });
+
+    onCreateWorktree.mockClear();
+    await renderTable();
+    await act(async () => button("New worktree for #381")?.click());
+    expect(onCreateWorktree.mock.lastCall).toEqual(fromSidebar);
+  });
+
+  it("names the same folder for a head a worktree holds, and goes there", async () => {
+    const folder = (): string | null | undefined =>
+      container.querySelector(".ref-checkout-chip .ref-checkout-chip__name")?.textContent;
+    await render();
+    expect(folder()).toBe("orbit-feat-plan");
+
+    await renderTable();
+    expect(folder()).toBe("orbit-feat-plan");
+    await act(async () => container.querySelector<HTMLElement>(".ref-checkout-chip")?.click());
+    expect(onRevealWorktree).toHaveBeenCalledWith("wt-9");
+    expect(onClose).toHaveBeenCalled();
   });
 });

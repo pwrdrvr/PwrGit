@@ -1,17 +1,43 @@
 /**
- * Keyboard model for the refs browser's rows (Branches, Pull requests, Tags).
+ * Keyboard and pointer model for the refs browser's rows (Branches, Pull
+ * requests, Tags, and each remote's branches on Remotes).
  *
  * A row is a focus stop of its own (`data-refs-row`, `tabIndex={-1}`), so the
  * list is reachable the way the sidebar's is: Tab into the filter, ↓ into the
- * first row, ↑/↓ between rows, ↑ off the first back to the filter. On a row,
- * Space pins the branch and Enter runs the row's primary action — the two verbs
- * that were mouse-only. Tab from a row still walks its own buttons.
+ * first row, ↑/↓ between rows, Home/End to the ends, ↑ off the first back to
+ * the filter. On a row, Space pins the branch and Enter runs the row's primary
+ * action; double-click runs that same action, as it does on a sidebar row.
+ * Tab from a row still walks its own buttons.
+ *
+ * The primary action is whichever button sits inside `data-refs-primary` —
+ * `RefRowActions`' first slot, or the remote card's wrapper.
  *
  * Space cannot pin from the filter field: there it types a space, and a branch
  * filter has no reason to swallow one. The row is where the key is free.
  */
 
 const ROW = "[data-refs-row]";
+
+/**
+ * A double-click on one of these is that control's own gesture, not the row's.
+ * A `CopyTarget` (`.copyable`) is left out on purpose: it is the row's name,
+ * the widest target on it, and the dialog's copy targets defer their copy so a
+ * double-click activates the row without touching the clipboard — as the
+ * sidebar's branch name does.
+ */
+const OWN_GESTURE =
+  'button, a[href], input, select, textarea, [role="button"]:not(.copyable), [role="menuitem"]';
+
+/** The row's primary action, or null when it has none or it is unavailable. */
+function primaryAction(row: HTMLElement): HTMLButtonElement | null {
+  const primary = row.querySelector<HTMLButtonElement>(
+    "[data-refs-primary] button:not(:disabled)"
+  );
+  if (primary === null || primary.getAttribute("aria-disabled") === "true") {
+    return null;
+  }
+  return primary;
+}
 
 function rows(scope: HTMLElement): HTMLElement[] {
   return Array.from(scope.querySelectorAll<HTMLElement>(ROW));
@@ -47,6 +73,12 @@ export function handleRefsRowKey(
   if (event.key === "ArrowDown") {
     event.preventDefault();
     all[Math.min(index + 1, all.length - 1)]?.focus();
+  } else if (event.key === "Home") {
+    event.preventDefault();
+    all[0]?.focus();
+  } else if (event.key === "End") {
+    event.preventDefault();
+    all.at(-1)?.focus();
   } else if (event.key === "ArrowUp") {
     event.preventDefault();
     if (index === 0) backToFilter();
@@ -58,11 +90,29 @@ export function handleRefsRowKey(
     event.preventDefault();
     pin.click();
   } else if (event.key === "Enter") {
-    const primary = row.querySelector<HTMLButtonElement>(
-      ".refs-row-slot--primary button:not(:disabled)"
-    );
-    if (primary === null) return;
+    if (row.querySelector("[data-refs-primary] button:not(:disabled)") === null) {
+      return;
+    }
+    // Taken even when the action is busy, so Enter cannot fall through to
+    // anything else while it runs.
     event.preventDefault();
-    if (primary.getAttribute("aria-disabled") !== "true") primary.click();
+    primaryAction(row)?.click();
   }
+}
+
+/**
+ * Double-click delegated from the rows' container: run the primary action
+ * Enter runs. A double-click on a control inside the row stays that control's.
+ */
+export function handleRefsRowDoubleClick(
+  event: { target: EventTarget },
+  scope: HTMLElement
+): void {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const row = target.closest<HTMLElement>(ROW);
+  if (row === null || !scope.contains(row)) return;
+  const control = target.closest(OWN_GESTURE);
+  if (control !== null && row.contains(control)) return;
+  primaryAction(row)?.click();
 }
