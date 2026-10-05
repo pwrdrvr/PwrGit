@@ -12,16 +12,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ok } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
 import { deleteLocalBranch, renameLocalBranch } from "./branch-lifecycle";
+import { timedGitSync } from "./test-support/git-tripwire";
 import { createSystemGit } from "./test-support/system-git";
 
 const systemGit: GitExec = createSystemGit();
 
 function git(cwd: string, ...args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: "ignore" });
+  timedGitSync(args, cwd, () => execFileSync("git", args, { cwd, stdio: "ignore" }));
 }
 
 function gitOut(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  return timedGitSync(args, cwd, () =>
+    execFileSync("git", args, { cwd, encoding: "utf8" })
+  ).trim();
 }
 
 function commit(cwd: string, file: string, message: string): void {

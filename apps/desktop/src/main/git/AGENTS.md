@@ -18,14 +18,26 @@ fail on the Windows runner, so a green local run proves nothing about them:
   It preserves the existing exit + stream-end policy and 250ms post-exit drain
   grace. A grace expiry does not prove inherited pipes caused a test failure.
   It honours cancellation and output callbacks like production's `execGit`.
-  The remote, partial-staging and rebase-assistant tests enable a 5s diagnostic
-  tripwire. `timedGitSync` records their fixture-helper calls before/after a
-  blocking invocation; it cannot inspect Git while blocked. CI uploads JSONL
-  begin/end records and per-test totals via `PWRGIT_GIT_DIAGNOSTICS_DIR` even on
-  failure. Only instrumented calls within test scopes count; beforeAll setup
+  The remote, partial-staging, rebase-assistant and branch-lifecycle tests
+  enable a 5s diagnostic tripwire. `timedGitSync` records their
+  fixture-helper calls before/after a blocking invocation; it cannot inspect
+  Git while blocked. CI uploads JSONL begin/end records and per-test totals
+  via `PWRGIT_GIT_DIAGNOSTICS_DIR` even on failure. Only instrumented calls within test scopes count; beforeAll setup
   and production Dugite calls are outside this narrow coverage. Reports omit
   raw arguments, paths, output and environment. A `killed` flag is a signal
   request, not observed termination. No diagnostic changes timeouts or cleanup.
+
+- **Before fixing a Windows timeout, compare the run against other runs.**
+  The Windows runner sometimes slows process spawning and disk I/O for a few
+  minutes. During that time every real-git file that is running slows down
+  together, while JS-only files keep their normal speed. A test that needs
+  only ~2s can reach the 20s limit this way (#397's `branch-lifecycle`
+  failure). Before changing code, take each file's `(N tests) Xms` line from
+  the failed log and compare it with the same file's median in other recent
+  Windows jobs. If the slow files ran at overlapping times, the runner caused
+  the failure. Don't respond with a higher timeout or a retry. A retry lets
+  an intermittent real hang pass, and the runner can slow a test past any
+  limit you choose. If only one file was slow, look for a hang, as #261 found.
 
 - **Code under test runs the bundled Git. Fixtures run the Git on PATH.**
   Despite its name, `createSystemGit` launches Dugite's bundle the way
