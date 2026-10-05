@@ -662,16 +662,18 @@ export function Sidebar({
     document.querySelector<HTMLElement>(`[data-repo-id="${id}"]`)?.focus();
   };
 
-  // A reveal asked from outside the sidebar — a toast's repo or remote chip
-  // (`sidebar-reveal.ts`). App has already moved the selection if it needed
+  // A reveal asked from outside the sidebar — a toast's repo or remote chip,
+  // or the graph's "You are here" for a worktree row (`sidebar-reveal.ts`). App has already moved the selection if it needed
   // to; this is the half a selection cannot do when it does not change:
   // expand the row, and bring it into view. Once per request, so a repo the
   // user collapses while a remote reveal waits on `repo:refs` stays collapsed.
   const reveal = useSidebarReveal();
   const handledRevealSeq = useRef<number | null>(null);
-  const pendingRepoScrollRef = useRef<{ repoId: string; seq: number } | null>(
-    null
-  );
+  const pendingRepoScrollRef = useRef<{
+    repoId: string;
+    worktreeId: string | null;
+    seq: number;
+  } | null>(null);
   useEffect(() => {
     if (reveal === null || handledRevealSeq.current === reveal.seq) return;
     handledRevealSeq.current = reveal.seq;
@@ -684,7 +686,11 @@ export function Sidebar({
     // A remote is scrolled to by the refs sections inside the row, which are
     // the only ones that know when its row exists.
     if (reveal.remote === null) {
-      pendingRepoScrollRef.current = { repoId: repo.id, seq: reveal.seq };
+      pendingRepoScrollRef.current = {
+        repoId: repo.id,
+        worktreeId: reveal.worktreeId,
+        seq: reveal.seq
+      };
     }
   }, [
     reveal,
@@ -706,10 +712,19 @@ export function Sidebar({
       return;
     }
     const el = document.querySelector<HTMLElement>(
-      `[data-repo-id="${pending.repoId}"]`
+      pending.worktreeId !== null
+        ? `[data-wt-id="${pending.worktreeId}"]`
+        : `[data-repo-id="${pending.repoId}"]`
     );
     if (el === null) return; // not rendered yet — retry after the next render
     pendingRepoScrollRef.current = null;
+    if (pending.worktreeId !== null) {
+      // Centered, as the graph centers HEAD: the row should land where the
+      // eye goes, not pinned to whichever edge it scrolled in from.
+      el.scrollIntoView({ block: "center" });
+      settleSidebarReveal(pending.seq);
+      return;
+    }
     el.scrollIntoView({ block: "nearest" });
     // Focus follows the jump, as it does for a link: the chip that was
     // pressed lives on a card that is about to time out, and focus left on it

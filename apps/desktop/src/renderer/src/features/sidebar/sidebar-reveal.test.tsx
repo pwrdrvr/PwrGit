@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   REVEAL_TTL_MS,
   requestSidebarReveal,
+  requestSidebarWorktreeReveal,
   settleSidebarReveal,
   useSidebarReveal,
   type SidebarReveal
@@ -41,6 +42,22 @@ describe("sidebar-reveal", () => {
 
     await act(async () => settleSidebarReveal(request!.seq));
     expect(probe.current()).toBeNull();
+    await probe.unmount();
+  });
+
+  it("carries a worktree target, and no remote, for a worktree reveal", async () => {
+    const probe = await watch();
+    await act(async () => requestSidebarWorktreeReveal("repo-1", "wt-7"));
+    const request = probe.current();
+    expect(request).toMatchObject({
+      repoId: "repo-1",
+      remote: null,
+      worktreeId: "wt-7"
+    });
+    // A repo or remote reveal must not inherit the last worktree target.
+    await act(async () => requestSidebarReveal("repo-1", "upstream"));
+    expect(probe.current()?.worktreeId).toBeNull();
+    await act(async () => settleSidebarReveal(probe.current()!.seq));
     await probe.unmount();
   });
 

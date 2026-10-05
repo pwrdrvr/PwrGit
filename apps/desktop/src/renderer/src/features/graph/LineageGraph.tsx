@@ -39,6 +39,7 @@ import type { CommitSwitchTarget } from "./commit-context-menu";
 import { switchFailureMessage } from "./commit-context-menu";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
 import { lastSegment } from "../sidebar/repo-view";
+import { requestSidebarWorktreeReveal } from "../sidebar/sidebar-reveal";
 import { CommitContextCard } from "./CommitContextCard";
 import { CommitContextMenu } from "./CommitContextMenu";
 import { PersonCard, type PersonGraphStats } from "./PersonCard";
@@ -1199,8 +1200,14 @@ export function LineageGraph({
           <button
             className="graph-locate"
             aria-label="You are here"
-            onClick={() => locateHash(head)}
-            {...hoverTooltip(tip, "Scroll to this worktree's current commit (HEAD)")}
+            onClick={() => {
+              locateHash(head);
+              requestSidebarWorktreeReveal(repoId, worktreeId);
+            }}
+            {...hoverTooltip(
+              tip,
+              "Scroll to this worktree's HEAD commit, and to its row in the sidebar"
+            )}
           >
             <LocateGlyph />
             <span className="fit-text">You are here</span>
