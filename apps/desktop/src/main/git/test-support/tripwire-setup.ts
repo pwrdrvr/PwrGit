@@ -9,7 +9,7 @@ const file = directory ? join(directory, `git-${process.pid}-${randomUUID()}.jso
 let artifactFailed = false;
 beforeEach(context => {
   const suite = basename(expect.getState().testPath ?? "");
-  if (!["remote.test.ts", "partial-staging.test.ts", "rebase-assistant.test.ts"].includes(suite)) return;
+  if (!["remote.test.ts", "partial-staging.test.ts", "rebase-assistant.test.ts", "branch-lifecycle.test.ts"].includes(suite)) return;
   const tripwire = new GitTripwire(row => {
     const line = JSON.stringify({ suite, testId: context.task.id, workerPid: process.pid, ...row });
     if (file && directory) {
