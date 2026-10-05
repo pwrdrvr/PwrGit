@@ -31,11 +31,14 @@ type Pin = SidebarAnchor & {
   /** Back: flash the row and give it focus once it is found. */
   restore: boolean;
   found: boolean;
+  /** The row, once found, so the per-frame follow-up need not search. */
+  el?: HTMLElement;
 };
 
 let snapshot: Snapshot | null = null;
 let interactionAt = 0;
 let pin: Pin | null = null;
+let followFrame = 0;
 
 export function anchorKeyOf(el: Element): string | null {
   if (!(el instanceof HTMLElement)) return null;
@@ -182,19 +185,33 @@ export function applySidebarAnchor(
     pin = null;
     return;
   }
-  const el = findAnchor(list, pin.key);
-  if (el === null) return;
-  const delta = offsetIn(list, el) - pin.offset;
-  if (Math.abs(delta) >= 1) list.scrollTop += delta;
-  if (!pin.found && pin.restore) {
-    flash(el);
-    if (el.hasAttribute("tabindex")) el.focus({ preventScroll: true });
+  const el =
+    pin.el !== undefined && pin.el.isConnected ? pin.el : findAnchor(list, pin.key);
+  if (el !== null) {
+    const delta = offsetIn(list, el) - pin.offset;
+    if (Math.abs(delta) >= 0.5) list.scrollTop += delta;
+    if (!pin.found && pin.restore) {
+      flash(el);
+      if (el.hasAttribute("tabindex")) el.focus({ preventScroll: true });
+    }
+    pin.found = true;
+    pin.el = el;
   }
-  pin.found = true;
+  // Layout keeps moving after React is done: the ghost's tag can be the first
+  // text in its weight, so a font arrives a frame later and grows the row.
+  // Re-check every frame while the hold lasts.
+  if (followFrame === 0 && typeof window.requestAnimationFrame === "function") {
+    followFrame = window.requestAnimationFrame(() => {
+      followFrame = 0;
+      applySidebarAnchor(list);
+    });
+  }
 }
 
 /** Test seam: forget everything. */
 export function resetSidebarAnchorForTests(): void {
+  if (followFrame !== 0) window.cancelAnimationFrame(followFrame);
+  followFrame = 0;
   snapshot = null;
   interactionAt = 0;
   pin = null;
