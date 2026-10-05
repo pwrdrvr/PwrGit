@@ -179,5 +179,11 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
       `pr:openChanged` (a row's location may have moved); a hidden ref is
       nobody's location. Main announces before it answers, so the view
       counts its own fetches in flight to ignore the echo.
+- **A branch going gone re-asks about its open PR** (`gone-pr-refresh.ts`).
+  `WorktreeStateService.onUpstreamGone` fires on every probe that finds the
+  upstream gone; `index.ts` queues it only while the cached PR reads open.
+  The 0→1 transition asks at the user tier and a branch that stays gone asks
+  at the scheduled tier, batched per repo for one tick. Without it, the row
+  showed `gone` beside a green open chip for the repo sweep's ten minutes.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

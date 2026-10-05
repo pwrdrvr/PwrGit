@@ -99,6 +99,7 @@ import {
 } from "./github/avatar-thumbnail-cache";
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
+import { createGonePrRefresh } from "./github/gone-pr-refresh";
 import { OpenPrService } from "./github/open-pr-service";
 import { registerChangeRequestHandlers } from "./github/change-request-handlers";
 import { PrService } from "./github/pr-service";
@@ -1141,6 +1142,14 @@ if (!gotSingleInstanceLock) {
       forgeHostsView,
       (repoId) => changeRequestHandlers.refreshInBackground(repoId, "scheduled")
     );
+    // A branch whose upstream is gone almost always had its PR merged; ask
+    // again now rather than leave an open chip beside "gone" until the repo
+    // sweep's TTL comes round (see gone-pr-refresh.ts).
+    const gonePrRefresh = createGonePrRefresh(githubHandlers.refreshBranches);
+    stateService.onUpstreamGone(({ repoId, branch, firstSeen }) => {
+      if (prService.cachedBranchPr(repoId, branch)?.state !== "open") return;
+      gonePrRefresh.queue(repoId, branch, firstSeen);
+    });
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
@@ -1339,6 +1348,7 @@ if (!gotSingleInstanceLock) {
       clearInterval(activeStatePoll);
       clearInterval(visibleStatePoll);
       remoteTipChecker.stop();
+      gonePrRefresh.stop();
       githubHandlers.stop();
       appearance.dispose();
     });

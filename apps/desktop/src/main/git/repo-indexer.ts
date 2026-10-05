@@ -167,6 +167,7 @@ type WorktreeRow = {
   diverged_from_default: number | null;
   is_default_branch: number | null;
   last_activity_at: string | null;
+  head: string | null;
   upstream_gone: number | null;
   source_remote: string | null;
   source_label: string | null;
@@ -1367,6 +1368,7 @@ export class RepoIndexer {
                   s.diverged_from_default AS diverged_from_default,
                   s.is_default_branch AS is_default_branch,
                   s.last_activity_at AS last_activity_at,
+                  s.head AS head,
                   s.upstream_gone AS upstream_gone,
                   s.source_remote AS source_remote,
                   s.source_label AS source_label,
@@ -1411,6 +1413,7 @@ export class RepoIndexer {
       const tracking = missing ? undefined : trackingFromWorktreeState(w);
       if (tracking !== undefined) wt.tracking = tracking;
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
+      if (!missing && w.head !== null && w.head !== "") wt.head = w.head;
       const source = missing ? undefined : forkSourceFromRow(w);
       if (source !== undefined) wt.source = source;
       if (w.custom_order !== null) wt.order = w.custom_order;

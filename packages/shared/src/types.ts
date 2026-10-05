@@ -84,6 +84,11 @@ export type Worktree = {
   isDefaultBranch: boolean;
   /** ISO-8601 time of the worktree branch's last commit (staleness signal). */
   lastActivityAt?: string;
+  /** Full object name of HEAD when state was last computed. Absent until then.
+   *  Compared with a merged change request's `headOid`: after a squash merge
+   *  that equality is the only proof the checkout holds nothing the merge did
+   *  not take. */
+  head?: string;
   pinned: boolean;
   /** Persisted drag-order index within the repo (U14); absent until reordered. */
   order?: number;
