@@ -154,5 +154,30 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   - A number the list does not hold (merged, closed, or opened since) is asked
     of `fetchPrsByNumbers` once and remembered for five minutes; an omitted
     answer is not remembered.
+  - **`pr:view` reads a change request with no worktree and no forge call**
+    (the sidebar's PR view). Diff and commits come from git alone:
+    `git diff -M <merge-base> <head>` and `git log <merge-base>..<head>`
+    (250 commits, an 8 MB patch — past that `patch` is null and the view
+    draws commits one at a time). `fetch: false` answers from the object
+    store and says `needsFetch` rather than fetching; the renderer decides
+    when a fetch is wanted (a click, or arrow keys resting).
+    - **A fetched head goes to a ref, never a branch.** A same-repository
+      head goes to its tracking ref, as `fetchHead` does. A fork's head, or
+      one gone from its branch, goes to `refs/pwrgit/cr/<remote>/<n>` from
+      the forge's change-request ref. A hidden ref there is pruned when its
+      number leaves that remote's list — never from a truncated list, where
+      absent proves nothing — and swept when its remote is removed or
+      renamed. One that no longer matches the forge's `headOid` answers
+      `needsFetch`, never a stale `ready`.
+    - **Local and forge are two ends.** When the branch here and the forge's
+      `headOid` differ, `relation` says how (`rev-list --left-right`) and the
+      newer end is drawn; `show` overrides. The forge's end is read from the
+      head's tracking ref when that matches, else fetched only on
+      `show: "forge"` with `fetch` — into that tracking ref when it is a
+      same-repository head, so + Worktree starts from the head just shown.
+    - Only a fetch into `refs/remotes` re-indexes and announces
+      `pr:openChanged` (a row's location may have moved); a hidden ref is
+      nobody's location. Main announces before it answers, so the view
+      counts its own fetches in flight to ignore the echo.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

@@ -99,8 +99,16 @@ API calls on every expand.
   by the one that leaves your repository, the other as a paired chip.
   Rows are keyed `changeRequestKey` (forge repository + number), never the
   number alone, and every verb passes `entry.forgeRepo` to `pr:fetchHead`.
+- **A row is a place, not a launcher.** A click (or Space) shows the change
+  request in the main pane — `../change-request/AGENTS.md` — and the list
+  stays put. Arrow keys select after 150 ms at rest. The row's own verb (⌂
+  or + Worktree) is Enter, double-click and its button. The selection comes
+  through `ChangeRequestSelectionContext`, not props, and while a change
+  request has it the worktree rows drop their selected look
+  (`RepoRow`).
 
 Design: `design/Change Requests in Sidebar - UX Review.dc.html`, 2b and 3.
+Design: `design/Change Request View - UX Review.dc.html`, 2a.
 
 ## The palette asks in this window's profile
 

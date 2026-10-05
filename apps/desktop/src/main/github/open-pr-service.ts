@@ -12,6 +12,9 @@ import {
   type ChangeRequestListFailure,
   type ChangeRequestLocation,
   type ChangeRequestRemote,
+  type ChangeRequestView,
+  type ChangeRequestViewCommit,
+  type ChangeRequestViewHead,
   type OpenChangeRequest,
   type PrSummary,
   type Result
@@ -35,6 +38,12 @@ const SCHEDULED_OPEN_LIST_TTL_MS = 10 * 60_000;
 const USER_OPEN_LIST_TTL_MS = 60_000;
 /** A number looked up because the open list could not answer it. */
 const LOOKUP_TTL_MS = 5 * 60_000;
+
+/** Commits the PR view lists; a longer branch says it was cut. */
+const VIEW_COMMITS_MAX = 250;
+/** A patch longer than this is not sent: the view lists the commits and
+ *  says it is too large to draw, rather than freezing the renderer. */
+const VIEW_PATCH_MAX_CHARS = 8 * 1024 * 1024;
 
 export type OpenListTrigger = "scheduled" | "user";
 
@@ -101,6 +110,9 @@ export class OpenPrService {
    * failed. Keyed by `listKey`.
    */
   private readonly unasked = new Map<string, number>();
+  /** The forge remotes' names the last hidden-ref sweep saw, per repository:
+   *  swept again only when they change (a remote removed or renamed). */
+  private readonly viewRefRemotes = new Map<string, string>();
   /** Each repository's remote URLs, stamped with its config file. */
   private readonly remoteUrls = new Map<
     string,
@@ -390,6 +402,369 @@ export class OpenPrService {
   }
 
   /**
+   * A listed change request's diff for the PR view: its head as this checkout
+   * holds it, from the merge base with its base branch's tracking ref. Asks
+   * the forge nothing — the entry comes from the cache — and fetches only with
+   * `fetch`, never into a branch:
+   *
+   * - a same-repository head that is not here, into its remote-tracking ref
+   *   (where `fetchHead` puts it too, so + Worktree finds it afterwards);
+   * - a fork's head, or one whose branch is gone, through the forge's
+   *   change-request ref into `refs/pwrgit/cr/<remote>/<n>`, which a later
+   *   list refresh prunes once the change request leaves the list;
+   * - a base branch with no tracking ref, into its tracking ref.
+   *
+   * When the local branch and the forge's head (`pr.headOid`) differ, the
+   * newer is shown unless `show` says which. `fetched` says whether a
+   * remote-tracking ref moved — a row's location may have changed, so the
+   * caller re-indexes; the hidden refs are not indexed and do not count.
+   */
+  async view(
+    repoId: string,
+    number: number,
+    forgeRepo: string,
+    options: { fetch: boolean; show?: "local" | "forge" }
+  ): Promise<Result<{ view: ChangeRequestView; fetched: boolean }>> {
+    const path = this.repoPath(repoId);
+    if (path === undefined) {
+      return err({ kind: "repo", code: "not_found", message: "Repository not found." });
+    }
+    const all = (await this.forgeRemotes(path)) ?? [];
+    const target = this.targetFor(repoId, number, all, forgeRepo);
+    const pr = target === null ? null : await this.findByNumber(repoId, number, target);
+    if (target === null || pr === null) {
+      return err({
+        kind: "remote",
+        code: "not_found",
+        message: `#${number} is not on this repository's open list any more.`
+      });
+    }
+    const place = placeFor(pr, target, all);
+    const location = locateChangeRequest(
+      pr,
+      target.forge.repo.kind,
+      await this.checkoutRefs(repoId, path, all),
+      place
+    );
+    let fetched = false;
+    const fetchInto = async (remote: string, refspec: string): Promise<Result<void>> => {
+      const result = await fetchRefspec(this.git, path, remote, refspec);
+      if (result.ok && refspec.includes(":refs/remotes/")) fetched = true;
+      return result;
+    };
+    const view = await this.resolveView(
+      path,
+      target,
+      { pr, location, headRemote: place.headRemote },
+      options,
+      fetchInto
+    );
+    return ok({ view, fetched });
+  }
+
+  private async resolveView(
+    path: string,
+    target: ForgeRemote,
+    {
+      pr,
+      location,
+      headRemote
+    }: { pr: OpenChangeRequest; location: ChangeRequestLocation; headRemote: string | null },
+    { fetch, show }: { fetch: boolean; show?: "local" | "forge" },
+    fetchInto: (remote: string, refspec: string) => Promise<Result<void>>
+  ): Promise<ChangeRequestView> {
+    const entry: ChangeRequestEntry = {
+      pr,
+      location,
+      remote: target.name,
+      forgeRepo: target.key
+    };
+    const unavailable = (message: string): ChangeRequestView => ({
+      state: "unavailable",
+      entry,
+      message
+    });
+    const number = pr.number;
+    const crRef = changeRequestHeadRef(target.forge.repo.kind, number);
+    const crName = crRef?.replace(/^refs\//, "") ?? null;
+    const viewRef = `refs/pwrgit/cr/${target.name}/${number}`;
+    const asFetched = (oid: string): ChangeRequestViewHead => ({
+      oid,
+      holder: { kind: "fetched", source: crRef ?? oid, remote: target.name }
+    });
+    /** The forge's change-request ref, fetched into the hidden ref. */
+    const fetchByNumber = async (): Promise<ChangeRequestViewHead | string> => {
+      if (crRef === null) return "This forge publishes no ref to fetch a change request from.";
+      const result = await fetchInto(target.name, `+${crRef}:${viewRef}`);
+      if (!result.ok) return `Couldn't fetch ${crName}: ${result.error.message}`;
+      const oid = await this.commitOid(path, viewRef);
+      return oid === null ? `${crName} fetched nothing.` : asFetched(oid);
+    };
+
+    // What this checkout holds as the head: its worktree's or local branch,
+    // or the remote-tracking branch.
+    let local: ChangeRequestViewHead | null = null;
+    if (location.kind === "worktree" || location.kind === "local") {
+      const oid = await this.commitOid(path, `refs/heads/${location.branch}`);
+      if (oid !== null) {
+        local = {
+          oid,
+          holder:
+            location.kind === "worktree"
+              ? { kind: "worktree", branch: location.branch, worktreeId: location.worktreeId }
+              : { kind: "local", branch: location.branch }
+        };
+      }
+    } else if (location.kind === "remote") {
+      const oid = await this.commitOid(path, location.fullName);
+      if (oid !== null) {
+        local = {
+          oid,
+          holder: { kind: "remote", name: location.fullName.replace(/^refs\/remotes\//, "") }
+        };
+      }
+    }
+
+    if (local === null && location.kind === "unfetched") {
+      // A same-repository branch one fetch away: into its tracking ref.
+      if (!(await this.isBranchName(path, location.branch))) {
+        return unavailable(`The forge named the head “${location.branch}”, which is not a branch name.`);
+      }
+      const name = `${location.remote}/${location.branch}`;
+      if (!fetch) return { state: "needsFetch", entry, what: name };
+      const fullName = `refs/remotes/${name}`;
+      const result = await fetchInto(location.remote, `+refs/heads/${location.branch}:${fullName}`);
+      if (!result.ok) return unavailable(`Couldn't fetch ${name}: ${result.error.message}`);
+      const oid = await this.commitOid(path, fullName);
+      if (oid === null) return unavailable(`${name} fetched nothing.`);
+      entry.location = { kind: "remote", branch: location.branch, fullName };
+      local = { oid, holder: { kind: "remote", name } };
+    }
+
+    let forge: ChangeRequestViewHead | null = null;
+    if (local === null) {
+      // A fork's head, or one whose branch is gone: the forge's ref by
+      // number, from the hidden ref when an earlier look fetched it and the
+      // forge has not moved since.
+      const kept = await this.commitOid(path, viewRef);
+      const current = kept !== null && (pr.headOid === undefined || pr.headOid === kept);
+      if (current) {
+        forge = asFetched(kept);
+      } else if (crRef === null) {
+        return unavailable(
+          location.kind === "missing"
+            ? "This change request's branch no longer exists, and this forge publishes no ref for it."
+            : "This forge publishes no ref to fetch a fork's change request from."
+        );
+      } else if (!fetch) {
+        return { state: "needsFetch", entry, what: `${crName} from ${target.name}` };
+      } else {
+        const head = await fetchByNumber();
+        if (typeof head === "string") return unavailable(head);
+        forge = head;
+      }
+    } else if (pr.headOid === undefined) {
+      forge = null;
+    } else if (pr.headOid === local.oid) {
+      forge = local;
+    } else if (await this.hasCommit(path, pr.headOid)) {
+      // Here already: say which ref holds it — the head's tracking branch
+      // when a fetch moved it past a local branch, else the hidden ref.
+      const tracking =
+        headRemote === null || pr.headRefName === undefined
+          ? null
+          : `${headRemote}/${pr.headRefName}`;
+      forge =
+        tracking !== null &&
+        (await this.commitOid(path, `refs/remotes/${tracking}`)) === pr.headOid
+          ? { oid: pr.headOid, holder: { kind: "remote", name: tracking } }
+          : asFetched(pr.headOid);
+    } else if (show === "forge" && fetch) {
+      // A same-repository head held by a tracking ref that has fallen
+      // behind: move the tracking ref, so + Worktree starts from the head
+      // shown here. Any other head comes by number into the hidden ref.
+      const tracking =
+        location.kind === "remote" &&
+        headRemote !== null &&
+        location.fullName === `refs/remotes/${headRemote}/${location.branch}` &&
+        (await this.isBranchName(path, location.branch))
+          ? location
+          : null;
+      if (tracking !== null && headRemote !== null) {
+        const name = `${headRemote}/${tracking.branch}`;
+        const result = await fetchInto(
+          headRemote,
+          `+refs/heads/${tracking.branch}:${tracking.fullName}`
+        );
+        if (!result.ok) return unavailable(`Couldn't fetch ${name}: ${result.error.message}`);
+        const oid = await this.commitOid(path, tracking.fullName);
+        if (oid === null) return unavailable(`${name} fetched nothing.`);
+        local = { oid, holder: { kind: "remote", name } };
+        forge = local;
+      } else {
+        const head = await fetchByNumber();
+        if (typeof head === "string") return unavailable(head);
+        forge = head;
+      }
+    }
+
+    let relation: Extract<ChangeRequestView, { state: "ready" }>["relation"] = {
+      kind: "unknown"
+    };
+    if (local !== null && forge !== null) {
+      relation = local.oid === forge.oid ? { kind: "same" } : await this.relate(path, local.oid, forge.oid);
+    }
+    // Newer by default: the forge's head when the local branch is behind it,
+    // the local one when it is ahead (unpushed work) or they diverged.
+    const shown: "local" | "forge" =
+      local === null
+        ? "forge"
+        : forge === null
+          ? "local"
+          : (show ?? (relation.kind === "behind" ? "forge" : "local"));
+    const head = shown === "forge" ? (forge ?? local) : (local ?? forge);
+    if (head === null) return unavailable("Nothing in this checkout holds this change request's head.");
+
+    const baseBranch = pr.baseRefName;
+    if (baseBranch === undefined) {
+      return unavailable("The forge did not say which branch this change request targets.");
+    }
+    let base: { name: string; oid: string } | null = null;
+    for (const name of target.names) {
+      const oid = await this.commitOid(path, `refs/remotes/${name}/${baseBranch}`);
+      if (oid !== null) {
+        base = { name: `${name}/${baseBranch}`, oid };
+        break;
+      }
+    }
+    if (base === null) {
+      const name = `${target.name}/${baseBranch}`;
+      if (!(await this.isBranchName(path, baseBranch))) {
+        return unavailable(`The forge named the base “${baseBranch}”, which is not a branch name.`);
+      }
+      if (!fetch) return { state: "needsFetch", entry, what: name };
+      const fullName = `refs/remotes/${name}`;
+      const result = await fetchInto(target.name, `+refs/heads/${baseBranch}:${fullName}`);
+      if (!result.ok) return unavailable(`Couldn't fetch ${name}: ${result.error.message}`);
+      const oid = await this.commitOid(path, fullName);
+      if (oid === null) return unavailable(`${name} fetched nothing.`);
+      base = { name, oid };
+    }
+
+    const mergeBase = await this.git(["merge-base", base.oid, head.oid], path);
+    const from = mergeBase.ok && mergeBase.value.exitCode === 0 ? mergeBase.value.stdout.trim() : "";
+    if (from === "") {
+      return unavailable(`${base.name} and this head share no history here. The checkout may be shallow.`);
+    }
+    const log = await this.git(
+      [
+        "log",
+        "--no-color",
+        `--max-count=${VIEW_COMMITS_MAX + 1}`,
+        "--format=%H%x1f%an%x1f%at%x1f%s",
+        `${from}..${head.oid}`
+      ],
+      path
+    );
+    if (!log.ok || log.value.exitCode !== 0) {
+      return unavailable("git could not list this change request's commits.");
+    }
+    const commits = parseViewLog(log.value.stdout);
+    const diff = await this.git(["diff", "--no-color", "--no-ext-diff", "-M", from, head.oid], path);
+    if (!diff.ok || diff.value.exitCode !== 0) {
+      return unavailable("git could not diff this change request.");
+    }
+    return {
+      state: "ready",
+      entry,
+      local,
+      forge,
+      relation,
+      head,
+      shown,
+      base: { ...base, mergeBase: from },
+      commits: commits.slice(0, VIEW_COMMITS_MAX),
+      commitsTruncated: commits.length > VIEW_COMMITS_MAX,
+      patch: diff.value.stdout.length > VIEW_PATCH_MAX_CHARS ? null : diff.value.stdout
+    };
+  }
+
+  /** How `local` relates to `forge`: commits only one side has. */
+  private async relate(
+    path: string,
+    local: string,
+    forge: string
+  ): Promise<Extract<ChangeRequestView, { state: "ready" }>["relation"]> {
+    const out = await this.git(["rev-list", "--left-right", "--count", `${local}...${forge}`], path);
+    if (!out.ok || out.value.exitCode !== 0) return { kind: "unknown" };
+    const [ahead, behind] = out.value.stdout.trim().split(/\s+/).map(Number);
+    if (ahead === undefined || behind === undefined || !Number.isFinite(ahead) || !Number.isFinite(behind)) {
+      return { kind: "unknown" };
+    }
+    if (behind === 0) return { kind: "ahead", count: ahead };
+    if (ahead === 0) return { kind: "behind", count: behind };
+    return { kind: "diverged", ahead, behind };
+  }
+
+  /**
+   * Drop the hidden refs `view` fetched for change requests that are no
+   * longer on `remote`'s list. A truncated list says nothing about the rest,
+   * so nothing goes then.
+   */
+  private async pruneViewRefs(path: string, remote: ForgeRemote, list: OpenPrList): Promise<void> {
+    if (list.truncated) return;
+    const prefix = `refs/pwrgit/cr/${remote.name}/`;
+    const out = await this.git(["for-each-ref", "--format=%(refname)", prefix], path);
+    if (!out.ok || out.value.exitCode !== 0) return;
+    const open = new Set(list.items.map((item) => String(item.number)));
+    for (const ref of out.value.stdout.split("\n")) {
+      const name = ref.trim();
+      if (!name.startsWith(prefix) || open.has(name.slice(prefix.length))) continue;
+      await this.git(["update-ref", "-d", name], path);
+    }
+  }
+
+  /**
+   * Drop the hidden refs of remotes that list nothing any more — removed or
+   * renamed — which `pruneViewRefs`, run per refreshed remote, never reaches.
+   * One `for-each-ref`, and only when the set of names changed.
+   */
+  private async sweepViewRefs(
+    repoId: string,
+    path: string,
+    remotes: readonly ForgeRemote[]
+  ): Promise<void> {
+    const names = new Set(remotes.map((remote) => remote.name));
+    const stamp = [...names].sort().join("\n");
+    if (this.viewRefRemotes.get(repoId) === stamp) return;
+    const prefix = "refs/pwrgit/cr/";
+    const out = await this.git(["for-each-ref", "--format=%(refname)", prefix], path);
+    if (!out.ok || out.value.exitCode !== 0) return;
+    for (const ref of out.value.stdout.split("\n")) {
+      const name = ref.trim();
+      if (!name.startsWith(prefix)) continue;
+      const rest = name.slice(prefix.length);
+      const remote = rest.slice(0, rest.lastIndexOf("/"));
+      if (names.has(remote)) continue;
+      await this.git(["update-ref", "-d", name], path);
+    }
+    this.viewRefRemotes.set(repoId, stamp);
+  }
+
+  private async commitOid(path: string, ref: string): Promise<string | null> {
+    const out = await this.git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], path);
+    if (!out.ok || out.value.exitCode !== 0) return null;
+    const oid = out.value.stdout.trim();
+    return oid === "" ? null : oid;
+  }
+
+  private async hasCommit(path: string, oid: string): Promise<boolean> {
+    if (!/^[0-9a-f]{7,64}$/i.test(oid)) return false;
+    const out = await this.git(["cat-file", "-e", `${oid}^{commit}`], path);
+    return out.ok && out.value.exitCode === 0;
+  }
+
+  /**
    * The open lists keyed by the branch names that hold each head, for
    * decorating branch rows: `remotes` by remote, then head name
    * (same-repository heads only, under the remote that listed them), and
@@ -458,6 +833,7 @@ export class OpenPrService {
     // prune — an unanswered question is not "every remote is gone".
     if (all === null || !this.isCurrent(generation)) return false;
     const pruned = this.prune(repoId, all);
+    await this.sweepViewRefs(repoId, path, all);
     const due = all.filter((remote) => {
       const key = listKey(repoId, remote.key);
       if (force) return true;
@@ -516,6 +892,8 @@ export class OpenPrService {
     if (!this.isCurrent(generation)) return false;
     this.lastFailure.delete(key);
     this.write(repoId, remote, list);
+    const path = this.repoPath(repoId);
+    if (path !== undefined) await this.pruneViewRefs(path, remote, list);
     return true;
   }
 
@@ -925,6 +1303,23 @@ function invalidHead(name: string): Result<ChangeRequestLocation> {
     code: "invalid_branch",
     message: `"${name}" is not a branch name git accepts.`
   });
+}
+
+/** `git log --format=%H%x1f%an%x1f%at%x1f%s`, one commit per line. */
+export function parseViewLog(stdout: string): ChangeRequestViewCommit[] {
+  const out: ChangeRequestViewCommit[] = [];
+  for (const line of stdout.split("\n")) {
+    const [hash = "", author = "", at = "", ...subject] = line.split("\x1f");
+    if (!/^[0-9a-f]{7,64}$/i.test(hash)) continue;
+    const seconds = Number.parseInt(at, 10);
+    out.push({
+      hash,
+      author,
+      at: Number.isFinite(seconds) ? seconds * 1000 : 0,
+      subject: subject.join("\x1f")
+    });
+  }
+  return out;
 }
 
 function storedFromOpen(pr: OpenChangeRequest): StoredRow {
