@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createQuitDrain } from "./bounded-shutdown";
 import { quitWithExitFailSafe, retryQuitAfterDispatch } from "./quit-retry";
 import { ElectronQuitModel } from "./test-support/electron-quit-model";
@@ -161,6 +161,8 @@ describe("quit drain under a native ⌘Q", () => {
 });
 
 describe("quitWithExitFailSafe", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("logs and exits when the resumed quit is swallowed", async () => {
     // Some later listener repeats the bug at will-quit.
     const model = new ElectronQuitModel(["main"]);
@@ -171,23 +173,20 @@ describe("quitWithExitFailSafe", () => {
     // never returns. With the deadline on the fake clock, however long
     // settle() takes on a loaded machine, the fail-safe cannot fire first.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      quitWithExitFailSafe(model, { afterMs: 20, warn });
-      await model.settle();
-      expect(model.emitted.at(-1)).toBe("will-quit");
-      expect(model.hasQuit).toBe(false);
 
-      vi.advanceTimersByTime(19);
-      expect(model.exitCode).toBeNull();
-      expect(warn).not.toHaveBeenCalled();
+    quitWithExitFailSafe(model, { afterMs: 20, warn });
+    await model.settle();
+    expect(model.emitted.at(-1)).toBe("will-quit");
+    expect(model.hasQuit).toBe(false);
 
-      vi.advanceTimersByTime(1);
-      expect(model.exitCode).toBe(0);
-      expect(warn).toHaveBeenCalledWith(
-        "quit had not completed 20 ms after resuming; exiting"
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+    vi.advanceTimersByTime(19);
+    expect(model.exitCode).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(model.exitCode).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      "quit had not completed 20 ms after resuming; exiting"
+    );
   });
 });
