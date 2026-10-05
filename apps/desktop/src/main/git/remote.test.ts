@@ -370,6 +370,48 @@ describe("remote ops (bare-remote fixture)", () => {
     ).toBe(planned.value[0]?.sourceHead);
   });
 
+  // `pushPlannedRefs` pushes to the remote's URL, not its name. Before Git
+  // 2.56 a URL push moved no remote-tracking ref, and the bundled Git is
+  // older than that, so the fetch afterwards is what brings `target/main`
+  // along. 2.56 moves it itself when exactly one remote has that push URL,
+  // which would let this pass on a newer Git with the fetch gone. A second
+  // remote on the same URL keeps Git from choosing either, and the probe —
+  // run by the same Git as the code under test — proves that still holds
+  // before the test leans on it.
+  it("refreshes the pushed remote-tracking ref whichever Git runs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-push-refresh-"));
+    git(root, ["init", "--bare", "-b", "main", "target.git"]);
+    const url = join(root, "target.git");
+    const local = join(root, "local");
+    git(root, ["init", "-b", "main", "local"]);
+    configure(local, "local");
+    commit(local, "base.txt", "base");
+    git(local, ["remote", "add", "target", url]);
+    git(local, ["remote", "add", "mirror", url]);
+    git(local, ["push", "target", "main"]);
+    const probe = await systemGit(["push", url, "main:probe"], local);
+    expect(probe.ok && probe.value.exitCode).toBe(0);
+    expect(
+      gitOut(local, ["for-each-ref", "--format=%(refname)", "refs/remotes/"])
+    ).toBe("refs/remotes/target/main");
+    commit(local, "next.txt", "next");
+
+    const planned = await planPushRefs(systemGit, local, "refs/heads/main", [
+      { remote: "target", branch: "main" }
+    ]);
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    expect(planned.value[0]?.relation).toBe("fast_forward");
+
+    const pushed = await pushPlannedRefs(systemGit, local, planned.value);
+    expect(pushed.ok).toBe(true);
+    if (!pushed.ok) return;
+    expect(pushed.value[0]?.outcome).toBe("pushed");
+    expect(gitOut(local, ["rev-parse", "refs/remotes/target/main"])).toBe(
+      planned.value[0]?.sourceHead
+    );
+  });
+
   it(
     "pushes the reviewed object if the source ref changes during execution",
     async () => {

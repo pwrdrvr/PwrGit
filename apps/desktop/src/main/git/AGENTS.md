@@ -45,6 +45,31 @@ fail on the Windows runner, so a green local run proves nothing about them:
   everywhere, and a bracket expression exercises glob-escaping just as well
   (see `gitignore.test.ts`). Keep `*` / `?` cases to pure string assertions.
 
+## A stale remote-tracking ref comes from a separate clone
+
+Git 2.56 changed `git push <url>`. When exactly one configured remote has that
+push URL, Git now moves that remote's tracking ref (`refs/remotes/<name>/*`,
+`@{push}`), as a push by remote name always has. Older Git leaves it alone.
+Today the match is byte for byte (`file://`, `./`, a trailing slash or a
+relative path all miss), and a later release may normalize it. Depend on
+neither answer:
+
+- **To make `origin/<branch>` stale, push from a separate clone.** A push never
+  writes another repository's refs. A second linked worktree is not separate,
+  because worktrees share `refs/remotes`. Prefer this to rewinding the ref with
+  `update-ref`, so the precondition a test asserts is a state Git produced.
+- **Product code that pushes to a URL refreshes the ref itself.**
+  `pushPlannedRefs` and the remote tag actions push to the remote's push URL.
+  The bundled Git predates 2.56 and Settings accepts any installed Git, so
+  `pushPlannedRefs` keeps its refetch. `remote.test.ts` pins that with two
+  remotes on one URL, which 2.56 declines to choose between.
+- **`createSystemGit` runs the bundled Git, not the one on PATH.**
+  `gitExecutionEnvironment` puts the bundle first on PATH and sets
+  `GIT_EXEC_PATH`. Fixture helpers that call `execFileSync("git")` run the PATH
+  Git. So putting another Git first on PATH (on macOS, a scratch directory
+  holding a symlink to `/usr/bin/git`) switches the fixtures, not the code
+  under test.
+
 ## Which Git runs: the bundle, set up the way an installed Git would be
 
 Every Git process goes through `gitLaunch` in `dugite.ts`. It returns the
