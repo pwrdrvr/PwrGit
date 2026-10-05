@@ -22,11 +22,6 @@ const ctx = self as unknown as {
 /** Above this a diff is minutes of work and gigabytes of buffers. */
 const MAX_PIXELS = 40_000_000;
 
-async function decode(dataUrl: string): Promise<ImageBitmap> {
-  const response = await fetch(dataUrl);
-  return createImageBitmap(await response.blob());
-}
-
 function rasterize(
   bitmap: ImageBitmap,
   width: number,
@@ -58,8 +53,8 @@ ctx.onmessage = (event: MessageEvent<DiffRequest>) => {
       // bitmap. A retina bitmap is tens of megabytes of GPU-backed surface,
       // and it is only released by close().
       const decoded = await Promise.allSettled([
-        decode(request.before),
-        decode(request.after)
+        createImageBitmap(request.before),
+        createImageBitmap(request.after)
       ]);
       const bitmaps = decoded.flatMap((outcome) =>
         outcome.status === "fulfilled" ? [outcome.value] : []

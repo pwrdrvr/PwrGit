@@ -43,12 +43,12 @@ function isLfsPointer(bytes: Buffer): boolean {
 
 function preview(mediaType: string, bytes: Buffer): ImagePreview {
   if (isLfsPointer(bytes)) return { kind: "lfsPointer" };
-  return {
-    kind: "image",
-    mediaType,
-    base64: bytes.toString("base64"),
-    bytes: bytes.byteLength
-  };
+  // A copy into a fresh, exactly-sized ArrayBuffer rather than the Buffer
+  // itself. Node serves small allocations out of a shared 8 KB pool, so a
+  // Buffer can be a view into memory that holds other things; structured
+  // clone of a view is free to carry its whole backing store across. One
+  // memcpy buys a payload that is the image and nothing else.
+  return { kind: "image", mediaType, bytes: new Uint8Array(bytes) };
 }
 
 async function worktreePreview(
@@ -68,7 +68,7 @@ async function worktreePreview(
     const info = await stat(full);
     if (!info.isFile()) return ok({ kind: "missing" });
     if (info.size > MAX_IMAGE_PREVIEW_BYTES) {
-      return ok({ kind: "tooLarge", bytes: info.size });
+      return ok({ kind: "tooLarge", sizeBytes: info.size });
     }
     return ok(preview(mediaType, await readFile(full)));
   } catch {
@@ -107,9 +107,11 @@ export async function readImagePreview(
   const sized = await git(["cat-file", "-s", spec], cwd);
   if (!sized.ok) return sized;
   if (sized.value.exitCode !== 0) return ok({ kind: "missing" });
-  const bytes = Number.parseInt(sized.value.stdout.trim(), 10);
-  if (!Number.isFinite(bytes)) return ok({ kind: "missing" });
-  if (bytes > MAX_IMAGE_PREVIEW_BYTES) return ok({ kind: "tooLarge", bytes });
+  const sizeBytes = Number.parseInt(sized.value.stdout.trim(), 10);
+  if (!Number.isFinite(sizeBytes)) return ok({ kind: "missing" });
+  if (sizeBytes > MAX_IMAGE_PREVIEW_BYTES) {
+    return ok({ kind: "tooLarge", sizeBytes });
+  }
 
   const blob = await gitBinary(["cat-file", "blob", spec], cwd);
   if (!blob.ok) return blob;

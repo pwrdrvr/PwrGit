@@ -65,19 +65,33 @@ describe("readImagePreview", () => {
     expect(result.value).toEqual({
       kind: "image",
       mediaType: "image/gif",
-      base64: GIF_V1.toString("base64"),
-      bytes: GIF_V1.byteLength
+      bytes: new Uint8Array(GIF_V1)
     });
+  });
+
+  it("hands over a plain Uint8Array that owns exactly the image's bytes", async () => {
+    // A Buffer would structured-clone too, but a small one is a view into
+    // Node's shared allocation pool. The renderer should receive the picture,
+    // not whatever else happened to share its slab.
+    const result = await read(repo, "art/dot.gif", { kind: "commit", hash: head });
+    if (!result.ok || result.value.kind !== "image") {
+      throw new Error("expected an image");
+    }
+    const { bytes } = result.value;
+    expect(Buffer.isBuffer(bytes)).toBe(false);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.byteOffset).toBe(0);
+    expect(bytes.buffer.byteLength).toBe(GIF_V1.byteLength);
   });
 
   it("reads the working tree for the after side of an unstaged change", async () => {
     const before = await read(repo, "art/dot.gif", { kind: "index" });
     const after = await read(repo, "art/dot.gif", { kind: "worktree" });
-    expect(before.ok && before.value.kind === "image" && before.value.base64).toBe(
-      GIF_V1.toString("base64")
+    expect(before.ok && before.value.kind === "image" && before.value.bytes).toEqual(
+      new Uint8Array(GIF_V1)
     );
-    expect(after.ok && after.value.kind === "image" && after.value.base64).toBe(
-      GIF_V2.toString("base64")
+    expect(after.ok && after.value.kind === "image" && after.value.bytes).toEqual(
+      new Uint8Array(GIF_V2)
     );
   });
 

@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -18,6 +17,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import {
+  blobOf,
   sourceOf,
   useImageRevisions,
   type ImageDiffRevisions,
@@ -43,8 +43,8 @@ function formatBytes(bytes: number): string {
 
 /**
  * A whole-commit diff renders every file it touched, so fetching on mount
- * would pull each image's bytes — up to 16 MB apiece, base64'd — for pictures
- * scrolled far off screen. Wait until the row is near the viewport.
+ * would pull each image's bytes — up to 16 MB apiece — for pictures scrolled
+ * far off screen. Wait until the row is near the viewport.
  */
 function useNearViewport(): [RefObject<HTMLDivElement | null>, boolean] {
   const host = useRef<HTMLDivElement | null>(null);
@@ -120,18 +120,12 @@ export function ImageDiff({
     return () => observer.disconnect();
   }, [host]);
 
-  // `sourceOf` concatenates the whole base64 payload — up to ~21 MB at the
-  // preview ceiling — so it is built ONCE per fetch rather than on each of the
-  // eight or so calls a render used to make. The stable identity matters twice
-  // over: usePixelDiff keeps these in an effect dependency array, where a
-  // fresh-but-equal string costs a full-length comparison every render.
-  const srcs = useMemo(
-    (): Record<SideKey, string | null> => ({
-      before: sourceOf(states.before),
-      after: sourceOf(states.after)
-    }),
-    [states]
-  );
+  // Blob URLs, minted once per fetch by useImageRevisions, which also owns
+  // revoking them — nothing here may hold one past the states it came from.
+  const srcs: Record<SideKey, string | null> = {
+    before: sourceOf(states.before),
+    after: sourceOf(states.after)
+  };
 
   const extentOf = (side: SideKey): Extent | null => {
     const size = sizes[side];
@@ -141,26 +135,28 @@ export function ImageDiff({
     sides.length === 2 &&
     shouldStack(rowWidth, [extentOf("before"), extentOf("after")]);
 
+  // Copying works from the Blob, not the URL: a menu left open across a
+  // refetch would otherwise be holding a URL its owner has since revoked.
   const copySource = (side: SideKey) => {
-    const src = srcs[side];
-    return src === null ? null : { label: SIDE_LABEL[side], src };
+    const blob = blobOf(states[side]);
+    return blob === null ? null : { label: SIDE_LABEL[side], blob };
   };
   const beforeExtent = extentOf("before");
   const afterExtent = extentOf("after");
-  const beforeSrc = srcs.before;
-  const afterSrc = srcs.after;
+  const beforeBlob = blobOf(states.before);
+  const afterBlob = blobOf(states.after);
   // Copying the diff from the row runs the same comparison the lightbox does;
   // there is no reason to make the reader open the viewer to reach it.
   const makeDiff =
     beforeExtent !== null &&
     afterExtent !== null &&
-    beforeSrc !== null &&
-    afterSrc !== null
+    beforeBlob !== null &&
+    afterBlob !== null
       ? async (): Promise<Blob> => {
           const plan = planDiff(beforeExtent, afterExtent);
           const result = await computePixelDiff({
-            before: beforeSrc,
-            after: afterSrc,
+            before: beforeBlob,
+            after: afterBlob,
             width: plan.size.w,
             height: plan.size.h,
             fit: plan.fit
@@ -174,7 +170,7 @@ export function ImageDiff({
       className={`diff-image${stacked ? " diff-image--stacked" : ""}`}
       ref={host}
       onContextMenu={(event: ReactMouseEvent<HTMLDivElement>) => {
-        if (beforeSrc === null && afterSrc === null) return;
+        if (beforeBlob === null && afterBlob === null) return;
         event.preventDefault();
         setMenu({ x: event.clientX, y: event.clientY });
       }}
@@ -225,7 +221,6 @@ function ImageSide({
   label: string;
   path: string;
   state: SideState;
-  /** Passed in rather than derived: see the `srcs` memo above. */
   src: string | null;
   measured: Extent | null;
   note: string | null;
@@ -283,7 +278,7 @@ function ImageSide({
         {note !== null ? (
           <span className="diff-image__copied">{note}</span>
         ) : state.kind === "image" ? (
-          `${measured === null ? "" : `${measured.w}×${measured.h} · `}${formatBytes(state.bytes)}`
+          `${measured === null ? "" : `${measured.w}×${measured.h} · `}${formatBytes(state.blob.size)}`
         ) : (
           ""
         )}
@@ -302,7 +297,7 @@ function ImageNote({ state }: { state: SideState }) {
     case "tooLarge":
       return (
         <span className="diff-image__note">
-          {formatBytes(state.bytes)} — too large to preview
+          {formatBytes(state.sizeBytes)} — too large to preview
         </span>
       );
     case "lfsPointer":

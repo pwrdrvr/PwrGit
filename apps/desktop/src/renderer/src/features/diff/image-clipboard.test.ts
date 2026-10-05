@@ -1,11 +1,22 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../lib/pwrgit", () => ({ dispatch: vi.fn() }));
+
 import {
   STRIP_GAP,
   STRIP_LABEL_BAND,
   STRIP_MAX_HEIGHT,
   STRIP_PAD,
+  composeStrip,
+  encodePng,
   stripLayout
 } from "./image-clipboard";
+import {
+  installObjectUrlLedger,
+  type ObjectUrlLedger
+} from "../../test-support/object-urls";
 
 describe("stripLayout", () => {
   it("puts equal panels side by side with one gap between them", () => {
@@ -69,5 +80,74 @@ describe("stripLayout", () => {
       height: 0,
       boxes: []
     });
+  });
+});
+
+describe("decoding for the clipboard", () => {
+  // Copies read the Blob, through a URL minted for the copy and revoked when
+  // it is done — so a copy never depends on the URL the picture is displayed
+  // through, which its owner may revoke while a menu is open.
+  let urls: ObjectUrlLedger;
+  let decodedFrom: string[];
+  let failDecode: boolean;
+  const originals = {
+    decode: HTMLImageElement.prototype.decode,
+    getContext: HTMLCanvasElement.prototype.getContext,
+    toBlob: HTMLCanvasElement.prototype.toBlob
+  };
+
+  beforeEach(() => {
+    urls = installObjectUrlLedger();
+    decodedFrom = [];
+    failDecode = false;
+    HTMLImageElement.prototype.decode = async function (this: HTMLImageElement) {
+      decodedFrom.push(this.getAttribute("src") ?? "");
+      if (failDecode) throw new Error("not an image");
+    };
+    HTMLCanvasElement.prototype.getContext = (() => ({
+      drawImage: () => undefined,
+      fillRect: () => undefined,
+      fillText: () => undefined
+    })) as unknown as HTMLCanvasElement["getContext"];
+    HTMLCanvasElement.prototype.toBlob = function (callback: BlobCallback) {
+      callback(new Blob([new Uint8Array([0x89])], { type: "image/png" }));
+    };
+  });
+
+  afterEach(() => {
+    HTMLImageElement.prototype.decode = originals.decode;
+    HTMLCanvasElement.prototype.getContext = originals.getContext;
+    HTMLCanvasElement.prototype.toBlob = originals.toBlob;
+    urls.restore();
+  });
+
+  const blob = (tag: number) =>
+    new Blob([new Uint8Array([tag])], { type: "image/webp" });
+
+  it("decodes a revision from a URL of its own and releases it", async () => {
+    const source = blob(1);
+    const png = await encodePng(source);
+
+    expect(png.type).toBe("image/png");
+    expect(decodedFrom).toHaveLength(1);
+    expect(urls.minted.get(decodedFrom[0]!)).toBe(source);
+    expect(urls.live()).toEqual([]);
+  });
+
+  it("releases its URL when the bytes will not decode", async () => {
+    failDecode = true;
+    await expect(encodePng(blob(1))).rejects.toThrow("not an image");
+    expect(urls.minted.size).toBe(1);
+    expect(urls.live()).toEqual([]);
+  });
+
+  it("releases every panel's URL once the strip is drawn", async () => {
+    const panels = [1, 2, 3].map((tag) => ({ label: `p${tag}`, blob: blob(tag) }));
+    await composeStrip(panels);
+
+    expect(decodedFrom.map((url) => urls.minted.get(url))).toEqual(
+      panels.map((panel) => panel.blob)
+    );
+    expect(urls.live()).toEqual([]);
   });
 });

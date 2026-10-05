@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import type { MenuItem } from "../shell/ContextMenu";
 import { composeStrip, copyPngToClipboard, encodePng } from "./image-clipboard";
 
-export type CopySource = { label: string; src: string };
+/** A revision to copy, as its bytes. Not its URL: the display URL belongs to
+ *  whoever is showing the picture and can be revoked under an open menu. */
+export type CopySource = { label: string; blob: Blob };
 
 /**
  * The right-click menu shared by the inline row and the lightbox, so "copy the
@@ -37,32 +39,19 @@ export function buildImageCopyMenu({
     })();
   };
 
-  /** The diff is a Blob; composing needs something an <img> can load. */
-  const withDiffSource = async <T,>(
-    use: (source: CopySource) => Promise<T>
-  ): Promise<T> => {
-    if (diff === null) throw new Error("no diff to copy");
-    const url = URL.createObjectURL(await diff());
-    try {
-      return await use({ label: "diff", src: url });
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  };
-
   const items: MenuItem[] = [];
   if (before !== null) {
     items.push({
       type: "item",
       label: "Copy before",
-      onSelect: () => run("before", () => encodePng(before.src))
+      onSelect: () => run("before", () => encodePng(before.blob))
     });
   }
   if (after !== null) {
     items.push({
       type: "item",
       label: "Copy after",
-      onSelect: () => run("after", () => encodePng(after.src))
+      onSelect: () => run("after", () => encodePng(after.blob))
     });
   }
   if (diff !== null) {
@@ -87,8 +76,8 @@ export function buildImageCopyMenu({
         type: "item",
         label: "Copy before + after + diff",
         onSelect: () =>
-          run("all three", () =>
-            withDiffSource((source) => composeStrip([before, after, source]))
+          run("all three", async () =>
+            composeStrip([before, after, { label: "diff", blob: await diff() }])
           )
       });
     }
