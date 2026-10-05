@@ -15,11 +15,13 @@
  * silently pull a second copy of main-process code into the renderer bundle.
  * `tsc` cannot see any of it.
  *
- * Test files are exempted from two of the renderer rules (marked below).
- * Vitest specs run under Node, not in the sandboxed renderer, so a spec that
- * reaches across the boundary to assert the two sides agree is legitimate —
- * `renderer/src/styles/theme-contract.test.ts` pins renderer CSS tokens to the
- * native chrome colors in `main/window-chrome.ts`, and must import both.
+ * Test files are exempted from two of the renderer rules and from the preload
+ * allowlist (marked below). Vitest specs run under Node, not in the sandboxed
+ * renderer, so a spec that reaches across the boundary to assert the two sides
+ * agree is legitimate — `renderer/src/styles/theme-contract.test.ts` pins
+ * renderer CSS tokens to the native chrome colors in `main/window-chrome.ts`,
+ * and must import both. A preload spec needs `vitest` and `node:events` to
+ * stand in for `ipcRenderer`, and is never part of the preload bundle.
  */
 
 /** Vitest specs — see the note above about the renderer carve-outs. */
@@ -179,9 +181,11 @@ module.exports = {
         "Preload is an allowlist, not a denylist: it may import `electron`, " +
         "`@pwrgit/shared`, and its own modules — nothing else. It runs in a " +
         "privileged context bridged into the renderer, so every extra import " +
-        "widens the surface a compromised renderer can reach.",
+        "widens the surface a compromised renderer can reach. Exempt: vitest " +
+        "specs, which run under Node and never reach the bundle.",
       from: {
         path: "^apps/desktop/src/preload/",
+        pathNot: TEST_FILE,
       },
       to: {
         pathNot: [
