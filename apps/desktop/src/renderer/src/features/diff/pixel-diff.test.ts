@@ -1,13 +1,15 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import pixelmatch from "pixelmatch";
 import {
   DIFF_AA_COLOR,
   DIFF_COLOR,
   DIFF_OPTIONS,
-  planDiff
+  planDiff,
+  type DiffReply,
+  type DiffRequest
 } from "./pixel-diff";
 
 const RETINA = { w: 3104, h: 2024 };
@@ -156,5 +158,151 @@ describe("the comparison itself", () => {
     expect(pixelmatch(before, after, out, W, H, DIFF_OPTIONS)).toBe(
       W * H - 4 * 4
     );
+  });
+});
+
+describe("the worker boundary", () => {
+  // The revisions cross to the worker as the Blobs the pane already holds —
+  // a handle to the same bytes, not a copy — and the worker decodes them
+  // directly. It used to be handed two data: URLs and fetch() them back into
+  // the Blobs they had been made from.
+  const before = new Blob([new Uint8Array([1])], { type: "image/png" });
+  const after = new Blob([new Uint8Array([2])], { type: "image/png" });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("posts the two Blobs themselves to the worker", async () => {
+    const posted: DiffRequest[] = [];
+    class FakeWorker extends EventTarget {
+      postMessage(message: DiffRequest): void {
+        posted.push(message);
+        const reply: DiffReply = {
+          id: message.id,
+          ok: true,
+          png: new Blob(),
+          changed: 3,
+          total: 4
+        };
+        queueMicrotask(() =>
+          this.dispatchEvent(new MessageEvent("message", { data: reply }))
+        );
+      }
+      terminate(): void {}
+    }
+    vi.stubGlobal("Worker", FakeWorker);
+    const { computePixelDiff } = await import("./pixel-diff-client");
+
+    const result = await computePixelDiff({
+      before,
+      after,
+      width: 2,
+      height: 2,
+      fit: "anchor"
+    });
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.before).toBe(before);
+    expect(posted[0]?.after).toBe(after);
+    expect(result).toMatchObject({ changed: 3, total: 4 });
+  });
+
+  describe("inside the worker", () => {
+    const W = 4;
+    const H = 3;
+    /** A decoded revision: one flat colour, and whether close() was called. */
+    type FakeBitmap = { rgb: [number, number, number]; closed: boolean };
+    let decodedFrom: Blob[];
+    let bitmaps: FakeBitmap[];
+    let fetchSpy: ReturnType<typeof vi.fn>;
+    let scope: {
+      onmessage: ((event: { data: DiffRequest }) => void) | null;
+      postMessage: (reply: DiffReply) => void;
+    };
+    let replies: DiffReply[];
+
+    beforeEach(async () => {
+      decodedFrom = [];
+      bitmaps = [];
+      replies = [];
+      fetchSpy = vi.fn();
+      scope = { onmessage: null, postMessage: (reply) => replies.push(reply) };
+      vi.stubGlobal("self", scope);
+      vi.stubGlobal("fetch", fetchSpy);
+      vi.stubGlobal("createImageBitmap", async (blob: Blob) => {
+        decodedFrom.push(blob);
+        const bitmap: FakeBitmap = {
+          rgb: blob === before ? [10, 10, 10] : [250, 250, 250],
+          closed: false
+        };
+        bitmaps.push(bitmap);
+        return { ...bitmap, close: () => (bitmap.closed = true) };
+      });
+      vi.stubGlobal(
+        "ImageData",
+        class {
+          data: Uint8ClampedArray;
+          constructor(w: number, h: number) {
+            this.data = new Uint8ClampedArray(w * h * 4);
+          }
+        }
+      );
+      vi.stubGlobal(
+        "OffscreenCanvas",
+        class {
+          private drawn: [number, number, number] = [0, 0, 0];
+          constructor(
+            private readonly w: number,
+            private readonly h: number
+          ) {}
+          getContext() {
+            return {
+              drawImage: (bitmap: FakeBitmap) => (this.drawn = bitmap.rgb),
+              getImageData: () => ({ data: fill(this.w, this.h, this.drawn) }),
+              putImageData: () => undefined
+            };
+          }
+          async convertToBlob() {
+            return new Blob([new Uint8Array([0x89])], { type: "image/png" });
+          }
+        }
+      );
+      await import("./pixel-diff.worker");
+    });
+
+    async function run(request: DiffRequest): Promise<DiffReply> {
+      scope.onmessage?.({ data: request });
+      await vi.waitFor(() => expect(replies).toHaveLength(1));
+      return replies[0]!;
+    }
+
+    it("decodes the posted Blobs directly, with no fetch", async () => {
+      const reply = await run({ id: 7, before, after, width: W, height: H, fit: "anchor" });
+
+      expect(decodedFrom).toEqual([before, after]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      // Every pixel differs, so the count proves the decoded pair is what
+      // pixelmatch compared.
+      expect(reply).toMatchObject({ id: 7, ok: true, changed: W * H, total: W * H });
+      // GPU-backed, released only by close().
+      expect(bitmaps.every((bitmap) => bitmap.closed)).toBe(true);
+    });
+
+    it("still closes the decoded side when the other cannot be decoded", async () => {
+      vi.stubGlobal("createImageBitmap", async (blob: Blob) => {
+        if (blob === after) throw new Error("undecodable");
+        const bitmap: FakeBitmap = { rgb: [10, 10, 10], closed: false };
+        bitmaps.push(bitmap);
+        return { ...bitmap, close: () => (bitmap.closed = true) };
+      });
+
+      const reply = await run({ id: 8, before, after, width: W, height: H, fit: "anchor" });
+
+      expect(reply).toEqual({ id: 8, ok: false, error: "undecodable" });
+      expect(bitmaps).toHaveLength(1);
+      expect(bitmaps[0]?.closed).toBe(true);
+    });
   });
 });
