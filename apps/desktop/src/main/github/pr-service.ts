@@ -10,7 +10,7 @@ const SCHEDULED_BRANCH_REFRESH_TTL_MS = 60_000;
 const USER_BRANCH_REFRESH_TTL_MS = 10_000;
 const TERMINAL_USER_BRANCH_REFRESH_TTL_MS = 60_000;
 
-type PrRefreshTrigger = "scheduled" | "user";
+export type PrRefreshTrigger = "scheduled" | "user";
 
 /**
  * Which question failed, not merely which repository.

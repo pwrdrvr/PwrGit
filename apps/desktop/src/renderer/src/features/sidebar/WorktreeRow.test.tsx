@@ -187,6 +187,59 @@ describe("WorktreeRow — a pruned upstream", () => {
       expect(render(worktree({ tracking }))).not.toContain("wt-tag--gone");
     }
   });
+
+  // One lifecycle word per row: "merged #803" already says why the branch
+  // went. An open chip beside gone keeps both — that pair is the question the
+  // gone transition's PR refresh is answering.
+  it("leaves gone to a merged or closed change request's chip", () => {
+    const pr = {
+      number: 803,
+      url: "https://example.test/pr/803",
+      title: "feat: lightbox",
+      isDraft: false
+    };
+    for (const state of ["merged", "closed"] as const) {
+      const markup = render(
+        worktree({ tracking: "upstream_missing", pr: { ...pr, state } })
+      );
+      expect(markup).not.toContain("wt-tag--gone");
+      expect(markup).toContain(`${state} #803`);
+    }
+    expect(
+      render(worktree({ tracking: "upstream_missing", pr: { ...pr, state: "open" } }))
+    ).toContain("wt-tag--gone");
+  });
+});
+
+describe("WorktreeRow — a ghost", () => {
+  it("is the same row, outlined, with the tag naming where it lives", async () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeRow
+        worktree={worktree({})}
+        selected
+        multiSelected={false}
+        now={new Date("2026-08-18T12:00:00.000Z").getTime()}
+        onSelect={() => undefined}
+        onContextMenu={() => undefined}
+        onTogglePin={() => undefined}
+        onRemove={() => undefined}
+        dragProps={{ draggable: false }}
+        dragging={false}
+        dropPosition={null}
+        focusable
+        onKeyDown={() => undefined}
+        onFocus={() => undefined}
+        posinset={3}
+        setsize={3}
+        ghost={{ tag: "Finished", tip: "Shown because you're on it." }}
+        platform="darwin"
+      />
+    );
+    expect(markup).toContain("wt-row is-selected is-ghost");
+    expect(markup).toContain('class="wt-tag wt-tag--ghost"');
+    expect(markup).toContain(">Finished<");
+    expect(render(worktree({}))).not.toContain("is-ghost");
+  });
 });
 
 describe("WorktreeRow — a checkout that is gone", () => {

@@ -169,6 +169,32 @@ Only local branches pin. A remote-tracking ref has no local name of its own and 
 change request no checkout; the ⌘K star and the refs browser's star both skip
 them, and the refs browser keeps an empty slot so names stay aligned.
 
+## Other worktrees shows six, and the row you are on ghosts in
+
+`sliceOtherWorktrees` (`repo-view.ts`) draws the first six in-flight rows of
+`remaining`, in the sort chip's order, then "Finished N" and "View all N
+worktrees…". Both open the refs browser's Worktrees tab (`RepoWorktreeTable`).
+The heading still counts all of `remaining`, so the headings add up to the
+repo row. Design: `design/Worktree List Cap - UX Review.dc.html`.
+
+- **`isFinishedWorktree` is the one test**, shared with Focused's Working
+  block. Finished means clean (`dirty === 0`), not pinned, and done with:
+  its PR merged or closed, its upstream gone, or old enough in main. A
+  merged or closed PR proves that only when its `headOid` equals the
+  checkout's `head`. After a squash merge, nothing else in Git ties the
+  branch to main, and `--not --remotes` counts every commit as unpushed. A bare
+  `mergedIntoDefault` waits 24 hours, so a branch cut a minute ago is not
+  "finished" just because it has no commits yet.
+- **Selecting a row never opens the disclosure.** A selected row outside the
+  six is drawn as a ghost: the same `WorktreeRow` with `ghost`, under a
+  "visiting" rule below the six, or directly above a closed disclosure. It
+  is not draggable, and ⌘⇧↑/↓ moves rows only among the drawn six.
+  `displayIds` is the drawn order, ghost included, so posinset and the arrow
+  walk follow what is on screen.
+- **One lifecycle word per row.** A merged or closed chip hides `gone`, because
+  the merge already explains the deleted branch. An open chip beside `gone` is
+  stale PR state; main refreshes it on the gone transition (`github/AGENTS.md`).
+
 ## The refs browser's rows are focus stops
 
 `lib/refsRowKeys.ts`: ↓ from the filter enters the rows, ↑/↓ walk them,

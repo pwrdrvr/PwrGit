@@ -48,10 +48,27 @@ import { WorktreeHolderChip } from "./WorktreeHolderChip";
 import {
   localBranchForRemote,
   RepoRefsModal,
-  trackingLabel
+  trackingLabel,
+  type RefsTab
 } from "./RepoRefsModal";
+import type { WorktreeStatusFilter } from "./RepoWorktreeTable";
 
 type RefSection = "branches" | "tags" | "remotes" | "changeRequests";
+
+/** What the repo row asks the refs browser to open on: "Manage remotes…",
+ *  and the worktree disclosure's Finished and View all. */
+export type RefsBrowserRequest = {
+  tab: RefsTab;
+  worktreeStatus?: WorktreeStatusFilter;
+};
+
+/** What the browser lists before `repo:refs` answers. */
+const NO_REFS: RepoRefs = {
+  branches: [],
+  previewTags: [],
+  tagCount: 0,
+  remotes: []
+};
 
 /** How many branches the collapsed slice shows before "View all …". */
 const BRANCH_SLICE = 6;
@@ -99,6 +116,8 @@ export function RepoRefsSections({
   browserRequest = null,
   onBrowserRequestHandled,
   onCleanUpBranches,
+  onPruneWorktrees,
+  onRemoveWorktree,
   onBranches
 }: {
   repo: Repo;
@@ -114,15 +133,22 @@ export function RepoRefsSections({
   onCreateWorktree: CreateWorktreeFromRef;
   /** Fork what `origin` points at and re-point this checkout at the fork. */
   onFork: () => void;
-  /** A tab the repo row's menu asked to open the refs browser on ("Manage
-   *  remotes…"). The browser needs `refs`, which only this component loads, so
-   *  the row asks and this honours it once they are in, then says so through
-   *  `onBrowserRequestHandled` so a later remount does not open it again. */
-  browserRequest?: RefSection | null;
+  /** A tab the repo row asked to open the refs browser on ("Manage
+   *  remotes…", Finished, View all). The browser needs `refs`, which only this
+   *  component loads, so the row asks and this honours it once they are in,
+   *  then says so through `onBrowserRequestHandled` so a later remount does
+   *  not open it again. */
+  browserRequest?: RefsBrowserRequest | null;
   onBrowserRequestHandled?: () => void;
   /** Open Maintenance › Local branches on this repository, already reviewing
    *  — the refs browser's Gone view offers it. */
   onCleanUpBranches?: (() => void) | undefined;
+  /** Open Maintenance › Prune worktrees — the Worktrees tab's Finished view
+   *  offers it. */
+  onPruneWorktrees?: (() => void) | undefined;
+  /** Remove a worktree, as its sidebar row does — the Worktrees tab's rows
+   *  offer it. */
+  onRemoveWorktree?: ((worktreeId: string) => void) | undefined;
   /** The local branches, each time the listing loads. The repo row's pinned
    *  branch rows read their tracking count and age from it rather than ask
    *  Git a second time. */
@@ -166,19 +192,27 @@ export function RepoRefsSections({
   const [openSections, setOpenSections] = useState<Set<RefSection>>(new Set());
   const [openRemotes, setOpenRemotes] = useState<Set<string>>(new Set());
   const [browser, setBrowserState] = useState<{
-    tab: RefSection;
+    tab: RefsTab;
     status: BranchStatusFilter;
+    worktreeStatus: WorktreeStatusFilter;
   } | null>(null);
   /** Open the refs browser, optionally already filtered — the header's ↑n,
    *  ↓n and gone counts each open it on their own status. */
   const setBrowser = useCallback(
-    (tab: RefSection, status: BranchStatusFilter = "all") =>
-      setBrowserState({ tab, status }),
+    (
+      tab: RefsTab,
+      status: BranchStatusFilter = "all",
+      worktreeStatus: WorktreeStatusFilter = "all"
+    ) => setBrowserState({ tab, status, worktreeStatus }),
     []
   );
   useEffect(() => {
-    if (browserRequest === null || refs === null) return;
-    setBrowser(browserRequest);
+    if (browserRequest === null) return;
+    // The Worktrees tab reads the repo, not refs, so it opens at once and
+    // the other tabs fill in when the listing lands — or stay empty beside
+    // the section's own error if it never does.
+    if (refs === null && browserRequest.tab !== "worktrees") return;
+    setBrowser(browserRequest.tab, "all", browserRequest.worktreeStatus);
     onBrowserRequestHandled?.();
   }, [browserRequest, refs, onBrowserRequestHandled, setBrowser]);
   const [fetching, setFetching] = useState<string | null>(null);
@@ -1187,15 +1221,25 @@ export function RepoRefsSections({
         )}
       </div>
 
-      {browser !== null && refs !== null && (
+      {browser !== null && (refs !== null || browser.tab === "worktrees") && (
         <RepoRefsModal
           onLocateTag={onLocateTag}
           repo={repo}
-          refs={refs}
+          refs={refs ?? NO_REFS}
           focusedWorktree={focusedWorktree}
           now={now}
           initialTab={browser.tab}
           initialStatus={browser.status}
+          initialWorktreeStatus={browser.worktreeStatus}
+          onRemoveWorktree={onRemoveWorktree}
+          onPruneWorktrees={
+            onPruneWorktrees === undefined
+              ? undefined
+              : () => {
+                  setBrowserState(null);
+                  onPruneWorktrees();
+                }
+          }
           onCleanUpBranches={
             onCleanUpBranches === undefined
               ? undefined

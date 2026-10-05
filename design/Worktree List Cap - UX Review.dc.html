@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 360px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .note.ink { color: #524a40; } .note.ink b { color: #1a1612; } .note.ink code { color: #1a1612; }
+          .rec { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--rv-acc); color: var(--rv-accon); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+          .rej { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t3); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .pin.q { background: var(--rv-t3); color: #050505; }
+          .find { width: 500px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 190px 260px minmax(0, 1fr); gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr.c2 { grid-template-columns: 150px minmax(0, 1fr); }
+          .tr.c3 { grid-template-columns: 210px 150px minmax(0, 1fr); }
+          .tr.c4 { grid-template-columns: 40px 190px minmax(0, 1fr) 110px; }
+          .num { font: 600 11px/1.3 var(--font-mono); color: var(--rv-t1); }
+          .verdict { display: inline-flex; justify-self: start; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verdict.keep { background: rgba(95, 169, 105, 0.16); color: #9ce5b3; }
+          .verdict.chg { background: rgba(255, 138, 31, 0.12); color: var(--rv-accb); }
+          .verdict.q { background: rgba(247, 243, 235, 0.06); color: var(--rv-t3); }
+
+          /* ============================================================
+             Light theme scope: the app's own token names, from tokens.css
+             ============================================================ */
+          .th-light {
+            --bg-sidebar: #f7f4ef; --bg-panel: #fdfcfa; --bg-panel-elevated: #ffffff; --bg-app: #ffffff;
+            --bg-panel-hover: #f4f0e8; --bg-hover-strong: #ebe5da; --bg-row-active: #fff5e9;
+            --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --status-ok: #2e7d3c; --status-error: #a8472a; --status-warning: #805200; --status-suspended: #6b6660;
+            --brand-purple: #6a4ba8;
+            color: var(--text-primary);
+          }
+          .stage { position: relative; padding: 18px; border-radius: 10px; background: #e9e4dc; }
+          .th-light .dv-oid { background: rgba(0, 0, 0, 0.08); color: #1a1612; }
+
+          /* ---- sidebar, sized from app.css (.repo-row, .wt-section, .wt-row) ---- */
+          .sb { position: relative; width: 330px; padding: 6px 6px 8px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-sidebar); }
+          .sb.w260 { width: 260px; }
+          .repo { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 4px 8px 4px 12px; border-radius: 8px; }
+          .chev { flex: none; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--text-muted); transform: rotate(90deg); margin-left: -4px; }
+          .rname { font: 650 13px/1.2 var(--font-sans); color: var(--accent); white-space: nowrap; }
+          .rsp { flex: 1; }
+          .wts { font: 600 11px/1 var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+          .tree { margin: 2px 0 2px 15px; padding: 2px 0 2px 8px; border-left: 1px solid var(--border-subtle); }
+          .prim { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 7px; background: var(--bg-row-active); }
+          .prim .bn { flex: 1; font: 500 11.5px/1 var(--font-mono); color: var(--accent-bright); }
+          .ptag { font: 650 9.5px/1 var(--font-mono); letter-spacing: .05em; color: var(--accent); }
+          .sub { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; }
+          .slabel { font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); white-space: nowrap; }
+          .scount { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .wsh { display: flex; align-items: center; gap: 6px; height: 31px; padding: 0 6px 0 4px; border-bottom: 1px solid var(--border-subtle); cursor: pointer; }
+          .wsh .c { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid var(--text-muted); }
+          .wsh .c.open { transform: rotate(90deg); }
+          .sp { flex: 1; min-width: 0; }
+          .ibtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-muted); font: 500 11px/1 var(--font-sans); }
+          .sort { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-muted); font: 500 10.5px/1 var(--font-mono); }
+
+          /* worktree row: branch line + folder line (.wt-row__folder wraps to 100%) */
+          .wr { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; padding: 3px 6px; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
+          .wr:hover { background: var(--bg-panel-hover); }
+          .wr.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .wr.sel .bn { color: var(--accent-bright); }
+          .wr.ghost { border: 1px dashed var(--accent-border); background: color-mix(in srgb, var(--bg-row-active) 55%, transparent); }
+          .wr.ghost.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .wr.hot { box-shadow: 0 0 0 2px rgba(185, 66, 50, .55); }
+          .gl { flex: none; width: 13px; text-align: center; font: 500 11px/1 var(--font-mono); color: var(--text-muted); }
+          .bn { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px/18px var(--font-mono); color: var(--text-secondary); }
+          .gone { flex: none; padding: 0 2px; font: 600 9.5px/1 var(--font-mono); letter-spacing: .03em; text-transform: uppercase; color: var(--text-subtle); }
+          .indef { flex: none; padding: 0 2px; font: 600 9.5px/1 var(--font-mono); color: color-mix(in srgb, var(--status-ok) 78%, transparent); }
+          .dirty { flex: none; font: 650 10px/1 var(--font-mono); color: var(--status-warning); }
+          .ahead { flex: none; font: 650 10px/1 var(--font-mono); color: var(--status-ok); }
+          .local { flex: none; padding: 0 4px; border: 1px solid var(--border-subtle); border-radius: 4px; font: 600 9px/14px var(--font-mono); color: var(--text-muted); }
+          .age { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); white-space: nowrap; }
+          .fold { flex: 0 0 100%; min-width: 0; padding-left: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 10px/14px var(--font-mono); color: var(--text-muted); }
+          .gtag { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px dashed var(--border-strong); border-radius: 4px; color: var(--text-muted); font: 600 9px/1 var(--font-mono); white-space: nowrap; }
+          .prc { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); white-space: nowrap; }
+          .prc .d { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--status-suspended); }
+          .prc.passing .d { background: var(--status-ok); } .prc.failing .d { background: var(--status-error); }
+          .prc.pending .d { background: var(--status-warning); } .prc.merged .d { background: var(--brand-purple); }
+          .prc.wrong { box-shadow: 0 0 0 2px rgba(185, 66, 50, .55); }
+
+          /* the two new footers: Finished, then View all (.ref-view-all) */
+          .fin { display: flex; align-items: center; gap: 6px; height: 26px; margin-top: 3px; padding: 0 8px; border-radius: 6px; color: var(--text-muted); font: 500 11px/1 var(--font-sans); cursor: pointer; }
+          .fin:hover { background: var(--bg-panel-hover); color: var(--text-primary); }
+          .fin .n { font: 600 10.5px/1 var(--font-mono); color: var(--text-secondary); }
+          .fin .w { font: 600 10px/1 var(--font-mono); color: var(--status-warning); }
+          .viewall { display: flex; align-items: center; height: 26px; padding: 0 8px; border-radius: 6px; font: 500 11px/1 var(--font-sans); color: var(--accent); cursor: pointer; }
+          .viewall:hover { background: var(--bg-panel-hover); }
+          .gsep { display: flex; align-items: center; gap: 6px; margin: 3px 4px; font: 600 8.5px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-subtle); }
+          .gsep::before, .gsep::after { content: ""; flex: 1; border-top: 1px dashed var(--border-default); }
+          .more { padding: 4px 6px 4px 25px; font: 500 10px/1.3 var(--font-mono); color: var(--text-subtle); }
+          .tip { position: absolute; z-index: 20; width: max-content; max-width: 300px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-panel-elevated); box-shadow: 0 12px 28px rgba(0,0,0,.14); color: var(--text-primary); font: 500 10.5px/1.45 var(--font-sans); }
+          .tip .k { color: var(--text-muted); }
+
+          /* ---- refs browser, Worktrees tab ---- */
+          .modal { width: 600px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-panel-elevated); box-shadow: 0 18px 48px rgba(0,0,0,.16); overflow: hidden; }
+          .mtabs { display: flex; align-items: center; gap: 4px; padding: 10px 12px 0; border-bottom: 1px solid var(--border-subtle); }
+          .mtab { padding: 7px 10px 9px; font: 550 11.5px/1 var(--font-sans); color: var(--text-muted); border-bottom: 2px solid transparent; }
+          .mtab.on { color: var(--text-primary); border-bottom-color: var(--accent); }
+          .mtab .n { margin-left: 5px; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .mbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; }
+          .q { flex: 1 1 160px; height: 26px; padding: 0 9px; border: 1px solid var(--border-default); border-radius: 6px; font: 500 11px/24px var(--font-sans); color: var(--text-muted); }
+          .fchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 1px solid var(--border-subtle); border-radius: 999px; font: 550 10.5px/1 var(--font-sans); color: var(--text-secondary); cursor: pointer; }
+          .fchip .n { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .fchip.on { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .fchip.on .n { color: var(--accent-bright); }
+          .mrows { max-height: 300px; overflow: auto; padding: 0 8px 8px; }
+          .mrows .wr { padding: 4px 8px; }
+          .mfoot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border-subtle); background: var(--bg-panel); font: 500 10.5px/1.4 var(--font-sans); color: var(--text-muted); }
+          .btn { flex: none; height: 26px; padding: 0 11px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-panel-elevated); font: 600 11px/24px var(--font-sans); color: var(--text-primary); cursor: pointer; }
+
+          /* ---- live prototype ---- */
+          .proto { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid rgba(255, 138, 31, 0.42); border-radius: 12px; background: #050505; }
+          .pchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+          .pchips button { appearance: none; height: 22px; padding: 0 9px; border: 1px solid rgba(247,243,235,.14); border-radius: 999px; background: transparent; color: var(--rv-t2); font: 600 9.5px/1 var(--font-mono); cursor: pointer; }
+          .pchips button.on { border-color: rgba(255, 138, 31, 0.42); color: var(--rv-accb); background: rgba(255,138,31,.12); }
+          .win { position: relative; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-default); background: var(--bg-app); }
+          .wbody { position: relative; display: flex; height: 600px; }
+          .wside { width: 340px; flex: none; overflow-y: auto; padding: 6px; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); }
+          .wmain { flex: 1; min-width: 0; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+          .jh { font: 600 10px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-subtle); }
+          .jl { display: flex; flex-direction: column; gap: 2px; max-width: 420px; }
+          .jl .wr { padding: 4px 8px; border-color: var(--border-subtle); background: var(--bg-panel); }
+          .readout { padding: 9px 11px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); font: 500 11px/1.5 var(--font-sans); color: var(--text-secondary); max-width: 520px; }
+          .scrim { position: absolute; inset: 0; display: flex; align-items: flex-start; justify-content: center; padding-top: 40px; background: rgba(26, 22, 18, .18); }
+          .x { margin-left: auto; padding: 0 4px; font: 500 14px/1 var(--font-sans); color: var(--text-muted); cursor: pointer; }
+          .hide { display: none !important; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Findings: Other worktrees is the one list with no cap, and its top rows are the work that already landed</span></div>
+        <p class="dv-sub">Branches, tags and remote branches each show a slice of 6 and then a &#8220;View all&#8221; button. Pull requests split into Local and a collapsed Remote&#8209;only group. <b>Other worktrees</b> is a disclosure that shows <b>every row</b> when you open it (<code>RepoRow.tsx:1045</code>, <code>remaining.map(renderWorktree)</code>, with no slice). Its &#8220;Recent&#8221; order sorts by HEAD&#8217;s commit date, so a branch merged twenty minutes ago is the newest thing in the list. Measured on PwrAgnt&#8217;s 202 checkouts, 5 October.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a As built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>As built: the Pinned lens with the disclosure open (contrived names, real shapes)</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrAgnt</span><span class="rsp"></span><span class="wts">199 wts</span></div>
+                <div class="tree">
+                  <div class="prim"><span class="gl">&#8962;</span><span class="bn">main</span><span class="ptag">PRIMARY</span><span class="age">today</span></div>
+                  <div class="sub"><span class="slabel">Pinned</span><span class="scount">1</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">releases/1.0</span><span class="age">2w</span></div>
+                  <div class="wsh"><span class="c open"></span><span class="slabel">Other worktrees</span><span class="scount">198</span><span class="sp"></span><span class="ibtn">&#8635;</span><span class="sort">Recent</span></div>
+                  <div class="wr hot"><span class="gl">&#9282;</span><span class="bn">codex/image&#8209;lightbox&#8209;a1b2c3</span><span class="gone">gone</span><span class="prc passing wrong"><span class="d"></span>#803</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/usage&#8209;snapshot&#8209;read</span><span class="gone">gone</span><span class="prc merged"><span class="d"></span>merged #801</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">feat/clef&#8209;camera&#8209;voice</span><span class="prc passing"><span class="d"></span>#795</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/star&#8209;map&#8209;guard</span><span class="gone">gone</span><span class="prc merged"><span class="d"></span>merged #799</span><span class="age">today</span><span class="fold">&#9633; dreamy&#8209;babbage&#8209;10b661</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/star&#8209;map&#8209;layout</span><span class="prc merged"><span class="d"></span>merged #798</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">detached@7c7f743</span><span class="indef">in default</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="more">&#8942; 192 more, about 7,600px</div>
+                </div>
+              </div>
+            </div>
+            <p class="note">The red rings mark the contradiction in finding 3: <b>gone</b> beside a green, open&#8209;looking <b>#803</b>, which actually merged 18 minutes earlier.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Four findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>No cap, and the order promotes finished work</h4><p>&#8220;Recent&#8221; is <code>git log -1 --format=%cI</code> on HEAD (<code>worktree-state.ts:505</code>). Work that merged today was also committed today, so it sorts above every older branch that is still in flight. On PwrAgnt the first five rows are four finished worktrees and one live one.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>Most of the list is finished</h4><p>Of 202 checkouts: <b>145</b> track a branch that is gone and <b>35</b> are detached (28 of them at a commit already in <code>main</code>). <b>15</b> track a live branch and <b>7</b> were never pushed. <b>31</b> of the finished ones still have uncommitted tracked changes, so &#8220;finished&#8221; cannot simply mean &#8220;safe to hide&#8221;.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>gone + open PR is stale PR state. The gone half is right</h4><p>The real branch behind #803 is deleted on origin (<code>ls-remote</code> finds nothing), and its PR merged at 13:02. <code>gone</code> comes from <code>fetch --prune</code>, which is immediate. The PR chip comes from <code>branch_pr</code>, on a 10&#8209;minute repo TTL. For up to that window the row says both things. Separately, <b>gone</b> and <b>merged</b> together say the same thing twice.</p></div></div>
+              <div class="fitem"><span class="pin q">4</span><div><h4>Selecting a hidden row opens the disclosure, and saves it open</h4><p><code>RepoRow.tsx:373</code> calls <code>setWorktreesOpen(true)</code> whenever the selection lands in <code>remaining</code>, and that state is saved to localStorage. This is finding 2 of <i>Back Forward Navigation</i>, and its ghost row is the fix. A capped list needs that fix even more, because &#8220;open the disclosure&#8221; would no longer reveal the row.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Why gone">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>When can a row say gone while its PR is open?</div>
+            <div class="tbl" style="width:660px">
+              <div class="tr head c3"><span>Case</span><span>What the row shows</span><span>Why</span></div>
+              <div class="tr c3"><span><b>PR merged, remote branch deleted</b> (the #803 case, and by far the most common)</span><span>gone + open chip, for up to ~10 min</span><span>Tracking state refreshes on fetch, PR state on its own TTL. Gone should <b>make</b> the PR refresh (<a href="#4a">4a</a>).</span></div>
+              <div class="tr c3"><span><b>Pushed under another name</b>: local <code>fix/a</code>, <code>git push origin HEAD:fix/a-v2</code></span><span>no PR at all, and gone only if <code>fix/a</code> was once set as the upstream</span><span>The PR lookup asks for <code>headRefName</code> = the <b>local</b> name (<code>pr-query.ts:69</code>). A different name never finds the PR. It does not cause a false gone.</span></div>
+              <div class="tr c3"><span><b>Upstream on another remote</b>: tracks <code>origin/x</code> (deleted), the PR head is <code>fork/x</code></span><span>gone + open chip, permanently</span><span>The one real case where both signals are true. The row should show the PR, and the header should say which upstream is gone.</span></div>
+              <div class="tr c3"><span><b>Git 2.56</b></span><span>&#8212;</span><span>2.56 makes <code>git push &lt;url&gt;</code> <b>move</b> the matching tracking ref (pwrdrvr/PwrGit#392). It removes stale tracking refs, it does not create false gones. The bundle is 2.53.</span></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">The cap: six in&#8209;flight rows, finished work counted, and View all</span></div>
+        <p class="dv-sub">The ref sections already answer &#8220;how much do I show&#8221;: a slice of 6, then a button into the browser. Worktrees get the same answer, with one rule added. <b>Finished worktrees never take a slot.</b> They are counted on a row of their own, and that row is a way into the browser filtered to them, where Prune is one button away. The sort chip and drag order keep working, but only over in&#8209;flight rows. Pinned rows sit above, as now, and are not capped: you pinned them.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Proposed">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span class="rec">Recommended</span>Slice of 6, then &#8220;Finished&#8221;, then &#8220;View all&#8221;</div>
+            <div class="stage th-light" style="display:flex;gap:22px;align-items:flex-start">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrAgnt</span><span class="rsp"></span><span class="wts">199 wts</span></div>
+                <div class="tree">
+                  <div class="prim"><span class="gl">&#8962;</span><span class="bn">main</span><span class="ptag">PRIMARY</span><span class="age">today</span></div>
+                  <div class="sub"><span class="slabel">Pinned</span><span class="scount">1</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">releases/1.0</span><span class="age">2w</span></div>
+                  <div class="wsh"><span class="c open"></span><span class="slabel">Other worktrees</span><span class="scount">198</span><span class="sp"></span><span class="ibtn">&#8635;</span><span class="sort">Recent</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">feat/clef&#8209;camera&#8209;voice</span><span class="prc passing"><span class="d"></span>#795</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/composer&#8209;watermark</span><span class="dirty">&#9679;6</span><span class="prc passing"><span class="d"></span>#806</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/lightbox&#8209;zoom&#8209;reset</span><span class="ahead">&#8593;3</span><span class="age">3h</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">agent/acp&#8209;tool&#8209;cards</span><span class="prc pending"><span class="d"></span>#790</span><span class="age">9h</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">chore/catalog&#8209;refresh</span><span class="local">local</span><span class="ahead">&#8593;1</span><span class="age">1d</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/session&#8209;export</span><span class="gone">gone</span><span class="dirty">&#9679;2</span><span class="age">2d</span><span class="fold">&#9633; quiet&#8209;hopper&#8209;4d1e</span></div>
+                  <div class="fin"><span>Finished</span><span class="n">150</span><span class="sp"></span><span>review&#8230;</span></div>
+                  <div class="viewall">View all 198 worktrees&#8230;</div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;width:330px">
+                <p class="note ink"><b>The six</b> are the in&#8209;flight rows in the chip&#8217;s order: Recent, A&#8211;Z, Active, or your drag order. Finished rows are filtered out <b>before</b> the order applies, so the chip still means what it says.</p>
+                <p class="note ink"><b>fix/session&#8209;export stays.</b> Its branch is gone, but it has 2 uncommitted changes. A finished lifecycle with work on disk is the row you most need to see, so it ranks like any other changed row.</p>
+                <p class="note ink"><b>Finished 150</b> counts rows that are finished <b>and</b> clean. It opens the browser filtered to Finished (<a href="#2d">2d</a>). The disclosure count stays 198, so the headings still add up to the repo row&#8217;s total.</p>
+                <p class="note ink"><b>View all</b> is the same <code>.ref-view-all</code> button the ref sections use. It opens the refs browser on a new Worktrees tab.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>What &#8220;finished&#8221; means: all three lines must hold</div>
+            <div class="tbl" style="width:620px">
+              <div class="tr head c2"><span>Test</span><span>Rule</span></div>
+              <div class="tr c2"><span><b>Its work landed</b></span><span>Its PR is merged or closed, or its upstream is gone, or HEAD is already in the default branch (<code>mergedIntoDefault</code>, which covers the detached rows). These are the same reasons Prune already uses (<code>prune-view.ts</code>).</span></div>
+              <div class="tr c2"><span><b>Nothing is on disk</b></span><span><code>dirty === 0</code>. Measured: this test keeps 31 of PwrAgnt&#8217;s finished checkouts in flight.</span></div>
+              <div class="tr c2"><span><b>Nothing is unshipped</b></span><span>No commit that no remote has. For a gone upstream, use the no&#8209;upstream count from #386 (<code>--not --remotes</code>), because <code>ahead</code> against a missing ref is 0.</span></div>
+              <div class="tr c2"><span><b>Not finished, ever</b></span><span>The selected worktree, a pinned one, and one whose cached PR is open while its upstream is gone. That last one is <i>uncertain</i> until the PR refresh in <a href="#4a">4a</a> lands.</span></div>
+            </div>
+            <p class="note" style="max-width:620px">One predicate, <code>isFinishedWorktree</code>, in <code>repo-view.ts</code> beside <code>focusReasonForWorktree</code>. The Focused lens&#8217;s Working block should use it as well. Today a just&#8209;merged branch ranks there as &#8220;recent&#8221;.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Alternatives">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a><span class="rej">Not recommended</span>Two alternatives, and why they lose</div>
+            <div class="stage th-light" style="display:flex;gap:18px;align-items:flex-start">
+              <div class="sb w260">
+                <div class="wsh"><span class="c open"></span><span class="slabel">In flight</span><span class="scount">48</span></div>
+                <div class="more" style="padding-left:8px">&#8942; 48 rows</div>
+                <div class="wsh"><span class="c"></span><span class="slabel">Finished</span><span class="scount">150</span></div>
+              </div>
+              <div class="sb w260">
+                <div class="wsh"><span class="c open"></span><span class="slabel">Other worktrees</span><span class="scount">198</span></div>
+                <div class="more" style="padding-left:8px">&#8942; 6 rows</div>
+                <div class="viewall">Show 6 more</div>
+              </div>
+            </div>
+            <p class="note" style="max-width:540px"><b>Two disclosures</b> (left) only moves the problem: opening Finished still renders 150 rows, and In flight has no cap at all. <b>&#8220;Show 6 more&#8221; paging</b> (right) grows without limit one click at a time, and it is a pattern no other sidebar section uses. Both keep the worktree list as the place to browse. 2a moves browsing to the browser, as Branches already did.</p>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Browser tab">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>The refs browser gains a Worktrees tab. &#8220;Finished 150&#8221; lands here, with its one verb</div>
+            <div class="stage th-light">
+              <div class="modal">
+                <div class="mtabs"><span class="mtab on">Worktrees<span class="n">198</span></span><span class="mtab">Branches<span class="n">243</span></span><span class="mtab">Tags<span class="n">61</span></span><span class="mtab">Remotes<span class="n">2</span></span><span class="mtab">Pull requests<span class="n">24</span></span></div>
+                <div class="mbar"><span class="q">Filter worktrees&#8230;</span><span class="fchip">In flight<span class="n">48</span></span><span class="fchip on">Finished<span class="n">150</span></span><span class="fchip">All<span class="n">198</span></span></div>
+                <div class="mrows">
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/image&#8209;lightbox&#8209;a1b2c3</span><span class="prc merged"><span class="d"></span>merged #803</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/usage&#8209;snapshot&#8209;read</span><span class="prc merged"><span class="d"></span>merged #801</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/star&#8209;map&#8209;guard</span><span class="prc merged"><span class="d"></span>merged #799</span><span class="age">today</span><span class="fold">&#9633; dreamy&#8209;babbage&#8209;10b661</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">detached@7c7f743</span><span class="indef">in default</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/tray&#8209;badge&#8209;count</span><span class="gone">gone</span><span class="age">3d</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="more">&#8942; 145 more</div>
+                </div>
+                <div class="mfoot"><span>Clean, and every commit is on a remote or in <code>main</code>.</span><span class="sp" style="flex:1"></span><span class="btn">Prune 150 worktrees&#8230;</span></div>
+              </div>
+            </div>
+            <p class="note" style="max-width:600px">Rows are the sidebar&#8217;s own component, so click selects and right&#8209;click gets the same menu. <b>Prune&#8230;</b> opens <code>PruneWorktreesPanel</code> scoped to this repo, and nothing is pre&#8209;ticked, as now. The filter remembers its last value, like the Branches tab&#8217;s status filter.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;should the slice be 8 for worktrees?&#8221; &#183; &#8220;put the Finished count on the repo row instead&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Ghosts: the row you are on, when it is outside the six</span></div>
+        <p class="dv-sub">Once the list is capped, &#8220;open the disclosure&#8221; no longer reveals the selected row, so the force&#8209;open at <code>RepoRow.tsx:373</code> has to go. The replacement is the ghost from <i>Back Forward Navigation</i> turn 4, applied with its <b>ref&#8209;list</b> rule. The slice is a ranking, so the ghost sits after it, behind a dashed &#8220;visiting&#8221; rule, above Finished. It is the real row component with one class, and it goes away when you select something else.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Ghost open">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><span class="rec">Recommended</span>Disclosure open: a finished worktree picked from View all</div>
+            <div class="stage th-light" style="padding-bottom:58px">
+              <div class="sb">
+                <div class="tree" style="margin-left:4px">
+                  <div class="wsh"><span class="c open"></span><span class="slabel">Other worktrees</span><span class="scount">198</span><span class="sp"></span><span class="ibtn">&#8635;</span><span class="sort">Recent</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">feat/clef&#8209;camera&#8209;voice</span><span class="prc passing"><span class="d"></span>#795</span><span class="age">today</span><span class="fold">&#9633; PwrAgnt</span></div>
+                  <div class="more">&#8942; 4 more in flight</div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/session&#8209;export</span><span class="gone">gone</span><span class="dirty">&#9679;2</span><span class="age">2d</span><span class="fold">&#9633; quiet&#8209;hopper&#8209;4d1e</span></div>
+                  <div class="gsep">visiting</div>
+                  <div class="wr ghost sel"><span class="gl">&#9282;</span><span class="bn">codex/star&#8209;map&#8209;guard</span><span class="prc merged"><span class="d"></span>merged #799</span><span class="gtag">Finished</span><span class="age">today</span><span class="fold">&#9633; dreamy&#8209;babbage&#8209;10b661</span></div>
+                  <div class="fin"><span>Finished</span><span class="n">150</span><span class="sp"></span><span>review&#8230;</span></div>
+                  <div class="viewall">View all 198 worktrees&#8230;</div>
+                </div>
+                <span class="tip" style="left:96px;top:238px">Finished, so it is not in the six. Shown because you&#8217;re on it.<br /><span class="k">&#9733; pins it. Prune removes it.</span></span>
+              </div>
+            </div>
+            <p class="note" style="max-width:360px">The tag names the bucket the row came from (<b>Finished</b>, or <b>In flight</b> when it ranked 7th or lower). At 260px it shrinks to a dashed dot, and the dashed border alone carries the meaning, as in Back Forward 4c.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Ghost closed">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Disclosure closed: unchanged from Back Forward 4a</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="tree" style="margin-left:4px">
+                  <div class="sub"><span class="slabel">Pinned</span><span class="scount">1</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">releases/1.0</span><span class="age">2w</span></div>
+                  <div class="wr ghost sel"><span class="gl">&#9282;</span><span class="bn">codex/star&#8209;map&#8209;guard</span><span class="prc merged"><span class="d"></span>merged #799</span><span class="gtag">&#8595; Other</span><span class="age">today</span><span class="fold">&#9633; dreamy&#8209;babbage&#8209;10b661</span></div>
+                  <div class="wsh"><span class="c"></span><span class="slabel">Other worktrees</span><span class="scount">198</span><span class="sp"></span><span class="ibtn">&#8635;</span><span class="sort">Recent</span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note">Closed means closed. The ghost sits directly above the disclosure, and selecting a row never writes <code>pwrgit.unpinnedWorktreesOpen</code>.</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>What this adds to the ghost rules</div>
+            <div class="tbl" style="width:620px">
+              <div class="tr head c2"><span>Rule</span><span>For worktrees under a cap</span></div>
+              <div class="tr c2"><span><b>Appears</b></span><span>The selected worktree is in <code>remaining</code> and not in the six: it is finished, or it ranked below 6th. This also covers selecting from View all, the palette, a PR&#8217;s &#8962; chip, the graph, and Back.</span></div>
+              <div class="tr c2"><span><b>Sits</b></span><span>Open: after the six, under &#8220;visiting&#8221;, above Finished. Closed: above the disclosure (Back Forward 4a).</span></div>
+              <div class="tr c2"><span><b>Leaves</b></span><span>When you select another worktree. Pinning it (&#9733;) moves it into Pinned. A change that ranks it into the six puts it in its real slot, with no ghost.</span></div>
+              <div class="tr c2"><span><b>Arrow keys</b></span><span>The ghost is part of the roving walk, in its drawn position (<code>displayIds</code>). Finished and View all are tab stops of their own.</span></div>
+              <div class="tr c2"><span><b>Never</b></span><span>Re&#8209;sorts the six to make room. Never animates in. Never moves the row under the pointer: its height is compensated in <code>scrollTop</code>.</span></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;ghost for a worktree whose repo is collapsed&#8221; &#183; &#8220;should a ghost linger for 1 Back step?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">gone and the PR chip: one lifecycle word per row, and gone makes the PR check itself</span></div>
+        <p class="dv-sub">Finding 3 is a freshness gap between two signals, not a false gone. Close the gap at its source: when a branch&#8217;s upstream turns gone while its cached PR is open, refresh that branch&#8217;s PR at the user tier right away, instead of waiting for the 10&#8209;minute TTL. Then let the row say one lifecycle thing: a terminal PR state already implies the branch is gone.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Precedence">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a><span class="rec">Recommended</span>Precedence, top row wins</div>
+            <div class="tbl" style="width:700px">
+              <div class="tr head c4"><span>#</span><span>State</span><span>Row shows</span><span>Bucket</span></div>
+              <div class="tr c4"><span class="num">1</span><span><b>PR merged / closed</b></span><span>the PR chip only. No <code>gone</code>, because the merge already explains it.</span><span><span class="verdict keep">finished</span>&#160;if clean</span></div>
+              <div class="tr c4"><span class="num">2</span><span><b>Gone, cached PR open</b></span><span>the PR chip, and a forced PR refresh starts on the gone transition. Usually it resolves to row 1 within seconds.</span><span><span class="verdict q">uncertain</span>&#160;stays in flight</span></div>
+              <div class="tr c4"><span class="num">3</span><span><b>Gone, PR still open after refresh</b></span><span>the PR chip, no <code>gone</code>. The header says <i>tracks origin/x, which was deleted; #n&#8217;s head is fork/x</i>.</span><span><span class="verdict chg">in flight</span></span></div>
+              <div class="tr c4"><span class="num">4</span><span><b>Gone, no PR</b></span><span><code>gone</code></span><span><span class="verdict keep">finished</span>&#160;if clean</span></div>
+              <div class="tr c4"><span class="num">5</span><span><b>HEAD in default</b>, no PR</span><span><code>in default</code></span><span><span class="verdict keep">finished</span>&#160;if clean</span></div>
+            </div>
+            <p class="note" style="max-width:700px">Changes beside any of these (<b>&#9679;n</b>, unshipped <b>&#8593;n</b>) always show, and always keep the row in flight. The trigger lives in main. <code>WorktreeStateService</code> already sees the 0&#8594;1 flip of <code>upstream_gone</code>, and the PR service already has a user&#8209;tier, per&#8209;branch refresh with its own throttle.</p>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Rows">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>The same four rows, before and after</div>
+            <div class="stage th-light" style="display:flex;gap:18px;align-items:flex-start">
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span class="slabel">Today</span>
+                <div class="sb" style="width:300px">
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/image&#8209;lightbox&#8209;a1b2c3</span><span class="gone">gone</span><span class="prc passing wrong"><span class="d"></span>#803</span><span class="age">today</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/star&#8209;map&#8209;guard</span><span class="gone">gone</span><span class="prc merged"><span class="d"></span>merged #799</span><span class="age">today</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">feat/fork&#8209;head&#8209;pr</span><span class="gone">gone</span><span class="prc passing"><span class="d"></span>#812</span><span class="age">1d</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/session&#8209;export</span><span class="gone">gone</span><span class="dirty">&#9679;2</span><span class="age">2d</span></div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span class="slabel">Proposed</span>
+                <div class="sb" style="width:300px">
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/image&#8209;lightbox&#8209;a1b2c3</span><span class="prc merged"><span class="d"></span>merged #803</span><span class="age">today</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">codex/star&#8209;map&#8209;guard</span><span class="prc merged"><span class="d"></span>merged #799</span><span class="age">today</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">feat/fork&#8209;head&#8209;pr</span><span class="prc passing"><span class="d"></span>#812</span><span class="age">1d</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">fix/session&#8209;export</span><span class="gone">gone</span><span class="dirty">&#9679;2</span><span class="age">2d</span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:640px">Row 1 corrected itself through the refresh (precedence row 2 &#8594; 1). Row 2 drops a redundant word. Row 3 is the fork&#8209;head case (precedence row 3). Row 4 is unchanged, and it is the row that matters: a gone branch with work on disk. In the capped list, rows 1 and 2 also leave the six.</p>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Follow-up">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Follow&#8209;up, separate from the cap: find a PR pushed under another name</div>
+            <div class="find" style="width:460px">
+              <div class="fitem"><span class="pin q">?</span><div><h4>Ask the forge for the upstream&#8217;s name as well</h4><p><code>pr-query.ts</code> asks for <code>headRefName</code> = the local branch name only. When <code>branch.&lt;name&gt;.merge</code> or <code>@{push}</code> names a different branch, ask for that name too, and keep the newest. This finds the <code>HEAD:fix/a-v2</code> case in <a href="#1c">1c</a>. Without it, that worktree has no PR, so it can only ever be finished by ancestry, which a squash merge never satisfies.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- ================================ TURN 5 ================================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Live: 198 worktrees, today and proposed</span></div>
+        <p class="dv-sub">Flip between <b>Today</b> and <b>Proposed</b>. Toggle the Other worktrees head. In Proposed, use <b>View all</b> or <b>Finished</b> to open the browser, or the <b>Jump to</b> list on the right (it stands in for the palette, a PR&#8217;s &#8962; chip, or Back). Pick a row outside the six and watch where it appears. The data is contrived: 48 in flight and 150 finished, in PwrAgnt&#8217;s proportions.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Live">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Live prototype</div>
+            <div class="proto" style="width:1000px">
+              <div class="pchips"><sc-for list="{{modes}}" as="m" hint-placeholder-count="2"><button class="{{m.cls}}" onClick="{{m.on}}">{{m.label}}</button></sc-for><button onClick="{{reset}}">reset</button></div>
+              <div class="win th-light">
+                <div class="wbody">
+                  <div class="wside">
+                    <div class="repo"><span class="chev"></span><span class="rname">PwrAgnt</span><span class="rsp"></span><span class="wts">199 wts</span></div>
+                    <div class="tree">
+                      <div class="prim"><span class="gl">&#8962;</span><span class="bn">main</span><span class="ptag">PRIMARY</span><span class="age">today</span></div>
+                      <div class="sub"><span class="slabel">Pinned</span><span class="scount">{{pinnedCount}}</span></div>
+                      <sc-for list="{{pinned}}" as="w" hint-placeholder-count="1"><div class="{{w.cls}}" onClick="{{w.on}}"><span class="gl">&#9282;</span><span class="bn">{{w.branch}}</span><span class="{{w.goneCls}}">gone</span><span class="{{w.dirtyCls}}">{{w.dirty}}</span><span class="{{w.prCls}}"><span class="d"></span>{{w.prLabel}}</span><span class="{{w.gtagCls}}">{{w.gtag}}</span><span class="age">{{w.age}}</span><span class="fold">&#9633; {{w.folder}}</span></div></sc-for>
+                      <sc-for list="{{ghostAbove}}" as="w" hint-placeholder-count="1"><div class="{{w.cls}}" onClick="{{w.on}}"><span class="gl">&#9282;</span><span class="bn">{{w.branch}}</span><span class="{{w.goneCls}}">gone</span><span class="{{w.dirtyCls}}">{{w.dirty}}</span><span class="{{w.prCls}}"><span class="d"></span>{{w.prLabel}}</span><span class="{{w.gtagCls}}">{{w.gtag}}</span><span class="age">{{w.age}}</span><span class="fold">&#9633; {{w.folder}}</span></div></sc-for>
+                      <div class="wsh" onClick="{{toggleOther}}"><span class="{{otherChev}}"></span><span class="slabel">Other worktrees</span><span class="scount">{{otherCount}}</span><span class="sp"></span><span class="ibtn">&#8635;</span><span class="sort">Recent</span></div>
+                      <sc-if value="{{otherOpen}}">
+                        <sc-for list="{{rows}}" as="w" hint-placeholder-count="6"><div class="{{w.cls}}" onClick="{{w.on}}"><span class="gl">&#9282;</span><span class="bn">{{w.branch}}</span><span class="{{w.goneCls}}">gone</span><span class="{{w.dirtyCls}}">{{w.dirty}}</span><span class="{{w.prCls}}"><span class="d"></span>{{w.prLabel}}</span><span class="{{w.gtagCls}}">{{w.gtag}}</span><span class="age">{{w.age}}</span><span class="fold">&#9633; {{w.folder}}</span></div></sc-for>
+                        <div class="{{visitCls}}">visiting</div>
+                        <sc-for list="{{ghostBelow}}" as="w" hint-placeholder-count="1"><div class="{{w.cls}}" onClick="{{w.on}}"><span class="gl">&#9282;</span><span class="bn">{{w.branch}}</span><span class="{{w.goneCls}}">gone</span><span class="{{w.dirtyCls}}">{{w.dirty}}</span><span class="{{w.prCls}}"><span class="d"></span>{{w.prLabel}}</span><span class="{{w.gtagCls}}">{{w.gtag}}</span><span class="age">{{w.age}}</span><span class="fold">&#9633; {{w.folder}}</span></div></sc-for>
+                        <div class="{{finCls}}" onClick="{{openFinished}}"><span>Finished</span><span class="n">{{finishedCount}}</span><span class="sp"></span><span>review&#8230;</span></div>
+                        <div class="{{viewAllCls}}" onClick="{{openAll}}">{{viewAllLabel}}</div>
+                      </sc-if>
+                      <div class="wsh" style="border-bottom:0"><span class="c"></span><span class="slabel">Pull requests</span><span class="scount">24</span></div>
+                      <div class="wsh" style="border-bottom:0"><span class="c"></span><span class="slabel">Branches</span><span class="scount">243</span></div>
+                    </div>
+                  </div>
+                  <div class="wmain">
+                    <span class="jh">Jump to (palette, PR &#8962; chip, Back)</span>
+                    <div class="jl">
+                      <sc-for list="{{jumps}}" as="w" hint-placeholder-count="4"><div class="wr" onClick="{{w.on}}"><span class="gl">&#9282;</span><span class="bn">{{w.branch}}</span><span class="{{w.goneCls}}">gone</span><span class="{{w.dirtyCls}}">{{w.dirty}}</span><span class="{{w.prCls}}"><span class="d"></span>{{w.prLabel}}</span><span class="age">{{w.age}}</span></div></sc-for>
+                    </div>
+                    <div class="readout">{{readout}}</div>
+                  </div>
+                  <sc-if value="{{browserOpen}}">
+                    <div class="scrim" onClick="{{closeBrowser}}">
+                      <div class="modal" onClick="{{stop}}">
+                        <div class="mtabs"><span class="mtab on">Worktrees<span class="n">{{otherCount}}</span></span><span class="mtab">Branches<span class="n">243</span></span><span class="mtab">Tags<span class="n">61</span></span><span class="x" onClick="{{closeBrowser}}">&#215;</span></div>
+                        <div class="mbar"><span class="q">Filter worktrees&#8230;</span><sc-for list="{{filters}}" as="f" hint-placeholder-count="3"><span class="{{f.cls}}" onClick="{{f.on}}">{{f.label}}<span class="n">{{f.n}}</span></span></sc-for></div>
+                        <div class="mrows">
+                          <sc-for list="{{browserRows}}" as="w" hint-placeholder-count="6"><div class="{{w.cls}}" onClick="{{w.on}}"><span class="gl">&#9282;</span><span class="bn">{{w.branch}}</span><span class="{{w.goneCls}}">gone</span><span class="{{w.dirtyCls}}">{{w.dirty}}</span><span class="{{w.prCls}}"><span class="d"></span>{{w.prLabel}}</span><span class="age">{{w.age}}</span><span class="fold">&#9633; {{w.folder}}</span></div></sc-for>
+                        </div>
+                        <div class="mfoot"><span>{{browserFoot}}</span><span class="sp" style="flex:1"></span><span class="{{pruneCls}}">{{pruneLabel}}</span></div>
+                      </div>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================ TURN 6 ================================ -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">What gets built, and in what order</span></div>
+        <p class="dv-sub">Three PRs. The first stands alone and fixes the contradiction today. The second depends on ghost rows, which so far exist only as the <i>Back Forward Navigation</i> artboard on <code>codex/pwrgit-back-forward-nav-25ab62</code>, with no code yet.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="6a" data-screen-label="6a Plan">
+            <div class="tbl" style="width:900px">
+              <div class="tr head"><span>PR</span><span>Where</span><span>What</span></div>
+              <div class="tr"><span><b>1. One lifecycle word</b><br />independent, small</span><span><code>worktree-state.ts</code> (gone flip), <code>pr-service.ts</code>, <code>WorktreeRow.tsx:256</code></span><span>The 0&#8594;1 flip of <code>upstream_gone</code> on a branch with a cached open PR queues a user&#8209;tier PR refresh for that branch. The row hides <code>gone</code> when the PR is merged or closed. Precedence row 3 needs the header copy (<code>WorktreeHeader.tsx:128</code>).</span></div>
+              <div class="tr"><span><b>2. The cap</b><br />stacks on the ghost row</span><span><code>repo-view.ts</code>, <code>RepoRow.tsx:373</code>, <code>:1045</code></span><span><code>isFinishedWorktree</code> (2b), plus <code>sliceOtherWorktrees(remaining, sort, order, 6)</code>. The body renders the six, the ghost, Finished, and View all. The force&#8209;open effect is deleted. Focused&#8217;s Working block also excludes finished rows.</span></div>
+              <div class="tr"><span><b>3. Worktrees tab</b></span><span><code>RepoRefsModal.tsx</code> (<code>RefsTab</code>), <code>PruneWorktreesPanel</code></span><span>The tab with In flight / Finished / All filters, built from the sidebar row. Finished&#8217;s footer opens Prune scoped to the repo. Until this lands, PR 2&#8217;s buttons can open Maintenance &#8250; Prune.</span></div>
+              <div class="tr"><span><b>Later</b></span><span><code>pr-query.ts</code></span><span>Also look PRs up by the upstream&#8217;s and <code>@{push}</code>&#8217;s branch name (4c).</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;build PR 1&#8221; &#183; &#8220;implement the ghost row here and stack the cap on it&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const SLICE = 6;
+      const PRE = ["feat", "fix", "codex", "agent", "chore", "refactor", "test", "docs"];
+      const A = ["composer", "lightbox", "sidebar", "tray", "session", "usage", "star-map", "thread", "voice", "catalog", "toast", "diff", "palette", "graph", "queue", "monitor"];
+      const B = ["draft", "zoom", "scroll", "badge", "export", "snapshot", "guard", "cursor", "cards", "refresh", "chrome", "anchor", "restore", "layout", "watch", "replay"];
+      const FOLD = ["PwrAgnt", "PwrAgnt", "PwrAgnt", "dreamy-babbage-10b661", "quiet-hopper-4d1e", "brave-curie-77a0"];
+      const AGES = ["12m", "40m", "1h", "3h", "9h", "today", "1d", "2d", "4d", "1w", "2w", "1mo"];
+      function rnd(seed) { let x = seed; return () => { x = (x * 1103515245 + 12345) % 2147483648; return x / 2147483648; }; }
+      function build() {
+        const r = rnd(7);
+        const list = [];
+        for (let i = 0; i < 198; i++) {
+          const finished = i >= 48;
+          const pre = PRE[Math.floor(r() * PRE.length)];
+          const branch = pre + "/" + A[Math.floor(r() * A.length)] + "-" + B[Math.floor(r() * B.length)] + (pre === "codex" ? "-" + Math.floor(r() * 4096).toString(16) : "");
+          const ageIx = Math.min(AGES.length - 1, Math.floor(r() * AGES.length));
+          const w = { id: "w" + i, branch: branch, folder: FOLD[Math.floor(r() * FOLD.length)], ageIx: ageIx, age: AGES[ageIx], finished: finished, gone: false, dirty: 0, pr: null };
+          if (finished) {
+            w.gone = r() < 0.82;
+            if (r() < 0.7) w.pr = { num: 600 + i, state: "merged" };
+            if (i === 48) { w.pr = { num: 803, state: "staleOpen" }; w.gone = true; w.ageIx = 0; w.age = "12m"; w.branch = "codex/image-lightbox-a1b2c3"; }
+            if (i === 49) { w.branch = "codex/star-map-guard"; w.folder = "dreamy-babbage-10b661"; w.ageIx = 1; w.age = "40m"; w.gone = true; w.pr = { num: 799, state: "merged" }; }
+            if (!w.gone && !w.pr) w.branch = "detached@" + Math.floor(r() * 268435455).toString(16).padStart(7, "0");
+          } else {
+            const k = r();
+            if (k < 0.35) w.pr = { num: 900 + i, state: r() < 0.6 ? "passing" : "pending" };
+            if (r() < 0.4) w.dirty = 1 + Math.floor(r() * 7);
+            if (i === 5) { w.gone = true; w.dirty = 2; w.branch = "fix/session-export"; w.folder = "quiet-hopper-4d1e"; w.pr = null; }
+          }
+          list.push(w);
+        }
+        return list;
+      }
+      const WT = build();
+      const BYID = {};
+      WT.forEach((w) => { BYID[w.id] = w; });
+      const RECENT = WT.slice().sort((a, b) => a.ageIx - b.ageIx || (a.id < b.id ? -1 : 1));
+      const JUMPS = ["w49", "w48", "w30", "w0"];
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = this.fresh("proposed");
+        }
+        fresh(mode) {
+          return { mode: mode, sel: null, otherOpen: true, browser: false, filter: "finished", pinned: [], log: "Start: Other worktrees open. Proposed shows six in-flight rows. Try a Jump to row, or View all." };
+        }
+        inSlice() {
+          return RECENT.filter((w) => !w.finished && this.state.pinned.indexOf(w.id) < 0).slice(0, SLICE).map((w) => w.id);
+        }
+        select(id, via) {
+          const s = this.state;
+          const w = BYID[id];
+          if (s.mode === "today") {
+            const forced = !s.otherOpen;
+            this.setState({ sel: id, browser: false, otherOpen: true, log: "Selected " + w.branch + (forced ? ". Other worktrees was forced open and saved open, and the row is somewhere in 198." : ". It is somewhere in the 198 rows; Today has no ghost, so you scroll for it.") });
+            return;
+          }
+          const inSix = this.inSlice().indexOf(id) >= 0;
+          const where = inSix ? "It is in the six, so it is selected in place." : !s.otherOpen ? "Other worktrees is closed, so it ghosts above the disclosure, and the disclosure stays closed." : w.finished ? "Finished, so it is not in the six. It ghosts under visiting, above Finished." : "In flight but ranked below 6th, so it ghosts under visiting.";
+          this.setState({ sel: id, browser: false, log: "Went to " + w.branch + (via ? " via " + via : "") + ". " + where });
+        }
+        rowView(w, ghost) {
+          const s = this.state;
+          const today = s.mode === "today";
+          const pr = w.pr;
+          const terminal = pr && pr.state === "merged";
+          const showGone = w.gone && (today || !terminal);
+          let prCls = "hide";
+          let prLabel = "";
+          if (pr) {
+            if (pr.state === "merged") { prCls = "prc merged"; prLabel = "merged #" + pr.num; }
+            else if (pr.state === "staleOpen") { prCls = today ? "prc passing" : "prc merged"; prLabel = today ? "#" + pr.num : "merged #" + pr.num; }
+            else { prCls = "prc " + pr.state; prLabel = "#" + pr.num; }
+          }
+          return {
+            branch: w.branch,
+            folder: w.folder,
+            age: w.age,
+            cls: "wr" + (w.id === s.sel ? " sel" : "") + (ghost ? " ghost" : ""),
+            goneCls: showGone && !(today === false && pr && pr.state === "staleOpen") ? "gone" : "hide",
+            dirty: w.dirty ? "●" + w.dirty : "",
+            dirtyCls: w.dirty ? "dirty" : "hide",
+            prCls: prCls,
+            prLabel: prLabel,
+            gtag: ghost === "above" ? "↓ Other" : w.finished ? "Finished" : "In flight",
+            gtagCls: ghost ? "gtag" : "hide",
+            on: () => this.select(w.id, null)
+          };
+        }
+        renderVals() {
+          const s = this.state;
+          const proposed = s.mode === "proposed";
+          const six = this.inSlice();
+          const ghostId = proposed && s.sel && six.indexOf(s.sel) < 0 && s.pinned.indexOf(s.sel) < 0 ? s.sel : null;
+          const rows = proposed
+            ? six.map((id) => this.rowView(BYID[id], false))
+            : RECENT.map((w) => this.rowView(w, false));
+          const ghostBelow = ghostId && s.otherOpen ? [this.rowView(BYID[ghostId], "below")] : [];
+          const ghostAbove = ghostId && !s.otherOpen ? [this.rowView(BYID[ghostId], "above")] : [];
+          const finishedCount = WT.filter((w) => w.finished).length;
+          const inFlight = WT.length - finishedCount;
+          const pick = s.filter === "finished" ? WT.filter((w) => w.finished) : s.filter === "inflight" ? WT.filter((w) => !w.finished) : WT;
+          const browserRows = RECENT.filter((w) => pick.indexOf(w) >= 0).map((w) => {
+            const v = this.rowView(w, false);
+            v.on = () => this.select(w.id, "View all");
+            return v;
+          });
+          const mk = (key, label, n) => ({ cls: "fchip" + (s.filter === key ? " on" : ""), label: label, n: n, on: () => this.setState({ filter: key }) });
+          return {
+            modes: [
+              { label: "Today", cls: s.mode === "today" ? "on" : "", on: () => this.setState(this.fresh("today")) },
+              { label: "Proposed", cls: proposed ? "on" : "", on: () => this.setState(this.fresh("proposed")) }
+            ],
+            reset: () => this.setState(this.fresh(s.mode)),
+            pinned: [{ branch: "releases/1.0", folder: "PwrAgnt", age: "2w", cls: "wr", goneCls: "hide", dirty: "", dirtyCls: "hide", prCls: "hide", prLabel: "", gtag: "", gtagCls: "hide", on: () => this.setState({ sel: null, log: "Selected releases/1.0 (pinned)." }) }],
+            pinnedCount: 1,
+            ghostAbove: ghostAbove,
+            ghostBelow: ghostBelow,
+            visitCls: ghostBelow.length ? "gsep" : "hide",
+            otherOpen: s.otherOpen,
+            otherChev: s.otherOpen ? "c open" : "c",
+            otherCount: WT.length,
+            viewAllLabel: "View all " + WT.length + " worktrees…",
+            toggleOther: () => this.setState({ otherOpen: !s.otherOpen, log: s.otherOpen ? "Closed Other worktrees." + (ghostId ? " The ghost moves above the disclosure." : "") : "Opened Other worktrees." + (ghostId ? " The ghost moves under visiting." : "") }),
+            rows: rows,
+            finCls: proposed ? "fin" : "hide",
+            viewAllCls: proposed ? "viewall" : "hide",
+            finishedCount: finishedCount,
+            openFinished: () => this.setState({ browser: true, filter: "finished", log: "Finished opens the browser filtered to Finished, with Prune in the footer." }),
+            openAll: () => this.setState({ browser: true, filter: "all", log: "View all opens the Worktrees tab." }),
+            browserOpen: s.browser,
+            closeBrowser: () => this.setState({ browser: false }),
+            stop: (e) => { e.stopPropagation(); },
+            filters: [mk("inflight", "In flight", inFlight), mk("finished", "Finished", finishedCount), mk("all", "All", WT.length)],
+            browserRows: browserRows,
+            browserFoot: s.filter === "finished" ? "Clean, and every commit is on a remote or in main." : "Click a row to go to it.",
+            pruneLabel: "Prune " + finishedCount + " worktrees…",
+            pruneCls: s.filter === "finished" ? "btn" : "hide",
+            jumps: JUMPS.map((id) => {
+              const v = this.rowView(BYID[id], false);
+              v.on = () => this.select(id, "Jump to");
+              return v;
+            }),
+            readout: s.log
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

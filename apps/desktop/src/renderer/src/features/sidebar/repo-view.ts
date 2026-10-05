@@ -239,6 +239,13 @@ export function partitionFocusedWorktrees(
   limit: number = FOCUS_WORKTREE_LIMIT
 ): { focused: Worktree[]; remaining: Worktree[] } {
   const ranked = worktrees
+    // A just-merged branch was committed to recently, which is all "recent"
+    // asks; Working is for work still in flight. The current one stays.
+    .filter(
+      (worktree) =>
+        worktree.id === context.selectedWorktreeId ||
+        !isFinishedWorktree(worktree, now)
+    )
     .map((worktree, index) => ({
       worktree,
       index,
@@ -605,6 +612,86 @@ export function orderWorktrees(
   }
   // "pinned"
   return list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+}
+
+/** How many in-flight rows Other worktrees shows before "View all" — the
+ *  ref sections' slice (`BRANCH_SLICE`), for the same reason. */
+export const WORKTREE_SLICE = 6;
+
+/**
+ * A branch cut from the default branch is "merged into" it until its first
+ * commit. Ancestry alone calls a worktree finished only once it has sat this
+ * long, so one an agent just created is not hidden before it starts.
+ */
+export const FINISHED_ANCESTRY_GRACE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Its work has landed and nothing of it is only here — so it does not take one
+ * of Other worktrees' six slots. A display rule, not a deletion rule: a
+ * finished row is still one click away (View all, or the ghost when selected),
+ * and Prune keeps its own, stricter `prunableReason`.
+ *
+ * - **Never** the primary checkout, the default branch, a pinned row, a missing
+ *   or locked checkout, or one with changes on disk.
+ * - **A merged or closed change request** lands it — but after a squash merge
+ *   nothing in Git connects the two, so when both are known the checkout's
+ *   HEAD must BE the change request's final head. A tip that moved on after
+ *   the merge is new work. Without a head to compare, no commits to push.
+ * - **Otherwise, commits to push** keep it in flight.
+ * - **An open change request** keeps it in flight, even with its upstream
+ *   gone: until the refresh that gone triggers lands (gone-pr-refresh.ts), the
+ *   open answer may be stale, and when it is not the PR's head lives elsewhere
+ *   (a fork) — both are in flight.
+ * - **A gone upstream** with no change request lands it.
+ * - **Ancestry** (`mergedIntoDefault`) lands it after the grace above.
+ */
+export function isFinishedWorktree(
+  worktree: Worktree,
+  now: number = Date.now()
+): boolean {
+  if (worktree.isPrimary || worktree.isDefaultBranch || worktree.pinned) {
+    return false;
+  }
+  if (worktree.missing === true || worktree.locked === true) return false;
+  if (worktree.dirty > 0) return false;
+  const pr = worktree.pr;
+  if (pr !== undefined && pr.state !== "open") {
+    // The tip IS the change request's final head: proven, even where `ahead`
+    // counts commits no remote ref holds any more (a branch pushed without
+    // `-u`, squash-merged, its remote branch then deleted).
+    if (pr.headOid !== undefined && worktree.head !== undefined) {
+      return pr.headOid === worktree.head;
+    }
+    return worktree.ahead === 0;
+  }
+  if (pr !== undefined || worktree.ahead > 0) return false;
+  if (worktree.tracking === "upstream_missing") return true;
+  if (!worktree.mergedIntoDefault) return false;
+  return validTime(worktree.lastActivityAt) < now - FINISHED_ANCESTRY_GRACE_MS;
+}
+
+/**
+ * Other worktrees, capped: the first `limit` in-flight rows in the list's own
+ * order (sort chip or drag order), the rest of the in-flight rows, and the
+ * finished ones, which never take a slot. Finished rows are taken out BEFORE
+ * the slice, so "Recent" still means the most recent in-flight work.
+ */
+export function sliceOtherWorktrees(
+  remaining: Worktree[],
+  now: number = Date.now(),
+  limit: number = WORKTREE_SLICE
+): { shown: Worktree[]; overflow: Worktree[]; finished: Worktree[] } {
+  const inFlight: Worktree[] = [];
+  const finished: Worktree[] = [];
+  for (const worktree of remaining) {
+    (isFinishedWorktree(worktree, now) ? finished : inFlight).push(worktree);
+  }
+  const cap = Math.max(0, limit);
+  return {
+    shown: inFlight.slice(0, cap),
+    overflow: inFlight.slice(cap),
+    finished
+  };
 }
 
 /**

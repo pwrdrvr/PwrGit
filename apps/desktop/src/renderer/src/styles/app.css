@@ -2782,6 +2782,87 @@ a.forge-chip:focus-visible {
 .new-wt {
   margin-top: 4px;
 }
+/* ---- Other worktrees past the cap ----
+
+   The disclosure draws six in-flight rows, then the row you are on if the six
+   leave it out, then Finished and View all (design/Worktree List Cap - UX
+   Review.dc.html, 2a and 3a). */
+
+/* The row you are on, drawn where the list would not draw it: the same row,
+   with a dashed border saying it is a visitor. Selected, so the accent is the
+   one `.wt-row.is-selected` already uses; only the dash is new. */
+.wt-row.is-ghost {
+  border-style: dashed;
+  border-color: var(--accent-border);
+}
+.wt-row.is-ghost.is-selected {
+  border-color: var(--accent);
+}
+.wt-tag--ghost {
+  height: calc(var(--sidebar-chip-size) + 6px);
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+/* At the narrowest sidebar the tag's word goes and the dashed border alone
+   says it (Back Forward Navigation, 4c). */
+@container (max-width: 260px) {
+  .wt-tag--ghost {
+    width: 8px;
+    padding: 0;
+    overflow: hidden;
+    color: transparent;
+  }
+}
+.wt-ghost-sep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 4px;
+  color: var(--text-subtle);
+  font: 600 8.5px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.wt-ghost-sep::before,
+.wt-ghost-sep::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--border-default);
+}
+.wt-finished {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  margin-top: 3px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  font: 500 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+.wt-finished:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.wt-finished__count {
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-mono);
+}
+.wt-finished:focus-visible,
+.wt-view-all:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  scroll-margin: 4px;
+}
+.wt-view-all {
+  padding: 0 8px;
+}
 .clone-repo,
 .fork-repo {
   height: 32px;
@@ -7744,6 +7825,37 @@ button.agent-menu__item:hover {
 .refs-status--diverged,
 .refs-status--upstream_missing {
   color: var(--status-warning);
+}
+/* The Worktrees tab's Status cell. Finished is context, not a warning;
+   changes on disk are what keep a row in flight, so they take the hue. */
+.refs-status--wt-finished,
+.refs-status--wt-in-flight,
+.refs-status--wt-unpublished {
+  color: var(--text-muted);
+}
+.refs-status--wt-dirty {
+  color: var(--status-warning);
+}
+.refs-status--wt-ahead {
+  color: var(--success-text);
+}
+.refs-status--wt-missing {
+  color: var(--danger-text);
+}
+/* The Finished view's foot: what the bucket means, and Prune. */
+.refs-worktree-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font: 500 11px/1.4 var(--font-sans);
+}
+.refs-worktree-foot > span {
+  flex: 1;
+  min-width: 0;
 }
 .refs-row-action {
   border-color: var(--border-default);
