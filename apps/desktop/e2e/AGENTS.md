@@ -169,7 +169,10 @@ idle guest that the authorized workflow owns.
   dialog.
 - **Repos**: `fixtures/git-sandbox.ts` builds repos + linked worktrees with the
   system `git`, isolated from your global config (`GIT_CONFIG_GLOBAL=/dev/null`).
-  `cleanup()` (in `afterEach`) deletes the whole tree.
+  `cleanup()` (in `afterEach`) deletes the whole tree. A fixture that needs a
+  stale `origin/<branch>` publishes from a separate clone, never by pushing
+  this repo to the remote's path: Git 2.56 moves the tracking ref for that
+  push (`src/main/git/AGENTS.md`).
 - **Forges**: `fixtures/forge-fixture.ts` writes a mutable, file-backed provider
   fixture and `launchApp({ forgeFixturePath })` installs it at main's
   `ForgeRepoProvider` boundary. Renderer, IPC, services, real on-disk Git,
