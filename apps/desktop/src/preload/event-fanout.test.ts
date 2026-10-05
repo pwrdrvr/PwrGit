@@ -13,7 +13,7 @@ function setup() {
 }
 
 describe("event fan-out", () => {
-  it("holds one IPC listener however many subscriptions there are", () => {
+  it("holds one IPC listener however many subscriptions there are", async () => {
     const warnings: Error[] = [];
     const onWarning = (warning: Error) => warnings.push(warning);
     process.on("warning", onWarning);
@@ -26,6 +26,8 @@ describe("event fan-out", () => {
       expect(ipc.listenerCount(IPC)).toBe(1);
       for (const off of offs) off();
       expect(ipc.listenerCount(IPC)).toBe(1);
+      // process.emitWarning delivers on a later tick: listen past it.
+      await new Promise((resolve) => setImmediate(resolve));
     } finally {
       process.off("warning", onWarning);
     }
@@ -46,7 +48,11 @@ describe("event fan-out", () => {
     expect(repo).toHaveBeenCalledExactlyOnceWith({ repoId: "r1" });
     expect(repoToo).toHaveBeenCalledExactlyOnceWith({ repoId: "r1" });
     expect(worktree).not.toHaveBeenCalled();
+
     send("nobody:listens", {});
+    expect(repo).toHaveBeenCalledOnce();
+    expect(repoToo).toHaveBeenCalledOnce();
+    expect(worktree).not.toHaveBeenCalled();
   });
 
   it("stops delivering after unsubscribe, and unsubscribing twice is harmless", () => {
