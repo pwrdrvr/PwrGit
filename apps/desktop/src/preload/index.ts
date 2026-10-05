@@ -14,6 +14,7 @@ import {
   type WindowControlAction,
   type WindowFrameState
 } from "@pwrgit/shared";
+import { createEventFanout } from "./event-fanout";
 
 // Each window is bound to one profile, passed by the main process via
 // additionalArguments when the window is created.
@@ -31,6 +32,9 @@ const failOnce = new Set(
     .split(",")
     .filter((name) => injectableBootReads.has(name))
 );
+
+// One ipcRenderer listener for every server event, routed by channel.
+const subscribeEvent = createEventFanout(ipcRenderer, IPC_EVENT_CHANNEL);
 
 // The minimal, typed-at-the-renderer surface. Renderer-side helpers in
 // src/renderer/src/lib/pwrgit.ts add the command/event generics on top.
@@ -53,17 +57,7 @@ const api = {
     return ipcRenderer.invoke(IPC_DISPATCH_CHANNEL, name, req);
   },
 
-  on: (channel: string, handler: (payload: unknown) => void): (() => void) => {
-    const listener = (
-      _event: IpcRendererEvent,
-      eventChannel: string,
-      payload: unknown
-    ): void => {
-      if (eventChannel === channel) handler(payload);
-    };
-    ipcRenderer.on(IPC_EVENT_CHANNEL, listener);
-    return () => ipcRenderer.off(IPC_EVENT_CHANNEL, listener);
-  },
+  on: subscribeEvent,
 
   getAppMenuModel: (): Promise<AppMenuTopLevel[]> =>
     ipcRenderer.invoke(APP_MENU_MODEL_CHANNEL) as Promise<AppMenuTopLevel[]>,
