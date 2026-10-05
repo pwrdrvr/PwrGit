@@ -51,8 +51,9 @@ PwrAgnt and keyed by worktree. Rules that are easy to break:
   captured as a place is *left* (`capture`) and ride on that entry. A restore
   re-opens the commit after the worktree-change effect clears it, the
   `pendingTag` way.
-- **Diff and file details are overlays.** The first Back closes them without
-  spending an entry.
+- **A change request read in place, the diff and file details are
+  overlays.** The first Back closes the top one without spending an entry,
+  and a restore clears an open change request as every other selection does.
 - **Saved per profile** (`pwrgit.navigationHistory.<profileId>`), pruned of
   removed worktrees only once repos have loaded.
 - Chords (⌘[ ⌘], ⌥←/→ outside text fields, mouse 3/4) are bound once in App
