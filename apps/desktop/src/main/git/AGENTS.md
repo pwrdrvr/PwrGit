@@ -58,11 +58,12 @@ neither answer:
   writes another repository's refs. A second linked worktree is not separate,
   because worktrees share `refs/remotes`. Prefer this to rewinding the ref with
   `update-ref`, so the precondition a test asserts is a state Git produced.
-- **Product code that pushes to a URL refreshes the ref itself.**
-  `pushPlannedRefs` and the remote tag actions push to the remote's push URL.
-  The bundled Git predates 2.56 and Settings accepts any installed Git, so
-  `pushPlannedRefs` keeps its refetch. `remote.test.ts` pins that with two
-  remotes on one URL, which 2.56 declines to choose between.
+- **Product code that pushes a branch to a URL refreshes the ref itself.**
+  `pushPlannedRefs` pushes to the remote's push URL. The bundled Git predates
+  2.56 and Settings accepts any installed Git, so it keeps its refetch.
+  `remote.test.ts` pins that with two remotes on one URL, which 2.56 declines
+  to choose between. The remote tag actions also push to the URL but need no
+  refresh, because the default fetch refspec maps no tags.
 - **`createSystemGit` runs the bundled Git, not the one on PATH.**
   `gitExecutionEnvironment` puts the bundle first on PATH and sets
   `GIT_EXEC_PATH`. Fixture helpers that call `execFileSync("git")` run the PATH
