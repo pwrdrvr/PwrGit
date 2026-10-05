@@ -1,4 +1,4 @@
-name: Release Desktop (macOS universal + arm64 + Windows; Linux-gated)
+name: Release Desktop (macOS + Windows + native Linux)
 
 on:
   push:
@@ -15,6 +15,7 @@ on:
     # `labeled` starts the opt-in signing check. `synchronize` and `reopened`
     # keep it current while ci:windows-signing remains on the PR.
     types:
+      - opened
       - labeled
       - synchronize
       - reopened
@@ -112,6 +113,8 @@ jobs:
             apps/desktop/release-stage \
             .github/actions/select-xcode-for-actool \
             apps/desktop/scripts/release.mjs \
+            apps/desktop/scripts/package-linux.mjs \
+            apps/desktop/scripts/linux-release-artifacts.mjs \
             apps/desktop/scripts/mac-release-artifacts.mjs \
             apps/desktop/scripts/windows-release-artifacts.mjs \
             scripts/lib/cli-entrypoint.mjs \
@@ -206,10 +209,18 @@ jobs:
           retention-days: 30
 
   linux-build:
-    name: Validate Linux desktop build
-    runs-on: ubuntu-24.04
-    needs: prepare
-    timeout-minutes: 30
+    name: Package and validate Linux (${{ matrix.arch }})
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: none
@@ -217,18 +228,59 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.inputs.tag || github.ref }}
           persist-credentials: false
+
+      - name: Install native package and runtime tools
+        run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools cpio xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64 libsecret-1-0
 
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@e1bd1cc1494a20f0ee91dae622b0d2523b6fb53c # v1.4.0
         with:
           node-version: 24.x
 
-      # Linux distribution is not published yet, but a tag cannot create a
-      # release unless the desktop code builds successfully on Linux.
-      - name: Build desktop on Linux
-        run: pnpm run build
+      - name: Check release metadata
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: pnpm release:check
+
+      - name: Package native Linux formats
+        run: pnpm --filter @pwrgit/desktop package:linux
+
+      - name: Validate packaged metadata and native payloads
+        run: |
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          node apps/desktop/scripts/verify-linux-packages.mjs apps/desktop/release-stage/dist "$version"
+          cd apps/desktop/release-stage/dist
+          sha256sum --check PwrGit-linux-${{ matrix.arch }}-SHA256SUMS
+
+      - name: Install DEB and smoke test packaged runtime
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          package_arch=$(dpkg --print-architecture)
+          sudo apt-get install -y "$(pwd)/apps/desktop/release-stage/dist/PwrGit-$version-linux-$package_arch.deb"
+          test "$(dpkg-query -W -f='${Architecture}' pwrgit)" = "$package_arch"
+          mkdir -p apps/desktop/linux-smoke
+          xvfb-run -a node apps/desktop/scripts/linux-installed-smoke.mjs "$version" apps/desktop/linux-smoke
+          sudo apt-get remove -y pwrgit
+
+      - name: Upload Linux package validation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-validation-${{ matrix.arch }}
+          path: apps/desktop/linux-smoke
+          retention-days: 7
+
+      - name: Upload Linux release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-release-linux-${{ matrix.arch }}
+          path: apps/desktop/release-stage/dist/*
+          if-no-files-found: error
+          retention-days: 7
 
   windows-prepare:
     name: Prepare Windows signing input
@@ -461,6 +513,13 @@ jobs:
           name: windows-installer
           path: windows-dist
 
+      - name: Download Linux release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: desktop-release-linux-*
+          merge-multiple: true
+          path: linux-dist
+
       - name: Name Windows checksum manifest
         run: |
           set -euo pipefail
@@ -489,7 +548,7 @@ jobs:
             exit 1
           fi
 
-          node scripts/publish-desktop-release.mjs "$RELEASE_TAG" mac-dist windows-dist "$notes"
+          node scripts/publish-desktop-release.mjs "$RELEASE_TAG" mac-dist windows-dist linux-dist "$notes"
 
   distribution-audit-after:
     name: Inspect Winget and Homebrew after publication

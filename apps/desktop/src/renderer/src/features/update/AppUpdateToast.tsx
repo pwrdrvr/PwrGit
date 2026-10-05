@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { releaseNotesUrl, type AppUpdateCheckResult } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { dismissToastKey, showErrorToast, showInfoToast } from "../../lib/toast";
+import { ManualUpdateInstructions } from "./ManualUpdateInstructions";
 import { ReleaseNotesLink } from "./ReleaseNotesLink";
 import { useAppUpdateStatus } from "./useAppUpdateStatus";
 import { isUpdateCheckInProgress, updateProgressCopy } from "./update-progress";
@@ -99,6 +100,7 @@ export function AppUpdateToast() {
     downloadedVersion: version,
     restarting,
     restartError,
+    restartManualUpdate,
     restart,
     resetRestart,
     setStatus
@@ -154,11 +156,20 @@ export function AppUpdateToast() {
           return;
         }
         const copy = updateCheckToastCopy(result);
+        const manual = "manualUpdate" in result ? result.manualUpdate : undefined;
+        const manualProps = manual ? {
+          message: `${copy.message} ${manual.description}`,
+          ...(manual.command ? { detail: manual.command, copyText: manual.command, copyLabel: "Copy update command" } : {}),
+          showCopyAction: manual.command !== undefined,
+          sticky: true,
+          layout: "stacked" as const
+        } : {};
         if (copy.isError) {
           showErrorToast({
             key: UPDATE_CHECK_TOAST_KEY,
             title: copy.title,
-            message: copy.message
+            message: copy.message,
+            ...manualProps
           });
           return;
         }
@@ -166,6 +177,7 @@ export function AppUpdateToast() {
           key: UPDATE_CHECK_TOAST_KEY,
           title: copy.title,
           message: copy.message,
+          ...manualProps,
           ...(copy.notesUrl === undefined ? {} : { notesUrl: copy.notesUrl })
         });
       }),
@@ -264,7 +276,7 @@ export function AppUpdateToast() {
         </aside>
       )}
       {offered && (
-        <aside className="app-toast" role="status" aria-live="polite">
+        <aside className={restartManualUpdate ? "app-toast app-toast--stacked" : "app-toast"} role="status" aria-live="polite">
           <div className="app-toast__content">
             <p className="app-toast__eyebrow app-toast__eyebrow--info">
               Update ready
@@ -277,6 +289,7 @@ export function AppUpdateToast() {
                 {restartError}
               </p>
             )}
+            <ManualUpdateInstructions instructions={restartManualUpdate} />
           </div>
           <div className="app-toast__actions">
             <button

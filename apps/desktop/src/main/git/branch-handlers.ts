@@ -206,7 +206,7 @@ export function registerBranchHandlers(
       ...(req.limit === undefined ? {} : { limit: req.limit }),
       ...(openPrs === undefined
         ? {}
-        : { originPrs: openPrs.branchPrs(req.repoId).origin })
+        : { remotePrs: openPrs.branchPrs(req.repoId).remotes })
     });
   });
 

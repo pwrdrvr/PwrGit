@@ -23,8 +23,8 @@
  * universal binaries. release.mjs verifies the merged git with
  * `lipo -verify_arch x86_64 arm64` afterwards.
  *
- * Windows/Linux dugite packs run on a host whose platform+arch already match
- * the target, so only the better-sqlite3 staging applies there.
+ * Windows/Linux packs run on a host matching the target architecture. Linux
+ * also prunes the unused GCM runtime, as the Darwin packs do below.
  */
 
 import { spawnSync } from "node:child_process";
@@ -60,39 +60,43 @@ export default async function beforePack(context) {
     arch,
   });
 
-  if (context.electronPlatformName !== "darwin") {
-    return;
-  }
+  if (!["darwin", "linux"].includes(context.electronPlatformName)) return;
 
   const dugiteDir = join(appDir, "node_modules", "dugite");
-  const downloadScript = join(dugiteDir, "script", "download-git.js");
-  if (!existsSync(downloadScript)) {
-    throw new Error(`dugite download script missing at ${downloadScript}`);
+  if (context.electronPlatformName === "darwin") {
+    const downloadScript = join(dugiteDir, "script", "download-git.js");
+    if (!existsSync(downloadScript)) {
+      throw new Error(`dugite download script missing at ${downloadScript}`);
+    }
+
+    console.log(`  beforePack: staging dugite embedded git for darwin-${arch}`);
+    rmSync(join(dugiteDir, "git"), { recursive: true, force: true });
+
+    const result = spawnSync(process.execPath, [downloadScript], {
+      cwd: dugiteDir,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        npm_config_arch: arch,
+        // Cache the per-arch tarballs so the second universal build pass (and
+        // repeated local builds) don't re-download ~50 MB each time.
+        DUGITE_CACHE_DIR: process.env.DUGITE_CACHE_DIR ?? join(tmpdir(), "dugite-arch-cache"),
+      },
+    });
+    if (result.status !== 0) {
+      throw new Error(`dugite download-git failed for darwin-${arch} (exit ${result.status})`);
+    }
+
+    const gitBinary = join(dugiteDir, "git", "bin", "git");
+    if (!existsSync(gitBinary)) {
+      throw new Error(`dugite download completed but ${gitBinary} is missing`);
+    }
+
   }
 
-  console.log(`  beforePack: staging dugite embedded git for darwin-${arch}`);
-  rmSync(join(dugiteDir, "git"), { recursive: true, force: true });
-
-  const result = spawnSync(process.execPath, [downloadScript], {
-    cwd: dugiteDir,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      npm_config_arch: arch,
-      // Cache the per-arch tarballs so the second universal build pass (and
-      // repeated local builds) don't re-download ~50 MB each time.
-      DUGITE_CACHE_DIR: process.env.DUGITE_CACHE_DIR ?? join(tmpdir(), "dugite-arch-cache"),
-    },
-  });
-  if (result.status !== 0) {
-    throw new Error(`dugite download-git failed for darwin-${arch} (exit ${result.status})`);
-  }
-
-  const gitBinary = join(dugiteDir, "git", "bin", "git");
-  if (!existsSync(gitBinary)) {
-    throw new Error(`dugite download completed but ${gitBinary} is missing`);
-  }
-
+  // Linux x64 also includes GCM's unused .NET/UI runtime (the arm64 payload
+  // does not). Keep Linux on the same pruned Git/LFS surface as macOS instead
+  // of introducing extra embedded runtime licensing obligations.
   // Prune Git Credential Manager from the distribution. GCM is a
   // self-contained .NET deployment (~104 MB of *.dll, .NET runtime dylibs,
   // Avalonia UI, and per-culture resource dirs strewn through

@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  changeRequestLabel,
   changeRequestMatch,
-  changeRequestNoun,
   changeRequestNumberQuery,
-  changeRequestPluralLabel,
   type ChangeRequestEntry,
   type ChangeRequestList,
   type ChangeRequestLocation,
@@ -17,7 +14,13 @@ import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { CopyTarget } from "../shell/CopyTarget";
+import {
+  changeRequestKey,
+  changeRequestWords,
+  trackingRemote
+} from "./change-request-groups";
 import { PrChip } from "./PrChip";
+import { RemoteChip } from "./RemoteChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { copyText } from "../../lib/copyText";
 import { lastSegment } from "./repo-view";
@@ -28,32 +31,61 @@ import { lastSegment } from "./repo-view";
  * Opening asks main to re-list in the background (it declines inside its own
  * TTL), and `pr:openChanged` says when a re-read is worth doing. The first
  * paint is whatever the cache holds, so the tab never waits on a forge.
+ *
+ * `refreshOnOpen: false` is for a surface that mounts with the repo row (the
+ * sidebar section): expanding a repo already re-lists through the repo sweep,
+ * at the scheduled TTL, so a second ask at the user TTL would spend a forge
+ * call per expand for nothing. `refresh()` is the explicit ask — it waits, so
+ * its caller can show the work and knows when it is over.
+ *
+ * The last answer per repository is kept for the session (`lastLists`), so a
+ * surface that mounts again — a repo collapsed and re-expanded — paints the
+ * list it had at once instead of growing into it a moment later. `relocateKey`
+ * re-reads when something the locations depend on changed without a
+ * `pr:openChanged` (a worktree created or removed).
  */
-export function useChangeRequestList(repoId: string): {
+/** Each repository's last answer this session, for an instant repaint. */
+const lastLists = new Map<string, ChangeRequestList>();
+
+export function useChangeRequestList(
+  repoId: string,
+  {
+    refreshOnOpen = true,
+    relocateKey = ""
+  }: { refreshOnOpen?: boolean; relocateKey?: string } = {}
+): {
   list: ChangeRequestList | null;
   error: string | null;
+  refresh: () => Promise<void>;
 } {
-  const [list, setList] = useState<ChangeRequestList | null>(null);
+  const [list, setList] = useState<ChangeRequestList | null>(
+    () => lastLists.get(repoId) ?? null
+  );
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
 
   const load = useCallback(
-    async (refresh: boolean): Promise<void> => {
+    async (refresh: boolean, wait = false): Promise<void> => {
       const stamp = ++generation.current;
-      const result = await dispatch("pr:openList", { repoId, refresh });
+      const result = await dispatch("pr:openList", {
+        repoId,
+        refresh,
+        ...(wait ? { wait } : {})
+      });
       if (stamp !== generation.current) return;
       if (!result.ok) {
         setError(result.error.message.split("\n")[0] ?? "Load failed");
         return;
       }
       setError(null);
+      lastLists.set(repoId, result.value);
       setList(result.value);
     },
     [repoId]
   );
 
   useEffect(() => {
-    void load(true);
+    void load(refreshOnOpen);
     const stop = subscribe("pr:openChanged", (event) => {
       if (event.repoId === repoId) void load(false);
     });
@@ -61,9 +93,11 @@ export function useChangeRequestList(repoId: string): {
       generation.current += 1;
       stop();
     };
-  }, [load, repoId]);
+  }, [load, repoId, refreshOnOpen, relocateKey]);
 
-  return { list, error };
+  const refresh = useCallback(() => load(true, true), [load]);
+
+  return { list, error, refresh };
 }
 
 /** Matched entries, the one the query names by number first. */
@@ -159,7 +193,7 @@ function locationTag(location: ChangeRequestLocation): {
       };
     case "remote":
       return {
-        text: "origin",
+        text: trackingRemote(location),
         className: "is-remote",
         hint: `Fetched as ${location.fullName.replace(/^refs\/remotes\//, "")}`
       };
@@ -167,7 +201,7 @@ function locationTag(location: ChangeRequestLocation): {
       return {
         text: "not fetched",
         className: "is-unfetched",
-        hint: "On origin, not fetched yet. Switching fetches it first."
+        hint: `On ${location.remote}, not fetched yet. Switching fetches it first.`
       };
     case "fork":
       return {
@@ -181,7 +215,7 @@ function locationTag(location: ChangeRequestLocation): {
       return {
         text: "branch gone",
         className: "is-missing",
-        hint: "Its branch no longer exists on origin"
+        hint: "Its branch no longer exists"
       };
   }
 }
@@ -208,19 +242,47 @@ const toIso = (ms: number | undefined): string | null =>
   ms === undefined ? null : new Date(ms).toISOString();
 
 /**
- * Bring a change request's head within reach of `git switch`: a fetch for an
- * unfetched or fork head, nothing for one already here. Null when there is
- * nothing to switch to (and the reason has been reported).
+ * The New worktree arguments for a head `reachableLocation` brought within
+ * reach: a fetched remote head starts a new branch from its tracking ref, a
+ * local branch is checked out as itself. Null where there is no branch to
+ * check out (it is in a worktree already, or gone).
  */
-async function reachableLocation(
+export function worktreeArgsFor(
+  location: ChangeRequestLocation
+): { branch: string; newBranch: boolean; startPoint?: string } | null {
+  switch (location.kind) {
+    case "remote":
+      return { branch: location.branch, newBranch: true, startPoint: location.fullName };
+    case "local":
+    case "unfetched":
+      return { branch: location.branch, newBranch: false };
+    case "fork":
+      return { branch: location.localBranch, newBranch: false };
+    case "worktree":
+    case "missing":
+      return null;
+  }
+}
+
+/**
+ * Bring a change request's head within reach of `git switch`, as git sees it
+ * now: a fetch for an unfetched or fork head, nothing for one already here.
+ * Null when there is nothing to switch to (and the reason has been reported).
+ */
+export async function reachableLocation(
   repoId: string,
   entry: ChangeRequestEntry
 ): Promise<ChangeRequestLocation | null> {
   const { location } = entry;
-  if (location.kind !== "unfetched" && location.kind !== "fork") return location;
+  // Everything else is re-located against git first: a list locates heads
+  // from the branch index, which can trail a terminal's fetch or delete, and
+  // this answer is about to become a `git worktree add`. A head already here
+  // costs no fetch; main returns it as-is.
+  if (location.kind === "worktree") return location;
   const result = await dispatch("pr:fetchHead", {
     repoId,
-    number: entry.pr.number
+    number: entry.pr.number,
+    forgeRepo: entry.forgeRepo
   });
   if (result.ok) return result.value;
   showErrorToast({
@@ -276,9 +338,12 @@ export function ChangeRequestTable({
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
-  const [fetching, setFetching] = useState<number | null>(null);
-  const noun = changeRequestNoun(forge);
-  const plural = changeRequestPluralLabel(forge).toLowerCase();
+  const [fetching, setFetching] = useState<string | null>(null);
+  const words = changeRequestWords(list, forge);
+  const noun = words.noun;
+  // Which remote listed a row says something only when more than one did.
+  const manyRemotes = list.remotes.length > 1;
+  const plural = words.plural.toLowerCase();
   const looked =
     lookup.state === "done" && lookup.entry !== null ? lookup.entry : null;
   const rows = looked === null ? matches : [looked, ...matches];
@@ -289,8 +354,8 @@ export function ChangeRequestTable({
     verb: "switch" | "worktree"
   ): Promise<void> => {
     if (busy) return;
-    const rowKey = `pr:${entry.pr.number}`;
-    setFetching(entry.pr.number);
+    const rowKey = `pr:${changeRequestKey(entry)}`;
+    setFetching(rowKey);
     const location = await reachableLocation(repoId, entry);
     setFetching(null);
     if (location === null) return;
@@ -305,11 +370,9 @@ export function ChangeRequestTable({
       await onSwitch(rowKey, branch);
       return;
     }
-    if (location.kind === "remote") {
-      onCreateWorktree(branch, true, location.fullName);
-    } else {
-      onCreateWorktree(branch, false);
-    }
+    const args = worktreeArgsFor(location);
+    if (args === null) return;
+    onCreateWorktree(args.branch, args.newBranch, args.startPoint);
     onClose();
   };
 
@@ -326,7 +389,7 @@ export function ChangeRequestTable({
   return (
     <div className="refs-table refs-pr-table">
       <div className="refs-table__header refs-pr-table__row">
-        <span>{changeRequestLabel(forge)}</span>
+        <span>{words.label}</span>
         <span>Author</span>
         <span>Checks</span>
         <span>Updated</span>
@@ -335,7 +398,7 @@ export function ChangeRequestTable({
       {rows.map((entry) => {
         const { pr, location } = entry;
         const tag = locationTag(location);
-        const rowKey = `pr:${pr.number}`;
+        const rowKey = `pr:${changeRequestKey(entry)}`;
         const isLookup = entry === looked;
         const updated = toIso(pr.updatedAt ?? pr.mergedAt ?? pr.closedAt ?? pr.createdAt);
         const unreachable =
@@ -345,14 +408,14 @@ export function ChangeRequestTable({
           location.kind === "missing"
             ? `its branch no longer exists`
             : "this forge publishes no ref to fetch a fork's head by";
-        const pending = fetching === pr.number;
+        const pending = fetching === rowKey;
         const switchingThis = switching === rowKey;
         const quiet = pr.state !== "open";
         const head = pr.headRefName ?? (location.kind === "fork" ? location.localBranch : "—");
         return (
           <div
             className={`refs-table__row refs-pr-table__row${isLookup ? " is-lookup" : ""}`}
-            key={`${isLookup ? "lookup" : "open"}:${pr.number}`}
+            key={`${isLookup ? "lookup" : "open"}:${changeRequestKey(entry)}`}
             data-refs-row=""
             tabIndex={-1}
           >
@@ -363,6 +426,13 @@ export function ChangeRequestTable({
                   {pr.title}
                 </strong>
                 <small className="refs-pr-where">
+                  {manyRemotes && (
+                    <RemoteChip
+                      remote={entry.remote}
+                      forge={pr.forge ?? forge}
+                      tip={tip}
+                    />
+                  )}
                   <span
                     className={`refs-pr-loc ${tag.className}`}
                     {...hoverTooltip(tip, tag.hint)}

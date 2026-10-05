@@ -381,3 +381,29 @@ describe("AppUpdateToast", () => {
     expect(button("Release notes")).toBeUndefined();
   });
 });
+
+it("keeps Linux fallback instructions visible and copies only the runnable command", async () => {
+  await mount({ status: "idle" });
+  const command = 'curl -fL -o "PwrGit-linux-x64.deb" "https://example.test/PwrGit.deb" && sudo apt install "./PwrGit-linux-x64.deb"';
+  await emit("app:updateCheckResult", { status: "error", message: "Download failed", manualUpdate: {
+    description: "Close PwrGit and run this command in a terminal.", command
+  } });
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({ sticky: true, copyLabel: "Copy update command", copyText: command, detail: command });
+  expect(toasts[0]?.message).toContain("Close PwrGit");
+});
+
+it("renders a failed installation's manual command next to the retry offer", async () => {
+  await mount({ status: "downloaded", version: "1.2.3" });
+  dispatchMock.mockResolvedValueOnce(ok({ status: "error", message: "Not authorized", manualUpdate: {
+    description: "Close PwrGit and install manually.", command: "sudo apt install ./fixture.deb"
+  } }));
+  await act(async () => { button("Restart")?.click(); });
+  expect(container.textContent).toContain("Not authorized");
+  expect(container.textContent).toContain("sudo apt install ./fixture.deb");
+  expect(button("Restart")?.disabled).toBe(false);
+  const clipboard = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboard } });
+  await act(async () => { button("Copy update command")?.click(); });
+  expect(clipboard).toHaveBeenCalledWith("sudo apt install ./fixture.deb");
+});

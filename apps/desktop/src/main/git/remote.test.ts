@@ -1734,13 +1734,18 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
     });
     // #6 heads page-06 on origin; the fork carries page-01 and page-02 under
     // the same names, and a same-named branch there is not origin's PR.
-    const originPrs = new Map([
-      ["feature/page-06", pr(6, "feature/page-06")],
-      ["feature/page-01", pr(1, "feature/page-01")]
+    const remotePrs = new Map([
+      [
+        "origin",
+        new Map([
+          ["feature/page-06", pr(6, "feature/page-06")],
+          ["feature/page-01", pr(1, "feature/page-01")]
+        ])
+      ]
     ]);
     const byNumber = await listRemoteBranchPage(systemGit, fixture.local, {
       query: "6",
-      originPrs
+      remotePrs
     });
     expect(byNumber.ok).toBe(true);
     if (!byNumber.ok) return;
@@ -1752,7 +1757,7 @@ describe("listRemoteBranchPage (paged remote refs)", () => {
 
     const byTitle = await listRemoteBranchPage(systemGit, fixture.local, {
       query: "console rebuild",
-      originPrs
+      remotePrs
     });
     expect(byTitle.ok).toBe(true);
     if (!byTitle.ok) return;

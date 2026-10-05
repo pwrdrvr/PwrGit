@@ -232,12 +232,18 @@ linux:
   icon: build/icon.png
   executableName: pwrgit
   category: Development
-  maintainer: PwrDrvr LLC
+  maintainer: PwrDrvr LLC <harold@pwrdrvr.com>
   synopsis: Cross-platform desktop git client
   description: PwrGit is a cross-platform desktop git client in the Pwr family.
   artifactName: "${productName}-${version}-linux-${arch}.${ext}"
   target:
     - target: deb
+      arch: [x64, arm64]
+    - target: rpm
+      arch: [x64, arm64]
+    - target: pacman
+      arch: [x64, arm64]
+    - target: tar.gz
       arch: [x64, arm64]
   desktop:
     entry:
@@ -246,7 +252,14 @@ linux:
       StartupWMClass: PwrGit
 
 deb:
+  packageName: pwrgit
   priority: optional
+
+rpm:
+  packageName: pwrgit
+
+pacman:
+  packageName: pwrgit
 
 # GitHub Releases are the canonical desktop artifact channel. Every
 # CI-published build is born as a GitHub Pre-release; promotion to Latest is a

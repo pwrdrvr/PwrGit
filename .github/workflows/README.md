@@ -53,7 +53,7 @@ repositories after rotation. See the distribution runbook for exact checks.
 |---|---|---|
 | `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + macOS + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
-| `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on Linux build, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. Labeled same-repo PRs run the real Windows prepare/sign/Authenticode path and upload workflow artifacts only. |
+| `release.yml` | `v*` tag push, manual dispatch with a tag, or PR activity | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on native Linux package/runtime validation, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. Same-repo PRs validate Linux packages on both CPUs and upload artifacts only; `ci:windows-signing` additionally runs the real Windows signing path. |
 
 ## macOS desktop E2E
 
@@ -156,7 +156,7 @@ Publication first creates a draft with changelog notes. It uploads the signed
 assets one at a time and compares each GitHub asset's SHA-256 digest and size
 with the downloaded workflow artifact. A lost upload response can report a 422
 after GitHub accepted the bytes; the publication job reconciles that asset and
-continues. A rerun resumes a matching draft, and only a complete 14-asset
+continues. A rerun resumes a matching draft, and only a complete 34-asset
 inventory becomes a visible Pre-release. A conflicting asset or partial
 published release fails without replacing assets. Recovery from a failed run
 can use its signed workflow artifacts with the updated publisher, while they
@@ -284,3 +284,18 @@ Binary and signing tests establish UUID separation and correct ordering; they
 do not establish how existing macOS permission decisions migrate. A signed
 upgrade and local-network permission test alongside sibling apps remains a
 manual release validation task. No installed-app mutation is part of this fix.
+
+## Native Linux release packages
+
+`linux-build` runs unprivileged packaging on `ubuntu-24.04` (x64) and
+`ubuntu-24.04-arm` (arm64), including same-repo PRs. It uses the worktree's
+pinned dependencies and separate per-format packaging passes for DEB, RPM,
+pacman and tar.gz. All native packages embed the corresponding updater marker;
+portable archives carry none. Both manifests and SHA-256 manifests are generated
+from verified final bytes. Installed DEB runtime checks use disposable Xvfb
+sessions, isolated app data, the shipped sandbox, SQLite and bundled Git/LFS.
+No release job publishes until both Linux runners and both signing jobs pass.
+The complete inventory has 34 assets. Linux package files are not signed;
+updates verify manifest SHA-512, and downloadable SHA-256 sums include aliases.
+See the [runbook](../../docs/desktop-release-runbook.md) for filenames, update
+behavior, distro smoke checks and the first-publication boundary.

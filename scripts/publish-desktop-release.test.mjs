@@ -12,19 +12,23 @@ function fixture() {
   tempDirs.push(root);
   const macDir = join(root, "mac");
   const windowsDir = join(root, "windows");
+  const linuxDir = join(root, "linux");
+  mkdirSync(linuxDir);
   mkdirSync(macDir);
   mkdirSync(windowsDir);
   for (const name of expectedAssetNames(tag)) {
     const directory = name.endsWith(".exe") || name.includes("windows") || name === "latest.yml"
-      ? windowsDir : macDir;
+      ? windowsDir : name.includes("linux") ? linuxDir : macDir;
     const original = name === "PwrGit.dmg" ? "PwrGit-0.18.0-universal.dmg"
       : name === "PwrGit-arm64.dmg" ? "PwrGit-0.18.0-arm64.dmg"
         : name === "PwrGit.Setup.exe" ? "PwrGit-0.18.0-windows-x64-setup.exe" : name;
-    writeFileSync(join(directory, name), original);
+    const linuxOriginal = name.startsWith("PwrGit-linux-") && !name.includes("SHA256SUMS")
+      ? name.replace("PwrGit-linux-x64.deb", "PwrGit-0.18.0-linux-amd64.deb").replace("PwrGit-linux-x64.rpm", "PwrGit-0.18.0-linux-x86_64.rpm").replace("PwrGit-linux-arm64.rpm", "PwrGit-0.18.0-linux-aarch64.rpm").replace("PwrGit-linux-arm64.pacman", "PwrGit-0.18.0-linux-aarch64.pacman").replace("PwrGit-linux-", "PwrGit-0.18.0-linux-") : original;
+    writeFileSync(join(directory, name), linuxOriginal);
   }
   const notesFile = join(root, "notes.md");
   writeFileSync(notesFile, "Fixed release publishing.\n");
-  return { tag, macDir, windowsDir, notesFile };
+  return { tag, macDir, windowsDir, linuxDir, notesFile };
 }
 
 afterEach(() => {
@@ -78,7 +82,7 @@ function fakeGh(assets, {
 describe("desktop release publication", () => {
   test("filters paginated release history before buffering the response", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { existing: true, published: true });
     remote.getRelease().assets.push(...assets.map(({ name, digest, size }) => ({ name, digest, size, state: "uploaded" })));
     await publishRelease({ ...input, gh: remote.gh });
@@ -102,30 +106,30 @@ describe("desktop release publication", () => {
 
   test("reconciles a 422 after GitHub accepted an upload, then verifies and publishes", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { uploadErrorAfterAccept: true });
     await publishRelease({ ...input, gh: remote.gh });
     expect(remote.getRelease().draft).toBe(false);
-    expect(remote.getRelease().assets).toHaveLength(14);
-    expect(remote.calls.filter((args) => args[1] === "upload")).toHaveLength(14);
+    expect(remote.getRelease().assets).toHaveLength(34);
+    expect(remote.calls.filter((args) => args[1] === "upload")).toHaveLength(34);
     expect(remote.calls.filter((args) => args[1] === "edit")).toHaveLength(1);
   });
 
   test("waits for a created draft to appear before uploading signed assets", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { hiddenReadsAfterCreate: 3 });
     const delays = [];
     await publishRelease({ ...input, gh: remote.gh, delay: async (ms) => { delays.push(ms); } });
     expect(delays).toEqual([500, 1000, 2000]);
     expect(remote.calls.filter((args) => args[1] === "create")).toHaveLength(1);
-    expect(remote.getRelease().assets).toHaveLength(14);
+    expect(remote.getRelease().assets).toHaveLength(34);
     expect(remote.getRelease().draft).toBe(false);
   });
 
   test("reconciles a lost create response after the draft becomes visible", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { createErrorAfterAccept: true, hiddenReadsAfterCreate: 2 });
     const delays = [];
     await publishRelease({ ...input, gh: remote.gh, delay: async (ms) => { delays.push(ms); } });
@@ -136,7 +140,7 @@ describe("desktop release publication", () => {
 
   test("stops after a bounded wait without uploading or publishing an invisible draft", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { hiddenReadsAfterCreate: 99 });
     const delays = [];
     await expect(publishRelease({ ...input, gh: remote.gh, delay: async (ms) => { delays.push(ms); } }))
@@ -149,7 +153,7 @@ describe("desktop release publication", () => {
 
   test("resumes a draft and refuses an asset whose digest differs", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { existing: true });
     remote.getRelease().assets.push({ name: assets[0].name, size: assets[0].size, digest: "sha256:wrong", state: "uploaded" });
     await expect(publishRelease({ ...input, gh: remote.gh })).rejects.toThrow("differs from signed input");
@@ -158,19 +162,19 @@ describe("desktop release publication", () => {
 
   test("resumes a matching draft without replacing verified assets", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { existing: true });
     remote.getRelease().assets.push({ ...assets[0], state: "uploaded" });
     await publishRelease({ ...input, gh: remote.gh });
     expect(remote.calls.filter((args) => args[1] === "create")).toHaveLength(0);
-    expect(remote.calls.filter((args) => args[1] === "upload")).toHaveLength(13);
-    expect(remote.getRelease().assets).toHaveLength(14);
+    expect(remote.calls.filter((args) => args[1] === "upload")).toHaveLength(33);
+    expect(remote.getRelease().assets).toHaveLength(34);
     expect(remote.getRelease().draft).toBe(false);
   });
 
   test("rejects a published release with missing assets", async () => {
     const input = fixture();
-    const assets = await collectAssets(tag, input.macDir, input.windowsDir);
+    const assets = await collectAssets(tag, input.macDir, input.windowsDir, input.linuxDir);
     const remote = fakeGh(assets, { existing: true, published: true });
     await expect(publishRelease({ ...input, gh: remote.gh })).rejects.toThrow("Release is missing assets");
     expect(remote.calls.some((args) => args[1] === "upload" || args[1] === "edit")).toBe(false);

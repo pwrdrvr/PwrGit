@@ -42,10 +42,11 @@ function seed(name: string, repo: string, branch: string): string {
   );
   db.prepare(
     `INSERT INTO repo_open_pr
-       (repo_id, number, url, title, state, is_draft, forge, host, repo_path, head_ref, base_ref)
-     VALUES (?, 106, ?, ?, 'open', 0, 'github', 'github.com', ?, ?, 'main')`
+       (repo_id, forge_repo, number, url, title, state, is_draft, forge, host, repo_path, head_ref, base_ref)
+     VALUES (?, ?, 106, ?, ?, 'open', 0, 'github', 'github.com', ?, ?, 'main')`
   ).run(
     repoId,
+    `github.com/${name}/${repo}`.toLowerCase(),
     `https://github.com/${name}/${repo}/pull/106`,
     `feat: ${name} pull request`,
     `${name}/${repo}`,
@@ -151,8 +152,8 @@ describe("searchAll profile scope", () => {
     );
     const pr = db.prepare(
       `INSERT INTO repo_open_pr
-         (repo_id, number, url, title, state, is_draft, forge, host, repo_path, head_ref, base_ref)
-       VALUES (?, ?, ?, ?, 'open', 0, 'github', 'github.com', 'x/y', ?, 'main')`
+         (repo_id, forge_repo, number, url, title, state, is_draft, forge, host, repo_path, head_ref, base_ref)
+       VALUES (?, 'github.com/x/y', ?, ?, ?, 'open', 0, 'github', 'github.com', 'x/y', ?, 'main')`
     );
     for (let n = 0; n < 200; n++) {
       branch.run(

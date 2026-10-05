@@ -553,9 +553,14 @@ export function resolveUpdateSelection(
   };
 }
 
+export type AppManualUpdateInstructions = {
+  description: string;
+  command?: string;
+};
+
 export type AppUpdateCheckResult =
-  | { status: "skipped"; reason: string }
-  | { status: "error"; message: string }
+  | { status: "skipped"; reason: string; manualUpdate?: AppManualUpdateInstructions }
+  | { status: "error"; message: string; manualUpdate?: AppManualUpdateInstructions }
   | { status: "checking" }
   | { status: "no-update"; version: string }
   | { status: "downloaded"; version: string }
@@ -574,7 +579,7 @@ export type AppUpdateDownloadProgress = {
 
 export type AppUpdateStatus =
   | { status: "idle" }
-  | { status: "skipped"; reason: string }
+  | { status: "skipped"; reason: string; manualUpdate?: AppManualUpdateInstructions }
   | { status: "checking" }
   | { status: "no-update"; version: string }
   | { status: "available"; version: string }
@@ -584,7 +589,7 @@ export type AppUpdateStatus =
    *  is not `available` (which promises a download is under way) and not an
    *  `error` (nothing failed) — it stands until the next check. */
   | { status: "canceled"; version: string }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; manualUpdate?: AppManualUpdateInstructions };
 
 /** Whether a download was actually running to stop. `false` is the ordinary
  *  race — the download finished while the click was in flight — not a fault. */
@@ -592,7 +597,7 @@ export type AppUpdateCancelResult = { canceled: boolean };
 
 export type AppUpdateInstallResult =
   | { status: "restarting" }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; manualUpdate?: AppManualUpdateInstructions };
 
 export type AppUpdateReleaseInfo = {
   version?: string;
@@ -1128,28 +1133,38 @@ export interface Commands {
    * with where its head lives in this checkout. `refresh` also re-lists them
    * from the forge in the background — throttled like every other PR read —
    * and `pr:openChanged` announces a list that moved.
+   *
+   * `wait` makes the refresh part of the answer instead: the read waits for it
+   * and returns the list it left behind. That is for a control that asked for
+   * the refresh and needs to know when it is over (the sidebar's ⟳); a read
+   * that paints should never set it.
    */
   "pr:openList": {
-    req: { repoId: string; refresh?: boolean };
+    req: { repoId: string; refresh?: boolean; wait?: boolean };
     res: ChangeRequestList;
   };
   /**
    * One change request by number, open or not: the numbered query the open
    * list could not answer (a merged PR, or one opened since the last list).
    * Null when the forge has no such number, or cannot be asked.
+   *
+   * `forgeRepo` (`ChangeRequestEntry.forgeRepo`) says whose #N is meant when
+   * a checkout lists more than one forge repository; without it, the remote
+   * listing that number answers, else `origin`.
    */
   "pr:lookup": {
-    req: { repoId: string; number: number };
+    req: { repoId: string; number: number; forgeRepo?: string };
     res: ChangeRequestEntry | null;
   };
   /**
    * Bring a change request's head into this checkout so the branch verbs can
-   * take over: a same-repository head is fetched into origin's remote-tracking
-   * ref, a fork's through the forge's change-request ref into a new local
-   * branch. Answers where the head now lives.
+   * take over: a head in a repository this checkout has a remote on is
+   * fetched into that remote's tracking ref, any other fork's through the
+   * forge's change-request ref into a new local branch. Answers where the
+   * head now lives. `forgeRepo` as for `pr:lookup`.
    */
   "pr:fetchHead": {
-    req: { repoId: string; number: number };
+    req: { repoId: string; number: number; forgeRepo?: string };
     res: ChangeRequestLocation;
   };
   /**

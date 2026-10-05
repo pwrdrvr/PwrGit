@@ -20,6 +20,8 @@ const logMainMock = vi.fn();
 
 const addAuthHeaderMock = vi.fn();
 
+const packageBackend = vi.hoisted(() => ({ format: undefined as string | undefined }));
+
 const autoUpdaterMock = {
   allowPrerelease: false,
   autoDownload: false,
@@ -31,19 +33,24 @@ const autoUpdaterMock = {
   on: vi.fn((event: string, handler: UpdateEventHandler) => {
     updateEventHandlers.set(event, handler);
   }),
+  once: vi.fn((event: string, handler: UpdateEventHandler) => { updateEventHandlers.set(`once:${event}`, handler); }),
+  removeListener: vi.fn((event: string) => { updateEventHandlers.delete(`once:${event}`); }),
   quitAndInstall: vi.fn(),
   setFeedURL: setFeedURLMock
 };
 
 // Mutable so a test can take the unpackaged path — dev and e2e launches run
 // unpackaged, and must not reach GitHub.
-const electronMock = vi.hoisted(() => ({ app: { isPackaged: true, getPath: vi.fn() } }));
+const electronMock = vi.hoisted(() => ({ app: { isPackaged: true, getPath: vi.fn(), quit: vi.fn() } }));
 
 vi.mock("electron", () => electronMock);
 
 vi.mock("electron-updater", () => ({
   default: {
-    autoUpdater: autoUpdaterMock
+    autoUpdater: autoUpdaterMock,
+    DebUpdater: class { static [Symbol.hasInstance]() { return packageBackend.format === "deb"; } },
+    RpmUpdater: class { static [Symbol.hasInstance]() { return packageBackend.format === "rpm"; } },
+    PacmanUpdater: class { static [Symbol.hasInstance]() { return packageBackend.format === "pacman"; } }
   }
 }));
 
@@ -186,6 +193,8 @@ describe("auto updater", () => {
     }));
     electronMock.app.isPackaged = true;
     setPlatform("darwin");
+    packageBackend.format = undefined;
+    electronMock.app.quit.mockReset();
     process.env.NODE_ENV = "production";
     delete process.env.GH_TOKEN;
     delete process.env.GITHUB_TOKEN;
@@ -583,7 +592,85 @@ describe("auto updater", () => {
     expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(true);
   });
 
-  it("skips electron-updater on Linux package builds", async () => {
+  describe("native Linux updates", () => {
+    const originalArch = process.arch;
+    afterEach(() => Object.defineProperty(process, "arch", { configurable: true, value: originalArch }));
+    function configureLinux(format: string, arch = "x64") {
+      setPlatform("linux");
+      Object.defineProperty(process, "arch", { configurable: true, value: arch });
+      packageBackend.format = format;
+      const packageArch = arch === "x64" ? (format === "deb" ? "amd64" : format === "rpm" ? "x86_64" : "x64")
+        : format === "deb" ? "arm64" : "aarch64";
+      mockGitHubReleases([githubRelease("v1.1.0", { assets: [
+        { name: arch === "x64" ? "latest-linux.yml" : "latest-linux-arm64.yml", state: "uploaded" },
+        { name: `PwrGit-1.1.0-linux-${packageArch}.${format}`, state: "uploaded" }
+      ] })]);
+    }
+    it.each(["deb", "rpm", "pacman"])("checks %s packages and keeps ordinary quits free of installation", async format => {
+      configureLinux(format);
+      const updater = await startUpdater();
+      expect((await updater.checkForAppUpdatesNow()).status).toBe("available");
+      expect(checkForUpdatesMock).toHaveBeenCalledOnce();
+      expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
+      updater.readAppUpdateStatus();
+      updater.reconcileDownloadedUpdateEligibility();
+      expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
+      const slots = await updater.readAppUpdateReleaseVersions();
+      expect(slots.stable.latest.version).toBe("v1.1.0");
+    });
+    it("returns copyable instructions for a failed feed read", async () => {
+      configureLinux("deb");
+      fetchMock.mockRejectedValue(new Error("network unavailable"));
+      const updater = await startUpdater();
+      const result = await updater.checkForAppUpdatesNow();
+      expect(result).toMatchObject({ status: "error", manualUpdate: {
+        description: expect.stringContaining("latest stable release"),
+        command: expect.stringContaining("sudo apt install")
+      } });
+    });
+    it("keeps services running after authorization failure, then drains and resumes an accepted install", async () => {
+      configureLinux("deb");
+      const flush = createDeferred<void>();
+      const beforeQuit = vi.fn(() => flush.promise);
+      const updater = await startUpdater(beforeQuit);
+      await updater.checkForAppUpdatesNow();
+      updateEventHandlers.get("update-downloaded")?.({ version: "1.1.0" });
+      autoUpdaterMock.quitAndInstall.mockImplementationOnce(() => {
+        const error = new Error("Not authorized");
+        (updateEventHandlers.get("once:error") as unknown as (error: Error) => void)(error);
+      });
+      expect(await updater.installDownloadedAppUpdate()).toMatchObject({ status: "error", manualUpdate: {
+        command: expect.stringContaining("download/v1.1.0/PwrGit-1.1.0-linux-amd64.deb")
+      } });
+      expect(beforeQuit).not.toHaveBeenCalled();
+      expect(electronMock.app.quit).not.toHaveBeenCalled();
+      expect(updater.readAppUpdateStatus().status).toBe("downloaded");
+      const installing = updater.installDownloadedAppUpdate();
+      await delayTicks();
+      expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledTimes(2);
+      expect(beforeQuit).toHaveBeenCalledOnce();
+      expect(electronMock.app.quit).not.toHaveBeenCalled();
+      flush.resolve();
+      expect(await installing).toEqual({ status: "restarting" });
+      expect(electronMock.app.quit).toHaveBeenCalledOnce();
+      expect(autoUpdaterMock.autoInstallOnAppQuit).toBe(false);
+    });
+    it.each(["deb", "rpm", "pacman"].flatMap(format => ["x64", "arm64"].map(arch => [format, arch])))(
+      "selects only a matching %s/%s manifest and package", async (format, arch) => {
+        configureLinux(format, arch);
+        const updater = await importAutoUpdater();
+        const matching = await fetchMock().then((response: { json: () => Promise<unknown[]> }) => response.json());
+        const releases = matching as Parameters<typeof updater.selectAppUpdateReleases>[0];
+        const release = releases[0]!;
+        expect(updater.selectAppUpdateReleases(releases).stableLatest?.tag_name).toBe("v1.1.0");
+        for (const assets of [macUpdateAssets("1.1.0"), release.assets!.slice(1), release.assets!.slice(0, 1),
+          [{ name: "latest-linux-armv7l.yml", state: "uploaded" }, { name: "PwrGit-1.1.0-linux-armv7l.deb", state: "uploaded" }]
+        ]) expect(updater.selectAppUpdateReleases([{ ...release, assets }]).stableLatest).toBeUndefined();
+      }
+    );
+  });
+
+  it("offers manual instructions for unsupported Linux builds", async () => {
     setPlatform("linux");
     const updater = await startUpdater();
     const manualResult = await updater.checkForAppUpdatesNow();
@@ -592,7 +679,8 @@ describe("auto updater", () => {
     expect(autoUpdaterMock.on).not.toHaveBeenCalled();
     expect(manualResult).toEqual({
       status: "skipped",
-      reason: "Linux builds are updated by installing a newer package."
+      reason: "This Linux build requires a manual update.",
+      manualUpdate: { description: expect.stringContaining("replace the extracted directory") }
     });
   });
 
@@ -791,16 +879,10 @@ describe("auto updater", () => {
       expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
     });
 
-    it("answers for the platform before offering a Linux preview", async () => {
+    it("offers the dev preview on Linux before looking for a packaged backend", async () => {
       setPlatform("linux");
       const updater = await importAutoUpdater();
-
-      // Linux never offers an in-app update in any build, so a dev preview
-      // there would demo UI that platform cannot reach.
-      expect(await runDevCheck(updater, "menu")).toEqual({
-        status: "skipped",
-        reason: "Linux builds are updated by installing a newer package."
-      });
+      expect(await runDevCheck(updater, "menu")).toEqual({ status: "downloaded", version: "420.0.0" });
     });
   });
 

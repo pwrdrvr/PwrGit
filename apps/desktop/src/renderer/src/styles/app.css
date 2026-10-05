@@ -1887,6 +1887,254 @@ a.forge-chip:focus-visible {
   color: var(--accent-bright);
 }
 
+/* ---- Pull / merge requests (RepoChangeRequestSection) ----
+
+   Two lines per row, because a PR is named by its title and found by its
+   branch, and neither fits beside the other at 300px. Line 1 is what it is
+   (number, title, age, the one verb); line 2 is where it lives here (a tag,
+   then the head branch, then the base when it is not the default). The verb
+   sits in the same right-hand column as every other ref row's mini action. */
+.ref-section__chip.is-failing {
+  color: var(--danger-text);
+}
+.ref-section__chip.is-failing.is-active {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+/* The last refresh failed: the list below is the last good one. Warning, not
+   danger — nothing is lost, it is just older than it says on the tin. The
+   line sits under the heading, so ⟳ never moves when it appears or clears. */
+.ref-fetch-all.is-warn {
+  border-color: color-mix(in srgb, var(--status-warning) 45%, transparent);
+  color: var(--status-warning);
+}
+.ref-cr-stale {
+  margin: 2px 4px 4px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--status-warning) 10%, transparent);
+  color: var(--status-warning);
+  font: 500 10.5px/1.35 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+.ref-cr-subhead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 22px;
+  margin-top: 2px;
+  padding: 0 6px 0 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  text-align: left;
+}
+.ref-cr-subhead__label {
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans);
+  color: var(--text-subtle);
+  letter-spacing: 0.06em;
+}
+.ref-cr-subhead--toggle {
+  cursor: pointer;
+}
+.ref-cr-subhead--toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+.ref-cr-subhead--toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.ref-cr-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 5px 4px 5px 7px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  scroll-margin: 4px;
+}
+.ref-cr-row:hover {
+  background: var(--bg-panel-hover);
+}
+.ref-cr-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.ref-cr-row__line,
+.ref-cr-row__where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ref-cr-row__line .pr-chip {
+  flex: 0 0 auto;
+}
+.ref-cr-row__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 500 11.5px/1.2 var(--font-sans);
+}
+.ref-cr-row__age {
+  flex: 0 0 auto;
+  font: 600 8.5px/1 var(--font-mono);
+  color: var(--text-muted);
+}
+.ref-cr-row__where {
+  /* Under the title, past the chip's leading edge: the branch reads as a
+     detail of the PR above it, not a second item. */
+  padding-left: 2px;
+}
+.ref-cr-row__where .ref-checkout-chip {
+  max-width: 96px;
+}
+.ref-cr-tag {
+  flex: 0 0 auto;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+}
+.ref-cr-tag.is-missing {
+  color: var(--status-warning);
+}
+.ref-cr-row__head {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10.5px/1 var(--font-mono);
+}
+.ref-cr-row__base {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-subtle);
+  font: 500 10.5px/1 var(--font-mono);
+}
+.ref-cr-row .ref-mini-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+/* More than one remote lists something (a fork and its original, or a
+   mirror on another forge): the lens picks whose list the rows show. A row of
+   segments, each a remote and its count, under the heading so ⟳ never moves
+   when it appears; past three remotes it is a menu instead, so it never
+   wraps. */
+.ref-cr-lens {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  min-width: 0;
+  margin: 2px 4px 4px;
+}
+.ref-cr-lens__seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: calc(var(--sidebar-eyebrow-size) + 12px);
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ref-cr-lens__seg:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+.ref-cr-lens__seg.is-active {
+  color: var(--accent-bright);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.ref-cr-lens__seg:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.ref-cr-lens__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ref-cr-lens--menu {
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+}
+.ref-cr-lens--menu select {
+  min-width: 0;
+  max-width: 100%;
+  height: calc(var(--sidebar-eyebrow-size) + 12px);
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--bg-sidebar);
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.ref-cr-lens--menu select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* Which remote a row is from, on All only: the forge's mark and the remote's
+   name. The name is capped and ellipsizes inside the cap, so the head branch
+   beside it keeps its room. */
+.ref-cr-remote {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  max-width: 84px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+}
+.ref-cr-remote__name,
+.ref-cr-paired__remote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The branch's other change request (your fork's CI PR beside the one you
+   sent upstream): its own chip, so its checks read on their own. */
+.ref-cr-paired {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  max-width: 96px;
+  color: var(--text-subtle);
+  font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
+}
+
 /* "on main" at the Branches heading's far end — the pair, readable while the
    section is collapsed. It sat beside the count and read as one phrase with
    the counts after it ("on main 7 behind"); now the counts follow the total
@@ -5815,6 +6063,23 @@ button.agent-menu__item:hover {
   margin-top: 9px;
   font: 500 10.5px/1.4 var(--font-sans);
   color: var(--text-muted);
+}
+/* The PR a New worktree dialog was opened from: chip and title, above the
+   branch field that would otherwise be the only clue. */
+.modal__subject {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-bottom: 10px;
+}
+.modal__subject-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font: 500 12px/1.3 var(--font-sans);
 }
 .modal__actions {
   display: flex;
@@ -18604,3 +18869,36 @@ button.agent-auth-node:focus-visible,
 .repository-setup__lane button.is-selected { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .repository-setup__map-detail { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--border-default); border-radius: 6px; color: var(--text-secondary); font: 10.5px/1.45 var(--font-sans); overflow-wrap: anywhere; }
 @media (max-width: 650px) { .repository-setup__grid { grid-template-columns: 118px minmax(0, 1fr); } .repository-setup__body { padding: 12px; } .repository-setup__layer header { flex-wrap: wrap; } }
+
+.manual-update-instructions {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.manual-update-instructions p,
+.manual-update-instructions pre {
+  margin: 0;
+}
+
+.manual-update-instructions pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.manual-update-instructions button {
+  justify-self: start;
+}
+
+.app-toast--stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-toast--stacked .app-toast__actions {
+  justify-self: end;
+}
+
+.app-toast--stacked .app-toast__detail {
+  max-height: none;
+}

@@ -10,11 +10,11 @@ CI path is the canonical release path.
 |---|---|---|
 | macOS | Signed and notarized universal DMG and updater ZIP | In-app updates from GitHub Releases |
 | Windows | Azure-signed x64 NSIS installer | In-app updates from GitHub Releases |
-| Linux | Build validation only | No package or release asset is published |
+| Linux | DEB, RPM, pacman, tar.gz for x64 and arm64 | Native packages check/download automatically; explicit authorized Restart installs. Archives require manual replacement. |
 
-`electron-builder.yml` contains future Linux DEB packaging configuration, but
-the release workflow only runs `pnpm build` on Linux. Do not advertise a Linux
-binary until the workflow publishes and verifies one.
+Linux publication begins with the first tag built by the native packaging workflow.
+Existing releases through v0.29.0 contain no Linux download. Do not link to a Linux
+asset until it appears in a successfully validated GitHub Release.
 
 ## Protected environments
 
@@ -103,12 +103,17 @@ follow-up, not republishing. Signing and publication keep their existing credent
    tests, checks license notices, builds, and creates a deploy stage.
 2. `apple-signing` signs, notarizes, and packages the universal and arm64 apps, then
    stages both DMGs, updater ZIPs, blockmaps, and one `latest-mac.yml`.
-3. Linux validates that the desktop source builds. It produces no package.
+3. Linux builds on native Ubuntu x64 and arm64 runners. Each format gets a
+   separate electron-builder pass so its `resources/package-type` marker is
+   correct and archives have none. Package validation checks package metadata,
+   unpacked payloads, ELF architecture, notices and updater configuration. The
+   installed DEB launches under Xvfb without disabling the sandbox, exercises
+   SQLite-backed profile reads and bundled Git/LFS, then quits normally.
 4. Windows prepares a self-contained x64 stage without credentials.
 5. `windows-signing` uses Azure Artifact Signing during NSIS packaging and
    verifies Authenticode on both the app executable and installer, then copies
    the verified installer to the stable `PwrGit.Setup.exe` alias.
-6. The publication job waits for macOS, Windows, and the Linux build gate,
+6. The publication job waits for macOS, Windows, and the Linux package gates,
    then creates a draft with changelog-derived notes. It uploads the signed
    assets, checks their digests and the complete inventory, and publishes one
    GitHub Pre-release. A retry resumes a matching draft without replacing
@@ -133,12 +138,16 @@ gh run download <run-id> --repo pwrdrvr/PwrGit \
   --name desktop-release-macos-artifacts --dir "$recovery_dir/mac"
 gh run download <run-id> --repo pwrdrvr/PwrGit \
   --name windows-installer --dir "$recovery_dir/windows"
+gh run download <run-id> --repo pwrdrvr/PwrGit \
+  --name desktop-release-linux-x64 --dir "$recovery_dir/linux"
+gh run download <run-id> --repo pwrdrvr/PwrGit \
+  --name desktop-release-linux-arm64 --dir "$recovery_dir/linux"
 mv "$recovery_dir/windows/SHA256SUMS" \
   "$recovery_dir/windows/PwrGit-windows-SHA256SUMS"
 node "$recovery_dir/tag/scripts/check-desktop-release-metadata.mjs" \
   --tag vX.Y.Z --notes-file "$recovery_dir/notes.md"
 node scripts/publish-desktop-release.mjs vX.Y.Z \
-  "$recovery_dir/mac" "$recovery_dir/windows" "$recovery_dir/notes.md"
+  "$recovery_dir/mac" "$recovery_dir/windows" "$recovery_dir/linux" "$recovery_dir/notes.md"
 ```
 
 The `release view` command reports not found when there is no release; inspect
@@ -177,14 +186,20 @@ Then confirm that the release body is non-empty and that the assets include:
   grep -- -setup.exe PwrGit-windows-SHA256SUMS
   ```
 
-- no Linux installer or package.
+- Linux packages and aliases for each x64/arm64 format, `latest-linux.yml`
+  (x64), `latest-linux-arm64.yml`, and `PwrGit-linux-<arch>-SHA256SUMS`.
+  DEB versioned names use amd64/arm64, RPM uses x86_64/aarch64, pacman uses
+  x64/aarch64, and tar.gz uses x64/arm64. Stable aliases always use x64/arm64.
+  Each manifest contains only its architecture's DEB, RPM and pacman packages;
+  its size and SHA-512 values are computed from the final package bytes.
+  SHA-256 manifests include versioned packages and their byte-identical aliases.
 
 ```bash
 gh run list --workflow release.yml --limit 10
 gh release view vX.Y.Z --repo pwrdrvr/PwrGit
 ```
 
-Smoke-test installation and launch on macOS and Windows before promotion. Then:
+Smoke-test installation and launch on macOS, Windows and Linux before promotion. Then:
 
 ```bash
 gh release edit vX.Y.Z --repo pwrdrvr/PwrGit --latest --prerelease=false
@@ -262,3 +277,38 @@ but do not prove Developer ID signing, notarization or Squirrel replacement.
 Publish macOS only through `release.yml`; the direct macOS release command
 fails before building. The workflow waits until both apps and the combined
 metadata have been verified before its existing all-platform publication gate.
+
+## Linux updates and manual installation
+
+Native packages use the pinned electron-updater backend selected by
+`resources/package-type`. Ordinary quit never installs a Linux update. Restart
+asks for administrator authorization while services are still running. Failed
+or canceled authorization preserves the downloaded offer and permits retry.
+After success the updater arms relaunch, PwrGit completes its bounded shutdown
+drain, and quit resumes. RPM/pacman payload extraction is validated on Ubuntu;
+their native desktop authorization and upgrade paths still require distro smoke
+checks before promotion. CI installs, launches and removes the DEB on both CPUs.
+
+Help → Check for Updates errors and Settings → Updates expose persistent,
+copyable terminal instructions. When a selected tag is known, the command uses
+its immutable package URL. A failed release-list read falls back to the latest
+stable alias and labels that choice explicitly. For an archive, download the
+matching tar.gz from the release page, close PwrGit and replace the extracted
+directory. Native packages are recommended for subsequent in-app updates.
+
+Local packaging on a matching native Linux host:
+
+```bash
+source ~/.nvm/nvm.sh
+nvm use
+pnpm install --frozen-lockfile
+pnpm --filter @pwrgit/desktop package:linux
+version=$(node -p "require('./apps/desktop/package.json').version")
+node apps/desktop/scripts/verify-linux-packages.mjs apps/desktop/release-stage/dist "$version"
+```
+
+AppImage is not a target. PwrGit has no approval for the additional AppImage
+runtime licensing/source obligations; approvals in another product do not apply.
+Linux prunes the unused Git Credential Manager/.NET UI runtime, as macOS does.
+Git and Git LFS retain PwrGit's existing runtime notices and source pointers.
+No new shipped npm dependency or license-policy exception is needed here.

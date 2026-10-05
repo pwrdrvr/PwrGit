@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ok } from "@pwrgit/shared";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
-import { checkSelectedRemoteTips } from "./auto-remote-check";
+import { checkRemoteTips } from "./auto-remote-check";
 import { RepoIndexer } from "./repo-indexer";
 import { createSystemGit } from "./test-support/system-git";
 import { WorktreeStateService } from "./worktree-state";
@@ -98,8 +98,8 @@ describe("worktree commits without upstream tracking (real bare remote)", () => 
     expect(git(linked, "ls-remote", "origin", "refs/heads/topic"))
       .toBe(`${git(linked, "rev-parse", "HEAD")}\trefs/heads/topic`);
     let refreshed = false;
-    expect(await checkSelectedRemoteTips(systemGit, linked, "topic", null, unlocked,
-      () => { refreshed = true; })).toEqual(ok("checked"));
+    expect((await checkRemoteTips(systemGit, [{ id: worktreeId, path: linked, branch: "topic" }], null, unlocked,
+      () => { refreshed = true; })).get(worktreeId)).toEqual(ok("checked"));
     expect(refreshed).toBe(true);
     expect(await service.compute(worktreeId)).toMatchObject({ hasUpstream: false, ahead: 0 });
   });

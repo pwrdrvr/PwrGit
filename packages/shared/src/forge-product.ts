@@ -341,12 +341,29 @@ export function changeRequestHeadRef(
     : template.replace("{n}", String(number));
 }
 
-/** The local branch a fork's change request is checked out as: `pr/121`. */
+/**
+ * The local branch a fork's change request is checked out as: `pr/121` when
+ * it was listed on `origin`, and `pr/upstream/121` on any other remote — the
+ * fork's #121 and the original's #121 are different change requests, and a
+ * checkout listing both must not put them on one branch.
+ */
 export function changeRequestLocalBranch(
   kind: ForgeKind,
-  number: number
+  number: number,
+  remote = "origin"
 ): string {
-  return `${FORGE_PRODUCTS[kind].changeRequestBranchPrefix}/${number}`;
+  const prefix = FORGE_PRODUCTS[kind].changeRequestBranchPrefix;
+  return remote === "origin"
+    ? `${prefix}/${number}`
+    : `${prefix}/${remote}/${number}`;
+}
+
+/**
+ * The key a forge repository is cached under: `host/path`, lowercased, since
+ * neither GitHub nor GitLab tells two repositories apart by case.
+ */
+export function forgeRepoKey(host: string, path: string): string {
+  return `${host}/${path}`.toLowerCase();
 }
 
 /** What a product can answer at all. */

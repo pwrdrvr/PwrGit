@@ -46,7 +46,7 @@ beforeEach(() => {
     if (channel === "remote:addForkParent") return Promise.resolve(ok({ name: request?.name ?? "upstream" }));
     if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
     if (channel === "pr:openList") {
-      return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [] }));
+      return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [], remotes: [] }));
     }
     return Promise.resolve(ok({ rows: [], total: 0 }));
   });
@@ -471,7 +471,7 @@ describe("the row menu says what each entry acts on", () => {
     dispatchMock.mockImplementation((channel: string) => {
       if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
       if (channel === "pr:openList") {
-        return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [] }));
+        return Promise.resolve(ok({ forge: null, fetchedAt: null, truncated: false, entries: [], remotes: [] }));
       }
       if (channel === "repo:remoteBranches") {
         return Promise.resolve(

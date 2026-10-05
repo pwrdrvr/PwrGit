@@ -532,3 +532,15 @@ describe("UpdatesSettings — check and install", () => {
     ).toHaveLength(1);
   });
 });
+
+it("shows manual instructions from the current Linux status even before a check", async () => {
+  const command = "sudo apt install ./fixture.deb";
+  bootWith({ status: "error", message: "Download failed", manualUpdate: { description: "Close PwrGit and install manually.", command } });
+  await act(async () => root.render(<UpdatesSettings saving={false} snapshot={snapshotWith()} onSelectionChange={onSelectionChange} />));
+  expect(container.textContent).toContain("Close PwrGit and install manually.");
+  expect(container.textContent).toContain(command);
+  const clipboard = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboard } });
+  await act(async () => button("Copy update command")?.click());
+  expect(clipboard).toHaveBeenCalledWith(command);
+});

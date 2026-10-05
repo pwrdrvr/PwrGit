@@ -32,16 +32,28 @@ export function registerChangeRequestHandlers(
   };
 
   bus.register("pr:openList", async (req) => {
-    if (req.refresh === true) refreshInBackground(req.repoId, "user");
+    if (req.refresh === true && req.wait === true) {
+      // Still the user TTL: a waited refresh is a click, not a bypass, so a
+      // second click inside the minute answers from the cache at once.
+      try {
+        if (await openPrs.refresh(req.repoId, { trigger: "user" })) {
+          emitEvent("pr:openChanged", { repoId: req.repoId });
+        }
+      } catch (cause) {
+        logMain("warn", "pr", `open list refresh failed for ${req.repoId}`, cause);
+      }
+    } else if (req.refresh === true) {
+      refreshInBackground(req.repoId, "user");
+    }
     return ok(await openPrs.list(req.repoId));
   });
 
   bus.register("pr:lookup", async (req) =>
-    ok(await openPrs.lookup(req.repoId, req.number))
+    ok(await openPrs.lookup(req.repoId, req.number, req.forgeRepo))
   );
 
   bus.register("pr:fetchHead", async (req) => {
-    const fetched = await openPrs.fetchHead(req.repoId, req.number);
+    const fetched = await openPrs.fetchHead(req.repoId, req.number, req.forgeRepo);
     if (!fetched.ok) return fetched;
     try {
       await deps.onHeadFetched?.(req.repoId);

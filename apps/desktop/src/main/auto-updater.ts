@@ -18,6 +18,12 @@ import {
 import type { CommandBus } from "./command-bus";
 import { emitEvent } from "./ipc";
 import { logMain } from "./logs";
+import {
+  linuxPackageFormat,
+  linuxArtifactSuffix,
+  linuxChannelFile,
+  linuxManualUpdateInstructions
+} from "./linux-updates";
 import { delay } from "./util/timing";
 import {
   APP_UPDATE_CHECK_INTERVAL_MS,
@@ -87,6 +93,7 @@ type AutoUpdaterOptions = {
 };
 
 let initialized = false;
+let nativeLinuxInstallAccepted = false;
 let beforeQuitAndInstall: (() => Promise<void>) | undefined;
 let observedSelection: UpdateSelectionKey | undefined;
 let resolveSelection: () => UpdatesSettings = () => ({
@@ -143,6 +150,7 @@ function applyPendingCancel(download: ActiveDownload): boolean {
   }
   return true;
 }
+let updateCheckReleaseTag: string | undefined;
 let releaseFetchInFlight: Promise<GitHubRelease[]> | undefined;
 let releaseStore: UpdateReleaseStateStore | undefined;
 
@@ -181,6 +189,7 @@ function currentUpdateSelectionKey(): UpdateSelectionKey {
 }
 
 function setUpdateStatus(nextStatus: AppUpdateStatus): void {
+  nextStatus = withLinuxUpdateHelp(nextStatus);
   updateStatus = nextStatus;
   emitEvent("app:updateStatus", nextStatus);
 }
@@ -253,14 +262,23 @@ function developmentUpdateCheckResult(): AppUpdateCheckResult {
 }
 
 function linuxManualPackageUpdateCheckResult(): AppUpdateCheckResult {
-  return {
-    status: "skipped",
-    reason: "Linux builds are updated by installing a newer package."
-  };
+  return withLinuxUpdateHelp({
+    status: "skipped" as const,
+    reason: "This Linux build requires a manual update."
+  });
 }
 
 function linuxManualPackageUpdatesEnabled(): boolean {
-  return process.platform === "linux";
+  return process.platform === "linux" && linuxPackageFormat() === undefined;
+}
+
+function withLinuxUpdateHelp<T extends AppUpdateCheckResult | AppUpdateStatus | AppUpdateInstallResult>(
+  result: T,
+  tag?: string
+): T {
+  if (result.status !== "error" && result.status !== "skipped") return result;
+  const manualUpdate = linuxManualUpdateInstructions(tag);
+  return manualUpdate ? { manualUpdate, ...result } : result;
 }
 
 function preserveDownloadedStatus(nextStatus: AppUpdateStatus): boolean {
@@ -282,8 +300,10 @@ function downloadedUpdateMatchesChannel(
 
 function syncAutoInstallOnAppQuit(selection: UpdateSelectionKey): void {
   autoUpdater.autoInstallOnAppQuit =
-    downloadedUpdateMatchesChannel(selection) !== undefined ||
-    heldDownloadedUpdate === undefined;
+    process.platform !== "linux" && (
+      downloadedUpdateMatchesChannel(selection) !== undefined ||
+      heldDownloadedUpdate === undefined
+    );
 }
 
 export function reconcileDownloadedUpdateEligibility(
@@ -332,15 +352,13 @@ function recordPendingDownloadChannel(
 export async function checkForAppUpdatesNow(
   trigger: AppUpdateCheckTrigger = "manual"
 ): Promise<AppUpdateCheckResult> {
-  // Linux is asked first: it never offers an in-app update in any build, so
-  // previewing one there would demo UI that platform cannot reach.
+  if (!productionUpdatesEnabled()) return simulateDevUpdateCheck(trigger);
+
   if (linuxManualPackageUpdatesEnabled()) {
     const result = linuxManualPackageUpdateCheckResult();
     setUpdateStatus(result);
     return result;
   }
-
-  if (!productionUpdatesEnabled()) return simulateDevUpdateCheck(trigger);
 
   const wanted = currentUpdateSelectionKey();
   if (updateCheckInFlight) {
@@ -371,7 +389,16 @@ export async function checkForAppUpdatesNow(
 
   const check = (async () => {
     try {
+      updateCheckReleaseTag = undefined;
       return await runUpdateCheck(trigger);
+    } catch (error) {
+      if (error instanceof DeferredReleaseCheck || process.platform !== "linux") throw error;
+      const result = withLinuxUpdateHelp({
+        status: "error" as const,
+        message: error instanceof Error ? error.message : String(error)
+      }, updateCheckReleaseTag);
+      setUpdateStatusUnlessDownloaded(result);
+      return result;
     } finally {
       updateCheckChannelInFlight = undefined;
       updateCheckInFlight = undefined;
@@ -435,6 +462,7 @@ async function runUpdateCheck(
     setUpdateStatusUnlessDownloaded(result);
     return result;
   }
+  updateCheckReleaseTag = release.tag_name;
   configureAutoUpdaterFeedForRelease(release);
   updateCheckChannelInFlight = selection;
   // Registered before the call, not after it: `checkForUpdates` emits
@@ -492,7 +520,7 @@ async function runAvailableUpdateDownload(
         return canceled;
       }
       const message = err instanceof Error ? err.message : String(err);
-      const downloadError = { status: "error", message } as const;
+      const downloadError = withLinuxUpdateHelp({ status: "error", message } as const, `v${downloadingVersion}`);
       setUpdateStatusUnlessDownloaded(downloadError);
       logMain("warn", "updater", "update download failed", message);
       return downloadError;
@@ -882,12 +910,21 @@ function hasWindowsUpdateAssets(release: GitHubRelease): boolean {
 }
 
 function hasPublishedUpdateAssets(release: GitHubRelease): boolean {
-  return hasMacUpdateAssets(release) || hasWindowsUpdateAssets(release);
+  return hasMacUpdateAssets(release) || hasWindowsUpdateAssets(release) || hasLinuxUpdateAssets(release);
+}
+
+function hasLinuxUpdateAssets(release: GitHubRelease): boolean {
+  const format = linuxPackageFormat();
+  if (!format) return false;
+  const version = release.tag_name?.replace(/^v/i, "");
+  return hasUploadedReleaseAsset(release, name => name === linuxChannelFile()) &&
+    hasUploadedReleaseAsset(release, name => name === `PwrGit-${version}${linuxArtifactSuffix(format)}`);
 }
 
 function hasCurrentPlatformUpdateAssets(release: GitHubRelease): boolean {
   if (process.platform === "darwin") return hasMacUpdateAssets(release);
   if (process.platform === "win32") return hasWindowsUpdateAssets(release);
+  if (process.platform === "linux") return hasLinuxUpdateAssets(release);
   return false;
 }
 
@@ -1092,7 +1129,9 @@ export async function readAppUpdateReleaseVersions(): Promise<AppUpdateReleaseVe
   }
   try {
     const releases = await readGitHubReleases();
-    const selected = selectPublishedUpdateReleases(releases);
+    const selected = process.platform === "linux"
+      ? selectAppUpdateReleases(releases)
+      : selectPublishedUpdateReleases(releases);
     // The matrix can discover a release between hourly checks. Start the
     // download from the same cached list, without delaying the Settings read.
     const selection = currentSelection();
@@ -1153,7 +1192,7 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
   }
 
   if (linuxManualPackageUpdatesEnabled()) {
-    logMain("info", "updater", "auto-update disabled for Linux package builds");
+    logMain("info", "updater", "auto-update disabled for portable or unsupported Linux builds");
     setUpdateStatus(linuxManualPackageUpdateCheckResult());
     return;
   }
@@ -1165,7 +1204,7 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
     debug: (...args: unknown[]) => logMain("debug", "updater", ...args)
   } as unknown as Console;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = process.platform !== "linux";
   configureAutoUpdaterChannel();
 
   autoUpdater.on("checking-for-update", () => {
@@ -1276,16 +1315,40 @@ export async function installDownloadedAppUpdate(): Promise<AppUpdateInstallResu
       message: `Dev preview (v${version}): Restart only works in production builds.`
     };
   }
+  if (nativeLinuxInstallAccepted) return { status: "restarting" };
   try {
     logMain("info", "updater", `installing downloaded update ${version}`);
-    await beforeQuitAndInstall?.();
-    autoUpdater.quitAndInstall();
+    if (linuxPackageFormat()) {
+      // Native package installation and authorization are synchronous in 6.8.9.
+      // Failure emits an error and resets the install latch for retry. Success
+      // arms relaunch, then queues app.quit via setImmediate. Start our drain
+      // before that queued quit, then resume it after the bounded flush: PwrGit's
+      // flushForUpdate takes ownership and prevents the updater's early quit.
+      let installError: Error | undefined;
+      const captureError = (error: Error): void => { installError = error; };
+      autoUpdater.once("error", captureError);
+      try {
+        autoUpdater.quitAndInstall();
+      } finally {
+        autoUpdater.removeListener("error", captureError);
+      }
+      if (installError) return withLinuxUpdateHelp({
+        status: "error" as const,
+        message: `Installation failed or authorization was canceled: ${installError.message}`
+      }, `v${version}`);
+      nativeLinuxInstallAccepted = true;
+      await beforeQuitAndInstall?.();
+      app.quit();
+    } else {
+      await beforeQuitAndInstall?.();
+      autoUpdater.quitAndInstall();
+    }
     return { status: "restarting" };
   } catch (err) {
-    return {
-      status: "error",
+    return withLinuxUpdateHelp({
+      status: "error" as const,
       message: err instanceof Error ? err.message : String(err)
-    };
+    }, `v${version}`);
   }
 }
 

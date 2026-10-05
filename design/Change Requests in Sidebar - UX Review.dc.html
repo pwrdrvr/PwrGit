@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 860px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 340px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .rec { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--rv-acc); color: var(--rv-accon); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .pin.q { background: var(--rv-t3); color: #050505; }
+          .find { width: 460px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 200px 250px minmax(0, 1fr); gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr.c2 { grid-template-columns: 34px minmax(0, 1fr) minmax(0, 1fr); }
+          .tr.c4 { grid-template-columns: 170px 230px 170px minmax(0, 1fr); }
+          .verdict { display: inline-flex; justify-self: start; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verdict.keep { background: rgba(95, 169, 105, 0.16); color: #9ce5b3; }
+          .verdict.chg { background: rgba(255, 138, 31, 0.12); color: var(--rv-accb); }
+          .verdict.bug { background: rgba(185, 66, 50, 0.22); color: #ffb0a1; }
+
+          /* ============================================================
+             Light theme scope: the app's own token names, from tokens.css
+             :root[data-theme="light"]
+             ============================================================ */
+          .th-light {
+            --bg-sidebar: #f7f4ef; --bg-panel: #fdfcfa; --bg-input: #ffffff; --bg-panel-elevated: #ffffff;
+            --bg-panel-hover: #f4f0e8; --bg-hover-strong: #ebe5da; --bg-row-active: #fff5e9; --bg-active-strong: #ffe8cf;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --status-ok: #2e7d3c; --status-error: #a8472a; --status-warning: #805200; --status-suspended: #6b6660;
+            --brand-purple: #6a4ba8; --success-text: #1a5c2e; --danger-text: #8a1f12;
+            --focus-ring: var(--accent);
+            color: var(--text-primary);
+          }
+          .stage { position: relative; padding: 18px; border-radius: 10px; background: #e9e4dc; }
+
+          /* ---- sidebar, true size from app.css (.repo-row, .wt-section, .ref-section) ---- */
+          .sb { position: relative; width: 320px; padding: 6px 6px 8px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-sidebar); }
+          .sb.w400 { width: 400px; } .sb.w260 { width: 260px; } .sb.w240 { width: 240px; }
+          .repo { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 4px 8px 4px 12px; border-radius: 8px; }
+          .chev { flex: none; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--text-muted); transform: rotate(90deg); margin-left: -4px; }
+          .rname { font: 650 13px/1.2 var(--font-sans); color: var(--accent); white-space: nowrap; }
+          .rsp { flex: 1; }
+          .fmk { width: 13px; height: 13px; flex: none; display: block; }
+          .wts { font: 600 11px/1 var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+          .tree { margin: 2px 0 2px 15px; padding: 2px 0 2px 8px; border-left: 1px solid var(--border-subtle); }
+          .wtrow { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px 0 8px; border: 1px solid transparent; border-radius: 6px; }
+          .wtrow.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .wtrow .hico { flex: none; color: var(--accent); font: 600 12px/1 var(--font-sans); }
+          .wtrow .bn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1.25 var(--font-mono); color: var(--text-secondary); }
+          .wtrow.sel .bn { color: var(--accent-bright); }
+          .ptag { flex: none; height: 16px; padding: 0 5px; display: inline-flex; align-items: center; border-radius: 4px; background: var(--accent-soft); color: var(--accent-bright); font: 700 9px/1 var(--font-mono); letter-spacing: .05em; }
+          .age { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); white-space: nowrap; }
+
+          .sec { border-top: 1px solid var(--border-subtle); }
+          .sh { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 6px 0 4px; color: var(--text-muted); }
+          .sh .c { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: .82; }
+          .sh .c.open { transform: rotate(90deg); }
+          .slabel { font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); white-space: nowrap; }
+          .scount { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .sp { flex: 1; min-width: 0; }
+          .schip { display: inline-flex; align-items: center; height: 20px; padding: 0 5px; border: 1px solid transparent; border-radius: 5px; font: 600 10px/1 var(--font-mono); white-space: nowrap; color: var(--status-warning); }
+          .schip.bad { color: var(--status-error); }
+          .schip.gone { color: var(--text-subtle); }
+          .rf { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; margin: -2px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-muted); font: 600 12px/1 var(--font-sans); }
+          .rf.warn { border-color: color-mix(in srgb, var(--status-warning) 45%, transparent); color: var(--status-warning); }
+          .srt { display: inline-flex; align-items: center; height: 24px; margin-block: -2px; padding: 0 7px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-muted); font: 600 11px/1 var(--font-mono); }
+          .sbody { padding: 0 2px 6px; }
+
+          /* sub-group heads, the .wt-subhead vocabulary */
+          .sub { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px 0 4px; }
+          .sub .slabel { font-size: 9.5px; }
+          .sub .c { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid var(--text-subtle); }
+          .sub .c.open { transform: rotate(90deg); }
+          .sub.tog { cursor: pointer; border-radius: 5px; }
+          .sub.tog:hover { background: var(--bg-panel-hover); }
+
+          /* segmented lens: .settings-segmented at sidebar chip size */
+          .seg { display: inline-flex; gap: 1px; padding: 2px; margin: 2px 4px 5px; border: 1px solid var(--border-subtle); border-radius: 7px; background: var(--bg-input); max-width: calc(100% - 8px); }
+          .seg > span { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 5px; color: var(--text-secondary); font: 550 11px/1 var(--font-sans); white-space: nowrap; cursor: pointer; min-width: 0; }
+          .seg > span:hover { color: var(--text-primary); }
+          .seg > span.on { background: var(--bg-row-active); color: var(--accent-bright); }
+          .seg i { font: 600 10px/1 var(--font-mono); font-style: normal; color: var(--text-subtle); }
+          .seg > span.on i { color: var(--accent-bright); }
+          .seg img { width: 11px; height: 11px; }
+
+          /* ---- change-request row (proposed .cr-row) ---- */
+          .prow { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 5px 5px 5px 7px; border: 1px solid transparent; border-radius: 6px; cursor: default; }
+          .prow:hover, .prow.hov { background: var(--bg-panel-hover); }
+          .prow.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .pl1 { display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; }
+          .pt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px/1.2 var(--font-sans); color: var(--text-primary); }
+          .pa { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .pacts { display: none; flex: none; align-items: center; gap: 3px; margin: -3px 0; }
+          .prow:hover .pacts, .prow.hov .pacts { display: flex; }
+          .prow:hover .pa, .prow.hov .pa { display: none; }
+          .ib { display: inline-flex; align-items: center; justify-content: center; height: 22px; padding: 0 7px; border: 1px solid var(--accent-border); border-radius: 5px; background: var(--accent-soft); color: var(--accent-bright); font: 600 10.5px/1 var(--font-sans); white-space: nowrap; cursor: pointer; }
+          .ib.ico { width: 22px; padding: 0; border-color: var(--border-default); background: var(--bg-input); color: var(--text-muted); font: 600 11px/1 var(--font-mono); }
+          .ib:hover { background: var(--bg-active-strong); }
+          .pl2 { display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; padding-left: 1px; overflow: hidden; }
+          .ph { flex: 0 6 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 10.5px/1.2 var(--font-mono); color: var(--text-muted); }
+          .pb { flex: none; font: 500 10.5px/1.2 var(--font-mono); color: var(--text-subtle); white-space: nowrap; }
+          .rem { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 5px 0 4px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--bg-input); color: var(--text-secondary); font: 600 9.5px/1 var(--font-mono); white-space: nowrap; }
+          .mk { flex: none; display: block; width: 10px; height: 10px; background: center / contain no-repeat; }
+          .mk.gh { background-image: url("assets/github-invertocat-black.svg"); }
+          .mk.gl { background-image: url("assets/gitlab-tanuki.svg"); }
+          .mk.fmk { width: 13px; height: 13px; }
+          .seg .mk { width: 11px; height: 11px; }
+          .loc { flex: 0 1 auto; min-width: 22px; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-muted); font: 600 9.5px/1 var(--font-mono); white-space: nowrap; max-width: 140px; overflow: hidden; }
+          .loc .lt { overflow: hidden; text-overflow: ellipsis; }
+          .lg.br { display: inline-block; flex: none; width: 10px; height: 10px; background: currentColor; -webkit-mask: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIyLjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTYgM3YxMiIvPjxjaXJjbGUgY3g9IjYiIGN5PSIxOCIgcj0iMyIvPjxjaXJjbGUgY3g9IjE4IiBjeT0iNiIgcj0iMyIvPjxwYXRoIGQ9Ik0xOCA5YTkgOSAwIDAgMS05IDkiLz48L3N2Zz4=) center / contain no-repeat; mask: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIyLjQiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+PHBhdGggZD0iTTYgM3YxMiIvPjxjaXJjbGUgY3g9IjYiIGN5PSIxOCIgcj0iMyIvPjxjaXJjbGUgY3g9IjE4IiBjeT0iNiIgcj0iMyIvPjxwYXRoIGQ9Ik0xOCA5YTkgOSAwIDAgMS05IDkiLz48L3N2Zz4=) center / contain no-repeat; }
+          .wtrow .hico.lg.br { width: 11px; height: 11px; color: var(--accent-bright); }
+          .loc.here { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .loc.fork { border-color: color-mix(in srgb, var(--brand-purple) 40%, transparent); color: var(--brand-purple); }
+
+          /* the shipped .pr-chip, light theme */
+          .prc { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--text-secondary); font: 600 9.5px/1 var(--font-mono); }
+          .prc .d { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--status-suspended); }
+          .prc.passing .d { background: var(--status-ok); } .prc.failing .d { background: var(--status-error); }
+          .prc.pending .d { background: var(--status-warning); } .prc.merged .d { background: var(--brand-purple); }
+          .prc.draft .d, .prc.draft .lb { transform: translateY(-1px); }
+          .prc.draft::after { content: ""; position: absolute; bottom: 2px; left: 50%; width: 16px; height: 2px; border-radius: 999px; transform: translateX(-50%); background: var(--status-suspended); }
+          .prc.mini { height: 16px; padding: 0 5px; gap: 4px; font-size: 9px; color: var(--text-muted); }
+          .prc.mini .d { width: 6px; height: 6px; }
+
+          /* ---- narrow ladder (measured, see 2e) ---- */
+          .sb.w260 .pb, .sb.w240 .pb { display: none; }
+          .sb.w260 .loc .lt, .sb.w240 .loc .lt { display: none; }
+          .sb.w260 .rem .rn, .sb.w240 .rem .rn { display: none; }
+          .sb.w260 .prc.mini .xr, .sb.w240 .prc.mini .xr { display: none; }
+          .sb.w240 .pa { display: none; }
+
+          /* ---- tooltip, dialog, palette, toast ---- */
+          .tip { position: absolute; z-index: 5; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-panel-elevated); color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); box-shadow: 0 8px 22px rgba(0,0,0,.14); max-width: 240px; }
+          .tip b { color: var(--text-primary); font-weight: 600; }
+          .tip code { font: 500 10px/1.3 var(--font-mono); color: var(--text-primary); }
+          .modal { width: 380px; padding: 16px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-panel-elevated); box-shadow: 0 24px 60px rgba(0,0,0,.22); display: flex; flex-direction: column; gap: 10px; }
+          .mt { font: 650 13px/1.2 var(--font-sans); color: var(--text-primary); }
+          .mfrom { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 8px; border: 1px solid var(--border-subtle); border-radius: 7px; background: var(--bg-panel); }
+          .mfrom .pt { font-size: 11.5px; }
+          .minput { height: 32px; padding: 0 10px; display: flex; align-items: center; border: 2px solid var(--focus-ring); border-radius: 7px; background: var(--bg-input); font: 500 11.5px/1 var(--font-mono); color: var(--text-primary); overflow: hidden; white-space: nowrap; }
+          .mcheck { display: flex; align-items: center; gap: 7px; font: 500 11.5px/1 var(--font-sans); color: var(--text-secondary); }
+          .mcheck .bx { width: 14px; height: 14px; border-radius: 3px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font: 700 10px/1 var(--font-sans); }
+          .mhint { font: 500 10.5px/1.5 var(--font-sans); color: var(--text-muted); }
+          .mhint code { font: 500 10px/1.3 var(--font-mono); color: var(--text-secondary); }
+          .mact { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+          .mbtn { height: 30px; padding: 0 14px; display: inline-flex; align-items: center; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-input); color: var(--text-secondary); font: 600 11.5px/1 var(--font-sans); cursor: pointer; }
+          .mbtn.pri { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+          .pal { width: 560px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-panel-elevated); box-shadow: 0 24px 60px rgba(0,0,0,.22); overflow: hidden; }
+          .palin { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--border-subtle); font: 500 14px/1 var(--font-sans); color: var(--text-primary); }
+          .palin span { color: var(--text-subtle); }
+          .palr { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 14px; }
+          .palr.on { background: var(--bg-row-active); box-shadow: inset 2px 0 0 var(--accent); }
+          .palr .k { font: 700 9px/1 var(--font-mono); color: var(--text-subtle); text-align: center; }
+          .palr .t1 { display: flex; align-items: center; gap: 7px; min-width: 0; }
+          .palr .t1 .pt { font-size: 12.5px; }
+          .palr .t2 { margin-top: 3px; font: 500 10.5px/1.2 var(--font-mono); color: var(--text-muted); }
+          .palr .act { font: 600 10.5px/1 var(--font-sans); color: var(--accent-bright); white-space: nowrap; }
+          .palf { padding: 7px 14px; border-top: 1px solid var(--border-subtle); font: 500 10.5px/1 var(--font-sans); color: var(--text-subtle); }
+          .toast { display: flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-panel-elevated); font: 500 11px/1.3 var(--font-sans); color: var(--text-secondary); box-shadow: 0 8px 22px rgba(0,0,0,.12); }
+          .toast b { color: var(--text-primary); }
+          .stale { display: flex; align-items: center; gap: 6px; margin: 0 4px 4px; padding: 5px 7px; border-radius: 6px; background: color-mix(in srgb, var(--status-warning) 10%, transparent); color: var(--status-warning); font: 500 10.5px/1.35 var(--font-sans); }
+          .empty { padding: 6px 8px 8px; font: 500 11px/1.45 var(--font-sans); color: var(--text-muted); }
+
+          /* ---- live prototype chrome ---- */
+          .proto { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid rgba(255, 138, 31, 0.42); border-radius: 12px; background: #050505; }
+          .pchips { display: flex; flex-wrap: wrap; gap: 6px; }
+          .pchips button { appearance: none; height: 22px; padding: 0 9px; border: 1px solid rgba(247,243,235,.14); border-radius: 999px; background: transparent; color: var(--rv-t2); font: 600 9.5px/1 var(--font-mono); cursor: pointer; }
+          .pchips button.on { border-color: rgba(255, 138, 31, 0.42); color: var(--rv-accb); background: rgba(255,138,31,.12); }
+          .readout { font: 500 10px/1.5 var(--font-mono); color: var(--rv-tsub); }
+          .veil { position: absolute; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; background: rgba(26, 22, 18, 0.28); border-radius: 10px; }
+          .hide { display: none !important; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Findings: the list already exists, behind a dialog, and it only asks origin</span></div>
+        <p class="dv-sub">PwrGit already keeps every open pull request and merge request in a cache filled by <b>one list call per repo</b>, and it can already check out a PR's head into a worktree, including a fork's head. The sidebar does not show that list. It only shows PRs as chips on worktree rows. And because the list is only ever asked of <code>origin</code>, a fork never sees the PRs on the original repo.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>What is there and what is in the way</div>
+            <div class="find">
+              <div class="fitem"><span class="pin ok">+</span><div><h4>The cache and the checkout already exist</h4><p><code>repo_open_pr</code> (0032), <code>pr:openList</code>, <code>pr:lookup</code> and <code>pr:fetchHead</code> back the refs browser's Pull requests tab. <code>ChangeRequestTable.act()</code> already resolves a row to a worktree, a local branch, a fetched remote branch or a fork head, and then switches to it or creates a worktree. The sidebar section draws data and calls verbs that are already built.</p></div></div>
+              <div class="fitem"><span class="pin">1</span><div><h4>The only list view is three clicks into a modal</h4><p>To get from "there's #381" to a worktree today, you expand the repo, open the refs browser, change tab, find the row, then New worktree. The sidebar can show a PR only when one of the 38 worktree rows already has it checked out.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The list is only asked of <code>origin</code></h4><p><code>open-pr-service.ts</code> resolves the forge from <code>remote get-url origin</code> and maps heads against <code>refs/remotes/origin</code>. In a fork checkout (origin is yours, upstream is the original) that returns your own CI PRs and never the PR you sent upstream. A second forge remote, such as a GitLab mirror, is never asked at all.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>The cache key cannot hold two remotes</h4><p>Rows are keyed <code>(repo_id, number)</code>. Your fork's #14 and the original's #14 would collide. The key needs the forge repository in it, so this is a migration and not just a renderer change.</p></div></div>
+              <div class="fitem"><span class="pin ok">+</span><div><h4>The cost model is already right, so keep it</h4><p>One list page per forge repo returns number, title, head, base, author, draft and the checks rollup in the same response. The TTL is 10 minutes. A failed list keeps the last good set. Nothing on this board adds a call per PR. See turn 5.</p></div></div>
+            </div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b The 381 walk">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The job: "PwrGit has #381, put it in a worktree"</div>
+            <div class="tbl" style="width:620px">
+              <div class="tr head c2"><span>#</span><span>Today</span><span>Proposed (turn 4)</span></div>
+              <div class="tr c2"><span>1</span><span>Expand <b>PwrGit</b></span><span>Expand <b>PwrGit</b>. The section reads <b>Pull requests 5</b></span></div>
+              <div class="tr c2"><span>2</span><span>Open the refs browser from Branches</span><span>Expand <b>Pull requests</b> (the open state is remembered per repo)</span></div>
+              <div class="tr c2"><span>3</span><span>Switch to the Pull requests tab</span><span>#381 sits under <b>Remote only</b>. Hover it, then <b>+ Worktree</b></span></div>
+              <div class="tr c2"><span>4</span><span>Type <code>381</code> and find the row</span><span>The New worktree dialog opens seeded with the branch name, the start point and the PR. <b>Create</b></span></div>
+              <div class="tr c2"><span>5</span><span>New worktree, then Create</span><span>The worktree is selected. #381 moves to <b>Local</b> with a <code>⌂</code> tag</span></div>
+            </div>
+            <p class="note" style="max-width:620px">⌘K gets there too: type <code>381</code> and the PR is a result with <b>New worktree</b> as its action (4d). It reads the same cache, so it costs nothing extra.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "what if a repo has 400 open PRs?" · "show me merged ones too"</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">The section: what you have locally first, what is only on the forge behind it</span></div>
+        <p class="dv-sub">The new section goes between <b>Worktrees</b> and <b>Branches</b>, because it is the one you will open more often. Its header follows the forge's own noun (<code>changeRequestPluralLabel</code>), so it reads <b>Pull requests</b> on GitHub and GitCafe and <b>Merge requests</b> on GitLab. <b>Local</b> means the head is a branch in <code>refs/heads</code> or is checked out in a worktree. <b>Remote only</b> means the forge has the PR and this machine has no local branch for it. Titles are PwrGit's real open list on 2026-10-04. Which PRs are local has been rearranged for the walk. Every frame is 320&#8239;px, the default sidebar width.</p>
+        <p class="dv-sub" style="border-left:3px solid var(--rv-acc);padding-left:12px"><b>Decided 2026-10-04: 2b.</b> Remote only starts collapsed on every repository, not only past a threshold, and remembers being opened per repository. In the build, each row's verb is the sidebar's own mini action in the shared right-hand column: <b>⌂</b> goes to the worktree that holds the head, <b>+</b> opens New worktree (fetching an unfetched or fork head first), and the dialog names the PR. The first build reads <code>origin</code>'s list only; the lens in turn 3 follows.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Tabs">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Two tabs: Local | Remote only</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrGit</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">38 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Worktrees</span><span class="scount">38</span><span class="sp"></span><span class="rf">⟳</span><span class="srt">Recent</span></div></div>
+                  <div class="sec">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s2a.label}}</span><span class="scount">{{s2a.total}}</span><span class="{{s2a.failCls}}">{{s2a.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <div class="seg"><span class="on">Local<i>{{s2a.nLocal}}</i></span><span>Remote only<i>{{s2a.nRemote}}</i></span></div>
+                      <sc-for list="{{s2a.local}}" as="r" hint-placeholder-count="3">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div class="sec"><div class="sh"><span class="c"></span><span class="slabel">Branches</span><span class="scount">243</span><span class="sp"></span><span class="schip">3 ahead</span><span class="schip">4 behind</span><span class="schip gone">187 gone</span></div></div>
+                </div>
+              </div>
+            </div>
+            <p class="note">This is the literal reading of the ask. It costs a control, and the remote-only PRs, which are where #381 lives, are always one click away and never visible at a glance. It also uses the house segmented control, not a pill that only swaps its own label.</p>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Two groups">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a><span class="rec">Chosen</span> Two groups, like Worktrees' Pinned and Working</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrGit</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">38 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Worktrees</span><span class="scount">38</span><span class="sp"></span><span class="rf">⟳</span><span class="srt">Recent</span></div></div>
+                  <div class="sec">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s2b.label}}</span><span class="scount">{{s2b.total}}</span><span class="{{s2b.failCls}}">{{s2b.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <div class="sub"><span class="slabel">Local</span><span class="scount">{{s2b.nLocal}}</span></div>
+                      <sc-for list="{{s2b.local}}" as="r" hint-placeholder-count="3">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                      <div class="sub tog"><span class="c open"></span><span class="slabel">Remote only</span><span class="scount">{{s2b.nRemote}}</span></div>
+                      <sc-for list="{{s2b.remote}}" as="r" hint-placeholder-count="2">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div class="sec"><div class="sh"><span class="c"></span><span class="slabel">Branches</span><span class="scount">243</span><span class="sp"></span><span class="schip">3 ahead</span><span class="schip">4 behind</span><span class="schip gone">187 gone</span></div></div>
+                </div>
+              </div>
+            </div>
+            <p class="note"><b>Both groups are visible at once, and there is no mode to forget.</b> Local is always open. Remote only is a disclosure whose state is remembered per repo, the same way <code>pwrgit.unpinnedWorktreesOpen</code> is. Each group is sorted by last update, newest first. Header chips work like Branches' chips: <b>1 failing</b> is a button that filters to failing checks, and it is coloured because someone needs to act.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Flat">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>One list, newest first; the location tag does the sorting</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrGit</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">38 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Worktrees</span><span class="scount">38</span><span class="sp"></span><span class="rf">⟳</span><span class="srt">Recent</span></div></div>
+                  <div class="sec">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s2c.label}}</span><span class="scount">{{s2c.total}}</span><span class="{{s2c.failCls}}">{{s2c.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <sc-for list="{{s2c.all}}" as="r" hint-placeholder-count="5">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div class="sec"><div class="sh"><span class="c"></span><span class="slabel">Branches</span><span class="scount">243</span><span class="sp"></span><span class="schip">3 ahead</span><span class="schip">4 behind</span><span class="schip gone">187 gone</span></div></div>
+                </div>
+              </div>
+            </div>
+            <p class="note">The quietest option, and fine at 5 PRs. At 40 open PRs, mostly dependabot's, your three local ones are scattered through the list and the point of the section is lost. The tag (<code>⌂</code> worktree, the branch mark for a local branch, <code>⑂</code> a contributor's fork, or none) is in 2a and 2b too.</p>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Row anatomy">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>The row: what each part is and what it does</div>
+            <div class="tbl" style="width:600px">
+              <div class="tr head"><span>Part</span><span>Shows</span><span>Click</span></div>
+              <div class="tr"><span><b>Chip</b> (shipped <code>PrChip</code>)</span><span><code>#381</code> or <code>!41</code>, the checks dot and the draft bar</span><span>The existing <code>PrStatusCard</code> hover card, drawn from cached list fields only</span></div>
+              <div class="tr"><span><b>Title</b></span><span>The PR title, ellipsized. It is the only part that is allowed to shrink freely</span><span>Selects the row. On a ⌂ row it opens that worktree, the same as clicking the worktree</span></div>
+              <div class="tr"><span><b>Location tag</b></span><span><code>⌂ name</code> worktree (just <code>⌂</code> when the folder is named after the branch, the rule <code>worktreeFolderLabel</code> already follows) · the branch mark and <code>local</code> for a branch with no worktree · <code>⑂ owner</code> contributor fork · none</span><span>⌂ reveals the worktree row</span></div>
+              <div class="tr"><span><b>Head → base</b></span><span><code>fix/distribution-audit-follow-up</code>. <code>→ base</code> is added only when the base is not the default branch, which is how a stacked PR looks</span><span>Nothing (copy is on the right-click menu)</span></div>
+              <div class="tr"><span><b>Hover verbs</b></span><span><b>+ Worktree</b> on any row with no worktree, plus <b>↗</b>. They replace the age while the pointer is on the row; they never push the row's text aside</span><span>+ Worktree opens the seeded dialog (4b). ↗ opens the PR on the forge</span></div>
+              <div class="tr"><span><b>Right-click / ⋮</b></span><span><code>RefRowMenu</code>: Switch here, New worktree, Copy branch, Copy URL, Open on forge</span><span>Switch here is on the menu and not the row, because it rewrites a checkout you might be using</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2e" data-screen-label="2e Narrow ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Narrow: a measured step-down, never a wrap</div>
+            <div class="stage th-light" style="display:flex;gap:16px;align-items:flex-start">
+              <div style="display:flex;flex-direction:column;gap:6px"><span class="age">400 px</span>
+                <div class="sb w400"><div class="sbody"><sc-for list="{{s2e}}" as="r" hint-placeholder-count="2"><div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div></sc-for></div></div></div>
+              <div style="display:flex;flex-direction:column;gap:6px"><span class="age">320 px</span>
+                <div class="sb"><div class="sbody"><sc-for list="{{s2e}}" as="r" hint-placeholder-count="2"><div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div></sc-for></div></div></div>
+              <div style="display:flex;flex-direction:column;gap:6px"><span class="age">260 px</span>
+                <div class="sb w260"><div class="sbody"><sc-for list="{{s2e}}" as="r" hint-placeholder-count="2"><div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div></sc-for></div></div></div>
+              <div style="display:flex;flex-direction:column;gap:6px"><span class="age">240 px · minimum</span>
+                <div class="sb w240"><div class="sbody"><sc-for list="{{s2e}}" as="r" hint-placeholder-count="2"><div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div></sc-for></div></div></div>
+            </div>
+            <p class="note" style="max-width:1180px"><b>Order of give-way, taken on measured natural widths (ResizeObserver), not on fixed breakpoints:</b> (1) <code>→ base</code> goes (it is drawn only when the base is not the default branch, as on #13, which is stacked on another branch), (2) the location tag shrinks to its glyph, (3) the remote chip shrinks to its forge mark, and the paired chip loses its remote name, (4) the age goes. The title ellipsizes at every width. The number and the checks dot never go. The widths shown here are illustrations, and the build must not hard-code them as collapse points. Rows here are from the fork in 3a, the widest case: remote chip, tag and a paired chip.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "2b, but with Remote only collapsed by default" · "dark theme" · "what does an empty section say?"</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">More than one remote, more than one forge: a lens that only appears when it has something to say</span></div>
+        <p class="dv-sub">In <code>orbit-deploy</code>, <code>origin</code> is your fork and <code>upstream</code> is the original, both on GitHub. You opened #14 on your fork to get CI, then sent the same branch upstream as #412. In <code>relay-cache</code>, <code>origin</code> is on GitHub and a <code>gitlab</code> remote mirrors it to GitLab, so its list mixes PRs (<code>#</code>) and MRs (<code>!</code>). Both repos and their PRs are invented.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Fork, All">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Fork, lens on All: every row says which remote it lives on</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">orbit-deploy</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">6 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s3a.label}}</span><span class="scount">{{s3a.total}}</span><span class="{{s3a.failCls}}">{{s3a.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <div class="seg"><sc-for list="{{s3a.lens}}" as="l" hint-placeholder-count="3"><span class="{{l.cls}}">{{l.label}}<i>{{l.n}}</i></span></sc-for></div>
+                      <div class="sub"><span class="slabel">Local</span><span class="scount">{{s3a.nLocal}}</span></div>
+                      <sc-for list="{{s3a.local}}" as="r" hint-placeholder-count="2">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                      <div class="sub tog"><span class="c open"></span><span class="slabel">Remote only</span><span class="scount">{{s3a.nRemote}}</span></div>
+                      <sc-for list="{{s3a.remote}}" as="r" hint-placeholder-count="3">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="note"><b>One branch, two PRs, one row.</b> The Local group is keyed by your branch, so <code>tenant-deploy-windows</code> appears once. It leads with the PR that leaves your repo (#412 on upstream). Your CI PR rides along as a small second chip (<code>#14 origin</code>) with its own checks dot. In Remote only, every row is a separate PR, and each carries a remote chip (forge mark plus remote name), but only while the lens reads All.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Fork, lens upstream">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Same repo, lens on upstream: the chips go, because the lens already says it</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">orbit-deploy</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">6 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s3b.label}}</span><span class="scount">{{s3b.total}}</span><span class="{{s3b.failCls}}">{{s3b.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <div class="seg"><sc-for list="{{s3b.lens}}" as="l" hint-placeholder-count="3"><span class="{{l.cls}}">{{l.label}}<i>{{l.n}}</i></span></sc-for></div>
+                      <div class="sub"><span class="slabel">Local</span><span class="scount">{{s3b.nLocal}}</span></div>
+                      <sc-for list="{{s3b.local}}" as="r" hint-placeholder-count="1">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                      <div class="sub tog"><span class="c open"></span><span class="slabel">Remote only</span><span class="scount">{{s3b.nRemote}}</span></div>
+                      <sc-for list="{{s3b.remote}}" as="r" hint-placeholder-count="3">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="note">Your fork's CI PRs drop out, and the paired chip goes with them. The lens is remembered per repo. Upstream is listed first because it is the original, and the forks routing (<code>RemoteRole</code>) already knows which remote that is.</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Two forges">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>GitHub and GitLab on one repo: PRs and MRs in one list</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">relay-cache</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><img class="fmk" src="assets/gitlab-tanuki.svg" alt="" /><span class="wts">3 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s3c.label}}</span><span class="scount">{{s3c.total}}</span><span class="{{s3c.failCls}}">{{s3c.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <div class="seg"><sc-for list="{{s3c.lens}}" as="l" hint-placeholder-count="3"><span class="{{l.cls}}"><span class="{{l.mark}}"></span>{{l.label}}<i>{{l.n}}</i></span></sc-for></div>
+                      <div class="sub"><span class="slabel">Local</span><span class="scount">{{s3c.nLocal}}</span></div>
+                      <sc-for list="{{s3c.local}}" as="r" hint-placeholder-count="2">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                      <div class="sub tog"><span class="c open"></span><span class="slabel">Remote only</span><span class="scount">{{s3c.nRemote}}</span></div>
+                      <sc-for list="{{s3c.remote}}" as="r" hint-placeholder-count="2">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="note">The header falls back to <b>Pull &amp; merge requests</b> only when the forges disagree. The lens segments carry the forge mark, because here the remote name alone ("gitlab") would be a coincidence. Each row's sigil (<code>#</code> or <code>!</code>) and its remote chip say which forge it is on.</p>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Lens rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>When the lens and the chips appear</div>
+            <div class="tbl" style="width:560px">
+              <div class="tr head"><span>Remotes with open PRs/MRs</span><span>Lens</span><span>Row chips</span></div>
+              <div class="tr"><span><b>None</b> (forge known)</span><span>Section stays, collapsed, reading <code>Pull requests 0</code></span><span>The body says "No open pull requests on pwrdrvr/PwrGit."</span></div>
+              <div class="tr"><span><b>One</b> (PwrGit, and most repos)</span><span>Hidden. A fork whose own remote has nothing open looks exactly like this</span><span>None</span></div>
+              <div class="tr"><span><b>Two or three</b></span><span>Segmented: All · each remote, with counts. Default is All, remembered per repo</span><span>On All only</span></div>
+              <div class="tr"><span><b>Four or more</b></span><span>Collapses to a <code>Remote: All ▾</code> menu button so the head never wraps</span><span>On All only</span></div>
+              <div class="tr"><span><b>No forge remote at all</b></span><span>No section</span><span>n/a</span></div>
+            </div>
+            <p class="note" style="max-width:560px"><b>Remotes that point at the same forge repository count once</b> (for example, an <code>origin</code> and a <code>github</code> remote with the same URL), and that repository is asked once. A remote on a forge you have no token for is not counted, and its lens segment is not drawn. Settings › Forges already says which hosts are connected.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "what does the lens do at 240 px?" · "should Local ignore the lens?"</p>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">#381 into a worktree, start to finish</span></div>
+        <p class="dv-sub">The verbs, and the fork fetch behind them, are <code>ChangeRequestTable.act()</code>, moved out of the refs browser so the sidebar and ⌘K can call it. The dialog is the shipped <code>NewWorktreeModal</code>, seeded with values. It is not a new dialog.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Hover 381">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Hover #381; the verb says what it will do</div>
+            <div class="stage th-light" style="padding-right:200px">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrGit</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">38 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s4a.label}}</span><span class="scount">{{s4a.total}}</span><span class="{{s4a.failCls}}">{{s4a.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <div class="sub"><span class="slabel">Local</span><span class="scount">{{s4a.nLocal}}</span></div>
+                      <sc-for list="{{s4a.local}}" as="r" hint-placeholder-count="3">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                      <div class="sub tog"><span class="c open"></span><span class="slabel">Remote only</span><span class="scount">{{s4a.nRemote}}</span></div>
+                      <sc-for list="{{s4a.remote}}" as="r" hint-placeholder-count="2">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="tip" style="left:300px;top:332px;max-width:300px"><b>New worktree from #381</b><br />Creates <code>fix/distribution-audit-follow-up</code> from <code>origin/fix/distribution-audit-follow-up</code></div>
+            </div>
+            <p class="note">The tooltip names the branch and start point that will be used, so the click is not a surprise. For a contributor's fork (⑂) it says <code>Fetches pull/405/head from upstream into pr/405</code> instead.</p>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Seeded dialog">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>The shipped dialog, seeded</div>
+            <div class="stage th-light" style="display:flex;flex-direction:column;gap:18px">
+              <div class="modal">
+                <div class="mt">New worktree · PwrGit</div>
+                <div class="mfrom"><span class="prc passing"><span class="d"></span><span class="lb">#381</span></span><span class="pt">fix(release): verify package manifests and retain release audits</span></div>
+                <div class="minput">fix/distribution-audit-follow-up</div>
+                <div class="mcheck"><span class="bx">✓</span>Create as a new branch</div>
+                <div class="mhint">Starting from <code>origin/fix/distribution-audit-follow-up</code>, tracking it, so Pull and Push go to the PR.<br />Path <code>~/pwrdrvr/PwrGit-worktrees/fix-distribution-audit-follow-up</code></div>
+                <div class="mact"><span class="mbtn">Cancel</span><span class="mbtn pri">Create</span></div>
+              </div>
+              <div class="modal">
+                <div class="mt">New worktree · orbit-deploy</div>
+                <div class="mfrom"><span class="prc passing"><span class="d"></span><span class="lb">#405</span></span><span class="pt">docs: fix a typo in the quickstart</span></div>
+                <div class="minput">pr/405</div>
+                <div class="mcheck"><span class="bx">✓</span>Create as a new branch</div>
+                <div class="mhint">From octo-contrib's fork. Fetches <code>pull/405/head</code> from <code>upstream</code> and sets <code>pr/405</code> to pull from <code>octo-contrib/fix/quickstart-typo</code>.</div>
+                <div class="mact"><span class="mbtn">Cancel</span><span class="mbtn pri">Create</span></div>
+              </div>
+            </div>
+            <p class="note">The only addition is the <b>PR strip</b> at the top, which reuses the row's chip and title. The branch name is editable as before. The head branch name is the default, and <code>pr/N</code> is used only when the head comes from someone else's fork or collides with a local branch (open question C on the refs board).</p>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c After">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>After Create: the worktree is selected, and #381 is Local</div>
+            <div class="stage th-light" style="display:flex;flex-direction:column;gap:12px">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrGit</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">39 wts</span></div>
+                <div class="tree">
+                  <div class="wtrow"><span class="hico">⌂</span><span class="bn">main</span><span class="ptag">PRIMARY</span><span class="age">today</span></div>
+                  <div class="wtrow sel"><span class="hico lg br"></span><span class="bn">fix/distribution-audit-follow-up</span><span class="prc passing"><span class="d"></span><span class="lb">#381</span></span><span class="age">now</span></div>
+                  <div class="sec"><div class="sh"><span class="c"></span><span class="slabel">Worktrees</span><span class="scount">39</span><span class="sp"></span><span class="rf">⟳</span><span class="srt">Recent</span></div></div>
+                  <div class="sec">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s4c.label}}</span><span class="scount">{{s4c.total}}</span><span class="{{s4c.failCls}}">{{s4c.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                    <div class="sbody">
+                      <div class="sub"><span class="slabel">Local</span><span class="scount">{{s4c.nLocal}}</span></div>
+                      <sc-for list="{{s4c.local}}" as="r" hint-placeholder-count="4">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                      <div class="sub tog"><span class="c open"></span><span class="slabel">Remote only</span><span class="scount">{{s4c.nRemote}}</span></div>
+                      <sc-for list="{{s4c.remote}}" as="r" hint-placeholder-count="1">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="toast"><b>Worktree created</b> · fix/distribution-audit-follow-up · #381</div>
+            </div>
+            <p class="note">The new worktree is selected and opens in the main pane, the same as after any New worktree. The PR row moves groups because its head is now local. No forge call is made; the move is a join against <code>refs/heads</code>.</p>
+          </div>
+
+          <div class="dv-opt" id="4d" data-screen-label="4d Cmd-K">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>⌘K, from anywhere: the same cache, the same verb</div>
+            <div class="stage th-light">
+              <div class="pal">
+                <div class="palin">⌕ 381<span></span></div>
+                <div class="palr on"><span class="k">PR</span><div><div class="t1"><span class="prc passing"><span class="d"></span><span class="lb">#381</span></span><span class="pt">fix(release): verify package manifests and retain release audits</span></div><div class="t2">PwrGit · remote only · fix/distribution-audit-follow-up</div></div><span class="act">New worktree ↵</span></div>
+                <div class="palr"><span class="k">PR</span><div><div class="t1"><span class="prc failing"><span class="d"></span><span class="lb">#381</span></span><span class="pt">feat(capture): HDR screenshots on Apple silicon</span></div><div class="t2">PwrSnap · ⌂ hdr-capture</div></div><span class="act">Open ↵</span></div>
+                <div class="palf">↵ runs the action · ⌘↵ opens on the forge · searches open PRs and MRs across every repo</div>
+              </div>
+            </div>
+            <p class="note" style="max-width:560px">This builds on the refs board's open question B. Give <code>search_fts</code> a <code>change_request</code> kind fed from the open-list cache, so a number or a title word finds the PR in every repo. The action follows the PR's location: <b>New worktree</b> when nothing is local, <b>Open</b> when it is in a worktree. The PwrSnap result is invented, to show two repos sharing a number.</p>
+          </div>
+
+          <div class="dv-opt" id="4e" data-screen-label="4e Live">
+            <div class="dv-olabel"><a class="dv-oid" href="#4e">4e</a>Live: switch repos, change the lens, collapse a group, hover a row and click + Worktree</div>
+            <div class="proto" style="width:780px">
+              <div class="pchips"><sc-for list="{{pRepos}}" as="c" hint-placeholder-count="3"><button class="{{c.cls}}" onClick="{{c.on}}">{{c.label}}</button></sc-for><button onClick="{{pReset}}">reset</button></div>
+              <div class="stage th-light" style="display:flex;gap:18px;align-items:flex-start;min-height:520px">
+                <div class="sb">
+                  <div class="repo"><span class="chev"></span><span class="rname">{{p.name}}</span><span class="rsp"></span><sc-for list="{{p.marks}}" as="m" hint-placeholder-count="1"><span class="{{m}}"></span></sc-for><span class="wts">{{p.wts}} wts</span></div>
+                  <div class="tree">
+                    <sc-for list="{{p.newWts}}" as="w" hint-placeholder-count="0"><div class="wtrow sel"><span class="hico lg br"></span><span class="bn">{{w.branch}}</span><span class="{{w.chipCls}}"><span class="d"></span><span class="lb">{{w.sig}}</span></span><span class="age">now</span></div></sc-for>
+                    <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Worktrees</span><span class="scount">{{p.wts}}</span><span class="sp"></span><span class="rf">⟳</span><span class="srt">Recent</span></div></div>
+                    <div class="sec">
+                      <div class="sh"><span class="c open"></span><span class="slabel">{{p.label}}</span><span class="scount">{{p.total}}</span><span class="{{p.failCls}}">{{p.fail}}</span><span class="sp"></span><span class="rf">⟳</span></div>
+                      <div class="sbody">
+                        <sc-if value="{{p.showLens}}"><div class="seg"><sc-for list="{{p.lens}}" as="l" hint-placeholder-count="3"><span class="{{l.cls}}" onClick="{{l.on}}"><span class="{{l.mark}}"></span>{{l.label}}<i>{{l.n}}</i></span></sc-for></div></sc-if>
+                        <div class="sub"><span class="slabel">Local</span><span class="scount">{{p.nLocal}}</span></div>
+                        <sc-for list="{{p.local}}" as="r" hint-placeholder-count="2">
+                          <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                        </sc-for>
+                        <div class="sub tog" onClick="{{pToggleRemote}}"><span class="{{p.remChev}}"></span><span class="slabel">Remote only</span><span class="scount">{{p.nRemote}}</span></div>
+                        <sc-if value="{{p.remoteOpen}}">
+                          <sc-for list="{{p.remote}}" as="r" hint-placeholder-count="2">
+                            <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                          </sc-for>
+                          <sc-if value="{{p.remoteEmpty}}"><div class="empty">Every open one is already local.</div></sc-if>
+                        </sc-if>
+                      </div>
+                    </div>
+                    <div class="sec"><div class="sh"><span class="c"></span><span class="slabel">Branches</span><span class="scount">{{p.branches}}</span></div></div>
+                  </div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px;width:380px">
+                  <sc-if value="{{d.open}}">
+                    <div class="modal">
+                      <div class="mt">New worktree · {{p.name}}</div>
+                      <div class="mfrom"><span class="{{d.chipCls}}"><span class="d"></span><span class="lb">{{d.sig}}</span></span><span class="pt">{{d.title}}</span></div>
+                      <div class="minput">{{d.branch}}</div>
+                      <div class="mcheck"><span class="bx">✓</span>Create as a new branch</div>
+                      <div class="mhint">{{d.hint}}</div>
+                      <div class="mact"><span class="mbtn" onClick="{{dCancel}}">Cancel</span><span class="mbtn pri" onClick="{{dCreate}}">Create</span></div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{t.show}}"><div class="toast"><b>Worktree created</b> · {{t.text}}</div></sc-if>
+                </div>
+              </div>
+              <div class="readout">{{readout}}</div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "Switch here instead, my checkout is clean" · "the PR's branch was force-pushed after I checked it out"</p>
+      </section>
+
+      <!-- ================================ TURN 5 ================================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">API budget: list calls only, and nothing per PR</span></div>
+        <p class="dv-sub">With 82 repos in a profile, a design that asked about each PR one at a time would spend GitHub's 5,000 points an hour in a single sidebar scroll. Everything this section draws comes from the list response. The only extra cost is <b>one list call for each additional forge repository</b> in a fork or a mirror.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Calls">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Every forge read this section makes</div>
+            <div class="tbl" style="width:900px">
+              <div class="tr head c4"><span>Read</span><span>Call</span><span>When</span><span>Cost</span></div>
+              <div class="tr c4"><span><b>Open list</b>, per forge repo</span><span>GitHub: <code>pullRequests(states: OPEN, first: 50, orderBy: UPDATED_AT)</code> with <code>statusCheckRollup</code> inline. GitLab: <code>mergeRequests(state: opened, first: 100)</code> with <code>headPipeline</code></span><span>On repo expand with the existing sweep (10&#8239;min TTL). ⟳ asks again, with a 1&#8239;min floor. Collapsed repos are never asked</span><span>1 request per forge repo. A fork is 2. A page past the first only when the section is expanded and scrolled to its end</span></div>
+              <div class="tr c4"><span><b>Local vs remote only</b></span><span>A join of <code>head_ref</code> and <code>head_repo</code> against <code>refs/heads</code>, worktrees and each branch's upstream</span><span>On every render, in SQL</span><span><span class="verdict keep">Free</span></span></div>
+              <div class="tr c4"><span><b>Hover card</b></span><span>The cached row's fields</span><span>On hover</span><span><span class="verdict keep">Free</span>, with no detail fetch</span></div>
+              <div class="tr c4"><span><b>A number not in the list</b></span><span><code>pr:lookup</code> (<code>fetchPrsByNumbers</code>)</span><span>Only when someone types a number in ⌘K or the refs browser and it misses</span><span>1 per distinct miss, memoized for 5&#8239;min</span></div>
+              <div class="tr c4"><span><b>A fork's head</b></span><span><code>git fetch upstream pull/N/head</code></span><span>Only on + Worktree for a ⑂ row</span><span>A git fetch, not an API call</span></div>
+              <div class="tr c4"><span><b>Per-PR detail, reviews, comments</b></span><span>Never. ↗ opens the forge</span><span>Never</span><span><span class="verdict keep">None</span></span></div>
+            </div>
+            <p class="note" style="max-width:900px"><b>Schema:</b> <code>repo_open_pr</code> gains <code>forge_repo</code> (host plus path) and is keyed <code>(repo_id, forge_repo, number)</code>. <code>repo_open_pr_state</code> gets one TTL row per forge repo, so the fork's list and the original's list refresh and fail independently. The list for each remote replaces only that remote's rows. The resolver changes from <code>remote get-url origin</code> to every remote, deduplicated by forge repo, skipping hosts with no token. The same list keeps feeding <code>branch_pr</code> for local heads, so worktree chips also get fresher.</p>
+          </div>
+
+          <div class="dv-opt" id="5b" data-screen-label="5b Rate limited">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Rate-limited or offline: keep the last good list and say how old it is</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrGit</span><span class="rsp"></span><img class="fmk" src="assets/github-invertocat-black.svg" alt="" /><span class="wts">38 wts</span></div>
+                <div class="tree">
+                  <div class="sec" style="border-top:0">
+                    <div class="sh"><span class="c open"></span><span class="slabel">{{s2b.label}}</span><span class="scount">{{s2b.total}}</span><span class="{{s2b.failCls}}">{{s2b.fail}}</span><span class="sp"></span><span class="rf warn">⟳</span></div>
+                    <div class="sbody">
+                      <div class="stale">From 14 min ago. GitHub's rate limit resets at 10:42.</div>
+                      <div class="sub"><span class="slabel">Local</span><span class="scount">{{s2b.nLocal}}</span></div>
+                      <sc-for list="{{s2b.local}}" as="r" hint-placeholder-count="3">
+                        <div class="{{r.cls}}"><div class="pl1"><span class="{{r.chipCls}}"><span class="d"></span><span class="lb">{{r.sig}}</span></span><span class="{{r.xCls}}"><span class="d"></span>{{r.x}}<span class="xr">{{r.xr}}</span></span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="pacts"><span class="{{r.a1Cls}}" onClick="{{r.onA1}}">{{r.a1}}</span><span class="ib ico" onClick="{{r.onFx}}">↗</span></span></div><div class="pl2"><span class="{{r.remCls}}"><span class="{{r.mark}}"></span><span class="rn">{{r.remote}}</span></span><span class="{{r.locCls}}"><span class="{{r.lgCls}}">{{r.locGlyph}}</span><span class="lt">{{r.loc}}</span></span><span class="ph">{{r.head}}</span><span class="{{r.pbCls}}">→ {{r.base}}</span></div></div>
+                      </sc-for>
+                      <div class="sub tog"><span class="c"></span><span class="slabel">Remote only</span><span class="scount">{{s2b.nRemote}}</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="note">The line appears only once the list is older than twice its TTL, or when the forge has refused. It sits under the header, so ⟳, the one control you would be pointing at, never moves when the line appears or clears. The ⟳ tooltip carries the detail (<code>retry.ts</code>'s reset time), and ⟳ stays clickable but does nothing before the reset. Remote only is shown collapsed here, in its remembered state.</p>
+          </div>
+
+          <div class="dv-opt" id="5c" data-screen-label="5c Open questions">
+            <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>Open questions for Harold</div>
+            <div class="find" style="width:420px">
+              <div class="fitem"><span class="pin q">A</span><div><h4>2a, 2b or 2c?</h4><p><b>Answered: 2b.</b> Remote only starts collapsed on every repository, whatever its size.</p></div></div>
+              <div class="fitem"><span class="pin q">B</span><div><h4>Hide bots in Remote only?</h4><p>Dependabot and Renovate can be most of a list. A <code>bots</code> header chip that filters them in or out would be cheap, because the author is already in the list.</p></div></div>
+              <div class="fitem"><span class="pin q">C</span><div><h4>Should Local ignore the lens?</h4><p>With the lens on <code>origin</code>, your branch with #412 upstream still has #14 on origin, so it stays. A branch whose only PR is upstream drops out. Is that right, or is Local always the whole list?</p></div></div>
+              <div class="fitem"><span class="pin q">D</span><div><h4>Recently merged</h4><p>Not in the list call, so not shown. A merged PR whose branch is still local already shows a purple chip on its worktree, and Finished Branches handles cleaning those up.</p></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "sketch the provider signature with forge_repo" · "how does the lens read in dark theme?"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const GH = "mk gh";
+      const GL = "mk gl";
+      const NOUN = { gh: "Pull requests", gl: "Merge requests" };
+      const REPOS = {
+        pwrgit: {
+          name: "PwrGit", wts: 38, branches: 243,
+          remotes: [{ name: "origin", forge: "gh", repo: "pwrdrvr/PwrGit" }],
+          prs: [
+            { id: "g376", remote: "origin", num: 376, title: "feat(desktop): use ChatGPT plans for opted-in AI jobs", head: "feat/siwc-chatgpt-plan", base: "main", chk: "passing", draft: true, age: "2h", loc: "wt", wt: "siwc-chatgpt-plan" },
+            { id: "g381", remote: "origin", num: 381, title: "fix(release): verify package manifests and retain release audits", head: "fix/distribution-audit-follow-up", base: "main", chk: "passing", age: "1d", loc: "none" },
+            { id: "g342", remote: "origin", num: 342, title: "feat(forge): add public Gerrit change browsing and patch-set checkout", head: "fix/chromium-repository-links", base: "main", chk: "pending", age: "6d", loc: "none" },
+            { id: "g320", remote: "origin", num: 320, title: "build(desktop): upgrade Electron from 41 to 44.4.3", head: "build/electron-44", base: "main", chk: "failing", age: "9d", loc: "branch" },
+            { id: "g138", remote: "origin", num: 138, title: "fix(npm): make pwrgit reservation explicit", head: "fix/honest-pwrgit-package-20260823", base: "main", chk: "passing", age: "2w", loc: "wt", wt: "honest-pwrgit-package" }
+          ]
+        },
+        orbit: {
+          name: "orbit-deploy", wts: 6, branches: 31,
+          remotes: [{ name: "upstream", forge: "gh", repo: "orbit-labs/orbit-deploy" }, { name: "origin", forge: "gh", repo: "pwrdrvr/orbit-deploy" }],
+          prs: [
+            { id: "o412", remote: "upstream", num: 412, title: "feat: per-tenant deploy windows", head: "tenant-deploy-windows", base: "main", chk: "passing", age: "3h", loc: "wt", wt: "tenant-deploy-windows" },
+            { id: "o14", remote: "origin", num: 14, title: "feat: per-tenant deploy windows", head: "tenant-deploy-windows", base: "main", chk: "passing", age: "3h", loc: "wt", wt: "tenant-deploy-windows" },
+            { id: "o13", remote: "origin", num: 13, title: "ci: try arm64 runners", head: "ci/arm64-runners", base: "tenant-deploy-windows", chk: "pending", age: "1d", loc: "branch" },
+            { id: "o409", remote: "upstream", num: 409, title: "Bump jest from 29.7.0 to 30.1.3", head: "dependabot/npm_and_yarn/jest-30.1.3", base: "main", chk: "pending", age: "2d", loc: "none" },
+            { id: "o405", remote: "upstream", num: 405, title: "docs: fix a typo in the quickstart", head: "fix/quickstart-typo", base: "main", chk: "passing", age: "4d", loc: "none", fork: "octo-contrib" },
+            { id: "o398", remote: "upstream", num: 398, title: "fix: drain the queue before shutdown", head: "drain-on-shutdown", base: "main", chk: "failing", age: "1w", loc: "none", fork: "mira-k" }
+          ]
+        },
+        relay: {
+          name: "relay-cache", wts: 3, branches: 18,
+          remotes: [{ name: "origin", forge: "gh", repo: "pwrdrvr/relay-cache" }, { name: "gitlab", forge: "gl", repo: "pwrdrvr/relay-cache" }],
+          prs: [
+            { id: "r88", remote: "origin", num: 88, title: "feat: evict by byte size, not entry count", head: "lru-by-bytes", base: "main", chk: "passing", age: "5h", loc: "wt", wt: "lru-by-bytes" },
+            { id: "r41", remote: "gitlab", num: 41, title: "ci: mirror pipeline for arm64", head: "ci/arm64-mirror", base: "main", chk: "pending", age: "1d", loc: "branch" },
+            { id: "r85", remote: "origin", num: 85, title: "Bump undici from 6.19.2 to 6.21.0", head: "dependabot/npm_and_yarn/undici-6.21.0", base: "main", chk: "passing", age: "3d", loc: "none" },
+            { id: "r39", remote: "gitlab", num: 39, title: "fix: TTL is off by one second at the boundary", head: "ttl-boundary", base: "main", chk: "failing", age: "1w", loc: "none", fork: "j.okafor" }
+          ]
+        }
+      };
+      const noop = () => {};
+
+      function forgeOf(repo, remoteName) {
+        for (const r of repo.remotes) { if (r.name === remoteName) return r.forge; }
+        return "gh";
+      }
+      function sigOf(repo, p) { return (forgeOf(repo, p.remote) === "gl" ? "!" : "#") + p.num; }
+      function chipCls(p) { return "prc " + p.chk + (p.draft ? " draft" : ""); }
+      function wtNameFor(p) { return p.head.replace(/\//g, "-"); }
+      function wtMatches(p) { const h = p.localHead || p.head; return p.wt === h.split("/").pop() || p.wt === h.replace(/\//g, "-"); }
+      function branchFor(p) { return p.fork ? "pr/" + p.num : p.head; }
+
+      // opts: lens, created (id -> true), hover (id), onNew (fn(p)), noBase
+      function build(key, opts) {
+        const repo = REPOS[key];
+        const o = opts || {};
+        const lens = o.lens || "all";
+        const created = o.created || {};
+        const prs = repo.prs.map((p) => created[p.id] ? Object.assign({}, p, { loc: "wt", wt: branchFor(p).replace(/\//g, "-"), localHead: p.fork ? branchFor(p) : null, age: "now" }) : p);
+        const remotesWithPrs = repo.remotes.filter((r) => prs.some((p) => p.remote === r.name));
+        const mixed = remotesWithPrs.length > 1;
+        const forges = {};
+        for (const r of remotesWithPrs) forges[r.forge] = true;
+        const forgeKeys = Object.keys(forges);
+        const label = forgeKeys.length > 1 ? "Pull & merge requests" : NOUN[forgeKeys[0] || "gh"];
+        const visible = prs.filter((p) => lens === "all" || p.remote === lens);
+        const showRem = mixed && lens === "all";
+        const view = (p, extra) => {
+          const forge = forgeOf(repo, p.remote);
+          const isWt = p.loc === "wt";
+          return {
+            cls: "prow" + (o.hover === p.id ? " hov" : "") + (o.sel === p.id ? " sel" : ""),
+            chipCls: chipCls(p),
+            sig: sigOf(repo, p),
+            title: p.title,
+            age: p.age,
+            remCls: showRem ? "rem" : "hide",
+            mark: forge === "gl" ? GL : GH,
+            remote: p.remote,
+            locCls: isWt ? "loc here" : p.loc === "branch" ? "loc" : p.fork ? "loc fork" : "hide",
+            lgCls: p.loc === "branch" && !isWt ? "lg br" : "lg",
+            locGlyph: isWt ? "⌂" : p.loc === "branch" ? "" : p.fork ? "⑂" : "",
+            pbCls: p.base === "main" ? "hide" : "pb",
+            loc: isWt ? (wtMatches(p) ? "" : p.wt) : p.loc === "branch" ? "local" : p.fork ? p.fork : "",
+            head: p.localHead || p.head,
+            base: p.base,
+            xCls: extra ? "prc mini " + extra.chk : "hide",
+            x: extra ? sigOf(repo, extra) : "",
+            xr: extra ? " " + extra.remote : "",
+            a1Cls: isWt ? "hide" : "ib",
+            a1: "+ Worktree",
+            onA1: o.onNew ? () => o.onNew(p) : noop,
+            onFx: noop
+          };
+        };
+        // Local: one row per local branch; lead with the PR that leaves your repo
+        const groups = [];
+        const byHead = {};
+        for (const p of visible) {
+          if (p.loc === "none") continue;
+          if (!byHead[p.head]) { byHead[p.head] = []; groups.push(byHead[p.head]); }
+          byHead[p.head].push(p);
+        }
+        const local = groups.map((g) => {
+          const sorted = g.slice().sort((a, b) => (a.remote === "origin" ? 1 : 0) - (b.remote === "origin" ? 1 : 0));
+          return view(sorted[0], sorted[1]);
+        });
+        const remote = visible.filter((p) => p.loc === "none").map((p) => view(p, null));
+        const all = visible.map((p) => view(p, null));
+        const nLocal = visible.filter((p) => p.loc !== "none").length;
+        const fail = visible.filter((p) => p.chk === "failing").length;
+        const lensItems = [{ key: "all", label: "All", n: prs.length, forge: null }].concat(remotesWithPrs.map((r) => ({ key: r.name, label: r.name, n: prs.filter((p) => p.remote === r.name).length, forge: r.forge })));
+        const showMarks = forgeKeys.length > 1;
+        return {
+          label: label,
+          total: visible.length,
+          fail: fail > 0 ? fail + " failing" : "",
+          failCls: fail > 0 ? "schip bad" : "hide",
+          nLocal: nLocal,
+          nRemote: remote.length,
+          local: local,
+          remote: remote,
+          all: all,
+          showLens: mixed,
+          lens: lensItems.map((l) => ({
+            cls: l.key === lens ? "on" : "",
+            label: l.label,
+            n: l.n,
+            mark: showMarks && l.forge ? (l.forge === "gl" ? GL : GH) : "hide",
+            on: o.onLens ? () => o.onLens(l.key) : noop
+          })),
+          marks: forgeKeys.map((f) => (f === "gl" ? GL : GH) + " fmk")
+        };
+      }
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { repo: "pwrgit", lens: { pwrgit: "all", orbit: "all", relay: "all" }, remoteOpen: false, created: {}, dlg: null, toast: "" };
+        }
+        renderVals() {
+          const s = this.state;
+          const s2b = build("pwrgit", {});
+          const s2e = build("orbit", {}).local.concat(build("orbit", {}).remote.slice(1, 2));
+          const repo = REPOS[s.repo];
+          const createdHere = {};
+          for (const p of repo.prs) { if (s.created[p.id]) createdHere[p.id] = true; }
+          const p = build(s.repo, {
+            lens: s.lens[s.repo],
+            created: s.created,
+            onNew: (pr) => { this.setState({ dlg: pr.id, toast: "" }); },
+            onLens: (k) => { const l = Object.assign({}, this.state.lens); l[this.state.repo] = k; this.setState({ lens: l }); }
+          });
+          const newWts = repo.prs.filter((x) => s.created[x.id]).map((x) => ({ branch: branchFor(x), chipCls: chipCls(x), sig: sigOf(repo, x) }));
+          const dp = s.dlg ? repo.prs.filter((x) => x.id === s.dlg)[0] : null;
+          let hint = "";
+          if (dp) {
+            hint = dp.fork
+              ? "From " + dp.fork + "'s fork. Fetches pull/" + dp.num + "/head from " + dp.remote + " and sets pr/" + dp.num + " to pull from " + dp.fork + "/" + dp.head + "."
+              : dp.loc === "branch"
+                ? "Uses your local branch " + dp.head + ". Path ~/" + repo.name + "-worktrees/" + wtNameFor(dp)
+                : "Starting from " + dp.remote + "/" + dp.head + ", tracking it. Path ~/" + repo.name + "-worktrees/" + wtNameFor(dp);
+          }
+          const nCreated = Object.keys(createdHere).length;
+          return {
+            s2a: s2b, s2b: s2b, s2c: s2b,
+            s2e: s2e,
+            s3a: build("orbit", {}),
+            s3b: build("orbit", { lens: "upstream" }),
+            s3c: build("relay", {}),
+            s4a: build("pwrgit", { hover: "g381" }),
+            s4c: build("pwrgit", { created: { g381: true } }),
+            pRepos: [["pwrgit", "PwrGit · one remote"], ["orbit", "orbit-deploy · fork"], ["relay", "relay-cache · GitHub + GitLab"]].map((c) => ({
+              label: c[1], cls: s.repo === c[0] ? "on" : "", on: () => { this.setState({ repo: c[0], dlg: null, toast: "" }); }
+            })),
+            pReset: () => { this.setState({ lens: { pwrgit: "all", orbit: "all", relay: "all" }, remoteOpen: false, created: {}, dlg: null, toast: "" }); },
+            pToggleRemote: () => { this.setState({ remoteOpen: !this.state.remoteOpen }); },
+            p: Object.assign({}, p, {
+              name: repo.name,
+              wts: repo.wts + nCreated,
+              branches: repo.branches + nCreated,
+              newWts: newWts,
+              remoteOpen: s.remoteOpen,
+              remChev: s.remoteOpen ? "c open" : "c",
+              remoteEmpty: p.remote.length === 0
+            }),
+            d: {
+              open: dp !== null,
+              chipCls: dp ? chipCls(dp) : "prc",
+              sig: dp ? sigOf(repo, dp) : "",
+              title: dp ? dp.title : "",
+              branch: dp ? branchFor(dp) : "",
+              hint: hint
+            },
+            dCancel: () => { this.setState({ dlg: null }); },
+            dCreate: () => {
+              const c = Object.assign({}, this.state.created);
+              c[dp.id] = true;
+              this.setState({ created: c, dlg: null, toast: branchFor(dp) + " · " + sigOf(repo, dp) });
+            },
+            t: { show: s.toast !== "", text: s.toast },
+            readout: "repo " + repo.name + " · lens " + s.lens[s.repo] + " · " + p.total + " open (" + p.nLocal + " local, " + p.nRemote + " remote only) · lens " + (p.showLens ? "shown" : "hidden, one remote has PRs") + " · list calls per refresh: " + (p.lens.length - 1)
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

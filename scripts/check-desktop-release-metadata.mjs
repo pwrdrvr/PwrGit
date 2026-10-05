@@ -268,7 +268,7 @@ for (const expected of [
   "Download macOS release artifacts",
   "Download Windows installer artifact",
   "Name Windows checksum manifest",
-  'node scripts/publish-desktop-release.mjs "$RELEASE_TAG" mac-dist windows-dist "$notes"',
+  'node scripts/publish-desktop-release.mjs "$RELEASE_TAG" mac-dist windows-dist linux-dist "$notes"',
   "cancel-in-progress: false",
 ]) {
   assertContains(publishJob, ".github/workflows/release.yml publish-release-assets", expected);

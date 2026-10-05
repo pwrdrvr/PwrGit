@@ -8,7 +8,7 @@
 // a correction to either copy leaves the other subscriber wrong.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AppUpdateStatus } from "@pwrgit/shared";
+import type { AppUpdateStatus, AppManualUpdateInstructions } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
 export type AppUpdateStatusHandle = {
@@ -19,6 +19,7 @@ export type AppUpdateStatusHandle = {
    *  quitting to install, and the window goes away rather than settling. */
   restarting: boolean;
   restartError: string | undefined;
+  restartManualUpdate: AppManualUpdateInstructions | undefined;
   restart: () => Promise<void>;
   /** Drop a failed Restart, so the offer is presented clean again. */
   resetRestart: () => void;
@@ -31,6 +32,8 @@ export function useAppUpdateStatus(): AppUpdateStatusHandle {
   const [status, setStatus] = useState<AppUpdateStatus>({ status: "idle" });
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | undefined>();
+
+  const [restartManualUpdate, setRestartManualUpdate] = useState<AppManualUpdateInstructions>();
 
   // Read the current status once, in case main reached `downloaded` before
   // this window mounted, and let any real event win that race.
@@ -55,6 +58,7 @@ export function useAppUpdateStatus(): AppUpdateStatusHandle {
 
   const resetRestart = useCallback(() => {
     setRestartError(undefined);
+    setRestartManualUpdate(undefined);
     setRestarting(false);
   }, []);
 
@@ -68,6 +72,7 @@ export function useAppUpdateStatus(): AppUpdateStatusHandle {
   const restart = useCallback(async () => {
     setRestarting(true);
     setRestartError(undefined);
+    setRestartManualUpdate(undefined);
     const result = await dispatch("app:installUpdate", undefined);
     if (!result.ok) {
       setRestartError(result.error.message);
@@ -76,6 +81,7 @@ export function useAppUpdateStatus(): AppUpdateStatusHandle {
     }
     if (result.value.status === "error") {
       setRestartError(result.value.message);
+      setRestartManualUpdate(result.value.manualUpdate);
       setRestarting(false);
     }
     // `restarting` — main is quitting to install; the window goes away.
@@ -91,10 +97,11 @@ export function useAppUpdateStatus(): AppUpdateStatusHandle {
       downloadedVersion,
       restarting,
       restartError,
+      restartManualUpdate,
       restart,
       resetRestart,
       setStatus
     }),
-    [downloadedVersion, resetRestart, restart, restartError, restarting, status]
+    [downloadedVersion, resetRestart, restart, restartError, restartManualUpdate, restarting, status]
   );
 }

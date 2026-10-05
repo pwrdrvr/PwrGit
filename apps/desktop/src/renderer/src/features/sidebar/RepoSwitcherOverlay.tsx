@@ -5,6 +5,7 @@ import {
   changeRequestLabel,
   changeRequestNoun,
   changeRequestNumberQuery,
+  forgeRepoKey,
   type ChangeRequestLocation,
   type Commit,
   type FileSearchHit,
@@ -26,6 +27,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { shortWhen } from "../graph/graph-view";
+import { trackingRemote } from "./change-request-groups";
 import { commitHashQuery, searchCommits } from "./commit-search";
 import { ContextMenu } from "../shell/ContextMenu";
 import { SettingsSegmented } from "../settings/SettingsLayout";
@@ -37,12 +39,15 @@ import { PinIcon } from "./WorktreeRow";
 // for a local branch, which carries neither — the branch name itself. Two local
 // branches in one repo would otherwise share a React key.
 // A change request's name is its title, which two PRs can share; its number
-// cannot be.
+// cannot be — within its forge repository. A fork checkout lists the fork's
+// and the original's, and both can have a #14.
 const hitKey = (hit: RepoSearchHit): string =>
   `${hit.kind}:${hit.repoId}:${
     hit.worktreeId ??
     hit.remoteRef ??
-    (hit.kind === "change_request" ? `#${hit.pr?.number ?? hit.name}` : hit.name)
+    (hit.kind === "change_request"
+      ? `${hit.pr?.repoPath ?? ""}#${hit.pr?.number ?? hit.name}`
+      : hit.name)
   }`;
 
 function resolvePaletteHits(
@@ -356,7 +361,7 @@ export function hitForLocation(
         kind: "remote_branch",
         name: location.branch,
         remoteRef: location.fullName,
-        remoteName: "origin"
+        remoteName: trackingRemote(location)
       };
     default:
       return null;
@@ -714,9 +719,14 @@ export function RepoSwitcherOverlay({
     if (pr === undefined || fetchingPr !== null) return;
     setBranchError(null);
     setFetchingPr(hitKey(hit));
+    // The listing repository says whose #N this is when a checkout lists
+    // more than one (a fork and its original).
     const result = await dispatch("pr:fetchHead", {
       repoId: hit.repoId,
-      number: pr.number
+      number: pr.number,
+      ...(pr.host === undefined || pr.repoPath === undefined
+        ? {}
+        : { forgeRepo: forgeRepoKey(pr.host, pr.repoPath) })
     });
     if (!mounted.current) return;
     setFetchingPr(null);

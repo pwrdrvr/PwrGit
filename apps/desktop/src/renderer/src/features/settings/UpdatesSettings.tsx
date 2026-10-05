@@ -1,3 +1,4 @@
+import { ManualUpdateInstructions } from "../update/ManualUpdateInstructions";
 // Settings → Updates: which published build PwrGit follows.
 //
 // Built around a FOUR-SLOT MATRIX rather than two stacked segmented controls
@@ -206,6 +207,8 @@ export function UpdatesSettings(props: {
     AppUpdateCheckResult | undefined
   >();
   const {
+    status: liveUpdateStatus,
+    restartManualUpdate,
     downloadedVersion,
     restarting: updateRestarting,
     restartError: updateRestartError,
@@ -291,6 +294,10 @@ export function UpdatesSettings(props: {
   const statusNotesUrl = sameVersion(statusVersion, downloadedVersion)
     ? undefined
     : releaseNotesUrl(statusVersion);
+
+  const manualInstructions = restartManualUpdate
+    ?? (updateResult && "manualUpdate" in updateResult ? updateResult.manualUpdate : undefined)
+    ?? ("manualUpdate" in liveUpdateStatus ? liveUpdateStatus.manualUpdate : undefined);
 
   // Roving tabindex + arrow keys, the radiogroup contract. Focus moves and
   // selection does NOT follow it: picking a slot rewrites which build the app
@@ -513,6 +520,7 @@ export function UpdatesSettings(props: {
               </div>
             }
           />
+          <ManualUpdateInstructions instructions={manualInstructions} />
         </div>
       </SettingsSection>
     </SettingsSectionStack>
