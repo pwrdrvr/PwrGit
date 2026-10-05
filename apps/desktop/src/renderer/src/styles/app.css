@@ -439,7 +439,8 @@ textarea,
    arrow cursor, clicks swallowed — and only the padding edges stay live.
    (PwrAgnt hit the same thing with `.masthead-actions`.) */
 .titlebar__branch,
-.titlebar__pathchip {
+.titlebar__pathchip,
+.titlebar__cr .pr-chip {
   -webkit-app-region: no-drag;
 }
 

@@ -110,6 +110,9 @@ export class OpenPrService {
    * failed. Keyed by `listKey`.
    */
   private readonly unasked = new Map<string, number>();
+  /** The forge remotes' names the last hidden-ref sweep saw, per repository:
+   *  swept again only when they change (a remote removed or renamed). */
+  private readonly viewRefRemotes = new Map<string, string>();
   /** Each repository's remote URLs, stamped with its config file. */
   private readonly remoteUrls = new Map<
     string,
@@ -412,8 +415,9 @@ export class OpenPrService {
    * - a base branch with no tracking ref, into its tracking ref.
    *
    * When the local branch and the forge's head (`pr.headOid`) differ, the
-   * newer is shown unless `show` says which. `fetched` says whether any ref
-   * moved, so the caller can re-index.
+   * newer is shown unless `show` says which. `fetched` says whether a
+   * remote-tracking ref moved — a row's location may have changed, so the
+   * caller re-indexes; the hidden refs are not indexed and do not count.
    */
   async view(
     repoId: string,
@@ -445,7 +449,7 @@ export class OpenPrService {
     let fetched = false;
     const fetchInto = async (remote: string, refspec: string): Promise<Result<void>> => {
       const result = await fetchRefspec(this.git, path, remote, refspec);
-      if (result.ok) fetched = true;
+      if (result.ok && refspec.includes(":refs/remotes/")) fetched = true;
       return result;
     };
     const view = await this.resolveView(
@@ -544,7 +548,7 @@ export class OpenPrService {
       // forge has not moved since.
       const kept = await this.commitOid(path, viewRef);
       const current = kept !== null && (pr.headOid === undefined || pr.headOid === kept);
-      if (kept !== null && (current || !fetch)) {
+      if (current) {
         forge = asFetched(kept);
       } else if (crRef === null) {
         return unavailable(
@@ -576,9 +580,32 @@ export class OpenPrService {
           ? { oid: pr.headOid, holder: { kind: "remote", name: tracking } }
           : asFetched(pr.headOid);
     } else if (show === "forge" && fetch) {
-      const head = await fetchByNumber();
-      if (typeof head === "string") return unavailable(head);
-      forge = head;
+      // A same-repository head held by a tracking ref that has fallen
+      // behind: move the tracking ref, so + Worktree starts from the head
+      // shown here. Any other head comes by number into the hidden ref.
+      const tracking =
+        location.kind === "remote" &&
+        headRemote !== null &&
+        location.fullName === `refs/remotes/${headRemote}/${location.branch}` &&
+        (await this.isBranchName(path, location.branch))
+          ? location
+          : null;
+      if (tracking !== null && headRemote !== null) {
+        const name = `${headRemote}/${tracking.branch}`;
+        const result = await fetchInto(
+          headRemote,
+          `+refs/heads/${tracking.branch}:${tracking.fullName}`
+        );
+        if (!result.ok) return unavailable(`Couldn't fetch ${name}: ${result.error.message}`);
+        const oid = await this.commitOid(path, tracking.fullName);
+        if (oid === null) return unavailable(`${name} fetched nothing.`);
+        local = { oid, holder: { kind: "remote", name } };
+        forge = local;
+      } else {
+        const head = await fetchByNumber();
+        if (typeof head === "string") return unavailable(head);
+        forge = head;
+      }
     }
 
     let relation: Extract<ChangeRequestView, { state: "ready" }>["relation"] = {
@@ -697,6 +724,33 @@ export class OpenPrService {
     }
   }
 
+  /**
+   * Drop the hidden refs of remotes that list nothing any more — removed or
+   * renamed — which `pruneViewRefs`, run per refreshed remote, never reaches.
+   * One `for-each-ref`, and only when the set of names changed.
+   */
+  private async sweepViewRefs(
+    repoId: string,
+    path: string,
+    remotes: readonly ForgeRemote[]
+  ): Promise<void> {
+    const names = new Set(remotes.map((remote) => remote.name));
+    const stamp = [...names].sort().join("\n");
+    if (this.viewRefRemotes.get(repoId) === stamp) return;
+    const prefix = "refs/pwrgit/cr/";
+    const out = await this.git(["for-each-ref", "--format=%(refname)", prefix], path);
+    if (!out.ok || out.value.exitCode !== 0) return;
+    for (const ref of out.value.stdout.split("\n")) {
+      const name = ref.trim();
+      if (!name.startsWith(prefix)) continue;
+      const rest = name.slice(prefix.length);
+      const remote = rest.slice(0, rest.lastIndexOf("/"));
+      if (names.has(remote)) continue;
+      await this.git(["update-ref", "-d", name], path);
+    }
+    this.viewRefRemotes.set(repoId, stamp);
+  }
+
   private async commitOid(path: string, ref: string): Promise<string | null> {
     const out = await this.git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], path);
     if (!out.ok || out.value.exitCode !== 0) return null;
@@ -779,6 +833,7 @@ export class OpenPrService {
     // prune — an unanswered question is not "every remote is gone".
     if (all === null || !this.isCurrent(generation)) return false;
     const pruned = this.prune(repoId, all);
+    await this.sweepViewRefs(repoId, path, all);
     const due = all.filter((remote) => {
       const key = listKey(repoId, remote.key);
       if (force) return true;

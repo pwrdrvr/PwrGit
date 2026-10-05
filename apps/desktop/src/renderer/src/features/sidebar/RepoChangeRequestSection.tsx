@@ -292,6 +292,16 @@ export function RepoChangeRequestSection({
       event.preventDefault();
       event.stopPropagation();
       select(entry, "pointer");
+    } else if (
+      event.key === "Escape" &&
+      selection.selectedKey === changeRequestPickKey(repo.id, entry)
+    ) {
+      // A click leaves focus here, not in the view: Esc goes back from
+      // either place.
+      event.preventDefault();
+      event.stopPropagation();
+      window.clearTimeout(keyboardSelect.current);
+      selection.clear();
     }
   };
 

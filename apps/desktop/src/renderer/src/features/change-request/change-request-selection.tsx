@@ -28,9 +28,11 @@ export type ChangeRequestSelection = {
   /** `changeRequestPickKey` of the change request on screen, if one is. */
   selectedKey: string | null;
   select: (pick: ChangeRequestPick) => void;
+  /** Back to the worktree that was selected before. */
+  clear: () => void;
 };
 
-const NONE: ChangeRequestSelection = { selectedKey: null, select: () => {} };
+const NONE: ChangeRequestSelection = { selectedKey: null, select: () => {}, clear: () => {} };
 
 /**
  * Carried by context rather than threaded through Sidebar → RepoRow →

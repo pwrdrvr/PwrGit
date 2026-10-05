@@ -20,6 +20,8 @@ export type ChangeRequestViewState = {
   setScope: (scope: ChangeRequestScope) => void;
   /** The patch the scope draws; null while it loads, or when too large. */
   patch: string | null;
+  /** The picked commit's diff could not be read. */
+  scopeError: string | null;
   /** The scope's patch, parsed once for the rail's file list. */
   files: DiffFile[];
   /** What the head shown changes, counted from its diff: the header's
@@ -39,6 +41,7 @@ export type ChangeRequestViewState = {
 export const KEYBOARD_FETCH_DWELL_MS = 600;
 /** A `pr:openChanged` this soon after our own fetch is our own echo. */
 const OWN_FETCH_ECHO_MS = 3_000;
+const ALL_CHANGES: ChangeRequestScope = { kind: "all" };
 
 /**
  * The PR view's data: `pr:view`, asked first without leave to fetch (an
@@ -62,23 +65,34 @@ export function useChangeRequestView(
   const [view, setView] = useState<ChangeRequestView | null>(null);
   const [fetching, setFetching] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [show, setShow] = useState<"local" | "forge" | undefined>(undefined);
-  const [scope, setScope] = useState<ChangeRequestScope>({ kind: "all" });
-  const [commitPatch, setCommitPatch] = useState<{ hash: string; patch: string } | null>(
+  // The end and the scope belong to one change request. Stored with its key
+  // and read back only under it, so the render that switches picks already
+  // asks the new one with neither — a reset effect would run after the load
+  // effect had sent the last pick's `show` (and fetched for it).
+  const [showFor, setShowFor] = useState<{ key: string; end: "local" | "forge" } | null>(null);
+  const [scopeFor, setScopeFor] = useState<{ key: string; scope: ChangeRequestScope } | null>(
     null
   );
+  const show = showFor !== null && showFor.key === key ? showFor.end : undefined;
+  const scope: ChangeRequestScope =
+    scopeFor !== null && scopeFor.key === key ? scopeFor.scope : ALL_CHANGES;
+  const [commitPatch, setCommitPatch] = useState<
+    { hash: string; patch: string | null; error: string | null } | null
+  >(null);
   /** Bumped to ask again; `forceFetch` says whether that ask may fetch. */
   const [nonce, setNonce] = useState(0);
   const forceFetch = useRef(false);
-  const ownFetchAt = useRef(0);
+  /** Our own fetches in flight, and when the last one finished: main
+   *  announces `pr:openChanged` before it answers, so the echo can land
+   *  while the fetch is still ours to wait on. */
+  const ownFetches = useRef(0);
+  const ownFetchDoneAt = useRef(0);
 
   // A different change request starts clean.
   useEffect(() => {
     setView(null);
     setError(null);
     setFetching(null);
-    setShow(undefined);
-    setScope({ kind: "all" });
     setCommitPatch(null);
     forceFetch.current = false;
   }, [key]);
@@ -88,15 +102,19 @@ export function useChangeRequestView(
     let live = true;
     let timer: number | undefined;
     const ask = async (fetch: boolean): Promise<ChangeRequestView | null> => {
+      if (fetch) ownFetches.current += 1;
       const result = await dispatch("pr:view", {
         repoId,
         number,
         forgeRepo,
         fetch,
         ...(show === undefined ? {} : { show })
+      }).finally(() => {
+        if (!fetch) return;
+        ownFetches.current -= 1;
+        ownFetchDoneAt.current = Date.now();
       });
       if (!live) return null;
-      if (fetch) ownFetchAt.current = Date.now();
       if (!result.ok) {
         setError(result.error.message);
         setFetching(null);
@@ -137,18 +155,25 @@ export function useChangeRequestView(
     if (repoId === null) return;
     return subscribe("pr:openChanged", (payload) => {
       if (payload.repoId !== repoId) return;
-      if (Date.now() - ownFetchAt.current < OWN_FETCH_ECHO_MS) return;
+      if (ownFetches.current > 0) return;
+      if (Date.now() - ownFetchDoneAt.current < OWN_FETCH_ECHO_MS) return;
       setNonce((n) => n + 1);
     });
   }, [repoId]);
 
   // One commit's diff, read through any worktree of the repository.
   const scopeHash = scope.kind === "commit" ? scope.hash : null;
+  const ownCommit = commitPatch !== null && commitPatch.hash === scopeHash ? commitPatch : null;
   useEffect(() => {
     if (scopeHash === null || worktreeId === null) return;
     let live = true;
     void dispatch("diff:commit", { worktreeId, hash: scopeHash }).then((result) => {
-      if (live && result.ok) setCommitPatch({ hash: scopeHash, patch: result.value });
+      if (!live) return;
+      setCommitPatch(
+        result.ok
+          ? { hash: scopeHash, patch: result.value, error: null }
+          : { hash: scopeHash, patch: null, error: result.error.message }
+      );
     });
     return () => {
       live = false;
@@ -166,9 +191,7 @@ export function useChangeRequestView(
       ? shown?.state === "ready"
         ? shown.patch
         : null
-      : commitPatch?.hash === scope.hash
-        ? commitPatch.patch
-        : null;
+      : (ownCommit?.patch ?? null);
   const allPatch = shown?.state === "ready" ? shown.patch : null;
   const all = useMemo(() => (allPatch === null ? null : parseUnifiedDiff(allPatch)), [allPatch]);
   const scopeFiles = useMemo(
@@ -184,11 +207,34 @@ export function useChangeRequestView(
     [all]
   );
 
-  const showEnd = useCallback((end: "local" | "forge") => setShow(end), []);
+  const showEnd = useCallback(
+    (end: "local" | "forge") => {
+      if (key !== null) setShowFor({ key, end });
+    },
+    [key]
+  );
+  const setScope = useCallback(
+    (next: ChangeRequestScope) => {
+      if (key !== null) setScopeFor({ key, scope: next });
+    },
+    [key]
+  );
   const fetchNow = useCallback(() => {
     forceFetch.current = true;
     setNonce((n) => n + 1);
   }, []);
 
-  return { view: shown, fetching, error, scope, setScope, patch, files, totals, showEnd, fetchNow };
+  return {
+    view: shown,
+    fetching,
+    error,
+    scope,
+    setScope,
+    patch,
+    scopeError: scope.kind === "commit" ? (ownCommit?.error ?? null) : null,
+    files,
+    totals,
+    showEnd,
+    fetchNow
+  };
 }

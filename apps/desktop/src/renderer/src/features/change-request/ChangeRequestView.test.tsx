@@ -6,9 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ok, type ChangeRequestEntry, type ChangeRequestView as View } from "@pwrgit/shared";
 
 const dispatchMock = vi.hoisted(() => vi.fn());
+const listeners = vi.hoisted(() => new Map<string, (payload: { repoId: string }) => void>());
 vi.mock("../../lib/pwrgit", () => ({
   dispatch: dispatchMock,
-  subscribe: () => () => undefined
+  subscribe: (event: string, handler: (payload: { repoId: string }) => void) => {
+    listeners.set(event, handler);
+    return () => listeners.delete(event);
+  }
 }));
 
 import type { ChangeRequestPick } from "./change-request-selection";
@@ -106,6 +110,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  listeners.clear();
   container.remove();
   vi.resetAllMocks();
   vi.useRealTimers();
@@ -223,5 +228,50 @@ describe("ChangeRequestView", () => {
     expect(commit?.getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelectorAll(".diff-file")).toHaveLength(1);
     expect(text(".cr-rail__base-ref")).toBe("origin/main · merge base ccccccc");
+  });
+
+  it("ignores its own fetch's announcement, which main sends before it answers", async () => {
+    answers = [
+      { fetch: false, view: { state: "needsFetch", entry, what: "origin/fix/audit" } },
+      { fetch: true, view: readyView }
+    ];
+    dispatchMock.mockImplementation((channel: string, req: { fetch?: boolean }) => {
+      if (channel !== "pr:view") return Promise.resolve(ok(undefined));
+      if (req.fetch === true) listeners.get("pr:openChanged")?.({ repoId: "repo-1" });
+      const answer = answers.find((candidate) => candidate.fetch === req.fetch);
+      return Promise.resolve(ok(answer?.view));
+    });
+    await act(async () => root.render(<Harness pick={pick("pointer")} />));
+    await settle();
+    expect(viewCalls()).toHaveLength(2);
+    expect(container.querySelector(".cr-view__src")?.classList.contains("is-ok")).toBe(true);
+  });
+
+  it("asks a newly picked change request without the last one's end", async () => {
+    const aheadView: View = {
+      ...readyView,
+      local: { oid: HEAD, holder: { kind: "local", branch: "fix/audit" } },
+      relation: { kind: "ahead", count: 1 },
+      forge: { oid: "f".repeat(40), holder: { kind: "remote", name: "origin/fix/audit" } }
+    };
+    answers = [{ fetch: false, view: aheadView }];
+    await act(async () => root.render(<Harness pick={pick("pointer")} />));
+    await settle();
+    const toggle = [...container.querySelectorAll<HTMLButtonElement>(".cr-view__src-act")].find(
+      (button) => button.textContent === "Show GitHub's head"
+    );
+    await act(async () => toggle?.click());
+    await settle();
+    expect(viewCalls().at(-1)).toMatchObject({ number: 381, show: "forge" });
+
+    dispatchMock.mockClear();
+    const other: ChangeRequestEntry = { ...entry, pr: { ...entry.pr, number: 372, title: "Bump vitest" } };
+    await act(async () =>
+      root.render(<Harness pick={{ repoId: "repo-1", entry: other, via: "pointer", manyRemotes: false }} />)
+    );
+    await settle();
+    const asked = viewCalls() as { number: number; fetch: boolean; show?: string }[];
+    expect(asked[0]).toEqual({ repoId: "repo-1", number: 372, forgeRepo: FORGE_REPO, fetch: false });
+    expect(asked.some((req) => req.show !== undefined)).toBe(false);
   });
 });

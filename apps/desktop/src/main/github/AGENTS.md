@@ -166,13 +166,18 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
       one gone from its branch, goes to `refs/pwrgit/cr/<remote>/<n>` from
       the forge's change-request ref. A hidden ref there is pruned when its
       number leaves that remote's list — never from a truncated list, where
-      absent proves nothing.
+      absent proves nothing — and swept when its remote is removed or
+      renamed. One that no longer matches the forge's `headOid` answers
+      `needsFetch`, never a stale `ready`.
     - **Local and forge are two ends.** When the branch here and the forge's
       `headOid` differ, `relation` says how (`rev-list --left-right`) and the
       newer end is drawn; `show` overrides. The forge's end is read from the
       head's tracking ref when that matches, else fetched only on
-      `show: "forge"` with `fetch`.
-    - A fetch announces `pr:openChanged` (the row's location moved), and the
-      view ignores its own echo.
+      `show: "forge"` with `fetch` — into that tracking ref when it is a
+      same-repository head, so + Worktree starts from the head just shown.
+    - Only a fetch into `refs/remotes` re-indexes and announces
+      `pr:openChanged` (a row's location may have moved); a hidden ref is
+      nobody's location. Main announces before it answers, so the view
+      counts its own fetches in flight to ignore the echo.
 - A **merged PR** makes a branch prunable at any age (`isPrunableWorktree`) —
   catches squash/rebase merges the git-ancestry "in default" check can't see.

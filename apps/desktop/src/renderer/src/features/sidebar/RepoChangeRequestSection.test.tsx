@@ -488,6 +488,7 @@ describe("RepoChangeRequestSection", () => {
   describe("as places to select", () => {
     const picks: ChangeRequestPick[] = [];
     let selectedKey: string | null = null;
+    let cleared = 0;
 
     async function renderSelectable(): Promise<void> {
       await act(async () => {
@@ -497,6 +498,9 @@ describe("RepoChangeRequestSection", () => {
               selectedKey,
               select: (pick) => {
                 picks.push(pick);
+              },
+              clear: () => {
+                cleared += 1;
               }
             }}
           >
@@ -517,6 +521,7 @@ describe("RepoChangeRequestSection", () => {
     beforeEach(() => {
       picks.length = 0;
       selectedKey = null;
+      cleared = 0;
       window.localStorage.setItem("pwrgit.changeRequestsOpen.repo-1", "1");
       window.localStorage.setItem("pwrgit.changeRequestsRemoteOpen.repo-1", "1");
     });
@@ -562,6 +567,20 @@ describe("RepoChangeRequestSection", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("goes back on Esc from the row on screen, which is where a click leaves focus", async () => {
+      selectedKey = changeRequestPickKey("repo-1", list.entries[1]!);
+      await renderSelectable();
+      const esc = (row: HTMLElement | null): void => {
+        row?.focus();
+        row?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      };
+      // Not on screen: Esc is not this row's to take.
+      await act(async () => esc(rowFor(381)));
+      expect(cleared).toBe(0);
+      await act(async () => esc(rowFor(376)));
+      expect(cleared).toBe(1);
     });
 
     it("keeps the row's own verb on Enter and double-click", async () => {

@@ -227,7 +227,9 @@ export function ChangeRequestView({
             </button>
           </div>
         )}
-        {ready !== null && patch !== null ? (
+        {state.scopeError !== null ? (
+          <div className="diff-empty">Couldn’t read this commit’s diff: {state.scopeError}</div>
+        ) : ready !== null && patch !== null ? (
           <DiffViewer
             patch={patch}
             emptyLabel="No changes between the merge base and this head."

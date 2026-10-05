@@ -520,7 +520,8 @@ describe("OpenPrService", () => {
       expect(first).toMatchObject({
         ok: true,
         value: {
-          fetched: true,
+          // A hidden ref is no row's location: nothing to re-index.
+          fetched: false,
           view: {
             state: "ready",
             entry: { location: { kind: "fork" } },
@@ -539,6 +540,68 @@ describe("OpenPrService", () => {
       const again = await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
       expect(again).toMatchObject({ ok: true, value: { fetched: false, view: { state: "ready" } } });
       expect(gitCalls.some((args) => args[0] === "fetch")).toBe(false);
+    });
+
+    it("asks to fetch again when the fork's head moved past the hidden ref", async () => {
+      const first = commitOn(seed, "feat/view", "fork.txt", false);
+      git(seed, ["push", "-q", "origin", "feat/view:refs/pull/140/head"]);
+      list = {
+        items: [openPr(140, "fix/thing", { headRepoPath: "octo-contrib/orbit", headOid: first })],
+        truncated: false
+      };
+      await service.refresh("repo");
+      await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
+      const moved = commitOn(seed, "feat/view", "more.txt", false);
+      git(seed, ["push", "-q", "-f", "origin", "feat/view:refs/pull/140/head"]);
+      list = {
+        items: [openPr(140, "fix/thing", { headRepoPath: "octo-contrib/orbit", headOid: moved })],
+        truncated: false
+      };
+      await service.refresh("repo", { force: true });
+      // The old diff is not passed off as current.
+      const stale = await service.view("repo", 140, "github.com/octo/orbit", { fetch: false });
+      expect(stale).toMatchObject({
+        ok: true,
+        value: { view: { state: "needsFetch", what: "pull/140/head from origin" } }
+      });
+      const fresh = await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
+      expect(fresh).toMatchObject({ ok: true, value: { view: { state: "ready", head: { oid: moved } } } });
+    });
+
+    it("moves a stale tracking ref when asked for the forge's head, so + Worktree starts there", async () => {
+      git(seed, ["push", "-q", "origin", "feat/view"]);
+      git(work, ["fetch", "-q", "origin"]);
+      const pushed = commitOn(seed, "feat/view", "later.txt");
+      list = { items: [openPr(150, "feat/view", { headOid: pushed })], truncated: false };
+      await service.refresh("repo");
+      const viewed = await service.view("repo", 150, "github.com/octo/orbit", {
+        fetch: true,
+        show: "forge"
+      });
+      expect(viewed).toMatchObject({
+        ok: true,
+        value: {
+          fetched: true,
+          view: {
+            state: "ready",
+            shown: "forge",
+            relation: { kind: "same" },
+            head: { oid: pushed, holder: { kind: "remote", name: "origin/feat/view" } }
+          }
+        }
+      });
+      expect(git(work, ["rev-parse", "refs/remotes/origin/feat/view"])).toBe(pushed);
+      expect(git(work, ["for-each-ref", "--format=%(refname)", "refs/pwrgit"])).toBe("");
+    });
+
+    it("sweeps the hidden refs of a remote that is gone", async () => {
+      git(work, ["update-ref", "refs/pwrgit/cr/upstream-old/7", mainTip]);
+      git(work, ["update-ref", "refs/pwrgit/cr/origin/150", mainTip]);
+      list = { items: [openPr(150, "feat/view")], truncated: false };
+      await service.refresh("repo");
+      expect(git(work, ["for-each-ref", "--format=%(refname)", "refs/pwrgit"])).toBe(
+        "refs/pwrgit/cr/origin/150"
+      );
     });
 
     it("drops a hidden ref once its change request leaves the list", async () => {

@@ -85,6 +85,8 @@ export function ChangeRequestRail({
             </div>
             {ready !== null && scope.kind === "all" && ready.patch === null ? (
               <div className="cr-rail__note">Too large to list here. Pick a commit.</div>
+            ) : state.scopeError !== null ? (
+              <div className="cr-rail__note">Couldn’t read this commit’s diff.</div>
             ) : patch === null ? (
               <div className="cr-rail__note">Loading…</div>
             ) : (

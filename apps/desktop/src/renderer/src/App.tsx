@@ -471,7 +471,8 @@ export function App() {
         changeRequest === null
           ? null
           : changeRequestPickKey(changeRequest.repoId, changeRequest.entry),
-      select: setChangeRequest
+      select: setChangeRequest,
+      clear: () => setChangeRequest(null)
     }),
     [changeRequest]
   );
