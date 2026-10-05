@@ -22,10 +22,11 @@ fail on the Windows runner, so a green local run proves nothing about them:
   enable a 5s diagnostic tripwire. `timedGitSync` records their
   fixture-helper calls before/after a blocking invocation; it cannot inspect
   Git while blocked. CI uploads JSONL begin/end records and per-test totals
-  via `PWRGIT_GIT_DIAGNOSTICS_DIR` even on failure. Only instrumented calls within test scopes count; beforeAll setup
-  and production Dugite calls are outside this narrow coverage. Reports omit
-  raw arguments, paths, output and environment. A `killed` flag is a signal
-  request, not observed termination. No diagnostic changes timeouts or cleanup.
+  via `PWRGIT_GIT_DIAGNOSTICS_DIR` even on failure. Only instrumented calls
+  within test scopes count; beforeAll setup and production Dugite calls are
+  outside this narrow coverage. Reports omit raw arguments, paths, output and
+  environment. A `killed` flag is a signal request, not observed termination.
+  No diagnostic changes timeouts or cleanup.
 
 - **Before fixing a Windows timeout, compare the run against other runs.**
   The Windows runner sometimes slows process spawning and disk I/O for a few
