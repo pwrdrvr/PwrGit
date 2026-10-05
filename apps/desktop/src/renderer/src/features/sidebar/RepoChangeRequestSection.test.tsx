@@ -512,6 +512,7 @@ describe("RepoChangeRequestSection", () => {
             <RepoChangeRequestSection
               repo={repo}
               now={0}
+              focusedWorktree={null}
               onRevealWorktree={onRevealWorktree}
               onCreateWorktree={onCreateWorktree}
               onOpenBrowser={() => undefined}
