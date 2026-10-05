@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ChangeRequestEntry,
   CloneRepository,
   BranchReveal,
   Commit,
+  OpenChangeRequest,
   FileInsightContext,
   Profile,
   RebaseOperation,
@@ -13,6 +15,15 @@ import type {
 } from "@pwrgit/shared";
 import { showErrorToast } from "./lib/toast";
 import { useAgentOffered } from "./features/agent/agent-store";
+import { ChangeRequestRail } from "./features/change-request/ChangeRequestRail";
+import { ChangeRequestView } from "./features/change-request/ChangeRequestView";
+import {
+  ChangeRequestSelectionContext,
+  changeRequestPickKey,
+  type ChangeRequestPick,
+  type ChangeRequestSelection
+} from "./features/change-request/change-request-selection";
+import { useChangeRequestView } from "./features/change-request/useChangeRequestView";
 import { DiffPane, type DiffTarget } from "./features/diff/DiffPane";
 import {
   FileInsightsPane,
@@ -37,6 +48,10 @@ import { routeBranch } from "./features/sidebar/fork-checkout-dialog";
 import { NewWorktreeModal } from "./features/sidebar/NewWorktreeModal";
 import { RepoSwitcherOverlay } from "./features/sidebar/RepoSwitcherOverlay";
 import { RepositorySetupSheet } from "./features/sidebar/RepositorySetupSheet";
+import {
+  reachableLocation,
+  worktreeArgsFor
+} from "./features/sidebar/RepoChangeRequests";
 import {
   branchRevealForSearchHit,
   pendingRevealForCreatedWorktree,
@@ -107,6 +122,8 @@ export function App() {
     branch: string;
     newBranch: boolean;
     startPoint?: string;
+    /** + Worktree from the PR view: the dialog names the change request. */
+    changeRequest?: OpenChangeRequest;
   } | null>(null);
   // Seed from the window-bound profile synchronously. Besides avoiding an
   // empty first frame, this lets Sidebar mount with the restored id and treat
@@ -116,6 +133,12 @@ export function App() {
     const profileId = windowProfileId();
     return profileId === null ? null : readStoredWorktreeSelection(profileId);
   });
+  /**
+   * A change request picked in the sidebar. While set, the main pane and the
+   * rail show it instead of the worktree; `selection` is kept, so leaving
+   * the change request (Esc, or picking any worktree) goes back to it.
+   */
+  const [changeRequest, setChangeRequest] = useState<ChangeRequestPick | null>(null);
   const restoredSelectionForProfileRef = useRef<string | null>(null);
   const worktreePrMonitorIdRef = useRef(crypto.randomUUID());
   // A queued "jump to this repo (and optionally this worktree)" — from ⌘F
@@ -370,6 +393,7 @@ export function App() {
     // the reveal queued rather than falling back to the primary.
     if (resolved.kind === "wait") return;
     if (resolved.kind === "select") {
+      setChangeRequest(null);
       setSelection({ repoId: repo.id, worktreeId: resolved.worktreeId });
       // A repo-name pick must reveal the row even when its primary checkout
       // was already selected and the user has since scrolled it away.
@@ -437,8 +461,20 @@ export function App() {
   }, [windowTitle]);
 
   const selectWorktree = useCallback((repo: Repo, worktree: Worktree) => {
+    setChangeRequest(null);
     setSelection({ repoId: repo.id, worktreeId: worktree.id });
   }, []);
+
+  const changeRequestSelection = useMemo<ChangeRequestSelection>(
+    () => ({
+      selectedKey:
+        changeRequest === null
+          ? null
+          : changeRequestPickKey(changeRequest.repoId, changeRequest.entry),
+      select: setChangeRequest
+    }),
+    [changeRequest]
+  );
 
   // A toast's repo / remote chip. The repository becomes the working target
   // unless the selection is already in it — sending someone who is working in
@@ -577,6 +613,67 @@ export function App() {
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
 
+  const changeRequestRepo = useMemo(
+    () =>
+      changeRequest === null
+        ? null
+        : (repos.find((r) => r.id === changeRequest.repoId) ?? null),
+    [changeRequest, repos]
+  );
+  // Any worktree of the change request's repository: the object store is
+  // shared, so a commit's diff and an image preview read through it.
+  const changeRequestWorktreeId =
+    changeRequestRepo?.worktrees.find((w) => w.isPrimary && !w.missing)?.id ??
+    changeRequestRepo?.worktrees.find((w) => !w.missing)?.id ??
+    null;
+  const shownChangeRequest = changeRequestRepo === null ? null : changeRequest;
+  const changeRequestState = useChangeRequestView(shownChangeRequest, changeRequestWorktreeId);
+  const changeRequestBodyRef = useRef<HTMLDivElement>(null);
+  const focusChangeRequestFile = useCallback((path: string) => {
+    const target = changeRequestBodyRef.current?.querySelector<HTMLElement>(
+      `.diff-file[data-path="${CSS.escape(path)}"]`
+    );
+    target?.scrollIntoView({ block: "start" });
+  }, []);
+  const leaveChangeRequest = useCallback(() => setChangeRequest(null), []);
+  const goToChangeRequestWorktree = useCallback(
+    (worktreeId: string) => {
+      if (changeRequestRepo === null) return;
+      setPendingReveal({ repoId: changeRequestRepo.id, worktreeId, branch: null });
+    },
+    [changeRequestRepo]
+  );
+  // + Worktree from the view: the sidebar row's own path — re-locate the head
+  // with git (fetching it when it is not here), then New worktree, naming
+  // the change request.
+  const createChangeRequestWorktree = useCallback(
+    async (entry: ChangeRequestEntry) => {
+      if (changeRequestRepo === null) return;
+      const location = await reachableLocation(changeRequestRepo.id, entry);
+      if (location === null) return;
+      if (location.kind === "worktree") {
+        goToChangeRequestWorktree(location.worktreeId);
+        return;
+      }
+      const args = worktreeArgsFor(location);
+      if (args === null) return;
+      setSearchNewWorktree({
+        repo: changeRequestRepo,
+        branch: args.branch,
+        newBranch: args.newBranch,
+        ...(args.startPoint === undefined ? {} : { startPoint: args.startPoint }),
+        changeRequest: entry.pr
+      });
+    },
+    [changeRequestRepo, goToChangeRequestWorktree]
+  );
+  // A repository removed from under the view leaves nothing to show.
+  useEffect(() => {
+    if (changeRequest !== null && changeRequestRepo === null && repoLoadState.status !== "loading") {
+      setChangeRequest(null);
+    }
+  }, [changeRequest, changeRequestRepo, repoLoadState.status]);
+
   // A returning profile opens exactly where it left off. Reconcile once, when
   // that profile's repository tree first arrives, so an id that went stale
   // between launches falls back safely. Live removals remain different: they
@@ -696,8 +793,11 @@ export function App() {
   return (
     <div className="app">
       <TitleBar
-        repo={selectedRepo}
+        repo={shownChangeRequest === null ? selectedRepo : changeRequestRepo}
         worktree={selectedWorktree}
+        {...(shownChangeRequest === null
+          ? {}
+          : { changeRequest: changeRequestState.view?.entry ?? shownChangeRequest.entry })}
         /* The branch picker refused because another worktree holds the branch.
            Every other branch surface answers that by going to that worktree —
            git will not check a branch out twice, and its refusal teaches the
@@ -727,6 +827,7 @@ export function App() {
       />
 
       <div className="app-body" style={{ gridTemplateColumns }}>
+        <ChangeRequestSelectionContext.Provider value={changeRequestSelection}>
         <Sidebar
           onLocateTag={(repoId, tag) => {
             const repo = repos.find((r) => r.id === repoId);
@@ -742,6 +843,7 @@ export function App() {
               });
               return;
             }
+            setChangeRequest(null);
             setSelection({ repoId, worktreeId: worktree.id });
             setPendingTag({ worktreeId: worktree.id, tag });
           }}
@@ -781,6 +883,7 @@ export function App() {
             setProfileModal({ mode: "edit", profile: activeProfile })
           }
         />
+        </ChangeRequestSelectionContext.Provider>
 
         <PaneResizer
           side="left"
@@ -795,8 +898,28 @@ export function App() {
         />
 
         <main className="pane pane--main" data-testid="main">
+          {shownChangeRequest !== null && (
+            <ChangeRequestView
+              key={changeRequestPickKey(shownChangeRequest.repoId, shownChangeRequest.entry)}
+              entry={shownChangeRequest.entry}
+              state={changeRequestState}
+              manyRemotes={shownChangeRequest.manyRemotes}
+              worktreeId={changeRequestWorktreeId}
+              now={Date.now()}
+              bodyRef={changeRequestBodyRef}
+              onGoToWorktree={goToChangeRequestWorktree}
+              onCreateWorktree={(entry) => void createChangeRequestWorktree(entry)}
+              onClose={leaveChangeRequest}
+              {...(railCollapsed ? { onShowRail: showRail } : {})}
+            />
+          )}
           {selectedRepo !== null && selectedWorktree !== null ? (
-            <>
+            // Hidden, not unmounted, while a change request is shown: going
+            // back is instant, the way the graph stays under an open diff.
+            <div
+              className="worktree-view"
+              style={{ display: shownChangeRequest === null ? "contents" : "none" }}
+            >
               <WorktreeHeader
                 repo={selectedRepo}
                 worktree={selectedWorktree}
@@ -902,8 +1025,8 @@ export function App() {
                   onShowCommit={showLineageCommit}
                 />
               )}
-            </>
-          ) : (
+            </div>
+          ) : shownChangeRequest !== null ? null : (
             <div className="main-empty">
               {profileLoadState.status === "loading"
                 ? "Loading profiles…"
@@ -932,7 +1055,17 @@ export function App() {
           />
         )}
 
-        {!railCollapsed && (
+        {!railCollapsed && shownChangeRequest !== null && (
+          <ChangeRequestRail
+            key={changeRequestPickKey(shownChangeRequest.repoId, shownChangeRequest.entry)}
+            state={changeRequestState}
+            now={Date.now()}
+            onFocusFile={focusChangeRequestFile}
+            onCollapse={() => setRailCollapsed(true)}
+          />
+        )}
+
+        {!railCollapsed && shownChangeRequest === null && (
           <Rail
             worktree={selectedWorktree}
             state={worktreeState}
@@ -989,8 +1122,11 @@ export function App() {
         )}
 
         {/* With a worktree open the header carries the reopen control in its
-            own row (Fork Sync 3c); floating it here covered Pull and Push. */}
-        {railCollapsed && (selectedRepo === null || selectedWorktree === null) && (
+            own row (Fork Sync 3c); floating it here covered Pull and Push.
+            The PR view's header carries one too. */}
+        {railCollapsed &&
+          shownChangeRequest === null &&
+          (selectedRepo === null || selectedWorktree === null) && (
           <button className="rail-reopen" onClick={showRail}>
             ‹ Panel
           </button>
@@ -1028,6 +1164,9 @@ export function App() {
           initialNewBranch={searchNewWorktree.newBranch}
           {...(searchNewWorktree.startPoint !== undefined
             ? { startPoint: searchNewWorktree.startPoint }
+            : {})}
+          {...(searchNewWorktree.changeRequest !== undefined
+            ? { changeRequest: searchNewWorktree.changeRequest }
             : {})}
           onCreate={(branch, newBranch, startPoint) =>
             createAndRevealWorktree(

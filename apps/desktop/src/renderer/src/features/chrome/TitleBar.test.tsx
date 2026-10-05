@@ -55,6 +55,38 @@ describe("TitleBar path chip", () => {
   });
 });
 
+describe("TitleBar change request crumb", () => {
+  it("names the change request on screen where the branch crumb would be", () => {
+    const markup = renderToStaticMarkup(
+      <TitleBar
+        {...chrome}
+        repo={repo}
+        worktree={worktree}
+        changeRequest={{
+          pr: {
+            number: 381,
+            url: "https://example.test/acme/orbit/pull/381",
+            title: "Audit log export",
+            state: "open",
+            isDraft: false,
+            forge: "github"
+          },
+          location: { kind: "unfetched", branch: "fix/audit", remote: "origin" },
+          remote: "origin",
+          forgeRepo: "github.com/acme/orbit"
+        }}
+        platform="darwin"
+      />
+    );
+    expect(markup).toContain("titlebar__cr");
+    expect(markup).toContain("Audit log export");
+    expect(markup).toContain("#381");
+    // The worktree it replaces says nothing: no branch, no path.
+    expect(markup).not.toContain("titlebar__branch");
+    expect(markup).not.toContain("titlebar__pathchip");
+  });
+});
+
 describe("TitleBar window chrome", () => {
   it("paints caption buttons on Linux, where no frame provides them", () => {
     const markup = renderToStaticMarkup(

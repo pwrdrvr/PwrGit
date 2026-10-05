@@ -19,6 +19,11 @@ vi.mock("../../lib/pwrgit", () => ({
 }));
 vi.mock("../../lib/toast", () => ({ showErrorToast: vi.fn(), showInfoToast: vi.fn() }));
 
+import {
+  ChangeRequestSelectionContext,
+  changeRequestPickKey,
+  type ChangeRequestPick
+} from "../change-request/change-request-selection";
 import { RepoChangeRequestSection } from "./RepoChangeRequestSection";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -477,6 +482,110 @@ describe("RepoChangeRequestSection", () => {
         "mirror (1)",
         "backup (1)"
       ]);
+    });
+  });
+
+  describe("as places to select", () => {
+    const picks: ChangeRequestPick[] = [];
+    let selectedKey: string | null = null;
+
+    async function renderSelectable(): Promise<void> {
+      await act(async () => {
+        root.render(
+          <ChangeRequestSelectionContext.Provider
+            value={{
+              selectedKey,
+              select: (pick) => {
+                picks.push(pick);
+              }
+            }}
+          >
+            <RepoChangeRequestSection
+              repo={repo}
+              now={0}
+              onRevealWorktree={onRevealWorktree}
+              onCreateWorktree={onCreateWorktree}
+              onOpenBrowser={() => undefined}
+            />
+          </ChangeRequestSelectionContext.Provider>
+        );
+      });
+    }
+    const rowFor = (number: number): HTMLElement | null =>
+      container.querySelector<HTMLElement>(`.ref-cr-row[aria-label^="#${number} "]`);
+
+    beforeEach(() => {
+      picks.length = 0;
+      selectedKey = null;
+      window.localStorage.setItem("pwrgit.changeRequestsOpen.repo-1", "1");
+      window.localStorage.setItem("pwrgit.changeRequestsRemoteOpen.repo-1", "1");
+    });
+
+    it("shows a clicked row in the main pane and leaves the list where it is", async () => {
+      await renderSelectable();
+      await act(async () => rowFor(381)?.click());
+      expect(picks).toEqual([
+        expect.objectContaining({ repoId: "repo-1", via: "pointer", manyRemotes: false })
+      ]);
+      expect(picks[0]?.entry.pr.number).toBe(381);
+      // Selecting is not acting: nothing fetched for a worktree, nothing opened.
+      expect(dispatchMock).not.toHaveBeenCalledWith("pr:fetchHead", expect.anything());
+      expect(onRevealWorktree).not.toHaveBeenCalled();
+      expect(onCreateWorktree).not.toHaveBeenCalled();
+    });
+
+    it("marks the row on screen as selected", async () => {
+      selectedKey = changeRequestPickKey("repo-1", list.entries[1]!);
+      await renderSelectable();
+      expect(rowFor(376)?.classList.contains("is-selected")).toBe(true);
+      expect(rowFor(376)?.getAttribute("aria-selected")).toBe("true");
+      expect(rowFor(381)?.classList.contains("is-selected")).toBe(false);
+    });
+
+    it("selects the row the arrow keys rest on, once, as the keyboard", async () => {
+      vi.useFakeTimers();
+      try {
+        await renderSelectable();
+        const first = rowFor(376);
+        await act(async () => {
+          first?.focus();
+          first?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+        });
+        await act(async () => {
+          document.activeElement?.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+          );
+        });
+        expect(picks).toEqual([]);
+        await act(async () => vi.advanceTimersByTime(200));
+        expect(picks.map((pick) => [pick.entry.pr.number, pick.via])).toEqual([[381, "keyboard"]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the row's own verb on Enter and double-click", async () => {
+      await renderSelectable();
+      await act(async () => {
+        rowFor(376)?.focus();
+        rowFor(376)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      });
+      expect(onRevealWorktree).toHaveBeenCalledWith("wt-9");
+
+      await act(async () => {
+        rowFor(381)?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      });
+      expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", {
+        repoId: "repo-1",
+        number: 381,
+        forgeRepo: ORIGIN
+      });
+      expect(onCreateWorktree).toHaveBeenCalledWith(
+        "fix/audit",
+        true,
+        "refs/remotes/origin/fix/audit",
+        expect.objectContaining({ number: 381 })
+      );
     });
   });
 });

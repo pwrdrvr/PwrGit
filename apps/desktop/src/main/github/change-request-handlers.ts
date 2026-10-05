@@ -65,5 +65,23 @@ export function registerChangeRequestHandlers(
     return fetched;
   });
 
+  bus.register("pr:view", async (req) => {
+    const viewed = await openPrs.view(req.repoId, req.number, req.forgeRepo, {
+      fetch: req.fetch,
+      ...(req.show === undefined ? {} : { show: req.show })
+    });
+    if (!viewed.ok) return viewed;
+    if (viewed.value.fetched) {
+      try {
+        await deps.onHeadFetched?.(req.repoId);
+      } catch (cause) {
+        logMain("warn", "pr", `re-index after view fetch failed for ${req.repoId}`, cause);
+      }
+      // A head fetched into its tracking ref moves the row's location tag.
+      emitEvent("pr:openChanged", { repoId: req.repoId });
+    }
+    return ok(viewed.value.view);
+  });
+
   return { refreshInBackground };
 }
