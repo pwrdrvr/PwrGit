@@ -10,6 +10,8 @@ import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
 
+import { LINUX_ARCHITECTURES, LINUX_FORMATS, linuxReleaseAssetNames, linuxArtifactName, linuxAliasName } from "../apps/desktop/scripts/linux-release-artifacts.mjs";
+
 const repo = "pwrdrvr/PwrGit";
 
 export function expectedAssetNames(tag) {
@@ -32,6 +34,7 @@ export function expectedAssetNames(tag) {
     "PwrGit.Setup.exe",
     "PwrGit-windows-SHA256SUMS",
     "latest.yml",
+    ...LINUX_ARCHITECTURES.flatMap(arch => linuxReleaseAssetNames(version, arch)),
   ].sort();
 }
 
@@ -50,8 +53,8 @@ async function digest(path) {
   return `sha256:${hash.digest("hex")}`;
 }
 
-export async function collectAssets(tag, macDir, windowsDir) {
-  const paths = [...filesUnder(macDir), ...filesUnder(windowsDir)];
+export async function collectAssets(tag, macDir, windowsDir, linuxDir) {
+  const paths = [...filesUnder(macDir), ...filesUnder(windowsDir), ...filesUnder(linuxDir)];
   const byName = new Map();
   for (const path of paths) {
     const name = basename(path);
@@ -70,6 +73,7 @@ export async function collectAssets(tag, macDir, windowsDir) {
     ["PwrGit.dmg", `PwrGit-${version}-universal.dmg`],
     ["PwrGit-arm64.dmg", `PwrGit-${version}-arm64.dmg`],
     ["PwrGit.Setup.exe", `PwrGit-${version}-windows-x64-setup.exe`],
+    ...LINUX_ARCHITECTURES.flatMap(arch => LINUX_FORMATS.map(format => [linuxAliasName(arch, format), linuxArtifactName(version, arch, format)])),
   ]) {
     if (byName.get(alias).digest !== byName.get(original).digest) {
       throw new Error(`${alias} differs from ${original}`);
@@ -126,9 +130,9 @@ function checkRemoteAssets(release, assets, allowMissing) {
   return seen;
 }
 
-export async function publishRelease({ tag, macDir, windowsDir, notesFile, gh = realGh, delay = sleep }) {
+export async function publishRelease({ tag, macDir, windowsDir, linuxDir, notesFile, gh = realGh, delay = sleep }) {
   // Finish all local checks before the first remote mutation.
-  const assets = await collectAssets(tag, macDir, windowsDir);
+  const assets = await collectAssets(tag, macDir, windowsDir, linuxDir);
   const notes = readFileSync(notesFile, "utf8");
   if (!notes.trim()) throw new Error("Release notes are empty");
   let release = getRelease(tag, gh);
@@ -186,11 +190,11 @@ export async function publishRelease({ tag, macDir, windowsDir, notesFile, gh = 
 }
 
 async function runCli() {
-  const [tag, macDir, windowsDir, notesFile] = process.argv.slice(2);
-  if (!tag || !macDir || !windowsDir || !notesFile) {
-    throw new Error("Usage: publish-desktop-release.mjs <tag> <mac-dir> <windows-dir> <notes-file>");
+  const [tag, macDir, windowsDir, linuxDir, notesFile] = process.argv.slice(2);
+  if (!tag || !macDir || !windowsDir || !linuxDir || !notesFile) {
+    throw new Error("Usage: publish-desktop-release.mjs <tag> <mac-dir> <windows-dir> <linux-dir> <notes-file>");
   }
-  await publishRelease({ tag, macDir, windowsDir, notesFile });
+  await publishRelease({ tag, macDir, windowsDir, linuxDir, notesFile });
 }
 
 if (isCliEntrypoint(import.meta.url)) {

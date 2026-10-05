@@ -140,10 +140,10 @@ repository's default branch:
 - Treat an environment approval gate as an intermediate state, not release
   completion. Continue through artifact publishing and release-note
   verification after approval.
-- Require both operating-system targets in `release.yml` to succeed before
-  calling the release complete. Linux packaging is configured in
-  `electron-builder.yml` but is not currently published by the release
-  workflow; do not imply that a Linux artifact is part of the release.
+- Require macOS, Windows and both native Linux packaging jobs in `release.yml`
+  to succeed before calling the release complete. Verify Linux DEB/RPM/pacman/
+  tar.gz assets, per-CPU metadata/checksums and aliases. Existing releases through
+  v0.29.0 predate Linux publication; never imply that they contain Linux assets.
 
 ## Prepare Release Metadata
 

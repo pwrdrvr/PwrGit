@@ -553,9 +553,14 @@ export function resolveUpdateSelection(
   };
 }
 
+export type AppManualUpdateInstructions = {
+  description: string;
+  command?: string;
+};
+
 export type AppUpdateCheckResult =
-  | { status: "skipped"; reason: string }
-  | { status: "error"; message: string }
+  | { status: "skipped"; reason: string; manualUpdate?: AppManualUpdateInstructions }
+  | { status: "error"; message: string; manualUpdate?: AppManualUpdateInstructions }
   | { status: "checking" }
   | { status: "no-update"; version: string }
   | { status: "downloaded"; version: string }
@@ -574,7 +579,7 @@ export type AppUpdateDownloadProgress = {
 
 export type AppUpdateStatus =
   | { status: "idle" }
-  | { status: "skipped"; reason: string }
+  | { status: "skipped"; reason: string; manualUpdate?: AppManualUpdateInstructions }
   | { status: "checking" }
   | { status: "no-update"; version: string }
   | { status: "available"; version: string }
@@ -584,7 +589,7 @@ export type AppUpdateStatus =
    *  is not `available` (which promises a download is under way) and not an
    *  `error` (nothing failed) — it stands until the next check. */
   | { status: "canceled"; version: string }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; manualUpdate?: AppManualUpdateInstructions };
 
 /** Whether a download was actually running to stop. `false` is the ordinary
  *  race — the download finished while the click was in flight — not a fault. */
@@ -592,7 +597,7 @@ export type AppUpdateCancelResult = { canceled: boolean };
 
 export type AppUpdateInstallResult =
   | { status: "restarting" }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; manualUpdate?: AppManualUpdateInstructions };
 
 export type AppUpdateReleaseInfo = {
   version?: string;

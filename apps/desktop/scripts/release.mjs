@@ -16,6 +16,8 @@
  *                       package/sign an already prepared release-stage without
  *                       reinstalling dependencies or rerunning tests. Defaults
  *                       to macOS; combine with --win for Windows NSIS.
+ *       --linux       : native host architecture DEB/RPM/pacman/tar.gz,
+ *                       verified metadata and aliases; never publishes
  *       --win         : build/package a Windows x64 NSIS installer (unsigned
  *                       unless Azure signing env is present; no publish). Run
  *                       on a Windows host/runner.
@@ -60,6 +62,7 @@ import {
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { packageLinux } from "./package-linux.mjs";
 import { MAC_ARCHITECTURES, writeMacReleaseArtifacts } from "./mac-release-artifacts.mjs";
 // The checksum manifest is written here and parsed by the signing job when it
 // cuts the stable aliases; one module owns both halves of that format.
@@ -77,6 +80,8 @@ const noPublish = args.includes("--no-publish");
 const prepareOnly = args.includes("--prepare-only");
 const signStageOnly = args.includes("--sign-stage-only");
 const win = args.includes("--win");
+const linux = args.includes("--linux");
+if (linux && (win || process.platform !== "linux")) throw new Error("--linux requires a native Linux host and cannot be combined with --win");
 const explicitPublish = args.includes("--publish");
 const winPublish = win && explicitPublish;
 const requireSigning = args.includes("--require-signing") || winPublish;
@@ -97,7 +102,7 @@ if (winPublish && noPublish) {
   throw new Error("--publish and --no-publish cannot be combined");
 }
 
-const publish = !dryrun && !noPublish && !prepareOnly && (!win || winPublish);
+const publish = !linux && !dryrun && !noPublish && !prepareOnly && (!win || winPublish);
 if (publish && !win) {
   throw new Error("Publish macOS through release.yml so both architectures and their verified metadata ship together. Use --no-publish for local packaging.");
 }
@@ -485,6 +490,12 @@ if (!signStageOnly) {
   }
 } else if (!existsSync(stageDir)) {
   throw new Error(`release-stage is missing at ${stageDir}`);
+}
+
+// Linux publication goes through the same all-platform publication gate.
+if (linux) {
+  packageLinux({ stageDir, desktopRoot, builderCli: electronBuilderCli(), runChecked });
+  process.exit(0);
 }
 
 // 5. electron-builder.

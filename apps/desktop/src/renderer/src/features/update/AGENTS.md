@@ -34,8 +34,9 @@ going, leaving the rest of the download invisible.
 
 So: while a user-initiated check is working, this component renders its own
 card (progress track, byte meter, Cancel) outside the toast store, with no
-countdown. Only when the check settles does the outcome go to the store, where
-the countdown is correct. Don't move the in-flight card back into
+countdown. Only when the check settles does the outcome go to the store. Ordinary outcomes
+get the countdown; manual update instructions stay visible until dismissed,
+and Copy copies only their runnable command. Don't move the in-flight card back into
 `showInfoToast`.
 
 ## Cancel is offered from `available`, so main must be ready by then

@@ -18869,3 +18869,36 @@ button.agent-auth-node:focus-visible,
 .repository-setup__lane button.is-selected { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .repository-setup__map-detail { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--border-default); border-radius: 6px; color: var(--text-secondary); font: 10.5px/1.45 var(--font-sans); overflow-wrap: anywhere; }
 @media (max-width: 650px) { .repository-setup__grid { grid-template-columns: 118px minmax(0, 1fr); } .repository-setup__body { padding: 12px; } .repository-setup__layer header { flex-wrap: wrap; } }
+
+.manual-update-instructions {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.manual-update-instructions p,
+.manual-update-instructions pre {
+  margin: 0;
+}
+
+.manual-update-instructions pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.manual-update-instructions button {
+  justify-self: start;
+}
+
+.app-toast--stacked {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-toast--stacked .app-toast__actions {
+  justify-self: end;
+}
+
+.app-toast--stacked .app-toast__detail {
+  max-height: none;
+}

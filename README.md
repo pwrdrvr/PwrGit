@@ -106,9 +106,12 @@ features, and troubleshooting live at
 PwrGit includes Git, Git LFS, and Git Credential Manager. A separate system Git
 installation is not required for the packaged app.
 
-**Linux packages are not published.** Linux is a build-tested CI target, not a
-supported binary download today. The exact platform matrix lives in the
-[desktop release runbook](docs/desktop-release-runbook.md).
+The release pipeline builds Linux DEB, RPM, pacman and tar.gz packages for
+x64 and arm64. Linux downloads become available with the first release using
+that pipeline; releases through v0.29.0 have none. Native packages support
+in-app updates with administrator authorization on Restart. Archives update by
+replacing the extracted directory. See the
+[desktop release runbook](docs/desktop-release-runbook.md) for the platform matrix.
 
 Updates come from GitHub Releases. PwrGit supports Stable and Beta trains with
 Latest and Prerelease tracks, checks on startup and periodically, and also
@@ -176,13 +179,12 @@ boundaries in CI.
 ## Roadmap
 
 PwrGit ships an Apple Silicon macOS build, a universal macOS build for Intel
-and Apple Silicon, and a Windows x64 installer. Linux builds in CI, but Linux
-packaging and distribution are not live. Follow the [changelog](CHANGELOG.md)
+and Apple Silicon, and a Windows x64 installer. Native Linux packaging is ready for the next tagged release. Follow the [changelog](CHANGELOG.md)
 for what has shipped and [docs.pwrgit.com](https://docs.pwrgit.com) for the
 operator reference and current “not yet” lists.
 
 The guarded desktop release pipeline — Apple signing and notarization, Azure
-Artifact Signing for Windows, update metadata, and the Linux build-only gate —
+Artifact Signing for Windows, update metadata, and the Linux package and runtime gates —
 is documented in
 [docs/desktop-release-runbook.md](docs/desktop-release-runbook.md).
 

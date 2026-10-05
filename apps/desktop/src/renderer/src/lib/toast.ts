@@ -32,6 +32,8 @@ export type Toast = {
    *  conditions that stay true until acted on, where auto-hiding would just
    *  un-report an unresolved problem. */
   sticky?: boolean;
+  /** Put long instructions above their actions, leaving the full card width. */
+  layout?: "stacked";
   /** Offer an "Open Logs" action (default true for errors). */
   showLogsAction?: boolean;
   /** Offer a copy action (default true for errors). */
@@ -102,19 +104,12 @@ export function showErrorToast(input: Omit<Toast, "id" | "tone">): void {
   });
 }
 
-export function showInfoToast(input: {
-  key?: string;
-  title: string;
-  message: string;
-  notesUrl?: string;
-  subject?: ToastSubject;
-  action?: { label: string; run: () => void };
-}): void {
+export function showInfoToast(input: Omit<Toast, "id" | "tone">): void {
   pushToast({
-    ...input,
-    tone: "info",
     showLogsAction: false,
-    showCopyAction: false
+    showCopyAction: false,
+    ...input,
+    tone: "info"
   });
 }
 

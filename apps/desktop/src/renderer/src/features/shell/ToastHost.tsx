@@ -138,7 +138,7 @@ function ToastCard({
 
   return (
     <aside
-      className="app-toast"
+      className={toast.layout === "stacked" ? "app-toast app-toast--stacked" : "app-toast"}
       role="status"
       aria-live="polite"
       onMouseEnter={() => setPaused(true)}
