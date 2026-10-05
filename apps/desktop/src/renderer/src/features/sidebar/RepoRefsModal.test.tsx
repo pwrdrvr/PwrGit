@@ -807,7 +807,10 @@ describe("parity with the sidebar's rows", () => {
       expect(actions).toHaveLength(1);
       return [...actions[0]!.children].map((slot) => ({
         slot: slot.className,
-        buttons: [...slot.querySelectorAll("button")].map((b) => b.textContent)
+        // The kebab by its name: it has no text of its own.
+        buttons: [...slot.querySelectorAll("button")].map((b) =>
+          b.classList.contains("refs-row-menu") ? b.getAttribute("aria-label") : b.textContent
+        )
       }));
     };
 
@@ -815,7 +818,7 @@ describe("parity with the sidebar's rows", () => {
     expect(slots(rowFor("feature/x"))).toEqual([
       { slot: "refs-row-slot refs-row-slot--primary", buttons: ["Switch here"] },
       { slot: "refs-row-slot refs-row-slot--secondary", buttons: ["New worktree"] },
-      { slot: "refs-row-slot refs-row-slot--menu", buttons: [""] }
+      { slot: "refs-row-slot refs-row-slot--menu", buttons: ["Actions for origin/feature/x"] }
     ]);
     // Held: the secondary slot keeps its width, empty. The chip naming the
     // worktree stays on the name line rather than standing in for it.
@@ -823,7 +826,7 @@ describe("parity with the sidebar's rows", () => {
     expect(slots(dev)).toEqual([
       { slot: "refs-row-slot refs-row-slot--primary", buttons: ["Show worktree"] },
       { slot: "refs-row-slot refs-row-slot--secondary", buttons: [] },
-      { slot: "refs-row-slot refs-row-slot--menu", buttons: [""] }
+      { slot: "refs-row-slot refs-row-slot--menu", buttons: ["Actions for origin/dev"] }
     ]);
     expect(dev.querySelector(".refs-branch-name-line > .ref-checkout-chip")).not.toBeNull();
     expect(dev.querySelector(".refs-row-actions .ref-checkout-chip")).toBeNull();

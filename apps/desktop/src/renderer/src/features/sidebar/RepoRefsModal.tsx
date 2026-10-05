@@ -401,6 +401,32 @@ function GoneBanner({
   );
 }
 
+/**
+ * A remote branch's `⋮`, the same on the Branches tab and on its remote's
+ * card, so the one branch never offers two different sets of verbs.
+ */
+function RemoteBranchMenu({ branch }: { branch: RemoteBranchSummary }) {
+  return (
+    <RefRowMenu
+      label={`Actions for ${branch.qualifiedName}`}
+      items={[
+        // The short name, as a click on the name copies; the full ref is its
+        // own entry (Post-ship 3c).
+        {
+          type: "item",
+          label: "Copy branch name",
+          onSelect: () => void copyText(branch.name)
+        },
+        {
+          type: "item",
+          label: `Copy ${branch.qualifiedName}`,
+          onSelect: () => void copyText(branch.qualifiedName)
+        }
+      ]}
+    />
+  );
+}
+
 /** One remote's branches, paged rather than listed whole. */
 function RemoteBranchList({
   repoId,
@@ -515,24 +541,7 @@ function RemoteBranchList({
                   </button>
                 )
               }
-              menu={
-                <RefRowMenu
-                  label={`Actions for ${branch.qualifiedName}`}
-                  items={[
-                    // As the Branches tab's remote rows offer them.
-                    {
-                      type: "item",
-                      label: "Copy branch name",
-                      onSelect: () => void copyText(branch.name)
-                    },
-                    {
-                      type: "item",
-                      label: `Copy ${branch.qualifiedName}`,
-                      onSelect: () => void copyText(branch.qualifiedName)
-                    }
-                  ]}
-                />
-              }
+              menu={<RemoteBranchMenu branch={branch} />}
             />
           </div>
         );
@@ -1255,25 +1264,7 @@ export function RepoRefsModal({
                             New worktree
                           </button>
                         }
-                        menu={
-                          <RefRowMenu
-                            label={`Actions for ${branch.qualifiedName}`}
-                            items={[
-                              // The short name, as a click on the name copies;
-                              // the full ref is its own entry (Post-ship 3c).
-                              {
-                                type: "item",
-                                label: "Copy branch name",
-                                onSelect: () => void copyText(branch.name)
-                              },
-                              {
-                                type: "item",
-                                label: `Copy ${branch.qualifiedName}`,
-                                onSelect: () => void copyText(branch.qualifiedName)
-                              }
-                            ]}
-                          />
-                        }
+                        menu={<RemoteBranchMenu branch={branch} />}
                       />
                     </div>
                   );

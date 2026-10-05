@@ -8012,12 +8012,18 @@ button.agent-menu__item:hover {
 }
 /* Measured against `refs-body` like the tables' steps: each threshold is the
    row's tracks with a 120px name, its 8px gaps, 26px of padding and the
-   card's 2px border. Below it the row would overflow its card, so the next
-   step takes over: compact drops the age, stacked moves the actions to a line
-   of their own at the right edge, where the slots may wrap.
+   card's 2px border. The name track is `minmax(0, 1fr)`, so the row never
+   overflows; what each step guards is the name, which below its threshold
+   would shrink under 120px while the age and slots kept theirs. Compact drops
+   the age, stacked moves the actions to a line of their own at the right
+   edge, where the slots may wrap.
 
      full     18+120+80+252 + 3×8 + 28 = 522
-     compact  18+120+252    + 2×8 + 28 = 434 */
+     compact  18+120+252    + 2×8 + 28 = 434
+
+   `refs-body` cannot see the card's own list scroller: once a page outgrows
+   its 280px, the house 9px scrollbar (`::-webkit-scrollbar`, which takes
+   layout width on every platform) comes out of the name too, leaving 111px. */
 @container refs-body (width < 522px) {
   .refs-remote-branch {
     grid-template-columns: 18px minmax(0, 1fr) var(--refs-actions-w);
