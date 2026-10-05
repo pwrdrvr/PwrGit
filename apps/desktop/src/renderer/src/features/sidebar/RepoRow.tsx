@@ -394,8 +394,10 @@ export function RepoRow({
   // (3a, 3b). Selecting a row used to force the disclosure open and save it
   // open; with a cap, opening it no longer reveals the row, and closed now
   // stays closed.
+  // A change request on screen holds the selection (the rows below drop
+  // their selected look meanwhile), so there is no row you are on to visit.
   const selectedOther =
-    selectedWorktreeId === null
+    selectedWorktreeId === null || changeRequestSelection.selectedKey !== null
       ? undefined
       : remaining.find((worktree) => worktree.id === selectedWorktreeId);
   const ghostWorktree =

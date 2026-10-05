@@ -21,6 +21,7 @@ vi.mock("../../lib/toast", () => ({
 }));
 
 import { RepoRow } from "./RepoRow";
+import { ChangeRequestSelectionContext } from "../change-request/change-request-selection";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -104,51 +105,58 @@ afterEach(async () => {
 
 const onReorder = vi.fn();
 
-async function render(selectedWorktreeId: string | null): Promise<void> {
+async function render(
+  selectedWorktreeId: string | null,
+  changeRequestKey: string | null = null
+): Promise<void> {
   const noop = () => undefined;
   await act(async () => {
     root.render(
-      <RepoRow
-        repo={repo}
-        expanded
-        containsSelection={selectedWorktreeId !== null}
-        selectedWorktreeId={selectedWorktreeId}
-        selectedIds={new Set()}
-        sort="recent"
-        customOrder={undefined}
-        now={NOW}
-        focused={false}
-        focusContext={{ selectedWorktreeId, visits: {} }}
-        onToggleExpand={noop}
-        onToggleRepoPin={noop}
-        refreshing={false}
-        onRefreshWorktrees={noop}
-        onSelectWorktree={noop}
-        onContextWorktree={noop}
-        onToggleWorktreePin={noop}
-        onToggleBranchPin={noop}
-        onRemoveWorktree={noop}
-        onRefreshPullRequest={noop}
-        onRemoveSelected={noop}
-        onClearSelected={noop}
-        onCycleSort={noop}
-        onReorder={onReorder}
-        onNewWorktree={noop}
-        onRevealWorktree={noop}
-        onCreateWorktreeFromRef={noop}
-        onForkRepo={noop}
-        arrangeable={false}
-        dragProps={{ draggable: false }}
-        dragging={false}
-        dropPosition={null}
-        focusable
-        onRowKeyDown={noop}
-        onRowFocus={noop}
-        isPostDragClick={() => false}
-        posinset={1}
-        setsize={1}
-        platform="darwin"
-      />
+      <ChangeRequestSelectionContext.Provider
+        value={{ selectedKey: changeRequestKey, select: noop, clear: noop }}
+      >
+        <RepoRow
+          repo={repo}
+          expanded
+          containsSelection={selectedWorktreeId !== null}
+          selectedWorktreeId={selectedWorktreeId}
+          selectedIds={new Set()}
+          sort="recent"
+          customOrder={undefined}
+          now={NOW}
+          focused={false}
+          focusContext={{ selectedWorktreeId, visits: {} }}
+          onToggleExpand={noop}
+          onToggleRepoPin={noop}
+          refreshing={false}
+          onRefreshWorktrees={noop}
+          onSelectWorktree={noop}
+          onContextWorktree={noop}
+          onToggleWorktreePin={noop}
+          onToggleBranchPin={noop}
+          onRemoveWorktree={noop}
+          onRefreshPullRequest={noop}
+          onRemoveSelected={noop}
+          onClearSelected={noop}
+          onCycleSort={noop}
+          onReorder={onReorder}
+          onNewWorktree={noop}
+          onRevealWorktree={noop}
+          onCreateWorktreeFromRef={noop}
+          onForkRepo={noop}
+          arrangeable={false}
+          dragProps={{ draggable: false }}
+          dragging={false}
+          dropPosition={null}
+          focusable
+          onRowKeyDown={noop}
+          onRowFocus={noop}
+          isPostDragClick={() => false}
+          posinset={1}
+          setsize={1}
+          platform="darwin"
+        />
+      </ChangeRequestSelectionContext.Provider>
     );
   });
 }
@@ -197,6 +205,17 @@ describe("RepoRow's Other worktrees past the cap", () => {
     // A row inside the six is selected in place.
     await render("live-2");
     expect(ghost()).toBeNull();
+  });
+
+  // While a pull request is on screen it holds the selection, and the
+  // worktree it will return to is not drawn as selected — or as a visitor.
+  it("draws no ghost while a change request holds the selection", async () => {
+    window.localStorage.setItem(OPEN_KEY, "1");
+    await render("done-1", "repo-1:origin#803");
+    expect(ghost()).toBeNull();
+    expect(container.querySelector(".wt-ghost-sep")).toBeNull();
+    await render("done-1");
+    expect(ghost()).not.toBeNull();
   });
 
   it("keeps a closed disclosure closed, and ghosts above it", async () => {
