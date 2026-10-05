@@ -110,6 +110,10 @@ import {
   subscribeLogEntries
 } from "./logs";
 import { openLogsWindow } from "./logs-window";
+import {
+  createRendererErrorLog,
+  sanitizeRendererErrorReport
+} from "./renderer-errors";
 import { watchProcessIds } from "./process-ids";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
@@ -376,6 +380,21 @@ if (!gotSingleInstanceLock) {
     installDevelopmentDockIcon();
     installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
+    // Render errors never kill the renderer process, so neither
+    // render-process-gone nor anything else in main would see them otherwise.
+    const rendererErrors = createRendererErrorLog();
+    bus.register("logs:reportRendererError", (req, context) => {
+      const report = sanitizeRendererErrorReport(req);
+      if (report === null) {
+        return err({
+          kind: "validation",
+          code: "invalid_renderer_error_report",
+          message: "Malformed renderer error report."
+        });
+      }
+      rendererErrors.report(report, context.webContentsId);
+      return ok(null);
+    });
     bus.register("logs:openWindow", (_req, context) => {
       openAuxiliaryWindow(openLogsWindow, senderWindow(context));
       return ok(null);

@@ -35,6 +35,7 @@ import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { DialogHost } from "./features/shell/DialogHost";
+import { PaneErrorFallback } from "./features/shell/ErrorFallbacks";
 import { ResetToRemoteHost } from "./features/graph/ResetToRemoteHost";
 import { PaneResizer } from "./features/shell/PaneResizer";
 import { ToastHost } from "./features/shell/ToastHost";
@@ -69,6 +70,7 @@ import {
 } from "./features/sidebar/worktree-selection";
 import { profileWindowTitle } from "./lib/profileTitle";
 import { dispatch, subscribe, windowProfileId } from "./lib/pwrgit";
+import { ErrorBoundary } from "./lib/ErrorBoundary";
 import { useColumnResize } from "./lib/useColumnResize";
 import { useProfiles } from "./state/useProfiles";
 import { useRepoTree } from "./state/useRepoTree";
@@ -991,40 +993,65 @@ export function App() {
                 )}
               </div>
               {diffTarget !== null && (
-                <DiffPane
-                  worktreeId={selectedWorktree.id}
-                  target={diffTarget}
-                  onOpenFile={(path, staged) =>
-                    setDiffTarget({ kind: "file", path, staged })
-                  }
-                  hidden={fileInsightTarget !== null}
-                  onOpenFileInsight={(path, context, tab, line) =>
-                    setFileInsightTarget({
-                      path,
-                      context,
-                      tab,
-                      ...(line === undefined ? {} : { line })
-                    })
-                  }
-                  onClose={closeDiff}
-                />
+                <ErrorBoundary
+                  resetKey={diffTarget}
+                  fallback={({ error, reset }) => (
+                    <PaneErrorFallback
+                      title="Diff"
+                      error={error}
+                      hidden={fileInsightTarget !== null}
+                      onRetry={reset}
+                      onClose={closeDiff}
+                    />
+                  )}
+                >
+                  <DiffPane
+                    worktreeId={selectedWorktree.id}
+                    target={diffTarget}
+                    onOpenFile={(path, staged) =>
+                      setDiffTarget({ kind: "file", path, staged })
+                    }
+                    hidden={fileInsightTarget !== null}
+                    onOpenFileInsight={(path, context, tab, line) =>
+                      setFileInsightTarget({
+                        path,
+                        context,
+                        tab,
+                        ...(line === undefined ? {} : { line })
+                      })
+                    }
+                    onClose={closeDiff}
+                  />
+                </ErrorBoundary>
               )}
               {fileInsightTarget !== null && (
-                <FileInsightsPane
-                  key={`${fileInsightTarget.path}:${insightContextKey(
-                    fileInsightTarget.context
-                  )}:${fileInsightTarget.tab}:${fileInsightTarget.line ?? ""}`}
-                  worktreeId={selectedWorktree.id}
-                  path={fileInsightTarget.path}
-                  context={fileInsightTarget.context}
-                  initialTab={fileInsightTarget.tab}
-                  {...(fileInsightTarget.line === undefined
-                    ? {}
-                    : { initialLine: fileInsightTarget.line })}
-                  returnLabel={diffTarget === null ? "Lineage" : "Diff"}
-                  onClose={() => setFileInsightTarget(null)}
-                  onShowCommit={showLineageCommit}
-                />
+                <ErrorBoundary
+                  resetKey={fileInsightTarget}
+                  fallback={({ error, reset }) => (
+                    <PaneErrorFallback
+                      title="File details"
+                      error={error}
+                      onRetry={reset}
+                      onClose={() => setFileInsightTarget(null)}
+                    />
+                  )}
+                >
+                  <FileInsightsPane
+                    key={`${fileInsightTarget.path}:${insightContextKey(
+                      fileInsightTarget.context
+                    )}:${fileInsightTarget.tab}:${fileInsightTarget.line ?? ""}`}
+                    worktreeId={selectedWorktree.id}
+                    path={fileInsightTarget.path}
+                    context={fileInsightTarget.context}
+                    initialTab={fileInsightTarget.tab}
+                    {...(fileInsightTarget.line === undefined
+                      ? {}
+                      : { initialLine: fileInsightTarget.line })}
+                    returnLabel={diffTarget === null ? "Lineage" : "Diff"}
+                    onClose={() => setFileInsightTarget(null)}
+                    onShowCommit={showLineageCommit}
+                  />
+                </ErrorBoundary>
               )}
             </div>
           ) : shownChangeRequest !== null ? null : (
