@@ -181,10 +181,34 @@ per-codepoint, and nothing warns when it falls through.
 **The probe is per-face too, and this table is Geist Sans.** `●` was once
 listed here as safe for the dirty badge. It is in Geist Sans, but `.badge`
 and `.hit-status__b` set it in `--font-mono`, Geist Mono does not have it, and
-the mono stack never reaches Geist Sans: `CSS.getPlatformFontsForNode` named
-**Menlo**. The same is true of `○`, `→`, `←`, `↵`, `⇧` and `⏎` wherever they
-are set in mono. The marks are now `DotGlyph`; the notation is a font-stack
-question, not an icon one. Probe a character in the face its rule asks for.
+the mono stack did not reach Geist Sans then: `CSS.getPlatformFontsForNode`
+named **Menlo**. The marks are now `DotGlyph`. Probe a character in the face
+its rule asks for.
+
+**The mono stack falls through to Geist Sans's symbols.** `--font-mono` is
+`"Geist Mono", "Geist Sans Symbols", …OS fonts`. `"Geist Sans Symbols"` is a
+`@font-face` alias in `fonts.css` over Geist Sans's own files, so it costs no
+second download. Its `unicode-range` covers the symbol blocks (arrows, math
+operators, misc technical, enclosed alphanumerics, geometric shapes through
+dingbats) **minus every codepoint Geist Mono has**. It is not plain
+`"Geist Sans"` second because of `font-display: swap`: while Geist Mono loads,
+the next loaded family draws *every* glyph, and plain Geist Sans would set mono
+digits and letters proportionally for that moment. The alias cannot reach a
+letter or digit. Its weights mirror Geist Mono's 400/500/600, so a 700 mono
+rule draws both at 600. Probed in a Vite harness build, at the weight each rule
+asks for:
+
+| char, where it is set in mono | before | after |
+|---|---|---|
+| `↑` `↓`: sync chip, switcher footer | Geist Mono | Geist Mono (Geist Mono has U+2191 and U+2193) |
+| `↵`: switcher footer | **Menlo** | Geist Medium |
+| `⇧` `⏎`: diff help keycaps | **Menlo** | Geist SemiBold |
+| `←` `→`: commit-alignment relation | **Menlo** | Geist SemiBold |
+| `≈`: commit-alignment relation (700) | **Courier** | Geist SemiBold |
+
+Every box holding only Geist Mono glyphs measured identical before and after.
+The boxes holding a fallthrough glyph grew by its wider advance: a `⏎` keycap
+went from 20.0px to 22.9px.
 
 **Reading the cmap answers the same question without a running app**, and it
 answers the *cause* rather than the symptom: `CSS.getPlatformFontsForNode`
@@ -213,10 +237,16 @@ rasters and what was kept as typography (and why) are in
 [design/Text Glyph Icons - UX Review.dc.html](../../../../../../design/Text%20Glyph%20Icons%20-%20UX%20Review.dc.html).
 
 `text-glyph-coverage.test.ts` now sweeps the renderer: every non-ASCII
-character in JSX text and string literals must be in a bundled face's `cmap`,
-read from the `.woff` files themselves. It is a floor — it cannot see which
-face a site sets a character in, so it passes `●` in mono. Its `PENDING` list
-names the characters still drawn from text and who is replacing them.
+character in JSX text and string literals must draw in a bundled face **in
+both `--font-sans` and `--font-mono`**. Coverage is read from the `.woff`
+files' `cmap`, narrowed by each face's `unicode-range`. It cannot see which
+stack a site uses, so it asks both. A stack counts only its leading run of
+bundled families, which makes a fallthrough placed behind an OS font fail. It
+also holds the fallthrough's range disjoint from the face ahead of it, and its
+weights equal to that face's. A character only Geist Mono has, such as box
+drawing, would fail the sans stack. The fix then is a symmetric fallthrough,
+not an exception. The `PENDING` list names the characters still drawn from
+text and who is replacing them.
 
 **An SVG in a flex button needs `flex: 0 0 auto`, and the label needs its own
 element.** Both fall out of the swap and neither announces itself. A text node

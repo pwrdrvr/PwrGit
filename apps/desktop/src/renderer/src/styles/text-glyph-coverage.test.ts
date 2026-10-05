@@ -15,23 +15,26 @@ import { describe, expect, it } from "vitest";
  * (`design/Text Glyph Icons - UX Review.dc.html`). An icon is a
  * `lib/*Glyph.tsx` component, never a character.
  *
- * This is a floor, not the whole rule. It asks whether *either* face has the
- * character, because it cannot see which face a site sets it in: `●` is in
- * Geist Sans but not Geist Mono, and every badge that drew it set it in mono,
- * so it fell back while passing a check like this one. See "A bundled font is
- * requested by its `@font-face` name" in `styles/AGENTS.md`.
+ * It cannot see which stack a site sets a character in, so it asks every
+ * stack: each character must draw in a bundled face whether the site is set in
+ * `--font-sans` or `--font-mono`. Asking whether *either* face had it once
+ * passed `●` while every badge that drew it set it in mono, where Geist Mono
+ * lacks it and the glyph fell back to Menlo. See "A bundled font is requested
+ * by its `@font-face` name" in `styles/AGENTS.md`.
  *
  * Coverage is read from the faces themselves — the `cmap` of every `.woff`
- * the `@fontsource` stylesheets imported by fonts.css load — so a font update
- * that drops a codepoint fails here rather than in a screenshot.
+ * fonts.css loads, through its `@fontsource` imports or its own `@font-face`
+ * rules, narrowed by each face's `unicode-range` — so a font update that drops
+ * a codepoint fails here rather than in a screenshot.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rendererRoot = resolve(here, "..");
 const require = createRequire(import.meta.url);
 
-/** Characters still drawn from text that no bundled face has. Each needs a
- *  named owner; an entry that is no longer used fails the second test. */
+/** Characters still drawn from text that some font stack cannot draw in a
+ *  bundled face. Each needs a named owner; an entry that is no longer used
+ *  fails the last test. */
 const PENDING: Record<string, string> = {
   // Keycap symbols, not icons: `lib/platform.ts` spells macOS shortcuts with
   // them. They fall back like the mono arrows do, and belong to the same
@@ -92,22 +95,77 @@ function cmapOf(path: string): Set<number> {
   return out;
 }
 
-/** Every `.woff` the stylesheets fonts.css imports point at (they name the
- *  `.woff2`; @fontsource ships a zlib `.woff` beside each). */
-function bundledCoverage(): { faces: string[]; codepoints: Set<number> } {
-  const fontsCss = readFileSync(resolve(here, "fonts.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const faces = new Set<string>();
+/** A `unicode-range` as a predicate; no descriptor means every codepoint. */
+function rangeOf(descriptor: string | undefined): (cp: number) => boolean {
+  if (descriptor === undefined) return () => true;
+  const spans = descriptor.split(",").map((part) => {
+    const m = /^U\+([0-9A-F?]+)(?:-([0-9A-F]+))?$/i.exec(part.trim());
+    if (m === null) throw new Error(`unreadable unicode-range part "${part}"`);
+    const lo = parseInt(m[1]!.replace(/\?/g, "0"), 16);
+    const hi = parseInt((m[2] ?? m[1]!).replace(/\?/g, "F"), 16);
+    return [lo, hi] as const;
+  });
+  return (cp) => spans.some(([lo, hi]) => cp >= lo && cp <= hi);
+}
+
+type Face = { family: string; weight: string; file: string; codepoints: Set<number> };
+
+const strip = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "");
+const unquote = (family: string): string => family.trim().replace(/^(["'])(.*)\1$/, "$2");
+
+/** The faces a stylesheet declares, each with the codepoints it can actually
+ *  draw: its `.woff`'s cmap (they name the `.woff2`; @fontsource ships a zlib
+ *  `.woff` beside each) narrowed by its `unicode-range`, because a codepoint
+ *  outside the range never reaches the face however the file reads. */
+function facesIn(cssPath: string, css: string): Face[] {
+  return [...strip(css).matchAll(/@font-face\s*\{([^}]*)\}/g)].map(([, body]) => {
+    const descriptor = (name: string): string | undefined =>
+      new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`).exec(body!)?.[1]?.trim();
+    const url = /url\(\s*["']?([^"')]+\.woff2)["']?\s*\)/.exec(body!)?.[1];
+    if (url === undefined) throw new Error(`a face in ${cssPath} names no .woff2`);
+    const woff = url.replace(/\.woff2$/, ".woff");
+    const file = woff.startsWith(".") ? resolve(dirname(cssPath), woff) : require.resolve(woff);
+    const inRange = rangeOf(descriptor("unicode-range"));
+    return {
+      family: unquote(descriptor("font-family")!),
+      weight: descriptor("font-weight")!,
+      file,
+      codepoints: new Set([...cmapOf(file)].filter(inRange))
+    };
+  });
+}
+
+/** Every face fonts.css loads: those its `@import`s declare, then its own. */
+function bundledFaces(): Face[] {
+  const fontsPath = resolve(here, "fonts.css");
+  const fontsCss = strip(readFileSync(fontsPath, "utf8"));
+  const faces: Face[] = [];
   for (const [, spec] of fontsCss.matchAll(/@import\s+(?:url\(\s*)?["']([^"']+)["']/g)) {
     const cssPath = require.resolve(spec!);
-    const css = readFileSync(cssPath, "utf8");
-    for (const [, file] of css.matchAll(/url\(\s*["']?([^"')]+\.woff2)["']?\s*\)/g)) {
-      faces.add(resolve(dirname(cssPath), file!.replace(/\.woff2$/, ".woff")));
-    }
+    faces.push(...facesIn(cssPath, readFileSync(cssPath, "utf8")));
   }
-  const codepoints = new Set<number>();
-  for (const face of faces) for (const cp of cmapOf(face)) codepoints.add(cp);
-  return { faces: [...faces], codepoints };
+  faces.push(...facesIn(fontsPath, fontsCss));
+  return faces;
 }
+
+/** Each font token's stacks, cut to the leading run of bundled families: the
+ *  part that decides whether a glyph draws in a bundled face. A bundled family
+ *  behind an OS font is never reached for a glyph the OS font has, so it does
+ *  not count. */
+function bundledStacks(faces: Face[]): { token: string; families: string[] }[] {
+  const tokensCss = strip(readFileSync(resolve(here, "tokens.css"), "utf8"));
+  const bundled = new Set(faces.map((face) => face.family));
+  return ["--font-sans", "--font-mono"].flatMap((token) =>
+    [...tokensCss.matchAll(new RegExp(`${token}\\s*:\\s*([^;]+);`, "g"))].map((m) => {
+      const stack = m[1]!.split(",").map(unquote);
+      const run = stack.findIndex((family) => !bundled.has(family));
+      return { token, families: run === -1 ? stack : stack.slice(0, run) };
+    })
+  );
+}
+
+const codepointsOf = (faces: Face[], families: string[]): Set<number> =>
+  new Set(faces.filter((face) => families.includes(face.family)).flatMap((face) => [...face.codepoints]));
 
 /** Non-ASCII characters in the text a component draws: JSX text, string
  *  literals and template text. The AST keeps comments out, which is where
@@ -143,25 +201,73 @@ function drawnCharacters(): Map<string, string[]> {
   return found;
 }
 
-const coverage = bundledCoverage();
+const faces = bundledFaces();
+const stacks = bundledStacks(faces);
 const drawn = drawnCharacters();
+const cp = (ch: string): number => ch.codePointAt(0)!;
+const label = (ch: string): string => `${ch} U+${cp(ch).toString(16).toUpperCase()}`;
 
 describe("text the renderer draws", () => {
   it("reads real coverage out of the bundled faces", () => {
     // Without this a path change would leave an empty set and fail every
     // character — or, worse, a reader that returned too much would pass all.
-    expect(coverage.faces.length).toBeGreaterThan(1);
-    expect(coverage.codepoints.has("A".codePointAt(0)!)).toBe(true);
-    expect(coverage.codepoints.has("…".codePointAt(0)!)).toBe(true);
+    const sans = codepointsOf(faces, ["Geist Sans"]);
+    expect(sans.has(cp("A"))).toBe(true);
+    expect(sans.has(cp("…"))).toBe(true);
     // ↻ is in neither face; a reader that finds it is reading the file wrong.
-    expect(coverage.codepoints.has("↻".codePointAt(0)!)).toBe(false);
+    expect(codepointsOf(faces, [...new Set(faces.map((f) => f.family))]).has(cp("↻"))).toBe(false);
+    // The range is applied: the symbols alias shares Geist Sans's files but
+    // must not report the letters those files carry.
+    const symbols = codepointsOf(faces, ["Geist Sans Symbols"]);
+    expect(symbols.has(cp("↵"))).toBe(true);
+    expect(symbols.has(cp("A"))).toBe(false);
+    // And each stack resolved to at least one bundled family.
+    for (const { token, families } of stacks) expect(families, token).not.toHaveLength(0);
   });
 
-  it("uses no character that neither bundled face can draw", () => {
-    const missing = [...drawn]
-      .filter(([ch]) => !coverage.codepoints.has(ch.codePointAt(0)!) && PENDING[ch] === undefined)
-      .map(([ch, where]) => `${ch} U+${ch.codePointAt(0)!.toString(16).toUpperCase()} at ${where.join(", ")}`);
-    expect(missing, "draw these with a lib/*Glyph.tsx component instead").toEqual([]);
+  it.each(["--font-sans", "--font-mono"])("draws every character in a bundled face when set in %s", (token) => {
+    const missing = stacks
+      .filter((stack) => stack.token === token)
+      .flatMap(({ families }) => {
+        const covered = codepointsOf(faces, families);
+        return [...drawn]
+          .filter(([ch]) => !covered.has(cp(ch)) && PENDING[ch] === undefined)
+          .map(([ch, where]) => `${label(ch)} at ${where.join(", ")}`);
+      });
+    expect(
+      missing,
+      `${token}'s bundled families (${stacks.find((s) => s.token === token)?.families.join(", ")}) lack these. ` +
+        "An icon belongs in a lib/*Glyph.tsx component; typography another bundled face has belongs " +
+        "in a fallthrough face in fonts.css, as Geist Sans Symbols is for the mono stack"
+    ).toEqual([]);
+  });
+
+  it("gives a fallthrough face nothing the face ahead of it draws", () => {
+    // A family behind the lead is reached per glyph, so after load it can only
+    // ever draw what the lead lacks. But while the lead is still loading,
+    // font-display: swap hands *every* glyph to the next loaded family — and
+    // a fallthrough that also had digits and letters would set mono text in a
+    // proportional face for that moment. Keeping the ranges disjoint means
+    // mono text never takes any metrics but Geist Mono's.
+    const overlaps = stacks.flatMap(({ token, families }) =>
+      families.slice(1).flatMap((family, i) => {
+        const ahead = codepointsOf(faces, families.slice(0, i + 1));
+        return [...codepointsOf(faces, [family])]
+          .filter((c) => ahead.has(c))
+          .map((c) => `${token}: ${family} claims ${label(String.fromCodePoint(c))}`);
+      })
+    );
+    expect(overlaps, "narrow the fallthrough face's unicode-range").toEqual([]);
+  });
+
+  it("gives a fallthrough face every weight of the face it backs", () => {
+    // A 700 mono rule draws Geist Mono at its heaviest bundled weight, 600;
+    // the glyphs that fall through should come out at the same weight.
+    const weights = (family: string): string[] =>
+      [...new Set(faces.filter((face) => face.family === family).map((face) => face.weight))].sort();
+    for (const { families } of stacks) {
+      for (const family of families.slice(1)) expect(weights(family), family).toEqual(weights(families[0]!));
+    }
   });
 
   it("keeps no stale entry in the pending list", () => {
