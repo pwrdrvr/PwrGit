@@ -7998,27 +7998,37 @@ button.agent-menu__item:hover {
   max-height: 280px;
   overflow: auto;
 }
-/* Marks the remote row's leading action for Enter and double-click; it takes
-   no box, so the actions keep laying out as one flex row. */
-.refs-remote-branch__primary {
-  display: contents;
-}
+/* The actions column is `--refs-actions-w`, the Branches tab's three fixed
+   slots (`RefRowActions`), never content-sized. At 112px it was two buttons'
+   worth of nothing: a free row's Switch here and New worktree each wrapped onto
+   two lines, while a held row's lone Show worktree ran the full width, so no
+   verb sat in the same place twice down a card. */
 .refs-remote-branch {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 80px 112px;
+  grid-template-columns: 18px minmax(0, 1fr) 80px var(--refs-actions-w);
   min-height: 45px;
   padding: 6px 13px;
   border-top: 1px solid var(--border-subtle);
 }
-/* 18 + 80 + 112 + 26 of padding + the card's 2px border: below that the row
-   would overflow its card, so the age goes and the actions take their own
-   line (see the narrow refs tables, `refs-body`). */
-@container refs-body (width < 240px) {
+/* Measured against `refs-body` like the tables' steps: each threshold is the
+   row's tracks with a 120px name, its 8px gaps, 26px of padding and the
+   card's 2px border. Below it the row would overflow its card, so the next
+   step takes over: compact drops the age, stacked moves the actions to a line
+   of their own at the right edge, where the slots may wrap.
+
+     full     18+120+80+252 + 3×8 + 28 = 522
+     compact  18+120+252    + 2×8 + 28 = 434 */
+@container refs-body (width < 522px) {
   .refs-remote-branch {
-    grid-template-columns: 18px minmax(0, 1fr);
+    grid-template-columns: 18px minmax(0, 1fr) var(--refs-actions-w);
   }
   .refs-remote-branch > :nth-child(3) {
     display: none;
+  }
+}
+@container refs-body (width < 434px) {
+  .refs-remote-branch {
+    grid-template-columns: 18px minmax(0, 1fr);
   }
   .refs-remote-branch > :last-child {
     grid-column: 1 / -1;
