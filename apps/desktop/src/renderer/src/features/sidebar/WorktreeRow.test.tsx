@@ -187,6 +187,59 @@ describe("WorktreeRow — a pruned upstream", () => {
       expect(render(worktree({ tracking }))).not.toContain("wt-tag--gone");
     }
   });
+
+  // One lifecycle word per row: "merged #803" already says why the branch
+  // went. An open chip beside gone keeps both — that pair is the question the
+  // gone transition's PR refresh is answering.
+  it("leaves gone to a merged or closed change request's chip", () => {
+    const pr = {
+      number: 803,
+      url: "https://example.test/pr/803",
+      title: "feat: lightbox",
+      isDraft: false
+    };
+    for (const state of ["merged", "closed"] as const) {
+      const markup = render(
+        worktree({ tracking: "upstream_missing", pr: { ...pr, state } })
+      );
+      expect(markup).not.toContain("wt-tag--gone");
+      expect(markup).toContain(`${state} #803`);
+    }
+    expect(
+      render(worktree({ tracking: "upstream_missing", pr: { ...pr, state: "open" } }))
+    ).toContain("wt-tag--gone");
+  });
+});
+
+describe("WorktreeRow — a ghost", () => {
+  it("is the same row, outlined, with the tag naming where it lives", async () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeRow
+        worktree={worktree({})}
+        selected
+        multiSelected={false}
+        now={new Date("2026-08-18T12:00:00.000Z").getTime()}
+        onSelect={() => undefined}
+        onContextMenu={() => undefined}
+        onTogglePin={() => undefined}
+        onRemove={() => undefined}
+        dragProps={{ draggable: false }}
+        dragging={false}
+        dropPosition={null}
+        focusable
+        onKeyDown={() => undefined}
+        onFocus={() => undefined}
+        posinset={3}
+        setsize={3}
+        ghost={{ tag: "Finished", tip: "Shown because you're on it." }}
+        platform="darwin"
+      />
+    );
+    expect(markup).toContain("wt-row is-selected is-ghost");
+    expect(markup).toContain('class="wt-tag wt-tag--ghost"');
+    expect(markup).toContain(">Finished<");
+    expect(render(worktree({}))).not.toContain("is-ghost");
+  });
 });
 
 describe("WorktreeRow — a checkout that is gone", () => {
@@ -350,52 +403,5 @@ describe("WorktreeRow — platform shortcut affordance", () => {
     expect(
       await hoverCard(worktree({}), ".wt-row__handle", { platform: "win32" })
     ).toBe("Drag to reorder — or Ctrl+Shift+↑ / Ctrl+Shift+↓ from the keyboard");
-  });
-});
-
-describe("WorktreeRow — ghost", () => {
-  const ghost = {
-    tag: "Other",
-    tooltip:
-      "Lives in Other worktrees (190). It is shown here because you're on it; pin it to keep it in Pinned.",
-    spoken: "from Other worktrees"
-  };
-
-  it("draws a visitor: the ghost class, a tag naming its disclosure, and a short reason for AT", () => {
-    const markup = renderToStaticMarkup(
-      <WorktreeRow
-        worktree={worktree({})}
-        selected
-        multiSelected={false}
-        now={new Date("2026-08-18T12:00:00.000Z").getTime()}
-        onSelect={() => undefined}
-        onContextMenu={() => undefined}
-        onTogglePin={() => undefined}
-        onRemove={() => undefined}
-        dragProps={{ draggable: false }}
-        dragging={false}
-        dropPosition={null}
-        focusable
-        onKeyDown={() => undefined}
-        onFocus={() => undefined}
-        posinset={4}
-        setsize={9}
-        ghost={ghost}
-        platform="darwin"
-      />
-    );
-    expect(markup).toContain('class="wt-row is-selected is-ghost"');
-    // Same row identity, so reveals and the anchor find it like the real one.
-    expect(markup).toContain('data-wt-id="wt1"');
-    expect(markup).toContain('<span class="wt-ghost-tag__text">Other</span>');
-    // The row's name gets the short form; the sentence stays on the card.
-    expect(markup).toContain('<span class="a11y-sr-only">from Other worktrees</span>');
-    expect(markup).not.toContain("Lives in Other worktrees");
-  });
-
-  it("draws nothing extra on an ordinary row", () => {
-    const markup = render(worktree({}));
-    expect(markup).not.toContain("is-ghost");
-    expect(markup).not.toContain("wt-ghost-tag");
   });
 });

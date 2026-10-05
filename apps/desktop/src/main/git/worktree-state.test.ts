@@ -341,6 +341,64 @@ describe("WorktreeStateService (system git)", () => {
     expect(repoGone).toHaveBeenCalledExactlyOnceWith(added.value.id);
   });
 
+  // `fetch --prune` drops the tracking ref at once, while the branch's PR is
+  // cached on a longer TTL; the listener is how the PR cache hears the ref
+  // went (gone-pr-refresh.ts). Every gone probe calls it, and `firstSeen`
+  // marks the one that saw it happen.
+  it("tells its listener when a branch's upstream goes, and whether it just went", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-upstream-gone-"));
+    const repo = join(isolatedRoot, "repo");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "t@t.com"]);
+    git(repo, ["config", "user.name", "Tester"]);
+    git(repo, ["commit", "--allow-empty", "-m", "init"]);
+    // A remote that is never contacted: the tracking ref is written directly,
+    // which behaves the same on every Git (src/main/git/AGENTS.md).
+    git(repo, ["remote", "add", "origin", join(isolatedRoot, "never-fetched.git")]);
+    git(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(repo, ["branch", "--set-upstream-to=origin/main", "main"]);
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({
+      name: "U",
+      email: "u@t.com"
+    });
+    const indexer = new RepoIndexer(isolatedDb, systemGit);
+    const added = await indexer.indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const primary = added.value.worktrees.find((w) => w.isPrimary);
+    if (primary === undefined) throw new Error("primary not indexed");
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    const gone = vi.fn();
+    isolated.onUpstreamGone(gone);
+
+    const tracked = await isolated.compute(primary.id);
+    expect(tracked?.upstreamGone).toBeUndefined();
+    expect(gone).not.toHaveBeenCalled();
+
+    git(repo, ["update-ref", "-d", "refs/remotes/origin/main"]);
+    expect((await isolated.compute(primary.id))?.upstreamGone).toBe(true);
+    expect(gone).toHaveBeenLastCalledWith({
+      worktreeId: primary.id,
+      repoId: added.value.id,
+      branch: "main",
+      firstSeen: true
+    });
+    await isolated.compute(primary.id);
+    expect(gone).toHaveBeenCalledTimes(2);
+    expect(gone).toHaveBeenLastCalledWith(
+      expect.objectContaining({ firstSeen: false })
+    );
+
+    // The sidebar's row carries the HEAD the probe saw, which is what a
+    // merged PR's head is compared with.
+    const indexed = indexer
+      .getRepo(added.value.id)
+      ?.worktrees.find((worktree) => worktree.id === primary.id);
+    expect(indexed?.head).toBe(tracked?.head);
+    expect(indexed?.tracking).toBe("upstream_missing");
+  });
+
   // A linked worktree nested inside the primary's tree (`<repo>/.worktrees/x`
   // is a common layout) that loses its `.git` link is still a directory git
   // can run in: `git status` walks up, finds the PRIMARY, and succeeds with

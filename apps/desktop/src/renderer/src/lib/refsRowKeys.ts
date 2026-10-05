@@ -10,7 +10,7 @@
  * Tab from a row still walks its own buttons.
  *
  * The primary action is whichever button sits inside `data-refs-primary` —
- * `RefRowActions`' first slot, or the remote card's wrapper.
+ * `RefRowActions`' first slot, which every one of those rows draws.
  *
  * Space cannot pin from the filter field: there it types a space, and a branch
  * filter has no reason to swallow one. The row is where the key is free.

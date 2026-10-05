@@ -21,12 +21,18 @@ const css = readFileSync(resolve(here, "app.css"), "utf8").replace(
 );
 
 /** Every `grid-template-columns` value declared in a rule whose selector list
- *  mentions one of the refs table classes. */
+ *  mentions one of the refs table classes, or a remote card's branch row. */
 function refsGridTemplates(): { selector: string; template: string }[] {
   const out: { selector: string; template: string }[] = [];
   for (const block of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const selector = (block[1] ?? "").trim();
-    if (!/\.refs-(table__(header|row)|pr-table__row|tag-table__row)/.test(selector)) continue;
+    if (
+      !/\.refs-(table__(header|row)|pr-table__row|tag-table__row|remote-branch(?![\w-]))/.test(
+        selector
+      )
+    ) {
+      continue;
+    }
     const found = /grid-template-columns:\s*([^;]+);/.exec(block[2] ?? "");
     if (found?.[1] !== undefined) {
       out.push({ selector, template: found[1].replace(/\s+/g, " ").trim() });
@@ -59,6 +65,32 @@ it("gives the tag grid the same token", () => {
     if (tracks.length > 2) expect(template.endsWith("var(--refs-actions-w)")).toBe(true);
     else expect(template).not.toContain("--refs-actions-w");
   }
+});
+
+/** A template's tracks, so a stacked step (name + one column) can be told from
+ *  one that still lays the actions out in a column of their own. */
+function tracks(template: string): string[] {
+  return template.match(/minmax\([^)]*\)|var\([^)]*\)|[\d.]+px|[\d.]+fr|auto/g) ?? [];
+}
+
+// The Remotes tab's cards are not a `.refs-table`, and their rows drew their
+// buttons in a 112px column of their own: a free branch's Switch here and New
+// worktree each wrapped onto two lines beside a held branch's one wide Show
+// worktree. They take the Branches tab's slots, and so its token.
+it("gives each remote card's branch rows the same token", () => {
+  const remote = refsGridTemplates().filter((t) =>
+    /\.refs-remote-branch(?![\w-])/.test(t.selector)
+  );
+  // Full, compact (no age) and stacked.
+  expect(remote.length).toBe(3);
+  for (const { selector, template } of remote) {
+    if (tracks(template).length > 2) {
+      expect(template.endsWith("var(--refs-actions-w)"), selector).toBe(true);
+    } else {
+      expect(template, selector).not.toContain("--refs-actions-w");
+    }
+  }
+  expect(remote.map((t) => tracks(t.template).length)).toEqual([4, 3, 2]);
 });
 
 it("never sizes a refs grid's last column by its content", () => {

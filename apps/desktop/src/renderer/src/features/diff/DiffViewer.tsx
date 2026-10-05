@@ -15,6 +15,8 @@ import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { DiffStat } from "./DiffStat";
 import { ImageDiff, type ImageDiffRevisions } from "./ImageDiff";
 import { ImageLightbox } from "./ImageLightbox";
+import { ErrorBoundary, errorSummary } from "../../lib/ErrorBoundary";
+import { showErrorToast } from "../../lib/toast";
 import {
   buildSequence,
   imageFilesOf,
@@ -166,14 +168,31 @@ export function DiffViewer({
         />
       )}
       {lightbox !== null && images !== undefined && (
-        <ImageLightbox
-          files={imageFiles}
-          revisions={images}
-          at={lightbox.at}
-          seed={lightbox.seed}
-          onMove={(at) => setLightbox((prev) => (prev === null ? prev : { ...prev, at }))}
-          onClose={() => setLightbox(null)}
-        />
+        // A lightbox that throws closes and says so, instead of taking the
+        // window with it (a blank white window is what an uncaught render
+        // error leaves). Unmounting runs its focus-restoring cleanup, so focus
+        // goes back to the opener and the pane's Escape still works.
+        <ErrorBoundary
+          fallback={() => null}
+          onError={(error) => {
+            setLightbox(null);
+            showErrorToast({
+              title: "Couldn’t show the image viewer",
+              message: "It hit an error and was closed. The full error is in the log.",
+              detail: errorSummary(error),
+              subject: { worktreeId: images.worktreeId }
+            });
+          }}
+        >
+          <ImageLightbox
+            files={imageFiles}
+            revisions={images}
+            at={lightbox.at}
+            seed={lightbox.seed}
+            onMove={(at) => setLightbox((prev) => (prev === null ? prev : { ...prev, at }))}
+            onClose={() => setLightbox(null)}
+          />
+        </ErrorBoundary>
       )}
     </div>
   );

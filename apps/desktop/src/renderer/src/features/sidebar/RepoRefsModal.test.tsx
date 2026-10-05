@@ -795,4 +795,53 @@ describe("parity with the sidebar's rows", () => {
     expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
     expect(onClose).toHaveBeenCalled();
   });
+
+  // The Remotes cards drew their buttons in a 112px column of their own, so a
+  // free branch's two verbs each wrapped onto two lines beside a held branch's
+  // one wide Show worktree. They take the Branches tab's three fixed slots;
+  // the widths themselves are pinned in styles/refs-actions-column.test.ts.
+  it("lays each remote branch's actions out in the Branches tab's three slots", async () => {
+    await show("remotes", { ...held, remotes: [origin] });
+    const slots = (row: HTMLElement) => {
+      const actions = row.querySelectorAll(":scope > .refs-row-actions");
+      expect(actions).toHaveLength(1);
+      return [...actions[0]!.children].map((slot) => ({
+        slot: slot.className,
+        // The kebab by its name: it has no text of its own.
+        buttons: [...slot.querySelectorAll("button")].map((b) =>
+          b.classList.contains("refs-row-menu") ? b.getAttribute("aria-label") : b.textContent
+        )
+      }));
+    };
+
+    // Free: the switch leads, New worktree beside it, then the kebab.
+    expect(slots(rowFor("feature/x"))).toEqual([
+      { slot: "refs-row-slot refs-row-slot--primary", buttons: ["Switch here"] },
+      { slot: "refs-row-slot refs-row-slot--secondary", buttons: ["New worktree"] },
+      { slot: "refs-row-slot refs-row-slot--menu", buttons: ["Actions for origin/feature/x"] }
+    ]);
+    // Held: the secondary slot keeps its width, empty. The chip naming the
+    // worktree stays on the name line rather than standing in for it.
+    const dev = rowFor("dev");
+    expect(slots(dev)).toEqual([
+      { slot: "refs-row-slot refs-row-slot--primary", buttons: ["Show worktree"] },
+      { slot: "refs-row-slot refs-row-slot--secondary", buttons: [] },
+      { slot: "refs-row-slot refs-row-slot--menu", buttons: ["Actions for origin/dev"] }
+    ]);
+    expect(dev.querySelector(".refs-branch-name-line > .ref-checkout-chip")).not.toBeNull();
+    expect(dev.querySelector(".refs-row-actions .ref-checkout-chip")).toBeNull();
+
+    // Enter and double-click find the leading action through the slot.
+    for (const name of ["dev", "feature/x"]) {
+      const primary = rowFor(name).querySelectorAll("[data-refs-primary]");
+      expect(primary).toHaveLength(1);
+      expect(primary[0]!.classList.contains("refs-row-slot--primary")).toBe(true);
+    }
+
+    // The kebab carries what the Branches tab's remote rows offer.
+    const kebab = labelled("Actions for origin/feature/x")!;
+    await act(async () => kebab.click());
+    const items = [...document.querySelectorAll('[role="menuitem"]')].map((i) => i.textContent);
+    expect(items).toEqual(["Copy branch name", "Copy origin/feature/x"]);
+  });
 });

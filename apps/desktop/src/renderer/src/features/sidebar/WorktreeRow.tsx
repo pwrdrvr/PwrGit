@@ -84,11 +84,12 @@ export function WorktreeRow({
    *  the position is not derivable from DOM order. */
   posinset: number;
   setsize: number;
-  /** Drawn as a visitor: the row really lives in a closed disclosure below,
-   *  and is shown here only because the window is on it. `tag` names that
-   *  disclosure; `tooltip` says why the row is here and how to keep it;
-   *  `spoken` is the short form read as part of the row's name. */
-  ghost?: { tag: string; tooltip: string; spoken: string };
+  /**
+   * Drawn as a visitor: the selected worktree, shown at the edge of a list it
+   * is not in the visible part of (the six, or a closed disclosure). The same
+   * row and verbs, a dashed outline, and a tag naming where it lives.
+   */
+  ghost?: { tag: string; tip: string } | undefined;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -98,6 +99,10 @@ export function WorktreeRow({
   // exist, so the count badges stay off whatever the row carries; the tag
   // says why, and the row keeps Remove.
   const missing = worktree.missing === true;
+  // A merged or closed change request already says why the branch it tracked
+  // was deleted; "gone" beside it said the same thing twice.
+  const showsPr = worktree.pr !== undefined && !worktree.isDefaultBranch;
+  const prSettled = showsPr && worktree.pr?.state !== "open";
   // The primary checkout sits in the repo's own directory, which the folder row
   // directly above already names — repeating it on every repo's first row would
   // be noise, so only linked worktrees carry the folder.
@@ -229,19 +234,6 @@ export function WorktreeRow({
       >
         {worktree.branch}
       </span>
-      {ghost !== undefined && (
-        <>
-          <span
-            className="wt-ghost-tag"
-            aria-hidden="true"
-            {...hoverTooltip(tip, ghost.tooltip)}
-          >
-            ↓<span className="wt-ghost-tag__text">{ghost.tag}</span>
-          </span>
-          {/* Short: it is part of the row's name, read on every arrow key. */}
-          <span className="a11y-sr-only">{ghost.spoken}</span>
-        </>
-      )}
       {worktree.isPrimary && (
         <span
           className="wt-tag wt-tag--local"
@@ -275,7 +267,7 @@ export function WorktreeRow({
         </span>
       )}
       {/* The header says "upstream gone"; the row read clean beside it. */}
-      {!missing && worktree.tracking === "upstream_missing" && (
+      {!missing && worktree.tracking === "upstream_missing" && !prSettled && (
         <span
           className="wt-tag wt-tag--gone"
           {...hoverTooltip(
@@ -332,7 +324,7 @@ export function WorktreeRow({
           placement="row"
         />
       )}
-      {worktree.pr !== undefined && !worktree.isDefaultBranch ? (
+      {showsPr && worktree.pr !== undefined ? (
         <PrChip pr={worktree.pr} />
       ) : missing ? null : (
         <>
@@ -368,6 +360,11 @@ export function WorktreeRow({
               in-flight branch, and nothing here acts on it. It now lives in the
               selected worktree's header, beside the sync chip. */}
         </>
+      )}
+      {ghost !== undefined && (
+        <span className="wt-tag wt-tag--ghost" {...hoverTooltip(tip, ghost.tip)}>
+          {ghost.tag}
+        </span>
       )}
       {worktree.lastActivityAt !== undefined && (
         <span className="wt-age" {...hoverTooltip(tip, worktree.lastActivityAt)}>

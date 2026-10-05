@@ -355,9 +355,11 @@ export function Sidebar({
     "fetch" | "soft-pull" | null
   >(null);
   /** The maintenance dialog, and — when the refs browser opened it — the one
-   *  repository it reviews. */
+   *  repository it reviews, or the Prune worktrees tab it opens on. Prune
+   *  has no repository scope; it reviews the whole profile. */
   const [maintenance, setMaintenance] = useState<
-    { repo?: { id: string; name: string } } | null
+    | { repo?: { id: string; name: string }; worktrees?: true }
+    | null
   >(null);
   const [sel, setSel] = useState<Selection>({
     repoId: "",
@@ -1039,6 +1041,7 @@ export function Sidebar({
         onCleanUpBranches={() =>
           setMaintenance({ repo: { id: repo.id, name: repo.name } })
         }
+        onPruneWorktrees={() => setMaintenance({ worktrees: true })}
         onRevealWorktree={(worktreeId) => {
           const worktree = repo.worktrees.find(
             (candidate) => candidate.id === worktreeId
@@ -1436,7 +1439,9 @@ export function Sidebar({
           platform={platform}
           onClose={() => setMaintenance(null)}
           onRemoveWorktrees={(ids) => onRemoveWorktrees(ids, { confirmed: true })}
-          {...(maintenance.repo === undefined
+          {...(maintenance.worktrees === true
+            ? { initialTab: "worktrees" as const }
+            : maintenance.repo === undefined
             ? {}
             : {
                 repoScope: maintenance.repo,

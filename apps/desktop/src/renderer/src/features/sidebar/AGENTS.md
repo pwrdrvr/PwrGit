@@ -169,16 +169,45 @@ Only local branches pin. A remote-tracking ref has no local name of its own and 
 change request no checkout; the ⌘K star and the refs browser's star both skip
 them, and the refs browser keeps an empty slot so names stay aligned.
 
+## Other worktrees shows six, and the row you are on ghosts in
+
+`sliceOtherWorktrees` (`repo-view.ts`) draws the first six in-flight rows of
+`remaining`, in the sort chip's order, then "Finished N" and "View all N
+worktrees…". Both open the refs browser's Worktrees tab (`RepoWorktreeTable`).
+The heading still counts all of `remaining`, so the headings add up to the
+repo row. Design: `design/Worktree List Cap - UX Review.dc.html`.
+
+- **`isFinishedWorktree` is the one test**, shared with Focused's Working
+  block. Finished means clean (`dirty === 0`), not pinned, and done with:
+  its PR merged or closed, its upstream gone, or old enough in main. A
+  merged or closed PR proves that only when its `headOid` equals the
+  checkout's `head`. After a squash merge, nothing else in Git ties the
+  branch to main, and `--not --remotes` counts every commit as unpushed. A bare
+  `mergedIntoDefault` waits 24 hours, so a branch cut a minute ago is not
+  "finished" just because it has no commits yet.
+- **Selecting a row never opens the disclosure.** A selected row outside the
+  six is drawn as a ghost: the same `WorktreeRow` with `ghost`, under a
+  "visiting" rule below the six, or directly above a closed disclosure. It
+  is not draggable, and ⌘⇧↑/↓ moves rows only among the drawn six.
+  `displayIds` is the drawn order, ghost included, so posinset and the arrow
+  walk follow what is on screen.
+- **One lifecycle word per row.** A merged or closed chip hides `gone`, because
+  the merge already explains the deleted branch. An open chip beside `gone` is
+  stale PR state; main refreshes it on the gone transition (`github/AGENTS.md`).
+
 ## The refs browser's rows are focus stops
 
 `lib/refsRowKeys.ts`: ↓ from the filter enters the rows, ↑/↓ walk them,
 Home/End jump, Space pins, and Enter or a double-click runs the primary action
-— the button inside `data-refs-primary` (`RefRowActions`' first slot, or the
-remote card's wrapper). Space is a **row** key on purpose — in the filter it
-types a space. A row's copy targets take `deferForDoubleClick`, so a
-double-click on the name activates without copying. The actions column is three
-fixed slots (`RefRowActions`), and `--refs-actions-w` in `app.css` is their
-widths plus gaps: change a slot, change the token, or the columns drift again.
+— the button inside `data-refs-primary` (`RefRowActions`' first slot). Space
+is a **row** key on purpose — in the filter it types a space. A row's copy
+targets take `deferForDoubleClick`, so a double-click on the name activates
+without copying. The actions column is three fixed slots (`RefRowActions`) on
+every tab, the Remotes cards' branch rows included, and `--refs-actions-w` in
+`app.css` is their widths plus gaps: change a slot, change the token, or the
+columns drift again. Don't hand-roll a row's buttons outside it, and don't
+size its grid track by hand: the Remotes cards' fixed 112px track squeezed two
+buttons' labels onto two lines. The track is the token.
 
 **Anything a sidebar row can do, its refs-browser row must do too** — the
 browser is how the rows past the short list are reached. When you add a verb,
@@ -257,15 +286,6 @@ name:
 
 Design: `design/Fork Route Graphic - UX Review.dc.html`.
 
-## A selection behind a closed disclosure is a ghost, never a reason to open it
-
-When the selected worktree lives in the closed Other/More worktrees list,
-`RepoRow` draws it as a ghost (`WorktreeRow ghost`) at the foot of the visible
-block. Nothing a jump does may open that disclosure or write
-`pwrgit.unpinnedWorktreesOpen.<repo>`: forcing it open pushed the list you
-jumped from down by the whole disclosure, and saved it that way. The ghost
-keeps `data-wt-id`, so reveals and anchors find it like the real row.
-
 ## The sidebar holds the reader's row across a selection change
 
 `sidebar-anchor.ts` remembers the row last pressed, focused or scrolled with
@@ -273,4 +293,5 @@ keeps `data-wt-id`, so reveals and anchors find it like the real row.
 A selection change caused by a press holds that row still for a moment, and
 Back restores it by key. Both run in Sidebar's layout effects, before paint,
 and while one holds its row the "reveal the selection" scroll stands down.
-A row someone can jump *from* needs a stable `data-nav-anchor`.
+A row someone can jump *from* needs a stable `data-nav-anchor`. A ghost
+keeps `data-wt-id`, so reveals and anchors find it like the real row.

@@ -70,6 +70,14 @@ import {
   useChangeRequestLookup,
   type CreateWorktreeFromRef
 } from "./RepoChangeRequests";
+import {
+  browserWorktrees,
+  filterWorktrees,
+  RepoWorktreeTable,
+  WORKTREE_STATUS_FILTERS,
+  worktreeStatusCounts,
+  type WorktreeStatusFilter
+} from "./RepoWorktreeTable";
 
 export function trackingLabel(branch: LocalBranchSummary): string {
   switch (branch.tracking) {
@@ -135,7 +143,12 @@ type BrowserBranch =
   | { kind: "local"; branch: LocalBranchSummary }
   | { kind: "remote"; branch: RemoteBranchSummary };
 
-export type RefsTab = "branches" | "tags" | "remotes" | "changeRequests";
+export type RefsTab =
+  | "worktrees"
+  | "branches"
+  | "tags"
+  | "remotes"
+  | "changeRequests";
 
 /**
  * Whether a branch row is on screen because of its change request rather than
@@ -401,6 +414,32 @@ function GoneBanner({
   );
 }
 
+/**
+ * A remote branch's `⋮`, the same on the Branches tab and on its remote's
+ * card, so the one branch never offers two different sets of verbs.
+ */
+function RemoteBranchMenu({ branch }: { branch: RemoteBranchSummary }) {
+  return (
+    <RefRowMenu
+      label={`Actions for ${branch.qualifiedName}`}
+      items={[
+        // The short name, as a click on the name copies; the full ref is its
+        // own entry (Post-ship 3c).
+        {
+          type: "item",
+          label: "Copy branch name",
+          onSelect: () => void copyText(branch.name)
+        },
+        {
+          type: "item",
+          label: `Copy ${branch.qualifiedName}`,
+          onSelect: () => void copyText(branch.qualifiedName)
+        }
+      ]}
+    />
+  );
+}
+
 /** One remote's branches, paged rather than listed whole. */
 function RemoteBranchList({
   repoId,
@@ -479,14 +518,17 @@ function RemoteBranchList({
                 ? "—"
                 : shortWhen(branch.lastCommitAt, now)}
             </span>
-            <div className="refs-row-actions">
-              {/* A branch a worktree already holds is a navigation problem, not
-                  a checkout one — git refuses the second checkout anyway, so
-                  the row offers the worktree instead of a switch that cannot
-                  succeed. Whichever leads is what Enter and double-click
-                  press (lib/refsRowKeys.ts). */}
-              <span className="refs-remote-branch__primary" data-refs-primary="">
-                {checkedOut ? (
+            {/* The Branches tab's three fixed slots, so each verb holds the same
+                place on every row and the age column lines up down the card.
+                A branch a worktree already holds is a navigation problem, not a
+                checkout one — git refuses the second checkout anyway, so the
+                row leads with the worktree instead of a switch that cannot
+                succeed, and its secondary slot stays empty: the chip naming
+                that worktree is already on the name line. The primary slot is
+                what Enter and double-click press (lib/refsRowKeys.ts). */}
+            <RefRowActions
+              primary={
+                checkedOut ? (
                   <ShowWorktreeButton
                     holder={holder}
                     tip={tip}
@@ -500,17 +542,20 @@ function RemoteBranchList({
                     inFlight={switching}
                     onSwitch={() => onSwitch(branch.fullName, branch.name)}
                   />
-                )}
-              </span>
-              {!checkedOut && (
-                <button
-                  className="refs-row-action refs-row-action--quiet"
-                  onClick={() => onPick(branch)}
-                >
-                  New worktree
-                </button>
-              )}
-            </div>
+                )
+              }
+              secondary={
+                checkedOut ? undefined : (
+                  <button
+                    className="refs-row-action refs-row-action--quiet"
+                    onClick={() => onPick(branch)}
+                  >
+                    New worktree
+                  </button>
+                )
+              }
+              menu={<RemoteBranchMenu branch={branch} />}
+            />
           </div>
         );
       })}
@@ -536,7 +581,10 @@ export function RepoRefsModal({
   now,
   initialTab,
   initialStatus = "all",
+  initialWorktreeStatus = "all",
   onCleanUpBranches,
+  onPruneWorktrees,
+  onRemoveWorktree,
   onRefresh,
   onLocateTag,
   onRevealWorktree,
@@ -554,6 +602,13 @@ export function RepoRefsModal({
   /** Which local branches the Branches tab starts on — the sidebar header's
    *  counts open it already filtered. */
   initialStatus?: BranchStatusFilter;
+  /** Which worktrees the Worktrees tab starts on — the sidebar's Finished row
+   *  opens it on Finished. */
+  initialWorktreeStatus?: WorktreeStatusFilter;
+  /** Where the Worktrees tab's Finished view sends its one verb. */
+  onPruneWorktrees?: (() => void) | undefined;
+  /** The sidebar row's Remove worktree, for the Worktrees tab's rows. */
+  onRemoveWorktree?: ((worktreeId: string) => void) | undefined;
   /** Where the Gone view's "Clean up finished branches…" goes. Absent, the
    *  banner still explains the state but offers nothing to press. */
   onCleanUpBranches?: (() => void) | undefined;
@@ -568,6 +623,8 @@ export function RepoRefsModal({
   const tip = useViewportTooltip();
   const [tab, setTab] = useState<RefsTab>(initialTab);
   const [status, setStatus] = useState<BranchStatusFilter>(initialStatus);
+  const [worktreeStatus, setWorktreeStatus] =
+    useState<WorktreeStatusFilter>(initialWorktreeStatus);
   const [query, setQuery] = useState("");
   const [pushOpen, setPushOpen] = useState(false);
   const [createTagOpen, setCreateTagOpen] = useState(false);
@@ -638,6 +695,15 @@ export function RepoRefsModal({
     enabled: tab === "tags" || counting,
     refreshKey: tagEpoch
   });
+  const allWorktrees = useMemo(() => browserWorktrees(repo), [repo]);
+  const worktreeCounts = useMemo(
+    () => worktreeStatusCounts(allWorktrees, now),
+    [allWorktrees, now]
+  );
+  const worktreeMatches = useMemo(
+    () => filterWorktrees(allWorktrees, worktreeStatus, query, now),
+    [allWorktrees, worktreeStatus, query, now]
+  );
   const changeRequests = useChangeRequestList(repo.id);
   const forge = changeRequests.list?.forge ?? null;
   const words =
@@ -690,6 +756,7 @@ export function RepoRefsModal({
         // The footer's total, not the rows fetched so far — the two sit one
         // above the other, and a tab reading 47 over "Showing 47 of 140" is
         // the same search disagreeing with itself.
+        worktrees: worktreeMatches.length,
         branches:
           localMatches.length + (statusFiltered ? 0 : remoteSearch.total),
         tags: tagSearch.total,
@@ -697,6 +764,7 @@ export function RepoRefsModal({
         changeRequests: changeRequestMatches.length + lookupHit
       }
     : {
+        worktrees: worktreeMatches.length,
         branches: statusFiltered ? localMatches.length : branchTabCount,
         tags: refs.tagCount,
         remotes: refs.remotes.length,
@@ -706,6 +774,7 @@ export function RepoRefsModal({
   // accent and an empty one dims, so nobody has to guess where to look.
   // Nothing is claimed while a count is still loading.
   const tabCountLoading: Record<RefsTab, boolean> = {
+    worktrees: false,
     branches: !statusFiltered && remoteSearch.loading,
     tags: tagSearch.loading,
     remotes: remoteSearch.loading,
@@ -1061,6 +1130,14 @@ export function RepoRefsModal({
         </div>
         <div className="refs-browser__toolbar">
           <div className="refs-tabs">
+            {/* First, as the sidebar lists them: the disclosure's Finished
+                and View all land here. */}
+            <button
+              className={tabClass("worktrees")}
+              onClick={() => setTab("worktrees")}
+            >
+              Worktrees <span>{tabCounts.worktrees}</span>
+            </button>
             <button
               className={tabClass("branches")}
               onClick={() => setTab("branches")}
@@ -1104,11 +1181,13 @@ export function RepoRefsModal({
               placeholder={
                 shownTab === "changeRequests" && forge !== null
                   ? "Filter by number, title, branch, author…"
-                  : `Filter ${shownTab}…`
+                  : shownTab === "worktrees"
+                    ? "Filter by branch, folder, PR…"
+                    : `Filter ${shownTab}…`
               }
             />
           </label>
-          {shownTab !== "tags" && (
+          {shownTab !== "tags" && shownTab !== "worktrees" && (
             <button className="refs-action" onClick={() => setPushOpen(true)}>
               Push to remotes…
             </button>
@@ -1142,6 +1221,27 @@ export function RepoRefsModal({
                 onClick={() => setStatus(filter.value)}
               >
                 {filter.label} <span>{statusCounts[filter.value]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {shownTab === "worktrees" && (
+          <div
+            className="refs-status-bar"
+            role="group"
+            aria-label="Filter worktrees by status"
+          >
+            <span className="refs-status-bar__label" aria-hidden="true">
+              Status
+            </span>
+            {WORKTREE_STATUS_FILTERS.map((filter) => (
+              <button
+                key={filter.value}
+                className={`refs-status-chip${worktreeStatus === filter.value ? " is-active" : ""}`}
+                aria-pressed={worktreeStatus === filter.value}
+                onClick={() => setWorktreeStatus(filter.value)}
+              >
+                {filter.label} <span>{worktreeCounts[filter.value]}</span>
               </button>
             ))}
           </div>
@@ -1232,25 +1332,7 @@ export function RepoRefsModal({
                             New worktree
                           </button>
                         }
-                        menu={
-                          <RefRowMenu
-                            label={`Actions for ${branch.qualifiedName}`}
-                            items={[
-                              // The short name, as a click on the name copies;
-                              // the full ref is its own entry (Post-ship 3c).
-                              {
-                                type: "item",
-                                label: "Copy branch name",
-                                onSelect: () => void copyText(branch.name)
-                              },
-                              {
-                                type: "item",
-                                label: `Copy ${branch.qualifiedName}`,
-                                onSelect: () => void copyText(branch.qualifiedName)
-                              }
-                            ]}
-                          />
-                        }
+                        menu={<RemoteBranchMenu branch={branch} />}
                       />
                     </div>
                   );
@@ -1449,6 +1531,19 @@ export function RepoRefsModal({
                 />
               )}
             </div>
+          )}
+
+          {shownTab === "worktrees" && (
+            <RepoWorktreeTable
+              worktrees={worktreeMatches}
+              status={worktreeStatus}
+              query={query}
+              now={now}
+              onRevealWorktree={onRevealWorktree}
+              onPruneWorktrees={onPruneWorktrees}
+              onRemoveWorktree={onRemoveWorktree}
+              onClose={onClose}
+            />
           )}
 
           {shownTab === "changeRequests" &&

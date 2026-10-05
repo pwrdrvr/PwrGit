@@ -36,12 +36,15 @@ import {
   type FocusContext,
   type FocusReason,
   groupWorktreesForNavigation,
+  isFinishedWorktree,
   linkedWorktreeCount,
   partitionFocusedWorktrees,
   reorder,
   repoPinSource,
   repoPrimaryPull,
+  sliceOtherWorktrees,
   SORT_LABEL,
+  WORKTREE_SLICE,
   type DropPosition,
   type SelectionModifiers
 } from "./repo-view";
@@ -57,7 +60,7 @@ import {
 import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { PinnedBranchRow, pinnedBranchRowId } from "./PinnedBranchRow";
-import { RepoRefsSections } from "./RepoRefsSections";
+import { RepoRefsSections, type RefsBrowserRequest } from "./RepoRefsSections";
 import type { CreateWorktreeFromRef } from "./RepoChangeRequestSection";
 import { useChangeRequestSelection } from "../change-request/change-request-selection";
 
@@ -126,6 +129,7 @@ export function RepoRow({
   onForkRepo,
   onOpenSetup,
   onCleanUpBranches,
+  onPruneWorktrees,
   arrangeable,
   dragProps,
   dragging,
@@ -189,6 +193,9 @@ export function RepoRow({
   /** Open Maintenance › Local branches on this repository, already reviewing
    *  — the refs browser's Gone view offers it. */
   onCleanUpBranches?: (() => void) | undefined;
+  /** Open Maintenance › Prune worktrees — the refs browser's Finished view
+   *  offers it. */
+  onPruneWorktrees?: (() => void) | undefined;
   /** The current lens is one the user can arrange by hand (Pinned only). */
   arrangeable: boolean;
   /** Repo-level drag handlers from the sidebar's useListReorder. */
@@ -238,12 +245,11 @@ export function RepoRow({
   } | null>(null);
   const kebabRef = useRef<HTMLButtonElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
-  /** "Manage remotes…" asks `RepoRefsSections` to open its browser, which
-   *  needs refs only that component loads — so the ask is held here until it
-   *  mounts and has them. */
-  const [refsBrowserRequest, setRefsBrowserRequest] = useState<
-    "remotes" | null
-  >(null);
+  /** "Manage remotes…", Finished and View all ask `RepoRefsSections` to open
+   *  its browser, which needs refs only that component loads — so the ask is
+   *  held here until it mounts and has them. */
+  const [refsBrowserRequest, setRefsBrowserRequest] =
+    useState<RefsBrowserRequest | null>(null);
   const clearRefsBrowserRequest = useCallback(
     () => setRefsBrowserRequest(null),
     []
@@ -294,7 +300,7 @@ export function RepoRow({
       label: "Manage remotes…",
       onSelect: () => {
         if (!expanded) onToggleExpand();
-        setRefsBrowserRequest("remotes");
+        setRefsBrowserRequest({ tab: "remotes" });
       }
     },
     { type: "item", label: "Repository setup…", onSelect: () => onOpenSetup?.() },
@@ -343,13 +349,6 @@ export function RepoRow({
   // Pinned branches nothing has checked out, after the pinned worktrees: same
   // shelf, and they take a place in the same arrow-key walk.
   const pinnedBranches = repo.pinnedBranches ?? [];
-  const displayIds = [
-    ...(primary === undefined ? [] : [primary.id]),
-    ...pinned.map((worktree) => worktree.id),
-    ...pinnedBranches.map(pinnedBranchRowId),
-    ...focusedWorktrees.map((worktree) => worktree.id),
-    ...remaining.map((worktree) => worktree.id)
-  ];
   const [worktreesOpen, setWorktreesOpen] = useState(() => {
     try {
       const stored = window.localStorage.getItem(
@@ -371,23 +370,71 @@ export function RepoRow({
     }
   }, [repo.id, worktreesOpen]);
 
-  // The selection can land behind the closed disclosure: a PR's worktree, a
-  // ⌘K pick, Back. Opening the disclosure to show it — and saving it open —
-  // pushed everything below down by the whole list, often thousands of
-  // pixels, and the list you jumped from with it. Instead the one row shows
-  // as a ghost at the foot of the visible block, directly above the
-  // disclosure it lives in, and the disclosure is left as the reader set it.
-  const ghost =
-    worktreesOpen || selectedWorktreeId === null
+  // The disclosure holds every linked worktree only when none are pinned. Once
+  // some are, they render above it under their own heading, so the disclosure
+  // says what it actually contains. In Focused, the Working block is a third
+  // partition; all visible headings still add up to the repo row's total.
+  const worktreesLabel =
+    pinned.length > 0 || focusedWorktrees.length > 0
+      ? focused
+        ? "More worktrees"
+        : "Other worktrees"
+      : "Worktrees";
+
+  // The disclosure draws at most six in-flight rows; finished ones are only
+  // counted (design/Worktree List Cap - UX Review.dc.html, 2a). The heading
+  // still counts all of `remaining`, so the headings add up to the repo row.
+  const otherSlice = sliceOtherWorktrees(remaining, now, WORKTREE_SLICE);
+  const shownOther = worktreesOpen ? otherSlice.shown : [];
+  const shownOtherIds = shownOther.map((worktree) => worktree.id);
+  const hiddenOtherCount =
+    otherSlice.overflow.length + otherSlice.finished.length;
+  // The row you are on, when the list does not draw it: below the six under
+  // "visiting" while the disclosure is open, directly above it while closed
+  // (3a, 3b). Selecting a row used to force the disclosure open and save it
+  // open; with a cap, opening it no longer reveals the row, and closed now
+  // stays closed.
+  // A change request on screen holds the selection (the rows below drop
+  // their selected look meanwhile), so there is no row you are on to visit.
+  const selectedOther =
+    selectedWorktreeId === null || changeRequestSelection.selectedKey !== null
       ? undefined
       : remaining.find((worktree) => worktree.id === selectedWorktreeId);
-  // The rows the arrow keys can reach: `displayIds` less the ones a closed
-  // disclosure hides, so ↓ from the last Working row lands on the ghost.
-  // Positions (aria-posinset) still count every treeitem in `displayIds`.
-  const remainingIds = new Set(remaining.map((worktree) => worktree.id));
-  const walkIds = worktreesOpen
-    ? displayIds
-    : displayIds.filter((id) => !remainingIds.has(id) || id === ghost?.id);
+  const ghostWorktree =
+    selectedOther !== undefined && !shownOtherIds.includes(selectedOther.id)
+      ? selectedOther
+      : undefined;
+  const ghostAbove = ghostWorktree !== undefined && !worktreesOpen;
+  const ghostTag =
+    ghostWorktree === undefined
+      ? undefined
+      : ghostAbove
+        ? {
+            tag: "↓ Other",
+            tip: `In ${worktreesLabel}, which is closed. Shown because you're on it. ★ pins it.`
+          }
+        : isFinishedWorktree(ghostWorktree, now)
+          ? {
+              tag: "Finished",
+              tip: `Finished, so it is not in the ${WORKTREE_SLICE}. Shown because you're on it. ★ pins it.`
+            }
+          : {
+              tag: "In flight",
+              tip: `Below the first ${WORKTREE_SLICE} in this order. Shown because you're on it. ★ pins it.`
+            };
+  // The arrow keys walk the rows in the order they are drawn, ghost included.
+  const displayIds = [
+    ...(primary === undefined ? [] : [primary.id]),
+    ...pinned.map((worktree) => worktree.id),
+    ...pinnedBranches.map(pinnedBranchRowId),
+    ...focusedWorktrees.map((worktree) => worktree.id),
+    ...(ghostAbove ? [ghostWorktree.id] : []),
+    ...shownOtherIds,
+    ...(ghostWorktree !== undefined && !ghostAbove ? [ghostWorktree.id] : [])
+  ];
+  const openWorktreeBrowser = (status: "finished" | "all"): void => {
+    setRefsBrowserRequest({ tab: "worktrees", worktreeStatus: status });
+  };
 
   // What Pull would bring into the primary checkout: on a fork, from the
   // source (Fork Sync, 3e). The same stored count the header chip reads.
@@ -408,17 +455,6 @@ export function RepoRow({
   // typically most of the list.
   const wtCount = linkedWorktreeCount(repo);
   const activeCollapsed = containsSelection && !expanded;
-
-  // The disclosure holds every linked worktree only when none are pinned. Once
-  // some are, they render above it under their own heading, so the disclosure
-  // says what it actually contains. In Focused, the Working block is a third
-  // partition; all visible headings still add up to the repo row's total.
-  const worktreesLabel =
-    pinned.length > 0 || focusedWorktrees.length > 0
-      ? focused
-        ? "More worktrees"
-        : "Other worktrees"
-      : "Worktrees";
 
   // The primary checkout is fixed at the top, so it is neither a drag source
   // nor a drop target — `orderedIds` excludes it for the same reason.
@@ -457,7 +493,7 @@ export function RepoRow({
         : displayIds[0] ?? null;
 
   const focusWorktreeAt = (index: number): void => {
-    const id = walkIds[index];
+    const id = displayIds[index];
     if (id === undefined) return;
     setFocusedWtId(id);
     // Compared, not interpolated into a selector: a branch id carries whatever
@@ -474,11 +510,11 @@ export function RepoRow({
   ): void => {
     // The pin inside the row keeps its own activation (SC 2.1.1).
     if (event.target !== event.currentTarget) return;
-    const index = walkIds.indexOf(pinnedBranchRowId(branch));
+    const index = displayIds.indexOf(pinnedBranchRowId(branch));
     if (index === -1) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      focusWorktreeAt(Math.min(index + 1, walkIds.length - 1));
+      focusWorktreeAt(Math.min(index + 1, displayIds.length - 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       focusWorktreeAt(Math.max(index - 1, 0));
@@ -496,7 +532,7 @@ export function RepoRow({
     // here. Handling them cancelled the button's own activation — see the note
     // on Sidebar's handleRepoKeyDown (SC 2.1.1).
     if (event.target !== event.currentTarget) return;
-    const index = walkIds.indexOf(worktree.id);
+    const index = displayIds.indexOf(worktree.id);
     if (index === -1) return;
     // ⌘⇧↑/↓ moves the row; plain ↑/↓ moves the focus. Same modifier pair as
     // PwrAgnt's pinned-directory reorder, so the two apps stay one muscle
@@ -505,16 +541,15 @@ export function RepoRow({
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       // Working is a computed priority section. Persisting a manual move here
       // would be immediately undone by its Focus reason/activity ranking.
-      if (
-        worktree.isPrimary ||
-        worktree.id === ghost?.id ||
-        sectionFor(worktree.id) === "focused"
-      ) {
-        return;
-      }
-      const from = orderedIds.indexOf(worktree.id);
+      if (worktree.isPrimary || sectionFor(worktree.id) === "focused") return;
+      // Other worktrees move among the rows that are drawn: past a finished
+      // or seventh row the move would land somewhere the user cannot see,
+      // and the ghost has no slot of its own to move from.
+      const walk =
+        sectionFor(worktree.id) === "other" ? shownOtherIds : orderedIds;
+      const from = walk.indexOf(worktree.id);
       const to = from + (event.key === "ArrowUp" ? -1 : 1);
-      const neighbor = orderedIds[to];
+      const neighbor = walk[to];
       // Same section boundary the drag honors (see `canDrop` above).
       if (
         from === -1 ||
@@ -524,31 +559,25 @@ export function RepoRow({
         return;
       }
       event.preventDefault();
-      const moved = reorder(
-        orderedIds,
-        worktree.id,
-        neighbor,
-        event.key === "ArrowUp" ? "before" : "after"
+      onReorder(
+        reorder(
+          orderedIds,
+          worktree.id,
+          neighbor,
+          event.key === "ArrowUp" ? "before" : "after"
+        )
       );
-      onReorder(moved);
       // Focus does not move, so without this the reorder is silent (SC 4.1.3).
       //
-      // Count in the same terms as this row's aria-posinset, which is an index
-      // into `displayIds`. `orderedIds` (and so `moved`) leaves the primary
-      // checkout out — it is fixed at the top and cannot be reordered — so
-      // announcing a raw index into it would tell the user "2 of 3" about a
-      // row whose own aria-posinset reads "3 of 4". displayIds is
-      // [primary?, ...pinned, ...remaining], so the primary is the whole
-      // difference.
-      const primaryOffset = primary === undefined ? 0 : 1;
-      // Pinned branches sit between the pinned worktrees and the rest, so they
-      // count for every row that lands after them.
-      const at = moved.indexOf(worktree.id);
-      const branchOffset = at >= pinned.length ? pinnedBranches.length : 0;
+      // Count in the same terms as this row's aria-posinset, an index into
+      // `displayIds`. A move swaps the row with its drawn neighbour, so it
+      // lands in the neighbour's slot. Counting in `orderedIds` instead
+      // left out the fixed primary checkout and the pinned branches, and told
+      // the user "2 of 3" about a row whose own aria-posinset read "3 of 4".
       announce(
         movedMessage(
           worktree.branch,
-          at + 1 + primaryOffset + branchOffset,
+          displayIds.indexOf(neighbor) + 1,
           displayIds.length
         )
       );
@@ -556,7 +585,7 @@ export function RepoRow({
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      focusWorktreeAt(Math.min(index + 1, walkIds.length - 1));
+      focusWorktreeAt(Math.min(index + 1, displayIds.length - 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       focusWorktreeAt(Math.max(index - 1, 0));
@@ -566,12 +595,10 @@ export function RepoRow({
     }
   };
 
-  const renderWorktree = (
-    worktree: Worktree,
-    ghostTag?: { tag: string; tooltip: string; spoken: string }
-  ) => (
+  const renderWorktree = (worktree: Worktree, ghost?: typeof ghostTag) => (
     <WorktreeRow
       key={worktree.id}
+      ghost={ghost}
       // `displayIds` is the group's treeitem order (primary, pinned, then the
       // rest) — the same list the arrow keys walk.
       posinset={displayIds.indexOf(worktree.id) + 1}
@@ -601,12 +628,10 @@ export function RepoRow({
           })}
       dragProps={wtDrag.rowProps(
         worktree.id,
-        // A ghost is out of its section, so it has nowhere to drop.
-        ghostTag === undefined &&
+        ghost === undefined &&
           !worktree.isPrimary &&
           sectionFor(worktree.id) !== "focused"
       )}
-      {...(ghostTag === undefined ? {} : { ghost: ghostTag })}
       dragging={wtDrag.dragId === worktree.id}
       dropPosition={
         wtDrag.target?.id === worktree.id ? wtDrag.target.position : null
@@ -969,12 +994,9 @@ export function RepoRow({
               </div>
             )}
             {focusedWorktrees.map((worktree) => renderWorktree(worktree))}
-            {ghost !== undefined &&
-              renderWorktree(ghost, {
-                tag: worktreesLabel.split(" ")[0] ?? worktreesLabel,
-                tooltip: `Lives in ${worktreesLabel} (${remaining.length}). It is shown here because you're on it; pin it to keep it in Pinned.`,
-                spoken: `from ${worktreesLabel}`
-              })}
+            {/* Closed means closed: the row you are on sits directly above
+                the disclosure instead of opening it (3b). */}
+            {ghostAbove && renderWorktree(ghostWorktree, ghostTag)}
           </div>
 
           {selectedIds.size > 1 && (
@@ -1071,7 +1093,55 @@ export function RepoRow({
 
           {worktreesOpen && (
             <div className="wt-section__body">
-              {remaining.map((worktree) => renderWorktree(worktree))}
+              {shownOther.map((worktree) => renderWorktree(worktree))}
+              {ghostWorktree !== undefined && !ghostAbove && (
+                <>
+                  {/* aria-hidden like .wt-subhead: only treeitems belong in
+                      this group. The ghost's own tag carries the word. */}
+                  <div className="wt-ghost-sep" aria-hidden="true">
+                    visiting
+                  </div>
+                  {renderWorktree(ghostWorktree, ghostTag)}
+                </>
+              )}
+              {otherSlice.finished.length > 0 && (
+                <button
+                  type="button"
+                  className="wt-finished"
+                  // Contains the visible "Finished N review…" (SC 2.5.3).
+                  aria-label={`Finished ${otherSlice.finished.length}, review…`}
+                  {...hoverTooltip(
+                    tip,
+                    "Clean, and done with: its PR merged or closed, its upstream gone, or already in the default branch"
+                  )}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    tip.hide();
+                    openWorktreeBrowser("finished");
+                  }}
+                >
+                  <span>Finished</span>
+                  <span className="wt-finished__count">
+                    {otherSlice.finished.length}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <span>review…</span>
+                </button>
+              )}
+              {hiddenOtherCount > 0 && (
+                <button
+                  type="button"
+                  className="ref-view-all wt-view-all"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openWorktreeBrowser("all");
+                  }}
+                >
+                  {/* The repo's linked count, which is the All the tab
+                      lands on — pinned rows included. */}
+                  View all {wtCount} worktrees…
+                </button>
+              )}
 
               <button
                 className="new-wt"
@@ -1099,7 +1169,11 @@ export function RepoRow({
             focusedWorktree={
               repo.worktrees.find((w) => w.id === selectedWorktreeId) ?? null
             }
+            // Revealing selects the row; one outside the six ghosts in
+            // rather than opening the disclosure (3c).
             onRevealWorktree={onRevealWorktree}
+            onPruneWorktrees={onPruneWorktrees}
+            onRemoveWorktree={onRemoveWorktree}
             onCreateWorktree={onCreateWorktreeFromRef}
             onBranches={keepRefBranches}
           />

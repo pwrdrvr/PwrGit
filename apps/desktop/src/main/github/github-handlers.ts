@@ -14,7 +14,7 @@ import { CommitAssociationMonitor } from "./commit-association-monitor";
 import { ForgeStatusService } from "../forge/status";
 import type { ForgeHostsView } from "../forge/hosts";
 import { PrStatusMonitor, type PrMonitorTarget } from "./pr-status-monitor";
-import type { PrService, PrStatusDeltas } from "./pr-service";
+import type { PrRefreshTrigger, PrService, PrStatusDeltas } from "./pr-service";
 
 const MAX_VISIBLE_COMMIT_MONITORS = 200;
 
@@ -39,6 +39,13 @@ export function registerGitHubHandlers(
 ): {
   stop: () => void;
   releaseWebContents: (webContentsId: number) => void;
+  /** Re-ask about these branches and publish whatever moved — `pr:refresh`
+   *  for callers inside main (the upstream-gone hook in index.ts). */
+  refreshBranches: (
+    repoId: string,
+    branches: string[],
+    trigger: PrRefreshTrigger
+  ) => Promise<void>;
 } {
   const publishBranchPrs = (
     repoId: string,
@@ -365,5 +372,16 @@ export function registerGitHubHandlers(
     people.stop();
   };
 
-  return { stop, releaseWebContents };
+  const refreshBranches = async (
+    repoId: string,
+    branches: string[],
+    trigger: PrRefreshTrigger
+  ): Promise<void> => {
+    publishBranchPrs(
+      repoId,
+      await prs.refreshRepo(repoId, { branches, trigger })
+    );
+  };
+
+  return { stop, releaseWebContents, refreshBranches };
 }

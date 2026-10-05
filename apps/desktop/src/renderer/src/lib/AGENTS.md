@@ -460,3 +460,27 @@ moving to another repo.
 - **Omit it only when nothing is left to go to** — `useRepoTree`'s "Removed …
   from the list" — or when the toast is not about a repository at all (app
   updates).
+
+## A render error is logged by the root, and contained by `ErrorBoundary`
+
+An error thrown while rendering, with no boundary above it, unmounts the whole
+React root: a blank white window, a live renderer process, and — before this —
+nothing in `main.log`, because `render-process-gone` never fires for it.
+
+- **Logging is the root's job, not the boundary's.** `main.tsx` passes
+  `rendererRootErrorOptions` ([renderer-errors.ts](renderer-errors.ts)) to
+  `createRoot`, so every uncaught, caught and recoverable React error goes to
+  `logs:reportRendererError` with its component stack, whichever boundary (if
+  any) caught it. `installRendererErrorReporting` adds window `error` and
+  `unhandledrejection`. A boundary's `onError` is for UI side effects only.
+- **Main owns the rate limit** (`src/main/renderer-errors.ts`): a burst of 10
+  per window, then one per 6s, then a "suppressed N" line. It is there rather
+  than here because a reload resets anything kept in the renderer.
+- **Inside `act()`, React never calls `onUncaughtError`** — it queues the
+  error for act to rethrow. Test the uncaught path outside act
+  (`ErrorBoundary.test.tsx` shows how).
+- **Wrap a surface that can fail on its own**: a pane in the main column
+  (`PaneErrorFallback`, keyed with `resetKey` so pointing it elsewhere is a
+  fresh try), or an overlay that should just close and raise a toast (the
+  image lightbox in `DiffViewer`). The root boundary is the last resort and
+  offers Reload.

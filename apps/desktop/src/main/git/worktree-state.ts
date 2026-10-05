@@ -5,6 +5,15 @@ import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
+/** A probe found `branch`'s configured upstream deleted. */
+export type UpstreamGoneChange = {
+  worktreeId: string;
+  repoId: string;
+  branch: string;
+  /** The last snapshot did not say gone: this probe saw it happen. */
+  firstSeen: boolean;
+};
+
 export type ParsedStatus = {
   head: string;
   branch: string;
@@ -216,6 +225,7 @@ export class WorktreeStateService {
   ) {}
 
   private repoPathMissing: ((repoId: string) => void) | null = null;
+  private upstreamGone: ((change: UpstreamGoneChange) => void) | null = null;
   private forkSource: ForkSourceProbe | null = null;
 
   /** Count each branch against its fork's source as part of every probe. */
@@ -231,6 +241,19 @@ export class WorktreeStateService {
    */
   onRepoPathMissing(listener: (repoId: string) => void): void {
     this.repoPathMissing = listener;
+  }
+
+  /**
+   * Hear about every probe that finds a branch's upstream gone. `fetch
+   * --prune` deletes the ref the moment the remote branch goes, but the
+   * branch's change request is cached on its own, longer TTL — so for up to
+   * that window the row read "gone" beside an open-looking PR that had in fact
+   * merged. The listener is how the PR cache hears that its answer is now in
+   * doubt (index.ts). Called on every such probe, not just the first:
+   * `firstSeen` tells the transition apart from a branch that stays gone.
+   */
+  onUpstreamGone(listener: (change: UpstreamGoneChange) => void): void {
+    this.upstreamGone = listener;
   }
 
   getCached(worktreeId: string): WorktreeState | null {
@@ -583,7 +606,26 @@ export class WorktreeStateService {
     if (parsed.upstreamGone) state.upstreamGone = true;
     if (source !== null) state.source = source;
 
+    // Read before the upsert overwrites it, and only when it can matter.
+    const previous =
+      state.upstreamGone === true && this.upstreamGone !== null
+        ? this.getCached(worktreeId)
+        : null;
     this.upsert(state);
+    if (state.upstreamGone === true && this.upstreamGone !== null) {
+      // A listener's failure is the PR cache's problem; this snapshot is
+      // already written and the caller is owed it.
+      try {
+        this.upstreamGone({
+          worktreeId,
+          repoId: wt.repo_id,
+          branch: branchName,
+          firstSeen: previous?.upstreamGone !== true
+        });
+      } catch {
+        // Best-effort.
+      }
+    }
     return state;
   }
 

@@ -10,6 +10,7 @@ import {
   focusReasonForWorktree,
   groupWorktreesForNavigation,
   groupReposByRoot,
+  isFinishedWorktree,
   isPrunableWorktree,
   formatLensCount,
   lensCounts,
@@ -25,6 +26,7 @@ import {
   repoPrimaryPull,
   worktreePull,
   selectableLenses,
+  sliceOtherWorktrees,
   SORT_CYCLE,
   worktreeFolderLabel
 } from "./repo-view";
@@ -470,6 +472,126 @@ describe("partitionFocusedWorktrees", () => {
     );
     expect(partition.focused).toHaveLength(5);
     expect(partition.remaining).toHaveLength(4);
+  });
+});
+
+describe("isFinishedWorktree", () => {
+  const NOW = Date.parse("2026-10-05T12:00:00Z");
+  const HEAD = "a".repeat(40);
+  const merged = (headOid?: string) => ({
+    number: 803,
+    url: "https://example.test/pr/803",
+    title: "feat: lightbox",
+    state: "merged" as const,
+    isDraft: false,
+    ...(headOid === undefined ? {} : { headOid })
+  });
+
+  it("finishes a merged change request whose final head is the checkout's tip", () => {
+    expect(
+      isFinishedWorktree(
+        wt({ id: "a", branch: "codex/a", head: HEAD, pr: merged(HEAD), tracking: "upstream_missing" }),
+        NOW
+      )
+    ).toBe(true);
+  });
+
+  // After a squash merge nothing in Git ties the branch to main, and its
+  // pruned remote branch leaves every commit "not on any remote". The head
+  // comparison is the proof either way.
+  it("trusts the head comparison over a no-remote commit count", () => {
+    expect(
+      isFinishedWorktree(wt({ id: "a", branch: "a", ahead: 4, head: HEAD, pr: merged(HEAD) }), NOW)
+    ).toBe(true);
+    expect(
+      isFinishedWorktree(wt({ id: "a", branch: "a", head: "b".repeat(40), pr: merged(HEAD) }), NOW)
+    ).toBe(false);
+    // No head to compare: only a branch with nothing to push.
+    expect(isFinishedWorktree(wt({ id: "a", branch: "a", pr: merged() }), NOW)).toBe(true);
+    expect(isFinishedWorktree(wt({ id: "a", branch: "a", ahead: 1, pr: merged() }), NOW)).toBe(false);
+  });
+
+  it("keeps work on disk, pins, and the anchored checkouts in flight", () => {
+    const done = { head: HEAD, pr: merged(HEAD) };
+    for (const partial of [
+      { dirty: 2 },
+      { pinned: true },
+      { isPrimary: true },
+      { isDefaultBranch: true },
+      { missing: true },
+      { locked: true }
+    ]) {
+      expect(isFinishedWorktree(wt({ id: "a", branch: "a", ...done, ...partial }), NOW)).toBe(false);
+    }
+  });
+
+  // Gone beside an open chip is a stale answer the gone transition is already
+  // refreshing — or a PR whose head lives on a fork. Either way, in flight.
+  it("keeps a gone branch in flight while its change request reads open", () => {
+    const open = { ...merged(), state: "open" as const };
+    expect(
+      isFinishedWorktree(wt({ id: "a", branch: "a", tracking: "upstream_missing", pr: open }), NOW)
+    ).toBe(false);
+    expect(
+      isFinishedWorktree(wt({ id: "a", branch: "a", tracking: "upstream_missing" }), NOW)
+    ).toBe(true);
+  });
+
+  // A branch cut from main is "merged into" main until its first commit.
+  it("finishes by ancestry only after a day untouched", () => {
+    const base = { mergedIntoDefault: true, tracking: "unpublished" as const };
+    expect(
+      isFinishedWorktree(wt({ id: "a", branch: "a", ...base, lastActivityAt: "2026-10-05T09:00:00Z" }), NOW)
+    ).toBe(false);
+    expect(
+      isFinishedWorktree(wt({ id: "a", branch: "a", ...base, lastActivityAt: "2026-10-03T09:00:00Z" }), NOW)
+    ).toBe(true);
+    expect(
+      isFinishedWorktree(wt({ id: "d", branch: "detached@7c7f743", mergedIntoDefault: true, lastActivityAt: OLD }), NOW)
+    ).toBe(true);
+    expect(
+      isFinishedWorktree(wt({ id: "d", branch: "detached@1234567", lastActivityAt: OLD }), NOW)
+    ).toBe(false);
+  });
+});
+
+describe("sliceOtherWorktrees", () => {
+  const NOW = Date.parse("2026-10-05T12:00:00Z");
+
+  it("drops finished rows before the slice, keeping the list's own order", () => {
+    const rows = [
+      wt({ id: "done-1", branch: "done-1", tracking: "upstream_missing" }),
+      ...Array.from({ length: 8 }, (_, i) => wt({ id: `live-${i}`, branch: `live-${i}`, ahead: 1 })),
+      wt({ id: "done-2", branch: "done-2", tracking: "upstream_missing" })
+    ];
+    const slice = sliceOtherWorktrees(rows, NOW, 6);
+    expect(slice.shown.map((w) => w.id)).toEqual([
+      "live-0", "live-1", "live-2", "live-3", "live-4", "live-5"
+    ]);
+    expect(slice.overflow.map((w) => w.id)).toEqual(["live-6", "live-7"]);
+    expect(slice.finished.map((w) => w.id)).toEqual(["done-1", "done-2"]);
+  });
+});
+
+describe("partitionFocusedWorktrees and finished work", () => {
+  const NOW = Date.parse("2026-10-05T12:00:00Z");
+
+  it("leaves a just-merged branch out of Working unless it is the current one", () => {
+    const merged = wt({
+      id: "merged",
+      branch: "merged",
+      tracking: "upstream_missing",
+      lastActivityAt: "2026-10-05T11:00:00Z"
+    });
+    const live = wt({ id: "live", branch: "live", lastActivityAt: "2026-10-05T10:00:00Z" });
+    expect(
+      partitionFocusedWorktrees([merged, live], { selectedWorktreeId: null, visits: {} }, NOW)
+        .focused.map((w) => w.id)
+    ).toEqual(["live"]);
+    expect(
+      partitionFocusedWorktrees([merged, live], { selectedWorktreeId: "merged", visits: {} }, NOW)
+        .focused.map((w) => w.id)
+    ).toEqual(["merged", "live"]);
   });
 });
 

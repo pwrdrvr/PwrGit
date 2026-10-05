@@ -99,6 +99,7 @@ import {
 } from "./github/avatar-thumbnail-cache";
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
+import { createGonePrRefresh } from "./github/gone-pr-refresh";
 import { OpenPrService } from "./github/open-pr-service";
 import { registerChangeRequestHandlers } from "./github/change-request-handlers";
 import { PrService } from "./github/pr-service";
@@ -110,6 +111,10 @@ import {
   subscribeLogEntries
 } from "./logs";
 import { openLogsWindow } from "./logs-window";
+import {
+  createRendererErrorLog,
+  sanitizeRendererErrorReport
+} from "./renderer-errors";
 import { watchProcessIds } from "./process-ids";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
@@ -376,6 +381,21 @@ if (!gotSingleInstanceLock) {
     installDevelopmentDockIcon();
     installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
+    // Render errors never kill the renderer process, so neither
+    // render-process-gone nor anything else in main would see them otherwise.
+    const rendererErrors = createRendererErrorLog();
+    bus.register("logs:reportRendererError", (req, context) => {
+      const report = sanitizeRendererErrorReport(req);
+      if (report === null) {
+        return err({
+          kind: "validation",
+          code: "invalid_renderer_error_report",
+          message: "Malformed renderer error report."
+        });
+      }
+      rendererErrors.report(report, context.webContentsId);
+      return ok(null);
+    });
     bus.register("logs:openWindow", (_req, context) => {
       openAuxiliaryWindow(openLogsWindow, senderWindow(context));
       return ok(null);
@@ -1122,6 +1142,14 @@ if (!gotSingleInstanceLock) {
       forgeHostsView,
       (repoId) => changeRequestHandlers.refreshInBackground(repoId, "scheduled")
     );
+    // A branch whose upstream is gone almost always had its PR merged; ask
+    // again now rather than leave an open chip beside "gone" until the repo
+    // sweep's TTL comes round (see gone-pr-refresh.ts).
+    const gonePrRefresh = createGonePrRefresh(githubHandlers.refreshBranches);
+    stateService.onUpstreamGone(({ repoId, branch, firstSeen }) => {
+      if (prService.cachedBranchPr(repoId, branch)?.state !== "open") return;
+      gonePrRefresh.queue(repoId, branch, firstSeen);
+    });
     registerSearchStatusHandlers(bus, db);
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
@@ -1320,6 +1348,7 @@ if (!gotSingleInstanceLock) {
       clearInterval(activeStatePoll);
       clearInterval(visibleStatePoll);
       remoteTipChecker.stop();
+      gonePrRefresh.stop();
       githubHandlers.stop();
       appearance.dispose();
     });
