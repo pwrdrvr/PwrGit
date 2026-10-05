@@ -28,6 +28,7 @@ import {
 } from "./repo-view";
 import { PullBadge } from "./PullBadge";
 import { useReportVisible } from "../../lib/visibleWorktrees";
+import { DotGlyph } from "../../lib/DotGlyph";
 
 const PR_HOVER_PREFETCH_DELAY_MS = 750;
 
@@ -292,7 +293,8 @@ export function WorktreeRow({
       {!missing && worktree.dirty > 0 && (
         <>
           <span className="badge badge--warn" aria-hidden="true">
-            ●{worktree.dirty}
+            <DotGlyph />
+            {worktree.dirty}
           </span>
           <span className="a11y-sr-only">
             {worktree.dirty} uncommitted{" "}

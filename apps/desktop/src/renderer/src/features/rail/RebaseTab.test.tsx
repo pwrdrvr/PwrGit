@@ -427,8 +427,14 @@ describe("The agent chip", () => {
     // One provider runs both jobs, so the rows are its models, the one a
     // request runs on unless changed marked as the default.
     expect(menu().querySelector(".agent-menu__head")?.textContent).toBe("History editing · Codex");
-    expect(menuItem("GPT-5.5").textContent).toBe("✓GPT-5.5default");
+    // The chosen row is said by aria-checked and drawn by an SVG check; the
+    // mark is not text, so it is not in the row's name.
+    expect(menuItem("GPT-5.5").textContent).toBe("GPT-5.5default");
+    expect(menuItem("GPT-5.5").getAttribute("aria-checked")).toBe("true");
+    expect(menuItem("GPT-5.5").querySelector(".agent-menu__check svg")).not.toBeNull();
     expect(menuItem("GPT-5.5 mini").textContent).toBe("GPT-5.5 mini");
+    expect(menuItem("GPT-5.5 mini").getAttribute("aria-checked")).toBe("false");
+    expect(menuItem("GPT-5.5 mini").querySelector(".agent-menu__check svg")).toBeNull();
     expect(effortLabels()).toEqual(["Default", "Low", "Medium", "High", "Extra high"]);
     expect(menu().textContent).toContain("Only this request. The default is in");
     await act(async () => menuItem("GPT-5.5 mini").click());
@@ -538,7 +544,8 @@ describe("Tidy", () => {
     expect(button("Apply 2 commits").disabled).toBe(false);
     // The ledger and the Checked button say it on screen; the sentence is
     // for a screen reader only.
-    expect(button("Checked ✓").disabled).toBe(true);
+    expect(button("Checked").disabled).toBe(true);
+    expect(button("Checked").querySelector("svg[aria-hidden='true']")).not.toBeNull();
     const passed = container.querySelector(".rebase-check-result--clean");
     expect(passed?.classList.contains("a11y-sr-only")).toBe(true);
     expect(passed?.textContent).toContain("Check passed");

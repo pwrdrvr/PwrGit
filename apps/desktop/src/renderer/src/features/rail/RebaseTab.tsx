@@ -36,6 +36,9 @@ import {
   type TidyEdits,
   type TidyGroup
 } from "./history-edit";
+import { CheckGlyph } from "../../lib/CheckGlyph";
+import { CloseGlyph } from "../../lib/CloseGlyph";
+import { DotGlyph } from "../../lib/DotGlyph";
 
 /** Matches the main process: a failed plan is revised at most twice. */
 const MAX_REVISIONS = 2;
@@ -88,7 +91,13 @@ export function ProofLedger({ rows }: { rows: LedgerRow[] }) {
       {rows.map((row) => (
         <div key={row.label} className={`proof-ledger__row proof-ledger__row--${row.state}`}>
           <span className="proof-ledger__glyph" aria-hidden="true">
-            {row.state === "ok" ? "✓" : row.state === "bad" ? "✕" : "○"}
+            {row.state === "ok" ? (
+              <CheckGlyph size={11} />
+            ) : row.state === "bad" ? (
+              <CloseGlyph size={11} />
+            ) : (
+              <DotGlyph size={11} hollow />
+            )}
           </span>
           <span>{row.label}</span>
           <span className="proof-ledger__value">{row.value}</span>
@@ -799,11 +808,15 @@ export function RebaseTab({
                   disabled={!canCheck}
                   onClick={() => void runCheck()}
                 >
-                  {check.kind === "checking"
-                    ? "Checking…"
-                    : check.kind === "clean"
-                      ? "Checked ✓"
-                      : "Check in isolated copy"}
+                  {check.kind === "checking" ? (
+                    "Checking…"
+                  ) : check.kind === "clean" ? (
+                    <>
+                      Checked <CheckGlyph />
+                    </>
+                  ) : (
+                    "Check in isolated copy"
+                  )}
                 </button>
               )}
               <div className="rebase-actions__row">
@@ -813,15 +826,21 @@ export function RebaseTab({
                   disabled={!plan.valid || check.kind !== "clean" || applying || applied}
                   onClick={() => void apply()}
                 >
-                  {applied
-                    ? "Applied ✓"
-                    : applying
-                      ? "Applying…"
-                      : op === "tidy"
-                        ? revised
-                          ? "Apply revised plan"
-                          : `Apply ${resultCommits ?? commits.length} commits`
-                        : "Apply rebase"}
+                  {applied ? (
+                    <>
+                      Applied <CheckGlyph />
+                    </>
+                  ) : applying ? (
+                    "Applying…"
+                  ) : op === "tidy" ? (
+                    revised ? (
+                      "Apply revised plan"
+                    ) : (
+                      `Apply ${resultCommits ?? commits.length} commits`
+                    )
+                  ) : (
+                    "Apply rebase"
+                  )}
                 </button>
                 <button type="button" className="rebase-discard" onClick={discard}>
                   {op === "tidy" ? "Discard" : "Clear"}

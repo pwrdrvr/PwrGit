@@ -61,3 +61,39 @@ describe("ContextMenu placement", () => {
     expect(menuLeft()).toBe("8px");
   });
 });
+
+describe("ContextMenu toggles", () => {
+  function entries(): HTMLButtonElement[] {
+    return [...document.querySelectorAll<HTMLButtonElement>(".pop-menu__item")];
+  }
+
+  it("says a toggle's state as aria-checked, not as a check typed into its label", () => {
+    act(() =>
+      root.render(
+        <ContextMenu
+          x={10}
+          y={10}
+          items={[
+            { type: "item", label: "Group by folder", checked: true, onSelect: () => undefined },
+            { type: "item", label: "Show hidden", checked: false, onSelect: () => undefined },
+            { type: "item", label: "Fork sparkline…", onSelect: () => undefined }
+          ]}
+          onClose={() => undefined}
+        />
+      )
+    );
+    const [on, off, plain] = entries();
+    expect(on?.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(on?.getAttribute("aria-checked")).toBe("true");
+    expect(on?.textContent).toBe("Group by folder");
+    expect(on?.querySelector(".pop-menu__check svg[aria-hidden='true']")).not.toBeNull();
+    // Off keeps an empty slot, so the two labels start in one column.
+    expect(off?.getAttribute("aria-checked")).toBe("false");
+    expect(off?.querySelector(".pop-menu__check")).not.toBeNull();
+    expect(off?.querySelector(".pop-menu__check svg")).toBeNull();
+    // An entry that is not a toggle draws no slot and stays a plain menuitem.
+    expect(plain?.getAttribute("role")).toBe("menuitem");
+    expect(plain?.hasAttribute("aria-checked")).toBe(false);
+    expect(plain?.querySelector(".pop-menu__check")).toBeNull();
+  });
+});

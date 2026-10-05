@@ -10,6 +10,9 @@ import {
   type RemoteActivityStep,
   type RemoteActivityView
 } from "./remote-activity";
+import { CheckGlyph } from "../../lib/CheckGlyph";
+import { CloseGlyph } from "../../lib/CloseGlyph";
+import { DotGlyph } from "../../lib/DotGlyph";
 
 /**
  * What one remote operation is doing — or, once it is over, what it did.
@@ -128,7 +131,7 @@ export function RemoteActivityCard({
               {...hoverTooltip(tip, "Dismiss")}
               onClick={onClose}
             >
-              ✕
+              <CloseGlyph size={12} />
             </button>
           )}
         </span>
@@ -187,7 +190,13 @@ export function RemoteActivityCard({
               className={`remote-activity__step remote-activity__step--${step.state}`}
             >
               <span className="remote-activity__step-mark" aria-hidden="true">
-                {step.state === "done" ? "✓" : step.state === "failed" ? "✕" : "●"}
+                {step.state === "done" ? (
+                  <CheckGlyph size={10} />
+                ) : step.state === "failed" ? (
+                  <CloseGlyph size={10} />
+                ) : (
+                  <DotGlyph size={10} />
+                )}
               </span>
               <span className="remote-activity__step-label">{step.label}</span>
               {step.detail !== null && (

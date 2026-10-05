@@ -13,13 +13,19 @@ import type { ReactElement } from "react";
  * `up` is drawn rather than a `transform: rotate(180deg)`: a rotated stroke
  * picks up the rounded cap at the other end, and at 10px that reads as a
  * different weight.
+ *
+ * `right` is the closed half of a disclosure (Lucide `chevron-right`), paired
+ * with the default `down` for open. It replaced a `▸` / `▾` pair in the hooks
+ * sheet, neither of which is in a bundled face.
  */
 export function ChevronGlyph({
   size = 10,
-  up = false
+  up = false,
+  right = false
 }: {
   size?: number;
   up?: boolean;
+  right?: boolean;
 }): ReactElement {
   return (
     <svg
@@ -35,7 +41,7 @@ export function ChevronGlyph({
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d={up ? "m18 15-6-6-6 6" : "m6 9 6 6 6-6"} />
+      <path d={right ? "m9 18 6-6-6-6" : up ? "m18 15-6-6-6 6" : "m6 9 6 6 6-6"} />
     </svg>
   );
 }

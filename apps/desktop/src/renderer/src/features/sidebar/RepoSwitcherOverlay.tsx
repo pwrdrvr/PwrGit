@@ -36,6 +36,8 @@ import { SettingsSegmented } from "../settings/SettingsLayout";
 import { PrChip } from "./PrChip";
 import { worktreeFolderLabel } from "./repo-view";
 import { PinIcon } from "./WorktreeRow";
+import { CloseGlyph } from "../../lib/CloseGlyph";
+import { DotGlyph } from "../../lib/DotGlyph";
 
 // The kind's own identity within its repo: a worktree id, a fetched ref, or —
 // for a local branch, which carries neither — the branch name itself. Two local
@@ -933,10 +935,7 @@ export function RepoSwitcherOverlay({
             onClick={onClose}
             {...hoverTooltip(tip, "Close (Esc)")}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
+            <CloseGlyph />
           </button>
         </div>
 
@@ -1144,7 +1143,8 @@ export function RepoSwitcherOverlay({
                   <span className="hit-status">
                     {s.dirty !== null && s.dirty > 0 && (
                       <span className="hit-status__b hit-status__b--warn">
-                        ●{s.dirty}
+                        <DotGlyph size={9.5} />
+                        {s.dirty}
                       </span>
                     )}
                     {s.ahead !== null && s.ahead > 0 && (

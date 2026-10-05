@@ -29,6 +29,7 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { CheckGlyph } from "../../lib/CheckGlyph";
 
 const STATUS_LABEL: Record<DiffFile["status"], string> = {
   added: "added",
@@ -576,7 +577,7 @@ function DiffHunkView({
                   aria-label={`Select every changed line in hunk ${hunk.header}`}
                   {...hoverTooltip(tip, "Select every changed line in this hunk")}
                 >
-                  {committedAll ? "✓" : "+"}
+                  {committedAll ? <CheckGlyph size={10} /> : "+"}
                 </button>
               )}
             </span>

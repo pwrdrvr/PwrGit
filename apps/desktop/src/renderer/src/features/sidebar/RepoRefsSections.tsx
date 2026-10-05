@@ -52,6 +52,7 @@ import {
   type RefsTab
 } from "./RepoRefsModal";
 import type { WorktreeStatusFilter } from "./RepoWorktreeTable";
+import { TagGlyph } from "../../lib/TagGlyph";
 
 type RefSection = "branches" | "tags" | "remotes" | "changeRequests";
 
@@ -789,7 +790,7 @@ export function RepoRefsSections({
             {refs?.previewTags.map((tag) => (
               <div className="ref-tag-row" key={tag.fullName}>
                 <span className="refs-tag-icon" aria-hidden="true">
-                  #
+                  <TagGlyph size={11} />
                 </span>
                 <CopyTarget
                   value={tag.name}

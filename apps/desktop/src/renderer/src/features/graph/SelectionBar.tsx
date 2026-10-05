@@ -1,4 +1,5 @@
 import { AgentGlyph } from "../../lib/AgentGlyph";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 export function SelectionBar({
   count,
@@ -42,7 +43,7 @@ export function SelectionBar({
         Open rebase tool →
       </button>
       <button className="selection-bar__x" onClick={onClear} aria-label="Clear">
-        ×
+        <CloseGlyph size={12} />
       </button>
     </div>
   );

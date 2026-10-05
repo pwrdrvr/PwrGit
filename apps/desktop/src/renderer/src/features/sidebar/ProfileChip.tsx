@@ -2,6 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import type { Profile } from "@pwrgit/shared";
 import { useDismissable } from "../../lib/useDismissable";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
+import { SettingsGlyph } from "../../lib/SettingsGlyph";
+import { PlusGlyph } from "../../lib/PlusGlyph";
 
 function monogram(p: Profile): string {
   return p.mono !== "" ? p.mono : p.name.slice(0, 1).toUpperCase();
@@ -115,7 +117,7 @@ export function ProfileChip({
             }}
           >
             <span className="profile-menu__action-icon" aria-hidden="true">
-              ⚙
+              <SettingsGlyph />
             </span>
             Edit “{activeProfile.name}”…
           </button>
@@ -129,7 +131,7 @@ export function ProfileChip({
             }}
           >
             <span className="profile-menu__action-icon" aria-hidden="true">
-              ＋
+              <PlusGlyph />
             </span>
             New profile…
           </button>

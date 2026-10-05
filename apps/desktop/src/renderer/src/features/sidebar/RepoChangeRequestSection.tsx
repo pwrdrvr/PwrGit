@@ -604,7 +604,8 @@ export function RepoChangeRequestSection({
             ))}
           {loading ? null : unlisted ? (
             <div className="ref-section__empty">
-              Not listed yet — ⟳ asks {forgeLabel(forge)}.
+              Not listed yet — <RefreshGlyph size={11} />
+              <span className="a11y-sr-only">Refresh</span> asks {forgeLabel(forge)}.
             </div>
           ) : visible.length === 0 ? (
             <div className="ref-section__empty">No open {plural.toLowerCase()}.</div>

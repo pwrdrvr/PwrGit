@@ -17,6 +17,7 @@ import {
   openAiSettings,
   useAgent
 } from "./agent-store";
+import { CheckGlyph } from "../../lib/CheckGlyph";
 
 /** The efforts a model accepts, or Codex's usual three when it names none. */
 function effortsFor(model: CodexModelOption | undefined): string[] {
@@ -146,7 +147,7 @@ export function AgentChip({
                     }}
                   >
                     <span className="agent-menu__check" aria-hidden="true">
-                      {on ? "✓" : ""}
+                      {on && <CheckGlyph size={10} />}
                     </span>
                     <span className="agent-menu__name">{option.displayName}</span>
                     {option.id === defaultId && (
@@ -157,7 +158,9 @@ export function AgentChip({
               })
             ) : (
               <div className="agent-menu__item is-on agent-menu__item--static">
-                <span className="agent-menu__check" aria-hidden="true">✓</span>
+                <span className="agent-menu__check" aria-hidden="true">
+                  <CheckGlyph size={10} />
+                </span>
                 <span className="agent-menu__name">
                   {agent.status?.modelLabel ?? "Default model"}
                   {agent.models.kind === "loading" && <small>Loading models…</small>}

@@ -26,6 +26,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { StashesTab } from "./StashesTab";
+import { PanelCloseGlyph } from "../../lib/PanelCloseGlyph";
 
 type RailTab = "changes" | "stashes" | "rebase";
 
@@ -239,7 +240,7 @@ export function Rail({
           {...hoverTooltip(tip, "Collapse panel")}
           aria-label="Collapse panel"
         >
-          ›
+          <PanelCloseGlyph />
         </button>
       </div>
 

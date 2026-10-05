@@ -95,6 +95,7 @@ first.
 | `Onboarding Wizard.dc.html` | The first-run wizard — step model, the four steps, the scan explained, and the Done payoff. Interactive. |
 | `Branch Switching and Ref Relevance - UX Review.dc.html` | Where "switch my checkout to this branch" was missing, the relevance ladder the six-row branch slices are spent on, the one guarded switch path, and the three answers a dirty checkout can give. |
 | `Palette Kind Glyphs - UX Review.dc.html` | The &#8984;K palette's leading kind glyph &mdash; why branch and worktree do not separate at 15&nbsp;px, the channels that survive that size, the labels that shipped, and the redraws offered for worktree and for the remote branch that never had a mark of its own. Interactive. |
+| `Text Glyph Icons - UX Review.dc.html` | Every icon the renderer drew as a Unicode character instead of an SVG &mdash; the audit (which bundled face has it, the face it was set in, and the font `CSS.getPlatformFontsForNode` says drew it on macOS), the shipped marks rasterised at 1&times; and magnified, what was kept as typography and why, then the `lib/*Glyph.tsx` replacements as raster pairs and beside their neighbours. Interactive. |
 | `Change Requests in Refs - UX Review.dc.html` | Why the refs browser cannot find a pull request by its number, the open-change-request cache that fixes it, and the three places PRs could live in the browser: matched on the Branches tab, a Pull requests / Merge requests sibling tab, or both with per-tab match counts. Interactive. |
 | `Change Requests in Sidebar - UX Review.dc.html` | Pull requests and merge requests as a sidebar section per repo, between Worktrees and Branches. Why the open list (one list call per repo) lived only behind the refs browser and was only ever asked of `origin`; three layouts (Local / Remote only tabs, two groups, one flat list) with two groups recommended; the row, its hover verbs and a measured narrow ladder; a remote lens that appears only when a fork or mirror has open PRs on more than one remote, with per-row remote chips and PRs and MRs in one list; #381 into a worktree through the seeded New worktree dialog and through ⌘K; and the API budget: list calls only, keyed by forge repository. Written here and pushed up; light theme; titles from PwrGit's open list on 2026-10-04, everything else invented. Interactive. |
 | `Change Request View - UX Review.dc.html` | Selecting a pull or merge request in the sidebar instead of being sent to its worktree. Why a click that leaves the list loses the reader's place, and why the diff needs no worktree (git already has it, or one fetch does); three models (a PR as a selectable place, a peek sheet, a split list) with the place recommended; the PR view's header, the provenance line for a local branch ahead of, behind or diverged from the forge's head, and the rail as files and commits; what a click fetches and when the arrow keys may; and the rows' verbs kept on Enter and double-click. Written here and pushed up; light theme; everything invented. Interactive. |
@@ -121,6 +122,7 @@ first.
 | `assets/logo-pwrgit.svg` | The lineage mark. |
 | `assets/tag-locate-{before,after}.png` | Shipped-app captures for the tag chip artboard, from the Playwright tag scenario on contrived fixture repos. |
 | `assets/palette-glyph-raster-before.png` | The three shipped palette glyphs rasterised at their true 15&nbsp;px and magnified with nearest-neighbour sampling &mdash; the evidence for the review's first finding. Generated, not a capture. |
+| `assets/text-glyphs/{raster,inplace}-{before,after}-*.png` | 80 captures for the text-glyph review: each glyph site's control box (`raster-`) and a strip around it (`inplace-`), at 1&times; device pixels, from the real components built from `main` and from the change. The artboard magnifies them with `image-rendering: pixelated`. Generated, not app captures. |
 | `assets/forges-before.png` | Shipped-app capture of Settings › Forges, from a Playwright scenario against contrived `gh`/`glab` stubs. |
 | `assets/branch-switch-{sidebar,browser}-{before,after}.png` | Shipped-app captures of the sidebar ref sections and the refs browser, from one Playwright scenario on a contrived repository, run against the renderer before and after the change. |
 | `assets/dirty-switch-prompt.png` | Shipped-app capture of the uncommitted-changes prompt, from the same contrived scenario. |
@@ -517,6 +519,23 @@ cap, turn **3** the ghost rows, turn **4** the gone / PR precedence, **5a** a
 live `DCLogic` prototype over 198 contrived worktrees, and turn **6** the build
 order. Its branch names, folders and PR numbers are invented. It carries no
 `assets/`.
+
+`Text Glyph Icons - UX Review.dc.html` and its 80 `assets/text-glyphs/*.png`
+crops were written here during the text-glyph icon pass (`CloseGlyph`,
+`DotGlyph`, `SettingsGlyph` and the rest), and pushed up on 2026-10-05 with
+`DesignSync` `write_files` from `localPath` (asked first, per the binaries
+rule); the project lists the artboard at 59,033 bytes and every crop at its
+repo size. The crops came from a Vite build of
+the real components &mdash; `RepoRefsModal`, `ToastHost`, `RemoteActivityCard`,
+`ProofLedger`, `SelectionBar`, `RouteStrip`, `ContextMenu`, `ProfileChip`,
+`WorktreeRow` and two onboarding steps &mdash; against a fake `window.pwrgit`,
+once from `main` and once from the change, in headless Chromium on macOS. The
+fonts named in card **1a** are `CSS.getPlatformFontsForNode` on the `main`
+build; another OS draws the fallback rows in other fonts, which is the
+finding. The images are 1&times; on purpose: the artboard magnifies them, so a
+small file is the raster and nothing is smoothed. Its repository (`orbit`),
+branches and paths are invented. Card **2d** is a live `DCLogic` prototype
+that swaps the whole set and blurs it.
 
 ## Deliberately NOT copied in
 

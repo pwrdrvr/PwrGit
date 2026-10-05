@@ -20,6 +20,7 @@ import {
   SettingsSectionStack
 } from "./SettingsLayout";
 import { AgentAccessSection } from "./AgentAccessSection";
+import { CheckGlyph } from "../../lib/CheckGlyph";
 
 type RoleDraft = {
   id: string | null;
@@ -246,7 +247,7 @@ export function LocalAgentsSettings() {
                     key={capability}
                     className={`agent-auth-permission${allowed ? " is-allowed" : " is-denied"}`}
                   >
-                    <span>{allowed ? "✓" : "—"}</span>
+                    <span>{allowed ? <CheckGlyph /> : "—"}</span>
                     <div><b>{detail.label}</b><small>{detail.detail}</small></div>
                     <i>{detail.danger}</i>
                   </div>

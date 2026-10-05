@@ -66,6 +66,7 @@ import { useModal } from "../../lib/useModal";
 import { FORGE_UNASKED_CODES, useCloneSearch } from "./useCloneSearch";
 import { SshHostTrustPanel, sshTrustTone } from "./SshHostTrustPanel";
 import { RepoIdentityChips } from "./RepoIdentityMarks";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 const PROTOCOL_IDS = ["ssh", "https", "cli"] as const;
 
@@ -792,7 +793,7 @@ export function CloneRepoDialog({
             disabled={busy}
             onClick={onClose}
           >
-            ×
+            <CloseGlyph />
           </button>
         </div>
 
