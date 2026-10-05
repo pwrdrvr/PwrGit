@@ -10,9 +10,18 @@ vi.mock("../../lib/pwrgit", () => ({ dispatch: dispatchMock }));
 
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
+import {
+  installObjectUrlLedger,
+  type ObjectUrlLedger
+} from "../../test-support/object-urls";
+import {
+  installCanvasStubs,
+  type CanvasStubs
+} from "../../test-support/canvas-stubs";
 
 let container: HTMLDivElement;
 let root: Root;
+let urls: ObjectUrlLedger;
 
 const REVISIONS: ImageDiffRevisions = {
   worktreeId: "wt-1",
@@ -51,7 +60,7 @@ const textPatch = (path: string): string =>
   ].join("\n");
 
 const anyImage = () =>
-  ok({ kind: "image", mediaType: "image/png", base64: "iVBOR", bytes: 2048 });
+  ok({ kind: "image", mediaType: "image/png", bytes: new Uint8Array(2048) });
 
 const frames = (): HTMLButtonElement[] =>
   Array.from(container.querySelectorAll("button.diff-image__frame"));
@@ -144,6 +153,7 @@ async function openLightbox(patch: string): Promise<void> {
 }
 
 beforeEach(() => {
+  urls = installObjectUrlLedger();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -157,13 +167,15 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  urls.restore();
   vi.clearAllMocks();
 });
 
 describe("DiffViewer binary files", () => {
   it("previews a binary image when the revisions to compare are known", async () => {
+    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38]);
     dispatchMock.mockResolvedValue(
-      ok({ kind: "image", mediaType: "image/gif", base64: "R0lG", bytes: 4 })
+      ok({ kind: "image", mediaType: "image/gif", bytes: gif })
     );
 
     await act(async () => {
@@ -172,9 +184,10 @@ describe("DiffViewer binary files", () => {
       );
     });
 
-    expect(container.querySelector("img")?.src).toBe(
-      "data:image/gif;base64,R0lG"
-    );
+    const src = container.querySelector("img")?.getAttribute("src") ?? "";
+    const blob = urls.minted.get(src);
+    expect(blob?.type).toBe("image/gif");
+    expect(new Uint8Array((await blob?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(gif);
     expect(container.textContent).not.toContain("no preview");
   });
 
@@ -997,5 +1010,88 @@ describe("DiffViewer image copy menu", () => {
     await rightClick(document.querySelector(".image-lightbox__stage"));
 
     expect(menuLabels()).toContain("Copy before + after + diff");
+  });
+
+  describe("copying from blob-backed pictures", () => {
+    let canvas: CanvasStubs;
+    let decodedFrom: string[];
+    beforeEach(() => {
+      canvas = installCanvasStubs();
+      decodedFrom = canvas.decodedFrom;
+    });
+    afterEach(() => canvas.restore());
+
+    const clipboardWrites = () =>
+      dispatchMock.mock.calls.filter(([name]) => name === "clipboard:writeImage");
+
+    async function choose(label: string): Promise<void> {
+      const item = Array.from(document.querySelectorAll(".pop-menu button")).find(
+        (button) => button.textContent === label
+      );
+      expect(item).toBeDefined();
+      await click(item ?? null);
+      // The copy is a chain of awaits after the click — decode, encode, read
+      // the PNG back, IPC — so wait for its end rather than guess a tick count.
+      await vi.waitFor(() => expect(clipboardWrites()).toHaveLength(1));
+    }
+
+    it("copies the after from the row without touching the row's own URL", async () => {
+      dispatchMock.mockImplementation(async (name: string) =>
+        name === "diff:image" ? anyImage() : ok(null)
+      );
+      await act(async () => {
+        root.render(
+          <DiffViewer patch={modifiedBinaryPatch("art/logo.png")} images={REVISIONS} />
+        );
+      });
+      await decodeAll({ w: 64, h: 64 });
+      const shown = Array.from(container.querySelectorAll("img")).map(
+        (img) => img.getAttribute("src") ?? ""
+      );
+      await rightClick(container.querySelector(".diff-image"));
+      await choose("Copy after");
+
+      expect(clipboardWrites()).toHaveLength(1);
+      // Decoded from a URL of its own, over the same Blob the row shows…
+      expect(decodedFrom).toHaveLength(1);
+      const copyUrl = decodedFrom[0] ?? "";
+      expect(shown).not.toContain(copyUrl);
+      expect(urls.minted.get(copyUrl)).toBe(urls.minted.get(shown[1] ?? ""));
+      // …released once the copy was done, with the row's pictures untouched.
+      expect(urls.revoked).toContain(copyUrl);
+      for (const src of shown) expect(urls.revoked).not.toContain(src);
+    });
+
+    it("copies both revisions from the lightbox", async () => {
+      await openLightbox(modifiedBinaryPatch("art/logo.png"));
+      await rightClick(document.querySelector(".image-lightbox__stage"));
+      await choose("Copy before + after");
+
+      expect(clipboardWrites()).toHaveLength(1);
+      expect(decodedFrom).toHaveLength(2);
+      for (const url of decodedFrom) {
+        expect(urls.minted.get(url)?.type).toBe("image/png");
+        expect(urls.revoked).toContain(url);
+      }
+    });
+  });
+});
+
+describe("DiffViewer image blob URLs", () => {
+  it("leaves the row's pictures live when the lightbox opened from it closes", async () => {
+    await openLightbox(modifiedBinaryPatch("art/logo.png"));
+    const rowSrcs = Array.from(container.querySelectorAll("img")).map(
+      (img) => img.getAttribute("src") ?? ""
+    );
+    const boxSrcs = Array.from(
+      document.querySelectorAll<HTMLImageElement>(".image-lightbox__img")
+    ).map((img) => img.getAttribute("src") ?? "");
+    expect(boxSrcs.some((src) => rowSrcs.includes(src))).toBe(false);
+
+    await press("Escape");
+    expect(lightbox()).toBeNull();
+
+    for (const src of boxSrcs) expect(urls.revoked).toContain(src);
+    for (const src of rowSrcs) expect(urls.revoked).not.toContain(src);
   });
 });

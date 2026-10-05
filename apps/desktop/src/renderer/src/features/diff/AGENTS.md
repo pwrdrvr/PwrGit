@@ -91,6 +91,39 @@ to Diff from the tabs produced nothing at all — silently, since the tab is
 offered whenever the file has two sides. Keeping both mounted also makes
 switching instant instead of a re-decode.
 
+## Pictures arrive as bytes, and every blob URL has exactly one owner
+
+`diff:image` returns the file as a raw `Uint8Array`. Electron's IPC
+structured-clones typed arrays end to end (preload `invoke` → `ipcMain.handle`
+→ `CommandBus`, no JSON anywhere), so nothing is base64'd on either side — a
+4/3 payload and a full-length string concatenation per side, gone. Any new
+transport for this command must preserve that, not stringify it.
+
+[use-image-revisions.ts](use-image-revisions.ts) wraps the bytes in a `Blob`
+and mints one object URL per side. The rule that keeps those URLs honest:
+**a URL is minted inside the effect run that revokes it, and nowhere else.**
+StrictMode's rehearsal unmount runs that cleanup and then the effect again, so
+the first run's URLs are revoked and the second run's are the ones shown. A
+disposable store built in `useMemo` and disposed in an effect cleanup gets
+disposed by the rehearsal and then serves revoked URLs for the life of the
+component — PwrAgent shipped exactly that. `ImageDiff.test.tsx` and
+`ImageLightbox.test.tsx` each have a StrictMode case that fails against such a
+store; keep them. `usePixelDiff` follows the same rule for the diff PNG.
+
+Three consequences:
+
+- **The lightbox never borrows the row's URL.** Its seed carries the row's
+  Blobs, and it mints URLs of its own from them, so closing the lightbox
+  revokes nothing the row is showing and the row unmounting cannot blank the
+  lightbox.
+- **Work reads the Blob, not the URL.** The pixel diff posts the two Blobs to
+  the worker (a handle, not a copy) and calls `createImageBitmap` on them. The
+  copy menu decodes each Blob through a URL it mints and revokes itself. Either
+  survives the display URL being revoked under an open menu.
+- **jsdom has no `URL.createObjectURL`.** Tests install the ledger in
+  [object-urls.ts](../../test-support/object-urls.ts), which records what was
+  minted from which Blob and what was revoked.
+
 ## Copying goes through a canvas, and through the main process
 
 The right-click menu is built once in [image-copy-menu.ts](image-copy-menu.ts)
@@ -104,14 +137,15 @@ Two things force the shape of [image-clipboard.ts](image-clipboard.ts):
 
 - **Everything is re-encoded to PNG through a canvas**, never handed over as
   the original bytes. The repository's images can be webp, avif or gif, and
-  Electron's `nativeImage` decodes only PNG and JPEG. Chromium already decoded
-  the picture to show it, so routing through a canvas means every format the
-  pane can preview is a format it can copy.
+  Electron's `nativeImage` decodes only PNG and JPEG. Decoding goes through an
+  `<img>` rather than `createImageBitmap`, which refuses SVG Blobs, so every
+  format the pane can preview is a format it can copy.
 - **The clipboard write is IPC** (`clipboard:writeImage`), because the
   renderer's async clipboard API cannot put an image on the pasteboard in a way
   every target app accepts. The PNG crosses as base64 — chunked, since
   `String.fromCharCode(...bytes)` blows the argument limit on a multi-megabyte
-  screenshot.
+  screenshot. It could cross as a `Uint8Array` the way `diff:image` does; that
+  change touches main's input validation and has not been made.
 
 `stripLayout` is pure and tested on its own: it matches panels on the
 **shortest** height and never scales up, so a 1x export beside its 2x twin

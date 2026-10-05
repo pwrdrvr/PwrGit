@@ -2049,7 +2049,7 @@ export interface Commands {
     req: { worktreeId: string; hash: string; path: string };
     res: string;
   };
-  /** Bytes of one side of an image diff, base64 for a data: URL. */
+  /** Bytes of one side of an image diff, raw — see `ImagePreview`. */
   "diff:image": {
     req: { worktreeId: string; path: string; rev: ImageRevision };
     res: ImagePreview;

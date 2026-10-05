@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ok, type ImagePreview } from "@pwrgit/shared";
@@ -10,7 +10,15 @@ vi.mock("../../lib/pwrgit", () => ({ dispatch: dispatchMock }));
 
 import { ImageLightbox } from "./ImageLightbox";
 import type { DiffFile } from "./parse-diff";
-import type { ImageDiffRevisions } from "./use-image-revisions";
+import type {
+  ImageDiffRevisions,
+  SideSeed,
+  SideState
+} from "./use-image-revisions";
+import {
+  installObjectUrlLedger,
+  type ObjectUrlLedger
+} from "../../test-support/object-urls";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,15 +41,16 @@ const FILE: DiffFile = {
 const png: ImagePreview = {
   kind: "image",
   mediaType: "image/png",
-  base64: "QkVGT1JF",
-  bytes: 2048
+  bytes: new Uint8Array(2048)
 };
 
 let container: HTMLDivElement;
 let root: Root;
 let opener: HTMLButtonElement;
+let urls: ObjectUrlLedger;
 
 beforeEach(() => {
+  urls = installObjectUrlLedger();
   dispatchMock.mockResolvedValue(ok(png));
   // The expand button in the diff row, behind the scrim.
   opener = document.createElement("button");
@@ -57,6 +66,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   opener.remove();
+  urls.restore();
   vi.clearAllMocks();
 });
 
@@ -142,5 +152,86 @@ describe("ImageLightbox as a modal", () => {
     // here is the proof the menu's state really cleared.
     press(document.activeElement!, "Escape");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ImageLightbox blob URL ownership", () => {
+  /** What a row on screen hands over: its Blobs, behind URLs IT minted. */
+  function rowSeed(): { seed: SideSeed; rowSrcs: string[] } {
+    const side = (tag: number): SideState => {
+      const blob = new Blob([new Uint8Array([tag])], { type: "image/png" });
+      return { kind: "image", blob, src: URL.createObjectURL(blob) };
+    };
+    const states = { before: side(1), after: side(2) };
+    const rowSrcs = [states.before, states.after].map((state) =>
+      state.kind === "image" ? state.src : ""
+    );
+    return { seed: { path: FILE.path, states }, rowSrcs };
+  }
+
+  const shown = (): string[] =>
+    [...document.querySelectorAll<HTMLImageElement>(".image-lightbox__img")].map(
+      (img) => img.getAttribute("src") ?? ""
+    );
+
+  // The seeded path is the one StrictMode's rehearsal really exercises: the
+  // first run mints URLs synchronously, its cleanup revokes them, and only the
+  // second run's URLs may end up on screen.
+  it("shows only URLs it still holds, under StrictMode", async () => {
+    const { seed, rowSrcs } = rowSeed();
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <ImageLightbox
+            files={[FILE]}
+            revisions={REVISIONS}
+            at={0}
+            seed={seed}
+            onMove={() => undefined}
+            onClose={() => undefined}
+          />
+        </StrictMode>
+      );
+    });
+
+    const srcs = shown();
+    expect(srcs).toHaveLength(2);
+    // The rehearsal ran and released what it made — else this proves nothing.
+    expect(urls.revoked.length).toBeGreaterThan(0);
+    for (const src of srcs) {
+      expect(urls.minted.has(src)).toBe(true);
+      expect(urls.revoked).not.toContain(src);
+    }
+    // Seeded sides cost no IPC.
+    expect(dispatchMock).not.toHaveBeenCalled();
+    // Same bytes as the row's, through URLs of its own.
+    expect(srcs.some((src) => rowSrcs.includes(src))).toBe(false);
+    expect(srcs.map((src) => urls.minted.get(src))).toEqual([
+      seed.states.before.kind === "image" ? seed.states.before.blob : null,
+      seed.states.after.kind === "image" ? seed.states.after.blob : null
+    ]);
+  });
+
+  it("releases its own URLs on close and leaves the row's alone", async () => {
+    const { seed, rowSrcs } = rowSeed();
+    await act(async () => {
+      root.render(
+        <ImageLightbox
+          files={[FILE]}
+          revisions={REVISIONS}
+          at={0}
+          seed={seed}
+          onMove={() => undefined}
+          onClose={() => undefined}
+        />
+      );
+    });
+    const mine = shown();
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+
+    for (const src of mine) expect(urls.revoked).toContain(src);
+    expect(urls.live()).toEqual(rowSrcs);
   });
 });

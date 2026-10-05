@@ -98,8 +98,10 @@ export const DIFF_OPTIONS = {
 /** Request and reply crossing the worker boundary. */
 export type DiffRequest = {
   id: number;
-  before: string;
-  after: string;
+  /** The encoded files. A Blob crosses postMessage as a handle to the same
+   *  bytes, not a copy of them. */
+  before: Blob;
+  after: Blob;
   width: number;
   height: number;
   fit: DiffPlan["fit"];
