@@ -71,7 +71,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@shutterstock/p-map-iterable':
-        specifier: 1.2.0
+        specifier: ^1.2.0
         version: 1.2.0(aggregate-error@3.1.0)
       better-sqlite3:
         specifier: ^13.0.3
