@@ -37,6 +37,7 @@ const PUBLIC_DEPENDENCY_REFERENCE_PATHS = new Set([
   "apps/desktop/src/main/util/map-limit.ts",
   "apps/desktop/src/renderer/src/lib/asyncFill.ts",
   "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
 ]);
 
 const SKIP_DIRS = new Set([
