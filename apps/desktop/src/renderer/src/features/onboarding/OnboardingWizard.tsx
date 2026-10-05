@@ -28,9 +28,9 @@ import {
 } from "./steps";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { CheckGlyph } from "../../lib/CheckGlyph";
-
 import { InfoGlyph } from "../../lib/InfoGlyph";
 import { WarningGlyph } from "../../lib/WarningGlyph";
+
 export type OnboardingWizardProps = {
   profile: Profile;
   /** The scan's result, for the Done screen. Only what a scan knows is drawn. */
