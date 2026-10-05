@@ -1,0 +1,128 @@
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import { expect, test } from "vitest";
+
+const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+
+// Evaluate the boolean subset used by these actual job conditions. GitHub adds
+// success() when no status function is present, so a skipped audit ancestor must
+// be represented in the fixture rather than treating prepare's success as enough.
+// https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#status-check-functions
+// Actionlint separately validates the complete workflow syntax.
+function eligible(job, { github, needs, inputs = {}, cancelled = false, ancestors }, source = workflow) {
+  const body = source.split(`\n  ${job}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
+  const expression = body?.match(/^    if: (?:>-\s*\n\s*)?\$\{\{([\s\S]*?)\}\}/m)?.[1];
+  if (!expression) throw new Error(`Missing job condition for ${job}`);
+  const success = () => ancestors.every((result) => result === "success");
+  if (!/\b(?:success|failure|always|cancelled)\s*\(/.test(expression) && !success()) return false;
+  const js = expression.replace(/needs\.([\w-]+)/g, 'needs["$1"]')
+    .replace("github.event.pull_request.labels.*.name", "github.event.pull_request.labels.map(label => label.name)");
+  return runInNewContext(js, { github, needs, inputs, cancelled: () => cancelled, success, always: () => true,
+    contains: (items, value) => items.includes(value) });
+}
+
+function context({ event = "pull_request", action = "labeled", fork = false, label = "ci:windows-signing", audit = "skipped", prepare = "success", cancelled = false } = {}) {
+  return {
+    github: { repository: "pwrdrvr/PwrGit", event_name: event, event: {
+      action, release: { prerelease: false, draft: false }, label: { name: label }, pull_request: {
+        head: { repo: { full_name: fork ? "contributor/PwrGit" : "pwrdrvr/PwrGit" } }, labels: [{ name: label }],
+      },
+    } },
+    needs: { "distribution-audit": { result: audit }, "windows-prepare": { result: prepare } },
+    ancestors: [audit, prepare], cancelled,
+  };
+}
+
+test.each(["labeled", "synchronize", "reopened"])("signed PR smoke remains eligible after its audit is skipped (%s)", (action) => {
+  const fixture = context({ action });
+  expect(eligible("windows-prepare", fixture)).toBe(true);
+  expect(eligible("windows-sign", fixture)).toBe(true);
+});
+
+test.each(["failure", "skipped", "cancelled"])("does not sign when preparation ends with %s", (prepare) => {
+  expect(eligible("windows-sign", context({ prepare }))).toBe(false);
+});
+
+test.each([{ fork: true }, { label: "unrelated" }, { cancelled: true }])("does not prepare/sign an ineligible PR %#", (options) => {
+  const fixture = context(options);
+  expect(eligible("windows-prepare", fixture)).toBe(false);
+  expect(eligible("windows-sign", { ...fixture, needs: { ...fixture.needs, "windows-prepare": { result: "skipped" } } })).toBe(false);
+});
+
+test.each(["push", "workflow_dispatch"])("prepares and signs an audited release (%s)", (event) => {
+  const fixture = context({ event, audit: "success" });
+  expect(eligible("windows-prepare", fixture)).toBe(true);
+  expect(eligible("windows-sign", fixture)).toBe(true);
+});
+
+test("failed preflight and cancellation do not enter signing", () => {
+  const fixture = context({ event: "push", audit: "failure", prepare: "skipped" });
+  expect(eligible("windows-prepare", fixture)).toBe(false);
+  expect(eligible("windows-sign", fixture)).toBe(false);
+  expect(eligible("windows-sign", context({ cancelled: true }))).toBe(false);
+});
+
+const distributionWorkflow = readFileSync(new URL("../.github/workflows/package-distribution.yml", import.meta.url), "utf8");
+
+test.each(["workflow_dispatch", "release", "schedule"])("read-only package audit cannot dispatch Homebrew (%s)", (event) => {
+  const fixture = context({ event, audit: "success" });
+  fixture.github.ref = "refs/heads/main";
+  // Successful dependencies exercise the explicit audit-only guard instead of
+  // passing solely because preparation happens to be skipped by today's DAG.
+  expect(eligible("homebrew", { ...fixture, inputs: { audit_only: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("homebrew", { ...fixture, inputs: { audit_only: false } }, distributionWorkflow)).toBe(true);
+});
+
+test("PR package validation cannot publish Homebrew", () => {
+  const fixture = context({ audit: "success" });
+  fixture.github.ref = "refs/heads/main";
+  expect(eligible("homebrew", { ...fixture, inputs: { audit_only: false } }, distributionWorkflow)).toBe(false);
+});
+
+test.each(["pull_request", "schedule", "release", "workflow_dispatch"])("routine distribution checks never download installers (%s)", (event) => {
+  const fixture = context({ event, audit: "success" });
+  fixture.github.event.release = { prerelease: false, draft: false };
+  expect(eligible("prepare", fixture, distributionWorkflow)).toBe(false);
+});
+
+test("native validation requires an explicit manual opt-in and cannot override audit-only", () => {
+  const fixture = context({ event: "workflow_dispatch", audit: "success" });
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true } }, distributionWorkflow)).toBe(true);
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true, audit_only: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("prepare", { ...fixture, ancestors: ["failure"], inputs: { validate_assets: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("prepare", { ...fixture, inputs: { force_validation: true } }, distributionWorkflow)).toBe(false);
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true, force_validation: true } }, distributionWorkflow)).toBe(true);
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true, force_validation: true, audit_only: true } }, distributionWorkflow)).toBe(false);
+});
+
+test.each(["pull_request", "schedule", "release"])("native-validation input cannot enable automatic downloads (%s)", (event) => {
+  const fixture = context({ event, audit: "success" });
+  expect(eligible("prepare", { ...fixture, inputs: { validate_assets: true } }, distributionWorkflow)).toBe(false);
+});
+
+test.each(["homebrew", "freshness"])("scheduled %s does not depend on skipped native validation", (job) => {
+  const body = distributionWorkflow.split(`\n  ${job}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+  expect(body.match(/^    needs: (.*)$/m)[1]).not.toContain("prepare");
+  const fixture = context({ event: "schedule", audit: "success" });
+  fixture.github.ref = "refs/heads/main";
+  expect(eligible(job, fixture, distributionWorkflow)).toBe(true);
+});
+
+test.each(["macos", "windows", "submissions"])("%s remains downstream of explicitly opted-in preparation", (job) => {
+  const body = distributionWorkflow.split(`\n  ${job}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+  expect(body.match(/^    needs: (.*)$/m)[1]).toContain("prepare");
+  // No job-level status override may bypass the skipped preparation ancestor.
+  expect(body.match(/^    if:/m)).toBeNull();
+});
+
+test("scheduled publication freshness is reported even after Homebrew synchronization fails", () => {
+  const fixture = context({ event: "schedule", audit: "success" });
+  expect(eligible("freshness", { ...fixture, ancestors: ["success", "failure"] }, distributionWorkflow)).toBe(true);
+  expect(eligible("freshness", { ...fixture, cancelled: true }, distributionWorkflow)).toBe(false);
+});
+
+test.each([{ prerelease: true, draft: false }, { prerelease: false, draft: true }])("ineligible release cannot sync Homebrew %#", (release) => {
+  const fixture = context({ event: "release", audit: "success" });
+  fixture.github.event.release = release;
+  expect(eligible("homebrew", fixture, distributionWorkflow)).toBe(false);
+});

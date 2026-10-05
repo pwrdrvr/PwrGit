@@ -2,46 +2,52 @@
 
 ## Workflows
 
-`package-distribution.yml` audits authoritative Winget/Homebrew sources against
-promoted Stable Latest and generates manifests from GitHub asset digests without
-downloading installers. Separate native jobs validate macOS signatures and both
-architectures, plus WinGet manifests, signatures, install/upgrade and uninstall.
-Successful validation is cached by release bytes, manifests, validator inputs and
-runner platform. Unchanged daily runs only restore that tiny success record; they do
-not download, mount or install release assets. Publication audits still run and
-fail on absent/stale channels independently of native validation reuse.
-
-A new release, changed validation input, cache eviction or manual dispatch with
-`force_validation=true` runs native checks. Exact installer caches include version,
-architecture and SHA-256; restored bytes are always hashed and size-checked before
-use. Windows also cross-checks the release checksum file. WinGet reuses those
-verified bytes through its own temp cache while retaining the published manifest
-URL, and the validator requires its reuse log entry. Success records are saved by
-each native job only after all its checks pass, even if a publication audit fails.
-GitHub cache branch scopes keep PR success records from blessing main; eviction
-safely causes revalidation. Cache keys intentionally have no prefix fallbacks.
-
-The internal `package-manager-plan` artifact is metadata only. The downloadable
-`package-manager-submissions` artifact is emitted after both native jobs pass or
-reuse matching success records. The workflow runs on stable publication/edit,
-daily, manual dispatch, and PRs changing its validators.
-The `homebrew` job dispatches the tap publisher after macOS validation and verifies
-tap `main` reached Stable Latest, with a direct tap run link on failure. The tap
+`package-distribution.yml` compares authoritative Winget/Homebrew sources
+against promoted Stable Latest. Opt-in validation plans manifests from GitHub
+asset metadata, then validates macOS signatures/architectures plus native Winget
+installation on separate runners. It audits every release publication/edit, including prereleases,
+daily and by manual dispatch. Routine audits, including PRs, read metadata and
+never download release installers. Preparation/install checks require manual
+dispatch with `-f validate_assets=true` (default false); these deliberate checks
+can add release downloads on cache misses. Successful native validation is
+reused only for identical release bytes, manifests, validator inputs and runner
+platform; restored installer bytes are always hashed and size-checked. Use
+`-f validate_assets=true -f force_validation=true` to repeat native checks while
+retaining installer caches. `force_validation` alone never enables downloads.
+The metadata-only `package-manager-plan` artifact becomes
+`package-manager-submissions` only after both native jobs pass or reuse exact
+success records. Cache keys have no prefix fallback; PR success records cannot
+bless main. Use `-f audit_only=true` to skip Homebrew synchronization
+as well as downloads/installations. The
+daily comparison fails on version drift after Homebrew synchronization. The
+`homebrew` job dispatches the tap publisher after the source audit and verifies tap
+`main` reached Stable Latest, with a direct tap run link on failure. The tap
 commits validated cask updates automatically; routine releases have no bump PR.
+An already-current cask needs only metadata reads. A changed cask's tap validation
+uses verified installer caches and downloads on cache misses, independently of
+the product's audit-only checks.
 Immediate dispatch needs `HOMEBREW_TAP_DISPATCH_TOKEN` (fine-grained PAT for
 `pwrdrvr/homebrew-tap` only, Actions write). The public-read token below cannot
-dispatch; the tap also reconciles every 15 minutes. Winget submission and final
-client publication verification follow
-[the distribution runbook](../../docs/package-manager-distribution.md); generated
-workflow artifacts alone do not establish publication.
+dispatch; the tap also reconciles every 15 minutes. Winget submission and client
+publication verification follow [the distribution runbook](../../docs/package-manager-distribution.md); generated workflow artifacts alone do not establish
+publication. `release.yml` reuses the same workflow in read-only mode before
+preparation and after publication, with stage-specific artifacts. Preflight
+blockers stop preparation; follow-up blockers require an owned retry without
+repeating GitHub publication.
 
-Distribution audits prefer the organization Actions secret shared with PwrGit,
+Distribution public reads prefer the organization Actions secret
 `DISTRIBUTION_READ_TOKEN`, an expiring fine-grained PAT with public-repository
-access only and no additional permissions. Without it (including fork PRs), they
+access only and no additional permissions, shared with PwrGit, PwrSnap and PwrAgent
+under selected repository visibility. Without it (including fork PRs), they
 use `GITHUB_TOKEN`. It is used only for read-only comparisons/generation, not
 submission or signing; do not reuse `RELEASES_PAT` or an administrator token.
-The workflow logs the selected credential's name and cancels superseded runs for
+The workflow logs the selected credential's name/availability, retains sanitized
+complete/blocked JSON comparisons and cancels superseded runs for
 the same ref. A dedicated token does not bypass GitHub's search/secondary limits.
+The helper bounds header-aware retries and requires complete code/issue pagination.
+`huntharo` / organization maintainers own the expiry inventory and same-name,
+same-policy rotation; verify metadata/sharing and runtime reads in all three
+repositories after rotation. See the distribution runbook for exact checks.
 
 | Workflow | Trigger | What it does |
 |---|---|---|

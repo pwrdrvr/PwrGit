@@ -8,30 +8,94 @@ on:
     types: [published, released, edited]
   workflow_dispatch:
     inputs:
+      audit_only:
+        description: Compare public sources only; skip downloads and native installation
+        type: boolean
+        default: false
+      validate_assets:
+        description: Download release installers and run native validation (adds GitHub downloads)
+        type: boolean
+        default: false
       force_validation:
         description: Re-run native validation even when the exact inputs already passed
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      audit_only:
+        type: boolean
+        default: true
+      stage:
+        type: string
+        default: standalone
+    secrets:
+      DISTRIBUTION_READ_TOKEN:
+        required: false
+      HOMEBREW_TAP_DISPATCH_TOKEN:
+        required: false
   schedule:
     - cron: "41 11 * * *"
   pull_request:
     paths:
       - scripts/package-manager-release*
+      - scripts/lib/distribution-api*
+      - docs/package-manager-distribution.md
+      - .agents/skills/release/**
       - scripts/release/verify-*
       - scripts/lib/cli-entrypoint.mjs
       - scripts/release/sync-homebrew*
       - .github/workflows/package-distribution.yml
+      - .github/workflows/release.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: package-distribution-${{ github.ref }}
+  group: package-distribution-${{ github.ref }}-${{ inputs.stage || 'standalone' }}
   cancel-in-progress: true
 
 jobs:
+  audit:
+    name: Audit authoritative public distribution sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      stable_tag: ${{ steps.comparison.outputs.stable_tag }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Compare GitHub, Winget and Homebrew without publishing
+        id: comparison
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
+          TOKEN_SOURCE: ${{ secrets.DISTRIBUTION_READ_TOKEN && 'DISTRIBUTION_READ_TOKEN' || 'GITHUB_TOKEN' }}
+          TOKEN_AVAILABLE: ${{ secrets.DISTRIBUTION_READ_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          echo "Distribution API token source: $TOKEN_SOURCE; organization secret available: $TOKEN_AVAILABLE"
+          node scripts/package-manager-release.mjs audit --output "$RUNNER_TEMP/distribution-audit.json"
+          tag="$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/distribution-audit.json")).stableTag')"
+          echo "stable_tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Retain comparison or actionable blocker
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: distribution-audit-${{ inputs.stage || 'standalone' }}
+          path: ${{ runner.temp }}/distribution-audit.json
+          if-no-files-found: error
+          retention-days: 14
+
   prepare:
-    if: ${{ github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft) }}
+    needs: audit
+    # Routine audits must not add release-asset downloads. Native checks are
+    # deliberate manual validation; the tap validates its own changed cask.
+    if: ${{ inputs.audit_only != true && github.event_name == 'workflow_dispatch' && inputs.validate_assets == true }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.plan.outputs.version }}
@@ -53,15 +117,15 @@ jobs:
       - name: Audit publication and plan validation without downloading installers
         id: plan
         env:
-          # A dedicated public-read PAT uses user authentication for the
+          # The organization public-read secret uses user authentication for the
           # cross-repository search; retain the workflow token for fork PRs.
           GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
           TOKEN_SOURCE: ${{ secrets.DISTRIBUTION_READ_TOKEN && 'DISTRIBUTION_READ_TOKEN' || 'GITHUB_TOKEN' }}
+          STABLE_TAG: ${{ needs.audit.outputs.stable_tag }}
         run: |
           set -euo pipefail
           echo "Distribution API token source: $TOKEN_SOURCE"
-          tag="$(gh api repos/pwrdrvr/PwrGit/releases/latest --jq .tag_name)"
-          node scripts/package-manager-release.mjs plan "$tag" "$RUNNER_TEMP/distribution" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-macos-distribution.sh', '.github/workflows/package-distribution.yml') }}" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-winget-install.ps1', '.github/workflows/package-distribution.yml') }}"
+          node scripts/package-manager-release.mjs plan "$STABLE_TAG" "$RUNNER_TEMP/distribution" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-macos-distribution.sh', '.github/workflows/package-distribution.yml') }}" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-winget-install.ps1', '.github/workflows/package-distribution.yml') }}"
       - name: Upload metadata plan (native validation is separate)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -74,8 +138,8 @@ jobs:
           if-no-files-found: error
 
   homebrew:
-    needs: [prepare, macos]
-    if: github.event_name != 'pull_request' && (github.event_name == 'release' || github.ref == 'refs/heads/main')
+    needs: audit
+    if: ${{ inputs.audit_only != true && github.event_name != 'pull_request' && (github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft)) && (github.event_name == 'release' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -91,13 +155,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
           HOMEBREW_TAP_DISPATCH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+          STABLE_TAG: ${{ needs.audit.outputs.stable_tag }}
         run: |
           set -euo pipefail
-          node scripts/release/sync-homebrew.mjs "${{ needs.prepare.outputs.version }}"
+          version="${STABLE_TAG#v}"
+          node scripts/release/sync-homebrew.mjs "$version"
 
   freshness:
-    needs: [prepare, homebrew]
-    if: ${{ always() && github.event_name == 'schedule' }}
+    needs: [audit, homebrew]
+    if: ${{ always() && !cancelled() && inputs.audit_only != true && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -222,7 +288,7 @@ jobs:
       - name: Install the official WinGet client
         if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

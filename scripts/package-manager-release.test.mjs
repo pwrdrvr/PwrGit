@@ -2,15 +2,15 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
-import { audit, compareVersions, distribution, downloadPlatform, prepare, publicationFailures, renderManifests, selectAssets, stableVersion, validationPlan } from "./package-manager-release.mjs";
+import { expect, test, vi } from "vitest";
+import { audit, compareVersions, distribution, downloadPlatform, prepare, publicationFailures, readCask, readWingetInstaller, renderManifests, selectAssets, stableVersion, validationPlan } from "./package-manager-release.mjs";
 
-function release() {
-  const tag_name = "v0.27.0";
+function release(version = "0.27.0") {
+  const tag_name = `v${version}`;
   return {
     tag_name, draft: false, prerelease: false,
     assets: ["arm64.dmg", "universal.dmg", "windows-x64-setup.exe"].map((suffix, i) => {
-      const name = `PwrGit-0.27.0-${suffix}`;
+      const name = `PwrGit-${version}-${suffix}`;
       return { name, browser_download_url: `https://github.com/pwrdrvr/PwrGit/releases/download/${tag_name}/${name}`, size: 123, digest: `sha256:${String(i + 1).repeat(64)}` };
     }),
   };
@@ -18,12 +18,27 @@ function release() {
 
 function api({ winget = null, cask = null, central = null, duplicate = false, pending = [] } = {}) {
   return (path) => {
+    if (/^repos\/[^/]+\/[^/?]+$/.test(path)) return { private: false, default_branch: path.includes("winget-pkgs") ? "master" : "main" };
     if (path.endsWith("/releases/latest")) return release();
-    if (path.endsWith(distribution.wingetPath)) return winget?.map((name) => ({ name })) ?? null;
-    if (path.includes("homebrew-tap/contents")) return cask ? { content: Buffer.from(`  version "${cask}"\n`).toString("base64") } : null;
-    if (path.includes("homebrew-cask/contents")) return central;
-    if (path.startsWith("search/code")) return { total_count: duplicate ? 1 : 0, items: duplicate ? [{ path: "manifests/o/Other/PwrGit/1.0.0/file.yaml" }] : [] };
-    if (path.startsWith("search/issues")) return { items: pending };
+    if (path.includes("/releases/tags/")) return release(path.match(/\/releases\/tags\/v(\d+\.\d+\.\d+)/)?.[1]);
+    if (path.includes(`${distribution.wingetPath}?`)) return winget?.map((name) => ({ name })) ?? null;
+    const content = (text) => ({ encoding: "base64", content: Buffer.from(text).toString("base64") });
+    if (path.includes("homebrew-tap/contents")) {
+      if (!cask) return null;
+      const value = release();
+      value.tag_name = `v${cask}`;
+      return content(renderManifests(value, selectAssets(release()))["Casks/pwrgit.rb"]);
+    }
+    if (path.includes(".installer.yaml")) {
+      const version = path.match(/\/(\d+\.\d+\.\d+)\//)?.[1];
+      const value = release(version);
+      return content(renderManifests(value, selectAssets(value))[`${distribution.wingetPath}/${version}/${distribution.wingetId}.installer.yaml`]);
+    }
+    if (path.startsWith("search/code")) {
+      const items = path.includes("winget-pkgs") ? (duplicate ? [{ path: "manifests/o/Other/PwrGit/1.0.0/file.yaml" }] : []) : (central ? [{ path: "Casks/p/pwrgit.rb" }] : []);
+      return { total_count: items.length, incomplete_results: false, items };
+    }
+    if (path.startsWith("search/issues")) return { total_count: pending.length, incomplete_results: false, items: pending };
     throw new Error(`Unexpected API request: ${path}`);
   };
 }
@@ -63,6 +78,19 @@ test("reports missing registration and pending links without claiming publicatio
   expect(result.clientPublication).toContain("Verify");
 });
 
+test("audits published platform manifests using metadata without fetching release bytes", async () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(() => { throw new Error("Audit must not download release bytes"); });
+  try {
+    const result = await audit({ api: api({ winget: ["0.27.0"], cask: "0.27.0" }) });
+    expect(result.status).toBe("complete");
+    expect(result.winget.version).toBe("0.27.0");
+    expect(result.homebrew.version).toBe("0.27.0");
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    fetch.mockRestore();
+  }
+});
+
 test("compares authoritative versions and refuses downgrades or duplicates", async () => {
   const result = await audit({ api: api({ winget: ["0.9.0", "0.27.0"], cask: "0.27.0" }) });
   expect(result.winget.version).toBe("0.27.0");
@@ -78,10 +106,10 @@ test("preserves errors from remote sources", async () => {
 
 test("inspects later identity-search pages before allowing submission", async () => {
   const firstPage = Array.from({ length: 100 }, (_, i) => ({ path: `${distribution.wingetPath}/0.${i}.0/file.yaml` }));
-  const source = api();
+  const source = api({ winget: ["0.27.0"] });
   const pages = [];
   const paginated = (path) => {
-    if (!path.startsWith("search/code")) return source(path);
+    if (!path.startsWith("search/code") || !path.includes("winget-pkgs")) return source(path);
     const page = Number(new URLSearchParams(path.split("?")[1]).get("page"));
     pages.push(page);
     return { total_count: 101, incomplete_results: false, items: page === 1 ? firstPage : [{ path: "manifests/o/Other/PwrGit/1.0.0/file.yaml" }] };
@@ -90,10 +118,10 @@ test("inspects later identity-search pages before allowing submission", async ()
   expect(pages).toEqual([1, 2]);
   const result = await audit({ api: (path) => {
     const response = paginated(path);
-    if (path.startsWith("search/code") && path.endsWith("page=2")) response.items = [{ path: `${distribution.wingetPath}/0.100.0/file.yaml` }];
+    if (path.startsWith("search/code") && path.includes("winget-pkgs") && path.endsWith("page=2")) response.items = [{ path: `${distribution.wingetPath}/0.100.0/file.yaml` }];
     return response;
   } });
-  expect(result.winget.version).toBeNull();
+  expect(result.winget.version).toBe("0.27.0");
 });
 
 test.each([
@@ -102,7 +130,7 @@ test.each([
   { total_count: 0, incomplete_results: true, items: [] },
 ])("rejects uninspectable identity results %#", async (response) => {
   const source = api();
-  await expect(audit({ api: (path) => path.startsWith("search/code") ? response : source(path) })).rejects.toThrow("identity search was incomplete");
+  await expect(audit({ api: (path) => path.startsWith("search/code") && path.includes("winget-pkgs") ? response : source(path) })).rejects.toThrow(/search/);
 });
 
 test("removes interrupted or corrupt downloads and retries without poisoning the cache", async () => {
@@ -178,6 +206,64 @@ test("maps native arm64 and universal Intel DMGs separately and offers only Wind
   expect(installer).not.toContain("/latest/");
 });
 
+
+test("requires remote manifest URLs and hashes to match published release metadata", async () => {
+  const source = api({ winget: ["0.27.0"], cask: "0.27.0" });
+  await expect(audit({ api: (path, options) => {
+    const result = source(path, options);
+    if (path.includes(".installer.yaml")) result.content = Buffer.from(Buffer.from(result.content, "base64").toString().replace("3".repeat(64), "4".repeat(64))).toString("base64");
+    return result;
+  } })).rejects.toThrow("URL/checksum disagrees");
+});
+
+test("recognizes established architectures and rejects changed remote layouts", () => {
+  const files = renderManifests(release(), selectAssets(release()));
+  expect(readCask(files["Casks/pwrgit.rb"]).assets.map((a) => a.architecture)).toEqual(["arm64", "universal"]);
+  const installer = files[`${distribution.wingetPath}/0.27.0/${distribution.wingetId}.installer.yaml`];
+  expect(readWingetInstaller(installer, "0.27.0")[0].architecture).toBe("x64");
+  expect(() => readWingetInstaller(installer.replace("Architecture: x64", "Architecture: arm64"), "0.27.0")).toThrow("layout changed");
+  expect(() => readCask(files["Casks/pwrgit.rb"].replace('intel: "universal"', 'intel: "x64"'))).toThrow("layout changed");
+});
+
+test("retains closed submission history and confirms public repository reads", async () => {
+  const source = api({ pending: [{ html_url: "https://github.com/example/pull/3", state: "closed", user: { login: "huntharo" } }] });
+  const result = await audit({ api: source });
+  expect(result.submissions.winget[0]).toMatchObject({ state: "closed", author: "huntharo" });
+  await expect(audit({ api: (path) => /^repos\/[^/]+\/[^/?]+$/.test(path) ? { private: true } : source(path) })).rejects.toThrow("readable/public");
+});
+
+// Every substituted URL and digest below belongs to a real published asset in
+// the fixture. Only the platform/architecture is wrong, so membership checks
+// alone would accept it. Exercise current and lagging package versions.
+test.each([
+  ["winget", 0], ["winget", 1],
+  ["homebrew", 0], ["homebrew", 1], ["homebrew", 2],
+].flatMap(([channel, wrongAsset]) => ["0.27.0", "0.28.0"].map((latest) => ({ channel, wrongAsset, latest }))))(
+  "blocks $channel using asset $wrongAsset against Latest $latest",
+  async ({ channel, wrongAsset, latest }) => {
+    const source = api({ winget: ["0.27.0"], cask: "0.27.0" });
+    const published = release().assets[wrongAsset];
+    await expect(audit({ api: (path, options) => {
+      if (path.endsWith("/releases/latest")) return release(latest);
+      const result = source(path, options);
+      if (channel === "winget" && path.includes(".installer.yaml")) {
+        const text = Buffer.from(result.content, "base64").toString("utf8")
+          .replace(/^  InstallerUrl:.*$/m, `  InstallerUrl: ${published.browser_download_url}`)
+          .replace(/^  InstallerSha256:.*$/m, `  InstallerSha256: ${published.digest.slice(7)}`);
+        result.content = Buffer.from(text).toString("base64");
+      }
+      if (channel === "homebrew" && path.includes("homebrew-tap/contents")) {
+        const text = Buffer.from(result.content, "base64").toString("utf8")
+          .replace(/^  url .*$/m, `  url "${published.browser_download_url}"`)
+          .replace(/^  sha256 arm:.*$/m, `  sha256 arm:   "${published.digest.slice(7)}",`)
+          .replace(/^ +intel: "[a-f0-9]{64}"$/m, `         intel: "${published.digest.slice(7)}"`);
+        result.content = Buffer.from(text).toString("base64");
+      }
+      return result;
+    } })).rejects.toThrow("URL/checksum disagrees");
+  },
+);
+
 function downloadableRelease() {
   const value = release();
   const payloads = value.assets.map((asset) => Buffer.from(`verified ${asset.name}`));
@@ -197,7 +283,11 @@ test("daily plan generates metadata without fetching any release bytes", async (
   const source = api({ cask: "0.27.0" });
   try {
     await prepare(value.tag_name, directory, {
-      api: (path) => path.includes("/releases/") ? value : source(path),
+      api: (path) => {
+        if (path.includes("/releases/")) return value;
+        if (path.includes("homebrew-tap/contents")) return { encoding: "base64", content: Buffer.from(renderManifests(value, selectAssets(value))["Casks/pwrgit.rb"]).toString("base64") };
+        return source(path);
+      },
       fetch: () => { throw new Error("No asset downloads allowed"); }, metadataOnly: true, validatorDigest: "a".repeat(64),
     });
     expect(readdirSync(directory).sort()).toEqual(["Casks", "distribution-status.json", "manifests"]);
@@ -279,8 +369,14 @@ test("platform downloads fetch once and verify restored bytes before reuse", asy
 });
 
 test("an absent channel and a pending submission remain publication failures", async () => {
-  const report = await audit({ api: api({ winget: ["0.26.0"], cask: "0.27.0", pending: [{ html_url: "https://github.com/example/pull/1", title: "PwrGit" }] }) });
+  const report = await audit({ api: api({ winget: ["0.26.0"], cask: "0.27.0", pending: [{ html_url: "https://github.com/example/pull/1", title: "PwrGit", state: "open" }] }) });
   expect(publicationFailures(report)).toEqual(["winget: published 0.26.0; expected 0.27.0; open submissions: https://github.com/example/pull/1"]);
+});
+
+test("closed submission history is retained without becoming an open publication blocker", async () => {
+  const report = await audit({ api: api({ cask: "0.27.0", pending: [{ html_url: "https://github.com/example/pull/2", state: "closed" }] }) });
+  expect(report.submissions.winget).toHaveLength(1);
+  expect(publicationFailures(report)).toEqual(["winget: registration absent; expected 0.27.0; no open submission found"]);
 });
 
 test("rejects an authenticated checksum file that disagrees with the installer", async () => {
