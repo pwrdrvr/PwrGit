@@ -8,10 +8,13 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import { CopyTarget } from "../shell/CopyTarget";
+import { revealLabel, revealPath } from "../shell/reveal";
 import { PrChip } from "./PrChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { isFinishedWorktree, lastSegment, orderWorktrees } from "./repo-view";
+import { ShowWorktreeButton } from "./WorktreeHolderChip";
 import { PinIcon } from "./WorktreeRow";
 
 /** The Worktrees tab's filter. The sidebar's Finished row opens it on
@@ -127,6 +130,7 @@ export function RepoWorktreeTable({
   now,
   onRevealWorktree,
   onPruneWorktrees,
+  onRemoveWorktree,
   onClose
 }: {
   /** Already filtered — the tab's count and its rows read one list. */
@@ -137,6 +141,8 @@ export function RepoWorktreeTable({
   onRevealWorktree: (worktreeId: string) => void;
   /** Absent, the Finished view still explains itself but offers no verb. */
   onPruneWorktrees?: (() => void) | undefined;
+  /** The sidebar row's Remove worktree, confirm and all. */
+  onRemoveWorktree?: ((worktreeId: string) => void) | undefined;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
@@ -216,7 +222,9 @@ export function RepoWorktreeTable({
                   <PinIcon filled={pinned} size={11} />
                 </button>
               </span>
-              <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+              <span className="refs-branch-icon">
+                <WorktreeGlyph />
+              </span>
               <div>
                 <span className="refs-branch-name-line">
                   <CopyTarget
@@ -224,6 +232,7 @@ export function RepoWorktreeTable({
                     label={`Copy branch name ${worktree.branch}`}
                     hint={`${worktree.branch}\nClick to copy branch name`}
                     className="refs-copyable-name copyable"
+                    deferForDoubleClick
                   >
                     <strong>{worktree.branch}</strong>
                   </CopyTarget>
@@ -239,6 +248,7 @@ export function RepoWorktreeTable({
               label={`Copy path ${worktree.path}`}
               hint={`${worktree.path}\nClick to copy path`}
               className="refs-table__muted refs-copyable-upstream copyable"
+              deferForDoubleClick
             >
               <span className="refs-copyable-upstream__text">{folder}</span>
             </CopyTarget>
@@ -252,12 +262,11 @@ export function RepoWorktreeTable({
             </span>
             <RefRowActions
               primary={
-                <button
-                  className="refs-row-action"
+                <ShowWorktreeButton
+                  holder={worktree}
+                  tip={tip}
                   onClick={() => reveal(worktree)}
-                >
-                  Show worktree
-                </button>
+                />
               }
               menu={
                 <RefRowMenu
@@ -277,7 +286,25 @@ export function RepoWorktreeTable({
                       type: "item",
                       label: "Copy path",
                       onSelect: () => void copyText(worktree.path)
-                    }
+                    },
+                    // The sidebar row's own menu, so a row past the six
+                    // can do here what it could do there.
+                    {
+                      type: "item",
+                      label: revealLabel(),
+                      onSelect: () => revealPath(worktree.path)
+                    },
+                    ...(onRemoveWorktree === undefined
+                      ? []
+                      : [
+                          { type: "sep" as const },
+                          {
+                            type: "item" as const,
+                            label: "Remove worktree",
+                            danger: true,
+                            onSelect: () => onRemoveWorktree(worktree.id)
+                          }
+                        ])
                   ]}
                 />
               }

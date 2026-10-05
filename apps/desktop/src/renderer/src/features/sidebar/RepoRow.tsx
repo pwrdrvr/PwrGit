@@ -1173,6 +1173,7 @@ export function RepoRow({
             // rather than opening the disclosure (3c).
             onRevealWorktree={onRevealWorktree}
             onPruneWorktrees={onPruneWorktrees}
+            onRemoveWorktree={onRemoveWorktree}
             onCreateWorktree={onCreateWorktreeFromRef}
             onBranches={keepRefBranches}
           />

@@ -117,6 +117,7 @@ export function RepoRefsSections({
   onBrowserRequestHandled,
   onCleanUpBranches,
   onPruneWorktrees,
+  onRemoveWorktree,
   onBranches
 }: {
   repo: Repo;
@@ -145,6 +146,9 @@ export function RepoRefsSections({
   /** Open Maintenance › Prune worktrees — the Worktrees tab's Finished view
    *  offers it. */
   onPruneWorktrees?: (() => void) | undefined;
+  /** Remove a worktree, as its sidebar row does — the Worktrees tab's rows
+   *  offer it. */
+  onRemoveWorktree?: ((worktreeId: string) => void) | undefined;
   /** The local branches, each time the listing loads. The repo row's pinned
    *  branch rows read their tracking count and age from it rather than ask
    *  Git a second time. */
@@ -1227,6 +1231,7 @@ export function RepoRefsSections({
           initialTab={browser.tab}
           initialStatus={browser.status}
           initialWorktreeStatus={browser.worktreeStatus}
+          onRemoveWorktree={onRemoveWorktree}
           onPruneWorktrees={
             onPruneWorktrees === undefined
               ? undefined

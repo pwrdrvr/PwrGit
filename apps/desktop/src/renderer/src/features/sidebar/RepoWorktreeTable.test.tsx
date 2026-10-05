@@ -16,6 +16,7 @@ vi.mock("../../lib/toast", () => ({
 }));
 vi.mock("../../lib/copyText", () => ({ copyText: vi.fn() }));
 
+import { revealLabel } from "../shell/reveal";
 import { RepoRefsModal } from "./RepoRefsModal";
 import {
   filterWorktrees,
@@ -105,6 +106,7 @@ describe("RepoRefsModal on Worktrees", () => {
   let root: Root;
   const onRevealWorktree = vi.fn();
   const onPruneWorktrees = vi.fn();
+  const onRemoveWorktree = vi.fn();
   const onClose = vi.fn();
 
   beforeEach(() => {
@@ -115,6 +117,8 @@ describe("RepoRefsModal on Worktrees", () => {
       }
       return Promise.resolve(ok({ rows: [], total: 0 }));
     });
+    // The row menu names the file manager by platform.
+    (window as unknown as { pwrgit: { platform: string } }).pwrgit = { platform: "darwin" };
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -139,6 +143,7 @@ describe("RepoRefsModal on Worktrees", () => {
           onRefresh={() => undefined}
           onRevealWorktree={onRevealWorktree}
           onPruneWorktrees={onPruneWorktrees}
+          onRemoveWorktree={onRemoveWorktree}
           onCreateWorktree={() => undefined}
           onClose={onClose}
         />
@@ -183,5 +188,39 @@ describe("RepoRefsModal on Worktrees", () => {
     );
     expect(onRevealWorktree).toHaveBeenCalledWith("live");
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  // The browser is how a row past the six is reached, so it does whatever
+  // the sidebar's worktree row does (sidebar/AGENTS.md, refs-browser parity).
+  it("offers the sidebar row's verbs, and double-click shows the worktree", async () => {
+    await open();
+    const row = [...container.querySelectorAll<HTMLElement>("[data-refs-row]")].find(
+      (el) => el.textContent?.includes("chore/old")
+    )!;
+    expect(row.querySelector(".refs-branch-icon svg rect")).not.toBeNull();
+    await act(async () =>
+      row.querySelector<HTMLButtonElement>('[aria-label="Actions for chore/old"]')!.click()
+    );
+    const items = [
+      ...document.querySelectorAll<HTMLElement>('.pop-menu [role="menuitem"]')
+    ];
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Pin worktree",
+      "Copy branch name",
+      "Copy path",
+      revealLabel(),
+      "Remove worktree"
+    ]);
+    await act(async () => items.at(-1)!.click());
+    expect(onRemoveWorktree).toHaveBeenCalledWith("gone");
+
+    // On the name, whose copy waits out the second click.
+    await act(async () => {
+      row
+        .querySelector(".refs-copyable-name strong")!
+        .dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+    });
+    expect(onRevealWorktree).toHaveBeenCalledWith("gone");
+    expect(onClose).toHaveBeenCalled();
   });
 });

@@ -552,6 +552,7 @@ export function RepoRefsModal({
   initialWorktreeStatus = "all",
   onCleanUpBranches,
   onPruneWorktrees,
+  onRemoveWorktree,
   onRefresh,
   onLocateTag,
   onRevealWorktree,
@@ -574,6 +575,8 @@ export function RepoRefsModal({
   initialWorktreeStatus?: WorktreeStatusFilter;
   /** Where the Worktrees tab's Finished view sends its one verb. */
   onPruneWorktrees?: (() => void) | undefined;
+  /** The sidebar row's Remove worktree, for the Worktrees tab's rows. */
+  onRemoveWorktree?: ((worktreeId: string) => void) | undefined;
   /** Where the Gone view's "Clean up finished branches…" goes. Absent, the
    *  banner still explains the state but offers nothing to press. */
   onCleanUpBranches?: (() => void) | undefined;
@@ -1524,6 +1527,7 @@ export function RepoRefsModal({
               now={now}
               onRevealWorktree={onRevealWorktree}
               onPruneWorktrees={onPruneWorktrees}
+              onRemoveWorktree={onRemoveWorktree}
               onClose={onClose}
             />
           )}
