@@ -1,3 +1,4 @@
+import { BranchGlyph } from "../../lib/BranchGlyph";
 import { LocateGlyph } from "../../lib/LocateGlyph";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -53,7 +54,7 @@ import {
   handleRefsRowKey
 } from "../../lib/refsRowKeys";
 import { holderWorktreeId } from "./branch-focus";
-import { WorktreeHolderChip } from "./WorktreeHolderChip";
+import { ShowWorktreeButton, WorktreeHolderChip } from "./WorktreeHolderChip";
 import { copyText } from "../../lib/copyText";
 import {
   BRANCH_STATUS_FILTERS,
@@ -207,7 +208,9 @@ function BranchIdentity({
           </button>
         )}
       </span>
-      <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+      <span className="refs-branch-icon">
+        <BranchGlyph />
+      </span>
       <div>
         <span className="refs-branch-name-line">
           <CopyTarget
@@ -435,7 +438,7 @@ function RemoteBranchList({
       {search.rows.map((branch) => {
         const local = localBranchForRemote(refs, branch);
         const checkedOut = (local?.checkedOutWorktreeIds.length ?? 0) > 0;
-        const holder = local === undefined || !checkedOut ? undefined : holderOf(local);
+        const holder = local === undefined ? undefined : holderOf(local);
         return (
           <div
             className="refs-remote-branch"
@@ -443,7 +446,9 @@ function RemoteBranchList({
             data-refs-row=""
             tabIndex={-1}
           >
-            <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+            <span className="refs-branch-icon">
+              <BranchGlyph />
+            </span>
             <div>
               <span className="refs-branch-name-line">
                 <CopyTarget
@@ -456,11 +461,11 @@ function RemoteBranchList({
                   <strong>{branch.name}</strong>
                 </CopyTarget>
                 {branch.pr !== undefined && <PrChip pr={branch.pr} />}
-                {holder !== undefined && local !== undefined && (
+                {holder !== undefined && (
                   <WorktreeHolderChip
                     holder={holder}
                     here={holder.id === focusedWorktree?.id}
-                    subject={local.name}
+                    subject={branch.name}
                     repoName={repoName}
                     tip={tip}
                     onReveal={onReveal}
@@ -482,18 +487,11 @@ function RemoteBranchList({
                   press (lib/refsRowKeys.ts). */}
               <span className="refs-remote-branch__primary" data-refs-primary="">
                 {checkedOut ? (
-                  <button
-                    className="refs-row-action"
-                    {...(holder === undefined
-                      ? {}
-                      : {
-                          "aria-label": `Show worktree ${lastSegment(holder.path)}`,
-                          ...hoverTooltip(tip, holder.path)
-                        })}
+                  <ShowWorktreeButton
+                    holder={holder}
+                    tip={tip}
                     onClick={() => onPick(branch)}
-                  >
-                    Show worktree
-                  </button>
+                  />
                 ) : (
                   <SwitchHereButton
                     branch={branch.name}
@@ -773,9 +771,13 @@ export function RepoRefsModal({
    *  checkout before the working target, since that is the one to go to. */
   const holderIdOf = (branch: LocalBranchSummary): string | null =>
     holderWorktreeId(branch, focusedWorktree?.id ?? null);
+  const worktreesById = useMemo(
+    () => new Map(repo.worktrees.map((worktree) => [worktree.id, worktree])),
+    [repo.worktrees]
+  );
   const holderOf = (branch: LocalBranchSummary): Worktree | undefined => {
     const id = holderIdOf(branch);
-    return id === null ? undefined : repo.worktrees.find((w) => w.id === id);
+    return id === null ? undefined : worktreesById.get(id);
   };
   /** Going to a worktree is a navigation, so the browser closes. */
   const reveal = (worktreeId: string): void => {
@@ -1254,9 +1256,10 @@ export function RepoRefsModal({
                   );
                 }
                 const branch = item.branch;
-                const checkedOut = branch.checkedOutWorktreeIds.length > 0;
                 const holderId = holderIdOf(branch);
-                const holder = holderOf(branch);
+                const checkedOut = holderId !== null;
+                const holder =
+                  holderId === null ? undefined : worktreesById.get(holderId);
                 return (
                   <div
                     className={`refs-table__row${isPinned(branch) ? " is-pinned" : ""}`}
@@ -1304,18 +1307,11 @@ export function RepoRefsModal({
                     <RefRowActions
                       primary={
                         holderId !== null ? (
-                          <button
-                            className="refs-row-action"
-                            {...(holder === undefined
-                              ? {}
-                              : {
-                                  "aria-label": `Show worktree ${lastSegment(holder.path)}`,
-                                  ...hoverTooltip(tip, holder.path)
-                                })}
+                          <ShowWorktreeButton
+                            holder={holder}
+                            tip={tip}
                             onClick={() => reveal(holderId)}
-                          >
-                            Show worktree
-                          </button>
+                          />
                         ) : (
                           <SwitchHereButton
                             branch={branch.name}
@@ -1332,7 +1328,7 @@ export function RepoRefsModal({
                       // which a held branch cannot offer — and it says which
                       // worktree "Show worktree" goes to.
                       secondary={
-                        holderId !== null ? (
+                        checkedOut ? (
                           holder !== undefined && (
                             <WorktreeHolderChip
                               holder={holder}
@@ -1384,8 +1380,8 @@ export function RepoRefsModal({
                             {
                               type: "item",
                               label: "Rename…",
-                              disabled: branch.checkedOutWorktreeIds.length > 0,
-                              ...(branch.checkedOutWorktreeIds.length > 0
+                              disabled: checkedOut,
+                              ...(checkedOut
                                 ? { hint: RENAME_DELETE_HOLD }
                                 : {}),
                               onSelect: () => setRenaming(branch)
@@ -1395,10 +1391,8 @@ export function RepoRefsModal({
                               label:
                                 deleting === branch.name ? "Deleting…" : "Delete…",
                               danger: true,
-                              disabled:
-                                branch.checkedOutWorktreeIds.length > 0 ||
-                                deleting !== null,
-                              ...(branch.checkedOutWorktreeIds.length > 0
+                              disabled: checkedOut || deleting !== null,
+                              ...(checkedOut
                                 ? { hint: RENAME_DELETE_HOLD }
                                 : {}),
                               onSelect: () => void deleteBranch(branch)

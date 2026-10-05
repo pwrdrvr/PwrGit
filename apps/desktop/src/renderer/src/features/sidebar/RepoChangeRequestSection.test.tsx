@@ -135,12 +135,16 @@ afterEach(async () => {
 const onCreateWorktree = vi.fn();
 const onRevealWorktree = vi.fn();
 
-async function render(shownRepo: Repo = repo): Promise<void> {
+async function render(
+  shownRepo: Repo = repo,
+  focusedWorktree: Worktree | null = null
+): Promise<void> {
   await act(async () => {
     root.render(
       <RepoChangeRequestSection
         repo={shownRepo}
         now={0}
+        focusedWorktree={focusedWorktree}
         onRevealWorktree={onRevealWorktree}
         onCreateWorktree={onCreateWorktree}
         onOpenBrowser={() => undefined}
@@ -539,5 +543,57 @@ describe("parity with the refs browser's Pull requests tab", () => {
     await act(async () => container.querySelector<HTMLElement>(".ref-checkout-chip")?.click());
     expect(onRevealWorktree).toHaveBeenCalledWith("wt-9");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // The chip follows the worktree that holds the head, as a branch row's does:
+  // the house for the primary checkout, the worktree mark for a linked one,
+  // and filled only where that worktree is the working target.
+  const chip = (): HTMLElement => container.querySelector<HTMLElement>(".ref-checkout-chip")!;
+  const mark = (): "worktree" | "house" =>
+    chip().querySelector("svg rect") === null ? "house" : "worktree";
+
+  it("draws a linked worktree's mark for a head a linked worktree holds", async () => {
+    await render();
+    expect(mark()).toBe("worktree");
+    expect(chip().classList.contains("is-here")).toBe(false);
+    expect(chip().getAttribute("aria-label")).toBe(
+      "Go to orbit-feat-plan, which has #376 checked out"
+    );
+
+    await render(repo, repo.worktrees[1]!);
+    expect(chip().classList.contains("is-here")).toBe(true);
+    expect(chip().getAttribute("aria-label")).toBe(
+      "#376 is checked out here, in orbit-feat-plan"
+    );
+  });
+
+  it("draws the house for a head the primary checkout holds, on both surfaces", async () => {
+    const primaryHeld: Repo = { ...repo, worktrees: [worktree("wt-9", "feat/plan", true)] };
+    await render(primaryHeld);
+    expect(mark()).toBe("house");
+
+    await act(async () => {
+      root.render(
+        <ChangeRequestTable
+          repoId="repo-1"
+          repoName={repo.name}
+          worktrees={primaryHeld.worktrees}
+          forge="github"
+          list={list}
+          matches={list.entries}
+          error={null}
+          query=""
+          lookup={{ state: "idle" }}
+          now={0}
+          focusedWorktree={null}
+          switching={null}
+          onSwitch={() => Promise.resolve()}
+          onRevealWorktree={onRevealWorktree}
+          onCreateWorktree={onCreateWorktree}
+          onClose={onClose}
+        />
+      );
+    });
+    expect(mark()).toBe("house");
   });
 });

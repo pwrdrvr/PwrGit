@@ -1,10 +1,42 @@
 import type { Worktree } from "@pwrgit/shared";
+import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { hoverTooltip, type ViewportTooltip } from "../../lib/useViewportTooltip";
+import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import { lastSegment, worktreeFolderLabel } from "./repo-view";
 
 /**
- * Which worktree holds a ref, and the way there: ⌂ for the primary checkout,
- * ⑂ for a linked one, then the folder. Filled when that worktree is the
+ * The refs browser's "Show worktree": its name and card say which folder it
+ * goes to, where the holder is known. The tree can lag the ref listing, and
+ * then it is the bare verb.
+ */
+export function ShowWorktreeButton({
+  holder,
+  tip,
+  onClick
+}: {
+  holder: Worktree | undefined;
+  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="refs-row-action"
+      {...(holder === undefined
+        ? {}
+        : {
+            "aria-label": `Show worktree ${lastSegment(holder.path)}`,
+            ...hoverTooltip(tip, holder.path)
+          })}
+      onClick={onClick}
+    >
+      Show worktree
+    </button>
+  );
+}
+
+/**
+ * Which worktree holds a ref, and the way there: the house (`CheckoutGlyph`)
+ * for the primary checkout, `WorktreeGlyph` for a linked one, then the folder. Filled when that worktree is the
  * working target, outlined when it is some other checkout.
  *
  * It names the WORKTREE, by its folder: branch and worktree are 1:1, so
@@ -12,7 +44,10 @@ import { lastSegment, worktreeFolderLabel } from "./repo-view";
  * when it adds nothing — a directory named after the branch, or the primary
  * checkout's repo folder — and the glyph alone still says which checkout it is.
  *
- * The sidebar's branch rows and the refs browser draw the same chip, so a
+ * Drawn, not typed: the `⌂`/`⑂` characters this replaced are in neither
+ * bundled face, so an OS fallback font drew them, out of weight with the label.
+ *
+ * The sidebar's branch and PR rows and the refs browser draw the same chip, so a
  * "Show worktree" in the browser says which one, as the short list does.
  * There it fills an action slot of its own, and a glyph alone in a
  * button-sized box reads as an empty button — so it always spells the folder.
@@ -56,7 +91,7 @@ export function WorktreeHolderChip({
         onReveal(holder.id);
       }}
     >
-      <span aria-hidden="true">{holder.isPrimary ? "⌂" : "⑂"}</span>
+      {holder.isPrimary ? <CheckoutGlyph size={11} /> : <WorktreeGlyph size={11} />}
       {folder !== null && folder !== "" && (
         <span className="ref-checkout-chip__name">{folder}</span>
       )}

@@ -643,14 +643,15 @@ describe("parity with the sidebar's rows", () => {
 
   async function show(
     initialTab: "branches" | "remotes" | "changeRequests",
-    shownRefs: RepoRefs = held
+    shownRefs: RepoRefs = held,
+    focused: Worktree | null = primary
   ): Promise<void> {
     await act(async () => {
       root.render(
         <RepoRefsModal
           repo={withWorktrees}
           refs={shownRefs}
-          focusedWorktree={primary}
+          focusedWorktree={focused}
           now={0}
           initialTab={initialTab}
           onRefresh={() => undefined}
@@ -681,10 +682,14 @@ describe("parity with the sidebar's rows", () => {
   it("names the worktree a branch is checked out in, as the sidebar's chip does", async () => {
     await show("branches");
     const chip = labelled("Go to widget-review, which has dev checked out")!;
-    expect(chip.textContent).toBe("⑂widget-review");
+    expect(chip.textContent).toBe("widget-review");
+    expect(chip.querySelector("svg rect")).not.toBeNull();
     // In the action slot it always spells the folder, even the repo's own:
     // a glyph alone in a button-sized box reads as an empty button.
-    expect(labelled("main is checked out here, in widget")?.textContent).toBe("⌂widget");
+    const home = labelled("main is checked out here, in widget")!;
+    expect(home.textContent).toBe("widget");
+    // The primary checkout wears the house, not the linked worktree's box.
+    expect(home.querySelector("svg rect")).toBeNull();
     expect(labelled("Show worktree widget-review")?.textContent).toBe("Show worktree");
     // A free branch has no chip.
     expect(rowFor("spike").querySelector(".ref-checkout-chip")).toBeNull();
@@ -707,6 +712,18 @@ describe("parity with the sidebar's rows", () => {
     dev.focus();
     press(dev, "Enter");
     expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
+  });
+
+  it("does nothing on double-click when the row's primary is unavailable", async () => {
+    // No working target here: Switch here is disabled and says why.
+    await show("branches", held, null);
+    const spike = rowFor("spike");
+    expect(spike.querySelector<HTMLButtonElement>("[data-refs-primary] button")?.disabled).toBe(true);
+    dispatchMock.mockClear();
+    await doubleClick(spike.querySelector(".refs-copyable-name strong")!);
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(onCreateWorktree).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("leaves a double-click on a control inside the row to that control", async () => {
@@ -751,7 +768,8 @@ describe("parity with the sidebar's rows", () => {
     expect(chip.getAttribute("aria-label")).toBe(
       "Go to widget-review, which has #376 checked out"
     );
-    expect(chip.textContent).toBe("⑂widget-review");
+    expect(chip.textContent).toBe("widget-review");
+    expect(chip.querySelector("svg rect")).not.toBeNull();
     expect(labelled("Show worktree widget-review")).not.toBeNull();
 
     await doubleClick(plan.querySelector(".refs-pr-title")!);

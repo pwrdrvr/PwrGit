@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   changeRequestMatch,
   changeRequestNumberQuery,
@@ -24,7 +24,7 @@ import { RemoteChip } from "./RemoteChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { copyText } from "../../lib/copyText";
 import { lastSegment } from "./repo-view";
-import { WorktreeHolderChip } from "./WorktreeHolderChip";
+import { ShowWorktreeButton, WorktreeHolderChip } from "./WorktreeHolderChip";
 
 /**
  * New worktree from a ref. `changeRequest` rides along when the ref is an open
@@ -194,7 +194,10 @@ function locationTag(location: ChangeRequestLocation): {
   switch (location.kind) {
     case "worktree":
       return {
-        text: "⌂ worktree",
+        // No mark: the holder chip beside it draws the right one — the house
+        // for the primary checkout, the worktree mark for a linked one — and
+        // the `⌂` this tag used to carry said "home" for both.
+        text: "worktree",
         className: "is-worktree",
         hint: "Checked out in a worktree"
       };
@@ -362,6 +365,15 @@ export function ChangeRequestTable({
     lookup.state === "done" && lookup.entry !== null ? lookup.entry : null;
   const rows = looked === null ? matches : [looked, ...matches];
   const busy = fetching !== null || switching !== null;
+  const worktreesById = useMemo(
+    () => new Map(worktrees.map((worktree) => [worktree.id, worktree])),
+    [worktrees]
+  );
+  /** Going to a worktree is a navigation, so the browser closes. */
+  const reveal = (worktreeId: string): void => {
+    onRevealWorktree(worktreeId);
+    onClose();
+  };
 
   const act = async (
     entry: ChangeRequestEntry,
@@ -374,8 +386,7 @@ export function ChangeRequestTable({
     setFetching(null);
     if (location === null) return;
     if (location.kind === "worktree") {
-      onRevealWorktree(location.worktreeId);
-      onClose();
+      reveal(location.worktreeId);
       return;
     }
     if (location.kind === "missing") return;
@@ -430,12 +441,8 @@ export function ChangeRequestTable({
         // worktree the tree has not listed yet: no chip until it has.
         const holder =
           location.kind === "worktree"
-            ? worktrees.find((worktree) => worktree.id === location.worktreeId)
+            ? worktreesById.get(location.worktreeId)
             : undefined;
-        const reveal = (worktreeId: string): void => {
-          onRevealWorktree(worktreeId);
-          onClose();
-        };
         return (
           <div
             className={`refs-table__row refs-pr-table__row${isLookup ? " is-lookup" : ""}`}
@@ -498,18 +505,11 @@ export function ChangeRequestTable({
             <RefRowActions
               primary={
                 location.kind === "worktree" ? (
-                  <button
-                    className="refs-row-action"
-                    {...(holder === undefined
-                      ? {}
-                      : {
-                          "aria-label": `Show worktree ${lastSegment(holder.path)}`,
-                          ...hoverTooltip(tip, holder.path)
-                        })}
+                  <ShowWorktreeButton
+                    holder={holder}
+                    tip={tip}
                     onClick={() => reveal(location.worktreeId)}
-                  >
-                    Show worktree
-                  </button>
+                  />
                 ) : (
                   <button
                     className={`refs-row-action${quiet ? " refs-row-action--quiet" : ""}`}

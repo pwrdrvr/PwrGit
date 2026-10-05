@@ -1772,9 +1772,9 @@ a.forge-chip:focus-visible {
   background: var(--bg-panel-hover);
 }
 .refs-branch-icon {
+  display: inline-flex;
   flex: 0 0 auto;
   color: var(--text-subtle);
-  font: 600 12px/1 var(--font-mono);
 }
 .refs-tag-icon {
   flex: 0 0 auto;
@@ -1994,8 +1994,10 @@ a.forge-chip:focus-visible {
      detail of the PR above it, not a second item. */
   padding-left: 2px;
 }
+/* 104, not the tag's 96: the drawn mark is ~4px wider than the `⌂` it
+   replaced, and a folder that used to fit should still fit. */
 .ref-cr-row__where .ref-checkout-chip {
-  max-width: 96px;
+  max-width: 104px;
 }
 .ref-cr-tag {
   flex: 0 0 auto;
@@ -7802,6 +7804,9 @@ button.agent-menu__item:hover {
 /* A held branch's secondary slot is the chip naming its worktree, where the
    sidebar row draws it. Slot-sized, so it lines up with the buttons beside it
    and the New worktree it stands in for on a free row. */
+.ref-checkout-chip > svg {
+  flex: 0 0 auto;
+}
 .refs-row-slot > .ref-checkout-chip {
   justify-content: center;
   width: 100%;

@@ -26,7 +26,7 @@ list, so a sentence is punishing. `hitKindLabel()` is the one place it is
 spelled.
 
 Only four glyphs exist for five kinds: `isWorktreelessBranch()` sends both
-`local_branch` and `remote_branch` to `BranchIcon`, so those two rows are the
+`local_branch` and `remote_branch` to `BranchGlyph`, so those two rows are the
 identical drawing and only the label and `__meta` tell them apart. The fifth,
 `change_request` (an open PR whose head is not in the checkout), draws
 `ChangeRequestIcon` and says the forge's own noun — "Pull request" or "Merge

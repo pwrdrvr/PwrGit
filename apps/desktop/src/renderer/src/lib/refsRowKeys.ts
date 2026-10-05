@@ -20,13 +20,14 @@ const ROW = "[data-refs-row]";
 
 /**
  * A double-click on one of these is that control's own gesture, not the row's.
- * A `CopyTarget` (`.copyable`) is left out on purpose: it is the row's name,
- * the widest target on it, and the dialog's copy targets defer their copy so a
+ * A `CopyTarget` that defers its copy (`deferForDoubleClick`, which stamps
+ * `data-defers-double-click`) is left out on purpose: it is the row's name, the
+ * widest target on it, and its copy waits for the second click so a
  * double-click activates the row without touching the clipboard — as the
- * sidebar's branch name does.
+ * sidebar's branch name does. One that copies at once stays its own gesture.
  */
 const OWN_GESTURE =
-  'button, a[href], input, select, textarea, [role="button"]:not(.copyable), [role="menuitem"]';
+  'button, a[href], input, select, textarea, [role="button"]:not([data-defers-double-click]), [role="menuitem"]';
 
 /** The row's primary action, or null when it has none or it is unavailable. */
 function primaryAction(row: HTMLElement): HTMLButtonElement | null {

@@ -1,3 +1,4 @@
+import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { LocateGlyph } from "../../lib/LocateGlyph";
 import { PlusGlyph } from "../../lib/PlusGlyph";
@@ -504,6 +505,7 @@ export function RepoRefsSections({
       <RepoChangeRequestSection
         repo={repo}
         now={now}
+        focusedWorktree={focusedWorktree}
         onRevealWorktree={onRevealWorktree}
         onCreateWorktree={onCreateWorktree}
         onOpenBrowser={() => setBrowser("changeRequests")}
@@ -637,7 +639,9 @@ export function RepoRefsSections({
                     }}
                     onKeyDown={(event) => onBranchKeyDown(event, index, branch)}
                   >
-                    <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+                    <span className="refs-branch-icon">
+                      <BranchGlyph />
+                    </span>
                     <CopyTarget
                       value={branch.name}
                       label={`Copy branch name ${branch.name}`}
@@ -1070,7 +1074,9 @@ export function RepoRefsSections({
                             className="ref-remote-branch-row"
                             key={branch.fullName}
                           >
-                            <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+                            <span className="refs-branch-icon">
+                              <BranchGlyph />
+                            </span>
                             <CopyTarget
                               value={branch.name}
                               label={`Copy branch name ${branch.name}`}
