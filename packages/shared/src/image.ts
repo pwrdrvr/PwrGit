@@ -1,6 +1,6 @@
 // Image previews for binary diffs. A repository's `.png`/`.gif`/`.webp` blobs
 // carry no unified diff, so the diff pane fetches the bytes for each side and
-// hands them to an <img>. Chromium already decodes every format below, which
+// hands them to an <img> through a blob: URL. Chromium already decodes every format below, which
 // is why the app needs no image library — only a way to name the bytes.
 
 const MEDIA_TYPES = new Map<string, string>([
@@ -31,9 +31,9 @@ export function imageMediaType(path: string): string | null {
 }
 
 /**
- * Ceiling on a previewed blob. Base64 inflates by a third and the string is
- * copied across the IPC boundary, so a repository that keeps a 200 MB PSD-like
- * asset must not stall the renderer for a picture nobody can see anyway.
+ * Ceiling on a previewed blob. Every byte is copied across the IPC boundary and
+ * again into a Blob, so a repository that keeps a 200 MB PSD-like asset must
+ * not stall the renderer for a picture nobody can see anyway.
  */
 export const MAX_IMAGE_PREVIEW_BYTES = 16 * 1024 * 1024;
 
@@ -48,9 +48,14 @@ export type ImageRevision =
 /**
  * One side of an image diff. `missing` is the normal answer for the other side
  * of an add or a delete, not an error.
+ *
+ * `bytes` is the raw file. Electron's IPC structured-clones a typed array, so
+ * it arrives in the renderer as a Uint8Array with no base64 step on either
+ * side; anything that ever routes this through JSON instead would turn it
+ * into an index-keyed object, and must not.
  */
 export type ImagePreview =
-  | { kind: "image"; mediaType: string; base64: string; bytes: number }
+  | { kind: "image"; mediaType: string; bytes: Uint8Array<ArrayBuffer> }
   | { kind: "missing" }
-  | { kind: "tooLarge"; bytes: number }
+  | { kind: "tooLarge"; sizeBytes: number }
   | { kind: "lfsPointer" };

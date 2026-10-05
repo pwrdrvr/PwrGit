@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { DiffPlan } from "./pixel-diff";
 import { computePixelDiff } from "./pixel-diff-client";
 
@@ -23,22 +23,11 @@ export function usePixelDiff({
   plan
 }: {
   enabled: boolean;
-  before: string | null;
-  after: string | null;
+  before: Blob | null;
+  after: Blob | null;
   plan: DiffPlan | null;
 }): PixelDiff {
   const [state, setState] = useState<PixelDiff>({ kind: "idle" });
-  // Object URLs outlive the render that made them, so the previous one has to
-  // be released by hand or every toggle leaks a multi-megabyte PNG.
-  const objectUrl = useRef<string | null>(null);
-
-  const release = useCallback(() => {
-    if (objectUrl.current === null) return;
-    URL.revokeObjectURL(objectUrl.current);
-    objectUrl.current = null;
-  }, []);
-
-  useEffect(() => () => release(), [release]);
 
   const width = plan?.size.w ?? 0;
   const height = plan?.size.h ?? 0;
@@ -46,23 +35,24 @@ export function usePixelDiff({
 
   useEffect(() => {
     if (!enabled || before === null || after === null || fit === undefined) {
-      // Going idle drops the last PNG from the UI, so its blob URL has to go
-      // too — walking a diff otherwise pins every diff it computed for the
-      // whole session, since only unmount used to revoke.
-      release();
       setState({ kind: "idle" });
       return;
     }
     let active = true;
+    // The PNG's object URL is minted by the run that asked for it and revoked
+    // by that run's cleanup — a new comparison, going idle and unmounting all
+    // release it, and StrictMode's rehearsal unmount cannot revoke a URL the
+    // run after it is still showing. Walking a diff otherwise pinned every
+    // PNG it ever computed.
+    let src: string | null = null;
     setState({ kind: "working" });
     computePixelDiff({ before, after, width, height, fit }).then(
       (result) => {
         if (!active) return;
-        release();
-        objectUrl.current = URL.createObjectURL(result.png);
+        src = URL.createObjectURL(result.png);
         setState({
           kind: "ready",
-          src: objectUrl.current,
+          src,
           png: result.png,
           changed: result.changed,
           total: result.total
@@ -74,8 +64,9 @@ export function usePixelDiff({
     );
     return () => {
       active = false;
+      if (src !== null) URL.revokeObjectURL(src);
     };
-  }, [enabled, before, after, width, height, fit, release]);
+  }, [enabled, before, after, width, height, fit]);
 
   return state;
 }

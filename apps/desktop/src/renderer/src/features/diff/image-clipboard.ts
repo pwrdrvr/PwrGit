@@ -65,26 +65,51 @@ function token(name: string, fallback: string): string {
   return value === "" ? fallback : value;
 }
 
-async function decode(src: string): Promise<HTMLImageElement> {
-  const image = new Image();
-  image.src = src;
-  await image.decode();
-  return image;
+/**
+ * Decodes each Blob through an <img> and hands the elements to `draw`. An
+ * <img> rather than createImageBitmap, because Chromium will not build a
+ * bitmap from an SVG Blob, and an SVG that `.gitattributes` marks binary does
+ * reach this pane. Each URL is minted here
+ * and revoked here once drawing is done, so copying never depends on the
+ * lifetime of the URL the picture is being displayed through.
+ */
+async function withDecoded<T>(
+  blobs: readonly Blob[],
+  draw: (images: HTMLImageElement[]) => T
+): Promise<T> {
+  const urls = blobs.map((blob) => URL.createObjectURL(blob));
+  try {
+    const images = await Promise.all(
+      urls.map(async (url) => {
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        return image;
+      })
+    );
+    return draw(images);
+  } finally {
+    for (const url of urls) URL.revokeObjectURL(url);
+  }
 }
 
 /** One revision, re-encoded, with nothing added around it. */
-export async function encodePng(src: string): Promise<Blob> {
-  const image = await decode(src);
+export async function encodePng(blob: Blob): Promise<Blob> {
+  return toBlob(await withDecoded([blob], ([image]) => drawAlone(image)));
+}
+
+function drawAlone(image: HTMLImageElement | undefined): HTMLCanvasElement {
+  if (image === undefined) throw new Error("nothing decoded");
   const canvas = document.createElement("canvas");
   canvas.width = image.naturalWidth;
   canvas.height = image.naturalHeight;
   const context = canvas.getContext("2d");
   if (context === null) throw new Error("no 2d context");
   context.drawImage(image, 0, 0);
-  return toBlob(canvas);
+  return canvas;
 }
 
-export type StripPanel = { label: string; src: string };
+export type StripPanel = { label: string; blob: Blob };
 
 /**
  * Several revisions in one picture, each captioned. Captions are the point: a
@@ -94,7 +119,17 @@ export type StripPanel = { label: string; src: string };
 export async function composeStrip(
   panels: readonly StripPanel[]
 ): Promise<Blob> {
-  const decoded = await Promise.all(panels.map((panel) => decode(panel.src)));
+  const canvas = await withDecoded(
+    panels.map((panel) => panel.blob),
+    (decoded) => drawStrip(panels, decoded)
+  );
+  return toBlob(canvas);
+}
+
+function drawStrip(
+  panels: readonly StripPanel[],
+  decoded: readonly HTMLImageElement[]
+): HTMLCanvasElement {
   // Drop the undrawable ones HERE, not inside stripLayout: it returns a box
   // per usable panel, so pairing its boxes with the original array by index
   // put every panel after a 0x0 one into its neighbour's slot.
@@ -134,7 +169,7 @@ export async function composeStrip(
     context.fillText(entry.panel.label, box.x, STRIP_PAD + STRIP_LABEL_BAND - 8);
     context.drawImage(entry.image, box.x, box.y, box.w, box.h);
   });
-  return toBlob(canvas);
+  return canvas;
 }
 
 function toBlob(canvas: HTMLCanvasElement): Promise<Blob> {

@@ -23,6 +23,7 @@ import { planDiff } from "./pixel-diff";
 import { computePixelDiff } from "./pixel-diff-client";
 import { usePixelDiff } from "./use-pixel-diff";
 import {
+  blobOf,
   sourceOf,
   useImageRevisions,
   type ImageDiffRevisions,
@@ -129,15 +130,14 @@ export function ImageLightbox({
 
   const beforeExtent = extentOf("before");
   const afterExtent = extentOf("after");
-  // Built once per fetch: `sourceOf` concatenates the entire base64 payload,
-  // and these go straight into usePixelDiff's dependency array.
-  const { before: beforeSrc, after: afterSrc } = useMemo(
-    () => ({
-      before: sourceOf(states.before),
-      after: sourceOf(states.after)
-    }),
-    [states]
-  );
+  // This lightbox's own blob URLs — useImageRevisions minted them from the
+  // row's Blobs rather than borrowing the row's URLs, so closing or walking
+  // never depends on the row staying mounted. The Blobs are what the pixel
+  // diff and the copy menu read; they stay valid whatever happens to a URL.
+  const beforeSrc = sourceOf(states.before);
+  const afterSrc = sourceOf(states.after);
+  const beforeBlob = blobOf(states.before);
+  const afterBlob = blobOf(states.after);
 
   const reference = useMemo(
     () => referenceExtent([beforeExtent, afterExtent]),
@@ -165,8 +165,8 @@ export function ImageLightbox({
 
   const diff = usePixelDiff({
     enabled: diffed[path] === true,
-    before: beforeSrc,
-    after: afterSrc,
+    before: beforeBlob,
+    after: afterBlob,
     plan
   });
 
@@ -270,14 +270,14 @@ export function ImageLightbox({
           : ""
       : sideSrc === null
         ? noteFor(side)
-        : `${sideExtent === null ? "" : `${sideExtent.w}×${sideExtent.h} · `}${side.kind === "image" ? formatBytes(side.bytes) : ""}`;
+        : `${sideExtent === null ? "" : `${sideExtent.w}×${sideExtent.h} · `}${side.kind === "image" ? formatBytes(side.blob.size) : ""}`;
   // `stretch` draws each revision across the whole reference box; `anchor`
   // draws it at natural size in the corner, which is what the diff itself did.
   const fills = plan === null || plan.fit === "stretch";
 
   const makeDiff =
-    beforeSrc !== null &&
-    afterSrc !== null &&
+    beforeBlob !== null &&
+    afterBlob !== null &&
     beforeExtent !== null &&
     afterExtent !== null
       ? async (): Promise<Blob> => {
@@ -288,8 +288,8 @@ export function ImageLightbox({
             stretch ?? undefined
           );
           const result = await computePixelDiff({
-            before: beforeSrc,
-            after: afterSrc,
+            before: beforeBlob,
+            after: afterBlob,
             width: fresh.size.w,
             height: fresh.size.h,
             fit: fresh.fit
@@ -385,7 +385,7 @@ export function ImageLightbox({
           onPointerDown={onPointerDown}
           onDoubleClick={() => (atFit ? actual() : fit())}
           onContextMenu={(event: ReactMouseEvent<HTMLDivElement>) => {
-            if (beforeSrc === null && afterSrc === null) return;
+            if (beforeBlob === null && afterBlob === null) return;
             event.preventDefault();
             setMenu({ x: event.clientX, y: event.clientY });
           }}
@@ -540,8 +540,9 @@ export function ImageLightbox({
           label={`Copy ${file.path}`}
           items={buildImageCopyMenu({
             before:
-              beforeSrc === null ? null : { label: "before", src: beforeSrc },
-            after: afterSrc === null ? null : { label: "after", src: afterSrc },
+              beforeBlob === null ? null : { label: "before", blob: beforeBlob },
+            after:
+              afterBlob === null ? null : { label: "after", blob: afterBlob },
             diff: makeDiff,
             onResult: say
           })}
