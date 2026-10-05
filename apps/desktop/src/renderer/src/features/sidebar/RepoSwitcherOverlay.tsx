@@ -13,6 +13,7 @@ import {
   type SearchHitStatus
 } from "@pwrgit/shared";
 import { createAsyncFill } from "../../lib/asyncFill";
+import { BranchGlyph } from "../../lib/BranchGlyph";
 import { copyText } from "../../lib/copyText";
 import {
   currentPlatform,
@@ -22,6 +23,7 @@ import {
 } from "../../lib/platform";
 import { dispatch, subscribe, windowProfileId } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
+import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -291,27 +293,6 @@ function FileIcon() {
     >
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
       <path d="M14 3v5h5" />
-    </svg>
-  );
-}
-
-function BranchIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="6" cy="5" r="2" />
-      <circle cx="6" cy="19" r="2" />
-      <circle cx="18" cy="8" r="2" />
-      <path d="M6 7v10M8 17c5 0 8-2 8-7" />
     </svg>
   );
 }
@@ -1077,26 +1058,11 @@ export function RepoSwitcherOverlay({
                 {...hoverTooltip(tip, hitKindLabel(r))}
               >
                 {isWorktreelessBranch(r) ? (
-                  <BranchIcon />
+                  <BranchGlyph size={15} />
                 ) : r.kind === "change_request" ? (
                   <ChangeRequestIcon />
                 ) : r.kind === "worktree" ? (
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M6 3v12" />
-                    <circle cx="6" cy="18" r="3" />
-                    <circle cx="18" cy="6" r="3" />
-                    <path d="M18 9c0 6-6 6-6 12" />
-                  </svg>
+                  <WorktreeGlyph size={15} />
                 ) : (
                   <svg
                     width="15"

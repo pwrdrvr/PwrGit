@@ -1823,9 +1823,9 @@ a.forge-chip:focus-visible {
   background: var(--bg-panel-hover);
 }
 .refs-branch-icon {
+  display: inline-flex;
   flex: 0 0 auto;
   color: var(--text-subtle);
-  font: 600 12px/1 var(--font-mono);
 }
 .refs-tag-icon {
   flex: 0 0 auto;
@@ -2054,8 +2054,10 @@ a.forge-chip:focus-visible {
      detail of the PR above it, not a second item. */
   padding-left: 2px;
 }
+/* 104, not the tag's 96: the drawn mark is ~4px wider than the `⌂` it
+   replaced, and a folder that used to fit should still fit. */
 .ref-cr-row__where .ref-checkout-chip {
-  max-width: 96px;
+  max-width: 104px;
 }
 .ref-cr-tag {
   flex: 0 0 auto;
@@ -7875,9 +7877,10 @@ button.agent-menu__item:hover {
   color: var(--accent);
 }
 /* A row is a focus stop (↑/↓ walks them, Space pins, Enter runs the primary
-   action — lib/refsRowKeys.ts). Inset, because the body scrolls and clips an
-   outline drawn outside the row. */
-.refs-table__row[data-refs-row]:focus-visible {
+   action — lib/refsRowKeys.ts), on the tables and on each remote card's list
+   alike. Inset, because the body scrolls and clips an outline drawn outside
+   the row. */
+[data-refs-row]:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
   scroll-margin: 4px;
@@ -7900,6 +7903,23 @@ button.agent-menu__item:hover {
 .refs-row-slot > .refs-row-action {
   width: 100%;
   white-space: nowrap;
+}
+/* A held branch's secondary slot is the chip naming its worktree, where the
+   sidebar row draws it. Slot-sized, so it lines up with the buttons beside it
+   and the New worktree it stands in for on a free row. */
+.ref-checkout-chip > svg {
+  flex: 0 0 auto;
+}
+.refs-row-slot > .ref-checkout-chip {
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 7px;
+  /* The buttons' face: a folder name fits ~40% more of itself than in mono. */
+  font: 600 10.5px/1 var(--font-sans);
 }
 /* The kebab stands at the row buttons' own 30px height, not the sidebar row's
    24px, or it reads as a smaller class of control beside them. */
@@ -8070,6 +8090,11 @@ button.agent-menu__item:hover {
   max-height: 280px;
   overflow: auto;
 }
+/* Marks the remote row's leading action for Enter and double-click; it takes
+   no box, so the actions keep laying out as one flex row. */
+.refs-remote-branch__primary {
+  display: contents;
+}
 .refs-remote-branch {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 80px 112px;
@@ -8123,7 +8148,8 @@ button.agent-menu__item:hover {
   opacity: 0.55;
 }
 
-/* A branch row's name shares its line with the PR chip. */
+/* A branch row's name shares its line with the PR chip and the chip naming
+   the worktree that holds it. */
 .refs-branch-name-line {
   display: flex;
   align-items: center;

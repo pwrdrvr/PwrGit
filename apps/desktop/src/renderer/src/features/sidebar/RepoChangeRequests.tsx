@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   changeRequestMatch,
   changeRequestNumberQuery,
@@ -24,6 +24,19 @@ import { RemoteChip } from "./RemoteChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { copyText } from "../../lib/copyText";
 import { lastSegment } from "./repo-view";
+import { ShowWorktreeButton, WorktreeHolderChip } from "./WorktreeHolderChip";
+
+/**
+ * New worktree from a ref. `changeRequest` rides along when the ref is an open
+ * PR's head, so `NewWorktreeModal` can say which one it is checking out — from
+ * the sidebar's + and from the refs browser's New worktree alike.
+ */
+export type CreateWorktreeFromRef = (
+  branch: string,
+  newBranch: boolean,
+  startPoint?: string,
+  changeRequest?: OpenChangeRequest
+) => void;
 
 /**
  * A repository's open change requests, read from main's cache.
@@ -181,7 +194,10 @@ function locationTag(location: ChangeRequestLocation): {
   switch (location.kind) {
     case "worktree":
       return {
-        text: "⌂ worktree",
+        // No mark: the holder chip beside it draws the right one — the house
+        // for the primary checkout, the worktree mark for a linked one — and
+        // the `⌂` this tag used to carry said "home" for both.
+        text: "worktree",
         className: "is-worktree",
         hint: "Checked out in a worktree"
       };
@@ -301,6 +317,8 @@ export async function reachableLocation(
  */
 export function ChangeRequestTable({
   repoId,
+  repoName,
+  worktrees,
   forge,
   list,
   matches,
@@ -316,6 +334,9 @@ export function ChangeRequestTable({
   onClose
 }: {
   repoId: string;
+  repoName: string;
+  /** The repository's worktrees, to name the one holding a head. */
+  worktrees: readonly Worktree[];
   forge: ForgeKind;
   list: ChangeRequestList;
   /** `filterChangeRequests(list.entries, query)` — the same array the tab
@@ -330,11 +351,7 @@ export function ChangeRequestTable({
   switching: string | null;
   onSwitch: (rowKey: string, branch: string) => Promise<void>;
   onRevealWorktree: (worktreeId: string) => void;
-  onCreateWorktree: (
-    branch: string,
-    newBranch: boolean,
-    startPoint?: string
-  ) => void;
+  onCreateWorktree: CreateWorktreeFromRef;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
@@ -348,6 +365,15 @@ export function ChangeRequestTable({
     lookup.state === "done" && lookup.entry !== null ? lookup.entry : null;
   const rows = looked === null ? matches : [looked, ...matches];
   const busy = fetching !== null || switching !== null;
+  const worktreesById = useMemo(
+    () => new Map(worktrees.map((worktree) => [worktree.id, worktree])),
+    [worktrees]
+  );
+  /** Going to a worktree is a navigation, so the browser closes. */
+  const reveal = (worktreeId: string): void => {
+    onRevealWorktree(worktreeId);
+    onClose();
+  };
 
   const act = async (
     entry: ChangeRequestEntry,
@@ -360,8 +386,7 @@ export function ChangeRequestTable({
     setFetching(null);
     if (location === null) return;
     if (location.kind === "worktree") {
-      onRevealWorktree(location.worktreeId);
-      onClose();
+      reveal(location.worktreeId);
       return;
     }
     if (location.kind === "missing") return;
@@ -372,7 +397,7 @@ export function ChangeRequestTable({
     }
     const args = worktreeArgsFor(location);
     if (args === null) return;
-    onCreateWorktree(args.branch, args.newBranch, args.startPoint);
+    onCreateWorktree(args.branch, args.newBranch, args.startPoint, entry.pr);
     onClose();
   };
 
@@ -412,6 +437,12 @@ export function ChangeRequestTable({
         const switchingThis = switching === rowKey;
         const quiet = pr.state !== "open";
         const head = pr.headRefName ?? (location.kind === "fork" ? location.localBranch : "—");
+        // The list locates heads from the branch index, which can name a
+        // worktree the tree has not listed yet: no chip until it has.
+        const holder =
+          location.kind === "worktree"
+            ? worktreesById.get(location.worktreeId)
+            : undefined;
         return (
           <div
             className={`refs-table__row refs-pr-table__row${isLookup ? " is-lookup" : ""}`}
@@ -450,6 +481,7 @@ export function ChangeRequestTable({
                         : `${head}\nClick to copy branch name`
                     }
                     className="refs-copyable-name copyable"
+                    deferForDoubleClick
                   >
                     <span className="refs-copyable-name__text">
                       {location.kind === "fork"
@@ -473,15 +505,11 @@ export function ChangeRequestTable({
             <RefRowActions
               primary={
                 location.kind === "worktree" ? (
-                  <button
-                    className="refs-row-action"
-                    onClick={() => {
-                      onRevealWorktree(location.worktreeId);
-                      onClose();
-                    }}
-                  >
-                    Show worktree
-                  </button>
+                  <ShowWorktreeButton
+                    holder={holder}
+                    tip={tip}
+                    onClick={() => reveal(location.worktreeId)}
+                  />
                 ) : (
                   <button
                     className={`refs-row-action${quiet ? " refs-row-action--quiet" : ""}`}
@@ -510,8 +538,22 @@ export function ChangeRequestTable({
                   </button>
                 )
               }
+              // A held head's chip names the worktree, where the branch rows
+              // and the sidebar draw it.
               secondary={
-                location.kind === "worktree" ? undefined : (
+                location.kind === "worktree" ? (
+                  holder !== undefined && (
+                    <WorktreeHolderChip
+                      holder={holder}
+                      here={holder.id === focusedWorktree?.id}
+                      subject={`#${pr.number}`}
+                      repoName={repoName}
+                      alwaysNameFolder
+                      tip={tip}
+                      onReveal={reveal}
+                    />
+                  )
+                ) : (
                   <button
                     className="refs-row-action refs-row-action--quiet"
                     aria-label={

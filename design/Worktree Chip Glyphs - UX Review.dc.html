@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit styles/tokens.css, restated short (dark). */
+          :root {
+            --bg-panel: #0a0a0a; --bg-menu: #101010;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --bad: #b94232; --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 420px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          .stage { display: flex; flex-direction: column; gap: 12px; width: 300px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 300px; }
+          .verd { display: flex; align-items: center; gap: 7px; font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verd.out { color: var(--badt); } .verd.in { color: var(--okt); } .verd.maybe { color: var(--tsub); }
+
+          /* Specimens, true size from styles/app.css: .ref-branch-row's icon
+             is --text-subtle at 12px; .ref-checkout-chip is 600 10px mono,
+             height 17px, padding 0 5px, radius 5px, --text-muted on a subtle
+             border; .is-here fills with the accent tint. The refs browser's
+             slot variant is 104px x 30px, 600 10.5px sans. */
+          .side { display: flex; flex-direction: column; gap: 9px; }
+          .brow { display: flex; align-items: center; gap: 6px; height: 20px; }
+          .bico { display: inline-flex; color: var(--tsub); }
+          .bname { font: 500 13px/1 var(--mono); color: var(--t2); }
+          .chip { display: inline-flex; align-items: center; gap: 4px; height: 17px; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; color: var(--t3); font: 600 10px/1 var(--mono); white-space: nowrap; }
+          .chip.here { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .chip.slot { justify-content: center; width: 104px; height: 30px; padding: 0 9px; border-radius: 7px; font: 600 10.5px/1 var(--sans); }
+          .cg { display: inline-flex; }
+          /* The shipped marks are text; let them fall back as they do in the app. */
+          .txt { font: 600 12px/1 var(--mono); }
+          .chip .txt { font: inherit; }
+          .stage.mag { width: 940px; height: 400px; overflow: hidden; }
+          .magin { transform: scale(3); transform-origin: 0 0; width: 300px; display: flex; flex-direction: column; gap: 12px; }
+          .slots { display: flex; gap: 8px; }
+
+          .find { width: 392px; display: flex; flex-direction: column; gap: 11px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .tbl { width: 560px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 170px 90px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr .g { display: inline-flex; align-items: center; gap: 6px; color: var(--t2); }
+        </style>
+      </helmet>
+
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the worktree chip draws its marks with text characters</span>
+        </div>
+        <p class="dv-sub">The chip that says which worktree holds a branch (sidebar branch rows, sidebar PR rows, and since #398 the refs browser) leads with <code>&#8962;</code> for the primary checkout and <code>&#9282;</code> for a linked worktree. Both are Unicode characters, not glyphs. The same <code>&#9282;</code> is also the leading icon on every branch row. Specimens use contrived names. Source: <code>WorktreeHolderChip.tsx</code>, <code>RepoChangeRequestSection.tsx</code>, <code>RepoRefsSections.tsx</code>.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Shipped">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>As shipped, drawn live with the shipped characters</div>
+            <div class="stage"><div class="side"><div class="brow"><span class="bico txt">&#9282;</span><span class="bname">feat/plan-view</span><span class="chip"><span class="cg txt">&#9282;</span><span class="cname">orbit-review</span></span></div><div class="brow"><span class="bico txt">&#9282;</span><span class="bname">main</span><span class="chip here"><span class="cg txt">&#8962;</span></span></div><div class="brow"><span class="bico txt">&#9282;</span><span class="bname">fix/audit-export</span><span class="chip"><span class="cg txt">&#9282;</span></span></div></div><div class="slots"><span class="chip slot"><span class="cg txt">&#9282;</span><span class="cname">orbit-review</span></span><span class="chip here slot"><span class="cg txt">&#8962;</span><span class="cname">orbit</span></span></div></div>
+            <p class="note">These are the real characters, not pictures of them, so this card shows whatever fallback font <em>your</em> OS picks &#8212; which is the point. The chip and row styles are restated from <code>app.css</code>; the names are Geist Mono.</p>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Magnified">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The same rows scaled 3&#215;</div>
+            <div class="stage mag"><div class="magin"><div class="side"><div class="brow"><span class="bico txt">&#9282;</span><span class="bname">feat/plan-view</span><span class="chip"><span class="cg txt">&#9282;</span><span class="cname">orbit-review</span></span></div><div class="brow"><span class="bico txt">&#9282;</span><span class="bname">main</span><span class="chip here"><span class="cg txt">&#8962;</span></span></div><div class="brow"><span class="bico txt">&#9282;</span><span class="bname">fix/audit-export</span><span class="chip"><span class="cg txt">&#9282;</span></span></div></div><div class="slots"><span class="chip slot"><span class="cg txt">&#9282;</span><span class="cname">orbit-review</span></span><span class="chip here slot"><span class="cg txt">&#8962;</span><span class="cname">orbit</span></span></div></div></div>
+            <p class="note">A vector scale, not a raster, so it flatters them; it still shows a mark from another typeface: the fork is a thin hairline set low against the mono names beside it, and the house is narrower than a letter. In the app at 1&#215; the fork is a two-pixel scratch.</p>
+          </div>
+          <div class="dv-opt" id="1c" data-screen-label="1c Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>What is wrong</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div>
+                <h4>Neither character is in the bundled faces</h4>
+                <p><code>&#9282;</code> is U+2442 OCR FORK and <code>&#8962;</code> is U+2302. Geist Mono&#8217;s subsets do not cover either range, and measured in Chromium both characters have the identical advance in Geist Sans and Geist Mono (23.52 and 24.09&#8239;px at 40&#8239;px, where <code>a</code> differs) &#8212; one OS fallback font draws them in both. So weight, size and baseline come from some other font and change per platform, the same reason <code>styles/AGENTS.md</code> bans <code>&#8635;</code> for refresh.</p>
+              </div></div>
+              <div class="fitem"><span class="pin">2</span><div>
+                <h4>The sidebar&#8217;s PR chip always says &#8220;primary, here&#8221;</h4>
+                <p>It draws <code>&#8962;</code> and the filled <code>is-here</code> treatment for every PR whose head is checked out, even in a linked worktree that is not the working target. The branch chip beside it gets both right. The refs browser follows the branch chip, so the two surfaces disagree.</p>
+              </div></div>
+              <div class="fitem"><span class="pin">3</span><div>
+                <h4>The SVG family is split too</h4>
+                <p><code>CheckoutGlyph</code> is the house the lineage graph&#8217;s ref chips and the sidebar&#8217;s remote rows draw for &#8220;checked out&#8221;. But &#8220;branch&#8221; has two drawings: the graph&#8217;s ref chips use Lucide&#8217;s git-branch (<code>GraphRow</code>&#8217;s <code>BranchGlyph</code>), the &#8984;K palette&#8217;s branch rows use a custom one (<code>BranchIcon</code>) &#8212; and the palette draws its <em>worktree</em> rows with the graph&#8217;s branch. One drawing means branch in one place and worktree in another.</p>
+              </div></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;which other controls draw a text character as an icon?&#8221; (tracked separately: &#10003; &#10005; &#215; &#9679; &#8981; # &#9656; &#9662; &#9888; &#8599;)</p>
+      </section>
+
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Options &#8212; one row of the house family for primary, linked, and the branch beside them</span>
+        </div>
+        <p class="dv-sub">Every option replaces the leading branch character with the graph&#8217;s branch (Lucide git-branch, as its ref chips draw it) and the primary mark with <code>CheckoutGlyph</code>; they differ in the linked worktree. Each is drawn with the branch icon in the same row, because that is the neighbour the chip has to read apart from (&#8220;A 15&#8239;px glyph separates by silhouette&#8221;). Top: sidebar rows at 10&#8239;px. Bottom: the refs browser&#8217;s action-slot chip at 12&#8239;px.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a House for both">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>House for both</div>
+            <div class="stage"><div class="side"><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">feat/plan-view</span><span class="chip"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span><span class="cname">orbit-review</span></span></div><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">main</span><span class="chip here"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span></span></div><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">fix/audit-export</span><span class="chip"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span></span></div></div><div class="slots"><span class="chip slot"><span class="cg"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span><span class="cname">orbit-review</span></span><span class="chip here slot"><span class="cg"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span><span class="cname">orbit</span></span></div></div>
+            <div class="verd maybe">Viable, loses a fact</div>
+            <p class="note">One mark meaning &#8220;checked out&#8221;, which is exactly the graph&#8217;s vocabulary. But the chip was built to say primary vs linked, and where the folder is left off (a folder named after the branch) <code>fix/audit-export</code>&#8217;s chip becomes indistinguishable from <code>main</code>&#8217;s except by the working-target fill.</p>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b House + the palette&#8217;s shipped worktree mark">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>House + the palette&#8217;s shipped worktree mark</div>
+            <div class="stage"><div class="side"><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">feat/plan-view</span><span class="chip"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="cname">orbit-review</span></span></div><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">main</span><span class="chip here"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span></span></div><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">fix/audit-export</span><span class="chip"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span></span></div></div><div class="slots"><span class="chip slot"><span class="cg"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="cname">orbit-review</span></span><span class="chip here slot"><span class="cg"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span><span class="cname">orbit</span></span></div></div>
+            <div class="verd out">Rejected</div>
+            <p class="note">The palette&#8217;s worktree mark is not just similar to the branch icon at the start of the row &#8212; it is the same drawing, because both are the graph&#8217;s git-branch. The palette review documented the near-miss as its finding&nbsp;1; side by side in one row it is an exact repeat.</p>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c House + the palette review&#8217;s proposed worktree (3a)">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>House + the palette review&#8217;s proposed worktree (3a)</div>
+            <div class="stage"><div class="side"><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">feat/plan-view</span><span class="chip"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span><span class="cname">orbit-review</span></span></div><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">main</span><span class="chip here"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span></span></div><div class="brow"><span class="bico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span class="bname">fix/audit-export</span><span class="chip"><span class="cg"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span></span></div></div><div class="slots"><span class="chip slot"><span class="cg"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span><span class="cname">orbit-review</span></span><span class="chip here slot"><span class="cg"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span><span class="cname">orbit</span></span></div></div>
+            <div class="verd in">Recommended</div>
+            <p class="note">A ref given a home: the branch&#8217;s stem and node entering a box. Closed and left-weighted, so it separates from the open branch icon beside it and from the house, and it keeps the branch&#8217;s own vocabulary. It is the mark <code>Palette Kind Glyphs</code> turn&nbsp;3 recommended for the palette&#8217;s worktree row.</p>
+          </div>
+          <div class="dv-opt" id="2d" data-screen-label="2d Where it lands">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Where 2c lands</div>
+            <div class="tbl">
+              <div class="tr head"><span>Surface</span><span>Mark</span><span>Rule</span></div>
+              <div class="tr"><span>Sidebar branch row, leading</span><span class="g"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span>The graph&#8217;s git-branch, replacing <code>&#9282;</code>; still takes the accent on the current row</span></div>
+              <div class="tr"><span>Sidebar remote branch row</span><span class="g"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span>Same mark as local, as the palette draws them today</span></div>
+              <div class="tr"><span>Refs browser branch rows</span><span class="g"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span>Branches tab and each remote card</span></div>
+              <div class="tr"><span>Holder chip, primary checkout</span><span class="g"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg></span><span><code>CheckoutGlyph</code>; filled only when it is the working target</span></div>
+              <div class="tr"><span>Holder chip, linked worktree</span><span class="g"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span><span>3a; filled only when it is the working target</span></div>
+              <div class="tr"><span>Sidebar PR row chip</span><span class="g"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span><span>The same component as the branch chip, so primary/linked and &#8220;here&#8221; follow the holder, not a constant</span></div>
+              <div class="tr"><span>Lineage graph ref chips</span><span class="g"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span>Unchanged &#8212; this is the drawing every other branch mark now matches; it moves to <code>lib/BranchGlyph.tsx</code></span></div>
+              <div class="tr"><span>&#8984;K palette, branch rows</span><span class="g"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3v12"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9c0 6-6 6-6 12"/></svg></span><span>The graph&#8217;s branch, replacing the custom <code>BranchIcon</code></span></div>
+              <div class="tr"><span>&#8984;K palette, worktree rows</span><span class="g"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="4.5" width="11.5" height="15" rx="3"/><path d="M3.6 12h5.4"/><circle cx="3.4" cy="12" r="1.7" fill="currentColor" stroke="none"/></svg></span><span>3a, which <code>Palette Kind Glyphs</code> turn&nbsp;3 recommended; otherwise its worktree rows would draw the branch</span></div>
+              <div class="tr"><span>Refs browser PR location tag</span><span class="g">&#8212;</span><span>The word alone. The holder chip beside it already draws the right mark; a house here said &#8220;home&#8221; next to a linked worktree&#8217;s chip (caught in the built screenshots)</span></div>
+            </div>
+            <p class="note">One family after this: <strong>branch</strong> is the graph&#8217;s git-branch everywhere, <strong>worktree</strong> is 3a everywhere, <strong>checked out / primary checkout</strong> is the house, and the <strong>repository</strong> keeps its folder. The palette&#8217;s local-vs-remote question (its turn&nbsp;4) is untouched.</p>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;give the remote branch its own mark (palette turn&nbsp;4)&#8221; &#183; &#8220;draw 2c in the light theme&#8221; &#183; &#8220;does 3a survive the squint test at 10&#8239;px?&#8221;</p>
+      </section>
+    </x-dc>
+  </body>
+</html>
