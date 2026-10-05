@@ -1469,7 +1469,8 @@ export function Sidebar({
           items={[
             {
               type: "item",
-              label: `${groupByFolder ? "✓ " : ""}Group by folder`,
+              label: "Group by folder",
+              checked: groupByFolder,
               onSelect: () => setGroupByFolder((value) => !value)
             }
           ]}

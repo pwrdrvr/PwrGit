@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit styles/tokens.css, restated short (dark). */
+          :root {
+            --bg-panel: #0a0a0a; --bg-menu: #101010;
+            --line: rgba(247, 243, 235, 0.1);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a; --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(95, 169, 105, 0.16);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+
+          /* ---- review chrome (matches "Palette Kind Glyphs - UX Review") ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 780px; text-wrap: pretty; }
+          .dv-sub code, .note code, .fitem code { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 420px; }
+          .lab { font: 500 10.5px/1.3 var(--sans); color: var(--t1); }
+          .fnt { font: 500 9.5px/1.4 var(--mono); color: var(--t3); }
+          .fb { color: var(--badt); } .wf { color: var(--okt); }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .st.keep { background: var(--oksoft); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.no { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+          .ch { font: 500 15px/1 var(--sans); color: var(--t1); text-align: center; }
+
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tbl > div { padding: 6px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); align-items: center; }
+          .tbl > div:last-child { border-bottom: 0; }
+          .tbl .head { font: 600 9px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tbl code { font: 500 9.5px var(--mono); color: var(--t3); }
+          .tr6 { display: grid; grid-template-columns: 170px 26px 64px 44px 44px 110px 1fr; gap: 10px; width: 760px; }
+          .tr3 { display: grid; grid-template-columns: 60px 210px 1fr; gap: 12px; width: 760px; }
+
+          /* Rasters: 1x captures, magnified by the browser with no smoothing. */
+          img.px { display: block; image-rendering: pixelated; background: #000; }
+          .rr, .pr, .ip, .pt { display: grid; gap: 14px; align-items: center; }
+          .rr { grid-template-columns: 190px auto; }
+          .pr { grid-template-columns: 170px auto auto; }
+          .ip { grid-template-columns: 150px auto auto; }
+          .pt { grid-template-columns: 150px auto; }
+          .col { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .colh { display: grid; gap: 14px; font: 600 9px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+
+          .find { width: 420px; display: flex; flex-direction: column; gap: 11px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .pin { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+
+          .gl { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; width: 380px; }
+          .gi { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 7px; background: var(--bg-menu); border: 1px solid var(--line); color: var(--t2); }
+          .gl b { font: 600 11px var(--mono); color: var(--t1); }
+          .gl p { margin: 3px 0 0; font: 400 10.5px/1.45 var(--sans); color: var(--t3); }
+
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--abord); border-radius: 9px; background: var(--bg-panel); }
+          .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+          .seg { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: #050505; }
+          .seg button { appearance: none; border: 0; padding: 4px 9px; border-radius: 5px; background: transparent; color: var(--t3); font: 600 9.5px/1 var(--mono); cursor: pointer; }
+          .seg button.on { background: var(--acc); color: var(--accon); }
+          .readout { font: 500 10px/1.5 var(--mono); color: var(--tsub); max-width: 420px; }
+          .gset { display: none; }
+          .set-ship .gset.s-ship, .set-prop .gset.s-prop { display: inline-flex; }
+          .blur img.px { filter: blur(1.1px); }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; twenty icons drawn as text, and 16 of them were never in our fonts</span>
+        </div>
+        <p class="dv-sub">Every control below drew its icon as a Unicode character rather than an SVG. The question for each was not &#8220;does it look odd&#8221; but &#8220;which font actually drew it&#8221;. Answered two ways: the bundled faces&#8217; <code>cmap</code> (Geist Sans latin, 538 codepoints; Geist Mono, every subset it loads), and <code>CSS.getPlatformFontsForNode</code> on the real components, mounted from <code>main</code> in headless Chromium on macOS against a fake <code>window.pwrgit</code>. Every repository, branch and path is invented.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Audit">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>The audit &#8212; the character, whether either face has it, the face it was set in, and what drew it</div>
+            <div class="tbl">
+              <div class="tr6 head"><span>Site</span><span>Char</span><span>Code</span><span>Sans</span><span>Mono</span><span>Set in</span><span>Drew in (macOS)</span></div>
+              <div class="tr6"><span class="lab">Refs browser · Close</span><b class="ch">×</b><code>U+00D7</code><span class="st keep">yes</span><span class="st keep">yes</span><span>Sans 500 20px</span><span class="wf">Geist Medium</span></div>
+<div class="tr6"><span class="lab">Refs browser · filter</span><b class="ch">⌕</b><code>U+2315</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans (inherited)</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Refs browser · tag row</span><b class="ch">#</b><code>U+0023</code><span class="st keep">yes</span><span class="st keep">yes</span><span>Mono 700 12px</span><span class="wf">Geist Mono SemiBold</span></div>
+<div class="tr6"><span class="lab">Toast · Dismiss</span><b class="ch">✕</b><code>U+2715</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans 600 11px</span><span class="fb">Zapf Dingbats</span></div>
+<div class="tr6"><span class="lab">Remote card · Dismiss</span><b class="ch">✕</b><code>U+2715</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans 600 11px</span><span class="fb">Zapf Dingbats</span></div>
+<div class="tr6"><span class="lab">Remote step · done</span><b class="ch">✓</b><code>U+2713</code><span class="st bug">no</span><span class="st bug">no</span><span>Mono 700 10px</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Remote step · running</span><b class="ch">●</b><code>U+25CF</code><span class="st keep">yes</span><span class="st bug">no</span><span>Mono 700 10px</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Remote step · failed</span><b class="ch">✕</b><code>U+2715</code><span class="st bug">no</span><span class="st bug">no</span><span>Mono 700 10px</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Proof ledger · ok</span><b class="ch">✓</b><code>U+2713</code><span class="st bug">no</span><span class="st bug">no</span><span>Mono 700 11px</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Proof ledger · bad</span><b class="ch">✕</b><code>U+2715</code><span class="st bug">no</span><span class="st bug">no</span><span>Mono 700 11px</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Proof ledger · not run</span><b class="ch">○</b><code>U+25CB</code><span class="st keep">yes</span><span class="st bug">no</span><span>Mono 700 11px</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Selection bar · Clear</span><b class="ch">×</b><code>U+00D7</code><span class="st keep">yes</span><span class="st keep">yes</span><span>Sans 600 13px</span><span class="wf">Geist SemiBold</span></div>
+<div class="tr6"><span class="lab">Route · refused push</span><b class="ch">×</b><code>U+00D7</code><span class="st keep">yes</span><span class="st keep">yes</span><span>Sans 700 9px</span><span class="wf">Geist Bold</span></div>
+<div class="tr6"><span class="lab">Sidebar options · toggle</span><b class="ch">✓</b><code>U+2713</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans 500 12px</span><span class="fb">Geist Medium, .SF NS</span></div>
+<div class="tr6"><span class="lab">Profile menu · Edit</span><b class="ch">⚙</b><code>U+2699</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans 13px</span><span class="fb">Menlo</span></div>
+<div class="tr6"><span class="lab">Profile menu · New</span><b class="ch">＋</b><code>U+FF0B</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans 13px</span><span class="fb">PingFang SC</span></div>
+<div class="tr6"><span class="lab">Worktree row · dirty</span><b class="ch">●</b><code>U+25CF</code><span class="st keep">yes</span><span class="st bug">no</span><span>Mono 600 10px</span><span class="fb">Menlo, Geist Mono SemiBold</span></div>
+<div class="tr6"><span class="lab">Onboarding · notice</span><b class="ch">ⓘ</b><code>U+24D8</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans 11.5px</span><span class="fb">Hiragino Sans</span></div>
+<div class="tr6"><span class="lab">Onboarding · warning</span><b class="ch">⚠</b><code>U+26A0</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans 11.5px</span><span class="fb">.SF NS</span></div>
+<div class="tr6"><span class="lab">Onboarding · remove folder</span><b class="ch">✕</b><code>U+2715</code><span class="st bug">no</span><span class="st bug">no</span><span>Sans (inherited)</span><span class="fb">Zapf Dingbats</span></div>
+            </div>
+            <p class="note">The characters in the second column are drawn by <em>your</em> browser, which is the point: they can differ from the macOS captures in 1b. Green is a bundled web font; red is whatever the OS had.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Raster">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>As shipped, captured at 1&#215; and magnified 10&#215; with no smoothing</div>
+            <div class="col">
+              <div class="rr"><div><div class="lab">Refs browser · Close</div><div class="fnt"><span class="wf">Geist Medium</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-refs-browser-close.png" style="zoom:10" alt="Refs browser · Close, text character" /></div>
+<div class="rr"><div><div class="lab">Refs browser · filter</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-refs-browser-filter.png" style="zoom:10" alt="Refs browser · filter, text character" /></div>
+<div class="rr"><div><div class="lab">Refs browser · tag row</div><div class="fnt"><span class="wf">Geist Mono SemiBold</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-refs-browser-tag-row.png" style="zoom:10" alt="Refs browser · tag row, text character" /></div>
+<div class="rr"><div><div class="lab">Toast · Dismiss</div><div class="fnt"><span class="fb">Zapf Dingbats</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-toast-dismiss.png" style="zoom:10" alt="Toast · Dismiss, text character" /></div>
+<div class="rr"><div><div class="lab">Remote card · Dismiss</div><div class="fnt"><span class="fb">Zapf Dingbats</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-card-dismiss.png" style="zoom:10" alt="Remote card · Dismiss, text character" /></div>
+<div class="rr"><div><div class="lab">Remote step · done</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-step-done.png" style="zoom:10" alt="Remote step · done, text character" /></div>
+<div class="rr"><div><div class="lab">Remote step · running</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-step-running.png" style="zoom:10" alt="Remote step · running, text character" /></div>
+<div class="rr"><div><div class="lab">Remote step · failed</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-step-failed.png" style="zoom:10" alt="Remote step · failed, text character" /></div>
+<div class="rr"><div><div class="lab">Proof ledger · ok</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-proof-ledger-ok.png" style="zoom:10" alt="Proof ledger · ok, text character" /></div>
+<div class="rr"><div><div class="lab">Proof ledger · bad</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-proof-ledger-bad.png" style="zoom:10" alt="Proof ledger · bad, text character" /></div>
+<div class="rr"><div><div class="lab">Proof ledger · not run</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-proof-ledger-not-run.png" style="zoom:10" alt="Proof ledger · not run, text character" /></div>
+<div class="rr"><div><div class="lab">Selection bar · Clear</div><div class="fnt"><span class="wf">Geist SemiBold</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-selection-bar-clear.png" style="zoom:10" alt="Selection bar · Clear, text character" /></div>
+<div class="rr"><div><div class="lab">Route · refused push</div><div class="fnt"><span class="wf">Geist Bold</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-route-refused-push.png" style="zoom:10" alt="Route · refused push, text character" /></div>
+<div class="rr"><div><div class="lab">Sidebar options · toggle</div><div class="fnt"><span class="fb">Geist Medium, .SF NS</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-sidebar-options-toggle.png" style="zoom:10" alt="Sidebar options · toggle, text character" /></div>
+<div class="rr"><div><div class="lab">Profile menu · Edit</div><div class="fnt"><span class="fb">Menlo</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-profile-menu-edit.png" style="zoom:10" alt="Profile menu · Edit, text character" /></div>
+<div class="rr"><div><div class="lab">Profile menu · New</div><div class="fnt"><span class="fb">PingFang SC</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-profile-menu-new.png" style="zoom:10" alt="Profile menu · New, text character" /></div>
+<div class="rr"><div><div class="lab">Worktree row · dirty</div><div class="fnt"><span class="fb">Menlo, Geist Mono SemiBold</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-worktree-row-dirty.png" style="zoom:10" alt="Worktree row · dirty, text character" /></div>
+<div class="rr"><div><div class="lab">Onboarding · notice</div><div class="fnt"><span class="fb">Hiragino Sans</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-onboarding-notice.png" style="zoom:10" alt="Onboarding · notice, text character" /></div>
+<div class="rr"><div><div class="lab">Onboarding · warning</div><div class="fnt"><span class="fb">.SF NS</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-onboarding-warning.png" style="zoom:10" alt="Onboarding · warning, text character" /></div>
+<div class="rr"><div><div class="lab">Onboarding · remove folder</div><div class="fnt"><span class="fb">Zapf Dingbats</span></div></div><img class="px" src="./assets/text-glyphs/raster-before-onboarding-remove-folder.png" style="zoom:10" alt="Onboarding · remove folder, text character" /></div>
+            </div>
+            <p class="note">Vector magnification flatters a glyph; this does not. Each crop is the control&#8217;s own box plus 3&#8239;px, so where the mark sits in it is visible too.</p>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>What is actually wrong</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div>
+                <h4>16 of 20 marks came from an OS font</h4>
+                <p>Menlo, Zapf Dingbats, PingFang&#8239;SC, Hiragino Sans and the system face &#8212; five families for one icon column. Each has its own weight, size and baseline, and Windows and Linux substitute a different five. That is the &#8220;looks broken next to the SVG glyphs&#8221;.</p>
+              </div></div>
+              <div class="fitem"><span class="pin">2</span><div>
+                <h4>&#8220;In the face&#8221; was not enough: <code>●</code> and <code>○</code> drew in Menlo</h4>
+                <p>Both are in Geist Sans, and <code>styles/AGENTS.md</code> lists <code>●{dirty}</code> as safe on that basis. But every site that uses them as a mark &#8212; the dirty badge, the remote steps, the proof ledger &#8212; sets them in <code>--font-mono</code>, and Geist Mono does not have them. The mono stack never reaches Geist Sans, so they go to the OS.</p>
+              </div></div>
+              <div class="fitem"><span class="pin">3</span><div>
+                <h4><code>×</code> is in Geist, and still the wrong drawing</h4>
+                <p>It is the multiplication sign: sized to sit between digits, centred on the x-height. At 19&#8211;20&#8239;px in a 28&#8239;px close button it is a small cross floating low, beside the 14&#8239;px stroked X that the palette, diff pane and lightbox already drew &#8212; four close marks in one app.</p>
+              </div></div>
+              <div class="fitem"><span class="pin">4</span><div>
+                <h4>A typed check announced nothing</h4>
+                <p>&#8220;✓ Group by folder&#8221; was the menu item&#8217;s label, so a screen reader read &#8220;check mark Group by folder&#8221; and no state. The menu now has a real toggle: <code>menuitemcheckbox</code> with <code>aria-checked</code>, and the check is an <code>aria-hidden</code> SVG.</p>
+              </div></div>
+              <div class="fitem"><span class="pin q">?</span><div>
+                <h4>Not drawn here, also converted</h4>
+                <p>Four dialog closes (Clone, Fork, Fork checkout, Fork tracking), the profile modal&#x27;s remove-folder, the wizard&#x27;s close, the agent menu&#x27;s two checks, Local agents&#x27; allowed check, the diff hunk chip&#x27;s ✓, Rebase&#x27;s “Checked ✓” / “Applied ✓”, the wizard rail&#x27;s “Step 1 ✓”, the ⌘K and worktree-header dirty badges, the hooks sheet&#x27;s ▸/▾ (ChevronGlyph), the PR section&#x27;s “⟳ asks GitHub” (RefreshGlyph inline, with an sr-only “Refresh”), and the rail&#x27;s › collapse (PanelCloseGlyph).</p>
+              </div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1d" data-screen-label="1d Kept">
+            <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>Kept as typography, and why</div>
+            <div class="tbl">
+              <div class="tr3 head"><span>Char</span><span>Where</span><span>Why it stays</span></div>
+              <div class="tr3"><b class="ch">↑ ↓</b><span>ahead/behind counts</span><span>In both faces. Notation beside a number, not a mark.</span></div>
+<div class="tr3"><b class="ch">→ ←</b><span>prose, rename paths, “main → feature”</span><span>In Geist Sans. Where it is set in Mono it falls back &#8212; see the follow-up below.</span></div>
+<div class="tr3"><b class="ch">↵ ⇧ ⏎</b><span>footer key hints, diff help keycaps</span><span>They name keys. Set in Mono, so they fall back too &#8212; same follow-up.</span></div>
+<div class="tr3"><b class="ch">× in 640×480</b><span>image diff dimensions</span><span>The multiplication sign doing its real job.</span></div>
+<div class="tr3"><b class="ch">+ −</b><span>diffstat counts; the diff&#x27;s per-line take buttons; the hunk chip&#x27;s +</span><span>In Geist Mono. One button per changed line in an unvirtualised diff, so an SVG each costs DOM for no fallback fix; the hunk chip's + stays text to match the lane it heads. Only its ✓ fell back.</span></div>
+<div class="tr3"><b class="ch">− +</b><span>image lightbox zoom</span><span>In face, and they name the keys that do the same thing.</span></div>
+<div class="tr3"><b class="ch">?</b><span>diff selection help</span><span>Names its own shortcut.</span></div>
+<div class="tr3"><b class="ch">!</b><span>refused-push disc</span><span>Geist Sans 700 letterform centred in a drawn disc. The route's × became CloseGlyph to match every other failed mark; ! has no SVG sibling.</span></div>
+<div class="tr3"><b class="ch">‹ ›</b><span>“‹ Changes”, “‹ Back”, breadcrumb separators</span><span>In both faces; part of a worded label or a separator.</span></div>
+<div class="tr3"><b class="ch">↗</b><span>“Codex releases ↗”</span><span>In Geist Sans and every site is Sans; a suffix on a worded label.</span></div>
+<div class="tr3"><b class="ch">#</b><span>rebase plan op column, PR #412</span><span>Git's own comment marker; a PR number.</span></div>
+<div class="tr3"><b class="ch">⌂ ⑂</b><span>worktree marks</span><span>Being redrawn in pwrdrvr/PwrGit#398, not here.</span></div>
+            </div>
+            <p class="note"><strong>Follow-up, not in this change:</strong> arrows and key symbols set in <code>--font-mono</code> (&#8594; in the PR section&#8217;s base, &#8776; &#8592; &#8594; in commit alignment, &#8629; in the palette footer, &#8679; &#9166; in the diff help keycaps) fall back for the reason finding&#160;2 gives. That is a font-stack fix &#8212; let the mono stack fall through to Geist Sans &#8212; not an icon fix.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;probe the same sites on Windows&#8221; &#183; &#8220;which of the kept arrows does the mono follow-up actually change?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">The replacements &#8212; one stroked set, checked as rasters and among their neighbours</span>
+        </div>
+        <p class="dv-sub">Every replacement is a <code>lib/*Glyph.tsx</code> component in the house style: 24-unit viewBox, <code>currentColor</code> stroke scaled with size, round caps, <code>aria-hidden</code>, Lucide geometry transcribed by hand. The control&#8217;s own label carries the meaning; none of the accessible names changed. Captures are the same scenes as turn&#160;1, built from this branch.</p>
+
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Glyph set">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>The set, at the sizes they ship</div>
+            <div class="col">
+              <div class="gl"><span class="gi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span><div><b>CloseGlyph</b> <span class="st chg">new</span><div class="fnt">Lucide x</div><p>Every close, dismiss, remove and failed mark. The palette, diff pane and lightbox already drew it inline at 14&#8239;px; they now share the component, unchanged.</p></div></div>
+<div class="gl"><span class="gi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span><div><b>CheckGlyph</b> <span class="st no">existing</span><div class="fnt">Lucide check</div><p>Done, passed, chosen. Already the agent menu's radio mark.</p></div></div>
+<div class="gl"><span class="gi"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg></span><div><b>DotGlyph</b> <span class="st chg">new</span><div class="fnt">filled disc</div><p>Running step; uncommitted changes. Filled because the step beside it is a stroke.</p></div></div>
+<div class="gl"><span class="gi"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/></svg></span><div><b>DotGlyph hollow</b> <span class="st chg">new</span><div class="fnt">ring</div><p>A proof that has not run. Same outer edge as the disc.</p></div></div>
+<div class="gl"><span class="gi"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span><div><b>SearchGlyph</b> <span class="st no">lifted</span><div class="fnt">Lucide search, r7 lens</div><p>The &#8984;K palette's lens, so both filters draw one mark.</p></div></div>
+<div class="gl"><span class="gi"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.96" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/></svg></span><div><b>TagGlyph</b> <span class="st no">existing</span><div class="fnt">Lucide tag</div><p>The lineage chip's tag mark; the refs rows now agree with it.</p></div></div>
+<div class="gl"><span class="gi"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span><div><b>SettingsGlyph</b> <span class="st chg">new</span><div class="fnt">Lucide settings</div><p>Edit profile. The teeth hold at 13&#8239;px &#8212; see 2b.</p></div></div>
+<div class="gl"><span class="gi"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.17" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span><div><b>PlusGlyph</b> <span class="st no">existing</span><div class="fnt">Lucide plus</div><p>New profile, like every other create button.</p></div></div>
+<div class="gl"><span class="gi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.86" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span><div><b>InfoGlyph</b> <span class="st chg">new</span><div class="fnt">Lucide info</div><p>Informational notice.</p></div></div>
+<div class="gl"><span class="gi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.86" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span><div><b>WarningGlyph</b> <span class="st chg">new</span><div class="fnt">Lucide triangle-alert</div><p>Warning notice; triangle vs circle is the silhouette channel.</p></div></div>
+<div class="gl"><span class="gi"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg></span><div><b>PanelCloseGlyph</b> <span class="st chg">new</span><div class="fnt">Lucide panel-right-close</div><p>The rail's collapse, the pair of the header's Show panel.</p></div></div>
+<div class="gl"><span class="gi"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></span><div><b>ChevronGlyph right</b> <span class="st no">extended</span><div class="fnt">Lucide chevron-right</div><p>Closed disclosure; down when open.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Raster pairs">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Text and SVG, each captured at 1&#215; and magnified 8&#215;</div>
+            <div class="col">
+              <div class="colh pr"><span>Site &#183; replacement</span><span>Text</span><span>SVG</span></div>
+              <div class="pr"><div><div class="lab">Refs browser · Close</div><div class="fnt">CloseGlyph 14</div></div><img class="px" src="./assets/text-glyphs/raster-before-refs-browser-close.png" style="zoom:8" alt="Refs browser · Close, text character" /><img class="px" src="./assets/text-glyphs/raster-after-refs-browser-close.png" style="zoom:8" alt="Refs browser · Close, SVG" /></div>
+<div class="pr"><div><div class="lab">Refs browser · filter</div><div class="fnt">SearchGlyph 13</div></div><img class="px" src="./assets/text-glyphs/raster-before-refs-browser-filter.png" style="zoom:8" alt="Refs browser · filter, text character" /><img class="px" src="./assets/text-glyphs/raster-after-refs-browser-filter.png" style="zoom:8" alt="Refs browser · filter, SVG" /></div>
+<div class="pr"><div><div class="lab">Refs browser · tag row</div><div class="fnt">TagGlyph 11</div></div><img class="px" src="./assets/text-glyphs/raster-before-refs-browser-tag-row.png" style="zoom:8" alt="Refs browser · tag row, text character" /><img class="px" src="./assets/text-glyphs/raster-after-refs-browser-tag-row.png" style="zoom:8" alt="Refs browser · tag row, SVG" /></div>
+<div class="pr"><div><div class="lab">Toast · Dismiss</div><div class="fnt">CloseGlyph 12</div></div><img class="px" src="./assets/text-glyphs/raster-before-toast-dismiss.png" style="zoom:8" alt="Toast · Dismiss, text character" /><img class="px" src="./assets/text-glyphs/raster-after-toast-dismiss.png" style="zoom:8" alt="Toast · Dismiss, SVG" /></div>
+<div class="pr"><div><div class="lab">Remote card · Dismiss</div><div class="fnt">CloseGlyph 12</div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-card-dismiss.png" style="zoom:8" alt="Remote card · Dismiss, text character" /><img class="px" src="./assets/text-glyphs/raster-after-remote-card-dismiss.png" style="zoom:8" alt="Remote card · Dismiss, SVG" /></div>
+<div class="pr"><div><div class="lab">Remote step · done</div><div class="fnt">CheckGlyph 10</div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-step-done.png" style="zoom:8" alt="Remote step · done, text character" /><img class="px" src="./assets/text-glyphs/raster-after-remote-step-done.png" style="zoom:8" alt="Remote step · done, SVG" /></div>
+<div class="pr"><div><div class="lab">Remote step · running</div><div class="fnt">DotGlyph 10</div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-step-running.png" style="zoom:8" alt="Remote step · running, text character" /><img class="px" src="./assets/text-glyphs/raster-after-remote-step-running.png" style="zoom:8" alt="Remote step · running, SVG" /></div>
+<div class="pr"><div><div class="lab">Remote step · failed</div><div class="fnt">CloseGlyph 10</div></div><img class="px" src="./assets/text-glyphs/raster-before-remote-step-failed.png" style="zoom:8" alt="Remote step · failed, text character" /><img class="px" src="./assets/text-glyphs/raster-after-remote-step-failed.png" style="zoom:8" alt="Remote step · failed, SVG" /></div>
+<div class="pr"><div><div class="lab">Proof ledger · ok</div><div class="fnt">CheckGlyph 11</div></div><img class="px" src="./assets/text-glyphs/raster-before-proof-ledger-ok.png" style="zoom:8" alt="Proof ledger · ok, text character" /><img class="px" src="./assets/text-glyphs/raster-after-proof-ledger-ok.png" style="zoom:8" alt="Proof ledger · ok, SVG" /></div>
+<div class="pr"><div><div class="lab">Proof ledger · bad</div><div class="fnt">CloseGlyph 11</div></div><img class="px" src="./assets/text-glyphs/raster-before-proof-ledger-bad.png" style="zoom:8" alt="Proof ledger · bad, text character" /><img class="px" src="./assets/text-glyphs/raster-after-proof-ledger-bad.png" style="zoom:8" alt="Proof ledger · bad, SVG" /></div>
+<div class="pr"><div><div class="lab">Proof ledger · not run</div><div class="fnt">DotGlyph hollow 11</div></div><img class="px" src="./assets/text-glyphs/raster-before-proof-ledger-not-run.png" style="zoom:8" alt="Proof ledger · not run, text character" /><img class="px" src="./assets/text-glyphs/raster-after-proof-ledger-not-run.png" style="zoom:8" alt="Proof ledger · not run, SVG" /></div>
+<div class="pr"><div><div class="lab">Selection bar · Clear</div><div class="fnt">CloseGlyph 12</div></div><img class="px" src="./assets/text-glyphs/raster-before-selection-bar-clear.png" style="zoom:8" alt="Selection bar · Clear, text character" /><img class="px" src="./assets/text-glyphs/raster-after-selection-bar-clear.png" style="zoom:8" alt="Selection bar · Clear, SVG" /></div>
+<div class="pr"><div><div class="lab">Route · refused push</div><div class="fnt">CloseGlyph 8</div></div><img class="px" src="./assets/text-glyphs/raster-before-route-refused-push.png" style="zoom:8" alt="Route · refused push, text character" /><img class="px" src="./assets/text-glyphs/raster-after-route-refused-push.png" style="zoom:8" alt="Route · refused push, SVG" /></div>
+<div class="pr"><div><div class="lab">Sidebar options · toggle</div><div class="fnt">CheckGlyph 12</div></div><img class="px" src="./assets/text-glyphs/raster-before-sidebar-options-toggle.png" style="zoom:8" alt="Sidebar options · toggle, text character" /><img class="px" src="./assets/text-glyphs/raster-after-sidebar-options-toggle.png" style="zoom:8" alt="Sidebar options · toggle, SVG" /></div>
+<div class="pr"><div><div class="lab">Profile menu · Edit</div><div class="fnt">SettingsGlyph 13</div></div><img class="px" src="./assets/text-glyphs/raster-before-profile-menu-edit.png" style="zoom:8" alt="Profile menu · Edit, text character" /><img class="px" src="./assets/text-glyphs/raster-after-profile-menu-edit.png" style="zoom:8" alt="Profile menu · Edit, SVG" /></div>
+<div class="pr"><div><div class="lab">Profile menu · New</div><div class="fnt">PlusGlyph 12</div></div><img class="px" src="./assets/text-glyphs/raster-before-profile-menu-new.png" style="zoom:8" alt="Profile menu · New, text character" /><img class="px" src="./assets/text-glyphs/raster-after-profile-menu-new.png" style="zoom:8" alt="Profile menu · New, SVG" /></div>
+<div class="pr"><div><div class="lab">Worktree row · dirty</div><div class="fnt">DotGlyph 10</div></div><img class="px" src="./assets/text-glyphs/raster-before-worktree-row-dirty.png" style="zoom:8" alt="Worktree row · dirty, text character" /><img class="px" src="./assets/text-glyphs/raster-after-worktree-row-dirty.png" style="zoom:8" alt="Worktree row · dirty, SVG" /></div>
+<div class="pr"><div><div class="lab">Onboarding · notice</div><div class="fnt">InfoGlyph 14</div></div><img class="px" src="./assets/text-glyphs/raster-before-onboarding-notice.png" style="zoom:8" alt="Onboarding · notice, text character" /><img class="px" src="./assets/text-glyphs/raster-after-onboarding-notice.png" style="zoom:8" alt="Onboarding · notice, SVG" /></div>
+<div class="pr"><div><div class="lab">Onboarding · warning</div><div class="fnt">WarningGlyph 14</div></div><img class="px" src="./assets/text-glyphs/raster-before-onboarding-warning.png" style="zoom:8" alt="Onboarding · warning, text character" /><img class="px" src="./assets/text-glyphs/raster-after-onboarding-warning.png" style="zoom:8" alt="Onboarding · warning, SVG" /></div>
+<div class="pr"><div><div class="lab">Onboarding · remove folder</div><div class="fnt">CloseGlyph 14</div></div><img class="px" src="./assets/text-glyphs/raster-before-onboarding-remove-folder.png" style="zoom:8" alt="Onboarding · remove folder, text character" /><img class="px" src="./assets/text-glyphs/raster-after-onboarding-remove-folder.png" style="zoom:8" alt="Onboarding · remove folder, SVG" /></div>
+            </div>
+            <p class="note">What to look for: one weight down the whole column, marks centred in their boxes rather than riding a baseline, and the four X marks now one drawing. The gear was the open question at 13&#8239;px &#8212; its teeth survive the raster, so it stays a gear rather than becoming a pencil.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c In place">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Beside the neighbours they have to live with &#8212; 1&#215;, magnified 2&#215;</div>
+            <div class="col">
+              <div class="colh ip"><span>Site</span><span>Text</span><span>SVG</span></div>
+              <div class="ip"><div class="lab">Refs browser · Close</div><img class="px" src="./assets/text-glyphs/inplace-before-refs-browser-close.png" style="zoom:2" alt="Refs browser · Close, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-refs-browser-close.png" style="zoom:2" alt="Refs browser · Close, SVG" /></div>
+<div class="ip"><div class="lab">Refs browser · filter</div><img class="px" src="./assets/text-glyphs/inplace-before-refs-browser-filter.png" style="zoom:2" alt="Refs browser · filter, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-refs-browser-filter.png" style="zoom:2" alt="Refs browser · filter, SVG" /></div>
+<div class="ip"><div class="lab">Refs browser · tag row</div><img class="px" src="./assets/text-glyphs/inplace-before-refs-browser-tag-row.png" style="zoom:2" alt="Refs browser · tag row, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-refs-browser-tag-row.png" style="zoom:2" alt="Refs browser · tag row, SVG" /></div>
+<div class="ip"><div class="lab">Toast · Dismiss</div><img class="px" src="./assets/text-glyphs/inplace-before-toast-dismiss.png" style="zoom:2" alt="Toast · Dismiss, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-toast-dismiss.png" style="zoom:2" alt="Toast · Dismiss, SVG" /></div>
+<div class="ip"><div class="lab">Remote card · Dismiss</div><img class="px" src="./assets/text-glyphs/inplace-before-remote-card-dismiss.png" style="zoom:2" alt="Remote card · Dismiss, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-remote-card-dismiss.png" style="zoom:2" alt="Remote card · Dismiss, SVG" /></div>
+<div class="ip"><div class="lab">Remote step · done</div><img class="px" src="./assets/text-glyphs/inplace-before-remote-step-done.png" style="zoom:2" alt="Remote step · done, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-remote-step-done.png" style="zoom:2" alt="Remote step · done, SVG" /></div>
+<div class="ip"><div class="lab">Remote step · running</div><img class="px" src="./assets/text-glyphs/inplace-before-remote-step-running.png" style="zoom:2" alt="Remote step · running, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-remote-step-running.png" style="zoom:2" alt="Remote step · running, SVG" /></div>
+<div class="ip"><div class="lab">Remote step · failed</div><img class="px" src="./assets/text-glyphs/inplace-before-remote-step-failed.png" style="zoom:2" alt="Remote step · failed, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-remote-step-failed.png" style="zoom:2" alt="Remote step · failed, SVG" /></div>
+<div class="ip"><div class="lab">Proof ledger · ok</div><img class="px" src="./assets/text-glyphs/inplace-before-proof-ledger-ok.png" style="zoom:2" alt="Proof ledger · ok, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-proof-ledger-ok.png" style="zoom:2" alt="Proof ledger · ok, SVG" /></div>
+<div class="ip"><div class="lab">Proof ledger · bad</div><img class="px" src="./assets/text-glyphs/inplace-before-proof-ledger-bad.png" style="zoom:2" alt="Proof ledger · bad, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-proof-ledger-bad.png" style="zoom:2" alt="Proof ledger · bad, SVG" /></div>
+<div class="ip"><div class="lab">Proof ledger · not run</div><img class="px" src="./assets/text-glyphs/inplace-before-proof-ledger-not-run.png" style="zoom:2" alt="Proof ledger · not run, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-proof-ledger-not-run.png" style="zoom:2" alt="Proof ledger · not run, SVG" /></div>
+<div class="ip"><div class="lab">Selection bar · Clear</div><img class="px" src="./assets/text-glyphs/inplace-before-selection-bar-clear.png" style="zoom:2" alt="Selection bar · Clear, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-selection-bar-clear.png" style="zoom:2" alt="Selection bar · Clear, SVG" /></div>
+<div class="ip"><div class="lab">Route · refused push</div><img class="px" src="./assets/text-glyphs/inplace-before-route-refused-push.png" style="zoom:2" alt="Route · refused push, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-route-refused-push.png" style="zoom:2" alt="Route · refused push, SVG" /></div>
+<div class="ip"><div class="lab">Sidebar options · toggle</div><img class="px" src="./assets/text-glyphs/inplace-before-sidebar-options-toggle.png" style="zoom:2" alt="Sidebar options · toggle, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-sidebar-options-toggle.png" style="zoom:2" alt="Sidebar options · toggle, SVG" /></div>
+<div class="ip"><div class="lab">Profile menu · Edit</div><img class="px" src="./assets/text-glyphs/inplace-before-profile-menu-edit.png" style="zoom:2" alt="Profile menu · Edit, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-profile-menu-edit.png" style="zoom:2" alt="Profile menu · Edit, SVG" /></div>
+<div class="ip"><div class="lab">Profile menu · New</div><img class="px" src="./assets/text-glyphs/inplace-before-profile-menu-new.png" style="zoom:2" alt="Profile menu · New, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-profile-menu-new.png" style="zoom:2" alt="Profile menu · New, SVG" /></div>
+<div class="ip"><div class="lab">Worktree row · dirty</div><img class="px" src="./assets/text-glyphs/inplace-before-worktree-row-dirty.png" style="zoom:2" alt="Worktree row · dirty, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-worktree-row-dirty.png" style="zoom:2" alt="Worktree row · dirty, SVG" /></div>
+<div class="ip"><div class="lab">Onboarding · notice</div><img class="px" src="./assets/text-glyphs/inplace-before-onboarding-notice.png" style="zoom:2" alt="Onboarding · notice, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-onboarding-notice.png" style="zoom:2" alt="Onboarding · notice, SVG" /></div>
+<div class="ip"><div class="lab">Onboarding · warning</div><img class="px" src="./assets/text-glyphs/inplace-before-onboarding-warning.png" style="zoom:2" alt="Onboarding · warning, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-onboarding-warning.png" style="zoom:2" alt="Onboarding · warning, SVG" /></div>
+<div class="ip"><div class="lab">Onboarding · remove folder</div><img class="px" src="./assets/text-glyphs/inplace-before-onboarding-remove-folder.png" style="zoom:2" alt="Onboarding · remove folder, text character" /><img class="px" src="./assets/text-glyphs/inplace-after-onboarding-remove-folder.png" style="zoom:2" alt="Onboarding · remove folder, SVG" /></div>
+            </div>
+            <p class="note">The legibility rule from the palette review applies here as a column rule: the remote steps and the proof ledger stack ✓, ✕ and a dot in one column, and they separate by silhouette &#8212; a tick, a cross, a disc, a ring &#8212; not by counting.</p>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Live">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Live &#8212; swap the whole set, and squint</div>
+            <div class="proto">
+              <div class="ctl">
+                <div class="seg"><button class="{{shipCls}}" onClick="{{useShip}}">text</button><button class="{{propCls}}" onClick="{{useProp}}">svg</button></div>
+                <div class="seg"><button class="{{blurOffCls}}" onClick="{{blurOff}}">sharp</button><button class="{{blurOnCls}}" onClick="{{blurOn}}">squint</button></div>
+              </div>
+              <div class="{{listCls}}" style="display:flex;flex-direction:column;gap:6px">
+                <div class="pt"><span class="lab">Refs browser · Close</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-refs-browser-close.png" style="zoom:2" alt="Refs browser · Close, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-refs-browser-close.png" style="zoom:2" alt="Refs browser · Close, SVG" /></span></div>
+<div class="pt"><span class="lab">Refs browser · filter</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-refs-browser-filter.png" style="zoom:2" alt="Refs browser · filter, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-refs-browser-filter.png" style="zoom:2" alt="Refs browser · filter, SVG" /></span></div>
+<div class="pt"><span class="lab">Refs browser · tag row</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-refs-browser-tag-row.png" style="zoom:2" alt="Refs browser · tag row, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-refs-browser-tag-row.png" style="zoom:2" alt="Refs browser · tag row, SVG" /></span></div>
+<div class="pt"><span class="lab">Toast · Dismiss</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-toast-dismiss.png" style="zoom:2" alt="Toast · Dismiss, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-toast-dismiss.png" style="zoom:2" alt="Toast · Dismiss, SVG" /></span></div>
+<div class="pt"><span class="lab">Remote card · Dismiss</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-remote-card-dismiss.png" style="zoom:2" alt="Remote card · Dismiss, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-remote-card-dismiss.png" style="zoom:2" alt="Remote card · Dismiss, SVG" /></span></div>
+<div class="pt"><span class="lab">Remote step · done</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-remote-step-done.png" style="zoom:2" alt="Remote step · done, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-remote-step-done.png" style="zoom:2" alt="Remote step · done, SVG" /></span></div>
+<div class="pt"><span class="lab">Remote step · running</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-remote-step-running.png" style="zoom:2" alt="Remote step · running, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-remote-step-running.png" style="zoom:2" alt="Remote step · running, SVG" /></span></div>
+<div class="pt"><span class="lab">Remote step · failed</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-remote-step-failed.png" style="zoom:2" alt="Remote step · failed, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-remote-step-failed.png" style="zoom:2" alt="Remote step · failed, SVG" /></span></div>
+<div class="pt"><span class="lab">Proof ledger · ok</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-proof-ledger-ok.png" style="zoom:2" alt="Proof ledger · ok, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-proof-ledger-ok.png" style="zoom:2" alt="Proof ledger · ok, SVG" /></span></div>
+<div class="pt"><span class="lab">Proof ledger · bad</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-proof-ledger-bad.png" style="zoom:2" alt="Proof ledger · bad, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-proof-ledger-bad.png" style="zoom:2" alt="Proof ledger · bad, SVG" /></span></div>
+<div class="pt"><span class="lab">Proof ledger · not run</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-proof-ledger-not-run.png" style="zoom:2" alt="Proof ledger · not run, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-proof-ledger-not-run.png" style="zoom:2" alt="Proof ledger · not run, SVG" /></span></div>
+<div class="pt"><span class="lab">Selection bar · Clear</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-selection-bar-clear.png" style="zoom:2" alt="Selection bar · Clear, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-selection-bar-clear.png" style="zoom:2" alt="Selection bar · Clear, SVG" /></span></div>
+<div class="pt"><span class="lab">Route · refused push</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-route-refused-push.png" style="zoom:2" alt="Route · refused push, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-route-refused-push.png" style="zoom:2" alt="Route · refused push, SVG" /></span></div>
+<div class="pt"><span class="lab">Sidebar options · toggle</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-sidebar-options-toggle.png" style="zoom:2" alt="Sidebar options · toggle, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-sidebar-options-toggle.png" style="zoom:2" alt="Sidebar options · toggle, SVG" /></span></div>
+<div class="pt"><span class="lab">Profile menu · Edit</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-profile-menu-edit.png" style="zoom:2" alt="Profile menu · Edit, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-profile-menu-edit.png" style="zoom:2" alt="Profile menu · Edit, SVG" /></span></div>
+<div class="pt"><span class="lab">Profile menu · New</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-profile-menu-new.png" style="zoom:2" alt="Profile menu · New, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-profile-menu-new.png" style="zoom:2" alt="Profile menu · New, SVG" /></span></div>
+<div class="pt"><span class="lab">Worktree row · dirty</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-worktree-row-dirty.png" style="zoom:2" alt="Worktree row · dirty, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-worktree-row-dirty.png" style="zoom:2" alt="Worktree row · dirty, SVG" /></span></div>
+<div class="pt"><span class="lab">Onboarding · notice</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-onboarding-notice.png" style="zoom:2" alt="Onboarding · notice, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-onboarding-notice.png" style="zoom:2" alt="Onboarding · notice, SVG" /></span></div>
+<div class="pt"><span class="lab">Onboarding · warning</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-onboarding-warning.png" style="zoom:2" alt="Onboarding · warning, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-onboarding-warning.png" style="zoom:2" alt="Onboarding · warning, SVG" /></span></div>
+<div class="pt"><span class="lab">Onboarding · remove folder</span><span class="gset s-ship"><img class="px" src="./assets/text-glyphs/inplace-before-onboarding-remove-folder.png" style="zoom:2" alt="Onboarding · remove folder, text character" /></span><span class="gset s-prop"><img class="px" src="./assets/text-glyphs/inplace-after-onboarding-remove-folder.png" style="zoom:2" alt="Onboarding · remove folder, SVG" /></span></div>
+              </div>
+              <div class="readout">{{readout}}</div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw the light theme&#8221; &#183; &#8220;should the hunk chip&#8217;s + become PlusGlyph too?&#8221; &#183; &#8220;redraw the ! refusal disc as a glyph&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { set: "prop", blur: false };
+        }
+        renderVals() {
+          const s = this.state;
+          const classes = [s.set === "ship" ? "set-ship" : "set-prop"];
+          if (s.blur) { classes.push("blur"); }
+          return {
+            listCls: classes.join(" "),
+            shipCls: s.set === "ship" ? "on" : "",
+            propCls: s.set === "prop" ? "on" : "",
+            blurOnCls: s.blur ? "on" : "",
+            blurOffCls: s.blur ? "" : "on",
+            useShip: () => { this.setState({ set: "ship" }); },
+            useProp: () => { this.setState({ set: "prop" }); },
+            blurOn: () => { this.setState({ blur: true }); },
+            blurOff: () => { this.setState({ blur: false }); },
+            readout: s.set === "ship"
+              ? "text \u2014 five OS families in one column; watch the X marks change size from row to row"
+              : "svg \u2014 one stroke weight; tick, cross, disc and ring still separate when squinting"
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

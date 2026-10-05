@@ -53,6 +53,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { useFitLadder } from "../../lib/useFitLadder";
+import { DotGlyph } from "../../lib/DotGlyph";
 
 /**
  * The sync chip. `mid` and `short` are what it says once the header has
@@ -1577,7 +1578,7 @@ export function WorktreeHeader({
           — hence __state, not __id — keeping this row's container-query
           degrade ladder. */}
       <div className="wt-header__state" ref={stateRowRef}>
-        {dirty > 0 && <span className="badge badge--warn">●{dirty}</span>}
+        {dirty > 0 && <span className="badge badge--warn"><DotGlyph />{dirty}</span>}
         {/* Repo fact, not sync state, so it sits with the dirty badge on the
             left rather than among the chips the action buttons act on. */}
         <GitLfsChip

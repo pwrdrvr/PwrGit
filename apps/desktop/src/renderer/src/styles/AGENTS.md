@@ -173,10 +173,18 @@ each one, against `geist-sans-latin-600-normal.woff2`:
 | `●` U+25CF, `→` U+2192, `·` U+00B7, `…` U+2026, `↵` U+21B5 | Geist SemiBold |
 | `↻` U+21BB | **Menlo** — the OS |
 
-So `↑3 ↓2` in a ref row and `●{dirty}` in the repo switcher are typographic
-notation that renders in the bundled face, not latent bugs. U+21BB was the
-outlier, and it is gone. A NEW character still needs the probe before it ships
-— the answer is per-codepoint, and nothing warns when it falls through.
+So `↑3 ↓2` in a ref row is typographic notation that renders in the bundled
+face, not a latent bug. U+21BB was the outlier, and it is gone. A NEW
+character still needs the probe before it ships — the answer is
+per-codepoint, and nothing warns when it falls through.
+
+**The probe is per-face too, and this table is Geist Sans.** `●` was once
+listed here as safe for the dirty badge. It is in Geist Sans, but `.badge`
+and `.hit-status__b` set it in `--font-mono`, Geist Mono does not have it, and
+the mono stack never reaches Geist Sans: `CSS.getPlatformFontsForNode` named
+**Menlo**. The same is true of `○`, `→`, `←`, `↵`, `⇧` and `⏎` wherever they
+are set in mono. The marks are now `DotGlyph`; the notation is a font-stack
+question, not an icon one. Probe a character in the face its rule asks for.
 
 **Reading the cmap answers the same question without a running app**, and it
 answers the *cause* rather than the symptom: `CSS.getPlatformFontsForNode`
@@ -195,13 +203,20 @@ The agent surfaces were checked that way against both faces
 | `✦` U+2726 (the agent mark) | **no** — now `lib/AgentGlyph.tsx` |
 | `▴` U+25B4, `▾` U+25BE (a caret) | **no** — now `lib/ChevronGlyph.tsx` |
 | `‥` U+2025 (two-dot leader) | **no** — the ledger's hash range uses `…` |
-| `✓` U+2713, `✕` U+2715 | **no** — still drawn as text elsewhere in the app |
+| `✓` U+2713, `✕` U+2715 | **no** — now `CheckGlyph`, `CloseGlyph` |
+| `⚙` `＋` `ⓘ` `⚠` `⌕` `⟳` `▸` | **no** — now `SettingsGlyph`, `PlusGlyph`, `InfoGlyph`, `WarningGlyph`, `SearchGlyph`, `RefreshGlyph`, `ChevronGlyph` |
 | `⑂` U+2442, `⌂` U+2302 (branch, worktree holder) | **no** — now `lib/BranchGlyph.tsx`, `lib/WorktreeGlyph.tsx`, `lib/CheckoutGlyph.tsx` |
 
-`▾` and the two check marks predate the agent work and are still text in
-TitleBar, ToastHost, DiffViewer and the remote activity card; converting them
-is its own pass. Until it happens, a test that sweeps the renderer for
-out-of-subset characters would fail on them, which is why there isn't one.
+On macOS those resolved to Menlo, Zapf Dingbats, PingFang SC, Hiragino Sans
+and the system face — five families in one icon column. The audit, the
+rasters and what was kept as typography (and why) are in
+[design/Text Glyph Icons - UX Review.dc.html](../../../../../../design/Text%20Glyph%20Icons%20-%20UX%20Review.dc.html).
+
+`text-glyph-coverage.test.ts` now sweeps the renderer: every non-ASCII
+character in JSX text and string literals must be in a bundled face's `cmap`,
+read from the `.woff` files themselves. It is a floor — it cannot see which
+face a site sets a character in, so it passes `●` in mono. Its `PENDING` list
+names the characters still drawn from text and who is replacing them.
 
 **An SVG in a flex button needs `flex: 0 0 auto`, and the label needs its own
 element.** Both fall out of the swap and neither announces itself. A text node

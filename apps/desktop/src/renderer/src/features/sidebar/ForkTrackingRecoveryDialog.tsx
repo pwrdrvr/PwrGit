@@ -10,6 +10,7 @@ import { useModal } from "../../lib/useModal";
 import { ForkCheckoutDialog } from "./ForkCheckoutDialog";
 import { ForkRoute, splitSlug, type RouteRepo } from "./ForkRoute";
 import { GitForkIcon } from "./RepoIdentityMarks";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 /** Where the dialog was opened. Only a refused push proves the original is
  *  closed to you, so only that entry says so. */
@@ -171,7 +172,7 @@ function ForkTrackingRecoveryPanel({
         <span className="clone-dialog__icon"><GitForkIcon size={17} /></span>
         <span><strong>{title}</strong>
           <small>{checking ? "Checking where this branch pulls and pushes…" : `${branch ?? "This branch"} in ${repoName}`}</small></span>
-        <button className="clone-dialog__close" aria-label="Close" disabled={busy} onClick={onClose}>×</button>
+        <button className="clone-dialog__close" aria-label="Close" disabled={busy} onClick={onClose}><CloseGlyph /></button>
       </div>
       <div className="clone-dialog__body fork-tracking-dialog__body">
         {refused && <div className="fork-tracking-refused" role="note">

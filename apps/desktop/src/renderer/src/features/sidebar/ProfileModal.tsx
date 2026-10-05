@@ -13,6 +13,7 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 type ProfileThemeChoice = "inherit" | ProfileThemeOverride;
 
@@ -222,7 +223,7 @@ export function ProfileModal({
                   aria-label={`Remove ${r}`}
                   {...hoverTooltip(tip, "Remove folder")}
                 >
-                  ×
+                  <CloseGlyph />
                 </button>
               </div>
             ))}

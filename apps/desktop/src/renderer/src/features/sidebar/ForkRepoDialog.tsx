@@ -53,6 +53,7 @@ import {
 import { forkInPlaceAction } from "./fork-checkout-dialog";
 import { ForkRemotePlan } from "./ForkRemotePlan";
 import { GitForkIcon, RepoIdentityChips } from "./RepoIdentityMarks";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 function destinationMeta(destination: CloneDestination): string {
   if (destination.lastUsedAt !== undefined) return "recent";
@@ -677,7 +678,7 @@ export function ForkRepoDialog({
             disabled={busy}
             onClick={onClose}
           >
-            ×
+            <CloseGlyph />
           </button>
         </div>
 

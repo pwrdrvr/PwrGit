@@ -17,6 +17,7 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 export type DiffTarget =
   | { kind: "file"; path: string; staged: boolean }
@@ -552,10 +553,7 @@ export function DiffPane({
             aria-label="Close"
             {...hoverTooltip(tip, "Close (Esc)")}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
+            <CloseGlyph />
           </button>
         </div>
         {subject !== null &&

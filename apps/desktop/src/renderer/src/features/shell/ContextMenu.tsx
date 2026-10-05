@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 import { useDismissable } from "../../lib/useDismissable";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
+import { CheckGlyph } from "../../lib/CheckGlyph";
 
 export type MenuItem =
   | {
@@ -19,6 +20,11 @@ export type MenuItem =
        *  disabled here: a disabled button takes no hover, so a tooltip would
        *  never show, and the reason is what a reader can act on. */
       hint?: string;
+      /** Set for a toggle: the entry becomes a `menuitemcheckbox` and leads
+       *  with a check slot, drawn empty when off so labels stay aligned. A
+       *  check typed into the label instead was read aloud as "check mark"
+       *  and announced no state. */
+      checked?: boolean;
       onSelect: () => void;
     }
   | { type: "sep" };
@@ -123,7 +129,8 @@ export function ContextMenu({
           <button
             key={i}
             className={`pop-menu__item${it.danger === true ? " pop-menu__item--danger" : ""}`}
-            role="menuitem"
+            role={it.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={it.checked}
             disabled={it.disabled === true}
             onClick={(e) => {
               e.stopPropagation();
@@ -132,6 +139,11 @@ export function ContextMenu({
               onClose();
             }}
           >
+            {it.checked !== undefined && (
+              <span className="pop-menu__check" aria-hidden="true">
+                {it.checked && <CheckGlyph />}
+              </span>
+            )}
             {it.hint === undefined ? (
               it.label
             ) : (

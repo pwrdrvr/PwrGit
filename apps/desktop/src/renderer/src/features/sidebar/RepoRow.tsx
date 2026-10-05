@@ -411,16 +411,16 @@ export function RepoRow({
       : ghostAbove
         ? {
             tag: "↓ Other",
-            tip: `In ${worktreesLabel}, which is closed. Shown because you're on it. ★ pins it.`
+            tip: `In ${worktreesLabel}, which is closed. Shown because you're on it; pin it to keep it here.`
           }
         : isFinishedWorktree(ghostWorktree, now)
           ? {
               tag: "Finished",
-              tip: `Finished, so it is not in the ${WORKTREE_SLICE}. Shown because you're on it. ★ pins it.`
+              tip: `Finished, so it is not in the ${WORKTREE_SLICE}. Shown because you're on it; pin it to keep it here.`
             }
           : {
               tag: "In flight",
-              tip: `Below the first ${WORKTREE_SLICE} in this order. Shown because you're on it. ★ pins it.`
+              tip: `Below the first ${WORKTREE_SLICE} in this order. Shown because you're on it; pin it to keep it here.`
             };
   // The arrow keys walk the rows in the order they are drawn, ghost included.
   const displayIds = [

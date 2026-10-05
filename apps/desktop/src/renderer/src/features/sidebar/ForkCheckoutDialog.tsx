@@ -20,6 +20,7 @@ import {
 import { forkCheckoutAction, forkCheckoutLead } from "./fork-checkout-dialog";
 import { ForkRemotePlan } from "./ForkRemotePlan";
 import { GitForkIcon } from "./RepoIdentityMarks";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 /**
  * Fork the repository this checkout was cloned from, and point the checkout at
@@ -290,7 +291,7 @@ export function ForkCheckoutDialog({
             disabled={busy}
             onClick={onClose}
           >
-            ×
+            <CloseGlyph />
           </button>
         </div>
 

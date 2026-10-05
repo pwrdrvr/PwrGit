@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 /** `owner/name` split at its last slash: GitLab owners can hold slashes.
  *  Text with no slash ("none yet", a bare nickname) is all owner. */
@@ -155,7 +156,7 @@ function arrowLabel(arrow: RouteArrow): ReactNode {
   }
   if (arrow.verb === "pull") return "Pull";
   return <>
-    {arrow.tone === "bad" && <span className="fork-route__x" aria-hidden="true">×</span>}
+    {arrow.tone === "bad" && <span className="fork-route__x" aria-hidden="true"><CloseGlyph size={8} /></span>}
     Push
     {arrow.confirmed === true && <span className="fork-route__tick" aria-hidden="true" />}
   </>;

@@ -1,4 +1,5 @@
 import { AgentGlyph } from "../../lib/AgentGlyph";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 export function SelectionBar({
   count,
@@ -37,13 +38,17 @@ export function SelectionBar({
           Tidy…
         </button>
       )}
-      <span style={{ flex: 1 }} />
-      <button className="selection-bar__rebase" onClick={onOpenRebaseTool}>
-        Open rebase tool →
-      </button>
-      <button className="selection-bar__x" onClick={onClear} aria-label="Clear">
-        ×
-      </button>
+      {/* One unit, so a narrow pane wraps the primary action and Clear onto
+          the next line together; Clear alone at the start of a line reads as
+          clearing something else. */}
+      <span className="selection-bar__end">
+        <button className="selection-bar__rebase" onClick={onOpenRebaseTool}>
+          Open rebase tool →
+        </button>
+        <button className="selection-bar__x" onClick={onClear} aria-label="Clear">
+          <CloseGlyph size={12} />
+        </button>
+      </span>
     </div>
   );
 }

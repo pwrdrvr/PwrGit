@@ -26,6 +26,10 @@ import {
   railLabel,
   type WizardStep
 } from "./steps";
+import { CloseGlyph } from "../../lib/CloseGlyph";
+import { CheckGlyph } from "../../lib/CheckGlyph";
+import { InfoGlyph } from "../../lib/InfoGlyph";
+import { WarningGlyph } from "../../lib/WarningGlyph";
 
 export type OnboardingWizardProps = {
   profile: Profile;
@@ -210,7 +214,7 @@ export function OnboardingWizard(props: OnboardingWizardProps) {
             aria-label="Close setup"
             onClick={skip}
           >
-            ✕
+            <CloseGlyph />
           </button>
         </header>
 
@@ -226,9 +230,11 @@ export function OnboardingWizard(props: OnboardingWizardProps) {
                   {...(state === "current" ? { "aria-current": "step" } : {})}
                 >
                   <div className="onboarding-wizard__rail-num">
-                    {state === "done"
-                      ? `Step ${i + 1} ✓`
-                      : i === 3
+                    {state === "done" ? (
+                      <>
+                        Step {i + 1} <CheckGlyph size={9} />
+                      </>
+                    ) : i === 3
                         ? "Done"
                         : `Step ${i + 1}`}
                   </div>
@@ -381,7 +387,9 @@ function IdentityStep(props: {
       </div>
       {identity !== null && identity.conditionalDirs.length > 0 && (
         <div className="onboarding-wizard__notice">
-          <span aria-hidden="true">ⓘ</span>
+          <span className="onboarding-wizard__notice-icon" aria-hidden="true">
+            <InfoGlyph />
+          </span>
           <div>
             Your <code>~/.gitconfig</code> sets a different identity for
             repositories under{" "}
@@ -490,7 +498,9 @@ function ScanExplainerStep() {
         </li>
       </ol>
       <div className="onboarding-wizard__notice">
-        <span aria-hidden="true">ⓘ</span>
+        <span className="onboarding-wizard__notice-icon" aria-hidden="true">
+          <InfoGlyph />
+        </span>
         <div>
           Also skipped, at every level: <code>node_modules</code>,{" "}
           <code>dist</code>, <code>out</code>, <code>build</code>,{" "}
@@ -536,7 +546,7 @@ function FolderPickStep(props: {
               aria-label={`Remove ${root}`}
               onClick={() => props.onRemove(root)}
             >
-              ✕
+              <CloseGlyph />
             </button>
           </li>
         ))}
@@ -556,7 +566,9 @@ function FolderPickStep(props: {
       </button>
       {homeish && (
         <div className="onboarding-wizard__notice onboarding-wizard__notice--warn">
-          <span aria-hidden="true">⚠</span>
+          <span className="onboarding-wizard__notice-icon" aria-hidden="true">
+            <WarningGlyph />
+          </span>
           <div>
             <b>Adding your home folder works, and we would not.</b> It holds
             thousands of directories that are not code, and PwrGit walks past

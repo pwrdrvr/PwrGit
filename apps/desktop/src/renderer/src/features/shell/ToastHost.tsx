@@ -16,6 +16,7 @@ import {
   useViewportTooltip,
   type ViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { CloseGlyph } from "../../lib/CloseGlyph";
 
 const AUTO_DISMISS_MS = 9_000;
 
@@ -224,7 +225,7 @@ function ToastCard({
           {...hoverTooltip(tip, "Dismiss")}
           onClick={() => dismissToast(toast.id)}
         >
-          ✕
+          <CloseGlyph size={12} />
         </button>
       </div>
       {/* Keyed by id so a replacement restarts the countdown animation, which

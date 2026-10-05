@@ -18,14 +18,16 @@ import { PrChip } from "../sidebar/PrChip";
 import { RemoteChip } from "../sidebar/RemoteChip";
 import { primaryVerb, provenanceOf, type Provenance } from "./provenance";
 import type { ChangeRequestViewState } from "./useChangeRequestView";
+import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
+import { PlusGlyph } from "../../lib/PlusGlyph";
 
 /**
  * The PR view's main pane: the change request picked in the sidebar, read
  * with no worktree — a header drawn from the open list's cache, a line saying
  * which commit the diff is drawn to, and the diff.
  *
- * Read-only. Its verbs lead elsewhere: ⌂ to the worktree holding the head,
- * + to New worktree, ↗ to the forge. Esc goes back to the worktree that was
+ * Read-only. Its verbs lead elsewhere: Go to worktree to the worktree holding
+ * the head, + Worktree to New worktree, ↗ to the forge. Esc goes back to the worktree that was
  * selected before.
  *
  * Design: `design/Change Request View - UX Review.dc.html`, 2a and 3.
@@ -127,7 +129,7 @@ export function ChangeRequestView({
               {...hoverTooltip(tip, "Go to the worktree with this head checked out")}
               onClick={() => onGoToWorktree(verb.worktreeId)}
             >
-              <span aria-hidden="true">⌂</span>
+              <WorktreeGlyph />
               <span className="wt-btn__label">Go to worktree</span>
             </button>
           )}
@@ -137,7 +139,7 @@ export function ChangeRequestView({
               {...hoverTooltip(tip, "New worktree on this change request's head")}
               onClick={() => onCreateWorktree(shown)}
             >
-              <span aria-hidden="true">+</span>
+              <PlusGlyph />
               <span className="wt-btn__label">Worktree</span>
             </button>
           )}

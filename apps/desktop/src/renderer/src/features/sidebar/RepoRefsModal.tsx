@@ -78,6 +78,9 @@ import {
   worktreeStatusCounts,
   type WorktreeStatusFilter
 } from "./RepoWorktreeTable";
+import { CloseGlyph } from "../../lib/CloseGlyph";
+import { SearchGlyph } from "../../lib/SearchGlyph";
+import { TagGlyph } from "../../lib/TagGlyph";
 
 export function trackingLabel(branch: LocalBranchSummary): string {
   switch (branch.tracking) {
@@ -1125,7 +1128,7 @@ export function RepoRefsModal({
             {repo.path}
           </span>
           <button className="refs-icon-btn" aria-label="Close" onClick={onClose}>
-            ×
+            <CloseGlyph />
           </button>
         </div>
         <div className="refs-browser__toolbar">
@@ -1169,7 +1172,7 @@ export function RepoRefsModal({
             )}
           </div>
           <label className="refs-search">
-            <span aria-hidden="true">⌕</span>
+            <SearchGlyph size={13} />
             <input
               ref={searchRef}
               value={query}
@@ -1593,7 +1596,7 @@ export function RepoRefsModal({
                 >
                   <div className="refs-table__identity">
                     <span className="refs-tag-icon" aria-hidden="true">
-                      #
+                      <TagGlyph size={11} />
                     </span>
                     <div>
                       <CopyTarget
