@@ -327,6 +327,8 @@ export function RepoChangeRequestSection({
           selected ? " is-selected" : ""
         }`}
         key={key}
+        // Back returns the sidebar to this row (sidebar-anchor.ts).
+        data-nav-anchor={`cr:${repo.id}:${key}`}
         role="treeitem"
         aria-selected={selected}
         aria-level={3}

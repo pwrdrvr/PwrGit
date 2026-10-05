@@ -658,6 +658,7 @@ export function RepoRefsSections({
                   <div
                     className={`ref-branch-row is-${state}`}
                     key={branch.fullName}
+                    data-nav-anchor={`branch:${repo.id}:${branch.fullName}`}
                     role="treeitem"
                     aria-level={3}
                     aria-posinset={index + 1}

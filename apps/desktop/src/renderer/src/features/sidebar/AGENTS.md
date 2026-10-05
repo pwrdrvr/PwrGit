@@ -285,3 +285,13 @@ name:
   the "Afterwards" list.
 
 Design: `design/Fork Route Graphic - UX Review.dc.html`.
+
+## The sidebar holds the reader's row across a selection change
+
+`sidebar-anchor.ts` remembers the row last pressed, focused or scrolled with
+(`data-nav-anchor`, `data-wt-id`, `data-repo-id`) and its offset in the list.
+A selection change caused by a press holds that row still for a moment, and
+Back restores it by key. Both run in Sidebar's layout effects, before paint,
+and while one holds its row the "reveal the selection" scroll stands down.
+A row someone can jump *from* needs a stable `data-nav-anchor`. A ghost
+keeps `data-wt-id`, so reveals and anchors find it like the real row.

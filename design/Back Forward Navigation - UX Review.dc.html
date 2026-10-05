@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 880px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 360px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .rec { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--rv-acc); color: var(--rv-accon); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .pin.q { background: var(--rv-t3); color: #050505; }
+          .find { width: 470px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 190px 260px minmax(0, 1fr); gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .verdict { display: inline-flex; justify-self: start; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verdict.keep { background: rgba(95, 169, 105, 0.16); color: #9ce5b3; }
+          .verdict.chg { background: rgba(255, 138, 31, 0.12); color: var(--rv-accb); }
+          .verdict.q { background: rgba(247, 243, 235, 0.06); color: var(--rv-t3); }
+
+          /* ============================================================
+             Light theme scope: the app's own token names, from tokens.css
+             :root[data-theme="light"]
+             ============================================================ */
+          .th-light {
+            --bg-titlebar: #f7f4ef; --bg-sidebar: #f7f4ef; --bg-panel: #fdfcfa; --bg-input: #ffffff; --bg-panel-elevated: #ffffff; --bg-app: #ffffff;
+            --bg-panel-hover: #f4f0e8; --bg-hover-strong: #ebe5da; --bg-row-active: #fff5e9; --bg-active-strong: #ffe8cf;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+            --accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --status-ok: #2e7d3c; --status-error: #a8472a; --status-warning: #805200; --status-suspended: #6b6660;
+            --brand-purple: #6a4ba8;
+            --focus-ring: var(--accent);
+            color: var(--text-primary);
+          }
+          .stage { position: relative; padding: 18px; border-radius: 10px; background: #e9e4dc; }
+          .th-light .dv-oid { background: rgba(0, 0, 0, 0.08); color: #1a1612; }
+
+          /* ---- title bar, true size from app.css (.titlebar, .titlebar__id) ---- */
+          .tb { position: relative; display: flex; align-items: center; height: 41px; padding: 0 16px; background: var(--bg-titlebar); border-bottom: 1px solid var(--border-subtle); border-radius: 9px 9px 0 0; }
+          .tb.solo { border-radius: 9px; border: 1px solid var(--border-subtle); }
+          .lights { flex: none; width: 80px; display: flex; gap: 8px; }
+          .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+          .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+          .brand { flex: none; display: flex; align-items: center; gap: 7px; font: 650 15px/1 var(--font-sans); color: var(--accent); }
+          .bmark { flex: none; width: 18px; height: 18px; background: currentColor; -webkit-mask: url("assets/logo-pwrgit.svg") center / contain no-repeat; mask: url("assets/logo-pwrgit.svg") center / contain no-repeat; }
+          .tid { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: 16px; }
+          .tb.hasnav .tid { margin-left: 10px; }
+          .trepo { flex: 0 1 auto; min-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 12.5px/1.3 var(--font-sans); color: var(--accent); }
+          .tsep { color: var(--text-subtle); font: 500 12px/1 var(--font-sans); }
+          .tbranch { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; max-width: 320px; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--accent-soft); color: var(--text-primary); font: 500 11.5px/1 var(--font-mono); white-space: nowrap; overflow: hidden; }
+          .tbranch .dot { width: 7px; height: 7px; flex: none; border-radius: 999px; background: var(--accent); }
+          .tbranch .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+          .tpath { flex: 0 999 auto; min-width: 0; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--text-muted); font: 500 10.5px/1 var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .tspacer { flex: 1; min-width: 12px; }
+
+          /* ---- the new control: PwrAgnt's .history-nav, verbatim ---- */
+          .hnav { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: 12px; }
+          .hchip { position: relative; display: inline-flex; width: 28px; height: 24px; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; transition: color 80ms ease, background 80ms ease; appearance: none; }
+          .hchip:hover, .hchip.hov { color: var(--text-primary); background: var(--bg-row-active); }
+          .hchip.foc { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+          .hchip.off, .hchip:disabled { opacity: 0.32; cursor: default; pointer-events: none; }
+          .hchip .htip { display: none; }
+          .hchip:hover .htip { display: block; }
+          .htip, .tip { position: absolute; z-index: 20; width: max-content; max-width: 380px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-panel-elevated); box-shadow: 0 12px 28px rgba(0,0,0,.14); color: var(--text-primary); font: 500 12px/1.45 var(--font-sans); text-align: left; white-space: pre-wrap; pointer-events: none; }
+          .htip { top: 30px; left: 0; }
+          .tip .k, .htip .k { color: var(--text-muted); }
+
+          /* ---- history menu (right-click / press-and-hold) ---- */
+          .hmenu { position: absolute; z-index: 25; width: 360px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-panel-elevated); box-shadow: 0 18px 48px rgba(0,0,0,.18); }
+          .hmh { padding: 6px 8px 5px; font: 600 9.5px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-subtle); }
+          .hmi { display: grid; grid-template-columns: 14px minmax(0,1fr) auto; gap: 8px; align-items: center; min-height: 34px; padding: 5px 8px; border-radius: 6px; cursor: pointer; }
+          .hmi:hover, .hmi.hov { background: var(--bg-panel-hover); }
+          .hmi.cur { background: var(--bg-row-active); }
+          .hmi .g { font: 600 11px/1 var(--font-mono); color: var(--text-subtle); text-align: center; }
+          .hmi.cur .g { color: var(--accent); }
+          .hmi .l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 500 11.5px/1.25 var(--font-mono); color: var(--text-primary); white-space: nowrap; overflow: hidden; }
+          .hmi .l1 .r { flex: none; font: 650 11px/1.25 var(--font-sans); color: var(--accent); }
+          .hmi .l1 .b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+          .hmi .l2 { margin-top: 2px; font: 500 10px/1.2 var(--font-sans); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .hmi .t { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .hmsep { height: 1px; margin: 4px 6px; background: var(--border-subtle); }
+
+          /* ---- sidebar, true size from app.css (.repo-row, .wt-row, .cr-row) ---- */
+          .sb { position: relative; width: 330px; padding: 6px 6px 8px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-sidebar); }
+          .sb.w260 { width: 260px; }
+          .sb.clip { overflow: hidden; }
+          .repo { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 4px 8px 4px 12px; border-radius: 8px; }
+          .chev { flex: none; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--text-muted); transform: rotate(90deg); margin-left: -4px; }
+          .rname { font: 650 13px/1.2 var(--font-sans); color: var(--accent); white-space: nowrap; }
+          .rsp { flex: 1; }
+          .wts { font: 600 11px/1 var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+          .tree { margin: 2px 0 2px 15px; padding: 2px 0 2px 8px; border-left: 1px solid var(--border-subtle); }
+          .wtrow { position: relative; display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 6px 0 6px; border: 1px solid transparent; border-radius: 7px; cursor: pointer; }
+          .wtrow:hover { background: var(--bg-panel-hover); }
+          .wtrow.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .hbox { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; border: 1px solid var(--accent-border); border-radius: 4px; color: var(--accent); font: 600 10px/1 var(--font-sans); }
+          .wtrow .bn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1.25 var(--font-mono); color: var(--text-secondary); }
+          .wtrow.sel .bn { color: var(--accent-bright); }
+          .age { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); white-space: nowrap; }
+          .flash { animation: flash 900ms ease-out 1; }
+          @keyframes flash { 0% { box-shadow: 0 0 0 3px var(--accent-border); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+          /* the ghost: a real row, drawn as a visitor */
+          .wtrow.ghost { border: 1px dashed var(--accent-border); background: color-mix(in srgb, var(--bg-row-active) 55%, transparent); }
+          .wtrow.ghost.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .gtag { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px dashed var(--border-strong); border-radius: 4px; color: var(--text-muted); font: 600 9px/1 var(--font-mono); white-space: nowrap; }
+          .gtag .gt { overflow: hidden; }
+          .sb.w260 .gtag .gt { display: none; }
+
+          .sec { border-top: 1px solid var(--border-subtle); }
+          .sh { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 6px 0 4px; color: var(--text-muted); cursor: pointer; }
+          .sh .c { flex: none; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid currentColor; opacity: .82; }
+          .sh .c.open { transform: rotate(90deg); }
+          .slabel { font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); white-space: nowrap; }
+          .scount { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .sp { flex: 1; min-width: 0; }
+          .sub { display: flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px 0 6px; }
+          .sub .slabel { font-size: 9.5px; }
+          .viewall { display: flex; align-items: center; height: 26px; padding: 0 8px; border-radius: 6px; font: 500 11px/1 var(--font-sans); color: var(--text-muted); }
+          .gsep { display: flex; align-items: center; gap: 6px; margin: 3px 4px; font: 600 8.5px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-subtle); }
+          .gsep::before, .gsep::after { content: ""; flex: 1; border-top: 1px dashed var(--border-default); }
+
+          /* ---- change-request row (.cr-row) ---- */
+          .prow { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 5px 5px 5px 7px; border: 1px solid transparent; border-radius: 6px; cursor: default; }
+          .prow:hover, .prow.hov { background: var(--bg-panel-hover); }
+          .pl1 { display: flex; align-items: center; gap: 6px; min-width: 0; height: 18px; }
+          .pt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px/1.2 var(--font-sans); color: var(--text-primary); }
+          .pa { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .pplus { flex: none; width: 18px; text-align: center; font: 500 14px/1 var(--font-sans); color: var(--text-muted); }
+          .pl2 { display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; padding-left: 1px; overflow: hidden; }
+          .ph { flex: 0 6 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 10.5px/1.2 var(--font-mono); color: var(--text-muted); }
+          .loc { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-muted); font: 600 9.5px/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
+          .loc.here { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .prc { position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-panel); color: var(--text-secondary); font: 600 9.5px/1 var(--font-mono); }
+          .prc .d { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--status-suspended); }
+          .prc.passing .d { background: var(--status-ok); } .prc.failing .d { background: var(--status-error); }
+          .prc.pending .d { background: var(--status-warning); } .prc.merged .d { background: var(--brand-purple); }
+          .brow { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; }
+          .brow .bico { flex: none; color: var(--text-subtle); font: 600 11px/1 var(--font-mono); }
+          .brow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1 var(--font-mono); color: var(--text-primary); }
+          .brow small { flex: none; font: 600 9px/1 var(--font-mono); color: var(--text-muted); }
+          .brow.ghost { border: 1px dashed var(--accent-border); background: color-mix(in srgb, var(--bg-row-active) 55%, transparent); }
+
+          /* stacked rows standing in for a disclosure's long body */
+          .filler { margin: 2px 6px; border-radius: 6px; background: repeating-linear-gradient(180deg, rgba(0,0,0,.035) 0 22px, transparent 22px 26px); display: flex; align-items: center; justify-content: center; font: 600 10px/1.3 var(--font-mono); color: var(--text-muted); text-align: center; }
+          .gauge { position: absolute; z-index: 4; right: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 999px; background: var(--status-error); color: #fff; font: 650 10px/1 var(--font-sans); box-shadow: 0 6px 16px rgba(0,0,0,.18); }
+          .cursor { position: absolute; z-index: 6; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 13px solid #1a1612; transform: rotate(-28deg); filter: drop-shadow(0 1px 0 #fff); }
+
+          /* ---- stack diagram ---- */
+          .stk { display: flex; align-items: stretch; gap: 8px; }
+          .ent { width: 172px; display: flex; flex-direction: column; gap: 4px; padding: 9px 10px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-panel-elevated); }
+          .ent.cur { border-color: var(--accent); background: var(--bg-row-active); }
+          .ent .eh { font: 600 9px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-subtle); }
+          .ent .ep { font: 500 11px/1.3 var(--font-mono); color: var(--text-primary); word-break: break-all; }
+          .ent .ep b { font: 650 11px/1.3 var(--font-sans); color: var(--accent); }
+          .ent .ex { font: 500 10px/1.4 var(--font-sans); color: var(--text-muted); }
+          .ent .ex code { font: 500 9.5px/1.4 var(--font-mono); color: var(--text-secondary); }
+          .arw { align-self: center; font: 500 14px/1 var(--font-sans); color: var(--text-subtle); }
+
+          /* ---- live prototype chrome ---- */
+          .proto { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid rgba(255, 138, 31, 0.42); border-radius: 12px; background: #050505; }
+          .pchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+          .pchips button { appearance: none; height: 22px; padding: 0 9px; border: 1px solid rgba(247,243,235,.14); border-radius: 999px; background: transparent; color: var(--rv-t2); font: 600 9.5px/1 var(--font-mono); cursor: pointer; }
+          .pchips button.on { border-color: rgba(255, 138, 31, 0.42); color: var(--rv-accb); background: rgba(255,138,31,.12); }
+          .pchips span { font: 500 10px/1.4 var(--font-sans); color: var(--rv-t3); margin-left: 6px; }
+          .readout { font: 500 10px/1.5 var(--font-mono); color: var(--rv-tsub); white-space: pre-wrap; }
+          .win { border-radius: 10px; overflow: hidden; border: 1px solid var(--border-default); background: var(--bg-app); }
+          .wbody { display: flex; height: 560px; }
+          .wside { width: 340px; flex: none; overflow-y: auto; padding: 6px; background: var(--bg-sidebar); border-right: 1px solid var(--border-subtle); }
+          .wmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; background: var(--bg-panel); }
+          .lin { font: 600 10.5px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+          .ph-img { flex: 1; min-height: 120px; border-radius: 8px; border: 1px solid var(--border-subtle); background: repeating-linear-gradient(135deg, rgba(0,0,0,.03) 0 10px, transparent 10px 20px); display: flex; align-items: center; justify-content: center; font: 500 10.5px/1.4 var(--font-mono); color: var(--text-muted); text-align: center; padding: 12px; }
+          .hist { display: flex; flex-wrap: wrap; gap: 5px; }
+          .hpill { display: inline-block; height: 20px; line-height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-input); color: var(--text-muted); font: 500 9.5px/1 var(--font-mono); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .hpill.cur { border-color: var(--accent); background: var(--bg-row-active); color: var(--accent-bright); }
+          .hpill.fwd { border-style: dashed; }
+          .kcap { font: 600 9.5px/1 var(--font-mono); color: var(--text-muted); }
+          .hide { display: none !important; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Findings: one double&#8209;click on #2525 moved the sidebar about 5,000px, and nothing remembers where you were</span></div>
+        <p class="dv-sub">PwrGit has no history. The selection is a single <code>{repoId, worktreeId}</code> in <code>App.tsx</code>, so a jump replaces it outright. Worse, the jump's own reveal rearranges the sidebar under you. Every specimen here is light theme at shipped size, drawn from <code>app.css</code>. PR numbers and branch names follow the PwrAgnt sidebar in the screenshot that prompted this review, the PR titles are completed by hand, and everything else is invented. Artboards load Google's &#8220;Geist&#8221;, so text widths can differ from the app's bundled Geist Sans by a few px.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Four findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>There is no way back.</h4><p>The only memory of past places is <code>focus&#8209;visits</code>, a worktree &#8594; last&#8209;viewed&#8209;time map that ranks the Focused lens. It records <b>when</b>, not <b>in what order</b>, and nothing in the UI can return you to it.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The reveal forces open the 190&#8209;row disclosure, and saves that.</h4><p>When the selection lands in the remaining worktrees, <code>RepoRow</code> runs <code>setWorktreesOpen(true)</code>. It also persists the result to <code>pwrgit.unpinnedWorktreesOpen.&lt;repo&gt;</code>. With 199 worktrees, the Pull requests list you clicked from is now about 190 rows lower, and it is still that low after the next launch.</p></div></div>
+              <div class="fitem"><span class="pin ok">3</span><div><h4>Every jump already goes through one hub.</h4><p>That covers the sidebar's <code>onRevealWorktree</code>, the palette, lineage chips, the title&#8209;bar branch switcher, tag Locate, and clone/fork completion. All of them end in <code>setSelection</code>, some through <code>pendingReveal</code>. So recording history in one place, by watching the selection the way PwrAgnt watches its location, covers every one of those entry points without touching a single call site.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>The &#8220;View all&#8230;&#8221; dialog can't do everything the short list can.</h4><p>The dialog's PR <b>New worktree</b> calls <code>onCreateWorktree</code> without the PR, so the new&#8209;worktree sheet loses its subject. The dialog's rows also ignore double&#8209;click, which the sidebar uses to reveal a worktree or switch. Both are split out as a separate task: a dialog that can only see the rest of the list, not act on it, is not much use.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Before and after the double-click">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>The same 560px of sidebar, before and after double&#8209;clicking #2525</div>
+            <div class="stage th-light" style="display:flex;gap:22px;align-items:flex-start">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="sb clip" style="height:420px">
+                  <div class="repo"><span class="chev"></span><span class="rname">PwrAgnt</span><span class="rsp"></span><span class="wts">199 wts</span></div>
+                  <div class="tree">
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">main</span><span class="age">1h</span></div>
+                    <div class="sub"><span class="slabel">Working</span><span class="scount">3</span></div>
+                    <div class="wtrow sel"><span class="hbox">&#8962;</span><span class="bn">fix/release&#8209;distribution&#8209;audit</span><span class="age">14h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">feat/github&#8209;markdown&#8209;image&#8209;previews</span><span class="age">13h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">agent/claude&#8209;acp&#8209;support</span><span class="age">15h</span></div>
+                    <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Other worktrees</span><span class="scount">190</span></div></div>
+                    <div class="sec">
+                      <div class="sh"><span class="c open"></span><span class="slabel">Pull requests</span><span class="scount">24</span></div>
+                      <div class="prow hov"><div class="pl1"><span class="prc failing"><span class="d"></span>#2525</span><span class="pt">feat(desktop): let the conversation scroll past the composer</span><span class="pa">9h</span></div><div class="pl2"><span class="loc here">&#8962;</span><span class="ph">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></div></div>
+                      <div class="prow"><div class="pl1"><span class="prc passing"><span class="d"></span>#2544</span><span class="pt">feat(desktop): render public GitHub markdown images</span><span class="pa">13h</span></div><div class="pl2"><span class="loc here">&#8962;</span><span class="ph">feat/github&#8209;markdown&#8209;image&#8209;previews</span></div></div>
+                      <div class="prow"><div class="pl1"><span class="prc passing"><span class="d"></span>#2504</span><span class="pt">fix(release): audit remote Winget and Scoop manifests</span><span class="pa">14h</span></div><div class="pl2"><span class="loc here">&#8962;</span><span class="ph">fix/release&#8209;distribution&#8209;audit</span></div></div>
+                    </div>
+                  </div>
+                  <span class="cursor" style="left:215px;top:242px"></span>
+                </div>
+                <p class="note" style="color:#524a40;max-width:330px"><b style="color:#1a1612">Before.</b> You are on <code style="color:#1a1612">fix/release&#8209;distribution&#8209;audit</code>, with #2525 under the pointer.</p>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="sb clip" style="height:420px">
+                  <div style="margin-top:-150px">
+                  <div class="tree" style="margin-top:0">
+                    <div class="sec" style="border-top:0"><div class="sh"><span class="c open"></span><span class="slabel">Other worktrees</span><span class="scount">190</span></div></div>
+                    <div class="filler" style="height:250px">&#8942;<br />142 rows above</div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">chore/agent&#8209;queue&#8209;race&#8209;3f1e</span><span class="age">1d</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">codex/thread&#8209;composer&#8209;scrollback&#8209;a1c2</span><span class="age">10h</span></div>
+                    <div class="wtrow sel"><span class="hbox">&#8962;</span><span class="bn">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span><span class="age">9h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">codex/thread&#8209;rail&#8209;pins&#8209;77b0</span><span class="age">11h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">docs/catppuccin&#8209;credits</span><span class="age">14h</span></div>
+                    <div class="filler" style="height:160px">&#8942;<br />43 rows below</div>
+                  </div>
+                  </div>
+                  <span class="gauge" style="bottom:12px">&#8595; Pull requests &#8776; 1,200px lower</span>
+                </div>
+                <p class="note" style="color:#524a40;max-width:330px"><b style="color:#1a1612">After.</b> The disclosure opened itself and the sidebar centred the new row. The row you clicked, and the worktree you were on, are both off&#8209;screen, and nothing on screen says how to get back to them.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "what if the target worktree was pinned?" &#183; "same jump from the &#8984;K palette"</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Back and Forward in the title bar: PwrAgnt's pair, in the same place relative to the crumbs</span></div>
+        <p class="dv-sub">PwrAgnt places <code>.history-nav</code> at the leading edge of the header, just before what it navigates between. In PwrGit that spot is between the brand and the <code>repo &#8250; branch</code> crumbs. These are the same component and class names as PwrAgnt's, and the same 28&#215;24 chip that rests muted and tints on hover. The window is a drag region, so the pair needs <code>no&#8209;drag</code>. Shortcuts go in the tooltip, never inside the chip.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a The pair, states">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><span class="rec">Recommended</span>Straight port, with Back's tooltip naming the destination</div>
+            <div class="stage th-light" style="width:976px;display:flex;flex-direction:column;gap:18px;padding-bottom:70px">
+              <div class="tb solo hasnav">
+                <span class="lights"><i></i><i></i><i></i></span>
+                <span class="brand"><span class="bmark"></span>PwrGit</span>
+                <span class="hnav"><span class="hchip hov"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
+                <span class="tid"><span class="trepo">PwrAgnt</span><span class="tsep">&#8250;</span><span class="tbranch"><span class="dot"></span><span class="nm">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></span><span class="tpath">&#9633; muslg1hh/PwrAgnt</span></span>
+                <span class="tspacer"></span>
+                <span class="tip" style="top:36px;left:186px">Back to PwrAgnt &#8250; fix/release&#8209;distribution&#8209;audit  <span class="k">(&#8984;[)</span></span>
+              </div>
+            </div>
+            <div class="stage th-light" style="width:976px;display:flex;gap:26px;align-items:center;padding:14px 18px">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><span class="hnav" style="margin:0"><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="kcap">rest</span></div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><span class="hnav" style="margin:0"><span class="hchip hov"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="kcap">hover</span></div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><span class="hnav" style="margin:0"><span class="hchip foc"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="kcap">focus&#8209;visible</span></div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><span class="hnav" style="margin:0"><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="kcap">nothing forward</span></div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:6px"><span class="hnav" style="margin:0"><span class="hchip off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="kcap">fresh window</span></div>
+              <p class="note" style="color:#524a40;max-width:250px">The pair is always there, with disabled states at 32%, so the crumbs never move when history fills up. That follows the &#8220;no layout shift under the pointer&#8221; rule.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b History menu">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Addition PwrAgnt doesn't have: right&#8209;click or press&#8209;and&#8209;hold either chip for the list</div>
+            <div class="stage th-light" style="width:520px;height:340px">
+              <div class="tb solo hasnav" style="width:434px">
+                <span class="lights"><i></i><i></i><i></i></span>
+                <span class="brand"><span class="bmark"></span>PwrGit</span>
+                <span class="hnav"><span class="hchip hov"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
+                <span class="tid"><span class="trepo">PwrAgnt</span></span>
+              </div>
+              <div class="hmenu" style="top:62px;left:118px">
+                <div class="hmh">Back</div>
+                <div class="hmi cur"><span class="g">&#9679;</span><div style="min-width:0"><div class="l1"><span class="r">PwrAgnt</span><span class="b">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></div><div class="l2">Here now &#183; from #2525</div></div><span class="t"></span></div>
+                <div class="hmi hov"><span class="g">1</span><div style="min-width:0"><div class="l1"><span class="r">PwrAgnt</span><span class="b">fix/release&#8209;distribution&#8209;audit</span></div><div class="l2">commit 0a2a1d7 open</div></div><span class="t">2m</span></div>
+                <div class="hmi"><span class="g">2</span><div style="min-width:0"><div class="l1"><span class="r">PwrAgnt</span><span class="b">feat/github&#8209;markdown&#8209;image&#8209;previews</span></div><div class="l2">from the &#8984;K palette</div></div><span class="t">9m</span></div>
+                <div class="hmi"><span class="g">3</span><div style="min-width:0"><div class="l1"><span class="r">PwrGit</span><span class="b">main</span></div><div class="l2">expanded the repo</div></div><span class="t">31m</span></div>
+                <div class="hmsep"></div>
+                <div class="hmi"><span class="g">&#8943;</span><div style="min-width:0"><div class="l1" style="font-family:var(--font-sans);color:var(--text-muted)">7 more</div></div><span class="t"></span></div>
+              </div>
+            </div>
+            <p class="note">This is the Safari and Chrome gesture, and it helps more here than in a thread app. With 199 worktrees, &#8220;back three&#8221; is easier to pick than to press three times. Rows show <b>repo &#8250; branch</b> and how you arrived, which the hub already knows. Picking a row jumps straight there and keeps the rest of the stack, the same as a browser. Hovering a row does nothing until you click.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c At the minimum window">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>At the 940px minimum window, with the widest branch chip: nothing needs to step down</div>
+            <div class="stage th-light" style="width:976px;display:flex;flex-direction:column;gap:12px">
+              <div class="tb solo hasnav" style="width:940px"><span class="lights"><i></i><i></i><i></i></span><span class="brand"><span class="bmark"></span>PwrGit</span><span class="hnav"><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="tid"><span class="trepo">PwrAgnt</span><span class="tsep">&#8250;</span><span class="tbranch"><span class="dot"></span><span class="nm">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></span><span class="tpath">&#9633; muslg1hh/PwrAgnt</span></span><span class="tspacer"></span></div>
+              <p class="note" style="color:#524a40;max-width:900px">The title bar spans the whole window, and <code>window.ts</code> sets <code>minWidth: 940</code>. The branch chip is capped at 320px, so even the longest crumb row leaves about 250px of spare strip at the minimum, and nothing on the existing <code>.titlebar__id</code> ladder fires. The pair is <code>flex: 0 0 auto</code> anyway, the same as the branch chip: a control you reach for mid&#8209;task must not vanish at some widths. It costs 58px plus a 12px lead, and the crumbs' own lead drops from 16px to 10px, so they move right by 64px.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "put the pair in the sidebar header instead" &#183; "what does the menu look like with only Forward entries?"</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">What Back remembers, and where it puts your eyes</span></div>
+        <p class="dv-sub">The model is PwrAgnt's <code>useNavigationHistory</code>, ported almost as&#8209;is. It watches the current place and records changes, with a back stack, a cursor, and a forward stack. Each stack is capped at 50, and consecutive repeats are collapsed. A new place clears Forward. A place here is <b>a worktree selection</b>. A few smaller things travel with the entry instead of becoming entries of their own, so that clicking down the lineage graph does not bury the worktree you came from under 30 commit stops.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a The stack">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>One entry, and what rides on it</div>
+            <div class="stage th-light" style="width:760px;display:flex;flex-direction:column;gap:14px">
+              <div class="stk">
+                <div class="ent"><span class="eh">Back 2</span><span class="ep"><b>PwrGit</b> main</span><span class="ex">no commit open</span></div>
+                <span class="arw">&#8250;</span>
+                <div class="ent"><span class="eh">Back 1</span><span class="ep"><b>PwrAgnt</b> fix/release&#8209;distribution&#8209;audit</span><span class="ex">commit <code>0a2a1d7</code> open<br />sidebar anchored on <code>pr:2525</code> at 302px</span></div>
+                <span class="arw">&#8250;</span>
+                <div class="ent cur"><span class="eh">Cursor</span><span class="ep"><b>PwrAgnt</b> codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span><span class="ex">arrived from <code>#2525</code></span></div>
+                <span class="arw">&#8250;</span>
+                <div class="ent" style="border-style:dashed;opacity:.7"><span class="eh">Forward</span><span class="ep" style="color:var(--text-muted)">empty</span><span class="ex">refilled by Back</span></div>
+              </div>
+            </div>
+            <div class="tbl" style="width:796px">
+              <div class="tr head"><span>Thing</span><span>Treatment</span><span>Why</span></div>
+              <div class="tr"><span><b>Worktree selection</b></span><span><span class="verdict chg">New entry</span></span><span>This is the place itself. It is recorded at the hub: the <code>selection</code> state in <code>App.tsx</code>, whatever set it. Sidebar click, PR row, palette, lineage chip, title&#8209;bar switcher, tag Locate, clone, and expanding a repo (which selects its primary) are all caught.</span></div>
+              <div class="tr"><span><b>Open commit</b> (<code>commitFocus</code>)</span><span><span class="verdict keep">Rides on the entry</span></span><span>Back restores it. Today, the worktree&#8209;change effect wipes it, so the restore re&#8209;applies it after that effect runs, the same way <code>onLocateTag</code> already sequences <code>pendingTag</code>.</span></div>
+              <div class="tr"><span><b>Sidebar anchor</b></span><span><span class="verdict keep">Rides on the entry</span></span><span>This is the row you acted from and where it sat in the viewport. Back uses it to put your eyes where they were (<a class="dv-oid" href="#3b">3b</a>). It is recorded as a row key, not a scroll pixel, because PR lists refresh underneath.</span></div>
+              <div class="tr"><span><b>Diff pane, File insights</b></span><span><span class="verdict q">Untracked overlay</span></span><span>The first Back closes the overlay without using up an entry, like PwrAgnt's Settings. It is the same verb Esc already performs here.</span></div>
+              <div class="tr"><span><b>Lens, sort, expand/collapse, &#8984;&#8209;click multi&#8209;select</b></span><span><span class="verdict q">Not recorded</span></span><span>These change how you look at the list, not where you are.</span></div>
+              <div class="tr"><span><b>Removed worktrees</b></span><span><span class="verdict chg">Pruned</span></span><span>PwrAgnt can't prove a deletion from a paged list, so it never prunes. PwrGit can: once repos load, <code>repos</code> is authoritative. Dead entries drop out, and duplicates they leave adjacent collapse.</span></div>
+              <div class="tr"><span><b>Keys</b></span><span><code>&#8984;[</code> <code>&#8984;]</code> &#183; <code>&#8997;&#8592;</code> <code>&#8997;&#8594;</code> &#183; mouse 4/5</span><span>These are PwrAgnt's <code>matchHistoryNavChord</code> plus thumb buttons, verbatim. Bracket chords stay live inside inputs; &#8997;&#8209;arrows don't, so word&#8209;wise caret movement keeps working. On Windows and Linux they read Ctrl+[ / Ctrl+].</span></div>
+              <div class="tr"><span><b>Lifetime</b></span><span><span class="verdict chg">New: persisted per profile</span></span><span>One window is one profile, and the selection is already saved per profile. The proposal is to save the stack beside it so it survives a relaunch, capped at 50. That part is new work: PwrAgnt&#8217;s <code>useRecoverableState</code> only survives a renderer recovery, so a straight port would reset the stack on every launch.</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Where Back lands">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Where the sidebar lands after Back</div>
+            <div class="stage th-light" style="display:flex;gap:18px;align-items:flex-start">
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="sb clip" style="height:300px;width:300px">
+                  <div class="repo"><span class="chev"></span><span class="rname">PwrAgnt</span><span class="rsp"></span><span class="wts">199 wts</span></div>
+                  <div class="tree">
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">main</span><span class="age">1h</span></div>
+                    <div class="sub"><span class="slabel">Working</span><span class="scount">3</span></div>
+                    <div class="wtrow sel flash"><span class="hbox">&#8962;</span><span class="bn">fix/release&#8209;distribution&#8209;audit</span><span class="age">14h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">feat/github&#8209;markdown&#8209;image&#8209;previews</span><span class="age">13h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">agent/claude&#8209;acp&#8209;support</span><span class="age">15h</span></div>
+                    <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Other worktrees</span><span class="scount">190</span></div></div>
+                    <div class="sec"><div class="sh"><span class="c open"></span><span class="slabel">Pull requests</span><span class="scount">24</span></div>
+                      <div class="prow"><div class="pl1"><span class="prc failing"><span class="d"></span>#2525</span><span class="pt">feat(desktop): let the conversation scroll&#8230;</span><span class="pa">9h</span></div></div>
+                    </div>
+                  </div>
+                </div>
+                <p class="note" style="color:#524a40;max-width:300px"><b style="color:#1a1612">(i) Reveal the restored row.</b> This is what the reveal effect does today. It works when the two rows are close, as here. With a pinned block or a long PR list between them, you land on the worktree and lose the row you were working down.</p>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px">
+                <div class="sb clip" style="height:300px;width:300px">
+                  <div style="margin-top:-62px">
+                  <div class="tree" style="margin-top:0">
+                    <div class="sub"><span class="slabel">Working</span><span class="scount">3</span></div>
+                    <div class="wtrow sel"><span class="hbox">&#8962;</span><span class="bn">fix/release&#8209;distribution&#8209;audit</span><span class="age">14h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">feat/github&#8209;markdown&#8209;image&#8209;previews</span><span class="age">13h</span></div>
+                    <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">agent/claude&#8209;acp&#8209;support</span><span class="age">15h</span></div>
+                    <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Other worktrees</span><span class="scount">190</span></div></div>
+                    <div class="sec"><div class="sh"><span class="c open"></span><span class="slabel">Pull requests</span><span class="scount">24</span></div>
+                      <div class="prow hov flash"><div class="pl1"><span class="prc failing"><span class="d"></span>#2525</span><span class="pt">feat(desktop): let the conversation scroll&#8230;</span><span class="pa">9h</span></div><div class="pl2"><span class="loc here">&#8962;</span><span class="ph">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></div></div>
+                      <div class="prow"><div class="pl1"><span class="prc passing"><span class="d"></span>#2544</span><span class="pt">feat(desktop): render public GitHub markdown&#8230;</span><span class="pa">13h</span></div><div class="pl2"><span class="loc here">&#8962;</span><span class="ph">feat/github&#8209;markdown&#8209;image&#8209;previews</span></div></div>
+                      <div class="prow"><div class="pl1"><span class="prc passing"><span class="d"></span>#2504</span><span class="pt">fix(release): audit remote Winget and&#8230;</span><span class="pa">14h</span></div></div>
+                    </div>
+                  </div>
+                  </div>
+                </div>
+                <p class="note" style="color:#524a40;max-width:300px"><b style="color:#1a1612"><span class="rec" style="margin-right:4px">Recommended</span>(ii) Restore the anchor.</b> #2525 returns to the y it was at, with a single 900ms flash, and keyboard focus goes back to it. The selected worktree is highlighted wherever it sits. If the anchor row is gone (the PR merged), this falls back to (i). It is the browser's scroll restoration, keyed by row instead of by pixel.</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "should opening a commit be its own entry after all?" &#183; "Back across two profiles' windows"</p>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Ghost rows: show the one you're on, without opening the 190</span></div>
+        <p class="dv-sub">When the place you land on (by Back, Forward, or any jump) lives behind a cap, today's fix is to expand the cap: the disclosure opens, or the lens widens through <code>showRepoRow</code>. A ghost does the opposite. The list keeps its shape, and the one row you need shows up at the edge of the visible block, nearest to where it really lives, with a dashed outline that says &#8220;visiting&#8221;. It is a real row, not a picture of one: same component, same click, same menu, same &#9733;.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Worktree ghost">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a><span class="rec">Recommended</span>A worktree ghost, at the foot of Working, directly above the disclosure it lives in</div>
+            <div class="stage th-light" style="display:flex;gap:22px;align-items:flex-start;padding-bottom:64px">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">PwrAgnt</span><span class="rsp"></span><span class="wts">199 wts</span></div>
+                <div class="tree">
+                  <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">main</span><span class="age">1h</span></div>
+                  <div class="sub"><span class="slabel">Working</span><span class="scount">3</span></div>
+                  <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">fix/release&#8209;distribution&#8209;audit</span><span class="age">14h</span></div>
+                  <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">feat/github&#8209;markdown&#8209;image&#8209;previews</span><span class="age">13h</span></div>
+                  <div class="wtrow"><span class="hbox">&#8962;</span><span class="bn">agent/claude&#8209;acp&#8209;support</span><span class="age">15h</span></div>
+                  <div class="wtrow ghost sel"><span class="hbox">&#8962;</span><span class="bn">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span><span class="gtag">&#8595;<span class="gt">Other</span></span><span class="age">9h</span></div>
+                  <div class="sec" style="border-top:0"><div class="sh"><span class="c"></span><span class="slabel">Other worktrees</span><span class="scount">190</span></div></div>
+                  <div class="sec"><div class="sh"><span class="c open"></span><span class="slabel">Pull requests</span><span class="scount">24</span></div>
+                    <div class="prow"><div class="pl1"><span class="prc failing"><span class="d"></span>#2525</span><span class="pt">feat(desktop): let the conversation scroll past the composer</span><span class="pa">9h</span></div><div class="pl2"><span class="loc here">&#8962;</span><span class="ph">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></div></div>
+                  </div>
+                </div>
+                <span class="tip" style="left:120px;top:206px">Lives in Other worktrees (190). It is shown here<br />because you're on it. <span class="k">&#9733; to keep it in Pinned.</span></span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;width:330px">
+                <p class="note" style="color:#524a40"><b style="color:#1a1612">Compare <a class="dv-oid" href="#1b">1b</a>:</b> the same jump, and #2525 is still under your pointer, with the worktree it opened three rows above it. The ghost adds one row above the pointer, so the sidebar compensates <code>scrollTop</code> by that row&#8217;s height. The rows <b>above</b> slide up by 26px, and nothing beneath the pointer moves.</p>
+                <p class="note" style="color:#524a40"><b style="color:#1a1612">The tag</b> is &#8220;&#8595; Other&#8221;, pointing at the disclosure directly below. Its tooltip says why the row is here and how to keep it. At the 260px sidebar it shrinks to the arrow alone (<a class="dv-oid" href="#4c">4c</a>).</p>
+                <p class="note" style="color:#524a40"><b style="color:#1a1612">The disclosure is left alone.</b> It stays closed if you had it closed, and its stored open state is never written by a jump, which fixes finding 2 on its own. If you open it yourself, the ghost goes away and the real row inside is selected.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Ref ghost">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>The same rule in a capped ref list: a branch reached from &#8220;View all&#8221; or Back, outside the top 6</div>
+            <div class="stage th-light">
+              <div class="sb">
+                <div class="sec" style="border-top:0">
+                  <div class="sh"><span class="c open"></span><span class="slabel">Branches</span><span class="scount">243</span></div>
+                  <div class="brow"><span class="bico">&#8970;</span><span class="nm">fix/release&#8209;distribution&#8209;audit</span><small>&#8593;2</small></div>
+                  <div class="brow"><span class="bico">&#8970;</span><span class="nm">main</span><small>Synced</small></div>
+                  <div class="brow"><span class="bico">&#8970;</span><span class="nm">feat/github&#8209;markdown&#8209;image&#8209;previews</span><small>Synced</small></div>
+                  <div class="brow"><span class="bico">&#8970;</span><span class="nm">agent/claude&#8209;acp&#8209;support</span><small>&#8595;4</small></div>
+                  <div class="brow"><span class="bico">&#8970;</span><span class="nm">feat/clef&#8209;camera&#8209;live&#8209;voice</span><small>Local only</small></div>
+                  <div class="brow"><span class="bico">&#8970;</span><span class="nm">refactor/toast&#8209;chrome&#8209;consolidation</span><small>Synced</small></div>
+                  <div class="gsep">visiting</div>
+                  <div class="brow ghost"><span class="bico">&#8970;</span><span class="nm">release/0.29&#8209;hotfix</span><small>Gone</small></div>
+                  <div class="viewall">View all 243 branches&#8230;</div>
+                </div>
+              </div>
+            </div>
+            <p class="note">In ref lists the ghost sits <b>after</b> the slice and just above &#8220;View all&#8221;, behind a dashed &#8220;visiting&#8221; rule. It goes there rather than in its sorted spot because the slice is a ranking, and slotting an outsider into it would claim it ranks. It shows the same row content as its neighbours, and the same verbs: copy, &#8644;, the &#8962; holder chip, +. It is not a summary.</p>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Ghost rules</div>
+            <div class="tbl" style="width:620px">
+              <div class="tr head" style="grid-template-columns:130px minmax(0,1fr)"><span>When</span><span>Rule</span></div>
+              <div class="tr" style="grid-template-columns:130px minmax(0,1fr)"><span><b>Appears</b></span><span>The selected worktree, or the anchor Back restores, has no rendered row because it is behind a closed disclosure, past a slice, or in a repo the lens hides. At most one per section.</span></div>
+              <div class="tr" style="grid-template-columns:130px minmax(0,1fr)"><span><b>Sits</b></span><span>For worktrees, at the foot of the visible block, directly above the disclosure that holds it. For refs, after the slice, above &#8220;View all&#8221;. For a repo hidden by the Focused lens, at the end of the page, instead of <code>showRepoRow</code> widening the lens.</span></div>
+              <div class="tr" style="grid-template-columns:130px minmax(0,1fr)"><span><b>Leaves</b></span><span>When you move away from it, including by Back. Forward brings it back with the entry. It also leaves when you open its disclosure (the real row takes over) or pin it with &#9733; (it becomes a real Pinned row).</span></div>
+              <div class="tr" style="grid-template-columns:130px minmax(0,1fr)"><span><b>Does</b></span><span>Everything its real row does: click, &#8984;/Shift&#8209;click into a multi&#8209;select, right&#8209;click menu, &#8943;, &#9733;, keyboard roving. It is the same component with one class.</span></div>
+              <div class="tr" style="grid-template-columns:130px minmax(0,1fr)"><span><b>Never</b></span><span>It never shifts the row under the pointer. Its height is compensated in <code>scrollTop</code> (scroll anchoring on the acted&#8209;on row), so the content above gives way instead. It never animates in. At the 260px sidebar width the tag shrinks to the arrow, and nothing else changes.</span></div>
+            </div>
+            <div class="stage th-light" style="width:620px;display:flex;gap:16px;align-items:center">
+              <div class="sb w260" style="padding:4px"><div class="wtrow ghost sel" style="margin:0"><span class="hbox">&#8962;</span><span class="bn">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span><span class="gtag">&#8595;<span class="gt">Other</span></span><span class="age">9h</span></div></div>
+              <p class="note" style="color:#524a40;max-width:300px">At 260px the tag is the arrow alone, and the branch name ellipsizes before it, the same order as the age chip. Dashed outline plus tag means the ghost never relies on colour.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: "ghost for a PR in the collapsed Remote&#8209;only group" &#183; "should Back re&#8209;close a disclosure I opened?"</p>
+      </section>
+
+      <!-- ================================ TURN 5 ================================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Live: double&#8209;click a PR, then try to get back</span></div>
+        <p class="dv-sub">Flip between <b>Today</b> and <b>Proposed</b>. In Proposed: double&#8209;click a PR row, or click its &#8962; chip, to jump to its worktree. Then press Back, use &#8984;[ / &#8984;] (with the pointer over the frame), or right&#8209;click or press&#8209;and&#8209;hold Back for the list (Esc or a click elsewhere closes it). Clicking a worktree row selects it, and the Other worktrees head toggles.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Live">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Live prototype</div>
+            <div class="proto" style="width:1000px" onMouseEnter="{{arm}}" onMouseLeave="{{disarm}}">
+              <div class="pchips"><sc-for list="{{modes}}" as="m" hint-placeholder-count="2"><button class="{{m.cls}}" onClick="{{m.on}}">{{m.label}}</button></sc-for><button onClick="{{reset}}">reset</button><span>{{modeHint}}</span></div>
+              <div class="win th-light" onMouseUp="{{onMouseUp}}">
+                <div class="tb hasnav" style="border-radius:0">
+                  <span class="lights"><i></i><i></i><i></i></span>
+                  <span class="brand"><span class="bmark"></span>PwrGit</span>
+                  <sc-if value="{{showNav}}">
+                    <span class="hnav" style="position:relative">
+                      <button class="{{backCls}}" onClick="{{goBack}}" onContextMenu="{{openMenu}}" onMouseDown="{{holdStart}}" onMouseUp="{{holdEnd}}" onMouseLeave="{{holdEnd}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg><span class="htip">{{backTip}}</span></button>
+                      <button class="{{fwdCls}}" onClick="{{goForward}}" onContextMenu="{{openMenu}}" onMouseDown="{{holdStart}}" onMouseUp="{{holdEnd}}" onMouseLeave="{{holdEnd}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg><span class="htip">{{fwdTip}}</span></button>
+                      <sc-if value="{{menuOpen}}">
+                        <div class="hmenu" style="top:30px;left:0" onMouseLeave="{{closeMenu}}">
+                          <sc-for list="{{menu}}" as="h" hint-placeholder-count="3">
+                            <div class="{{h.cls}}" onClick="{{h.on}}"><span class="g">{{h.g}}</span><div style="min-width:0"><div class="l1"><span class="r">PwrAgnt</span><span class="b">{{h.branch}}</span></div><div class="l2">{{h.via}}</div></div><span class="t">{{h.dir}}</span></div>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                    </span>
+                  </sc-if>
+                  <span class="tid"><span class="trepo">PwrAgnt</span><span class="tsep">&#8250;</span><span class="tbranch"><span class="dot"></span><span class="nm">{{selBranch}}</span></span><span class="tpath">&#9633; muslg1hh/PwrAgnt</span></span>
+                  <span class="tspacer"></span>
+                </div>
+                <div class="wbody">
+                  <div class="wside" ref="{{sideRef}}">
+                    <div class="repo"><span class="chev"></span><span class="rname">PwrAgnt</span><span class="rsp"></span><span class="wts">199 wts</span></div>
+                    <div class="tree">
+                      <sc-for list="{{primary}}" as="w" hint-placeholder-count="1"><div class="{{w.cls}}" data-row="{{w.key}}" onClick="{{w.on}}"><span class="hbox">&#8962;</span><span class="bn">{{w.branch}}</span><span class="{{w.tagCls}}">&#8595;<span class="gt">Other</span></span><span class="age">{{w.age}}</span></div></sc-for>
+                      <div class="sub"><span class="slabel">Working</span><span class="scount">3</span></div>
+                      <sc-for list="{{working}}" as="w" hint-placeholder-count="3"><div class="{{w.cls}}" data-row="{{w.key}}" onClick="{{w.on}}"><span class="hbox">&#8962;</span><span class="bn">{{w.branch}}</span><span class="{{w.tagCls}}">&#8595;<span class="gt">Other</span></span><span class="age">{{w.age}}</span></div></sc-for>
+                      <div class="sec" style="border-top:0"><div class="sh" onClick="{{toggleOther}}"><span class="{{otherChev}}"></span><span class="slabel">Other worktrees</span><span class="scount">190</span></div></div>
+                      <sc-if value="{{otherOpen}}">
+                        <div class="filler" style="height:420px">&#8942;<br />{{fillerAbove}}</div>
+                        <sc-for list="{{other}}" as="w" hint-placeholder-count="4"><div class="{{w.cls}}" data-row="{{w.key}}" onClick="{{w.on}}"><span class="hbox">&#8962;</span><span class="bn">{{w.branch}}</span><span class="{{w.tagCls}}">&#8595;<span class="gt">Other</span></span><span class="age">{{w.age}}</span></div></sc-for>
+                        <div class="filler" style="height:520px">&#8942;<br />{{fillerBelow}}</div>
+                      </sc-if>
+                      <div class="sec">
+                        <div class="sh"><span class="c open"></span><span class="slabel">Pull requests</span><span class="scount">24</span></div>
+                        <sc-for list="{{prs}}" as="r" hint-placeholder-count="4">
+                          <div class="{{r.cls}}" data-row="{{r.key}}" onDoubleClick="{{r.on}}"><div class="pl1"><span class="{{r.chip}}"><span class="d"></span>{{r.sig}}</span><span class="pt">{{r.title}}</span><span class="pa">{{r.age}}</span><span class="{{r.plusCls}}">+</span></div><div class="pl2"><span class="{{r.locCls}}" onClick="{{r.on}}">{{r.locGlyph}}</span><span class="ph">{{r.head}}</span></div></div>
+                        </sc-for>
+                      </div>
+                      <div class="sec"><div class="sh"><span class="c"></span><span class="slabel">Branches</span><span class="scount">243</span></div></div>
+                    </div>
+                  </div>
+                  <div class="wmain">
+                    <span class="lin">Lineage</span>
+                    <div class="ph-img"><span>lineage graph &#183; {{selBranch}}</span></div>
+                    <sc-if value="{{showNav}}"><span class="lin">History stack</span>
+                    <div class="hist"><sc-for list="{{stack}}" as="s" hint-placeholder-count="3"><span class="{{s.cls}}">{{s.label}}</span></sc-for></div></sc-if>
+                  </div>
+                </div>
+              </div>
+              <div class="readout">{{readout}}</div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: "add the ghost for a PR in Remote&#8209;only" &#183; "make Back from a diff close the diff first"</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const WT = {
+        main: { branch: "main", block: "primary", age: "1h" },
+        audit: { branch: "fix/release-distribution-audit", block: "working", age: "14h" },
+        previews: { branch: "feat/github-markdown-image-previews", block: "working", age: "13h" },
+        acp: { branch: "agent/claude-acp-support", block: "working", age: "15h" },
+        queue: { branch: "chore/agent-queue-race-3f1e", block: "other", age: "1d" },
+        scroll: { branch: "codex/thread-composer-scrollback-a1c2", block: "other", age: "10h" },
+        watermark: { branch: "codex/thread-composer-watermark-cursor-38d840", block: "other", age: "9h" },
+        camera: { branch: "feat/clef-camera-head-motion", block: "other", age: "14h" },
+        credits: { branch: "docs/catppuccin-credits", block: "other", age: "14h" }
+      };
+      const ORDER = ["main", "audit", "previews", "acp", "queue", "scroll", "watermark", "camera", "credits"];
+      const PRS = [
+        { num: 2525, title: "feat(desktop): let the conversation scroll past the composer", chk: "failing", age: "9h", wt: "watermark" },
+        { num: 2544, title: "feat(desktop): render public GitHub markdown images", chk: "passing", age: "13h", wt: "previews" },
+        { num: 2504, title: "fix(release): audit remote Winget and Scoop manifests", chk: "passing", age: "14h", wt: "audit" },
+        { num: 2540, title: "feat(desktop): send camera bursts and cue head motion", chk: "passing", age: "14h", wt: "camera" },
+        { num: 1423, title: "feat(agent-core): add experimental Claude ACP support", chk: "pending", age: "15h", wt: "acp" },
+        { num: 2481, title: "refactor(desktop): draw every toast through one chrome", chk: "failing", age: "2d", wt: null, head: "refactor/toast-chrome-consolidation" }
+      ];
+      const MAX = 50;
+      const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform || "");
+      const accel = (k) => (isMac ? "⌘" + k : "Ctrl+" + k);
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.sideRef = React.createRef();
+          this.state = this.fresh("proposed");
+          this.pendingScroll = null;
+        }
+        fresh(mode) {
+          return { mode: mode, sel: "audit", back: [], fwd: [], via: null, otherOpen: false, menu: false, flash: null, log: "Start: on fix/release-distribution-audit. Double-click #2525." };
+        }
+        componentDidMount() {
+          this.onWinKey = (e) => {
+            if (e.key === "Escape" && this.state.menu) { this.setState({ menu: false }); return; }
+            const prim = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+            if (prim && !e.altKey && !e.shiftKey && (e.code === "BracketLeft" || e.code === "BracketRight")) {
+              if (!this.armed) return;
+              e.preventDefault();
+              if (e.code === "BracketLeft") this.back(); else this.forward();
+              return;
+            }
+            const tag = e.target && e.target.tagName;
+            if (this.armed && e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && tag !== "INPUT" && tag !== "TEXTAREA") {
+              if (e.key === "ArrowLeft") { e.preventDefault(); this.back(); }
+              if (e.key === "ArrowRight") { e.preventDefault(); this.forward(); }
+            }
+          };
+          // The history menu closes on any press outside it, like the app's popovers.
+          this.onWinDown = (e) => {
+            if (this.state.menu && !(e.target && e.target.closest && e.target.closest(".hmenu"))) this.setState({ menu: false });
+          };
+          window.addEventListener("keydown", this.onWinKey);
+          window.addEventListener("mousedown", this.onWinDown);
+        }
+        componentWillUnmount() {
+          window.removeEventListener("keydown", this.onWinKey);
+          window.removeEventListener("mousedown", this.onWinDown);
+          clearTimeout(this.flashT);
+          clearTimeout(this.holdT);
+        }
+        componentDidUpdate() {
+          const side = this.sideRef.current;
+          if (!side || this.pendingScroll === null) return;
+          let p = this.pendingScroll;
+          this.pendingScroll = null;
+          if (p.kind === "top") { side.scrollTop = p.top; return; }
+          if (p.kind === "anchor") {
+            // Restore by row key: put the row you acted from back at the offset it had.
+            // Falls back to the saved pixel offset only when that row is gone.
+            const r = side.querySelector('[data-row="' + p.key + '"]');
+            if (r) side.scrollTop += (r.getBoundingClientRect().top - side.getBoundingClientRect().top) - p.prev;
+            else side.scrollTop = p.top;
+            return;
+          }
+          if (p.kind === "keep") {
+            const a = side.querySelector('[data-row="' + p.anchor + '"]');
+            if (a) side.scrollTop += (a.getBoundingClientRect().top - side.getBoundingClientRect().top) - p.prev;
+            p = { kind: "nearest", key: p.key };
+          }
+          const row = side.querySelector('[data-row="' + p.key + '"]');
+          if (!row) return;
+          const sr = side.getBoundingClientRect();
+          const rr = row.getBoundingClientRect();
+          if (p.kind === "center") {
+            side.scrollTop += (rr.top - sr.top) - (sr.height / 2 - rr.height / 2);
+          } else if (rr.top < sr.top || rr.bottom > sr.bottom) {
+            side.scrollTop += rr.top < sr.top ? rr.top - sr.top - 8 : rr.bottom - sr.bottom + 8;
+          }
+        }
+        scrollNow() { return this.sideRef.current ? this.sideRef.current.scrollTop : 0; }
+        flashLater(key) {
+          clearTimeout(this.flashT);
+          this.flashT = setTimeout(() => this.setState({ flash: null }), 950);
+          return key;
+        }
+        go(id, via, anchorKey) {
+          const s = this.state;
+          if (id === s.sel) return;
+          if (s.mode === "today") {
+            const forced = WT[id].block === "other";
+            this.pendingScroll = { kind: "center", key: "wt:" + id };
+            this.setState({ sel: id, via: via, otherOpen: s.otherOpen || forced, flash: this.flashLater("wt:" + id), log: forced ? "Other worktrees forced open (and saved open). The PR list is now ~5,000px lower; there is no Back." : "Selected " + WT[id].branch + "." });
+            return;
+          }
+          const side = this.sideRef.current;
+          const a = side && anchorKey ? side.querySelector('[data-row="' + anchorKey + '"]') : null;
+          const prev = a ? a.getBoundingClientRect().top - side.getBoundingClientRect().top : null;
+          const leaving = { id: s.sel, via: s.via, top: this.scrollNow(), anchor: a ? anchorKey : null, anchorTop: prev };
+          this.pendingScroll = a
+            ? { kind: "keep", anchor: anchorKey, prev: prev, key: "wt:" + id }
+            : { kind: "nearest", key: "wt:" + id };
+          this.setState({ sel: id, via: via, back: s.back.concat([leaving]).slice(-MAX), fwd: [], menu: false, flash: this.flashLater("wt:" + id), log: "Went to " + WT[id].branch + (via ? " via " + via : "") + "." + (WT[id].block === "other" && !s.otherOpen ? " It lives in Other worktrees, so it shows as a ghost; the disclosure stays shut." : "") });
+        }
+        land(target, dir) {
+          const s = this.state;
+          const here = { id: s.sel, via: s.via, top: this.scrollNow(), anchor: null };
+          const back = dir === "back" ? s.back.slice(0, -1) : s.back.concat([here]).slice(-MAX);
+          const fwd = dir === "back" ? [here].concat(s.fwd).slice(0, MAX) : s.fwd.slice(1);
+          this.pendingScroll = this.restoreFor(target);
+          const fk = target.anchor || "wt:" + target.id;
+          this.setState({ sel: target.id, via: target.via, back: back, fwd: fwd, menu: false, flash: this.flashLater(fk), log: (dir === "back" ? "Back" : "Forward") + " to " + WT[target.id].branch + ". Sidebar restored to where you left it" + (target.anchor ? ", anchored on " + target.anchor.replace("pr:", "#") : "") + "." });
+        }
+        back() { const s = this.state; if (s.mode !== "proposed" || s.back.length === 0) return; this.land(s.back[s.back.length - 1], "back"); }
+        forward() { const s = this.state; if (s.mode !== "proposed" || s.fwd.length === 0) return; this.land(s.fwd[0], "forward"); }
+        restoreFor(target) {
+          return target.anchor
+            ? { kind: "anchor", key: target.anchor, prev: target.anchorTop, top: target.top }
+            : { kind: "top", top: target.top };
+        }
+        holdStart() {
+          // Press-and-hold either chip opens the list, as in Safari and Chrome.
+          clearTimeout(this.holdT);
+          this.held = false;
+          this.holdT = setTimeout(() => {
+            const s = this.state;
+            if (s.back.length || s.fwd.length) { this.held = true; this.setState({ menu: true }); }
+          }, 450);
+        }
+        jumpTo(idx, dir) {
+          // Jump several steps at once, keeping the rest of the stack (browser semantics).
+          const s = this.state;
+          const here = { id: s.sel, via: s.via, top: this.scrollNow(), anchor: null };
+          let back, fwd, target;
+          if (dir === "back") {
+            const i = s.back.length - 1 - idx;
+            target = s.back[i];
+            back = s.back.slice(0, i);
+            fwd = s.back.slice(i + 1).concat([here]).concat(s.fwd).slice(0, MAX);
+          } else {
+            target = s.fwd[idx];
+            back = s.back.concat([here]).concat(s.fwd.slice(0, idx)).slice(-MAX);
+            fwd = s.fwd.slice(idx + 1);
+          }
+          this.pendingScroll = this.restoreFor(target);
+          this.setState({ sel: target.id, via: target.via, back: back, fwd: fwd, menu: false, flash: this.flashLater(target.anchor || "wt:" + target.id), log: "Jumped " + (idx + 1) + " step" + (idx ? "s" : "") + " " + dir + " to " + WT[target.id].branch + "." });
+        }
+        wtView(id, ghost) {
+          const s = this.state;
+          const w = WT[id];
+          const key = "wt:" + id;
+          return {
+            key: key,
+            branch: w.branch,
+            age: w.age,
+            cls: "wtrow" + (id === s.sel ? " sel" : "") + (ghost ? " ghost" : "") + (s.flash === key ? " flash" : ""),
+            tagCls: ghost ? "gtag" : "hide",
+            on: () => this.go(id, null, null)
+          };
+        }
+        renderVals() {
+          const s = this.state;
+          const proposed = s.mode === "proposed";
+          const ghostId = proposed && WT[s.sel].block === "other" && !s.otherOpen ? s.sel : null;
+          const primary = ORDER.filter((id) => WT[id].block === "primary").map((id) => this.wtView(id, false));
+          const working = ORDER.filter((id) => WT[id].block === "working").map((id) => this.wtView(id, false));
+          if (ghostId) working.push(this.wtView(ghostId, true));
+          const other = ORDER.filter((id) => WT[id].block === "other").map((id) => this.wtView(id, false));
+          const prs = PRS.map((p) => {
+            const key = "pr:" + p.num;
+            const has = p.wt !== null;
+            return {
+              key: key,
+              cls: "prow" + (s.flash === key ? " flash hov" : ""),
+              chip: "prc " + p.chk,
+              sig: "#" + p.num,
+              title: p.title,
+              age: p.age,
+              plusCls: has ? "hide" : "pplus",
+              locCls: has ? "loc here" : "loc",
+              locGlyph: has ? "⌂" : "local",
+              head: has ? WT[p.wt].branch : p.head,
+              on: has ? () => this.go(p.wt, "#" + p.num, key) : () => this.setState({ log: "#" + p.num + " has no worktree yet; + would open New worktree." })
+            };
+          });
+          const lbl = (e) => "PwrAgnt › " + WT[e.id].branch;
+          const backT = s.back[s.back.length - 1];
+          const fwdT = s.fwd[0];
+          const menu = [];
+          s.fwd.slice().reverse().forEach((e, i) => {
+            const idx = s.fwd.length - 1 - i;
+            menu.push({ cls: "hmi", g: "›", branch: WT[e.id].branch, via: e.via ? "from " + e.via : "", dir: "fwd " + (idx + 1), on: () => this.jumpTo(idx, "forward") });
+          });
+          menu.push({ cls: "hmi cur", g: "●", branch: WT[s.sel].branch, via: "Here now" + (s.via ? " · from " + s.via : ""), dir: "", on: () => this.setState({ menu: false }) });
+          s.back.slice().reverse().forEach((e, i) => {
+            menu.push({ cls: "hmi", g: String(i + 1), branch: WT[e.id].branch, via: e.via ? "from " + e.via : (e.anchor ? "left from " + e.anchor.replace("pr:", "#") : ""), dir: "back " + (i + 1), on: () => this.jumpTo(i, "back") });
+          });
+          const stack = []
+            .concat(s.back.map((e) => ({ cls: "hpill", label: WT[e.id].branch })))
+            .concat([{ cls: "hpill cur", label: WT[s.sel].branch }])
+            .concat(s.fwd.map((e) => ({ cls: "hpill fwd", label: WT[e.id].branch })));
+          return {
+            sideRef: this.sideRef,
+            modes: [
+              { label: "Today", cls: s.mode === "today" ? "on" : "", on: () => { this.pendingScroll = { kind: "top", top: 0 }; this.setState(this.fresh("today")); } },
+              { label: "Proposed", cls: s.mode === "proposed" ? "on" : "", on: () => { this.pendingScroll = { kind: "top", top: 0 }; this.setState(this.fresh("proposed")); } }
+            ],
+            modeHint: proposed ? "Back/Forward, anchor restore, ghost rows" : "No history; the reveal forces the disclosure open",
+            reset: () => { this.pendingScroll = { kind: "top", top: 0 }; this.setState(this.fresh(s.mode)); },
+            showNav: proposed,
+            backCls: "hchip" + (s.back.length ? "" : " off"),
+            fwdCls: "hchip" + (s.fwd.length ? "" : " off"),
+            backTip: backT ? "Back to " + lbl(backT) + "  (" + accel("[") + ")" : "Back  (" + accel("[") + ")",
+            fwdTip: fwdT ? "Forward to " + lbl(fwdT) + "  (" + accel("]") + ")" : "Forward  (" + accel("]") + ")",
+            goBack: () => { if (this.held) { this.held = false; return; } this.back(); },
+            goForward: () => { if (this.held) { this.held = false; return; } this.forward(); },
+            holdStart: (e) => { if (e.button === 0) this.holdStart(); },
+            holdEnd: () => clearTimeout(this.holdT),
+            openMenu: (e) => { e.preventDefault(); if (s.back.length || s.fwd.length) this.setState({ menu: true }); },
+            closeMenu: () => this.setState({ menu: false }),
+            menuOpen: s.menu,
+            menu: menu,
+            onMouseUp: (e) => { if (e.button === 3) { e.preventDefault(); this.back(); } else if (e.button === 4) { e.preventDefault(); this.forward(); } },
+            arm: () => { this.armed = true; },
+            disarm: () => { this.armed = false; },
+            selBranch: WT[s.sel].branch,
+            primary: primary,
+            working: working,
+            other: other,
+            otherOpen: s.otherOpen,
+            otherChev: s.otherOpen ? "c open" : "c",
+            toggleOther: () => this.setState({ otherOpen: !s.otherOpen, log: s.otherOpen ? "Closed Other worktrees." : "Opened Other worktrees" + (ghostId ? "; the ghost hands over to the real row." : ".") }),
+            fillerAbove: "137 rows above",
+            fillerBelow: "48 rows below",
+            prs: prs,
+            stack: stack,
+            readout: s.log
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

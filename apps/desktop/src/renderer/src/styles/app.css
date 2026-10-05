@@ -335,6 +335,56 @@ textarea,
   min-width: 12px;
 }
 
+/* Back / Forward: PwrAgnt's .history-nav, at the leading edge of the crumbs
+   it moves between. Never shrinks or steps down: a control reached for
+   mid-task must not vanish at some widths, and at the 940px minimum window
+   the strip still has room to spare. */
+.history-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: 12px;
+}
+/* The strip drags the window and -webkit-app-region inherits, so every pixel
+   of the pair opts back out. */
+.history-nav,
+.history-nav * {
+  -webkit-app-region: no-drag;
+}
+.history-nav + .titlebar__id {
+  margin-left: 10px;
+}
+.history-nav__chip {
+  display: inline-flex;
+  width: 28px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 80ms ease, background 80ms ease;
+}
+.history-nav__chip:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-row-active);
+}
+.history-nav__chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* Drawn at rest rather than hidden, so the crumbs never move as history
+   fills. */
+.history-nav__chip:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
 /* Linux caption buttons. A frameless window there gets neither traffic lights
    nor a Windows controls overlay, so nothing draws min/max/close unless the
    strip does — GNOME's side, order and roundness, in our own palette. Close
@@ -2521,6 +2571,18 @@ a.forge-chip:focus-visible {
 .wt-row.is-selected.is-multiselected {
   background: var(--bg-row-active);
   box-shadow: none;
+}
+/* Back puts the row you left from where it was; one ring says "here". */
+.is-nav-flash {
+  animation: nav-flash 900ms ease-out 1;
+}
+@keyframes nav-flash {
+  from {
+    box-shadow: 0 0 0 3px var(--accent-border);
+  }
+  to {
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 /* ---- Drag source ----
 

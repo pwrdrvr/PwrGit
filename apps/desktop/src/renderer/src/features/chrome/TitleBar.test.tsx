@@ -116,3 +116,46 @@ describe("TitleBar window chrome", () => {
     expect(markup).toContain('class="titlebar__gutter"');
   });
 });
+
+describe("TitleBar history", () => {
+  const history = {
+    canGoBack: true,
+    canGoForward: false,
+    backLabel: "PwrGit › fix/release-audit",
+    onBack: () => {},
+    onForward: () => {},
+    menuItems: () => []
+  };
+
+  it("draws Back and Forward between the brand and the crumbs", () => {
+    const markup = renderToStaticMarkup(
+      <TitleBar
+        {...chrome}
+        repo={repo}
+        worktree={worktree}
+        history={history}
+        platform="darwin"
+      />
+    );
+    const nav = markup.indexOf('class="history-nav"');
+    expect(nav).toBeGreaterThan(markup.indexOf("titlebar__brand"));
+    expect(nav).toBeLessThan(markup.indexOf('class="titlebar__id"'));
+    expect(markup).toMatch(/aria-label="Back"[^>]*aria-description="PwrGit › fix\/release-audit"/);
+    // Forward is drawn disabled rather than hidden, so the crumbs never move.
+    expect(markup).toMatch(/aria-label="Forward"[^>]*disabled=""/);
+  });
+
+  it("still draws the pair with nothing selected", () => {
+    const markup = renderToStaticMarkup(
+      <TitleBar
+        {...chrome}
+        repo={null}
+        worktree={null}
+        history={{ ...history, canGoBack: false }}
+        platform="darwin"
+      />
+    );
+    expect(markup).toContain('data-testid="history-nav-back"');
+  });
+});
+
