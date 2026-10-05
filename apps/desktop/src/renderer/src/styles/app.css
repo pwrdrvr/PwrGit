@@ -10021,10 +10021,28 @@ button.ref-chip:focus-visible {
   border-radius: var(--radius-lg);
   background: var(--bg-row-active);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   box-shadow: 0 12px 28px color-mix(in srgb, var(--shadow-base) 36%, transparent);
   animation: pg-fade 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Every part keeps its natural width on one line, and the bar wraps instead.
+   A shrunk part breaks its label inside a fixed 28px height, which clipped
+   "Open rebase tool →" to two and a half lines in a narrow graph pane, and a
+   shrunk Clear drew its glyph in a box narrower than 28px. Wrapping drops the
+   rebase action and Clear onto a second line, where the auto margin keeps
+   them at the right edge. */
+.selection-bar > *,
+.selection-bar__end > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.selection-bar__end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .selection-bar__count {
   font: 700 12px/1 var(--font-sans);
