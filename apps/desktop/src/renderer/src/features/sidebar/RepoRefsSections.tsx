@@ -62,6 +62,14 @@ export type RefsBrowserRequest = {
   worktreeStatus?: WorktreeStatusFilter;
 };
 
+/** What the browser lists before `repo:refs` answers. */
+const NO_REFS: RepoRefs = {
+  branches: [],
+  previewTags: [],
+  tagCount: 0,
+  remotes: []
+};
+
 /** How many branches the collapsed slice shows before "View all …". */
 const BRANCH_SLICE = 6;
 
@@ -195,7 +203,11 @@ export function RepoRefsSections({
     []
   );
   useEffect(() => {
-    if (browserRequest === null || refs === null) return;
+    if (browserRequest === null) return;
+    // The Worktrees tab reads the repo, not refs, so it opens at once and
+    // the other tabs fill in when the listing lands — or stay empty beside
+    // the section's own error if it never does.
+    if (refs === null && browserRequest.tab !== "worktrees") return;
     setBrowser(browserRequest.tab, "all", browserRequest.worktreeStatus);
     onBrowserRequestHandled?.();
   }, [browserRequest, refs, onBrowserRequestHandled, setBrowser]);
@@ -1205,11 +1217,11 @@ export function RepoRefsSections({
         )}
       </div>
 
-      {browser !== null && refs !== null && (
+      {browser !== null && (refs !== null || browser.tab === "worktrees") && (
         <RepoRefsModal
           onLocateTag={onLocateTag}
           repo={repo}
-          refs={refs}
+          refs={refs ?? NO_REFS}
           focusedWorktree={focusedWorktree}
           now={now}
           initialTab={browser.tab}

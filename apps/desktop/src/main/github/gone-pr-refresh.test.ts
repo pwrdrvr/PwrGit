@@ -40,14 +40,21 @@ describe("createGonePrRefresh", () => {
     );
   });
 
-  it("drops what is queued when stopped, and survives a failed refresh", async () => {
-    const refresh = vi.fn(() => Promise.reject(new Error("offline")));
+  it("drops what is queued when stopped, and asks nothing after", async () => {
+    const refresh = vi.fn(() => Promise.resolve());
     const gone = createGonePrRefresh(refresh, 250);
     gone.queue("repo-a", "feat/one", true);
     gone.stop();
     await vi.advanceTimersByTimeAsync(500);
+    // A probe that lands during quit, after the handlers have stopped.
+    gone.queue("repo-a", "feat/two", true);
+    await vi.advanceTimersByTimeAsync(500);
     expect(refresh).not.toHaveBeenCalled();
+  });
 
+  it("survives a failed refresh", async () => {
+    const refresh = vi.fn(() => Promise.reject(new Error("offline")));
+    const gone = createGonePrRefresh(refresh, 250);
     gone.queue("repo-a", "feat/one", true);
     await vi.advanceTimersByTimeAsync(250);
     expect(refresh).toHaveBeenCalledTimes(1);

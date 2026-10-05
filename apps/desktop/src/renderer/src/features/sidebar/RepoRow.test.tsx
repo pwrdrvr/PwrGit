@@ -10,6 +10,11 @@ vi.mock("../../lib/pwrgit", () => ({
   dispatch: dispatchMock,
   subscribe: () => () => undefined
 }));
+const announceMock = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/announce", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/announce")>()),
+  announce: announceMock
+}));
 vi.mock("../../lib/toast", () => ({
   showErrorToast: vi.fn(),
   showInfoToast: vi.fn()
@@ -97,6 +102,8 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
+const onReorder = vi.fn();
+
 async function render(selectedWorktreeId: string | null): Promise<void> {
   const noop = () => undefined;
   await act(async () => {
@@ -125,7 +132,7 @@ async function render(selectedWorktreeId: string | null): Promise<void> {
         onRemoveSelected={noop}
         onClearSelected={noop}
         onCycleSort={noop}
-        onReorder={noop}
+        onReorder={onReorder}
         onNewWorktree={noop}
         onRevealWorktree={noop}
         onCreateWorktreeFromRef={noop}
@@ -201,5 +208,41 @@ describe("RepoRow's Other worktrees past the cap", () => {
     expect(row.closest(".wt-section__elevated")).not.toBeNull();
     expect(row.querySelector(".wt-tag--ghost")?.textContent).toBe("↓ Other");
     expect(window.localStorage.getItem(OPEN_KEY)).toBe("0");
+  });
+
+  // ⌘⇧↑/↓ moves a row past its drawn neighbour only. The seventh in-flight
+  // row and the finished ones are not drawn, so the sixth has nowhere to go.
+  it("reorders among the drawn rows and announces the drawn position", async () => {
+    window.localStorage.setItem(OPEN_KEY, "1");
+    await render(null);
+    const row = (id: string): HTMLElement =>
+      [...container.querySelectorAll<HTMLElement>("[data-wt-id]")].find(
+        (el) => el.dataset["wtId"] === id
+      )!;
+    const chord = (target: HTMLElement): void => {
+      act(() => {
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "ArrowDown",
+            metaKey: true,
+            shiftKey: true,
+            bubbles: true,
+            cancelable: true
+          })
+        );
+      });
+    };
+
+    chord(row("live-0"));
+    const moved = onReorder.mock.lastCall?.[0] as string[];
+    expect(moved.indexOf("live-0")).toBe(moved.indexOf("live-1") + 1);
+    // Primary is 1, live-1 was 3: live-0 takes its slot.
+    expect(announceMock).toHaveBeenLastCalledWith(
+      expect.stringContaining("moved to 3 of 7.")
+    );
+
+    onReorder.mockClear();
+    chord(row("live-5"));
+    expect(onReorder).not.toHaveBeenCalled();
   });
 });

@@ -31,6 +31,9 @@ export function createGonePrRefresh(
     { branches: Set<string>; firstSeen: boolean }
   >();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // A probe can still land during quit, after the handlers it would call
+  // have stopped.
+  let stopped = false;
 
   const flush = (): void => {
     timer = undefined;
@@ -49,6 +52,7 @@ export function createGonePrRefresh(
 
   return {
     queue: (repoId, branch, firstSeen) => {
+      if (stopped) return;
       const batch = pending.get(repoId) ?? {
         branches: new Set<string>(),
         firstSeen: false
@@ -59,6 +63,7 @@ export function createGonePrRefresh(
       timer ??= setTimeout(flush, delayMs);
     },
     stop: () => {
+      stopped = true;
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
       pending.clear();

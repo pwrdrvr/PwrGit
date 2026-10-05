@@ -1106,10 +1106,11 @@ export function RepoRow({
                 <button
                   type="button"
                   className="wt-finished"
-                  aria-label={`Review ${otherSlice.finished.length} finished worktrees`}
+                  // Contains the visible "Finished N review…" (SC 2.5.3).
+                  aria-label={`Finished ${otherSlice.finished.length}, review…`}
                   {...hoverTooltip(
                     tip,
-                    "Clean, and the work landed: merged or closed, upstream gone, or already in the default branch"
+                    "Clean, and done with: its PR merged or closed, its upstream gone, or already in the default branch"
                   )}
                   onClick={(event) => {
                     event.stopPropagation();

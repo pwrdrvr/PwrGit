@@ -606,7 +606,11 @@ export class WorktreeStateService {
     if (parsed.upstreamGone) state.upstreamGone = true;
     if (source !== null) state.source = source;
 
-    const previous = this.getCached(worktreeId);
+    // Read before the upsert overwrites it, and only when it can matter.
+    const previous =
+      state.upstreamGone === true && this.upstreamGone !== null
+        ? this.getCached(worktreeId)
+        : null;
     this.upsert(state);
     if (state.upstreamGone === true && this.upstreamGone !== null) {
       // A listener's failure is the PR cache's problem; this snapshot is

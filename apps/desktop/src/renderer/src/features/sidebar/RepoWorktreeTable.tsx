@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { changeRequestMatch, type Repo, type Worktree } from "@pwrgit/shared";
 import { shortWhen } from "../graph/graph-view";
 import { copyText } from "../../lib/copyText";
@@ -11,7 +11,7 @@ import {
 import { CopyTarget } from "../shell/CopyTarget";
 import { PrChip } from "./PrChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
-import { isFinishedWorktree, lastSegment } from "./repo-view";
+import { isFinishedWorktree, lastSegment, orderWorktrees } from "./repo-view";
 import { PinIcon } from "./WorktreeRow";
 
 /** The Worktrees tab's filter. The sidebar's Finished row opens it on
@@ -27,16 +27,13 @@ export const WORKTREE_STATUS_FILTERS: {
   { value: "all", label: "All" }
 ];
 
-/** Every linked worktree, newest activity first — the primary checkout is the
- *  repository itself, not one of them. */
+/** Every linked worktree, in the sidebar's Recent order — the primary
+ *  checkout is the repository itself, not one of them. */
 export function browserWorktrees(repo: Repo): Worktree[] {
-  const time = (worktree: Worktree): number => {
-    const at = Date.parse(worktree.lastActivityAt ?? "");
-    return Number.isNaN(at) ? Number.NEGATIVE_INFINITY : at;
-  };
-  return repo.worktrees
-    .filter((worktree) => !worktree.isPrimary)
-    .sort((a, b) => time(b) - time(a));
+  return orderWorktrees(
+    repo.worktrees.filter((worktree) => !worktree.isPrimary),
+    "recent"
+  );
 }
 
 export function worktreeStatusCounts(
@@ -53,7 +50,8 @@ export function worktreeStatusCounts(
   };
 }
 
-/** What a row's filter matches: branch, folder and path, and its change
+/** What a row's filter matches: branch and folder — not the whole path,
+ *  whose shared parent directories would match every row — and its change
  *  request through the same `changeRequestMatch` every refs tab uses. */
 export function filterWorktrees(
   worktrees: readonly Worktree[],
@@ -68,7 +66,11 @@ export function filterWorktrees(
       if (finished !== (status === "finished")) return false;
     }
     if (q === "") return true;
-    if (`${worktree.branch} ${worktree.path}`.toLowerCase().includes(q)) {
+    if (
+      `${worktree.branch} ${lastSegment(worktree.path)}`
+        .toLowerCase()
+        .includes(q)
+    ) {
       return true;
     }
     return worktree.pr !== undefined && changeRequestMatch(worktree.pr, q) !== null;
@@ -143,6 +145,19 @@ export function RepoWorktreeTable({
   const [pinOverride, setPinOverride] = useState<Record<string, boolean>>({});
   const isPinned = (worktree: Worktree): boolean =>
     pinOverride[worktree.id] ?? worktree.pinned;
+  // An override is done once the tree agrees with it. Kept past that, it
+  // would hide a pin changed elsewhere while the browser is open.
+  useEffect(() => {
+    setPinOverride((current) => {
+      const settled = worktrees.filter(
+        (worktree) => current[worktree.id] === worktree.pinned
+      );
+      if (settled.length === 0) return current;
+      const next = { ...current };
+      for (const worktree of settled) delete next[worktree.id];
+      return next;
+    });
+  }, [worktrees]);
   const togglePin = async (worktree: Worktree): Promise<void> => {
     const pinned = !isPinned(worktree);
     setPinOverride((current) => ({ ...current, [worktree.id]: pinned }));
@@ -278,8 +293,8 @@ export function RepoWorktreeTable({
       {status === "finished" && worktrees.length > 0 && (
         <div className="refs-worktree-foot">
           <span>
-            Clean, and the work landed: merged or closed, upstream gone, or
-            already in the default branch.
+            Clean, and done with: its PR merged or closed, its upstream gone,
+            or already in the default branch.
           </span>
           {onPruneWorktrees !== undefined && (
             <button

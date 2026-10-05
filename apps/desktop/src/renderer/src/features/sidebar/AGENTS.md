@@ -178,9 +178,10 @@ The heading still counts all of `remaining`, so the headings add up to the
 repo row. Design: `design/Worktree List Cap - UX Review.dc.html`.
 
 - **`isFinishedWorktree` is the one test**, shared with Focused's Working
-  block. Finished means clean (`dirty === 0`), not pinned, and the work
-  landed. A merged or closed PR proves that only when its `headOid` equals
-  the checkout's `head`. After a squash merge, nothing else in Git ties the
+  block. Finished means clean (`dirty === 0`), not pinned, and done with:
+  its PR merged or closed, its upstream gone, or old enough in main. A
+  merged or closed PR proves that only when its `headOid` equals the
+  checkout's `head`. After a squash merge, nothing else in Git ties the
   branch to main, and `--not --remotes` counts every commit as unpushed. A bare
   `mergedIntoDefault` waits 24 hours, so a branch cut a minute ago is not
   "finished" just because it has no commits yet.
