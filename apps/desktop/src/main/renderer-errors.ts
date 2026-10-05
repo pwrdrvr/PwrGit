@@ -76,8 +76,11 @@ export function formatRendererErrorReport(
     report.view === undefined ? "" : ` view=${report.view}`
   }`;
   // An Error's stack already starts with its message; don't print it twice.
+  // Compare a prefix: a clipped message ends in a "… (N more chars)" note
+  // that no stack carries.
+  const head = report.message.slice(0, 200);
   const body =
-    report.stack !== undefined && report.stack.includes(report.message)
+    report.stack !== undefined && report.stack.includes(head)
       ? report.stack
       : [report.message, report.stack].filter((part) => part !== undefined).join("\n");
   const component =
@@ -105,6 +108,10 @@ export function createRendererErrorLog({
       budgets.set(sender, fresh);
       return fresh;
     }
+    // Re-insert, so eviction above drops the sender quiet longest — never a
+    // window that is still reporting.
+    budgets.delete(sender);
+    budgets.set(sender, existing);
     const earned = Math.floor((at - existing.updatedAt) / REFILL_MS);
     if (earned > 0) {
       existing.tokens = Math.min(BURST, existing.tokens + earned);
@@ -121,6 +128,15 @@ export function createRendererErrorLog({
     report(report: RendererErrorReport, sender: number | undefined): boolean {
       const budget = budgetFor(sender);
       if (budget.tokens === 0) {
+        // Say so the moment dropping starts: the count below is only written
+        // when a later report gets through, which may never happen.
+        if (budget.suppressed === 0) {
+          log(
+            "error",
+            "renderer",
+            `rate limit reached for wc=${sender ?? "?"}; dropping renderer error reports (${BURST} burst, then 1 per ${REFILL_MS / 1000}s)`
+          );
+        }
         budget.suppressed += 1;
         return false;
       }

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { WindowControls } from "../chrome/WindowControls";
 import { errorSummary } from "../../lib/ErrorBoundary";
 import { dispatch } from "../../lib/pwrgit";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
@@ -33,6 +34,20 @@ export function PaneErrorFallback({
   useEffect(() => {
     if (!hidden) paneRef.current?.focus({ preventScroll: true });
   }, [hidden]);
+  // DiffPane's Escape contract, not an element handler: a window listener,
+  // scoped to focus inside, deferred a tick so a hover card the keyboard
+  // summoned (the close button's own) can claim the key first.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      if (paneRef.current?.contains(document.activeElement) !== true) return;
+      window.setTimeout(() => {
+        if (!event.defaultPrevented) onClose();
+      }, 0);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
   return (
     <div
@@ -40,11 +55,6 @@ export function PaneErrorFallback({
       ref={paneRef}
       tabIndex={-1}
       style={hidden ? { display: "none" } : undefined}
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || event.defaultPrevented) return;
-        event.preventDefault();
-        onClose();
-      }}
     >
       <div className="diff-pane__head">
         <div className="diff-pane__row">
@@ -87,8 +97,10 @@ export function PaneErrorFallback({
 /**
  * The last resort, around the whole window: anything that reaches it would
  * otherwise have unmounted the root and left the window blank. Deliberately
- * plain — no app state, no tooltip portal — so it can still draw when the
- * thing that broke is shared.
+ * plain — no app state — so it can still draw when the thing that broke is
+ * shared. The one exception is Linux's caption buttons: the title bar that
+ * paints them is gone too, and a frameless window without them cannot be
+ * closed or minimized with the mouse.
  */
 export function RootErrorFallback({
   error,
@@ -100,6 +112,11 @@ export function RootErrorFallback({
 }) {
   return (
     <div className="app-error" role="alert">
+      {window.pwrgit?.platform === "linux" && (
+        <div className="app-error__controls">
+          <WindowControls />
+        </div>
+      )}
       <div className="app-error__card">
         <h1 className="app-error__title">PwrGit hit an error</h1>
         <p className="app-error__text">

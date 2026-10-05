@@ -48,6 +48,18 @@ describe("formatRendererErrorReport", () => {
     );
   });
 
+  it("does not repeat a clipped message ahead of the stack that carries it", () => {
+    const long = "x".repeat(5_000);
+    const clean = sanitizeRendererErrorReport({
+      source: "react-caught",
+      message: `Error: ${long}`,
+      stack: `Error: ${long}\n    at Thrower`
+    })!;
+    const line = formatRendererErrorReport(clean, 1);
+    expect(line.startsWith("renderer error (react-caught wc=1): Error: xxx")).toBe(true);
+    expect(line).not.toContain("more chars)\nError:");
+  });
+
   it("keeps the message when the stack does not carry it", () => {
     const line = formatRendererErrorReport(
       { source: "unhandled-rejection", message: '{"code":1}' },
@@ -77,13 +89,16 @@ describe("createRendererErrorLog", () => {
 
     const accepted = Array.from({ length: 500 }, () => errors.report(report, 7));
     expect(accepted.filter(Boolean)).toHaveLength(10);
-    expect(log).toHaveBeenCalledTimes(10);
+    // Ten reports, then one line the moment dropping starts — written then,
+    // because a later report that carries the count may never come.
+    expect(log).toHaveBeenCalledTimes(11);
+    expect(log.mock.calls[10]![2]).toMatch(/^rate limit reached for wc=7; dropping/);
 
     // One more is earned every 6s; the first one through says what was lost.
     now = 6_000;
     expect(errors.report(report, 7)).toBe(true);
-    expect(log).toHaveBeenCalledTimes(12);
-    expect(log.mock.calls[10]![2]).toMatch(/^suppressed 490 renderer error report\(s\) from wc=7/);
+    expect(log).toHaveBeenCalledTimes(13);
+    expect(log.mock.calls[11]![2]).toMatch(/^suppressed 490 renderer error report\(s\) from wc=7/);
     expect(errors.report(report, 7)).toBe(false);
   });
 
@@ -92,6 +107,19 @@ describe("createRendererErrorLog", () => {
     const errors = createRendererErrorLog({ log, now: () => 0 });
     for (let i = 0; i < 50; i += 1) errors.report(report, 1);
     expect(errors.report(report, 2)).toBe(true);
+  });
+
+  it("evicts the sender quiet longest, not a window that is still reporting", () => {
+    const log = vi.fn();
+    const errors = createRendererErrorLog({ log, now: () => 0 });
+    // wc=1 spends its budget first, then 31 other windows report once.
+    for (let i = 0; i < 20; i += 1) errors.report(report, 1);
+    for (let wc = 2; wc <= 32; wc += 1) errors.report(report, wc);
+    // wc=1 reports again (still dropped), so it is no longer the oldest.
+    expect(errors.report(report, 1)).toBe(false);
+    // A 33rd window forces an eviction — of wc=2, not wc=1.
+    errors.report(report, 33);
+    expect(errors.report(report, 1)).toBe(false);
   });
 
   it("refills to the burst, never beyond it", () => {

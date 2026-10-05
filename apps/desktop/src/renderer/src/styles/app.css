@@ -14056,10 +14056,7 @@ body.is-col-resizing {
 /* ---- Error fallbacks (features/shell/ErrorFallbacks.tsx) ----
    What a pane, or the whole window, draws in place of a subtree that threw
    while rendering. The pane keeps `.diff-pane`'s head and close button; only
-   the body is new. */
-.pane-error:focus {
-  outline: none;
-}
+   the body is new — `.diff-pane:focus` already drops the region's outline. */
 .pane-error__body,
 .app-error__card {
   display: flex;
@@ -14099,6 +14096,7 @@ body.is-col-resizing {
    is draggable so the window can still be moved, and the card keeps clear of
    the macOS stoplights at the top left. */
 .app-error {
+  position: relative;
   box-sizing: border-box;
   height: 100%;
   display: flex;
@@ -14110,6 +14108,13 @@ body.is-col-resizing {
 }
 .app-error__card {
   max-width: 460px;
+  -webkit-app-region: no-drag;
+}
+/* Linux's painted caption buttons, where the title bar would have put them. */
+.app-error__controls {
+  position: absolute;
+  top: 8px;
+  right: 12px;
   -webkit-app-region: no-drag;
 }
 .app-error__title {

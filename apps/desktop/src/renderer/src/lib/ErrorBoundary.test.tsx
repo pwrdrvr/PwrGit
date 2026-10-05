@@ -107,9 +107,19 @@ describe("ErrorBoundary", () => {
     const pane = container.querySelector<HTMLElement>(".pane-error")!;
     // It takes focus, so Escape has somewhere to land.
     expect(document.activeElement).toBe(pane);
-    await act(async () => {
-      pane.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    });
+    const escape = async (claim: boolean): Promise<void> => {
+      await act(async () => {
+        const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+        // A hover card the keyboard summoned claims the key from its own
+        // window listener, after this pane's — hence the deferred check.
+        if (claim) window.addEventListener("keydown", (e) => e.preventDefault(), { once: true });
+        pane.dispatchEvent(event);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    };
+    await escape(true);
+    expect(onClose).not.toHaveBeenCalled();
+    await escape(false);
     expect(onClose).toHaveBeenCalledTimes(1);
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click();
@@ -181,6 +191,32 @@ describe("ErrorBoundary", () => {
     const labels = [...container.querySelectorAll("button")].map((b) => b.textContent);
     expect(labels).toEqual(["Reload"]);
     expect(container.textContent).toContain("root exploded");
+  });
+
+  it("keeps Linux's painted caption buttons, since the title bar that drew them is gone", async () => {
+    const runWindowControl = vi.fn(async () => undefined);
+    const scope = window as unknown as { pwrgit?: unknown };
+    scope.pwrgit = {
+      platform: "linux",
+      runWindowControl,
+      readWindowFrameState: async () => null,
+      onWindowFrameState: () => () => undefined
+    };
+    try {
+      await act(async () =>
+        root.render(
+          <ErrorBoundary fallback={({ error }) => <RootErrorFallback error={error} showLogs />}>
+            <Thrower message="root exploded" />
+          </ErrorBoundary>
+        )
+      );
+      const close = container.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+      expect(close).not.toBeNull();
+      await act(async () => close!.click());
+      expect(runWindowControl).toHaveBeenCalledWith("close");
+    } finally {
+      delete scope.pwrgit;
+    }
   });
 });
 
