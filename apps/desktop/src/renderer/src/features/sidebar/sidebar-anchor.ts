@@ -22,7 +22,8 @@ const ANCHOR_SELECTOR = "[data-nav-anchor], [data-wt-id], [data-repo-id]";
  *  arrive a beat later (focus visits re-ranking Working, a repo expanding)
  *  cannot shift it either. Any wheel, key or press in the list ends it. */
 export const KEEP_MS = 900;
-/** A press this recent caused the selection change being rendered. */
+/** A press in the list this recent, with nothing pressed or typed elsewhere
+ *  since, caused the selection change being rendered. */
 const INTERACTION_MS = 1_200;
 
 type Snapshot = SidebarAnchor & { at: number };
@@ -85,12 +86,30 @@ function firstVisible(list: HTMLElement): Element | null {
  */
 export function trackSidebarAnchors(list: HTMLElement): () => void {
   const onPress = (event: Event): void => {
-    interactionAt = Date.now();
     // A new gesture ends any hold: the reader is driving again.
     pin = null;
+    // Only a press or an activation key can make a jump from a row. ⌘F
+    // pressed while a sidebar row still has focus is a jump from the palette.
+    if (
+      event instanceof KeyboardEvent &&
+      (event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        (event.key !== "Enter" && event.key !== " "))
+    ) {
+      return;
+    }
+    interactionAt = Date.now();
     const row = (event.target as Element | null)?.closest?.(ANCHOR_SELECTOR);
     if (row !== null && row !== undefined && list.contains(row)) {
       remember(list, row);
+    }
+  };
+  // Anything pressed or typed elsewhere since — the palette's Enter, a
+  // lineage chip — is what moved the selection, not the last sidebar row.
+  const onPressElsewhere = (event: Event): void => {
+    if (!(event.target instanceof Node) || !list.contains(event.target)) {
+      interactionAt = 0;
     }
   };
   const onFocus = (event: FocusEvent): void => {
@@ -114,6 +133,8 @@ export function trackSidebarAnchors(list: HTMLElement): () => void {
       snapshot = { key, offset: offsetIn(list, row), at: snapshot?.at ?? 0 };
     });
   };
+  window.addEventListener("pointerdown", onPressElsewhere, true);
+  window.addEventListener("keydown", onPressElsewhere, true);
   list.addEventListener("pointerdown", onPress, true);
   list.addEventListener("keydown", onPress, true);
   list.addEventListener("focusin", onFocus);
@@ -121,6 +142,8 @@ export function trackSidebarAnchors(list: HTMLElement): () => void {
   list.addEventListener("scroll", onScroll, { passive: true });
   return () => {
     window.cancelAnimationFrame(frame);
+    window.removeEventListener("pointerdown", onPressElsewhere, true);
+    window.removeEventListener("keydown", onPressElsewhere, true);
     list.removeEventListener("pointerdown", onPress, true);
     list.removeEventListener("keydown", onPress, true);
     list.removeEventListener("focusin", onFocus);

@@ -79,6 +79,45 @@ describe("sidebar-anchor", () => {
     stop();
   });
 
+  it("does not hold the last sidebar row for a jump made from somewhere else", () => {
+    const view = fakeList([
+      { attr: ["data-wt-id", "wt-1"], y: 0 },
+      { attr: ["data-nav-anchor", "cr:r:2525"], y: 300 }
+    ]);
+    const stop = trackSidebarAnchors(view.list);
+    const pr = view.row('[data-nav-anchor="cr:r:2525"]');
+    pr.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    // ⌘F with the row still focused opens the palette; it is not a press.
+    pr.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true })
+    );
+    // Typing and Enter in the palette happen outside the list.
+    const search = document.createElement("input");
+    document.body.append(search);
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    keepSidebarAnchorForSelection();
+    view.insertAbove(100, 26);
+    applySidebarAnchor(view.list);
+    expect(view.list.scrollTop).toBe(0);
+    // So the sidebar's own reveal of the new selection is free to scroll.
+    expect(sidebarAnchorHeld()).toBe(false);
+    stop();
+  });
+
+  it("holds the row for Enter pressed on it", () => {
+    const view = fakeList([{ attr: ["data-wt-id", "wt-1"], y: 300 }]);
+    const stop = trackSidebarAnchors(view.list);
+    view
+      .row('[data-wt-id="wt-1"]')
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    keepSidebarAnchorForSelection();
+    view.insertAbove(0, 26);
+    applySidebarAnchor(view.list);
+    expect(view.list.scrollTop).toBe(26);
+    stop();
+  });
+
   it("does not hold anything when no press caused the selection change", () => {
     const view = fakeList([{ attr: ["data-wt-id", "wt-1"], y: 300 }]);
     keepSidebarAnchorForSelection();
