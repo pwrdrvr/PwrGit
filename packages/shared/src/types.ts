@@ -1008,6 +1008,81 @@ export type ChangeRequestEntry = {
   forgeRepo: string;
 };
 
+/** One end of a change request's diff, and the ref this checkout holds it in. */
+export type ChangeRequestViewHead = {
+  oid: string;
+  holder:
+    /** The branch a worktree has checked out. */
+    | { kind: "worktree"; branch: string; worktreeId: WorktreeId }
+    /** A local branch nothing has checked out. */
+    | { kind: "local"; branch: string }
+    /** A remote-tracking branch, by its short name (`upstream/feat-x`). */
+    | { kind: "remote"; name: string }
+    /**
+     * Fetched only to be looked at, under `refs/pwrgit/cr/` — never a branch.
+     * `source` is what the forge publishes it as (`refs/pull/405/head`), and
+     * `remote` is where it came from.
+     */
+    | { kind: "fetched"; source: string; remote: string };
+};
+
+/** A commit between a change request's merge base and its head. */
+export type ChangeRequestViewCommit = {
+  hash: string;
+  subject: string;
+  author: string;
+  /** Epoch ms, author date. */
+  at: number;
+};
+
+/**
+ * A change request's changes, read from git with no worktree involved: the
+ * PR view. Never asks the forge — the facts come from the open list's cache,
+ * the diff from the object store.
+ *
+ * - `needsFetch`: its head (or the base it is measured against) is not in
+ *   this checkout, and the request did not allow a fetch. `what` names the
+ *   ref one fetch would bring.
+ * - `unavailable`: nothing to show, for a reason a person can read — the
+ *   forge publishes no ref for a fork, a fetch failed, or the two ends share
+ *   no history.
+ * - `ready`: the diff.
+ */
+export type ChangeRequestView =
+  | { state: "needsFetch"; entry: ChangeRequestEntry; what: string }
+  | { state: "unavailable"; entry: ChangeRequestEntry; message: string }
+  | {
+      state: "ready";
+      entry: ChangeRequestEntry;
+      /** What this checkout holds as the head: its worktree or local branch,
+       *  or the remote-tracking branch. Null for a head only fetched to look. */
+      local: ChangeRequestViewHead | null;
+      /** The forge's head (`pr.headOid`) when its commit is here. */
+      forge: ChangeRequestViewHead | null;
+      /** How `local` relates to the forge's head. `unknown` when either is
+       *  missing, or the forge's commit is not in this checkout. */
+      relation:
+        | { kind: "same" }
+        | { kind: "ahead"; count: number }
+        | { kind: "behind"; count: number }
+        | { kind: "diverged"; ahead: number; behind: number }
+        | { kind: "unknown" };
+      /** The end the diff and commits are drawn to. */
+      head: ChangeRequestViewHead;
+      shown: "local" | "forge";
+      base: {
+        /** The base branch's tracking ref, short (`upstream/main`). */
+        name: string;
+        oid: string;
+        mergeBase: string;
+      };
+      /** `mergeBase..head`, newest first, capped. */
+      commits: ChangeRequestViewCommit[];
+      commitsTruncated: boolean;
+      /** `git diff mergeBase head`; null when it is too large to draw. */
+      patch: string | null;
+    };
+
 /** The last refresh of an open list that could not finish. */
 export type ChangeRequestListFailure = {
   /** Epoch ms it failed. */

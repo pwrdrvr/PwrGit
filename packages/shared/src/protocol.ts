@@ -68,6 +68,7 @@ import type {
   ChangeRequestEntry,
   ChangeRequestList,
   ChangeRequestLocation,
+  ChangeRequestView,
   Profile,
   PruneScanProgress,
   PruneScanSummary,
@@ -1166,6 +1167,28 @@ export interface Commands {
   "pr:fetchHead": {
     req: { repoId: string; number: number; forgeRepo?: string };
     res: ChangeRequestLocation;
+  };
+  /**
+   * A change request's diff for the PR view, with no worktree: its head as
+   * this checkout holds it, measured from the merge base with its base
+   * branch's tracking ref. Asks the forge nothing.
+   *
+   * `fetch` allows one fetch for a head or base that is not here — a
+   * same-repository head into its remote-tracking ref, a fork's through the
+   * forge's change-request ref into `refs/pwrgit/cr/`. Never a branch.
+   * `show` picks the end when the local branch and the forge's head differ;
+   * without it, whichever is newer. `"forge"` with `fetch` fetches the
+   * forge's head when its commit is not here.
+   */
+  "pr:view": {
+    req: {
+      repoId: string;
+      number: number;
+      forgeRepo: string;
+      fetch: boolean;
+      show?: "local" | "forge";
+    };
+    res: ChangeRequestView;
   };
   /**
    * Which forges are usable right now, and what each can do.

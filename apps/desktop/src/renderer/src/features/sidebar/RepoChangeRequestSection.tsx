@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement
@@ -12,6 +13,10 @@ import {
   type Repo
 } from "@pwrgit/shared";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
+import {
+  changeRequestPickKey,
+  useChangeRequestSelection
+} from "../change-request/change-request-selection";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
@@ -67,6 +72,12 @@ function usePersistedOpen(key: string): [boolean, (open: boolean) => void] {
   const [value, setValue] = usePersistedValue(key, "0");
   return [value === "1", (open) => setValue(open ? "1" : "0")];
 }
+
+/**
+ * Arrowing through the rows selects each one after this pause, so holding
+ * the key does not draw every change request it passes.
+ */
+const KEYBOARD_SELECT_MS = 150;
 
 /** More segments than this and the lens becomes a menu, so the head never wraps. */
 const LENS_SEGMENTS_MAX = 3;
@@ -132,6 +143,9 @@ export function RepoChangeRequestSection({
   const [refreshing, setRefreshing] = useState(false);
   const [fetching, setFetching] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
+  const selection = useChangeRequestSelection();
+  const keyboardSelect = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(keyboardSelect.current), []);
 
   // No forge on origin: no section at all, rather than a heading that can only
   // ever say 0. Before this session's first answer, origin's identity predicts
@@ -208,6 +222,20 @@ export function RepoChangeRequestSection({
     onCreateWorktree(args.branch, args.newBranch, args.startPoint, entry.pr);
   };
 
+  // A row is a place: selecting it shows the change request in the main
+  // pane, and the list stays where it is.
+  const select = (entry: ChangeRequestEntry, via: "pointer" | "keyboard"): void =>
+    selection.select({ repoId: repo.id, entry, via, manyRemotes });
+
+  /** The row's own verb — Enter and double-click: ⌂ or + Worktree. */
+  const primary = (entry: ChangeRequestEntry): void => {
+    if (entry.location.kind === "worktree") {
+      onRevealWorktree(entry.location.worktreeId);
+    } else if (worktreeHint(entry) !== null) {
+      void act(entry);
+    }
+  };
+
   /** What + Worktree will do, said before the click. Null: it cannot. */
   const worktreeHint = (entry: ChangeRequestEntry): string | null => {
     const { pr, location } = entry;
@@ -243,6 +271,14 @@ export function RepoChangeRequestSection({
       const group = event.currentTarget.closest('[role="group"]');
       const target = group?.querySelectorAll<HTMLElement>(".ref-cr-row")[clamped];
       target?.focus();
+      const reached = rows[clamped]?.entry;
+      window.clearTimeout(keyboardSelect.current);
+      if (reached !== undefined) {
+        keyboardSelect.current = window.setTimeout(
+          () => select(reached, "keyboard"),
+          KEYBOARD_SELECT_MS
+        );
+      }
     };
     if (event.key === "ArrowDown") move(index + 1);
     else if (event.key === "ArrowUp") move(index - 1);
@@ -251,11 +287,21 @@ export function RepoChangeRequestSection({
     else if (event.key === "Enter") {
       event.preventDefault();
       event.stopPropagation();
-      if (entry.location.kind === "worktree") {
-        onRevealWorktree(entry.location.worktreeId);
-      } else if (worktreeHint(entry) !== null) {
-        void act(entry);
-      }
+      primary(entry);
+    } else if (event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+      select(entry, "pointer");
+    } else if (
+      event.key === "Escape" &&
+      selection.selectedKey === changeRequestPickKey(repo.id, entry)
+    ) {
+      // A click leaves focus here, not in the view: Esc goes back from
+      // either place.
+      event.preventDefault();
+      event.stopPropagation();
+      window.clearTimeout(keyboardSelect.current);
+      selection.clear();
     }
   };
 
@@ -279,13 +325,17 @@ export function RepoChangeRequestSection({
     const hint = worktreeHint(entry);
     const pending = fetching === key;
     const cursorIndex = Math.min(cursor, rows.length - 1);
+    const selected = selection.selectedKey === changeRequestPickKey(repo.id, entry);
     return (
       <div
-        className={`ref-cr-row${location.kind === "worktree" ? " is-checked-out" : ""}`}
+        className={`ref-cr-row${location.kind === "worktree" ? " is-checked-out" : ""}${
+          selected ? " is-selected" : ""
+        }`}
         key={key}
         // Back returns the sidebar to this row (sidebar-anchor.ts).
         data-nav-anchor={`cr:${repo.id}:${key}`}
         role="treeitem"
+        aria-selected={selected}
         aria-level={3}
         aria-posinset={index + 1}
         aria-setsize={rows.length}
@@ -295,9 +345,14 @@ export function RepoChangeRequestSection({
           if (event.target === event.currentTarget) setCursor(index);
         }}
         onKeyDown={(event) => onRowKeyDown(event, index, entry)}
+        onClick={(event) => {
+          event.stopPropagation();
+          window.clearTimeout(keyboardSelect.current);
+          select(entry, "pointer");
+        }}
         onDoubleClick={(event) => {
           event.stopPropagation();
-          if (location.kind === "worktree") onRevealWorktree(location.worktreeId);
+          primary(entry);
         }}
       >
         <div className="ref-cr-row__line">

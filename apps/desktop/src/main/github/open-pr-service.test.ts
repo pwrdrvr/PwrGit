@@ -450,6 +450,239 @@ describe("OpenPrService", () => {
     });
   });
 
+  describe("view", () => {
+    let seed: string;
+    let mainTip: string;
+
+    /** One commit on `branch` in the seed clone, pushed; returns its hash. */
+    const commitOn = (dir: string, branch: string, file: string, push = true): string => {
+      git(dir, ["checkout", "-q", branch]);
+      writeFileSync(join(dir, file), `${file}\n`);
+      git(dir, ["add", file]);
+      git(dir, ["commit", "-q", "-m", `add ${file}`]);
+      if (push) git(dir, ["push", "-q", "origin", branch]);
+      return git(dir, ["rev-parse", "HEAD"]);
+    };
+
+    beforeEach(() => {
+      seed = join(root, "seed");
+      mainTip = git(seed, ["rev-parse", "main"]);
+      git(seed, ["checkout", "-q", "-b", "feat/view", "main"]);
+    });
+
+    it("waits for leave to fetch a head that is not here, and fetches nothing", async () => {
+      commitOn(seed, "feat/view", "a.txt");
+      list = { items: [openPr(150, "feat/view")], truncated: false };
+      await service.refresh("repo");
+      const viewed = await service.view("repo", 150, "github.com/octo/orbit", { fetch: false });
+      expect(viewed).toMatchObject({
+        ok: true,
+        value: { fetched: false, view: { state: "needsFetch", what: "origin/feat/view" } }
+      });
+      expect(() =>
+        git(work, ["rev-parse", "--verify", "refs/remotes/origin/feat/view"])
+      ).toThrow();
+    });
+
+    it("fetches a same-repository head into its tracking ref and diffs it from the merge base", async () => {
+      const head = commitOn(seed, "feat/view", "a.txt");
+      list = { items: [openPr(150, "feat/view", { headOid: head })], truncated: false };
+      await service.refresh("repo");
+      const viewed = await service.view("repo", 150, "github.com/octo/orbit", { fetch: true });
+      expect(viewed).toMatchObject({
+        ok: true,
+        value: {
+          fetched: true,
+          view: {
+            state: "ready",
+            entry: { location: { kind: "remote", fullName: "refs/remotes/origin/feat/view" } },
+            head: { oid: head, holder: { kind: "remote", name: "origin/feat/view" } },
+            relation: { kind: "same" },
+            base: { name: "origin/main", mergeBase: mainTip },
+            commits: [{ hash: head, subject: "add a.txt", author: "Tester" }],
+            commitsTruncated: false
+          }
+        }
+      });
+      if (!viewed.ok || viewed.value.view.state !== "ready") throw new Error("not ready");
+      expect(viewed.value.view.patch).toContain("+++ b/a.txt");
+    });
+
+    it("fetches a fork's head into a hidden ref, never a branch, and reads it from there after", async () => {
+      const head = commitOn(seed, "feat/view", "fork.txt", false);
+      git(seed, ["push", "-q", "origin", "feat/view:refs/pull/140/head"]);
+      list = {
+        items: [openPr(140, "fix/thing", { headRepoPath: "octo-contrib/orbit", headOid: head })],
+        truncated: false
+      };
+      await service.refresh("repo");
+      const first = await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
+      expect(first).toMatchObject({
+        ok: true,
+        value: {
+          // A hidden ref is no row's location: nothing to re-index.
+          fetched: false,
+          view: {
+            state: "ready",
+            entry: { location: { kind: "fork" } },
+            local: null,
+            head: {
+              oid: head,
+              holder: { kind: "fetched", source: "refs/pull/140/head", remote: "origin" }
+            },
+            shown: "forge"
+          }
+        }
+      });
+      expect(git(work, ["rev-parse", "refs/pwrgit/cr/origin/140"])).toBe(head);
+      expect(git(work, ["for-each-ref", "--format=%(refname)", "refs/heads"])).not.toContain("pr/140");
+      gitCalls = [];
+      const again = await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
+      expect(again).toMatchObject({ ok: true, value: { fetched: false, view: { state: "ready" } } });
+      expect(gitCalls.some((args) => args[0] === "fetch")).toBe(false);
+    });
+
+    it("asks to fetch again when the fork's head moved past the hidden ref", async () => {
+      const first = commitOn(seed, "feat/view", "fork.txt", false);
+      git(seed, ["push", "-q", "origin", "feat/view:refs/pull/140/head"]);
+      list = {
+        items: [openPr(140, "fix/thing", { headRepoPath: "octo-contrib/orbit", headOid: first })],
+        truncated: false
+      };
+      await service.refresh("repo");
+      await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
+      const moved = commitOn(seed, "feat/view", "more.txt", false);
+      git(seed, ["push", "-q", "-f", "origin", "feat/view:refs/pull/140/head"]);
+      list = {
+        items: [openPr(140, "fix/thing", { headRepoPath: "octo-contrib/orbit", headOid: moved })],
+        truncated: false
+      };
+      await service.refresh("repo", { force: true });
+      // The old diff is not passed off as current.
+      const stale = await service.view("repo", 140, "github.com/octo/orbit", { fetch: false });
+      expect(stale).toMatchObject({
+        ok: true,
+        value: { view: { state: "needsFetch", what: "pull/140/head from origin" } }
+      });
+      const fresh = await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
+      expect(fresh).toMatchObject({ ok: true, value: { view: { state: "ready", head: { oid: moved } } } });
+    });
+
+    it("moves a stale tracking ref when asked for the forge's head, so + Worktree starts there", async () => {
+      git(seed, ["push", "-q", "origin", "feat/view"]);
+      git(work, ["fetch", "-q", "origin"]);
+      const pushed = commitOn(seed, "feat/view", "later.txt");
+      list = { items: [openPr(150, "feat/view", { headOid: pushed })], truncated: false };
+      await service.refresh("repo");
+      const viewed = await service.view("repo", 150, "github.com/octo/orbit", {
+        fetch: true,
+        show: "forge"
+      });
+      expect(viewed).toMatchObject({
+        ok: true,
+        value: {
+          fetched: true,
+          view: {
+            state: "ready",
+            shown: "forge",
+            relation: { kind: "same" },
+            head: { oid: pushed, holder: { kind: "remote", name: "origin/feat/view" } }
+          }
+        }
+      });
+      expect(git(work, ["rev-parse", "refs/remotes/origin/feat/view"])).toBe(pushed);
+      expect(git(work, ["for-each-ref", "--format=%(refname)", "refs/pwrgit"])).toBe("");
+    });
+
+    it("sweeps the hidden refs of a remote that is gone", async () => {
+      git(work, ["update-ref", "refs/pwrgit/cr/upstream-old/7", mainTip]);
+      git(work, ["update-ref", "refs/pwrgit/cr/origin/150", mainTip]);
+      list = { items: [openPr(150, "feat/view")], truncated: false };
+      await service.refresh("repo");
+      expect(git(work, ["for-each-ref", "--format=%(refname)", "refs/pwrgit"])).toBe(
+        "refs/pwrgit/cr/origin/150"
+      );
+    });
+
+    it("drops a hidden ref once its change request leaves the list", async () => {
+      const head = commitOn(seed, "feat/view", "fork.txt", false);
+      git(seed, ["push", "-q", "origin", "feat/view:refs/pull/140/head"]);
+      list = {
+        items: [openPr(140, "fix/thing", { headRepoPath: "octo-contrib/orbit", headOid: head })],
+        truncated: false
+      };
+      await service.refresh("repo");
+      await service.view("repo", 140, "github.com/octo/orbit", { fetch: true });
+      list = { items: [], truncated: false };
+      await service.refresh("repo", { force: true });
+      expect(git(work, ["for-each-ref", "--format=%(refname)", "refs/pwrgit"])).toBe("");
+    });
+
+    it("shows the worktree's branch when it is ahead of the forge's head", async () => {
+      const console = join(root, "work-console");
+      git(console, ["config", "user.email", "t@t.com"]);
+      git(console, ["config", "user.name", "Tester"]);
+      const local = commitOn(console, "feat/console", "wip.txt", false);
+      list = { items: [openPr(106, "feat/console", { headOid: mainTip })], truncated: false };
+      await service.refresh("repo");
+      const viewed = await service.view("repo", 106, "github.com/octo/orbit", { fetch: false });
+      expect(viewed).toMatchObject({
+        ok: true,
+        value: {
+          view: {
+            state: "ready",
+            local: { oid: local, holder: { kind: "worktree", worktreeId: "wt-console" } },
+            relation: { kind: "ahead", count: 1 },
+            shown: "local",
+            head: { oid: local }
+          }
+        }
+      });
+    });
+
+    it("shows the forge's head when the local branch is behind it, and the local one when asked", async () => {
+      git(seed, ["checkout", "-q", "-b", "feat/console", "main"]);
+      git(seed, ["push", "-q", "origin", "feat/console"]);
+      const pushed = commitOn(seed, "feat/console", "theirs.txt");
+      git(work, ["fetch", "-q", "origin"]);
+      list = { items: [openPr(106, "feat/console", { headOid: pushed })], truncated: false };
+      await service.refresh("repo");
+      const viewed = await service.view("repo", 106, "github.com/octo/orbit", { fetch: false });
+      expect(viewed).toMatchObject({
+        ok: true,
+        value: {
+          view: {
+            state: "ready",
+            relation: { kind: "behind", count: 1 },
+            shown: "forge",
+            head: { oid: pushed, holder: { kind: "remote", name: "origin/feat/console" } }
+          }
+        }
+      });
+      const mine = await service.view("repo", 106, "github.com/octo/orbit", {
+        fetch: false,
+        show: "local"
+      });
+      expect(mine).toMatchObject({
+        ok: true,
+        value: { view: { state: "ready", shown: "local", head: { oid: mainTip } } }
+      });
+    });
+
+    it("names the change-request ref a fork's head would be fetched from", async () => {
+      list = {
+        items: [openPr(121, "fix/typo", { headRepoPath: "octo-contrib/orbit" })],
+        truncated: false
+      };
+      await service.refresh("repo");
+      const viewed = await service.view("repo", 121, "github.com/octo/orbit", { fetch: false });
+      expect(viewed).toMatchObject({
+        ok: true,
+        value: { view: { state: "needsFetch", what: "pull/121/head from origin" } }
+      });
+    });
+  });
+
   describe("more than one remote", () => {
     /**
      * The fork checkout: origin is octo/orbit (yours), and `upstream` is the

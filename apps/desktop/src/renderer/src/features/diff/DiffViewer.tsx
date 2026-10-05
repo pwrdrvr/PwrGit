@@ -410,7 +410,9 @@ function DiffFileView({
   };
 
   return (
-    <div className="diff-file">
+    // `data-path` is how a file list beside a multi-file patch (the PR view's
+    // rail) finds a file to bring into view.
+    <div className="diff-file" data-path={file.path}>
       <div className="diff-file__head">
         <span className={`diff-file__status diff-file__status--${file.status}`}>
           {STATUS_LABEL[file.status]}

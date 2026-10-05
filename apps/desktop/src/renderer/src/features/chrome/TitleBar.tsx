@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { Repo, Worktree } from "@pwrgit/shared";
+import type { ChangeRequestEntry, Repo, Worktree } from "@pwrgit/shared";
+import { PrChip } from "../sidebar/PrChip";
 import { currentPlatform, pathLeaf, pathTail } from "../../lib/platform";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
@@ -37,6 +38,7 @@ export function TitleBar({
   repo,
   worktree,
   history,
+  changeRequest,
   onRevealBranchWorktree,
   platform = currentPlatform()
 }: {
@@ -46,6 +48,9 @@ export function TitleBar({
    *  what they move between. Always drawn, disabled when empty, so the crumbs
    *  never shift as history fills. */
   history?: HistoryNavControls;
+  /** A change request on screen instead of the worktree: the crumb names it,
+   *  and `repo` is its repository. */
+  changeRequest?: ChangeRequestEntry;
   /** Go to the worktree already holding a branch the picker could not check
    *  out. The strip has no worktree list of its own, so the owner resolves it. */
   onRevealBranchWorktree: (branch: string) => void;
@@ -72,7 +77,30 @@ export function TitleBar({
           <HistoryNavButtons {...history} platform={platform} />
         )}
 
-        {repo !== null && worktree !== null && (
+        {repo !== null && changeRequest !== undefined && (
+          <div className="titlebar__id">
+            <span
+              className="titlebar__repo"
+              {...truncatedTooltip(tip, repo.name)}
+            >
+              {repo.name}
+            </span>
+            <span aria-hidden="true" className="titlebar__sep">
+              ›
+            </span>
+            <span className="titlebar__cr">
+              <PrChip pr={changeRequest.pr} />
+              <span
+                className="titlebar__cr-title"
+                {...truncatedTooltip(tip, changeRequest.pr.title)}
+              >
+                {changeRequest.pr.title}
+              </span>
+            </span>
+          </div>
+        )}
+
+        {repo !== null && worktree !== null && changeRequest === undefined && (
           <div className="titlebar__id">
             <span
               className="titlebar__repo"

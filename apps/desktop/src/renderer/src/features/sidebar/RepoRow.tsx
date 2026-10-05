@@ -59,6 +59,7 @@ import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { PinnedBranchRow, pinnedBranchRowId } from "./PinnedBranchRow";
 import { RepoRefsSections } from "./RepoRefsSections";
 import type { CreateWorktreeFromRef } from "./RepoChangeRequestSection";
+import { useChangeRequestSelection } from "../change-request/change-request-selection";
 
 /** Distinguishes worktree drags from repo drags (see useListReorder). */
 const WORKTREE_MIME = "application/x-pwrgit-worktree";
@@ -226,6 +227,7 @@ export function RepoRow({
    * forge has answered, so a checkout added mid-session had no fork verb
    * anywhere on its row. See design/Fork From Here - UX Review.dc.html.
    */
+  const changeRequestSelection = useChangeRequestSelection();
   const [menu, setMenu] = useState<{
     x: number;
     y: number;
@@ -575,7 +577,9 @@ export function RepoRow({
       posinset={displayIds.indexOf(worktree.id) + 1}
       setsize={displayIds.length}
       worktree={worktree}
-      selected={worktree.id === selectedWorktreeId}
+      // A change request on screen holds the selection; the worktree it will
+      // return to is not drawn as selected meanwhile.
+      selected={worktree.id === selectedWorktreeId && changeRequestSelection.selectedKey === null}
       multiSelected={selectedIds.has(worktree.id)}
       now={now}
       onSelect={(event) => {

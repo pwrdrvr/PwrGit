@@ -198,6 +198,12 @@ export default defineConfig(({ command }) => {
             : {})
         }
       },
+      // Dev only. Vite's startup dep scan crawls from index.html and never
+      // follows `new Worker(new URL(...))`, so a package imported only from a
+      // worker is found when the worker first loads; the optimizer then
+      // re-runs and force-reloads the window mid-interaction. Pre-bundle
+      // worker-only imports here (pixel-diff.worker.ts → pixelmatch).
+      optimizeDeps: { include: ["pixelmatch"] },
       build: { minify: "esbuild", sourcemap: false }
     }
   };
