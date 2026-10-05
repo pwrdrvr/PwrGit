@@ -3,12 +3,22 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { AppDocumentWindow } from "./features/documents/AppDocumentWindow";
+import { RootErrorFallback } from "./features/shell/ErrorFallbacks";
 import { LogsWindow } from "./features/logs/LogsWindow";
 import { SettingsWindow } from "./features/settings/SettingsWindow";
 import { isSettingsHash } from "@pwrgit/shared";
 import { startAppearanceSync } from "./lib/appearance";
+import { ErrorBoundary } from "./lib/ErrorBoundary";
+import {
+  installRendererErrorReporting,
+  rendererRootErrorOptions
+} from "./lib/renderer-errors";
 import { startWindowFrameSync } from "./lib/window-frame";
 import "./styles/app.css";
+
+// Before the setup calls below, so an error in any of them reaches the app
+// log rather than only this window's DevTools console.
+installRendererErrorReporting();
 
 const container = document.getElementById("root");
 if (container === null) throw new Error("root element not found");
@@ -35,20 +45,30 @@ startAppearanceSync();
 // `settings:open` mints for a window that is not open yet.
 const hash = window.location.hash;
 
-createRoot(container).render(
+// The root options send every React error — uncaught, caught by a boundary,
+// or recovered — to the app log with its component stack. The boundary is
+// the last resort: without it, one render error unmounts the whole tree and
+// leaves a blank window with nothing to click.
+createRoot(container, rendererRootErrorOptions).render(
   <StrictMode>
-    {hash === "#agent-consent" ? (
-      <AgentConsentWindow />
-    ) : isSettingsHash(hash) ? (
-      <SettingsWindow />
-    ) : hash === "#logs" ? (
-      <LogsWindow />
-    ) : hash === "#document-license" ? (
-      <AppDocumentWindow kind="license" />
-    ) : hash === "#document-third-party-notices" ? (
-      <AppDocumentWindow kind="third-party-notices" />
-    ) : (
-      <App />
-    )}
+    <ErrorBoundary
+      fallback={({ error }) => (
+        <RootErrorFallback error={error} showLogs={hash !== "#logs"} />
+      )}
+    >
+      {hash === "#agent-consent" ? (
+        <AgentConsentWindow />
+      ) : isSettingsHash(hash) ? (
+        <SettingsWindow />
+      ) : hash === "#logs" ? (
+        <LogsWindow />
+      ) : hash === "#document-license" ? (
+        <AppDocumentWindow kind="license" />
+      ) : hash === "#document-third-party-notices" ? (
+        <AppDocumentWindow kind="third-party-notices" />
+      ) : (
+        <App />
+      )}
+    </ErrorBoundary>
   </StrictMode>
 );

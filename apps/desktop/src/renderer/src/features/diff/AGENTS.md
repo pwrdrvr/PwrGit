@@ -72,6 +72,12 @@ click straight to the scrim and throws the view away. For the same reason the
 chevrons sit inside the stage rather than at the frame's edge: a near-miss
 should land on the picture, not next to the thing that closes everything.
 
+A lightbox that throws while rendering closes and raises a toast; it does not
+blank the window. `DiffViewer` wraps it in an `ErrorBoundary` whose `onError`
+clears the lightbox state, and unmounting runs the lightbox's own cleanup, so
+focus still returns to the opener. The error itself reaches `main.log` through
+the root's `onCaughtError` (`lib/AGENTS.md`).
+
 ## The arrows walk the whole diff, and stop at the ends
 
 [lightbox-sequence.ts](lightbox-sequence.ts) flattens the diff into one list of

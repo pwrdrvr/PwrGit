@@ -151,6 +151,27 @@ export type LogEntry = {
   line: string;
 };
 
+/**
+ * An error the renderer could not handle, forwarded so it lands in the app log.
+ * A render error unmounts React's tree while the renderer process lives on, so
+ * nothing in main sees it unless the renderer says so.
+ */
+export type RendererErrorReport = {
+  /** Which hook saw it: a window listener or one of React's root callbacks. */
+  source:
+    | "window-error"
+    | "unhandled-rejection"
+    | "react-uncaught"
+    | "react-caught"
+    | "react-recoverable";
+  message: string;
+  stack?: string;
+  /** React's component stack, for the three `react-*` sources. */
+  componentStack?: string;
+  /** `location.hash` — which window kind (main, #logs, #settings…). */
+  view?: string;
+};
+
 export type LogSnapshot = {
   entries: LogEntry[];
   /** Older entries were dropped from the ring buffer. */
@@ -2200,6 +2221,7 @@ export interface Commands {
   // App logs (diagnosability — silent failures must be findable somewhere)
   "logs:read": { req: void; res: LogSnapshot };
   "logs:openWindow": { req: void; res: null };
+  "logs:reportRendererError": { req: RendererErrorReport; res: null };
 
   // Bundled legal notices (Settings → About and Help menu).
   "app:readDocument": { req: { kind: AppDocumentKind }; res: AppDocument };
