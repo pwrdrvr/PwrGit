@@ -1,13 +1,17 @@
 import { spawn } from "node:child_process";
+import { accessSync, constants, statSync } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 import { beginGitCall } from "./git-tripwire";
 import { err, ok, type PwrGitError, type Result } from "@pwrgit/shared";
 import {
   gitExecutionEnvironment,
   gitProcessInvocation,
+  installedGitEnvironment,
   type GitBinaryOutput,
   type GitExec,
   type GitExecBinary,
   type GitExecOptions,
+  type GitLaunch,
   type GitOutput
 } from "../dugite";
 
@@ -43,7 +47,7 @@ function abortedSignal(options: GitExecOptions | undefined): AbortSignal | null 
 function runGit(
   args: string[],
   cwd: string,
-  env: NodeJS.ProcessEnv,
+  launch: GitLaunch,
   options?: GitExecOptions
 ): Promise<Result<Collected, PwrGitError>> {
   return new Promise((resolve) => {
@@ -55,9 +59,9 @@ function runGit(
 
     let proc;
     try {
-      proc = spawn("git", invocation.args, {
+      proc = spawn(launch.binary, invocation.args, {
         cwd: invocation.processCwd,
-        env,
+        env: launch.env,
         // Nothing here answers a prompt, and an inherited stdin lets a git
         // that decides to read one block until the suite's timeout. A pipe
         // closed at once reads as EOF, and carries `input` when there is one.
@@ -156,29 +160,82 @@ function runGit(
 }
 
 /**
- * Merge the caller's environment the way production does, so a suite cannot
- * accidentally re-enable prompting: `gitExecutionEnvironment` forces the
- * non-interactive invariant over whatever it is handed.
+ * Which Git the code under test runs. Fixture helpers that call
+ * `execFileSync("git")` always run the first `git` on PATH; this only decides
+ * the Git behind `createSystemGit` and `createSystemGitBinary`.
+ *
+ * - `bundled`, the default: Dugite's bundle, which is what PwrGit runs unless
+ *   Settings › Git runtime names another Git. The lockfile pins it, so a
+ *   runner image or a developer's Homebrew upgrade cannot change the result.
+ * - `installed`: the first `git` on PATH, launched the way production
+ *   launches a Git chosen in Settings. Its environment comes from
+ *   `installedGitEnvironment`, so none of the bundle's variables reach it.
+ *
+ * Select it with `PWRGIT_TEST_GIT`. CI runs only the default.
  */
-function execEnvironment(
+export type SystemGitRuntime = "bundled" | "installed";
+
+/** An unknown value throws: a typo must not quietly test the bundle. */
+export function systemGitRuntime(env: NodeJS.ProcessEnv = process.env): SystemGitRuntime {
+  const value = env.PWRGIT_TEST_GIT;
+  if (value === undefined || value === "" || value === "bundled") return "bundled";
+  if (value === "installed") return "installed";
+  throw new Error(`PWRGIT_TEST_GIT must be "bundled" or "installed", not "${value}".`);
+}
+
+/** The `git` a shell would run with `env`'s PATH. */
+function gitOnPath(env: NodeJS.ProcessEnv): string {
+  const name = process.platform === "win32" ? "git.exe" : "git";
+  // Windows names it `Path`; Node's own lookup ignores the case there too.
+  const path = Object.entries(env).find(([key]) =>
+    process.platform === "win32" ? key.toUpperCase() === "PATH" : key === "PATH"
+  )?.[1] ?? "";
+  for (const directory of path.split(delimiter)) {
+    if (!isAbsolute(directory)) continue;
+    const candidate = join(directory, name);
+    try {
+      if (!statSync(candidate).isFile()) continue;
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Not here. A shell would keep looking, so this does too.
+    }
+  }
+  throw new Error(`PWRGIT_TEST_GIT=installed found no ${name} on PATH.`);
+}
+
+/**
+ * Production's launch for `runtime`: the binary to spawn, and each call's
+ * environment with its `options.env` merged over `base`. Both environments
+ * force the non-interactive invariant over whatever they are handed, so a
+ * suite cannot re-enable prompting (#261).
+ */
+export function systemGitLauncher(
   base: NodeJS.ProcessEnv,
-  overrides: GitExecOptions["env"]
-): NodeJS.ProcessEnv {
-  return gitExecutionEnvironment({ ...base, ...overrides });
+  runtime: SystemGitRuntime = systemGitRuntime()
+): (overrides: GitExecOptions["env"]) => GitLaunch {
+  if (runtime === "bundled") {
+    // `gitExecutionEnvironment` puts the bundle first on PATH, so a bare
+    // `git` finds it.
+    return (overrides) => ({
+      binary: "git",
+      env: gitExecutionEnvironment({ ...base, ...overrides })
+    });
+  }
+  const binary = gitOnPath(base);
+  return (overrides) => ({
+    binary,
+    env: installedGitEnvironment({ ...base, ...overrides }, binary)
+  });
 }
 
 /** Text-mode `GitExec`; per-call `options.env` overlays the base environment. */
 export function createSystemGit(base: SystemGitOptions = {}): GitExec {
-  const baseEnv = base.env ?? process.env;
+  const launch = systemGitLauncher(base.env ?? process.env);
   return async (args, cwd, options) => {
     const alreadyAborted = abortedSignal(options);
     if (alreadyAborted !== null) return err(abortError(alreadyAborted));
-    const run = await runGit(
-      args,
-      cwd,
-      execEnvironment(baseEnv, options?.env),
-      options
-    );
+    const run = await runGit(args, cwd, launch(options?.env), options);
     const aborted = abortedSignal(options);
     if (aborted !== null) return err(abortError(aborted));
     if (!run.ok) return run;
@@ -196,9 +253,9 @@ export function createSystemGit(base: SystemGitOptions = {}): GitExec {
 export function createSystemGitBinary(
   base: SystemGitOptions = {}
 ): GitExecBinary {
-  const baseEnv = base.env ?? process.env;
+  const launch = systemGitLauncher(base.env ?? process.env);
   return async (args, cwd) => {
-    const run = await runGit(args, cwd, execEnvironment(baseEnv, undefined));
+    const run = await runGit(args, cwd, launch(undefined));
     if (!run.ok) return run;
     return ok({
       stdout: Buffer.concat(run.value.stdout),
