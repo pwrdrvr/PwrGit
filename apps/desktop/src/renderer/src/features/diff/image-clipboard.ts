@@ -95,17 +95,18 @@ async function withDecoded<T>(
 
 /** One revision, re-encoded, with nothing added around it. */
 export async function encodePng(blob: Blob): Promise<Blob> {
-  const canvas = await withDecoded([blob], ([image]) => {
-    if (image === undefined) throw new Error("nothing decoded");
-    const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
-    const context = canvas.getContext("2d");
-    if (context === null) throw new Error("no 2d context");
-    context.drawImage(image, 0, 0);
-    return canvas;
-  });
-  return toBlob(canvas);
+  return toBlob(await withDecoded([blob], ([image]) => drawAlone(image)));
+}
+
+function drawAlone(image: HTMLImageElement | undefined): HTMLCanvasElement {
+  if (image === undefined) throw new Error("nothing decoded");
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (context === null) throw new Error("no 2d context");
+  context.drawImage(image, 0, 0);
+  return canvas;
 }
 
 export type StripPanel = { label: string; blob: Blob };

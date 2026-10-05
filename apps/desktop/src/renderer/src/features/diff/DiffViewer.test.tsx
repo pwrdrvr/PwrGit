@@ -14,6 +14,10 @@ import {
   installObjectUrlLedger,
   type ObjectUrlLedger
 } from "../../test-support/object-urls";
+import {
+  installCanvasStubs,
+  type CanvasStubs
+} from "../../test-support/canvas-stubs";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -1009,40 +1013,16 @@ describe("DiffViewer image copy menu", () => {
   });
 
   describe("copying from blob-backed pictures", () => {
-    // jsdom decodes nothing and has no canvas. These stand in for the two
-    // Chromium halves of a copy, and record which URL the decode was fed.
+    let canvas: CanvasStubs;
     let decodedFrom: string[];
-    const restore: (() => void)[] = [];
-    function stub<T extends object, K extends keyof T>(
-      target: T,
-      key: K,
-      value: T[K]
-    ): void {
-      const had = Object.getOwnPropertyDescriptor(target, key);
-      Object.defineProperty(target, key, { value, configurable: true, writable: true });
-      restore.push(() => {
-        if (had === undefined) delete target[key];
-        else Object.defineProperty(target, key, had);
-      });
-    }
-
     beforeEach(() => {
-      decodedFrom = [];
-      stub(HTMLImageElement.prototype, "decode", async function (this: HTMLImageElement) {
-        decodedFrom.push(this.getAttribute("src") ?? "");
-      });
-      stub(HTMLCanvasElement.prototype, "getContext", (() => ({
-        drawImage: () => undefined,
-        fillRect: () => undefined,
-        fillText: () => undefined
-      })) as unknown as HTMLCanvasElement["getContext"]);
-      stub(HTMLCanvasElement.prototype, "toBlob", function (callback: BlobCallback) {
-        callback(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: "image/png" }));
-      });
+      canvas = installCanvasStubs();
+      decodedFrom = canvas.decodedFrom;
     });
-    afterEach(() => {
-      while (restore.length > 0) restore.pop()?.();
-    });
+    afterEach(() => canvas.restore());
+
+    const clipboardWrites = () =>
+      dispatchMock.mock.calls.filter(([name]) => name === "clipboard:writeImage");
 
     async function choose(label: string): Promise<void> {
       const item = Array.from(document.querySelectorAll(".pop-menu button")).find(
@@ -1050,14 +1030,10 @@ describe("DiffViewer image copy menu", () => {
       );
       expect(item).toBeDefined();
       await click(item ?? null);
-      // The copy is a chain of awaits after the click: decode, encode, IPC.
-      await act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      });
+      // The copy is a chain of awaits after the click — decode, encode, read
+      // the PNG back, IPC — so wait for its end rather than guess a tick count.
+      await vi.waitFor(() => expect(clipboardWrites()).toHaveLength(1));
     }
-
-    const clipboardWrites = () =>
-      dispatchMock.mock.calls.filter(([name]) => name === "clipboard:writeImage");
 
     it("copies the after from the row without touching the row's own URL", async () => {
       dispatchMock.mockImplementation(async (name: string) =>

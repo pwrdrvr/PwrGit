@@ -178,6 +178,15 @@ describe("ImageDiff", () => {
     expect(container.textContent).toContain("Git LFS pointer");
   });
 
+  it("gives up on a side whose request rejected instead of loading forever", async () => {
+    dispatchMock.mockRejectedValue(new Error("render frame was disposed"));
+
+    await render(binaryFile({ status: "added" }));
+
+    expect(container.textContent).toContain("Could not read the image");
+    expect(container.textContent).not.toContain("Loading");
+  });
+
   it("names the size it refused to inline", async () => {
     dispatchMock.mockResolvedValue(
       ok({ kind: "tooLarge", sizeBytes: 24 * 1024 * 1024 })

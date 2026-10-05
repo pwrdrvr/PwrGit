@@ -84,6 +84,24 @@ describe("readImagePreview", () => {
     expect(bytes.buffer.byteLength).toBe(GIF_V1.byteLength);
   });
 
+  it("hands a large blob over without a second copy, still as a plain Uint8Array", async () => {
+    // Above Node's pool threshold the Buffer owns its whole ArrayBuffer, so
+    // wrapping it is enough. Bytes need not be a real PNG for this read.
+    const large = Buffer.alloc(64 * 1024, 7);
+    const path = join(repo, "art", "large.png");
+    writeFileSync(path, large);
+    const result = await read(repo, "art/large.png", { kind: "worktree" });
+    rmSync(path);
+    if (!result.ok || result.value.kind !== "image") {
+      throw new Error("expected an image");
+    }
+    const { bytes } = result.value;
+    expect(Buffer.isBuffer(bytes)).toBe(false);
+    expect(bytes.byteOffset).toBe(0);
+    expect(bytes.buffer.byteLength).toBe(large.byteLength);
+    expect(bytes).toEqual(new Uint8Array(large));
+  });
+
   it("reads the working tree for the after side of an unstaged change", async () => {
     const before = await read(repo, "art/dot.gif", { kind: "index" });
     const after = await read(repo, "art/dot.gif", { kind: "worktree" });

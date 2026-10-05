@@ -17,6 +17,10 @@ import {
   installObjectUrlLedger,
   type ObjectUrlLedger
 } from "../../test-support/object-urls";
+import {
+  installCanvasStubs,
+  type CanvasStubs
+} from "../../test-support/canvas-stubs";
 
 describe("stripLayout", () => {
   it("puts equal panels side by side with one gap between them", () => {
@@ -88,36 +92,17 @@ describe("decoding for the clipboard", () => {
   // it is done — so a copy never depends on the URL the picture is displayed
   // through, which its owner may revoke while a menu is open.
   let urls: ObjectUrlLedger;
+  let canvas: CanvasStubs;
   let decodedFrom: string[];
-  let failDecode: boolean;
-  const originals = {
-    decode: HTMLImageElement.prototype.decode,
-    getContext: HTMLCanvasElement.prototype.getContext,
-    toBlob: HTMLCanvasElement.prototype.toBlob
-  };
 
   beforeEach(() => {
     urls = installObjectUrlLedger();
-    decodedFrom = [];
-    failDecode = false;
-    HTMLImageElement.prototype.decode = async function (this: HTMLImageElement) {
-      decodedFrom.push(this.getAttribute("src") ?? "");
-      if (failDecode) throw new Error("not an image");
-    };
-    HTMLCanvasElement.prototype.getContext = (() => ({
-      drawImage: () => undefined,
-      fillRect: () => undefined,
-      fillText: () => undefined
-    })) as unknown as HTMLCanvasElement["getContext"];
-    HTMLCanvasElement.prototype.toBlob = function (callback: BlobCallback) {
-      callback(new Blob([new Uint8Array([0x89])], { type: "image/png" }));
-    };
+    canvas = installCanvasStubs();
+    decodedFrom = canvas.decodedFrom;
   });
 
   afterEach(() => {
-    HTMLImageElement.prototype.decode = originals.decode;
-    HTMLCanvasElement.prototype.getContext = originals.getContext;
-    HTMLCanvasElement.prototype.toBlob = originals.toBlob;
+    canvas.restore();
     urls.restore();
   });
 
@@ -135,7 +120,7 @@ describe("decoding for the clipboard", () => {
   });
 
   it("releases its URL when the bytes will not decode", async () => {
-    failDecode = true;
+    canvas.failDecodes();
     await expect(encodePng(blob(1))).rejects.toThrow("not an image");
     expect(urls.minted.size).toBe(1);
     expect(urls.live()).toEqual([]);

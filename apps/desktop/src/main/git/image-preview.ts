@@ -43,12 +43,21 @@ function isLfsPointer(bytes: Buffer): boolean {
 
 function preview(mediaType: string, bytes: Buffer): ImagePreview {
   if (isLfsPointer(bytes)) return { kind: "lfsPointer" };
-  // A copy into a fresh, exactly-sized ArrayBuffer rather than the Buffer
-  // itself. Node serves small allocations out of a shared 8 KB pool, so a
-  // Buffer can be a view into memory that holds other things; structured
-  // clone of a view is free to carry its whole backing store across. One
-  // memcpy buys a payload that is the image and nothing else.
-  return { kind: "image", mediaType, bytes: new Uint8Array(bytes) };
+  // A plain Uint8Array over an ArrayBuffer that holds exactly the image, not
+  // the Buffer itself. Node serves small allocations out of a shared 8 KB
+  // pool, so a Buffer can be a view into memory that holds other things, and
+  // structured clone of a view is free to carry its whole backing store
+  // across. A Buffer that already owns its whole ArrayBuffer — every large
+  // blob — is wrapped without a copy; only a pooled one pays a memcpy.
+  const owned =
+    bytes.byteOffset === 0 && bytes.buffer.byteLength === bytes.byteLength;
+  return {
+    kind: "image",
+    mediaType,
+    bytes: owned
+      ? new Uint8Array(bytes.buffer as ArrayBuffer)
+      : new Uint8Array(bytes)
+  };
 }
 
 async function worktreePreview(

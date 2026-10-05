@@ -13,7 +13,7 @@ export type ImageDiffRevisions = {
 
 /** A side that arrived as a picture: the bytes, and the URL an <img> loads.
  *  `blob.size` and `blob.type` are the file's size and media type. */
-export type ShownImage = { kind: "image"; blob: Blob; src: string };
+type ShownImage = { kind: "image"; blob: Blob; src: string };
 
 export type SideState =
   | ShownImage
@@ -111,19 +111,29 @@ export function useImageRevisions({
         worktreeId: revisions.worktreeId,
         path,
         rev: side === "before" ? revisions.before : revisions.after
-      }).then((result) => {
-        // Nothing is minted for a reply that lands after cleanup, so nothing
-        // is left for a cleanup that has already run.
-        if (!active) return;
-        const next: SideState = !result.ok
-          ? { kind: "failed" }
-          : result.value.kind === "image"
-            ? show(
-                new Blob([result.value.bytes], { type: result.value.mediaType })
-              )
-            : result.value;
-        setStates((prev) => ({ ...prev, [side]: next }));
-      });
+      }).then(
+        (result) => {
+          // Nothing is minted for a reply that lands after cleanup, so nothing
+          // is left for a cleanup that has already run.
+          if (!active) return;
+          const next: SideState = !result.ok
+            ? { kind: "failed" }
+            : result.value.kind === "image"
+              ? show(
+                  new Blob([result.value.bytes], {
+                    type: result.value.mediaType
+                  })
+                )
+              : result.value;
+          setStates((prev) => ({ ...prev, [side]: next }));
+        },
+        // `dispatch` never resolves to an error for a failed command, but the
+        // invoke itself can still reject — a window torn down mid-request.
+        // Left unhandled, the side would say "Loading…" for good.
+        () => {
+          if (active) setStates((prev) => ({ ...prev, [side]: { kind: "failed" } }));
+        }
+      );
     }
     return cleanup;
     // The file and the revisions fully determine the fetch; `seed` is an
