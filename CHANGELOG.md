@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.30.0 - 2026-10-05
+
+- Linux - Added native DEB, RPM, pacman, and portable tar.gz downloads for x64 and arm64. Native packages can check and download updates in-app; Restart requests administrator authorization to install, while ordinary quit leaves updates uninstalled. Failed updates offer copyable terminal instructions, and portable builds explain manual replacement.
+- Pull and merge requests - Added sidebar lists across your repository's forge remotes, including requests sent upstream from your fork. Filter by remote or failing checks, find local checkouts, or fetch a request into a new worktree.
+- Forks - Added visual routes showing where a branch pulls from and pushes to in Fork, Publish, Remotes, Pull, and tracking repair. Choose among confirmed writable forks and review the destination before changing tracking.
+- Fork recovery - Fixed existing forks still tracking the original repository after remote renames. Use your fork without moving commits or changing files; after a denied push, retry explicitly from the repair confirmation.
+- Remote status - Improved incoming and outgoing counts for visible repositories without selecting each checkout. Automatic checks are batched across linked worktrees to reduce duplicate remote requests.
+- Worktrees - Fixed local commit counts for branches without an upstream, comparing against all fetched remote branches so already-published commits are not shown as local-only.
+- Navigation - Improved You are here to reveal the current worktree in the sidebar as well as its HEAD commit in the graph.
+- Desktop - Updated the packaged Electron runtime to 44.4.5. PwrGit now requires macOS 13 Ventura or newer.
+- Distribution - Improved automatic Homebrew publication and verification after a release is promoted to Stable Latest.
+
 ## v0.29.0 - 2026-10-02
 
 - Clone - Added a choice between the original repository and your fork when cloning from a forge. Reuse an existing fork, create one explicitly, or reveal its existing checkout; fork clones keep the original as upstream.
