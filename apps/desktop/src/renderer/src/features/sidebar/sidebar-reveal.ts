@@ -31,6 +31,10 @@ export type SidebarReveal = {
   /** A remote to open and scroll to inside the repo's Remotes section, or
    *  null for the repo row itself. */
   remote: string | null;
+  /** A worktree row to scroll to instead of the repo row — "You are here" in
+   *  the graph, whose worktree can be one of hundreds under its repo. Never
+   *  set together with `remote`. */
+  worktreeId: string | null;
 };
 
 /** Long enough for a large repository's `repo:refs` to answer; short enough
@@ -50,9 +54,22 @@ export function requestSidebarReveal(
   repoId: string,
   remote: string | null = null
 ): number {
+  return post({ repoId, remote, worktreeId: null });
+}
+
+/** Scroll a worktree's row into view. Unlike a repo reveal it leaves focus
+ *  where it is: the asker is still on screen, unlike a toast's chip. */
+export function requestSidebarWorktreeReveal(
+  repoId: string,
+  worktreeId: string
+): number {
+  return post({ repoId, remote: null, worktreeId });
+}
+
+function post(target: Omit<SidebarReveal, "seq">): number {
   seq += 1;
   const requestSeq = seq;
-  current = { seq: requestSeq, repoId, remote };
+  current = { seq: requestSeq, ...target };
   notify();
   window.setTimeout(() => settleSidebarReveal(requestSeq), REVEAL_TTL_MS);
   return requestSeq;
