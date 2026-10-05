@@ -22,6 +22,10 @@ vi.mock("./ImageLightbox", () => ({
 
 import { DiffViewer } from "./DiffViewer";
 import type { ImageDiffRevisions } from "./ImageDiff";
+import {
+  installObjectUrlLedger,
+  type ObjectUrlLedger
+} from "../../test-support/object-urls";
 
 const REVISIONS: ImageDiffRevisions = {
   worktreeId: "wt-1",
@@ -38,14 +42,16 @@ const PATCH = [
 
 let container: HTMLDivElement;
 let root: Root;
+let urls: ObjectUrlLedger;
 
 beforeEach(() => {
   dispatchMock.mockImplementation(async (name: string) =>
     name === "diff:image"
-      ? ok({ kind: "image", mediaType: "image/png", base64: "iVBOR", bytes: 2048 })
+      ? ok({ kind: "image", mediaType: "image/png", bytes: new Uint8Array(2048) })
       : ok(null)
   );
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+  urls = installObjectUrlLedger();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -54,6 +60,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  urls.restore();
   vi.restoreAllMocks();
 });
 
