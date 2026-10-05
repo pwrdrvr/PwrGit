@@ -3,7 +3,13 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ok, type RepoRefs, type Repo } from "@pwrgit/shared";
+import {
+  ok,
+  type ChangeRequestList,
+  type RepoRefs,
+  type Repo,
+  type Worktree
+} from "@pwrgit/shared";
 
 const dispatchMock = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/pwrgit", () => ({
@@ -514,5 +520,279 @@ describe("the row menu says what each entry acts on", () => {
     await openMenu("Actions for dev");
     await choose("Delete");
     expect(confirmDialogMock.mock.lastCall?.[0].message).not.toContain("Pinned");
+  });
+});
+
+// Owner's rule: anything a row in the sidebar's short list can do, the same
+// row in the browser can do too — the browser is how the rest are reached.
+describe("parity with the sidebar's rows", () => {
+  const worktree = (id: string, branch: string, path: string, isPrimary = false): Worktree => ({
+    id,
+    repoId: "repo-1",
+    branch,
+    path,
+    dirty: 0,
+    ahead: 0,
+    behind: 0,
+    behindDefault: 0,
+    defaultBranch: "main",
+    mergedIntoDefault: false,
+    divergedFromDefault: false,
+    isDefaultBranch: isPrimary,
+    pinned: false,
+    isPrimary
+  });
+  const primary = worktree("wt-1", "main", "/repos/widget", true);
+  // A folder that is not the branch's name: the chip has something to say.
+  const review = worktree("wt-2", "dev", "/repos/widget-review");
+  const withWorktrees: Repo = { ...repo, worktrees: [primary, review] };
+  const local = (name: string, extra: Record<string, unknown> = {}) => ({
+    name,
+    fullName: `refs/heads/${name}`,
+    head: "a".repeat(40),
+    ahead: 0,
+    behind: 0,
+    tracking: "unpublished" as const,
+    checkedOutWorktreeIds: [] as string[],
+    ...extra
+  });
+  const held: RepoRefs = {
+    ...refs,
+    branches: [
+      local("main", { checkedOutWorktreeIds: ["wt-1"] }),
+      local("dev", { checkedOutWorktreeIds: ["wt-2"] }),
+      local("spike")
+    ]
+  };
+  const ORIGIN = "github.com/acme/widget";
+  const prList: ChangeRequestList = {
+    forge: "github",
+    fetchedAt: 1,
+    truncated: false,
+    entries: [
+      {
+        pr: {
+          number: 381,
+          url: "https://example.test/acme/widget/pull/381",
+          title: "Audit log export",
+          state: "open",
+          isDraft: false,
+          forge: "github",
+          baseRefName: "main",
+          headRefName: "fix/audit"
+        },
+        location: { kind: "unfetched", branch: "fix/audit", remote: "origin" },
+        remote: "origin",
+        forgeRepo: ORIGIN
+      },
+      {
+        pr: {
+          number: 376,
+          url: "https://example.test/acme/widget/pull/376",
+          title: "Plan view",
+          state: "open",
+          isDraft: false,
+          forge: "github",
+          baseRefName: "main",
+          headRefName: "dev"
+        },
+        location: { kind: "worktree", branch: "dev", worktreeId: "wt-2" },
+        remote: "origin",
+        forgeRepo: ORIGIN
+      }
+    ],
+    remotes: [
+      { name: "origin", forge: "github", forgeRepo: ORIGIN, path: "acme/widget", fetchedAt: 1, truncated: false }
+    ]
+  };
+  const origin = {
+    name: "origin",
+    fetchUrl: "git@github.com:acme/widget.git",
+    pushUrl: "git@github.com:acme/widget.git",
+    skipFetchAll: false,
+    previewBranches: [],
+    branchCount: 2
+  };
+  const remoteRow = (name: string) => ({
+    name,
+    qualifiedName: `origin/${name}`,
+    fullName: `refs/remotes/origin/${name}`,
+    head: "b".repeat(40)
+  });
+
+  const onRevealWorktree = vi.fn();
+  const onCreateWorktree = vi.fn();
+  const onClose = vi.fn();
+
+  beforeEach(() => {
+    copyTextMock.mockResolvedValue(undefined);
+    dispatchMock.mockImplementation((channel: string, request?: { remote?: string }) => {
+      if (channel === "forge:hosts") return Promise.resolve(ok({ hosts: [], overrides: {} }));
+      if (channel === "pr:openList") return Promise.resolve(ok(prList));
+      if (channel === "pr:fetchHead") {
+        return Promise.resolve(
+          ok({ kind: "remote", branch: "fix/audit", fullName: "refs/remotes/origin/fix/audit" })
+        );
+      }
+      if (channel === "repo:remoteBranches" && request?.remote === "origin") {
+        return Promise.resolve(ok({ rows: [remoteRow("dev"), remoteRow("feature/x")], total: 2 }));
+      }
+      return Promise.resolve(ok({ rows: [], total: 0 }));
+    });
+  });
+
+  async function show(
+    initialTab: "branches" | "remotes" | "changeRequests",
+    shownRefs: RepoRefs = held,
+    focused: Worktree | null = primary
+  ): Promise<void> {
+    await act(async () => {
+      root.render(
+        <RepoRefsModal
+          repo={withWorktrees}
+          refs={shownRefs}
+          focusedWorktree={focused}
+          now={0}
+          initialTab={initialTab}
+          onRefresh={() => undefined}
+          onRevealWorktree={onRevealWorktree}
+          onCreateWorktree={onCreateWorktree}
+          onClose={onClose}
+        />
+      );
+    });
+    // The remote pages are debounced (SEARCH_DEBOUNCE_MS).
+    if (initialTab === "remotes") {
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 260)));
+    }
+  }
+
+  const rows = (): HTMLElement[] => [
+    ...dialog().querySelectorAll<HTMLElement>("[data-refs-row]")
+  ];
+  const rowFor = (text: string): HTMLElement =>
+    rows().find((row) => row.textContent?.includes(text))!;
+  const labelled = (label: string): HTMLElement | null =>
+    dialog().querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  const doubleClick = (target: Element): Promise<void> =>
+    act(async () => {
+      target.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+    });
+
+  it("names the worktree a branch is checked out in, as the sidebar's chip does", async () => {
+    await show("branches");
+    const chip = labelled("Go to widget-review, which has dev checked out")!;
+    expect(chip.textContent).toBe("widget-review");
+    expect(chip.querySelector("svg rect")).not.toBeNull();
+    // In the action slot it always spells the folder, even the repo's own:
+    // a glyph alone in a button-sized box reads as an empty button.
+    const home = labelled("main is checked out here, in widget")!;
+    expect(home.textContent).toBe("widget");
+    // The primary checkout wears the house, not the linked worktree's box.
+    expect(home.querySelector("svg rect")).toBeNull();
+    expect(labelled("Show worktree widget-review")?.textContent).toBe("Show worktree");
+    // A free branch has no chip.
+    expect(rowFor("spike").querySelector(".ref-checkout-chip")).toBeNull();
+
+    await act(async () => chip.click());
+    expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("runs a row's primary action on double-click, as Enter does", async () => {
+    await show("branches");
+    // On the name: the widest target, and the one the sidebar uses.
+    await doubleClick(rowFor("dev").querySelector(".refs-copyable-name strong")!);
+    expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(copyTextMock).not.toHaveBeenCalled();
+
+    onRevealWorktree.mockClear();
+    const dev = rowFor("dev");
+    dev.focus();
+    press(dev, "Enter");
+    expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
+  });
+
+  it("does nothing on double-click when the row's primary is unavailable", async () => {
+    // No working target here: Switch here is disabled and says why.
+    await show("branches", held, null);
+    const spike = rowFor("spike");
+    expect(spike.querySelector<HTMLButtonElement>("[data-refs-primary] button")?.disabled).toBe(true);
+    dispatchMock.mockClear();
+    await doubleClick(spike.querySelector(".refs-copyable-name strong")!);
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(onCreateWorktree).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("leaves a double-click on a control inside the row to that control", async () => {
+    await show("branches");
+    const dev = rowFor("dev");
+    await doubleClick(dev.querySelector("[data-refs-pin]")!);
+    await doubleClick(dev.querySelector(".refs-row-menu")!);
+    expect(onRevealWorktree).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("jumps to the first and last row with Home and End", async () => {
+    await show("branches");
+    rows()[1]!.focus();
+    press(rows()[1]!, "End");
+    expect(document.activeElement).toBe(rows().at(-1));
+    press(rows().at(-1)!, "Home");
+    expect(document.activeElement).toBe(rows()[0]);
+  });
+
+  it("hands New worktree the pull request, so the dialog can name it", async () => {
+    await show("changeRequests");
+    await act(async () => labelled("New worktree for #381")!.click());
+    expect(dispatchMock).toHaveBeenCalledWith("pr:fetchHead", {
+      repoId: "repo-1",
+      number: 381,
+      forgeRepo: ORIGIN
+    });
+    expect(onCreateWorktree).toHaveBeenCalledWith(
+      "fix/audit",
+      true,
+      "refs/remotes/origin/fix/audit",
+      expect.objectContaining({ number: 381, title: "Audit log export" })
+    );
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("names a pull request's worktree by its folder, and goes there on double-click", async () => {
+    await show("changeRequests");
+    const plan = rowFor("Plan view");
+    const chip = plan.querySelector<HTMLElement>(".ref-checkout-chip")!;
+    expect(chip.getAttribute("aria-label")).toBe(
+      "Go to widget-review, which has #376 checked out"
+    );
+    expect(chip.textContent).toBe("widget-review");
+    expect(chip.querySelector("svg rect")).not.toBeNull();
+    expect(labelled("Show worktree widget-review")).not.toBeNull();
+
+    await doubleClick(plan.querySelector(".refs-pr-title")!);
+    expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("makes each remote's branches focus stops whose Enter runs the leading action", async () => {
+    await show("remotes", { ...held, remotes: [origin] });
+    const dev = rowFor("dev");
+    expect(dev.getAttribute("tabindex")).toBe("-1");
+    expect(dev.querySelector(".ref-checkout-chip")?.getAttribute("aria-label")).toBe(
+      "Go to widget-review, which has dev checked out"
+    );
+    expect(labelled("Show worktree widget-review")).not.toBeNull();
+    // A branch nothing holds leads with the switch, as in the sidebar.
+    expect(
+      rowFor("feature/x").querySelector("[data-refs-primary] button")?.getAttribute("aria-label")
+    ).toBe("Switch widget to feature/x");
+
+    dev.focus();
+    press(dev, "Enter");
+    expect(onRevealWorktree).toHaveBeenCalledWith("wt-2");
+    expect(onClose).toHaveBeenCalled();
   });
 });

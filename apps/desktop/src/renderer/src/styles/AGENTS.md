@@ -196,6 +196,7 @@ The agent surfaces were checked that way against both faces
 | `▴` U+25B4, `▾` U+25BE (a caret) | **no** — now `lib/ChevronGlyph.tsx` |
 | `‥` U+2025 (two-dot leader) | **no** — the ledger's hash range uses `…` |
 | `✓` U+2713, `✕` U+2715 | **no** — still drawn as text elsewhere in the app |
+| `⑂` U+2442, `⌂` U+2302 (branch, worktree holder) | **no** — now `lib/BranchGlyph.tsx`, `lib/WorktreeGlyph.tsx`, `lib/CheckoutGlyph.tsx` |
 
 `▾` and the two check marks predate the agent work and are still text in
 TitleBar, ToastHost, DiffViewer and the remote activity card; converting them
@@ -258,6 +259,14 @@ Two consequences when adding or changing one of these marks:
   its own; the question is only ever whether it reads apart from the row above
   it. Moving the palette's worktree mark to a closed shape traded one collision
   for a possible worktree-vs-repo one, and that had to be drawn to settle.
+
+**One noun, one drawing, on every surface.** A branch is `BranchGlyph`
+(Lucide `git-branch`, the graph chip's mark), a linked worktree is
+`WorktreeGlyph`, the primary checkout is `CheckoutGlyph`'s house, and a
+repository is the palette's folder. The sidebar, the refs browser, the graph
+and the ⌘K palette each had drawn their own until
+[design/Worktree Chip Glyphs - UX Review.dc.html](../../../../../../design/Worktree%20Chip%20Glyphs%20-%20UX%20Review.dc.html)
+(2c) folded them together. Reach for these before drawing a variant.
 
 A glyph also needs words. See "The kind glyph is labelled twice" in
 `features/sidebar/AGENTS.md`.

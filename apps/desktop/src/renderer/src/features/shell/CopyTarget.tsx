@@ -93,6 +93,9 @@ export function CopyTarget({
         tabIndex={0}
         aria-label={label}
         className={className}
+        // A row's double-click handler reads this to know the copy waits for
+        // it (lib/refsRowKeys.ts).
+        data-defers-double-click={deferForDoubleClick ? "" : undefined}
         {...hoverTooltip(tooltip, tipText)}
         onClick={(e) => {
           if (stopPropagation) e.stopPropagation();

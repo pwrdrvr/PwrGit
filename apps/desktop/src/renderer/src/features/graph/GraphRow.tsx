@@ -1,5 +1,6 @@
 import { useMemo, useRef, type MouseEvent } from "react";
 import type { Commit, LaneBranchInfo, PrSummary } from "@pwrgit/shared";
+import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { AuthorAvatar } from "./AuthorAvatar";
 import { hoverIntentHandlers, type HoverIntent } from "../../lib/hoverIntent";
@@ -80,17 +81,6 @@ export type GraphRowVM = {
   /** Best pull request associated with this exact commit, when known. */
   pullRequest?: PrSummary;
 };
-
-function BranchGlyph() {
-  return (
-    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 3v12" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="6" r="3" />
-      <path d="M18 9c0 6-6 6-6 12" />
-    </svg>
-  );
-}
 
 export function GraphRow({
   vm,
@@ -526,7 +516,7 @@ export function GraphRow({
                       }}
                       {...branchMenu(name, false)}
                     >
-                      <BranchGlyph />
+                      <BranchGlyph size={8} strokeWidth={2.6} />
                       <span className="ref-chip__name">{name}</span>
                     </button>
                     {info?.pr !== undefined &&
@@ -567,7 +557,7 @@ export function GraphRow({
                       }}
                       {...branchMenu(name, true)}
                     >
-                      <BranchGlyph />
+                      <BranchGlyph size={8} strokeWidth={2.6} />
                       <span className="ref-chip__name">{name}</span>
                     </button>
                   ) : (
@@ -579,7 +569,7 @@ export function GraphRow({
                         borderColor: `color-mix(in srgb, ${color} 45%, transparent)`
                       }}
                     >
-                      <BranchGlyph />
+                      <BranchGlyph size={8} strokeWidth={2.6} />
                       <span className="ref-chip__name">{name}</span>
                     </span>
                   )

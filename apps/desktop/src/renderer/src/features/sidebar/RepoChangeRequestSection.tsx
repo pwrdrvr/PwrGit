@@ -9,8 +9,8 @@ import {
   forgeLabel,
   type ChangeRequestEntry,
   type ChangeRequestList,
-  type OpenChangeRequest,
-  type Repo
+  type Repo,
+  type Worktree
 } from "@pwrgit/shared";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import {
@@ -37,10 +37,11 @@ import { RemoteChip } from "./RemoteChip";
 import {
   reachableLocation,
   useChangeRequestList,
-  worktreeArgsFor
+  worktreeArgsFor,
+  type CreateWorktreeFromRef
 } from "./RepoChangeRequests";
 import { SectionChevron } from "./SectionChevron";
-import { lastSegment, worktreeFolderLabel } from "./repo-view";
+import { WorktreeHolderChip } from "./WorktreeHolderChip";
 
 /**
  * A value that outlives the window, per repository — the same localStorage
@@ -89,12 +90,7 @@ function compactAge(updatedAt: number | undefined, now: number): string | null {
   return when === "just now" ? "now" : (when.split(" ")[0] ?? when);
 }
 
-export type CreateWorktreeFromRef = (
-  branch: string,
-  newBranch: boolean,
-  startPoint?: string,
-  changeRequest?: OpenChangeRequest
-) => void;
+export type { CreateWorktreeFromRef } from "./RepoChangeRequests";
 
 /**
  * The repository's open pull or merge requests, between Worktrees and
@@ -111,12 +107,15 @@ export type CreateWorktreeFromRef = (
 export function RepoChangeRequestSection({
   repo,
   now,
+  focusedWorktree,
   onRevealWorktree,
   onCreateWorktree,
   onOpenBrowser
 }: {
   repo: Repo;
   now: number;
+  /** The working target: a head checked out there wears the filled chip. */
+  focusedWorktree: Worktree | null;
   onRevealWorktree: (worktreeId: string) => void;
   onCreateWorktree: CreateWorktreeFromRef;
   /** The refs browser on its Pull requests tab: search, and numbers that are
@@ -318,10 +317,6 @@ export function RepoChangeRequestSection({
     const base = shownBase(pr, defaultBranch);
     const holder =
       location.kind === "worktree" ? worktreesById.get(location.worktreeId) : undefined;
-    const folder =
-      holder === undefined
-        ? null
-        : worktreeFolderLabel(holder.branch, holder.path, [repo.name]);
     const hint = worktreeHint(entry);
     const pending = fetching === key;
     const cursorIndex = Math.min(cursor, rows.length - 1);
@@ -414,21 +409,15 @@ export function RepoChangeRequestSection({
               )}
             </span>
           ))}
-          {location.kind === "worktree" && (
-            <button
-              className="ref-checkout-chip is-here"
-              aria-label={`Go to ${holder === undefined ? "the worktree" : lastSegment(holder.path)}`}
-              {...hoverTooltip(tip, holder?.path ?? "Checked out in a worktree")}
-              onClick={(event) => {
-                event.stopPropagation();
-                onRevealWorktree(location.worktreeId);
-              }}
-            >
-              <span aria-hidden="true">⌂</span>
-              {folder !== null && (
-                <span className="ref-checkout-chip__name">{folder}</span>
-              )}
-            </button>
+          {holder !== undefined && (
+            <WorktreeHolderChip
+              holder={holder}
+              here={holder.id === focusedWorktree?.id}
+              subject={`#${pr.number}`}
+              repoName={repo.name}
+              tip={tip}
+              onReveal={onRevealWorktree}
+            />
           )}
           {location.kind === "local" && (
             <span

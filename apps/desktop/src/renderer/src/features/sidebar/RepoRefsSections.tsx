@@ -1,3 +1,4 @@
+import { BranchGlyph } from "../../lib/BranchGlyph";
 import { CheckoutGlyph } from "../../lib/CheckoutGlyph";
 import { LocateGlyph } from "../../lib/LocateGlyph";
 import { PlusGlyph } from "../../lib/PlusGlyph";
@@ -42,7 +43,8 @@ import {
   type CreateWorktreeFromRef
 } from "./RepoChangeRequestSection";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
-import { lastSegment, worktreeFolderLabel } from "./repo-view";
+import { lastSegment } from "./repo-view";
+import { WorktreeHolderChip } from "./WorktreeHolderChip";
 import {
   localBranchForRemote,
   RepoRefsModal,
@@ -503,6 +505,7 @@ export function RepoRefsSections({
       <RepoChangeRequestSection
         repo={repo}
         now={now}
+        focusedWorktree={focusedWorktree}
         onRevealWorktree={onRevealWorktree}
         onCreateWorktree={onCreateWorktree}
         onOpenBrowser={() => setBrowser("changeRequests")}
@@ -617,12 +620,6 @@ export function RepoRefsSections({
                   (state === "current" && focusedWorktree !== null
                     ? focusedWorktree
                     : undefined);
-                const folderName =
-                  holder === undefined
-                    ? null
-                    : worktreeFolderLabel(holder.branch, holder.path, [
-                        repo.name
-                      ]);
                 return (
                   <div
                     className={`ref-branch-row is-${state}`}
@@ -642,7 +639,9 @@ export function RepoRefsSections({
                     }}
                     onKeyDown={(event) => onBranchKeyDown(event, index, branch)}
                   >
-                    <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+                    <span className="refs-branch-icon">
+                      <BranchGlyph />
+                    </span>
                     <CopyTarget
                       value={branch.name}
                       label={`Copy branch name ${branch.name}`}
@@ -685,39 +684,16 @@ export function RepoRefsSections({
                         to fire on whichever row had moved underneath. */}
                     {state === "free" &&
                       switchAction(branch.name, () => void activate(branch))}
-                    {/* The chip names the WORKTREE, by its folder — branch and
-                        worktree are 1:1, so labelling it by its branch would
-                        only repeat the row. Where on disk is the new fact. */}
+                    {/* Where on disk is the new fact; the chip says it. */}
                     {holder !== undefined ? (
-                      <button
-                        className={`ref-checkout-chip${
-                          state === "current" ? " is-here" : ""
-                        }`}
-                        aria-label={
-                          state === "current"
-                            ? `${branch.name} is checked out here, in ${lastSegment(holder.path)}`
-                            : `Go to ${lastSegment(holder.path)}, which has ${branch.name} checked out`
-                        }
-                        {...hoverTooltip(tip, holder.path)}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onRevealWorktree(holder.id);
-                        }}
-                      >
-                        <span aria-hidden="true">
-                          {holder.isPrimary ? "⌂" : "⑂"}
-                        </span>
-                        {/* Only when the folder adds something. A directory
-                            named after the branch would just repeat the row,
-                            and a primary checkout's folder is the repo folder
-                            the header above already shows — the glyph alone
-                            still says which checkout holds this branch. */}
-                        {folderName !== null && (
-                          <span className="ref-checkout-chip__name">
-                            {folderName}
-                          </span>
-                        )}
-                      </button>
+                      <WorktreeHolderChip
+                        holder={holder}
+                        here={state === "current"}
+                        subject={branch.name}
+                        repoName={repo.name}
+                        tip={tip}
+                        onReveal={onRevealWorktree}
+                      />
                     ) : (
                       // The glyph is aria-hidden, so this button has no
                       // content to name it — the label is its only name, and
@@ -1098,7 +1074,9 @@ export function RepoRefsSections({
                             className="ref-remote-branch-row"
                             key={branch.fullName}
                           >
-                            <span className="refs-branch-icon" aria-hidden="true">⑂</span>
+                            <span className="refs-branch-icon">
+                              <BranchGlyph />
+                            </span>
                             <CopyTarget
                               value={branch.name}
                               label={`Copy branch name ${branch.name}`}

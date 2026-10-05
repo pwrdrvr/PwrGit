@@ -26,7 +26,7 @@ list, so a sentence is punishing. `hitKindLabel()` is the one place it is
 spelled.
 
 Only four glyphs exist for five kinds: `isWorktreelessBranch()` sends both
-`local_branch` and `remote_branch` to `BranchIcon`, so those two rows are the
+`local_branch` and `remote_branch` to `BranchGlyph`, so those two rows are the
 identical drawing and only the label and `__meta` tell them apart. The fifth,
 `change_request` (an open PR whose head is not in the checkout), draws
 `ChangeRequestIcon` and says the forge's own noun — "Pull request" or "Merge
@@ -171,11 +171,21 @@ them, and the refs browser keeps an empty slot so names stay aligned.
 
 ## The refs browser's rows are focus stops
 
-`lib/refsRowKeys.ts`: ↓ from the filter enters the rows, ↑/↓ walk them, Space
-pins, Enter runs the primary action. Space is a **row** key on purpose — in the
-filter it types a space. The actions column is three fixed slots
-(`RefRowActions`), and `--refs-actions-w` in `app.css` is their widths plus
-gaps: change a slot, change the token, or the columns drift again.
+`lib/refsRowKeys.ts`: ↓ from the filter enters the rows, ↑/↓ walk them,
+Home/End jump, Space pins, and Enter or a double-click runs the primary action
+— the button inside `data-refs-primary` (`RefRowActions`' first slot, or the
+remote card's wrapper). Space is a **row** key on purpose — in the filter it
+types a space. A row's copy targets take `deferForDoubleClick`, so a
+double-click on the name activates without copying. The actions column is three
+fixed slots (`RefRowActions`), and `--refs-actions-w` in `app.css` is their
+widths plus gaps: change a slot, change the token, or the columns drift again.
+
+**Anything a sidebar row can do, its refs-browser row must do too** — the
+browser is how the rows past the short list are reached. When you add a verb,
+chip or gesture to a sidebar ref row, add it there (both `RepoRefsModal` and
+`ChangeRequestTable`), and the parity tests in `RepoRefsModal.test.tsx` and
+`RepoChangeRequestSection.test.tsx` beside it. `WorktreeHolderChip` is the
+shared "which worktree holds this" chip.
 
 ## Clone and Fork… ask the forge the same question
 
