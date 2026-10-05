@@ -8,7 +8,8 @@ import { linuxArtifactName } from "./linux-release-artifacts.mjs";
 import { verifyExtractedLinuxPayload } from "./verify-linux-packages.mjs";
 
 const require = createRequire(import.meta.url);
-const builderRequire = createRequire(require.resolve("app-builder-lib"));
+const electronBuilderRequire = createRequire(require.resolve("electron-builder"));
+const builderRequire = createRequire(electronBuilderRequire.resolve("app-builder-lib"));
 const { tar } = builderRequire("./targets/archive");
 const tarPackage = builderRequire("tar");
 

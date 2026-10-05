@@ -8,7 +8,8 @@ import { LINUX_FORMATS, linuxArtifactName, linuxAliasName, linuxManifestName, wr
 import { verifyLinuxElf } from "./package-linux.mjs";
 
 const require = createRequire(import.meta.url);
-const { getArtifactArchName, Arch } = require("builder-util");
+const builderRequire = createRequire(require.resolve("electron-builder"));
+const { getArtifactArchName, Arch } = builderRequire("builder-util");
 const { resolveFiles, findFile, parseUpdateInfo } = require("electron-updater/out/providers/Provider");
 
 test.each(["x64", "arm64"])("%s metadata hashes final bytes and the pinned updater resolves the native formats", arch => {

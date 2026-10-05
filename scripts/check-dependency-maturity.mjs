@@ -103,7 +103,8 @@ export function parseMaturityPolicy(yaml) {
 /**
  * Every registry package pinned by the lockfile, as `{ name, version }`.
  *
- * Only the top-level `packages:` block is read. `snapshots:` repeats the same
+ * Only top-level `packages:` blocks are read, including pnpm 12's separate
+ * package-manager document. `snapshots:` repeats the same
  * releases with peer-dependency suffixes (`zod-to-json-schema@3.25.2(zod@4.5.1)`)
  * and would double-count them.
  */
@@ -119,8 +120,12 @@ export function parseLockedPackages(yaml) {
       continue;
     }
     if (!inPackages) continue;
-    // Any other column-0 key ends the block.
-    if (/^\S/.test(line)) break;
+    // Any other column-0 key or document separator ends this block. Continue
+    // scanning: pnpm 12 places tool dependencies before the project document.
+    if (/^\S/.test(line)) {
+      inPackages = false;
+      continue;
+    }
 
     const entry = /^ {2}(\S.*?):\s*$/.exec(line);
     if (!entry) continue;

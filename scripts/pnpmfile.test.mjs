@@ -156,7 +156,44 @@ describe("pnpmfile override scanning", () => {
   it("accepts this repository's own root manifest", async () => {
     const { readFile } = await import("node:fs/promises");
     const root = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-    expect(root.pnpm.overrides).toBeTruthy();
+    expect(root.packageManager).toMatch(/^pnpm@12\./);
     expect(() => readPackage(root)).not.toThrow();
+  });
+});
+
+describe("pnpm 12 git-dependency guard", () => {
+  it("rejects a workspace YAML override before resolution", () => {
+    expect(() => pnpmfile.hooks.updateConfig({ overrides: { dep: "github:a/b" } }))
+      .toThrow(/declared in overrides of pnpm-workspace.yaml/);
+  });
+
+  it("preserves registry overrides", () => {
+    const config = { overrides: { dep: "1.2.3" } };
+    expect(pnpmfile.hooks.updateConfig(config)).toBe(config);
+  });
+
+  it("rejects a git spec supplied by a catalog before contacting its remote", () => {
+    const dep = { alias: "dep", bareSpecifier: "ssh://alice@git.example.com/repo.git" };
+    const resolver = pnpmfile.resolvers[0];
+    expect(resolver.canResolve(dep)).toBe(true);
+    expect(() => resolver.resolve(dep)).toThrow(/Blocked git dependency dep@ssh:/);
+    expect(resolver.canResolve({ alias: "dep", bareSpecifier: "1.2.3" })).toBe(false);
+  });
+
+  it.each([
+    ["git.example.com/repo/commit", { type: "git", repo: "ssh://git.example.com/repo.git" }],
+    ["github.com/a/b/commit", { tarball: "https://codeload.github.com/a/b/tar.gz/commit" }],
+    ["dep@1.0.0", { tarball: "https://api.github.com/repos/a/b/tarball/commit" }]
+  ])("rejects the frozen git resolution %s at fetch time", async (id, resolution) => {
+    const fetcher = pnpmfile.fetchers[0];
+    expect(fetcher.canFetch(id, resolution)).toBe(true);
+    await expect(fetcher.fetch()).rejects.toThrow(/Blocked pnpm git dependency fetch/);
+  });
+
+  it("leaves registry tarballs and local directories to pnpm", () => {
+    const fetcher = pnpmfile.fetchers[0];
+    expect(fetcher.canFetch("dep@1.0.0", { integrity: "sha512-test" })).toBe(false);
+    expect(fetcher.canFetch("dep@1.0.0", { tarball: "https://registry.npmjs.org/dep/-/dep-1.0.0.tgz" })).toBe(false);
+    expect(fetcher.canFetch("file:../local", { type: "directory", directory: "../local" })).toBe(false);
   });
 });

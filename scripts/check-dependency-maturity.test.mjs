@@ -148,6 +148,27 @@ describe("parseLockedPackages", () => {
     const names = parseLockedPackages(lockfile).map(({ name }) => name);
     expect(names).not.toContain("zod-to-json-schema");
   });
+
+  it("checks project dependencies after pnpm 12's package-manager document", () => {
+    const tools = [
+      "---",
+      "lockfileVersion: '9.0'",
+      "packages:",
+      "  pnpm@12.8.1:",
+      "    resolution: {integrity: sha512-tool}",
+      "  zod@4.5.1:",
+      "    resolution: {integrity: sha512-bbb}",
+      "snapshots:",
+      "  pnpm@12.8.1: {}",
+      "---",
+      lockfile,
+    ].join("\n");
+    expect(parseLockedPackages(tools)).toEqual([
+      { name: "pnpm", version: "12.8.1" },
+      { name: "zod", version: "4.5.1" },
+      { name: "@rollup/rollup-darwin-arm64", version: "4.62.2" },
+    ]);
+  });
 });
 
 describe("parseExclusions", () => {
