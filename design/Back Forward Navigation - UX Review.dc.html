@@ -89,7 +89,7 @@
           .lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
           .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
           .brand { flex: none; display: flex; align-items: center; gap: 7px; font: 650 15px/1 var(--font-sans); color: var(--accent); }
-          .brand svg { color: var(--accent); }
+          .bmark { flex: none; width: 18px; height: 18px; background: currentColor; -webkit-mask: url("assets/logo-pwrgit.svg") center / contain no-repeat; mask: url("assets/logo-pwrgit.svg") center / contain no-repeat; }
           .tid { display: flex; align-items: center; gap: 8px; min-width: 0; margin-left: 16px; }
           .tb.hasnav .tid { margin-left: 10px; }
           .trepo { flex: 0 1 auto; min-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 12.5px/1.3 var(--font-sans); color: var(--accent); }
@@ -153,7 +153,6 @@
           .gtag { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px dashed var(--border-strong); border-radius: 4px; color: var(--text-muted); font: 600 9px/1 var(--font-mono); white-space: nowrap; }
           .gtag .gt { overflow: hidden; }
           .sb.w260 .gtag .gt { display: none; }
-          .prow.ghost { border: 1px dashed var(--accent-border); }
 
           .sec { border-top: 1px solid var(--border-subtle); }
           .sh { display: flex; align-items: center; gap: 7px; height: 31px; padding: 0 6px 0 4px; color: var(--text-muted); cursor: pointer; }
@@ -175,8 +174,6 @@
           .pt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px/1.2 var(--font-sans); color: var(--text-primary); }
           .pa { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
           .pplus { flex: none; width: 18px; text-align: center; font: 500 14px/1 var(--font-sans); color: var(--text-muted); }
-          .phome { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; color: var(--text-muted); font: 600 11px/1 var(--font-sans); cursor: pointer; }
-          .phome:hover { background: var(--bg-hover-strong); color: var(--accent); }
           .pl2 { display: flex; align-items: center; gap: 5px; min-width: 0; height: 16px; padding-left: 1px; overflow: hidden; }
           .ph { flex: 0 6 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 10.5px/1.2 var(--font-mono); color: var(--text-muted); }
           .loc { flex: none; display: inline-flex; align-items: center; gap: 3px; height: 16px; padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-muted); font: 600 9.5px/1 var(--font-mono); white-space: nowrap; cursor: pointer; }
@@ -195,7 +192,6 @@
           .filler { margin: 2px 6px; border-radius: 6px; background: repeating-linear-gradient(180deg, rgba(0,0,0,.035) 0 22px, transparent 22px 26px); display: flex; align-items: center; justify-content: center; font: 600 10px/1.3 var(--font-mono); color: var(--text-muted); text-align: center; }
           .gauge { position: absolute; z-index: 4; right: 10px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 999px; background: var(--status-error); color: #fff; font: 650 10px/1 var(--font-sans); box-shadow: 0 6px 16px rgba(0,0,0,.18); }
           .cursor { position: absolute; z-index: 6; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 13px solid #1a1612; transform: rotate(-28deg); filter: drop-shadow(0 1px 0 #fff); }
-          .vport { position: absolute; left: -6px; right: -6px; border: 2px solid var(--status-error); border-radius: 10px; pointer-events: none; }
 
           /* ---- stack diagram ---- */
           .stk { display: flex; align-items: stretch; gap: 8px; }
@@ -241,7 +237,7 @@
             <div class="find">
               <div class="fitem"><span class="pin">1</span><div><h4>There is no way back.</h4><p>The only memory of past places is <code>focus&#8209;visits</code>, a worktree &#8594; last&#8209;viewed&#8209;time map that ranks the Focused lens. It records <b>when</b>, not <b>in what order</b>, and nothing in the UI can return you to it.</p></div></div>
               <div class="fitem"><span class="pin">2</span><div><h4>The reveal forces open the 190&#8209;row disclosure, and saves that.</h4><p>When the selection lands in the remaining worktrees, <code>RepoRow</code> runs <code>setWorktreesOpen(true)</code>. It also persists the result to <code>pwrgit.unpinnedWorktreesOpen.&lt;repo&gt;</code>. With 199 worktrees, the Pull requests list you clicked from is now about 190 rows lower, and it is still that low after the next launch.</p></div></div>
-              <div class="fitem"><span class="pin ok">3</span><div><h4>Every jump already goes through one hub.</h4><p>That covers the sidebar's <code>onRevealWorktree</code>, the palette, lineage chips, the title&#8209;bar branch switcher, tag Locate, and clone/fork completion. All of them end in <code>setSelection</code>, some through <code>pendingReveal</code>. So recording history in one place, by watching the selection the way PwrAgnt watches its location, covers all twelve entry points without touching a single call site.</p></div></div>
+              <div class="fitem"><span class="pin ok">3</span><div><h4>Every jump already goes through one hub.</h4><p>That covers the sidebar's <code>onRevealWorktree</code>, the palette, lineage chips, the title&#8209;bar branch switcher, tag Locate, and clone/fork completion. All of them end in <code>setSelection</code>, some through <code>pendingReveal</code>. So recording history in one place, by watching the selection the way PwrAgnt watches its location, covers every one of those entry points without touching a single call site.</p></div></div>
               <div class="fitem"><span class="pin">4</span><div><h4>The &#8220;View all&#8230;&#8221; dialog can't do everything the short list can.</h4><p>The dialog's PR <b>New worktree</b> calls <code>onCreateWorktree</code> without the PR, so the new&#8209;worktree sheet loses its subject. The dialog's rows also ignore double&#8209;click, which the sidebar uses to reveal a worktree or switch. Both are split out as a separate task: a dialog that can only see the rest of the list, not act on it, is not much use.</p></div></div>
             </div>
           </div>
@@ -306,7 +302,7 @@
             <div class="stage th-light" style="width:976px;display:flex;flex-direction:column;gap:18px;padding-bottom:70px">
               <div class="tb solo hasnav">
                 <span class="lights"><i></i><i></i><i></i></span>
-                <span class="brand"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="18" r="3"></circle><path d="M6 9v3a6 6 0 0 0 6 6h3"></path></svg>PwrGit</span>
+                <span class="brand"><span class="bmark"></span>PwrGit</span>
                 <span class="hnav"><span class="hchip hov"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
                 <span class="tid"><span class="trepo">PwrAgnt</span><span class="tsep">&#8250;</span><span class="tbranch"><span class="dot"></span><span class="nm">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></span><span class="tpath">&#9633; muslg1hh/PwrAgnt</span></span>
                 <span class="tspacer"></span>
@@ -328,7 +324,7 @@
             <div class="stage th-light" style="width:520px;height:340px">
               <div class="tb solo hasnav" style="width:434px">
                 <span class="lights"><i></i><i></i><i></i></span>
-                <span class="brand">PwrGit</span>
+                <span class="brand"><span class="bmark"></span>PwrGit</span>
                 <span class="hnav"><span class="hchip hov"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip off"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span>
                 <span class="tid"><span class="trepo">PwrAgnt</span></span>
               </div>
@@ -348,7 +344,7 @@
           <div class="dv-opt" id="2c" data-screen-label="2c At the minimum window">
             <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>At the 940px minimum window, with the widest branch chip: nothing needs to step down</div>
             <div class="stage th-light" style="width:976px;display:flex;flex-direction:column;gap:12px">
-              <div class="tb solo hasnav" style="width:940px"><span class="lights"><i></i><i></i><i></i></span><span class="brand">PwrGit</span><span class="hnav"><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="tid"><span class="trepo">PwrAgnt</span><span class="tsep">&#8250;</span><span class="tbranch"><span class="dot"></span><span class="nm">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></span><span class="tpath">&#9633; muslg1hh/PwrAgnt</span></span><span class="tspacer"></span></div>
+              <div class="tb solo hasnav" style="width:940px"><span class="lights"><i></i><i></i><i></i></span><span class="brand"><span class="bmark"></span>PwrGit</span><span class="hnav"><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span><span class="hchip"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg></span></span><span class="tid"><span class="trepo">PwrAgnt</span><span class="tsep">&#8250;</span><span class="tbranch"><span class="dot"></span><span class="nm">codex/thread&#8209;composer&#8209;watermark&#8209;cursor&#8209;38d840</span></span><span class="tpath">&#9633; muslg1hh/PwrAgnt</span></span><span class="tspacer"></span></div>
               <p class="note" style="color:#524a40;max-width:900px">The title bar spans the whole window, and <code>window.ts</code> sets <code>minWidth: 940</code>. The branch chip is capped at 320px, so even the longest crumb row leaves about 250px of spare strip at the minimum, and nothing on the existing <code>.titlebar__id</code> ladder fires. The pair is <code>flex: 0 0 auto</code> anyway, the same as the branch chip: a control you reach for mid&#8209;task must not vanish at some widths. It costs 58px plus a 12px lead, and the crumbs' own lead drops from 16px to 10px, so they move right by 64px.</p>
             </div>
           </div>
@@ -385,7 +381,7 @@
               <div class="tr"><span><b>Lens, sort, expand/collapse, &#8984;&#8209;click multi&#8209;select</b></span><span><span class="verdict q">Not recorded</span></span><span>These change how you look at the list, not where you are.</span></div>
               <div class="tr"><span><b>Removed worktrees</b></span><span><span class="verdict chg">Pruned</span></span><span>PwrAgnt can't prove a deletion from a paged list, so it never prunes. PwrGit can: once repos load, <code>repos</code> is authoritative. Dead entries drop out, and duplicates they leave adjacent collapse.</span></div>
               <div class="tr"><span><b>Keys</b></span><span><code>&#8984;[</code> <code>&#8984;]</code> &#183; <code>&#8997;&#8592;</code> <code>&#8997;&#8594;</code> &#183; mouse 4/5</span><span>These are PwrAgnt's <code>matchHistoryNavChord</code> plus thumb buttons, verbatim. Bracket chords stay live inside inputs; &#8997;&#8209;arrows don't, so word&#8209;wise caret movement keeps working. On Windows and Linux they read Ctrl+[ / Ctrl+].</span></div>
-              <div class="tr"><span><b>Lifetime</b></span><span>Per window, like the selection</span><span>One window is one profile. The selection is already persisted per profile, so the stack is too: it survives a relaunch, capped at 50.</span></div>
+              <div class="tr"><span><b>Lifetime</b></span><span><span class="verdict chg">New: persisted per profile</span></span><span>One window is one profile, and the selection is already saved per profile. The proposal is to save the stack beside it so it survives a relaunch, capped at 50. That part is new work: PwrAgnt&#8217;s <code>useRecoverableState</code> only survives a renderer recovery, so a straight port would reset the stack on every launch.</span></div>
             </div>
           </div>
 
@@ -461,7 +457,7 @@
                 <span class="tip" style="left:120px;top:206px">Lives in Other worktrees (190). It is shown here<br />because you're on it. <span class="k">&#9733; to keep it in Pinned.</span></span>
               </div>
               <div style="display:flex;flex-direction:column;gap:10px;width:330px">
-                <p class="note" style="color:#524a40"><b style="color:#1a1612">Compare <a class="dv-oid" href="#1b">1b</a>:</b> the same jump, and #2525 is still under your pointer, with the worktree it opened four rows above it. The ghost adds one row above the pointer, so the sidebar compensates <code>scrollTop</code> by that row&#8217;s height. The rows <b>above</b> slide up by 26px, and nothing beneath the pointer moves.</p>
+                <p class="note" style="color:#524a40"><b style="color:#1a1612">Compare <a class="dv-oid" href="#1b">1b</a>:</b> the same jump, and #2525 is still under your pointer, with the worktree it opened three rows above it. The ghost adds one row above the pointer, so the sidebar compensates <code>scrollTop</code> by that row&#8217;s height. The rows <b>above</b> slide up by 26px, and nothing beneath the pointer moves.</p>
                 <p class="note" style="color:#524a40"><b style="color:#1a1612">The tag</b> is &#8220;&#8595; Other&#8221;, pointing at the disclosure directly below. Its tooltip says why the row is here and how to keep it. At the 260px sidebar it shrinks to the arrow alone (<a class="dv-oid" href="#4c">4c</a>).</p>
                 <p class="note" style="color:#524a40"><b style="color:#1a1612">The disclosure is left alone.</b> It stays closed if you had it closed, and its stored open state is never written by a jump, which fixes finding 2 on its own. If you open it yourself, the ghost goes away and the real row inside is selected.</p>
               </div>
@@ -512,7 +508,7 @@
       <!-- ================================ TURN 5 ================================ -->
       <section class="dv-turn" id="t5">
         <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Live: double&#8209;click a PR, then try to get back</span></div>
-        <p class="dv-sub">Flip between <b>Today</b> and <b>Proposed</b>. In Proposed: double&#8209;click a PR row, or click its &#8962; chip, to jump to its worktree. Then press Back, use &#8984;[ / &#8984;] (with the pointer over the frame), or right&#8209;click Back for the list. Clicking a worktree row selects it, and the Other worktrees head toggles.</p>
+        <p class="dv-sub">Flip between <b>Today</b> and <b>Proposed</b>. In Proposed: double&#8209;click a PR row, or click its &#8962; chip, to jump to its worktree. Then press Back, use &#8984;[ / &#8984;] (with the pointer over the frame), or right&#8209;click or press&#8209;and&#8209;hold Back for the list (Esc or a click elsewhere closes it). Clicking a worktree row selects it, and the Other worktrees head toggles.</p>
         <div class="dv-opts">
           <div class="dv-opt" id="5a" data-screen-label="5a Live">
             <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Live prototype</div>
@@ -521,11 +517,11 @@
               <div class="win th-light" onMouseUp="{{onMouseUp}}">
                 <div class="tb hasnav" style="border-radius:0">
                   <span class="lights"><i></i><i></i><i></i></span>
-                  <span class="brand">PwrGit</span>
+                  <span class="brand"><span class="bmark"></span>PwrGit</span>
                   <sc-if value="{{showNav}}">
                     <span class="hnav" style="position:relative">
-                      <button class="{{backCls}}" onClick="{{goBack}}" onContextMenu="{{openMenu}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg><span class="htip">{{backTip}}</span></button>
-                      <button class="{{fwdCls}}" onClick="{{goForward}}" onContextMenu="{{openMenu}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg><span class="htip">{{fwdTip}}</span></button>
+                      <button class="{{backCls}}" onClick="{{goBack}}" onContextMenu="{{openMenu}}" onMouseDown="{{holdStart}}" onMouseUp="{{holdEnd}}" onMouseLeave="{{holdEnd}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg><span class="htip">{{backTip}}</span></button>
+                      <button class="{{fwdCls}}" onClick="{{goForward}}" onContextMenu="{{openMenu}}" onMouseDown="{{holdStart}}" onMouseUp="{{holdEnd}}" onMouseLeave="{{holdEnd}}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg><span class="htip">{{fwdTip}}</span></button>
                       <sc-if value="{{menuOpen}}">
                         <div class="hmenu" style="top:30px;left:0" onMouseLeave="{{closeMenu}}">
                           <sc-for list="{{menu}}" as="h" hint-placeholder-count="3">
@@ -616,6 +612,7 @@
         }
         componentDidMount() {
           this.onWinKey = (e) => {
+            if (e.key === "Escape" && this.state.menu) { this.setState({ menu: false }); return; }
             const prim = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
             if (prim && !e.altKey && !e.shiftKey && (e.code === "BracketLeft" || e.code === "BracketRight")) {
               if (!this.armed) return;
@@ -629,15 +626,33 @@
               if (e.key === "ArrowRight") { e.preventDefault(); this.forward(); }
             }
           };
+          // The history menu closes on any press outside it, like the app's popovers.
+          this.onWinDown = (e) => {
+            if (this.state.menu && !(e.target && e.target.closest && e.target.closest(".hmenu"))) this.setState({ menu: false });
+          };
           window.addEventListener("keydown", this.onWinKey);
+          window.addEventListener("mousedown", this.onWinDown);
         }
-        componentWillUnmount() { window.removeEventListener("keydown", this.onWinKey); }
+        componentWillUnmount() {
+          window.removeEventListener("keydown", this.onWinKey);
+          window.removeEventListener("mousedown", this.onWinDown);
+          clearTimeout(this.flashT);
+          clearTimeout(this.holdT);
+        }
         componentDidUpdate() {
           const side = this.sideRef.current;
           if (!side || this.pendingScroll === null) return;
           let p = this.pendingScroll;
           this.pendingScroll = null;
           if (p.kind === "top") { side.scrollTop = p.top; return; }
+          if (p.kind === "anchor") {
+            // Restore by row key: put the row you acted from back at the offset it had.
+            // Falls back to the saved pixel offset only when that row is gone.
+            const r = side.querySelector('[data-row="' + p.key + '"]');
+            if (r) side.scrollTop += (r.getBoundingClientRect().top - side.getBoundingClientRect().top) - p.prev;
+            else side.scrollTop = p.top;
+            return;
+          }
           if (p.kind === "keep") {
             const a = side.querySelector('[data-row="' + p.anchor + '"]');
             if (a) side.scrollTop += (a.getBoundingClientRect().top - side.getBoundingClientRect().top) - p.prev;
@@ -662,7 +677,6 @@
         go(id, via, anchorKey) {
           const s = this.state;
           if (id === s.sel) return;
-          const leaving = { id: s.sel, via: s.via, top: this.scrollNow(), anchor: anchorKey || null };
           if (s.mode === "today") {
             const forced = WT[id].block === "other";
             this.pendingScroll = { kind: "center", key: "wt:" + id };
@@ -671,8 +685,10 @@
           }
           const side = this.sideRef.current;
           const a = side && anchorKey ? side.querySelector('[data-row="' + anchorKey + '"]') : null;
+          const prev = a ? a.getBoundingClientRect().top - side.getBoundingClientRect().top : null;
+          const leaving = { id: s.sel, via: s.via, top: this.scrollNow(), anchor: a ? anchorKey : null, anchorTop: prev };
           this.pendingScroll = a
-            ? { kind: "keep", anchor: anchorKey, prev: a.getBoundingClientRect().top - side.getBoundingClientRect().top, key: "wt:" + id }
+            ? { kind: "keep", anchor: anchorKey, prev: prev, key: "wt:" + id }
             : { kind: "nearest", key: "wt:" + id };
           this.setState({ sel: id, via: via, back: s.back.concat([leaving]).slice(-MAX), fwd: [], menu: false, flash: this.flashLater("wt:" + id), log: "Went to " + WT[id].branch + (via ? " via " + via : "") + "." + (WT[id].block === "other" && !s.otherOpen ? " It lives in Other worktrees, so it shows as a ghost; the disclosure stays shut." : "") });
         }
@@ -681,13 +697,27 @@
           const here = { id: s.sel, via: s.via, top: this.scrollNow(), anchor: null };
           const back = dir === "back" ? s.back.slice(0, -1) : s.back.concat([here]).slice(-MAX);
           const fwd = dir === "back" ? [here].concat(s.fwd).slice(0, MAX) : s.fwd.slice(1);
-          this.pendingScroll = { kind: "top", top: target.top };
+          this.pendingScroll = this.restoreFor(target);
           const fk = target.anchor || "wt:" + target.id;
           this.setState({ sel: target.id, via: target.via, back: back, fwd: fwd, menu: false, flash: this.flashLater(fk), log: (dir === "back" ? "Back" : "Forward") + " to " + WT[target.id].branch + ". Sidebar restored to where you left it" + (target.anchor ? ", anchored on " + target.anchor.replace("pr:", "#") : "") + "." });
         }
         back() { const s = this.state; if (s.mode !== "proposed" || s.back.length === 0) return; this.land(s.back[s.back.length - 1], "back"); }
         forward() { const s = this.state; if (s.mode !== "proposed" || s.fwd.length === 0) return; this.land(s.fwd[0], "forward"); }
-        jumpTo(list, idx, dir) {
+        restoreFor(target) {
+          return target.anchor
+            ? { kind: "anchor", key: target.anchor, prev: target.anchorTop, top: target.top }
+            : { kind: "top", top: target.top };
+        }
+        holdStart() {
+          // Press-and-hold either chip opens the list, as in Safari and Chrome.
+          clearTimeout(this.holdT);
+          this.held = false;
+          this.holdT = setTimeout(() => {
+            const s = this.state;
+            if (s.back.length || s.fwd.length) { this.held = true; this.setState({ menu: true }); }
+          }, 450);
+        }
+        jumpTo(idx, dir) {
           // Jump several steps at once, keeping the rest of the stack (browser semantics).
           const s = this.state;
           const here = { id: s.sel, via: s.via, top: this.scrollNow(), anchor: null };
@@ -702,7 +732,7 @@
             back = s.back.concat([here]).concat(s.fwd.slice(0, idx)).slice(-MAX);
             fwd = s.fwd.slice(idx + 1);
           }
-          this.pendingScroll = { kind: "top", top: target.top };
+          this.pendingScroll = this.restoreFor(target);
           this.setState({ sel: target.id, via: target.via, back: back, fwd: fwd, menu: false, flash: this.flashLater(target.anchor || "wt:" + target.id), log: "Jumped " + (idx + 1) + " step" + (idx ? "s" : "") + " " + dir + " to " + WT[target.id].branch + "." });
         }
         wtView(id, ghost) {
@@ -749,11 +779,11 @@
           const menu = [];
           s.fwd.slice().reverse().forEach((e, i) => {
             const idx = s.fwd.length - 1 - i;
-            menu.push({ cls: "hmi", g: "›", branch: WT[e.id].branch, via: e.via ? "from " + e.via : "", dir: "fwd " + (idx + 1), on: () => this.jumpTo(s.fwd, idx, "forward") });
+            menu.push({ cls: "hmi", g: "›", branch: WT[e.id].branch, via: e.via ? "from " + e.via : "", dir: "fwd " + (idx + 1), on: () => this.jumpTo(idx, "forward") });
           });
           menu.push({ cls: "hmi cur", g: "●", branch: WT[s.sel].branch, via: "Here now" + (s.via ? " · from " + s.via : ""), dir: "", on: () => this.setState({ menu: false }) });
           s.back.slice().reverse().forEach((e, i) => {
-            menu.push({ cls: "hmi", g: String(i + 1), branch: WT[e.id].branch, via: e.via ? "from " + e.via : (e.anchor ? "left from " + e.anchor.replace("pr:", "#") : ""), dir: "back " + (i + 1), on: () => this.jumpTo(s.back, i, "back") });
+            menu.push({ cls: "hmi", g: String(i + 1), branch: WT[e.id].branch, via: e.via ? "from " + e.via : (e.anchor ? "left from " + e.anchor.replace("pr:", "#") : ""), dir: "back " + (i + 1), on: () => this.jumpTo(i, "back") });
           });
           const stack = []
             .concat(s.back.map((e) => ({ cls: "hpill", label: WT[e.id].branch })))
@@ -772,8 +802,10 @@
             fwdCls: "hchip" + (s.fwd.length ? "" : " off"),
             backTip: backT ? "Back to " + lbl(backT) + "  (" + accel("[") + ")" : "Back  (" + accel("[") + ")",
             fwdTip: fwdT ? "Forward to " + lbl(fwdT) + "  (" + accel("]") + ")" : "Forward  (" + accel("]") + ")",
-            goBack: () => this.back(),
-            goForward: () => this.forward(),
+            goBack: () => { if (this.held) { this.held = false; return; } this.back(); },
+            goForward: () => { if (this.held) { this.held = false; return; } this.forward(); },
+            holdStart: (e) => { if (e.button === 0) this.holdStart(); },
+            holdEnd: () => clearTimeout(this.holdT),
             openMenu: (e) => { e.preventDefault(); if (s.back.length || s.fwd.length) this.setState({ menu: true }); },
             closeMenu: () => this.setState({ menu: false }),
             menuOpen: s.menu,
