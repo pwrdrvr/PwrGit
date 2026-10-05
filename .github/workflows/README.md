@@ -53,7 +53,7 @@ repositories after rotation. See the distribution runbook for exact checks.
 |---|---|---|
 | `ci.yml` | push to `main`, PRs | Typecheck, build, unit tests, Linux + macOS + Windows desktop E2E. Unit-test jobs run `rebuild:electron-native` first — a no-op after a fresh install, which repairs a restored `node_modules` cache whose better-sqlite3 build predates the two-ABI layout. Documentation-only PRs skip those jobs after Classify Changes (see below). |
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
-| `release.yml` | `v*` tag push, manual dispatch with a tag, or PR activity | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on native Linux package/runtime validation, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. Same-repo PRs validate Linux packages on both CPUs and upload artifacts only; `ci:windows-signing` additionally runs the real Windows signing path. |
+| `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:linux-packages` / `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on native Linux package/runtime validation, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. On same-repo PRs every job skips unless a label opts in: `ci:linux-packages` validates Linux packages on both CPUs and `ci:windows-signing` runs the real Windows signing path; both upload artifacts only. |
 
 ## macOS desktop E2E
 
@@ -108,6 +108,19 @@ Do not add `paths` or `paths-ignore` to the `pull_request` trigger. Required
 status checks (`Typecheck`, `Desktop E2E`) must still exist on every PR;
 skipped jobs satisfy those checks, missing jobs leave them pending.
 
+## Required checks stuck on "Expected"
+
+GitHub occasionally delivers one push twice; the repository activity log
+(`gh api "repos/pwrdrvr/PwrGit/activity?ref=refs/heads/<branch>"`) then shows two
+identical `push` entries, and every `pull_request` workflow runs twice for the
+head SHA. `ci.yml`'s concurrency group cancels one CI run before it creates any
+jobs. When the cancelled run is the newer check suite, the PR page and merge
+gate read that empty suite: the four required checks show "Expected" and the PR
+stays `BLOCKED`, although `statusCheckRollup` reports them successful from the
+other suite. Re-run the cancelled CI run (`gh run rerun <id>`) or push again.
+Do not loosen the concurrency group for this; superseding stale PR runs is the
+common case.
+
 ## PR labels
 
 Keep label names namespaced when they start, skip, or narrow CI work.
@@ -116,6 +129,7 @@ Keep label names namespaced when they start, skip, or narrow CI work.
 |---|---|---|
 | `build-preview` | `preview-build.yml` | Builds the unsigned macOS DMG and Windows installer for the PR. Applied label triggers a run; later pushes to a labeled PR re-run it. |
 | `ci:windows-signing` | `release.yml` | For same-repo PRs, runs the release Windows prepare/build/Azure-sign/Authenticode-verification path and uploads the signed installer to the workflow run. It never creates a GitHub Release. |
+| `ci:linux-packages` | `release.yml` | For same-repo PRs, runs `linux-build` on x64 and arm64: native DEB/RPM/pacman/tar.gz packaging, manifest checks and the installed-DEB smoke test, uploading the packages to the workflow run. Use it on PRs that touch Linux packaging. It never creates a GitHub Release. |
 
 If you add another label-influenced workflow path, document it here in the same
 change as the workflow update.
@@ -288,7 +302,8 @@ manual release validation task. No installed-app mutation is part of this fix.
 ## Native Linux release packages
 
 `linux-build` runs unprivileged packaging on `ubuntu-24.04` (x64) and
-`ubuntu-24.04-arm` (arm64), including same-repo PRs. It uses the worktree's
+`ubuntu-24.04-arm` (arm64) for tags and dispatches, and for same-repo PRs
+labeled `ci:linux-packages`. It uses the worktree's
 pinned dependencies and separate per-format packaging passes for DEB, RPM,
 pacman and tar.gz. All native packages embed the corresponding updater marker;
 portable archives carry none. Both manifests and SHA-256 manifests are generated

@@ -12,10 +12,12 @@ on:
         required: true
         type: string
   pull_request:
-    # `labeled` starts the opt-in signing check. `synchronize` and `reopened`
-    # keep it current while ci:windows-signing remains on the PR.
+    # PR runs exist only for the opt-in labels ci:windows-signing and
+    # ci:linux-packages; every job is skipped on an unlabeled PR. `labeled`
+    # starts a check (a PR opened with a label also sends `labeled`).
+    # `synchronize` and `reopened` keep it current while the label remains.
+    # Do not add `opened`: it only re-runs packaging for unlabeled PRs.
     types:
-      - opened
       - labeled
       - synchronize
       - reopened
@@ -210,7 +212,23 @@ jobs:
 
   linux-build:
     name: Package and validate Linux (${{ matrix.arch }})
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    # CI already builds and E2E-tests on Linux for every PR, and tags gate
+    # publication on this job. PRs that change packaging opt in with the
+    # ci:linux-packages label.
+    if: >-
+      ${{
+        github.event_name != 'pull_request'
+        || (
+          github.event.pull_request.head.repo.full_name == github.repository
+          && (
+            (github.event.action == 'labeled' && github.event.label.name == 'ci:linux-packages')
+            || (
+              github.event.action != 'labeled'
+              && contains(github.event.pull_request.labels.*.name, 'ci:linux-packages')
+            )
+          )
+        )
+      }}
     strategy:
       fail-fast: false
       matrix:
