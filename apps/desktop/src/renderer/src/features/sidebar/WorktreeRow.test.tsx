@@ -352,3 +352,47 @@ describe("WorktreeRow — platform shortcut affordance", () => {
     ).toBe("Drag to reorder — or Ctrl+Shift+↑ / Ctrl+Shift+↓ from the keyboard");
   });
 });
+
+describe("WorktreeRow — ghost", () => {
+  const ghost = {
+    tag: "Other",
+    tooltip:
+      "Lives in Other worktrees (190). It is shown here because you're on it; pin it to keep it in Pinned."
+  };
+
+  it("draws a visitor: the ghost class, a tag naming its disclosure, and the reason for AT", () => {
+    const markup = renderToStaticMarkup(
+      <WorktreeRow
+        worktree={worktree({})}
+        selected
+        multiSelected={false}
+        now={new Date("2026-08-18T12:00:00.000Z").getTime()}
+        onSelect={() => undefined}
+        onContextMenu={() => undefined}
+        onTogglePin={() => undefined}
+        onRemove={() => undefined}
+        dragProps={{ draggable: false }}
+        dragging={false}
+        dropPosition={null}
+        focusable
+        onKeyDown={() => undefined}
+        onFocus={() => undefined}
+        posinset={4}
+        setsize={9}
+        ghost={ghost}
+        platform="darwin"
+      />
+    );
+    expect(markup).toContain('class="wt-row is-selected is-ghost"');
+    // Same row identity, so reveals and the anchor find it like the real one.
+    expect(markup).toContain('data-wt-id="wt1"');
+    expect(markup).toContain('<span class="wt-ghost-tag__text">Other</span>');
+    expect(markup).toContain(`<span class="a11y-sr-only">${ghost.tooltip.replace("'", "&#x27;")}</span>`);
+  });
+
+  it("draws nothing extra on an ordinary row", () => {
+    const markup = render(worktree({}));
+    expect(markup).not.toContain("is-ghost");
+    expect(markup).not.toContain("wt-ghost-tag");
+  });
+});

@@ -37,3 +37,25 @@ Verify alignment by measuring, not by eye. Render the strip at 2× and compare
 each element's ink centre with y=20. In the harness, draw the stoplights at
 their Electron position as 14px circles. The macOS 26 geometry has been
 measured; macOS 15 and earlier have not.
+
+## Back / Forward
+
+`HistoryNavButtons` sits between the brand (and Windows/Linux menubar) and the
+crumbs, like PwrAgnt's. History is `lib/useNavigationHistory.ts`, ported from
+PwrAgnt and keyed by worktree. Rules that are easy to break:
+
+- **It observes `selection`; it is never pushed.** Every jump funnels through
+  App's `selection`, so a new way to navigate is recorded for free. Don't add
+  a push at a call site.
+- **Riders, not entries.** The open commit and the sidebar anchor are
+  captured as a place is *left* (`capture`) and ride on that entry. A restore
+  re-opens the commit after the worktree-change effect clears it, the
+  `pendingTag` way.
+- **Diff and file details are overlays.** The first Back closes them without
+  spending an entry.
+- **Saved per profile** (`pwrgit.navigationHistory.<profileId>`), pruned of
+  removed worktrees only once repos have loaded.
+- Chords (⌘[ ⌘], ⌥←/→ outside text fields, mouse 3/4) are bound once in App
+  and stand down while an `aria-modal` dialog is open.
+
+Design: `design/Back Forward Navigation - UX Review.dc.html`.

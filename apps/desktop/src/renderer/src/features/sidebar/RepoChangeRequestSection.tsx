@@ -283,6 +283,8 @@ export function RepoChangeRequestSection({
       <div
         className={`ref-cr-row${location.kind === "worktree" ? " is-checked-out" : ""}`}
         key={key}
+        // Back returns the sidebar to this row (sidebar-anchor.ts).
+        data-nav-anchor={`cr:${repo.id}:${key}`}
         role="treeitem"
         aria-level={3}
         aria-posinset={index + 1}

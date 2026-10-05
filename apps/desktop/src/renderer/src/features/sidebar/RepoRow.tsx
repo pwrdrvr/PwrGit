@@ -369,20 +369,23 @@ export function RepoRow({
     }
   }, [repo.id, worktreesOpen]);
 
-  const lastSelectedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (selectedWorktreeId === null) {
-      lastSelectedRef.current = null;
-      return;
-    }
-    if (!remaining.some((worktree) => worktree.id === selectedWorktreeId)) {
-      lastSelectedRef.current = null;
-      return;
-    }
-    if (selectedWorktreeId === lastSelectedRef.current) return;
-    lastSelectedRef.current = selectedWorktreeId;
-    setWorktreesOpen(true);
-  }, [remaining, selectedWorktreeId]);
+  // The selection can land behind the closed disclosure: a PR's worktree, a
+  // ⌘K pick, Back. Opening the disclosure to show it — and saving it open —
+  // pushed everything below down by the whole list, often thousands of
+  // pixels, and the list you jumped from with it. Instead the one row shows
+  // as a ghost at the foot of the visible block, directly above the
+  // disclosure it lives in, and the disclosure is left as the reader set it.
+  const ghost =
+    worktreesOpen || selectedWorktreeId === null
+      ? undefined
+      : remaining.find((worktree) => worktree.id === selectedWorktreeId);
+  // The rows the arrow keys can reach: `displayIds` less the ones a closed
+  // disclosure hides, so ↓ from the last Working row lands on the ghost.
+  // Positions (aria-posinset) still count every treeitem in `displayIds`.
+  const remainingIds = new Set(remaining.map((worktree) => worktree.id));
+  const walkIds = worktreesOpen
+    ? displayIds
+    : displayIds.filter((id) => !remainingIds.has(id) || id === ghost?.id);
 
   // What Pull would bring into the primary checkout: on a fork, from the
   // source (Fork Sync, 3e). The same stored count the header chip reads.
@@ -452,7 +455,7 @@ export function RepoRow({
         : displayIds[0] ?? null;
 
   const focusWorktreeAt = (index: number): void => {
-    const id = displayIds[index];
+    const id = walkIds[index];
     if (id === undefined) return;
     setFocusedWtId(id);
     // Compared, not interpolated into a selector: a branch id carries whatever
@@ -469,11 +472,11 @@ export function RepoRow({
   ): void => {
     // The pin inside the row keeps its own activation (SC 2.1.1).
     if (event.target !== event.currentTarget) return;
-    const index = displayIds.indexOf(pinnedBranchRowId(branch));
+    const index = walkIds.indexOf(pinnedBranchRowId(branch));
     if (index === -1) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      focusWorktreeAt(Math.min(index + 1, displayIds.length - 1));
+      focusWorktreeAt(Math.min(index + 1, walkIds.length - 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       focusWorktreeAt(Math.max(index - 1, 0));
@@ -491,7 +494,7 @@ export function RepoRow({
     // here. Handling them cancelled the button's own activation — see the note
     // on Sidebar's handleRepoKeyDown (SC 2.1.1).
     if (event.target !== event.currentTarget) return;
-    const index = displayIds.indexOf(worktree.id);
+    const index = walkIds.indexOf(worktree.id);
     if (index === -1) return;
     // ⌘⇧↑/↓ moves the row; plain ↑/↓ moves the focus. Same modifier pair as
     // PwrAgnt's pinned-directory reorder, so the two apps stay one muscle
@@ -500,7 +503,13 @@ export function RepoRow({
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       // Working is a computed priority section. Persisting a manual move here
       // would be immediately undone by its Focus reason/activity ranking.
-      if (worktree.isPrimary || sectionFor(worktree.id) === "focused") return;
+      if (
+        worktree.isPrimary ||
+        worktree.id === ghost?.id ||
+        sectionFor(worktree.id) === "focused"
+      ) {
+        return;
+      }
       const from = orderedIds.indexOf(worktree.id);
       const to = from + (event.key === "ArrowUp" ? -1 : 1);
       const neighbor = orderedIds[to];
@@ -545,7 +554,7 @@ export function RepoRow({
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      focusWorktreeAt(Math.min(index + 1, displayIds.length - 1));
+      focusWorktreeAt(Math.min(index + 1, walkIds.length - 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       focusWorktreeAt(Math.max(index - 1, 0));
@@ -555,7 +564,10 @@ export function RepoRow({
     }
   };
 
-  const renderWorktree = (worktree: Worktree) => (
+  const renderWorktree = (
+    worktree: Worktree,
+    ghostTag?: { tag: string; tooltip: string }
+  ) => (
     <WorktreeRow
       key={worktree.id}
       // `displayIds` is the group's treeitem order (primary, pinned, then the
@@ -585,8 +597,12 @@ export function RepoRow({
           })}
       dragProps={wtDrag.rowProps(
         worktree.id,
-        !worktree.isPrimary && sectionFor(worktree.id) !== "focused"
+        // A ghost is out of its section, so it has nowhere to drop.
+        ghostTag === undefined &&
+          !worktree.isPrimary &&
+          sectionFor(worktree.id) !== "focused"
       )}
+      {...(ghostTag === undefined ? {} : { ghost: ghostTag })}
       dragging={wtDrag.dragId === worktree.id}
       dropPosition={
         wtDrag.target?.id === worktree.id ? wtDrag.target.position : null
@@ -924,7 +940,7 @@ export function RepoRow({
                 </span>
               </div>
             )}
-            {pinned.map(renderWorktree)}
+            {pinned.map((worktree) => renderWorktree(worktree))}
             {pinnedBranches.map((branch) => (
               <PinnedBranchRow
                 key={pinnedBranchRowId(branch)}
@@ -948,7 +964,12 @@ export function RepoRow({
                 </span>
               </div>
             )}
-            {focusedWorktrees.map(renderWorktree)}
+            {focusedWorktrees.map((worktree) => renderWorktree(worktree))}
+            {ghost !== undefined &&
+              renderWorktree(ghost, {
+                tag: worktreesLabel.split(" ")[0] ?? worktreesLabel,
+                tooltip: `Lives in ${worktreesLabel} (${remaining.length}). It is shown here because you're on it; pin it to keep it in Pinned.`
+              })}
           </div>
 
           {selectedIds.size > 1 && (
@@ -1045,7 +1066,7 @@ export function RepoRow({
 
           {worktreesOpen && (
             <div className="wt-section__body">
-              {remaining.map(renderWorktree)}
+              {remaining.map((worktree) => renderWorktree(worktree))}
 
               <button
                 className="new-wt"
@@ -1073,10 +1094,7 @@ export function RepoRow({
             focusedWorktree={
               repo.worktrees.find((w) => w.id === selectedWorktreeId) ?? null
             }
-            onRevealWorktree={(worktreeId) => {
-              setWorktreesOpen(true);
-              onRevealWorktree(worktreeId);
-            }}
+            onRevealWorktree={onRevealWorktree}
             onCreateWorktree={onCreateWorktreeFromRef}
             onBranches={keepRefBranches}
           />

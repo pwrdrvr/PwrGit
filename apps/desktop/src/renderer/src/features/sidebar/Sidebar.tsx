@@ -2,6 +2,7 @@ import { dispatch } from "../../lib/pwrgit";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -51,6 +52,12 @@ import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
+import {
+  applySidebarAnchor,
+  keepSidebarAnchorForSelection,
+  sidebarAnchorHeld,
+  trackSidebarAnchors
+} from "./sidebar-anchor";
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 import {
@@ -458,10 +465,33 @@ export function Sidebar({
   useEffect(() => {
     const id = pendingRevealRef.current;
     if (id === null) return;
+    // A row held by the anchor (the one the jump was made from, or the one
+    // Back is returning to) owns the scroll. Revealing the selection too
+    // would move that row out from under the pointer.
+    if (sidebarAnchorHeld()) {
+      pendingRevealRef.current = null;
+      return;
+    }
     const el = document.querySelector(`[data-wt-id="${id}"]`);
     if (el === null) return; // not rendered yet — retry after the next render
     pendingRevealRef.current = null;
     el.scrollIntoView({ block: "nearest" });
+  });
+
+  // Keep the reader's place across a selection change: see sidebar-anchor.ts.
+  // Both run before paint, in this order, after every render — a ghost row
+  // or a re-ranked Working block inserted above the held row is compensated
+  // in the same frame it appears.
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = listRef.current;
+    return list === null ? undefined : trackSidebarAnchors(list);
+  }, []);
+  useLayoutEffect(() => {
+    if (selectedWorktreeId !== null) keepSidebarAnchorForSelection();
+  }, [selectedWorktreeId]);
+  useLayoutEffect(() => {
+    applySidebarAnchor(listRef.current);
   });
 
   // A plain row click seeds the batch (shift-range) set — but selection can
@@ -1308,7 +1338,7 @@ export function Sidebar({
           still needs to sit outside the tree. The wrapper below owns only rows
           and folder groups. It is a plain static block, so it changes no layout
           and the rows still stick to .sidebar__list's scrollport. */}
-      <div className="sidebar__list">
+      <div className="sidebar__list" ref={listRef}>
         {repoLoadState.status === "error" && (
           <ReadError
             compact

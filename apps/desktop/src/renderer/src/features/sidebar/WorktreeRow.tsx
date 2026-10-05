@@ -49,6 +49,7 @@ export function WorktreeRow({
   onFocus,
   posinset,
   setsize,
+  ghost,
   platform = currentPlatform()
 }: {
   worktree: Worktree;
@@ -83,6 +84,10 @@ export function WorktreeRow({
    *  the position is not derivable from DOM order. */
   posinset: number;
   setsize: number;
+  /** Drawn as a visitor: the row really lives in a closed disclosure below,
+   *  and is shown here only because the window is on it. `tag` names that
+   *  disclosure; `tooltip` says why the row is here and how to keep it. */
+  ghost?: { tag: string; tooltip: string };
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -129,6 +134,8 @@ export function WorktreeRow({
       className={`wt-row${selected ? " is-selected" : ""}${
         multiSelected ? " is-multiselected" : ""
       }${prunable ? " is-stale" : ""}${missing ? " is-missing" : ""}${
+        ghost === undefined ? "" : " is-ghost"
+      }${
         dragging ? " is-dragging" : ""
       }${
         dropPosition === null ? "" : ` is-drop-${dropPosition}`
@@ -221,6 +228,18 @@ export function WorktreeRow({
       >
         {worktree.branch}
       </span>
+      {ghost !== undefined && (
+        <>
+          <span
+            className="wt-ghost-tag"
+            aria-hidden="true"
+            {...hoverTooltip(tip, ghost.tooltip)}
+          >
+            ↓<span className="wt-ghost-tag__text">{ghost.tag}</span>
+          </span>
+          <span className="a11y-sr-only">{ghost.tooltip}</span>
+        </>
+      )}
       {worktree.isPrimary && (
         <span
           className="wt-tag wt-tag--local"

@@ -22,6 +22,8 @@ import {
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
+import { buildHistoryMenu } from "./features/chrome/historyMenu";
+import { useHistoryNavHotkeys } from "./features/chrome/useHistoryNavHotkeys";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
 import { DialogHost } from "./features/shell/DialogHost";
 import { ResetToRemoteHost } from "./features/graph/ResetToRemoteHost";
@@ -47,6 +49,10 @@ import {
 import { Sidebar } from "./features/sidebar/Sidebar";
 import { requestSidebarReveal } from "./features/sidebar/sidebar-reveal";
 import {
+  restoreSidebarAnchor,
+  snapshotSidebarAnchor
+} from "./features/sidebar/sidebar-anchor";
+import {
   readStoredWorktreeSelection,
   resolveWorktreeSelection,
   storeWorktreeSelection,
@@ -55,6 +61,11 @@ import {
 import { profileWindowTitle } from "./lib/profileTitle";
 import { dispatch, subscribe, windowProfileId } from "./lib/pwrgit";
 import { useColumnResize } from "./lib/useColumnResize";
+import {
+  useNavigationHistory,
+  type NavigationLocation,
+  type NavigationRiders
+} from "./lib/useNavigationHistory";
 import { useProfiles } from "./state/useProfiles";
 import { useRepoTree } from "./state/useRepoTree";
 import { useWorktreeState } from "./state/useWorktreeState";
@@ -271,6 +282,27 @@ export function App() {
     }));
     setPendingTag(null);
   }, [pendingTag, selection?.worktreeId]);
+
+  // A commit Back or Forward re-opens once its worktree is selected again —
+  // after the worktree-change effect above has cleared the last one, the
+  // same sequencing `pendingTag` uses.
+  const [pendingCommit, setPendingCommit] = useState<{
+    worktreeId: string;
+    commit: { hash: string; subject: string };
+  } | null>(null);
+  useEffect(() => {
+    if (pendingCommit === null) return;
+    if (selection?.worktreeId !== pendingCommit.worktreeId) {
+      setPendingCommit(null);
+      return;
+    }
+    setCommitFocus(pendingCommit.commit);
+    setCommitReveal((current) => ({
+      hash: pendingCommit.commit.hash,
+      requestId: (current?.requestId ?? 0) + 1
+    }));
+    setPendingCommit(null);
+  }, [pendingCommit, selection?.worktreeId]);
 
   const toggleCommit = useCallback((hash: string) => {
     setSelectedCommits((prev) => {
@@ -689,6 +721,102 @@ export function App() {
     selectedWorktree?.pr
   ]);
 
+  // Back / Forward over the selection (design: Back Forward Navigation, 2a,
+  // 3a). Recorded by watching `selection`, so every way of moving — sidebar,
+  // PR row, ⌘K, lineage chip, title-bar switcher, tag Locate, clone — is
+  // covered without touching one of them.
+  const captureRiders = useCallback((): NavigationRiders => {
+    const anchor = snapshotSidebarAnchor();
+    return {
+      ...(commitFocus === null ? {} : { commit: commitFocus }),
+      ...(anchor === undefined ? {} : { anchor })
+    };
+  }, [commitFocus]);
+  const restoreLocation = useCallback((location: NavigationLocation) => {
+    // Posted before the selection moves, so the sidebar's first render on the
+    // restored worktree already knows which row to put back.
+    if (location.anchor !== undefined) restoreSidebarAnchor(location.anchor);
+    setPendingReveal(null);
+    setSelection({ repoId: location.repoId, worktreeId: location.worktreeId });
+    setPendingCommit(
+      location.commit === undefined
+        ? null
+        : { worktreeId: location.worktreeId, commit: location.commit }
+    );
+  }, []);
+  const liveWorktreeIds = useMemo(
+    () =>
+      repoLoadState.status === "ready" && repos.length > 0
+        ? new Set(repos.flatMap((repo) => repo.worktrees.map((w) => w.id)))
+        : undefined,
+    [repoLoadState.status, repos]
+  );
+  const history = useNavigationHistory({
+    profileId: windowProfileId(),
+    current: selection,
+    restore: restoreLocation,
+    capture: captureRiders,
+    liveWorktreeIds
+  });
+  const placeLabel = useCallback(
+    (location: NavigationLocation): string => {
+      const repo = repos.find((candidate) => candidate.id === location.repoId);
+      const worktree = repo?.worktrees.find(
+        (candidate) => candidate.id === location.worktreeId
+      );
+      return repo === undefined || worktree === undefined
+        ? "Removed worktree"
+        : `${repo.name} › ${worktree.branch}`;
+    },
+    [repos]
+  );
+  // The diff and file details are overlays on a place, not places: the first
+  // Back closes them without spending an entry, as Esc does.
+  const goBack = useCallback(() => {
+    if (fileInsightTarget !== null) {
+      setFileInsightTarget(null);
+      return;
+    }
+    if (diffTarget !== null) {
+      setDiffTarget(null);
+      return;
+    }
+    history.goBack();
+  }, [diffTarget, fileInsightTarget, history]);
+  const goForward = useCallback(() => history.goForward(), [history]);
+  useHistoryNavHotkeys({ onBack: goBack, onForward: goForward });
+  const backTarget = history.stacks.back[history.stacks.back.length - 1];
+  const forwardTarget = history.stacks.forward[0];
+  const backLabel =
+    fileInsightTarget !== null
+      ? diffTarget === null
+        ? "Lineage"
+        : "the diff"
+      : diffTarget !== null
+        ? "Lineage"
+        : backTarget === undefined
+          ? undefined
+          : placeLabel(backTarget);
+  const historyControls = {
+    canGoBack:
+      history.canGoBack || diffTarget !== null || fileInsightTarget !== null,
+    canGoForward: history.canGoForward,
+    ...(backLabel === undefined ? {} : { backLabel }),
+    ...(forwardTarget === undefined
+      ? {}
+      : { forwardLabel: placeLabel(forwardTarget) }),
+    onBack: goBack,
+    onForward: goForward,
+    menuItems: () =>
+      buildHistoryMenu({
+        stacks: history.stacks,
+        label: placeLabel,
+        goBack: history.goBack,
+        goForward: history.goForward,
+        now: Date.now()
+      })
+  };
+
   const gridTemplateColumns = `${sidebar.width}px minmax(0, 1fr) ${
     railCollapsed ? "0px" : `${rail.width}px`
   }`;
@@ -698,6 +826,7 @@ export function App() {
       <TitleBar
         repo={selectedRepo}
         worktree={selectedWorktree}
+        history={historyControls}
         /* The branch picker refused because another worktree holds the branch.
            Every other branch surface answers that by going to that worktree —
            git will not check a branch out twice, and its refusal teaches the

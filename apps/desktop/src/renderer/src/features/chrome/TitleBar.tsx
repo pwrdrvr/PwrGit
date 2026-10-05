@@ -4,6 +4,7 @@ import { currentPlatform, pathLeaf, pathTail } from "../../lib/platform";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
+import { HistoryNavButtons, type HistoryNavControls } from "./HistoryNavButtons";
 import { TitleBarBrand } from "./Brand";
 import { WindowControls } from "./WindowControls";
 import {
@@ -16,7 +17,7 @@ import {
  * The window's top strip: wordmark, then the selected worktree's identity as a
  * breadcrumb.
  *
- *   [●●●]  ⑂ PwrGit   repo › ●branch ▾  [path chip]        …drag…
+ *   [●●●]  ⑂ PwrGit  ‹ ›  repo › ●branch ▾  [path chip]        …drag…
  *
  * Pwr-family house chrome, specified in ./AGENTS.md. PwrSnap runs the same
  * full-width bar. (PwrAgnt's `AppTitleBar` is win32-only; on macOS it keeps
@@ -35,11 +36,16 @@ import {
 export function TitleBar({
   repo,
   worktree,
+  history,
   onRevealBranchWorktree,
   platform = currentPlatform()
 }: {
   repo: Repo | null;
   worktree: Worktree | null;
+  /** Back/Forward, placed where PwrAgnt places them: at the leading edge of
+   *  what they move between. Always drawn, disabled when empty, so the crumbs
+   *  never shift as history fills. */
+  history?: HistoryNavControls;
   /** Go to the worktree already holding a branch the picker could not check
    *  out. The strip has no worktree list of its own, so the owner resolves it. */
   onRevealBranchWorktree: (branch: string) => void;
@@ -61,6 +67,10 @@ export function TitleBar({
             hid the title bar the native row lived in, so the strip paints the
             top-level labels and pops the real submenus. */}
         {platform !== "darwin" && <AppMenuBar />}
+
+        {history !== undefined && (
+          <HistoryNavButtons {...history} platform={platform} />
+        )}
 
         {repo !== null && worktree !== null && (
           <div className="titlebar__id">
