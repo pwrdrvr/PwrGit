@@ -62,6 +62,41 @@ test("failed preflight and cancellation do not enter signing", () => {
   expect(eligible("windows-sign", context({ cancelled: true }))).toBe(false);
 });
 
+function linuxContext({ event = "pull_request", action = "synchronize", label, labels = [], fork = false } = {}) {
+  const fixture = context({ event, action, fork, label });
+  fixture.github.event.pull_request.labels = labels.map((name) => ({ name }));
+  return { ...fixture, ancestors: [] };
+}
+
+test.each([
+  { action: "labeled", label: "ci:linux-packages", labels: ["ci:linux-packages"] },
+  { action: "synchronize", labels: ["ci:linux-packages"] },
+  { action: "reopened", labels: ["build-preview", "ci:linux-packages"] },
+])("packages Linux for a PR that opted in ($action)", (options) => {
+  expect(eligible("linux-build", linuxContext(options))).toBe(true);
+});
+
+test.each([
+  { action: "synchronize" },
+  { action: "reopened" },
+  { action: "labeled", label: "build-preview", labels: ["build-preview"] },
+  { action: "labeled", label: "ci:windows-signing", labels: ["ci:windows-signing"] },
+  // Adding an unrelated label must not re-run packaging the label already ran.
+  { action: "labeled", label: "build-preview", labels: ["build-preview", "ci:linux-packages"] },
+  { action: "labeled", label: "ci:linux-packages", labels: ["ci:linux-packages"], fork: true },
+])("does not package Linux for an unlabeled, re-labeled or fork PR %#", (options) => {
+  expect(eligible("linux-build", linuxContext(options))).toBe(false);
+});
+
+test.each(["push", "workflow_dispatch"])("always packages Linux for a release (%s)", (event) => {
+  expect(eligible("linux-build", linuxContext({ event }))).toBe(true);
+});
+
+test("opening an unlabeled PR does not start the release workflow", () => {
+  const types = workflow.split("\n  pull_request:\n")[1]?.split(/\n\S/)[0].match(/^ {6}- (\w+)$/gm);
+  expect(types?.map((line) => line.trim().slice(2))).toEqual(["labeled", "synchronize", "reopened"]);
+});
+
 const distributionWorkflow = readFileSync(new URL("../.github/workflows/package-distribution.yml", import.meta.url), "utf8");
 
 test.each(["workflow_dispatch", "release", "schedule"])("read-only package audit cannot dispatch Homebrew (%s)", (event) => {
