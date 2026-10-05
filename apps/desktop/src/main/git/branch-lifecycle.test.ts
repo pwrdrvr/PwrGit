@@ -251,7 +251,8 @@ describe("safe local branch lifecycle", () => {
     expect(head(path, "moving")).toBe(movedHead);
   });
 
-  it("lets Git use a configured upstream as the normal-delete merge authority", async () => {
+  // PROBE (reverted before merge): repeat on the Windows runner to rule out a hang.
+  it.each(Array.from({ length: 150 }, (_, i) => i))("lets Git use a configured upstream as the normal-delete merge authority #%i", async () => {
     const { root, path } = repo("delete-upstream");
     const remote = join(root, "remote.git");
     git(root, "init", "--bare", remote);

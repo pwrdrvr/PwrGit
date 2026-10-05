@@ -445,7 +445,7 @@ jobs:
       - name: Test
         run: |
           git --version
-          pnpm run test
+          pnpm exec vitest run apps/desktop/src/main/git/branch-lifecycle.test.ts
         env:
           PWRGIT_GIT_DIAGNOSTICS_DIR: ${{ runner.temp }}/git-tripwires
           PWRGIT_TEST_GIT: installed
