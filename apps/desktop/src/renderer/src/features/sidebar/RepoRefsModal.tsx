@@ -414,6 +414,32 @@ function GoneBanner({
   );
 }
 
+/**
+ * A remote branch's `⋮`, the same on the Branches tab and on its remote's
+ * card, so the one branch never offers two different sets of verbs.
+ */
+function RemoteBranchMenu({ branch }: { branch: RemoteBranchSummary }) {
+  return (
+    <RefRowMenu
+      label={`Actions for ${branch.qualifiedName}`}
+      items={[
+        // The short name, as a click on the name copies; the full ref is its
+        // own entry (Post-ship 3c).
+        {
+          type: "item",
+          label: "Copy branch name",
+          onSelect: () => void copyText(branch.name)
+        },
+        {
+          type: "item",
+          label: `Copy ${branch.qualifiedName}`,
+          onSelect: () => void copyText(branch.qualifiedName)
+        }
+      ]}
+    />
+  );
+}
+
 /** One remote's branches, paged rather than listed whole. */
 function RemoteBranchList({
   repoId,
@@ -492,14 +518,17 @@ function RemoteBranchList({
                 ? "—"
                 : shortWhen(branch.lastCommitAt, now)}
             </span>
-            <div className="refs-row-actions">
-              {/* A branch a worktree already holds is a navigation problem, not
-                  a checkout one — git refuses the second checkout anyway, so
-                  the row offers the worktree instead of a switch that cannot
-                  succeed. Whichever leads is what Enter and double-click
-                  press (lib/refsRowKeys.ts). */}
-              <span className="refs-remote-branch__primary" data-refs-primary="">
-                {checkedOut ? (
+            {/* The Branches tab's three fixed slots, so each verb holds the same
+                place on every row and the age column lines up down the card.
+                A branch a worktree already holds is a navigation problem, not a
+                checkout one — git refuses the second checkout anyway, so the
+                row leads with the worktree instead of a switch that cannot
+                succeed, and its secondary slot stays empty: the chip naming
+                that worktree is already on the name line. The primary slot is
+                what Enter and double-click press (lib/refsRowKeys.ts). */}
+            <RefRowActions
+              primary={
+                checkedOut ? (
                   <ShowWorktreeButton
                     holder={holder}
                     tip={tip}
@@ -513,17 +542,20 @@ function RemoteBranchList({
                     inFlight={switching}
                     onSwitch={() => onSwitch(branch.fullName, branch.name)}
                   />
-                )}
-              </span>
-              {!checkedOut && (
-                <button
-                  className="refs-row-action refs-row-action--quiet"
-                  onClick={() => onPick(branch)}
-                >
-                  New worktree
-                </button>
-              )}
-            </div>
+                )
+              }
+              secondary={
+                checkedOut ? undefined : (
+                  <button
+                    className="refs-row-action refs-row-action--quiet"
+                    onClick={() => onPick(branch)}
+                  >
+                    New worktree
+                  </button>
+                )
+              }
+              menu={<RemoteBranchMenu branch={branch} />}
+            />
           </div>
         );
       })}
@@ -1300,25 +1332,7 @@ export function RepoRefsModal({
                             New worktree
                           </button>
                         }
-                        menu={
-                          <RefRowMenu
-                            label={`Actions for ${branch.qualifiedName}`}
-                            items={[
-                              // The short name, as a click on the name copies;
-                              // the full ref is its own entry (Post-ship 3c).
-                              {
-                                type: "item",
-                                label: "Copy branch name",
-                                onSelect: () => void copyText(branch.name)
-                              },
-                              {
-                                type: "item",
-                                label: `Copy ${branch.qualifiedName}`,
-                                onSelect: () => void copyText(branch.qualifiedName)
-                              }
-                            ]}
-                          />
-                        }
+                        menu={<RemoteBranchMenu branch={branch} />}
                       />
                     </div>
                   );

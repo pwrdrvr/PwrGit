@@ -199,12 +199,15 @@ repo row. Design: `design/Worktree List Cap - UX Review.dc.html`.
 
 `lib/refsRowKeys.ts`: ↓ from the filter enters the rows, ↑/↓ walk them,
 Home/End jump, Space pins, and Enter or a double-click runs the primary action
-— the button inside `data-refs-primary` (`RefRowActions`' first slot, or the
-remote card's wrapper). Space is a **row** key on purpose — in the filter it
-types a space. A row's copy targets take `deferForDoubleClick`, so a
-double-click on the name activates without copying. The actions column is three
-fixed slots (`RefRowActions`), and `--refs-actions-w` in `app.css` is their
-widths plus gaps: change a slot, change the token, or the columns drift again.
+— the button inside `data-refs-primary` (`RefRowActions`' first slot). Space
+is a **row** key on purpose — in the filter it types a space. A row's copy
+targets take `deferForDoubleClick`, so a double-click on the name activates
+without copying. The actions column is three fixed slots (`RefRowActions`) on
+every tab, the Remotes cards' branch rows included, and `--refs-actions-w` in
+`app.css` is their widths plus gaps: change a slot, change the token, or the
+columns drift again. Don't hand-roll a row's buttons outside it, and don't
+size its grid track by hand: the Remotes cards' fixed 112px track squeezed two
+buttons' labels onto two lines. The track is the token.
 
 **Anything a sidebar row can do, its refs-browser row must do too** — the
 browser is how the rows past the short list are reached. When you add a verb,
