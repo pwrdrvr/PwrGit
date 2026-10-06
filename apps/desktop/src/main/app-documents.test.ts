@@ -71,4 +71,22 @@ describe("app documents", () => {
       content: "MIT"
     });
   });
+
+  it("finds the workspace root from the built entry's deeper app path", async () => {
+    // Launching out/main/index.js directly (E2E) sets the app path to that
+    // file's folder, two levels below where `electron .` puts it.
+    const documentRoots = roots();
+    const base = join(documentRoots.appPath, "..", "..");
+    mkdirSync(base, { recursive: true });
+    writeFileSync(join(base, "pnpm-workspace.yaml"), "packages: []\n");
+    writeFileSync(join(base, "CHANGELOG.md"), "# Changelog");
+    for (const appPath of [
+      documentRoots.appPath,
+      join(documentRoots.appPath, "out", "main")
+    ]) {
+      await expect(
+        readAppDocument("changelog", { ...documentRoots, appPath })
+      ).resolves.toMatchObject({ content: "# Changelog" });
+    }
+  });
 });

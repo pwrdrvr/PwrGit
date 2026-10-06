@@ -162,6 +162,13 @@ test("secondary windows share themed platform chrome", async () => {
       item.title,
       "rgb(247, 244, 239)"
     );
+    if (item.title.startsWith("PwrGit ")) {
+      // The title alone cannot tell a loaded document from a failed read:
+      // the viewer shows its title before the read returns. Require the text.
+      await expect(
+        auxiliary.locator(".document-window__content")
+      ).not.toBeEmpty();
+    }
     expect(await frameBackground(app, auxiliary)).toBe("#FFFFFF");
     await auxiliary.close();
   }

@@ -184,6 +184,14 @@ export type LogSnapshot = {
 /** A first-party or bundled notice document displayed inside the desktop app. */
 export type AppDocumentKind = "license" | "third-party-notices" | "changelog";
 
+/** Each document window's title — shared so the viewer can show it before the
+ *  read returns, instead of a guess that is wrong for every other kind. */
+export const APP_DOCUMENT_TITLES: Readonly<Record<AppDocumentKind, string>> = {
+  license: "PwrGit License",
+  "third-party-notices": "PwrGit Third-Party Notices",
+  changelog: "PwrGit Changelog"
+};
+
 export type AppDocument = {
   kind: AppDocumentKind;
   title: string;
