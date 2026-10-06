@@ -8,6 +8,16 @@ import { isCliEntrypoint } from "../../../scripts/lib/cli-entrypoint.mjs";
 import { LINUX_FORMATS, linuxArtifactName } from "./linux-release-artifacts.mjs";
 import { verifyLinuxElf } from "./package-linux.mjs";
 
+export function verifyLinuxDesktopIcons(root, desktop) {
+  assert.match(desktop, /^Icon=pwrgit$/m);
+  for (const size of [16, 24, 32, 48, 64, 128, 256, 512]) {
+    const icon = readFileSync(join(root, "usr", "share", "icons", "hicolor", `${size}x${size}`, "apps", "pwrgit.png"));
+    assert.equal(icon.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "Launcher icon must be a PNG");
+    assert.equal(icon.readUInt32BE(16), size, "Launcher icon width must match its theme directory");
+    assert.equal(icon.readUInt32BE(20), size, "Launcher icon height must match its theme directory");
+  }
+}
+
 // The pinned ArchiveTarget wraps portable tar files in the artifact basename.
 export function verifyExtractedLinuxPayload({ root, format, asset, arch }) {
   const appRoot = format === "tar.gz" ? join(root, basename(asset, ".tar.gz")) : join(root, "opt", "PwrGit");
@@ -20,6 +30,7 @@ export function verifyExtractedLinuxPayload({ root, format, asset, arch }) {
     const desktop = readFileSync(join(root, "usr", "share", "applications", "pwrgit.desktop"), "utf8");
     assert.match(desktop, /StartupWMClass=PwrGit/);
     assert.match(desktop, /Exec=.*\/opt\/PwrGit\/pwrgit/);
+    verifyLinuxDesktopIcons(root, desktop);
   }
   verifyLinuxElf(join(appRoot, "pwrgit"), arch);
   verifyLinuxElf(join(resources, "git", "bin", "git"), arch);
