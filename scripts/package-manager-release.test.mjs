@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
-import { audit, compareVersions, distribution, downloadPlatform, prepare, publicationFailures, readCask, readWingetInstaller, renderManifests, selectAssets, stableVersion, validationPlan } from "./package-manager-release.mjs";
+import { audit, caskMacosRequirement, compareVersions, distribution, downloadPlatform, prepare, publicationFailures, readCask, readWingetInstaller, renderManifests, selectAssets, stableVersion, validationPlan } from "./package-manager-release.mjs";
 
 function release(version = "0.27.0") {
   const tag_name = `v${version}`;
@@ -206,6 +206,30 @@ test("maps native arm64 and universal Intel DMGs separately and offers only Wind
   expect(installer).not.toContain("/latest/");
 });
 
+
+test("pins the cask's macOS floor to the app's LSMinimumSystemVersion", () => {
+  const config = readFileSync(new URL("../apps/desktop/electron-builder.yml", import.meta.url), "utf8");
+  const floor = config.match(/^ *LSMinimumSystemVersion: "(\d+)\.0"$/m)?.[1];
+  expect(floor).toBe("13");
+  const cask = renderManifests(release(), selectAssets(release()))["Casks/pwrgit.rb"];
+  expect(cask).toMatch(/^  depends_on macos: :ventura$/m);
+  expect(cask).not.toContain(":monterey");
+});
+
+test.each([
+  ['"12.0"', ":monterey"], ['"13.0"', ":ventura"], ["14.0", ":sonoma"], ['"15"', ":sequoia"], ['"26.0" # Tahoe', ":tahoe"],
+])("maps LSMinimumSystemVersion %s to %s", (value, symbol) => {
+  expect(caskMacosRequirement(`  extendInfo:\n    LSMinimumSystemVersion: ${value}\n`)).toBe(symbol);
+});
+
+test.each([
+  ["an unmapped release", '    LSMinimumSystemVersion: "11.0"\n', "No Homebrew macOS symbol"],
+  ["a point-release floor", '    LSMinimumSystemVersion: "13.3"\n', "No Homebrew macOS symbol"],
+  ["a missing key", "    LSApplicationCategoryType: public.app-category.developer-tools\n", "found 0"],
+  ["a duplicated key", '    LSMinimumSystemVersion: "13.0"\n    LSMinimumSystemVersion: "14.0"\n', "found 2"],
+])("refuses to guess the cask's macOS floor from %s", (_name, config, message) => {
+  expect(() => caskMacosRequirement(config)).toThrow(message);
+});
 
 test("requires remote manifest URLs and hashes to match published release metadata", async () => {
   const source = api({ winget: ["0.27.0"], cask: "0.27.0" });
