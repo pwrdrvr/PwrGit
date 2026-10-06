@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* Dark theme only: the app's unscoped :root block from tokens.css,
+             under the app's own token names, so every rule below reads like
+             the app.css rule it would become. */
+          :root {
+            --bg-app: #000000; --bg-sidebar: #050505; --bg-panel: #0a0a0a; --bg-input: #080808;
+            --bg-panel-elevated: #101010; --bg-menu: #101010; --bg-panel-hover: #14110d; --bg-hover-strong: #1f1a12;
+            --bg-row-active: #120800;
+            --border-faint: rgba(247, 243, 235, 0.06); --border-subtle: rgba(247, 243, 235, 0.1);
+            --border-default: rgba(247, 243, 235, 0.14); --border-strong: rgba(247, 243, 235, 0.2);
+            --text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+            --accent: #ff8a1f; --accent-bright: #ffb35c; --accent-on: #160a00;
+            --accent-soft: rgba(255, 138, 31, 0.12); --accent-tint: rgba(255, 138, 31, 0.08); --accent-border: rgba(255, 138, 31, 0.42);
+            --danger-base: #b94232; --danger-soft: rgba(185, 66, 50, 0.24); --danger-border: rgba(185, 66, 50, 0.28); --danger-text: #ffb0a1; --danger-on: #2a0d08;
+            --success-soft: rgba(74, 148, 92, 0.18); --success-text: #9ce5b3;
+            --status-ok: #5fa969; --status-warning: #d99a3d; --warn-soft: rgba(217, 154, 61, 0.14);
+            --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.42); --shadow-overlay: 0 32px 80px rgba(0, 0, 0, 0.6);
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--font-sans); color: var(--text-primary); }
+          a { color: var(--accent-bright); text-decoration: none; } a:hover { color: var(--accent); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; border-bottom: 1px solid var(--border-subtle); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--text-primary); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--text-primary); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.55 var(--font-sans); color: var(--text-muted); max-width: 900px; text-wrap: pretty; }
+          .dv-sub b { color: var(--text-secondary); font-weight: 600; }
+          .dv-sub code, .note code, .tr code, .dv-olabel code { font: 500 10px/1.4 var(--font-mono); color: var(--text-secondary); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--text-primary); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--accent); color: var(--accent-on); }
+          .dv-olabel { display: block; font: 400 11px/1.6 var(--font-sans); color: var(--text-subtle); max-width: 720px; text-wrap: pretty; }
+          .dv-olabel .dv-oid, .dv-olabel .rec { margin-right: 8px; }
+          .dv-olabel b { color: var(--accent-bright); font-weight: 600; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--text-muted); }
+          .rec { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--accent-on); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--text-muted); text-wrap: pretty; max-width: 720px; }
+          .note b { color: var(--text-secondary); font-weight: 600; }
+          .stage { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 18px; border: 1px solid var(--border-faint); border-radius: 10px; background: var(--bg-app); }
+
+          /* ---- rules table ---- */
+          .tbl { border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 14px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--border-faint); font: 500 10.5px/1.5 var(--font-sans); color: var(--text-secondary); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--text-primary); font-weight: 600; }
+          .tr.c3 { grid-template-columns: 170px 120px minmax(0, 1fr); }
+          .yes { color: var(--success-text); font-weight: 600; }
+          .no { color: var(--danger-text); font-weight: 600; }
+
+          /* ---- sidebar, from app.css (.repo-row, .wt-section, .wt-row) ---- */
+          .sb { position: relative; width: 300px; padding: 6px 6px 8px; border: 1px solid var(--border-subtle); border-radius: 9px; background: var(--bg-sidebar); }
+          .repo { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 4px 8px 4px 12px; border-radius: 8px; }
+          .repo.menu-on { background: var(--bg-hover-strong); }
+          .repo.cur { background: var(--bg-row-active); }
+          .chev { flex: none; width: 0; height: 0; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-left: 5px solid var(--text-muted); margin-left: -4px; }
+          .chev.open { transform: rotate(90deg); }
+          .rname { font: 650 13px/1.2 var(--font-sans); color: var(--text-primary); white-space: nowrap; }
+          .repo.cur .rname { color: var(--accent); }
+          .rsp { flex: 1; }
+          .wts { font: 600 11px/1 var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+          .kebab { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; color: var(--text-secondary); font: 700 12px/1 var(--font-sans); background: var(--bg-panel-elevated); border: 1px solid var(--border-subtle); }
+          .tree { margin: 2px 0 2px 15px; padding: 2px 0 2px 8px; border-left: 1px solid var(--border-subtle); }
+          .wr { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px; }
+          .wr.sel { border-color: var(--accent); background: var(--bg-row-active); }
+          .wr.sel .bn { color: var(--accent-bright); }
+          .gl { flex: none; width: 13px; text-align: center; font: 500 11px/1 var(--font-mono); color: var(--text-muted); }
+          .bn { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px/18px var(--font-mono); color: var(--text-secondary); }
+          .age { flex: none; font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .sb-foot { display: flex; align-items: center; gap: 6px; height: 26px; margin-top: 6px; padding: 0 8px; border-top: 1px solid var(--border-faint); color: var(--text-muted); font: 500 11px/1 var(--font-sans); border-radius: 0 0 6px 6px; }
+          .sb-foot .n { font: 600 10.5px/1 var(--font-mono); color: var(--text-secondary); }
+          .sb-foot .eye { flex: none; width: 13px; height: 8px; border: 1.5px solid var(--text-muted); border-radius: 50% / 60%; position: relative; }
+          .sb-foot .eye::before { content: ""; position: absolute; left: -3px; right: -3px; top: 2px; height: 1.5px; background: var(--text-muted); transform: rotate(-28deg); }
+          .sb-foot.hot { background: var(--bg-panel-hover); color: var(--text-primary); }
+          .lens { display: flex; gap: 4px; padding: 2px 4px 8px; }
+          .lchip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-secondary); font: 550 10.5px/1 var(--font-sans); }
+          .lchip .n { font: 600 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .lchip.on { border-color: var(--accent-border); background: var(--accent-soft); color: var(--accent-bright); }
+          .lchip.on .n { color: var(--accent-bright); }
+
+          /* ---- context menu, from app.css .pop-menu ---- */
+          .pop { position: relative; z-index: 2; width: 236px; padding: 5px; background: var(--bg-menu); border: 1px solid var(--border-default); border-radius: 10px; box-shadow: var(--shadow-popover); }
+          .pi { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 7px; color: var(--text-secondary); font: 500 12px/1 var(--font-sans); }
+          .pi.stack { flex-direction: column; align-items: flex-start; gap: 4px; }
+          .pi .hint { color: var(--text-subtle); font: 500 10.5px/1.3 var(--font-sans); }
+          .pi.hov { background: var(--bg-hover-strong); color: var(--text-primary); }
+          .pi.dgr { color: var(--danger-text); }
+          .pi.dgr.hov { background: var(--danger-soft); }
+          .pi.new { box-shadow: inset 2px 0 0 0 var(--accent); }
+          .psep { height: 1px; margin: 4px; background: var(--border-subtle); }
+
+          /* ---- toast, from ToastHost (.toast) ---- */
+          .toast { width: 340px; display: flex; flex-direction: column; gap: 8px; padding: 12px 13px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-panel-elevated); box-shadow: var(--shadow-popover); }
+          .toast strong { font: 650 12px/1.3 var(--font-sans); color: var(--text-primary); }
+          .toast p { margin: 0; font: 500 11px/1.45 var(--font-sans); color: var(--text-secondary); text-wrap: pretty; }
+          .toast .row { display: flex; align-items: center; gap: 8px; }
+          .chipr { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border: 1px solid var(--border-subtle); border-radius: 999px; font: 600 10px/1 var(--font-mono); color: var(--text-secondary); }
+
+          /* ---- buttons, from app.css .modal__cancel / .modal__create ---- */
+          .btn { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-panel-elevated); color: var(--text-primary); font: 600 11.5px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
+          .btn.sm { height: 22px; padding: 0 8px; font-size: 10.5px; border-radius: 6px; }
+          .btn.pri { border-color: transparent; background: var(--accent); color: var(--accent-on); }
+          .btn.dgr { border-color: transparent; background: var(--danger-text); color: var(--danger-on); }
+          .btn.off { opacity: 0.42; cursor: not-allowed; }
+          .btn.ghost { background: transparent; }
+          .btn kbd { font: 500 9.5px/1 var(--font-mono); opacity: 0.7; }
+
+          /* ============================================================
+             Remove repository dialog — proposed. Shell is .modal widened
+             (the maintenance sheet's anatomy: head / body / foot).
+             ============================================================ */
+          .rm { width: 680px; display: flex; flex-direction: column; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); overflow: hidden; }
+          .rm.narrow { width: 560px; }
+          .rm-head { display: flex; align-items: flex-start; gap: 14px; padding: 18px 18px 14px; border-bottom: 1px solid var(--border-subtle); }
+          .rm-head > div { flex: 1; min-width: 0; }
+          .rm-eyebrow { margin: 0 0 5px; font: 650 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--danger-text); }
+          .rm-head h2 { margin: 0; font: 700 14px/1.25 var(--font-sans); color: var(--text-primary); }
+          .rm-head p { margin: 6px 0 0; font: 500 11px/1.5 var(--font-sans); color: var(--text-muted); text-wrap: pretty; }
+          .rm-head p code { font: 500 10.5px/1 var(--font-mono); color: var(--text-secondary); }
+          .count { flex: none; padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); white-space: nowrap; }
+
+          /* fate strip: what goes, what stays */
+          .fate { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 12px 18px 0; }
+          .fcol { display: flex; flex-direction: column; gap: 5px; padding: 9px 11px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .fcol em { font: 700 9px/1 var(--font-sans); font-style: normal; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-subtle); }
+          .fcol.go em { color: var(--danger-text); }
+          .fcol.stay em { color: var(--success-text); }
+          .fcol span { font: 500 10.5px/1.45 var(--font-sans); color: var(--text-secondary); }
+          .fcol span b { color: var(--text-primary); font-weight: 600; }
+          .fcol span code { font: 500 10px/1 var(--font-mono); color: var(--text-secondary); }
+
+          .rm-body { display: flex; flex-direction: column; gap: 6px; padding: 12px 18px; }
+          .grp { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font: 700 9px/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-subtle); }
+          .grp b { color: var(--text-secondary); font-family: var(--font-mono); }
+          .grp .r { margin-left: auto; letter-spacing: 0; text-transform: none; font: 500 10px/1 var(--font-sans); color: var(--text-muted); }
+
+          /* one checkout */
+          .co { display: flex; flex-direction: column; gap: 7px; padding: 9px 11px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+          .co.risk { border-color: color-mix(in srgb, var(--status-warning) 45%, transparent); }
+          .co.block { border-color: var(--danger-border); background: color-mix(in srgb, var(--danger-soft) 35%, var(--bg-panel)); }
+          .co.kept { border-style: dashed; background: transparent; }
+          .co.kept .co-b, .co.kept .co-p { color: var(--text-muted); }
+          .co.run { border-color: var(--accent-border); background: var(--accent-tint); }
+          .co.done { border-color: color-mix(in srgb, var(--success-text) 28%, transparent); }
+          .co.fail { border-color: var(--danger-border); }
+          .co-top { display: flex; align-items: flex-start; gap: 10px; }
+          .co-top > div { flex: 1; min-width: 0; }
+          .co-b { display: flex; align-items: center; gap: 7px; min-width: 0; font: 600 11.5px/1.3 var(--font-mono); color: var(--text-primary); }
+          .co-b .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .co-b .tag { flex: none; padding: 0 5px; border: 1px solid var(--border-subtle); border-radius: 4px; font: 650 9px/15px var(--font-mono); letter-spacing: 0.04em; color: var(--text-muted); }
+          .co-p { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 9.5px/1.3 var(--font-mono); color: var(--text-subtle); }
+          .sz { flex: none; padding-top: 1px; font: 600 10.5px/1.3 var(--font-mono); color: var(--text-secondary); }
+          .facts { display: flex; flex-wrap: wrap; gap: 5px; }
+          .fact { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 500 10px/1.2 var(--font-sans); white-space: nowrap; }
+          .fact b { font: 700 10px/1 var(--font-mono); color: var(--text-secondary); }
+          .fact.ok { color: var(--success-text); border-color: transparent; background: var(--success-soft); }
+          .fact.warn { color: var(--status-warning); border-color: color-mix(in srgb, var(--status-warning) 35%, transparent); }
+          .fact.warn b { color: var(--status-warning); }
+          .fact.bad { color: var(--danger-text); border-color: var(--danger-border); background: color-mix(in srgb, var(--danger-soft) 50%, transparent); }
+          .fact.bad b { color: var(--danger-text); }
+          .verdict { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: 999px; font: 650 9.5px/1 var(--font-mono); white-space: nowrap; }
+          .verdict::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+          .verdict.ok { color: var(--success-text); background: var(--success-soft); }
+          .verdict.risk { color: var(--status-warning); background: var(--warn-soft); }
+          .verdict.block { color: var(--danger-text); background: var(--danger-soft); }
+          .verdict.kept { color: var(--text-secondary); background: rgba(247, 243, 235, 0.06); }
+          .verdict.run { color: var(--accent-bright); background: var(--accent-soft); }
+
+          /* the per-item decision: a segmented choice, never a checkbox */
+          .decide { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 7px; border-top: 1px solid var(--border-faint); }
+          .decide > span.q { font: 500 10.5px/1.3 var(--font-sans); color: var(--text-muted); }
+          .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-input); }
+          .seg span { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 5px; color: var(--text-secondary); font: 600 10.5px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
+          .seg span:hover { color: var(--text-primary); background: var(--bg-panel-hover); }
+          .seg span.on { background: var(--accent-soft); color: var(--accent-bright); box-shadow: inset 0 0 0 1px var(--accent-border); }
+          .seg span.on.dg { background: var(--danger-soft); color: var(--danger-text); box-shadow: inset 0 0 0 1px var(--danger-border); }
+          .seg span.dis { opacity: 0.4; cursor: not-allowed; }
+          .decide .why { flex: 1 1 100%; font: 500 10px/1.45 var(--font-sans); color: var(--text-muted); text-wrap: pretty; }
+          .decide .why b { color: var(--text-secondary); font-weight: 600; }
+          .decide .why code { font: 500 9.5px/1 var(--font-mono); color: var(--text-secondary); }
+          .sub-items { display: flex; flex-direction: column; gap: 6px; padding-top: 7px; border-top: 1px solid var(--border-faint); }
+          .si { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; }
+          .si strong { font: 600 10.5px/1.3 var(--font-sans); color: var(--text-primary); }
+          .si strong code { font: 600 10.5px/1 var(--font-mono); }
+          .si small { grid-column: 1 / -1; font: 500 10px/1.4 var(--font-sans); color: var(--text-muted); }
+
+          .callout { display: flex; gap: 9px; padding: 9px 11px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--accent-tint); font: 500 10.5px/1.5 var(--font-sans); color: var(--text-secondary); text-wrap: pretty; }
+          .callout b { color: var(--text-primary); font-weight: 600; }
+          .callout.warn { border-color: color-mix(in srgb, var(--status-warning) 45%, transparent); background: var(--warn-soft); }
+          .callout.bad { border-color: var(--danger-border); background: color-mix(in srgb, var(--danger-soft) 45%, transparent); }
+          .callout .i { flex: none; width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent-bright); font: 700 9.5px/1 var(--font-mono); }
+          .callout.warn .i { background: var(--warn-soft); color: var(--status-warning); }
+          .callout.bad .i { background: var(--danger-soft); color: var(--danger-text); }
+
+          .confirm { display: flex; flex-direction: column; gap: 6px; padding: 10px 18px 0; }
+          .confirm label { font: 500 11px/1.3 var(--font-sans); color: var(--text-secondary); }
+          .confirm label code { font: 600 11px/1 var(--font-mono); color: var(--text-primary); }
+          .inp { height: 32px; padding: 0 10px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-input); color: var(--text-primary); font: 500 12.5px/30px var(--font-mono); }
+          .inp.ph { color: var(--text-subtle); }
+          .inp.focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+          input.inp { width: 100%; outline: none; }
+          input.inp:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+          .rm-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); background: var(--bg-panel); }
+          .rm-foot .st { flex: 1; min-width: 0; font: 500 10.5px/1.4 var(--font-sans); color: var(--text-muted); }
+          .rm-foot .st b { color: var(--text-primary); font-weight: 600; }
+          .rm-foot .st .w { color: var(--status-warning); font-weight: 600; }
+          .rm-foot .st .x { color: var(--danger-text); font-weight: 600; }
+
+          /* progress, the BulkSyncStatus card */
+          .prog { display: flex; flex-direction: column; gap: 9px; margin: 12px 18px 0; padding: 11px 12px 10px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--bg-panel); }
+          .ptop { display: flex; align-items: center; gap: 11px; }
+          .ptop > div { flex: 1; min-width: 0; }
+          .ptop strong { display: block; font: 650 11.5px/1.25 var(--font-sans); color: var(--text-primary); }
+          .ptop > div > span { display: block; margin-top: 3px; font: 500 9.5px/1.2 var(--font-mono); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .spin { flex: none; width: 15px; height: 15px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; }
+          .mark { flex: none; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--success-soft); color: var(--success-text); font: 700 10px/1 var(--font-sans); }
+          .mark.x { background: var(--danger-soft); color: var(--danger-text); }
+          .pbar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--border-subtle); }
+          .pbar .ok { background: var(--status-ok); }
+          .pbar .fly { background: repeating-linear-gradient(135deg, var(--accent) 0 4px, rgba(255, 138, 31, 0.45) 4px 8px); }
+          .pbar .bad { background: var(--danger-base); }
+          .steps { display: flex; flex-direction: column; gap: 4px; }
+          .stp { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 5px 2px; font: 500 11px/1.3 var(--font-sans); color: var(--text-secondary); }
+          .stp code { font: 500 10.5px/1 var(--font-mono); color: var(--text-primary); }
+          .stp .tm { font: 500 10px/1 var(--font-mono); color: var(--text-subtle); }
+          .stp.wait { color: var(--text-subtle); }
+          .stp.wait code { color: var(--text-muted); }
+          .dot { width: 9px; height: 9px; margin-left: 3px; border: 1.5px dashed var(--border-strong); border-radius: 50%; }
+          .stp .spin { width: 13px; height: 13px; }
+          .stp .mark { width: 15px; height: 15px; font-size: 9px; }
+
+          /* ============================================================
+             Settings → Profiles, from SettingsLayout / app.css
+             ============================================================ */
+          .set { width: 640px; display: flex; flex-direction: column; gap: 14px; padding: 22px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-app); }
+          .card { border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--bg-panel); overflow: hidden; }
+          .card-hd { display: flex; align-items: flex-start; gap: 12px; padding: 13px 16px 11px; border-bottom: 1px solid var(--border-subtle); }
+          .card-hd > div { flex: 1; min-width: 0; }
+          .card-eyebrow { margin: 0 0 2px; font: 600 10px/1 var(--font-sans); letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-muted); }
+          .card-title { margin: 0; font: 600 13.5px/1.3 var(--font-sans); color: var(--text-primary); }
+          .card-desc { margin: 5px 0 0; font: 400 12px/1.5 var(--font-sans); color: var(--text-muted); max-width: 62ch; text-wrap: pretty; }
+          .schip { flex: none; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-panel-elevated); color: var(--text-muted); font: 600 10.5px/1 var(--font-sans); }
+          .card-bd { padding: 6px 16px 12px; }
+          .pgrp { display: flex; align-items: center; gap: 8px; padding: 10px 0 4px; font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); }
+          .pgrp .mono { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 5px; background: var(--accent-soft); color: var(--accent-bright); font: 700 9px/1 var(--font-mono); letter-spacing: 0; }
+          .pgrp .act { margin-left: 2px; padding: 2px 6px; border-radius: 999px; background: var(--success-soft); color: var(--success-text); font: 600 9px/1.2 var(--font-sans); letter-spacing: 0.03em; text-transform: none; }
+          .hrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border-faint); }
+          .hrow strong { font: 600 12.5px/1.3 var(--font-sans); color: var(--text-primary); }
+          .hrow strong .w { margin-left: 6px; font: 600 10.5px/1 var(--font-mono); color: var(--text-muted); }
+          .hrow small { grid-column: 1; font: 500 10px/1.3 var(--font-mono); color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .hrow small.gone { font-family: var(--font-sans); color: var(--status-warning); }
+          .hrow .acts { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; }
+          .empty { margin: 8px 0 2px; font: 400 12px/1.5 var(--font-sans); color: var(--text-muted); }
+
+          /* sidebar popover for the hidden list */
+          .hpop { position: absolute; left: 8px; bottom: 34px; width: 284px; padding: 6px; background: var(--bg-menu); border: 1px solid var(--border-default); border-radius: 10px; box-shadow: var(--shadow-popover); }
+          .hpop-h { display: flex; align-items: baseline; gap: 6px; padding: 5px 6px 7px; font: 600 10px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); }
+          .hpop-h .n { font: 600 10px/1 var(--font-mono); color: var(--text-secondary); letter-spacing: 0; }
+          .hp { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 7px; }
+          .hp:hover { background: var(--bg-hover-strong); }
+          .hp > div { flex: 1; min-width: 0; }
+          .hp strong { display: block; font: 600 12px/1.25 var(--font-sans); color: var(--text-secondary); }
+          .hp small { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 9.5px/1.2 var(--font-mono); color: var(--text-subtle); }
+          .hpop .lnk { display: block; margin-top: 4px; padding: 7px 6px 4px; border-top: 1px solid var(--border-subtle); font: 550 11px/1 var(--font-sans); color: var(--accent); }
+
+          /* palette, from RepoSwitcherOverlay */
+          .pal { width: 560px; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-overlay); overflow: hidden; }
+          .pal-q { display: flex; align-items: center; gap: 9px; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--border-subtle); font: 500 14px/1 var(--font-sans); color: var(--text-primary); }
+          .pal-q .caret { width: 1.5px; height: 17px; background: var(--accent); }
+          .pal-q .scope { margin-left: auto; font: 500 10.5px/1 var(--font-sans); color: var(--text-subtle); }
+          .pal-list { padding: 6px; }
+          .pal-g { padding: 8px 8px 5px; font: 600 9.5px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-subtle); }
+          .res { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 7px; }
+          .res.on { background: var(--bg-row-active); box-shadow: inset 0 0 0 1px var(--accent-border); }
+          .res .k { flex: none; width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--text-muted); }
+          .res .k.cmd { border-radius: 50%; }
+          .res > div { flex: 1; min-width: 0; }
+          .res strong { display: block; font: 600 12.5px/1.25 var(--font-sans); color: var(--text-primary); }
+          .res small { display: block; margin-top: 2px; font: 500 10px/1.25 var(--font-mono); color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .res.muted strong { color: var(--text-muted); }
+          .res .hid { flex: none; padding: 2px 6px; border: 1px dashed var(--border-strong); border-radius: 4px; font: 600 9px/1.2 var(--font-mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+          .res .kb { flex: none; font: 500 10px/1 var(--font-mono); color: var(--text-subtle); }
+
+          /* live prototype frame */
+          .proto { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--accent-border); border-radius: 12px; background: #050505; }
+          .pchips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 500 10px/1 var(--font-sans); color: var(--text-muted); }
+          .pchips button { appearance: none; height: 22px; padding: 0 9px; border: 1px solid var(--border-default); border-radius: 999px; background: transparent; color: var(--text-secondary); font: 600 9.5px/1 var(--font-mono); cursor: pointer; }
+          .pchips button.on { border-color: var(--accent-border); color: var(--accent-bright); background: var(--accent-soft); }
+          .hide { display: none !important; }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1" data-screen-label="Turn 1 Menu and hide">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">The two new entries on the repository row, and what Hide does with no dialog</span></div>
+        <p class="dv-sub">Both entries go last on the repo row&#8217;s menu (<code>RepoRow.tsx</code> <code>menuItems()</code>), below a separator, in the order <b>least to most consequential</b>: Hide, then Remove. Remove uses the existing <code>danger</code> item style. Hide gets <b>no ellipsis and no confirmation</b>: it changes nothing on disk, so the cost of a mistake is one click, and the info toast carries Undo. Remove keeps the ellipsis because it opens a review. All repository and branch names on this page are contrived.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Menu, plain">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Plain labels, matching every other entry on this menu today</div>
+            <div class="stage">
+              <div class="sb">
+                <div class="repo menu-on"><span class="chev"></span><span class="rname">harbor-api</span><span class="rsp"></span><span class="wts">6 wts</span><span class="kebab">&#8943;</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">ledger-ui</span><span class="rsp"></span><span class="wts">2 wts</span></div>
+              </div>
+              <div class="pop" style="margin-left: 120px; margin-top: -40px;">
+                <div class="pi">Fork acme/harbor-api&#8230;</div>
+                <div class="pi">Manage remotes&#8230;</div>
+                <div class="pi">Repository setup&#8230;</div>
+                <div class="psep"></div>
+                <div class="pi">Copy path</div>
+                <div class="pi">Reveal in Finder</div>
+                <div class="psep"></div>
+                <div class="pi">Refresh forge info</div>
+                <div class="psep"></div>
+                <div class="pi new">Hide repository</div>
+                <div class="pi dgr new hov">Remove repository&#8230;</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Menu, with hints">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><span class="rec">Recommended</span>The same two entries with a muted second line (<code>MenuItem.hint</code>), because the difference between them is the whole point</div>
+            <div class="stage">
+              <div class="sb">
+                <div class="repo menu-on"><span class="chev"></span><span class="rname">harbor-api</span><span class="rsp"></span><span class="wts">6 wts</span><span class="kebab">&#8943;</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">ledger-ui</span><span class="rsp"></span><span class="wts">2 wts</span></div>
+              </div>
+              <div class="pop" style="margin-left: 120px; margin-top: -40px;">
+                <div class="pi">Fork acme/harbor-api&#8230;</div>
+                <div class="pi">Manage remotes&#8230;</div>
+                <div class="pi">Repository setup&#8230;</div>
+                <div class="psep"></div>
+                <div class="pi">Copy path</div>
+                <div class="pi">Reveal in Finder</div>
+                <div class="psep"></div>
+                <div class="pi">Refresh forge info</div>
+                <div class="psep"></div>
+                <div class="pi stack new hov"><span>Hide repository</span><span class="hint">Stays on disk. Unhide from the sidebar&#8217;s Hidden list.</span></div>
+                <div class="pi stack dgr new"><span>Remove repository&#8230;</span><span class="hint">Review, then move the checkout and its 5 worktrees to the Trash.</span></div>
+              </div>
+            </div>
+            <p class="note">The hint is the existing <code>.pop-menu__hint</code> line, already used for disabled reasons. The worktree count in the Remove hint comes from the row, so the menu says the size of the job before the dialog does.</p>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c After Hide">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>After Hide on the <b>current</b> repository: selection moves on, the footer counts it, the toast offers Undo</div>
+            <div class="stage" style="flex-direction: row; align-items: flex-end; gap: 18px;">
+              <div class="sb">
+                <div class="lens"><span class="lchip on">All<span class="n">11</span></span><span class="lchip">Pinned<span class="n">3</span></span><span class="lchip">Focused<span class="n">5</span></span></div>
+                <div class="repo cur"><span class="chev open"></span><span class="rname">ledger-ui</span><span class="rsp"></span><span class="wts">2 wts</span></div>
+                <div class="tree">
+                  <div class="wr sel"><span class="gl">&#8962;</span><span class="bn">main</span><span class="age">2h</span></div>
+                  <div class="wr"><span class="gl">&#9282;</span><span class="bn">feat/csv-import</span><span class="age">1d</span></div>
+                </div>
+                <div class="repo"><span class="chev"></span><span class="rname">tidepool</span><span class="rsp"></span><span class="wts">1 wt</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">wavelet-sdk</span><span class="rsp"></span><span class="wts">4 wts</span></div>
+                <div class="sb-foot"><span class="eye"></span><span>Hidden</span><span class="n">3</span></div>
+              </div>
+              <div class="toast">
+                <strong>Hid harbor-api</strong>
+                <p>It stays on disk and out of this profile&#8217;s sidebar, search, Fetch all and Try pull all. Its 6 worktrees are hidden with it.</p>
+                <div class="row"><span class="chipr">harbor-api</span><span class="rsp"></span><span class="btn sm pri">Undo</span><span class="btn sm ghost">Dismiss</span></div>
+              </div>
+            </div>
+            <p class="note">The repository was selected, so selection moves to the <b>next visible repository in sidebar order</b> (here <code>ledger-ui</code>, its last-used worktree), the same rule the sidebar already uses when a repository leaves the list. With nothing left it falls to the empty state. Undo restores the repository and the previous selection. Focus returns to the next repo row, never to the toast.</p>
+          </div>
+
+          <div class="dv-opt" id="1d" data-screen-label="1d Hide rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>What Hide means, decided</div>
+            <div class="tbl" style="width: 720px;">
+              <div class="tr head"><span>Question</span><span>Decision</span></div>
+              <div class="tr"><b>Scope</b><span>Per profile. Hiding in Work does not hide in Personal, even when both scan the same folder.</span></div>
+              <div class="tr"><b>What is hidden</b><span>The repository, keyed by its <b>main checkout&#8217;s path</b> in that profile. Every worktree of it goes with it, including a linked worktree a scan finds in another registered folder, because worktrees are grouped under their main checkout. The key outlives rescans, which delete and recreate repository rows. A worktree cannot be hidden on its own; that is what pinning and the Focused lens are for.</span></div>
+              <div class="tr"><b>Rescans</b><span>A hidden repository is still discovered (so Settings can say whether it still exists), then filtered before it reaches the renderer. It never comes back by itself.</span></div>
+              <div class="tr"><b>Background work</b><span>None. No status polling, no fetch, no forge identity or PR refresh, no index of its commits for search. Unhide schedules one refresh.</span></div>
+              <div class="tr"><b>Current repository</b><span>Selection moves to the next visible repository (see <a class="dv-oid" href="#1c">1c</a>). Back/Forward skips history entries in a hidden repository.</span></div>
+              <div class="tr"><b>Agents (MCP)</b><span>Left out of the app catalog: repositories, recent repositories, search. Opening one by path answers &#8220;hidden in this PwrGit profile&#8221; rather than pretending it does not exist, so an agent does not go and re-clone it. Tools that take a path and read the folder directly still work; hiding is about PwrGit&#8217;s lists, not about the files.</span></div>
+              <div class="tr"><b>Removed folder</b><span>If a hidden repository disappears from disk, its entry stays in the hidden list marked Not found, with Forget. Nothing prunes it silently.</span></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;use <a class="dv-oid" href="#1a">1a</a>, no hints&#8221; &#183; &#8220;confirm before hiding the current repository&#8221; &#183; &#8220;let a single worktree be hidden too&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2" data-screen-label="Turn 2 Remove repository">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Remove repository: one review dialog, every checkout listed, worktrees first</span></div>
+        <p class="dv-sub">The dialog opens on a scan of every checkout: each linked worktree, then the main checkout last, because the main checkout holds <code>.git</code> and so carries the repository-wide things that die with it (stashes, local branches nothing has checked out). Each row gets a verdict. <b>Safe</b> needs nothing. <b>At risk</b> needs an explicit choice: Push first, Keep, or Discard; there is no default. <b>Blocked</b> (an operation in progress, a locked worktree, a running PwrGit operation) offers only Keep or a way to go fix it. The button stays disabled until nothing is undecided or blocked. Folders go to the <b>Trash</b>; permanent deletion only ever happens as its own named step.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Review, mixed">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Review, just opened: one safe, three at risk (one of them on a volume that is not mounted), one blocked, and the main checkout with repository-wide losses</div>
+            <section class="rm">
+              <div class="rm-head">
+                <div>
+                  <p class="rm-eyebrow">Remove repository</p>
+                  <h2>Remove harbor-api from disk</h2>
+                  <p>Moves the main checkout and its linked worktrees to the Trash, worktrees first. Nothing is removed until every row below is safe or decided.</p>
+                </div>
+                <span class="count">5 folders &#183; 2.1 GB</span>
+              </div>
+              <div class="fate">
+                <div class="fcol go"><em>Moved to the Trash</em><span><b>5 folders</b>, including untracked and ignored files (<code>node_modules</code>, build output). Local-only commits, stashes and branches go with <code>.git</code>.</span></div>
+                <div class="fcol stay"><em>Not touched</em><span>The remotes <code>origin</code> (acme/harbor-api) and <code>upstream</code>, and everything already pushed to them: branches, tags, pull requests.</span></div>
+              </div>
+              <div class="rm-body">
+                <div class="grp">Linked worktrees <b>5</b><span class="r">removed first</span></div>
+
+                <div class="co">
+                  <div class="co-top"><div><div class="co-b"><span class="t">fix/retry-jitter</span></div><div class="co-p">~/wt/harbor-api/fix-retry-jitter</div></div><span class="sz">212 MB</span><span class="verdict ok">safe</span></div>
+                  <div class="facts"><span class="fact ok">clean</span><span class="fact ok">pushed to origin/fix/retry-jitter</span></div>
+                </div>
+
+                <div class="co risk">
+                  <div class="co-top"><div><div class="co-b"><span class="t">feat/batch-export</span></div><div class="co-p">~/wt/harbor-api/batch-export</div></div><span class="sz">388 MB</span><span class="verdict risk">at risk</span></div>
+                  <div class="facts"><span class="fact warn"><b>3</b> uncommitted</span><span class="fact warn"><b>1</b> untracked</span><span class="fact warn"><b>2</b> unpushed commits</span></div>
+                  <div class="decide"><span class="q">Decide</span><span class="seg"><span class="dis">Push first</span><span>Keep</span><span>Discard</span></span><span class="why">Push first is off: it would save the 2 commits but not the 3 uncommitted files. Commit them in the worktree, or Keep it.</span></div>
+                </div>
+
+                <div class="co risk">
+                  <div class="co-top"><div><div class="co-b"><span class="t">spike/ws-transport</span></div><div class="co-p">~/wt/harbor-api/ws-transport</div></div><span class="sz">301 MB</span><span class="verdict risk">at risk</span></div>
+                  <div class="facts"><span class="fact ok">clean</span><span class="fact warn"><b>4</b> commits on no remote</span><span class="fact warn">no upstream</span></div>
+                  <div class="decide"><span class="q">Decide</span><span class="seg"><span>Push first</span><span>Keep</span><span>Discard</span></span><span class="why">Push first publishes <code>spike/ws-transport</code> to <code>origin</code> and sets it as the upstream, then removes the folder.</span></div>
+                </div>
+
+                <div class="co block">
+                  <div class="co-top"><div><div class="co-b"><span class="t">chore/deps-bump</span></div><div class="co-p">~/wt/harbor-api/deps-bump</div></div><span class="sz">295 MB</span><span class="verdict block">blocked</span></div>
+                  <div class="facts"><span class="fact bad">rebase in progress, <b>3</b> of <b>7</b></span><span class="fact warn"><b>1</b> conflicted</span></div>
+                  <div class="decide"><span class="q">Finish or abort the rebase first.</span><span class="btn sm">Open worktree</span><span class="seg"><span>Keep</span></span><span class="why">A half-applied rebase is work this dialog cannot describe, so it will not discard it. Open the worktree, finish or abort it, then Rescan.</span></div>
+                </div>
+
+                <div class="co risk">
+                  <div class="co-top"><div><div class="co-b"><span class="t">old/hotfix-2.3</span><span class="tag">NOT FOUND</span></div><div class="co-p">/Volumes/scratch/harbor-hotfix</div></div><span class="sz">&#8212;</span><span class="verdict risk">at risk</span></div>
+                  <div class="facts"><span class="fact warn">folder not found; <b>/Volumes/scratch</b> is not mounted</span></div>
+                  <div class="decide"><span class="q">Decide</span><span class="seg"><span class="dis">Push first</span><span>Keep</span><span>Discard</span></span><span class="why">PwrGit cannot see what is in it. If the volume is only unmounted, its files survive but lose their repository. Mount it and Rescan, or Discard to clear the record.</span></div>
+                </div>
+
+                <div class="grp">Main checkout <b>1</b><span class="r">removed last, holds .git</span></div>
+
+                <div class="co risk">
+                  <div class="co-top"><div><div class="co-b"><span class="t">main</span><span class="tag">PRIMARY</span></div><div class="co-p">~/src/harbor-api</div></div><span class="sz">940 MB</span><span class="verdict risk">at risk</span></div>
+                  <div class="facts"><span class="fact ok">clean</span><span class="fact ok">up to date with origin/main</span></div>
+                  <div class="sub-items">
+                    <div class="si"><strong><b>2</b> stashes</strong><span class="seg"><span>Keep</span><span>Discard</span></span><small>Newest: &#8220;WIP on main: try pooled client&#8221;, 9 days old. Stashes live in .git and cannot be pushed.</small></div>
+                    <div class="si"><strong>Branch <code>experiment/cache</code></strong><span class="seg"><span>Push first</span><span>Keep</span><span>Discard</span></span><small>5 commits on no remote, not checked out anywhere.</small></div>
+                  </div>
+                </div>
+              </div>
+              <div class="rm-foot">
+                <span class="st"><span class="w">4 need a choice</span> &#183; <span class="x">1 blocked</span> &#183; 1 safe</span>
+                <span class="btn ghost">Rescan</span><span class="btn">Cancel <kbd>Esc</kbd></span><span class="btn dgr off">Move 5 folders to Trash</span>
+              </div>
+            </section>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Review, all safe">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>All safe: no choices, no typing, one button</div>
+            <section class="rm narrow">
+              <div class="rm-head">
+                <div>
+                  <p class="rm-eyebrow">Remove repository</p>
+                  <h2>Remove tidepool from disk</h2>
+                  <p>Everything here is committed and pushed. Moves 2 folders to the Trash.</p>
+                </div>
+                <span class="count">2 folders &#183; 164 MB</span>
+              </div>
+              <div class="fate">
+                <div class="fcol go"><em>Moved to the Trash</em><span><b>2 folders</b>, with their ignored files.</span></div>
+                <div class="fcol stay"><em>Not touched</em><span><code>origin</code> (acme/tidepool) and everything on it.</span></div>
+              </div>
+              <div class="rm-body">
+                <div class="grp">Linked worktrees <b>1</b></div>
+                <div class="co"><div class="co-top"><div><div class="co-b"><span class="t">docs/api-guide</span></div><div class="co-p">~/wt/tidepool/api-guide</div></div><span class="sz">38 MB</span><span class="verdict ok">safe</span></div></div>
+                <div class="grp">Main checkout <b>1</b></div>
+                <div class="co"><div class="co-top"><div><div class="co-b"><span class="t">main</span><span class="tag">PRIMARY</span></div><div class="co-p">~/src/tidepool</div></div><span class="sz">126 MB</span><span class="verdict ok">safe</span></div><div class="facts"><span class="fact ok">clean</span><span class="fact ok">no stashes</span><span class="fact ok">every branch is on origin</span></div></div>
+              </div>
+              <div class="rm-foot">
+                <span class="st">2 safe</span>
+                <span class="btn">Cancel <kbd>Esc</kbd></span><span class="btn dgr">Move 2 folders to Trash</span>
+              </div>
+            </section>
+            <p class="note">Default focus is <b>Cancel</b>, never the destructive button, in every state of this dialog. Return on Cancel closes; the destructive button needs a deliberate Tab or click.</p>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Decided, partial">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Every row decided. One Keep turns the job into a partial removal: the repository stays, and nothing has to be typed</div>
+            <section class="rm">
+              <div class="rm-head">
+                <div>
+                  <p class="rm-eyebrow">Remove repository</p>
+                  <h2>Remove harbor-api from disk</h2>
+                  <p>Moves the main checkout and its linked worktrees to the Trash, worktrees first.</p>
+                </div>
+                <span class="count">3 folders &#183; 513 MB</span>
+              </div>
+              <div class="rm-body">
+                <div class="callout"><span class="i">i</span><span><b>Keeping a worktree keeps the main checkout.</b> A linked worktree&#8217;s history lives in the main checkout&#8217;s <code>.git</code>, so the repository cannot go while <code>feat/batch-export</code> or <code>chore/deps-bump</code> stays. This removes 3 worktrees; harbor-api stays in PwrGit.</span></div>
+                <div class="grp">Linked worktrees <b>5</b></div>
+                <div class="co"><div class="co-top"><div><div class="co-b"><span class="t">fix/retry-jitter</span></div><div class="co-p">~/wt/harbor-api/fix-retry-jitter</div></div><span class="sz">212 MB</span><span class="verdict ok">safe</span></div></div>
+                <div class="co kept"><div class="co-top"><div><div class="co-b"><span class="t">feat/batch-export</span></div><div class="co-p">~/wt/harbor-api/batch-export</div></div><span class="sz">388 MB</span><span class="verdict kept">keep</span></div>
+                  <div class="decide"><span class="seg"><span class="dis">Push first</span><span class="on">Keep</span><span>Discard</span></span></div></div>
+                <div class="co"><div class="co-top"><div><div class="co-b"><span class="t">spike/ws-transport</span></div><div class="co-p">~/wt/harbor-api/ws-transport</div></div><span class="sz">301 MB</span><span class="verdict run">push first</span></div>
+                  <div class="decide"><span class="seg"><span class="on">Push first</span><span>Keep</span><span>Discard</span></span><span class="why">To <code>origin/spike/ws-transport</code>. If the push fails, this worktree is kept and the rest continues.</span></div></div>
+                <div class="co kept"><div class="co-top"><div><div class="co-b"><span class="t">chore/deps-bump</span></div><div class="co-p">~/wt/harbor-api/deps-bump</div></div><span class="sz">295 MB</span><span class="verdict kept">keep</span></div></div>
+                <div class="co"><div class="co-top"><div><div class="co-b"><span class="t">old/hotfix-2.3</span><span class="tag">NOT FOUND</span></div><div class="co-p">/Volumes/scratch/harbor-hotfix</div></div><span class="sz">&#8212;</span><span class="verdict block">discard</span></div>
+                  <div class="decide"><span class="seg"><span class="dis">Push first</span><span>Keep</span><span class="on dg">Discard</span></span><span class="why">Clears this one worktree&#8217;s record. Never a repo-wide <code>git worktree prune</code>, which would also forget worktrees on other unmounted volumes.</span></div></div>
+                <div class="grp">Main checkout <b>1</b><span class="r">kept: 2 worktrees depend on it</span></div>
+                <div class="co kept"><div class="co-top"><div><div class="co-b"><span class="t">main</span><span class="tag">PRIMARY</span></div><div class="co-p">~/src/harbor-api</div></div><span class="sz">940 MB</span><span class="verdict kept">stays</span></div>
+                  <div class="facts"><span class="fact">2 stashes and <code>experiment/cache</code> stay with it; their choices no longer apply</span></div></div>
+              </div>
+              <div class="rm-foot">
+                <span class="st"><b>Remove 3 worktrees</b>, push 1 branch first. 2 kept.</span>
+                <span class="btn">Cancel <kbd>Esc</kbd></span><span class="btn dgr">Remove 3 worktrees</span>
+              </div>
+            </section>
+          </div>
+
+          <div class="dv-opt" id="2d" data-screen-label="2d Discard, type name">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Full removal with work discarded: the footer asks for the repository name, as Delete profile already does</div>
+            <section class="rm narrow">
+              <div class="rm-body" style="padding-top: 14px;">
+                <div class="grp">You chose to discard</div>
+                <div class="callout bad"><span class="i">!</span><span><b>Lost for good once the Trash is emptied:</b> 3 uncommitted and 1 untracked file in <code>feat/batch-export</code>, 2 stashes, and 5 commits on <code>experiment/cache</code>. Nothing else on this list is unpushed.</span></div>
+              </div>
+              <div class="confirm">
+                <label>Type <code>harbor-api</code> to remove it</label>
+                <div class="inp focus">harbor-a<span style="color: var(--accent);">|</span></div>
+              </div>
+              <div class="rm-foot">
+                <span class="st">Moves <b>5 folders</b> to the Trash, pushes 1 branch first.</span>
+                <span class="btn">Cancel <kbd>Esc</kbd></span><span class="btn dgr off">Remove harbor-api</span>
+              </div>
+            </section>
+            <p class="note">The name gate appears <b>only</b> when a Discard is chosen. A removal where everything is pushed (<a class="dv-oid" href="#2b">2b</a>) or that only removes worktrees (<a class="dv-oid" href="#2c">2c</a>) is recoverable from the Trash or the remote and does not ask. The summary repeats exactly what is being given up, so the name is typed against a list, not against a feeling.</p>
+          </div>
+
+          <div class="dv-opt" id="2e" data-screen-label="2e Progress">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Running: pushes, then each worktree, then those worktrees&#8217; records, then the main checkout</div>
+            <section class="rm narrow">
+              <div class="rm-head"><div><p class="rm-eyebrow">Remove repository</p><h2>Removing harbor-api</h2><p>Leave this open or close it; the job keeps going and the sidebar row shows its progress.</p></div></div>
+              <div class="prog">
+                <div class="ptop"><span class="spin"></span><div><strong>Moving worktrees to the Trash, 2 of 4</strong><span>~/wt/harbor-api/ws-transport</span></div></div>
+                <div class="pbar"><span class="ok" style="width: 46%;"></span><span class="fly" style="width: 14%;"></span></div>
+              </div>
+              <div class="rm-body">
+                <div class="steps">
+                  <div class="stp"><span class="mark">&#10003;</span><span>Pushed <code>spike/ws-transport</code> to origin</span><span class="tm">2.4s</span></div>
+                  <div class="stp"><span class="mark">&#10003;</span><span>Pushed <code>experiment/cache</code> to origin</span><span class="tm">1.1s</span></div>
+                  <div class="stp"><span class="mark">&#10003;</span><span><code>fix/retry-jitter</code> to the Trash</span><span class="tm">0.6s</span></div>
+                  <div class="stp"><span class="spin"></span><span><code>spike/ws-transport</code> to the Trash</span><span class="tm"></span></div>
+                  <div class="stp wait"><span class="dot"></span><span><code>feat/batch-export</code> to the Trash</span><span class="tm"></span></div>
+                  <div class="stp wait"><span class="dot"></span><span>Clear the records of the removed worktrees</span><span class="tm"></span></div>
+                  <div class="stp wait"><span class="dot"></span><span>Main checkout <code>~/src/harbor-api</code> to the Trash</span><span class="tm"></span></div>
+                </div>
+              </div>
+              <div class="rm-foot">
+                <span class="st">A step that fails stops the main checkout from being touched.</span>
+                <span class="btn">Stop after this step</span><span class="btn ghost">Close</span>
+              </div>
+            </section>
+          </div>
+
+          <div class="dv-opt" id="2f" data-screen-label="2f Result">
+            <div class="dv-olabel"><a class="dv-oid" href="#2f">2f</a>Results: done, and stopped short with the main checkout untouched</div>
+            <div class="fx col" style="display: flex; flex-direction: column; gap: 16px;">
+              <section class="rm narrow">
+                <div class="prog" style="border-color: color-mix(in srgb, var(--success-text) 32%, transparent); margin-bottom: 0;">
+                  <div class="ptop"><span class="mark">&#10003;</span><div><strong>Removed harbor-api</strong><span>5 folders, 2.1 GB, are in the Trash. 2 branches were pushed to origin first.</span></div></div>
+                </div>
+                <div class="rm-body"><p class="note" style="max-width: none;">It is gone from this profile and will not come back in a scan: there is nothing left on disk to find. Restoring the folders from the Trash brings it back on the next scan.</p></div>
+                <div class="rm-foot" style="margin-top: 0;"><span class="st"></span><span class="btn pri">Done</span></div>
+              </section>
+              <section class="rm narrow">
+                <div class="prog" style="border-color: var(--danger-border); margin-bottom: 0;">
+                  <div class="ptop"><span class="mark x">!</span><div><strong>Stopped: 1 folder could not be moved</strong><span>3 of 4 worktrees are in the Trash. The main checkout was not touched.</span></div></div>
+                  <div class="pbar"><span class="ok" style="width: 75%;"></span><span class="bad" style="width: 8%;"></span></div>
+                </div>
+                <div class="rm-body">
+                  <div class="co fail"><div class="co-top"><div><div class="co-b"><span class="t">feat/batch-export</span></div><div class="co-p">C:\wt\harbor-api\batch-export</div></div><span class="verdict block">failed</span></div>
+                    <div class="facts"><span class="fact bad">EBUSY: a file is open in another program</span></div>
+                    <div class="decide"><span class="btn sm">Retry</span><span class="btn sm">Reveal in Explorer</span><span class="btn sm ghost">Delete permanently&#8230;</span><span class="why">Close editors and terminals using this folder, then Retry. Delete permanently asks again, separately, and cannot be undone.</span></div>
+                  </div>
+                </div>
+                <div class="rm-foot" style="margin-top: 0;"><span class="st">harbor-api stays in PwrGit until its main checkout is removed.</span><span class="btn">Close</span></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2g" data-screen-label="2g Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#2g">2g</a>What the scan checks, and what each finding allows</div>
+            <div class="tbl" style="width: 760px;">
+              <div class="tr c3 head"><span>Finding</span><span>Verdict</span><span>Choices, and why</span></div>
+              <div class="tr c3"><b>Uncommitted or untracked files</b><span class="no">at risk</span><span>Keep or Discard. Push first is offered only when unpushed commits are the <b>only</b> risk on that checkout. Ignored files are not work and are not counted, but their size is.</span></div>
+              <div class="tr c3"><b>Commits on no remote</b><span class="no">at risk</span><span>Push first, Keep, Discard. Measured as commits reachable from the branch and from no remote-tracking ref, so a branch with no upstream and a branch ahead of its upstream read the same way.</span></div>
+              <div class="tr c3"><b>Stashes</b><span class="no">at risk</span><span>Keep or Discard, on the main checkout: stashes live in <code>.git</code>.</span></div>
+              <div class="tr c3"><b>Local branch, not checked out, on no remote</b><span class="no">at risk</span><span>Push first, Keep, Discard, on the main checkout.</span></div>
+              <div class="tr c3"><b>Rebase, merge, cherry-pick, revert or bisect in progress</b><span class="no">blocked</span><span>Keep, or Open worktree to finish it. Never discarded from here.</span></div>
+              <div class="tr c3"><b>Locked worktree</b><span class="no">blocked</span><span>Keep. Someone locked it on purpose; unlock it first.</span></div>
+              <div class="tr c3"><b>A PwrGit operation is running in it</b><span class="no">blocked</span><span>Wait. The row unblocks itself when the pull, fetch or commit ends.</span></div>
+              <div class="tr c3"><b>Worktree folder not found</b><span class="no">at risk</span><span>Keep or Discard. It may be on an unmounted volume, so absence is not proof it is gone. Discard clears that worktree&#8217;s record only; nothing here runs a repo-wide <code>git worktree prune</code>.</span></div>
+              <div class="tr c3"><b>Submodules with their own unpushed work</b><span class="no">at risk</span><span>Listed as a fact on the checkout that contains them; same choices as uncommitted files.</span></div>
+              <div class="tr c3"><b>Trash unavailable</b><span>&#8212;</span><span>Network volume, or Linux with no trash. Known before the run: the row says so, the button becomes <b>Delete permanently</b>, and the name gate applies whatever the other choices are.</span></div>
+              <div class="tr c3"><b>Profiles</b><span>&#8212;</span><span>The repository leaves every profile&#8217;s index, since the folders are gone. A profile with it hidden keeps a Not found entry (<a class="dv-oid" href="#1d">1d</a>).</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2h" data-screen-label="2h Live prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#2h">2h</a>Live: make the choices and watch the footer, the name gate and the button follow</div>
+            <div class="proto">
+              <div class="pchips"><span>scenario</span><button class="{{scenMixed}}" onClick="{{toMixed}}">mixed</button><button class="{{scenClean}}" onClick="{{toClean}}">all safe</button><button onClick="{{reset}}">reset</button></div>
+              <section class="rm">
+                <div class="rm-head">
+                  <div><p class="rm-eyebrow">Remove repository</p><h2>{{title}}</h2><p>{{lede}}</p></div>
+                  <span class="count">{{countLabel}}</span>
+                </div>
+                <sc-if value="{{showPartial}}"><div class="rm-body" style="padding-bottom: 0;"><div class="callout"><span class="i">i</span><span><b>Keeping a worktree keeps the main checkout.</b> Its history lives in the main checkout&#8217;s <code>.git</code>. This removes only the worktrees; the repository stays in PwrGit.</span></div></div></sc-if>
+                <sc-if value="{{showRunning}}"><div class="prog"><div class="ptop"><span class="{{runMark}}">{{runGlyph}}</span><div><strong>{{runTitle}}</strong><span>{{runSub}}</span></div></div><div class="pbar"><span class="ok" style="{{runBar}}"></span></div></div></sc-if>
+                <div class="rm-body">
+                  <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+                    <div class="{{r.grpCls}}">{{r.grp}}</div>
+                    <div class="{{r.cls}}">
+                      <div class="co-top"><div><div class="co-b"><span class="t">{{r.branch}}</span><span class="{{r.tagCls}}">{{r.tag}}</span></div><div class="co-p">{{r.path}}</div></div><span class="sz">{{r.size}}</span><span class="{{r.vCls}}">{{r.verdict}}</span></div>
+                      <div class="{{r.factsCls}}"><span class="{{r.f1Cls}}">{{r.f1}}</span><span class="{{r.f2Cls}}">{{r.f2}}</span></div>
+                      <div class="{{r.decideCls}}"><span class="{{r.openCls}}" onClick="{{r.onOpen}}">Open worktree</span><span class="seg"><span class="{{r.pCls}}" onClick="{{r.onPush}}">Push first</span><span class="{{r.kCls}}" onClick="{{r.onKeep}}">Keep</span><span class="{{r.dCls}}" onClick="{{r.onDiscard}}">Discard</span></span><span class="why">{{r.why}}</span></div>
+                    </div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{needName}}"><div class="confirm"><label>Type <code>harbor-api</code> to remove it</label><input class="inp" placeholder="harbor-api" value="{{typed}}" onInput="{{onType}}" /></div></sc-if>
+                <div class="rm-foot">
+                  <span class="st">{{status}}</span>
+                  <span class="btn" onClick="{{reset}}">{{cancelLabel}}</span><span class="{{goCls}}" onClick="{{go}}">{{goLabel}}</span>
+                </div>
+              </section>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;make Keep the default for at-risk rows&#8221; &#183; &#8220;split the review into steps like the maintenance rail&#8221; &#183; &#8220;always ask for the name, even in <a class="dv-oid" href="#2b">2b</a>&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3" data-screen-label="Turn 3 Hidden list">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Seeing and unhiding hidden repositories</span></div>
+        <p class="dv-sub">Three surfaces, each for a different moment. The sidebar footer is where you notice (it only exists while something is hidden). Settings &#8594; Profiles is where you manage every profile&#8217;s list. The palette catches the &#8220;where did it go&#8221; search without putting hidden repositories back into ordinary results. Recommendation: <b><a class="dv-oid" href="#3a">3a</a> and <a class="dv-oid" href="#3b">3b</a></b>, with <a class="dv-oid" href="#3c">3c</a> as the safety net.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Sidebar footer">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><span class="rec">Recommended</span>Sidebar footer, open: the active profile&#8217;s hidden list with Unhide on each</div>
+            <div class="stage">
+              <div class="sb">
+                <div class="repo"><span class="chev"></span><span class="rname">anchorage</span><span class="rsp"></span><span class="wts">3 wts</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">billing-core</span><span class="rsp"></span><span class="wts">1 wt</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">cartograph</span><span class="rsp"></span><span class="wts">2 wts</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">drift-cli</span><span class="rsp"></span><span class="wts">1 wt</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">ember-docs</span><span class="rsp"></span><span class="wts">1 wt</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">ledger-ui</span><span class="rsp"></span><span class="wts">2 wts</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">tidepool</span><span class="rsp"></span><span class="wts">1 wt</span></div>
+                <div class="repo"><span class="chev"></span><span class="rname">wavelet-sdk</span><span class="rsp"></span><span class="wts">4 wts</span></div>
+                <div class="hpop">
+                  <div class="hpop-h">Hidden in Work <span class="n">3</span></div>
+                  <div class="hp"><div><strong>harbor-api</strong><small>~/src/harbor-api &#183; 6 worktrees</small></div><span class="btn sm">Unhide</span></div>
+                  <div class="hp"><div><strong>vendor-mirror</strong><small>~/src/vendor/vendor-mirror</small></div><span class="btn sm">Unhide</span></div>
+                  <div class="hp"><div><strong>scratch-2019</strong><small>~/src/old/scratch-2019</small></div><span class="btn sm">Unhide</span></div>
+                  <span class="lnk">Manage in Settings &#8594; Profiles&#8230;</span>
+                </div>
+                <div class="sb-foot hot"><span class="eye"></span><span>Hidden</span><span class="n">3</span></div>
+              </div>
+            </div>
+            <p class="note">The footer row is a button (<code>aria-haspopup="menu"</code>, <code>aria-expanded</code>) at the end of the repo list, below every lens: hidden repositories are outside all lenses, so it is not a lens chip and does not join the lens strip. It does not appear at 0. Unhide puts the row back where sidebar order says and keeps the popover open, with focus on the next Unhide.</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Settings Profiles">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a><span class="rec">Recommended</span>Settings &#8594; Profiles: a Hidden repositories section, grouped by profile</div>
+            <div class="set">
+              <div class="card">
+                <div class="card-hd"><div><p class="card-eyebrow">Profiles</p><p class="card-title">Hidden repositories</p><p class="card-desc">Repositories that stay in a scanned folder but out of that profile&#8217;s window, search, bulk sync and agent results. Hide one from its row menu in the sidebar.</p></div><span class="schip">4 hidden</span></div>
+                <div class="card-bd">
+                  <div class="pgrp"><span class="mono">Wk</span>Work<span class="act">Active</span></div>
+                  <div class="hrow"><strong>harbor-api<span class="w">6 wts</span></strong><small>~/src/harbor-api &#183; hidden 2 days ago</small><span class="acts"><span class="btn sm">Unhide</span></span></div>
+                  <div class="hrow"><strong>vendor-mirror</strong><small>~/src/vendor/vendor-mirror &#183; hidden 3 weeks ago</small><span class="acts"><span class="btn sm">Unhide</span></span></div>
+                  <div class="hrow"><strong>scratch-2019</strong><small class="gone">Not found on disk. It was moved or deleted outside PwrGit.</small><span class="acts"><span class="btn sm">Forget</span></span></div>
+                  <div class="pgrp"><span class="mono">Pe</span>Personal</div>
+                  <div class="hrow"><strong>dotfiles-old</strong><small>~/code/dotfiles-old &#183; hidden 4 months ago</small><span class="acts"><span class="btn sm">Unhide</span></span></div>
+                </div>
+              </div>
+            </div>
+            <p class="note">Placed under the existing Profile list card, in the same pane, so the hide list sits next to the folder roots that produce it. A profile with none hidden is left out of the card rather than drawn with an empty row. With none hidden anywhere the card reads &#8220;No hidden repositories.&#8221;</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Palette">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Command+K: an exact name match shows one muted hidden row; ordinary searches never do</div>
+            <div class="pal">
+              <div class="pal-q">harbor-api<span class="caret"></span><span class="scope">Work</span></div>
+              <div class="pal-list">
+                <div class="pal-g">Repositories</div>
+                <div class="res on muted"><span class="k"></span><div><strong>harbor-api</strong><small>~/src/harbor-api</small></div><span class="hid">hidden</span><span class="kb">Return to unhide</span></div>
+                <div class="pal-g">Commands</div>
+                <div class="res"><span class="k cmd"></span><div><strong>Show hidden repositories</strong><small>3 in Work</small></div></div>
+              </div>
+            </div>
+            <p class="note">The hidden row appears only when the query equals a hidden repository&#8217;s name (case-insensitive), so <code>harb</code> finds nothing hidden, and branches, PRs and commits inside it are never searched. Return unhides and opens it. The command opens the sidebar popover in <a class="dv-oid" href="#3a">3a</a>.</p>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Exclusion map">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a>Where a hidden repository is left out</div>
+            <div class="tbl" style="width: 620px;">
+              <div class="tr c3 head"><span>Surface</span><span>Hidden repo</span><span>Note</span></div>
+              <div class="tr c3"><b>Sidebar rows and lenses</b><span class="no">excluded</span><span>All, Pinned, Focused and group-by-folder.</span></div>
+              <div class="tr c3"><b>Counts</b><span class="no">excluded</span><span>Lens chips, folder heads, the title bar.</span></div>
+              <div class="tr c3"><b>Fetch all, Try pull all</b><span class="no">excluded</span><span>Not in the plan, not in the progress total.</span></div>
+              <div class="tr c3"><b>Repository maintenance</b><span class="no">excluded</span><span>Its worktrees are not prune or reclaim candidates.</span></div>
+              <div class="tr c3"><b>Command+K search</b><span class="no">excluded</span><span>Except the exact-name row in <a class="dv-oid" href="#3c">3c</a>.</span></div>
+              <div class="tr c3"><b>MCP app catalog</b><span class="no">excluded</span><span>Repositories, recent, open. Open by path answers &#8220;hidden&#8221;.</span></div>
+              <div class="tr c3"><b>MCP path tools</b><span class="yes">still work</span><span>Handed a path, they read the folder like any other.</span></div>
+              <div class="tr c3"><b>Back / Forward</b><span class="no">skipped</span><span>Entries stay, so Undo restores them.</span></div>
+              <div class="tr c3"><b>Scan</b><span class="yes">still found</span><span>To keep the Not found state honest.</span></div>
+              <div class="tr c3"><b>Remove repository</b><span>&#8212;</span><span>Unhide first; there is no row to start from.</span></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;put the hidden count in the lens strip instead of a footer&#8221; &#183; &#8220;drop the palette row; Settings is enough&#8221; &#183; &#8220;let Remove start from the hidden list&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const MIXED = [
+        { id: "a", grp: "Linked worktrees", branch: "fix/retry-jitter", path: "~/wt/harbor-api/fix-retry-jitter", size: "212 MB", kind: "safe", f1: "clean", f2: "pushed", linked: true },
+        { id: "b", branch: "feat/batch-export", path: "~/wt/harbor-api/batch-export", size: "388 MB", kind: "risk", f1: "3 uncommitted", f2: "2 unpushed commits", noPush: true, linked: true, loses: "3 uncommitted files and 2 commits" },
+        { id: "c", branch: "spike/ws-transport", path: "~/wt/harbor-api/ws-transport", size: "301 MB", kind: "risk", f1: "clean", f2: "4 commits on no remote", linked: true, loses: "4 commits" },
+        { id: "d", branch: "chore/deps-bump", path: "~/wt/harbor-api/deps-bump", size: "295 MB", kind: "block", f1: "rebase in progress, 3 of 7", f2: "", linked: true },
+        { id: "m", grp: "Main checkout", branch: "main", tag: "PRIMARY", path: "~/src/harbor-api", size: "940 MB", kind: "risk", f1: "clean", f2: "2 stashes", noPush: true, linked: false, loses: "2 stashes" }
+      ];
+      const CLEAN = [
+        { id: "a", grp: "Linked worktrees", branch: "fix/retry-jitter", path: "~/wt/harbor-api/fix-retry-jitter", size: "212 MB", kind: "safe", f1: "clean", f2: "pushed", linked: true },
+        { id: "m", grp: "Main checkout", branch: "main", tag: "PRIMARY", path: "~/src/harbor-api", size: "940 MB", kind: "safe", f1: "clean", f2: "no stashes", linked: false }
+      ];
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.state = { scen: "mixed", choice: {}, fixed: {}, typed: "", phase: "review", step: 0 };
+        }
+        componentWillUnmount() { if (this.timer) clearInterval(this.timer); }
+        list() { return this.state.scen === "mixed" ? MIXED : CLEAN; }
+        renderVals() {
+          const s = this.state;
+          const self = this;
+          const list = this.list().map((r) => s.fixed[r.id] ? Object.assign({}, r, { kind: "safe", f1: "rebase finished, clean", f2: "pushed" }) : r);
+          const fix = (id) => () => { if (s.phase !== "review") return; const next = Object.assign({}, s.fixed); next[id] = true; const ch = Object.assign({}, s.choice); ch[id] = undefined; self.setState({ fixed: next, choice: ch }); };
+          const choose = (id, c) => () => { if (s.phase !== "review") return; const next = Object.assign({}, s.choice); next[id] = next[id] === c ? undefined : c; self.setState({ choice: next }); };
+          let undecided = 0, blocked = 0, safe = 0, keepLinked = 0, keepAny = 0, discards = [], pushes = 0;
+          list.forEach((r) => {
+            const c = s.choice[r.id];
+            if (r.kind === "safe") safe++;
+            else if (r.kind === "block" && c !== "keep") blocked++;
+            else if (r.kind === "risk" && c === undefined) undecided++;
+            if (c === "keep") { keepAny++; if (r.linked) keepLinked++; }
+            if (c === "discard") discards.push(r.loses);
+            if (c === "push") pushes++;
+          });
+          const mainKeptByChoice = s.choice.m === "keep";
+          const partial = keepLinked > 0 || mainKeptByChoice;
+          const removing = list.filter((r) => s.choice[r.id] !== "keep" && (r.linked || !partial));
+          const ready = undecided === 0 && blocked === 0 && removing.length > 0;
+          const needName = ready && !partial && discards.length > 0;
+          const nameOk = !needName || s.typed === "harbor-api";
+          const goLabel = partial ? "Remove " + removing.length + " worktree" + (removing.length === 1 ? "" : "s") : (needName ? "Remove harbor-api" : "Move " + removing.length + " folders to Trash");
+          let status;
+          if (s.phase === "running") status = "Working. Closing this dialog does not stop it.";
+          else if (s.phase === "done") status = "";
+          else if (!ready) status = [undecided ? undecided + " need a choice" : "", blocked ? blocked + " blocked" : "", safe ? safe + " safe" : ""].filter(Boolean).join(" · ");
+          else if (needName && !nameOk) status = "Discarding " + discards.join(", ") + ". Type the name to continue.";
+          else status = (partial ? "Removes " + removing.length + " worktrees; harbor-api stays." : "Moves " + removing.length + " folders to the Trash.") + (pushes ? " Pushes " + pushes + " branch first." : "");
+          const rows = list.map((r) => {
+            const c = s.choice[r.id];
+            const keptByPartial = !r.linked && partial;
+            const isKept = c === "keep" || keptByPartial;
+            let vCls = "verdict ok", verdict = "safe";
+            if (isKept) { vCls = "verdict kept"; verdict = keptByPartial && c !== "keep" ? "stays" : "keep"; }
+            else if (r.kind === "block") { vCls = "verdict block"; verdict = "blocked"; }
+            else if (r.kind === "risk") {
+              if (c === "push") { vCls = "verdict run"; verdict = "push first"; }
+              else if (c === "discard") { vCls = "verdict block"; verdict = "discard"; }
+              else { vCls = "verdict risk"; verdict = "at risk"; }
+            }
+            if (s.phase !== "review") {
+              const ix = removing.indexOf(r);
+              if (ix >= 0 && ix < s.step) { vCls = "verdict ok"; verdict = "in Trash"; }
+              else if (ix === s.step && s.phase === "running") { vCls = "verdict run"; verdict = c === "push" ? "pushing" : "moving"; }
+            }
+            const warn = r.kind === "safe" ? "fact ok" : "fact warn";
+            let cls = "co";
+            if (isKept) cls = "co kept"; else if (r.kind === "block") cls = "co block"; else if (r.kind === "risk" && c === undefined) cls = "co risk";
+            let why = "";
+            if (r.kind === "block") why = "Finish or abort the rebase in this worktree, then Rescan. It is never discarded from here. (Prototype: Open worktree pretends you finished it.)";
+            else if (r.noPush && r.linked) why = "Push first is off: it would not save the uncommitted files.";
+            else if (r.id === "m") why = keptByPartial ? "Kept: a kept worktree depends on this .git." : "Stashes live in .git and cannot be pushed.";
+            else if (c === "push") why = "Publishes the branch to origin first. A failed push keeps this worktree.";
+            return {
+              grp: r.grp || "", grpCls: r.grp ? "grp" : "hide",
+              cls: cls, branch: r.branch, tag: r.tag || "", tagCls: r.tag ? "tag" : "hide",
+              path: r.path, size: r.size, vCls: vCls, verdict: verdict,
+              factsCls: "facts", f1: r.f1, f1Cls: r.f1 === "clean" ? "fact ok" : (r.kind === "block" ? "fact bad" : warn), f2: r.f2, f2Cls: r.f2 ? (r.f2 === "pushed" || r.f2 === "no stashes" ? "fact ok" : "fact warn") : "hide",
+              decideCls: r.kind === "safe" || s.phase !== "review" || keptByPartial ? "hide" : "decide",
+              pCls: r.kind === "block" ? "hide" : (r.noPush ? "dis" : (c === "push" ? "on" : "")),
+              kCls: c === "keep" ? "on" : "",
+              dCls: r.kind === "block" ? "hide" : (c === "discard" ? "on dg" : ""),
+              openCls: r.kind === "block" ? "btn sm" : "hide", onOpen: fix(r.id),
+              onPush: r.noPush ? undefined : choose(r.id, "push"), onKeep: choose(r.id, "keep"), onDiscard: choose(r.id, "discard"),
+              why: why
+            };
+          });
+          const total = removing.length;
+          const go = () => {
+            if (s.phase !== "review" || !ready || !nameOk) return;
+            self.setState({ phase: "running", step: 0 });
+            self.timer = setInterval(() => {
+              const st = self.state.step + 1;
+              if (st >= total) { clearInterval(self.timer); self.setState({ phase: "done", step: total }); }
+              else self.setState({ step: st });
+            }, 900);
+          };
+          const reset = () => { if (self.timer) clearInterval(self.timer); self.setState({ choice: {}, fixed: {}, typed: "", phase: "review", step: 0 }); };
+          const scen = (name) => () => { if (self.timer) clearInterval(self.timer); self.setState({ scen: name, choice: {}, fixed: {}, typed: "", phase: "review", step: 0 }); };
+          const sizeOf = (rs) => rs.length + (rs.length === 1 ? " folder" : " folders");
+          return {
+            scenMixed: s.scen === "mixed" ? "on" : "", scenClean: s.scen === "clean" ? "on" : "",
+            toMixed: scen("mixed"), toClean: scen("clean"), reset: reset,
+            title: s.phase === "done" ? "Done" : (s.phase === "running" ? "Removing harbor-api" : "Remove harbor-api from disk"),
+            lede: s.phase === "review" ? "Every row must be safe or decided before anything moves." : "Worktrees first, then the worktree records, then the main checkout.",
+            countLabel: sizeOf(removing),
+            showPartial: s.phase === "review" && partial,
+            showRunning: s.phase !== "review",
+            runMark: s.phase === "done" ? "mark" : "spin", runGlyph: s.phase === "done" ? "✓" : "",
+            runTitle: s.phase === "done" ? (partial ? "Removed " + total + " worktrees" : "Removed harbor-api") : "Step " + (s.step + 1) + " of " + total,
+            runSub: s.phase === "done" ? (partial ? "harbor-api stays in PwrGit." : "Gone from this profile; a scan will not bring it back.") : (removing[s.step] ? removing[s.step].path : ""),
+            runBar: "width: " + Math.round((s.step / Math.max(1, total)) * 100) + "%",
+            rows: rows,
+            needName: needName && s.phase === "review", typed: s.typed,
+            onType: (e) => self.setState({ typed: e.target.value }),
+            status: status,
+            cancelLabel: s.phase === "review" ? "Cancel" : "Close",
+            goLabel: s.phase === "done" ? "Done" : goLabel,
+            goCls: s.phase === "done" ? "btn pri" : (ready && nameOk && s.phase === "review" ? "btn dgr" : "btn dgr off"),
+            go: s.phase === "done" ? reset : go
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

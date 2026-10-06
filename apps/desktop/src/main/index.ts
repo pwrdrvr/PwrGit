@@ -9,6 +9,7 @@ import {
   nativeTheme,
   protocol,
   safeStorage,
+  shell,
   webContents
 } from "electron";
 import {
@@ -81,6 +82,10 @@ import { registerGraphHandlers } from "./git/graph-handlers";
 import { registerRebaseHandlers } from "./git/rebase-handlers";
 import { registerRemoteHandlers } from "./git/remote-handlers";
 import { registerRepoHandlers } from "./git/repo-handlers";
+import {
+  registerRepoRemovalHandlers,
+  trashIntoDirectory
+} from "./git/repo-removal-handlers";
 import { RepoIndexer } from "./git/repo-indexer";
 import { registerSearchStatusHandlers } from "./git/search-status-handlers";
 import { registerSubmoduleHandlers } from "./git/submodule-handlers";
@@ -1075,6 +1080,22 @@ if (!gotSingleInstanceLock) {
       return ok(null);
     });
     registerWorktreeLifecycleHandlers(bus, db, indexer, settings, stateService);
+    // PWRGIT_E2E_TRASH_DIR (e2e seam): move removed folders into a test
+    // directory instead of the machine's Trash.
+    const e2eTrashDir = app.isPackaged
+      ? undefined
+      : process.env["PWRGIT_E2E_TRASH_DIR"];
+    registerRepoRemovalHandlers(bus, {
+      db,
+      git: execGit,
+      indexer,
+      state: stateService,
+      operations: worktreeOperations,
+      trash:
+        e2eTrashDir === undefined || e2eTrashDir === ""
+          ? (path) => shell.trashItem(path)
+          : trashIntoDirectory(e2eTrashDir)
+    });
     registerBranchHandlers(
       bus,
       db,

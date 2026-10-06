@@ -23,6 +23,7 @@ import {
   sweepPrunableWorktrees,
   type PruneScanRepoInput
 } from "./worktree-prune";
+import { visibleRepoSql } from "./hidden-repos";
 
 export type PruneHandlers = {
   /** Cancel work owned by a renderer window that has gone away. */
@@ -68,8 +69,8 @@ export function pruneScanInputs(
   if (profile === undefined) return null;
   const repos = db
     .prepare(
-      `SELECT id, name, path FROM repos
-       WHERE profile_id = ?
+      `SELECT id, name, path FROM repos r
+       WHERE profile_id = ? AND ${visibleRepoSql("r")}
        ORDER BY name COLLATE NOCASE, name, id`
     )
     .all(profileId) as RepoRow[];
@@ -80,6 +81,7 @@ export function pruneScanInputs(
        JOIN repos r ON r.id = w.repo_id
        LEFT JOIN worktree_state s ON s.worktree_id = w.id
        WHERE r.profile_id = ? AND w.is_primary = 0 AND w.missing = 0
+         AND ${visibleRepoSql("r")}
        ORDER BY w.repo_id, w.branch COLLATE NOCASE, w.id`
     )
     .all(profileId) as WorktreeStateRow[];

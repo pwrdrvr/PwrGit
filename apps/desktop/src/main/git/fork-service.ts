@@ -930,7 +930,7 @@ export class ForkService {
     // `huntharo/react-native`, and of a gitlab.com URL carrying the same slug.
     // Either false positive points "Reveal checkout" at the wrong folder.
     return this.indexer
-      .listRepos(profileId)
+      .listRepos(profileId, { includeHidden: true })
       .filter(
         (repo) =>
           repo.identity !== undefined &&
