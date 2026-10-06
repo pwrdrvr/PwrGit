@@ -69,6 +69,7 @@ MIT
 ~~~
 - @hono/node-server@2.1.1 | https://github.com/honojs/node-server
 - @modelcontextprotocol/sdk@1.30.0 | https://github.com/modelcontextprotocol/typescript-sdk
+- @modelcontextprotocol/sdk@1.31.0 | https://github.com/modelcontextprotocol/typescript-sdk
 - @octokit/endpoint@10.1.4 | github:octokit/endpoint.js
 - @octokit/graphql@8.2.2 | github:octokit/graphql.js
 - @octokit/openapi-types@25.1.0 | https://github.com/octokit/openapi-types.ts
@@ -644,6 +645,7 @@ SOFTWARE.
 
 Applies to:
 - @modelcontextprotocol/sdk@1.30.0 (MIT)
+- @modelcontextprotocol/sdk@1.31.0 (MIT)
 
 Representative file: @modelcontextprotocol/sdk@1.30.0/LICENSE
 
