@@ -229,7 +229,9 @@ nsis:
   artifactName: "${productName}-${version}-windows-${arch}-setup.${ext}"
 
 linux:
-  icon: build/icon.png
+  # The pinned builder installs PNGs at their original dimensions. Use the
+  # standard hicolor family; 1024x1024 is absent from the theme's index.
+  icon: build/icons
   executableName: pwrgit
   category: Development
   maintainer: PwrDrvr LLC <harold@pwrdrvr.com>

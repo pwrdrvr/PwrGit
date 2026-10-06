@@ -250,7 +250,7 @@ jobs:
           persist-credentials: false
 
       - name: Install native package and runtime tools
-        run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools cpio xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64 libsecret-1-0
+        run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools cpio xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64 libsecret-1-0 python3-gi gir1.2-gtk-3.0 hicolor-icon-theme
 
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@8876dbf3c524c8a765543dae3ae5b55d7b5ecfb3 # v1.6.0
@@ -281,6 +281,7 @@ jobs:
           sudo apt-get install -y "$(pwd)/apps/desktop/release-stage/dist/PwrGit-$version-linux-$package_arch.deb"
           test "$(dpkg-query -W -f='${Architecture}' pwrgit)" = "$package_arch"
           mkdir -p apps/desktop/linux-smoke
+          xvfb-run -a python3 apps/desktop/scripts/verify-linux-launcher.py apps/desktop/linux-smoke/launcher.png
           xvfb-run -a node apps/desktop/scripts/linux-installed-smoke.mjs "$version" apps/desktop/linux-smoke
           sudo apt-get remove -y pwrgit
 

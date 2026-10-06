@@ -362,6 +362,15 @@ pull requests. `mac-release-artifacts.mjs`, `stage-better-sqlite3-arch.mjs` and
 `packaged-html-rules.mjs` are all listed for this reason. Direct macOS publication is
 blocked; use the release workflow, which uploads only after validation.
 
+## Linux launcher icons
+
+`linux.icon` points to `build/icons/`, a standard hicolor family derived from
+`build/icon.png` by `pnpm --filter @pwrgit/desktop generate:linux-icons`.
+`generate:app-icon` regenerates it after the master. Do not point Linux at the
+1024px master: the pinned builder preserves that size and hicolor cannot find
+the resulting `1024x1024` directory. Package validation checks icon names and
+dimensions; native CI also resolves the installed DEB icon through GTK.
+
 ## Windows installer names
 
 `windows-release-artifacts.mjs` owns two things: the `SHA256SUMS` manifest

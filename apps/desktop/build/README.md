@@ -30,6 +30,7 @@ lane is everyone else's.
 ```
 apps/desktop/build/
   icon.png                       1024×1024   Windows/Linux source
+  icons/16x16.png … 512x512.png                Linux hicolor launcher family
   icon-macos.png                 1024×1024   macOS safe-area development Dock icon
   icon.icon/                                 Icon Composer package — the macOS input
     icon.json                                fill gradient + one glyph layer
@@ -52,12 +53,21 @@ for why a hand-built `.icns` is not an option. Regenerate on a Mac:
 
 ```
 swift scripts/generate-app-icon.swift build
+node scripts/generate-linux-icons.mjs
 node scripts/generate-tray-icon.mjs
 swift scripts/generate-dmg-background.swift build/dmg-background.png
 ```
 
 No hand-authored `.ico` — electron-builder derives the Windows icon from the
 1024px `build/icon.png`, same as the siblings.
+
+Linux packaging uses `build/icons/`, resized from that master with the pinned
+Sharp dependency. The pinned electron-builder preserves a PNG's dimensions
+for Linux; using the 1024px master directly installs only a `1024x1024` theme
+directory, which the standard hicolor index does not list. The generated
+family covers 16, 24, 32, 48, 64, 128, 256 and 512px. `generate:app-icon`
+regenerates both the master and this family; `generate:linux-icons` regenerates
+just the Linux family on any development platform.
 
 ## electron-builder wiring
 
@@ -71,6 +81,9 @@ mac:
 
 win:
   icon: build/icon.png
+
+linux:
+  icon: build/icons
 
 dmg:
   background: build/dmg-background.png
