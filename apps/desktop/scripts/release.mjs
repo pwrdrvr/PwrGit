@@ -132,7 +132,7 @@ function runChecked(file, args, opts = {}) {
   }
 }
 
-function runQuiet(file, args) {
+function runQuiet(file, args, opts = {}) {
   const displayArgs = args.map((arg, index) => {
     const preceding = args[index - 1];
     if (preceding === "-p" || preceding === "-P") return "***";
@@ -144,6 +144,7 @@ function runQuiet(file, args) {
     cwd: desktopRoot,
     encoding: "utf8",
     env: process.env,
+    shell: opts.shell ?? false,
   });
   if (result.error) {
     throw new Error(`${command} failed to spawn: ${result.error.message}`);
@@ -220,6 +221,26 @@ function electronBuilderCli() {
     );
   }
   return cli;
+}
+
+function configureStagePackageManager() {
+  // app-builder-lib 26.16.1 selects its collector from packageManager before
+  // lockfiles or the process environment. The deploy stage is already installed:
+  // npm list reads both pnpm's isolated tree and Windows' hoisted tree without
+  // installing anything or running lifecycle scripts. Selecting npm here avoids
+  // requiring pnpm/Corepack in the hermetic signing jobs (and their ambient
+  // version/shims). npm ships with the Node runtime those jobs already use.
+  // Do this only during preparation, before the signing input is archived.
+  const npmVersion = runQuiet(process.platform === "win32" ? "npm.cmd" : "npm", ["--version"], {
+    shell: process.platform === "win32",
+  }).trim();
+  if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(npmVersion)) {
+    throw new Error(`Cannot select the staged npm collector: unexpected npm version ${JSON.stringify(npmVersion)}`);
+  }
+  const manifestPath = join(stageDir, "package.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest.packageManager = `npm@${npmVersion}`;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function findWindowsUnpackedDir(distDir) {
@@ -462,6 +483,8 @@ if (!signStageOnly) {
   }
   mkdirSync(stageDir, { recursive: true });
   runChecked("pnpm", deployArgs, { cwd: repoRoot });
+
+  configureStagePackageManager();
 
   // 4. Copy the build output, notices, changelog, and electron-builder inputs into the
   //    stage so electron-builder finds them at well-known paths. pnpm deploy
