@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import type { Profile } from "@pwrgit/shared";
 import { ProfileModal } from "../sidebar/ProfileModal";
 import { reorder, type DropPosition } from "../sidebar/repo-view";
@@ -44,15 +44,44 @@ export function ProfilesSettings() {
     { mode: "create" } | { mode: "edit"; profile: Profile } | null
   >(null);
   const [deleting, setDeleting] = useState<Profile | null>(null);
-  const [orderError, setOrderError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [savingMenu, setSavingMenu] = useState<string | null>(null);
+  // The order the user just asked for, shown until main's profile:changed
+  // catches up, so a second move builds on the first instead of on the
+  // order from before it.
+  const [pendingOrder, setPendingOrder] = useState<string[] | null>(null);
 
-  const ids = profiles.profiles.map((p) => p.id);
+  const savedIds = profiles.profiles.map((p) => p.id);
+  const pendingStillFits =
+    pendingOrder !== null &&
+    pendingOrder.length === savedIds.length &&
+    savedIds.every((id) => pendingOrder.includes(id));
+  const ids = pendingStillFits ? pendingOrder : savedIds;
+  const byId = new Map(profiles.profiles.map((p) => [p.id, p] as const));
+  const ordered = ids.flatMap((id) => byId.get(id) ?? []);
+
+  const savedKey = savedIds.join("\n");
+  useEffect(() => {
+    // Drop the pending order once main has it, or once profiles were added
+    // or removed under it (that save is refused as stale anyway).
+    setPendingOrder((pending) =>
+      pending === null ||
+      pending.join("\n") === savedKey ||
+      pending.length !== savedKey.split("\n").length
+        ? null
+        : pending
+    );
+  }, [savedKey]);
+
   const commitOrder = (next: string[]): void => {
     if (next.every((id, i) => id === ids[i])) return;
-    setOrderError(null);
+    setListError(null);
+    setPendingOrder(next);
     void profiles.reorderProfiles(next).then((error) => {
-      if (error !== null) setOrderError(error);
+      if (error !== null) {
+        setPendingOrder(null);
+        setListError(error);
+      }
     });
   };
   const drag = useListReorder({
@@ -61,28 +90,24 @@ export function ProfilesSettings() {
       commitOrder(reorder(ids, dragId, targetId, position))
   });
   const moveBy = (id: string, delta: -1 | 1): void => {
-    const from = ids.indexOf(id);
-    const to = from + delta;
-    if (from < 0 || to < 0 || to >= ids.length) return;
-    const next = [...ids];
-    next.splice(from, 1);
-    next.splice(to, 0, id);
-    commitOrder(next);
+    const target = ids[ids.indexOf(id) + delta];
+    if (target === undefined) return;
+    commitOrder(reorder(ids, id, target, delta < 0 ? "before" : "after"));
   };
   const setShowInMenu = (profile: Profile, showInMenu: boolean): void => {
     setSavingMenu(profile.id);
-    setOrderError(null);
+    setListError(null);
     void profiles
       .updateProfile({ profileId: profile.id, showInMenu })
       .then((error) => {
         setSavingMenu(null);
-        if (error !== null) setOrderError(error);
+        if (error !== null) setListError(error);
       });
   };
 
   // The shortcut each shown profile has today, numbered over the shown ones.
   const shortcutFor = new Map<string, string>();
-  profiles.profiles
+  ordered
     .filter((p) => p.showInMenu)
     .slice(0, MENU_SHORTCUT_SLOTS)
     .forEach((p, i) => shortcutFor.set(p.id, shortcutLabel({ key: String(i + 1) })));
@@ -131,13 +156,13 @@ export function ProfilesSettings() {
           <p className="settings-empty">No profiles yet.</p>
         ) : (
           <>
-            {orderError !== null ? (
+            {listError !== null ? (
               <p className="settings-profile-list__error" role="alert">
-                {orderError}
+                {listError}
               </p>
             ) : null}
             <div className="settings-profile-list">
-              {profiles.profiles.map((profile, index) => (
+              {ordered.map((profile, index) => (
                 <ProfileRow
                   key={profile.id}
                   active={profile.id === profiles.activeProfileId}
@@ -149,7 +174,7 @@ export function ProfilesSettings() {
                     drag.target?.id === profile.id ? drag.target.position : null
                   }
                   canMoveUp={index > 0}
-                  canMoveDown={index < profiles.profiles.length - 1}
+                  canMoveDown={index < ordered.length - 1}
                   onMove={(delta) => moveBy(profile.id, delta)}
                   savingMenu={savingMenu === profile.id}
                   onShowInMenu={(next) => setShowInMenu(profile, next)}

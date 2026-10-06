@@ -927,7 +927,15 @@ if (!gotSingleInstanceLock) {
           ),
         onCopyDiagnostics: () => {
           clipboard.writeText(readAppIdentity().diagnosticsText);
-          emitEvent("ui:diagnosticsCopied", {});
+          const open = windows.openProfileIds();
+          const activeId = profiles.getActiveId();
+          emitEvent("ui:diagnosticsCopied", {
+            profileId:
+              windows.focusedProfileId() ??
+              (activeId !== null && open.includes(activeId)
+                ? activeId
+                : (open[0] ?? null))
+          });
         },
         onOpenLicense: () =>
           openAuxiliaryWindow((palette) =>

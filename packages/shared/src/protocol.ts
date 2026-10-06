@@ -2367,9 +2367,11 @@ export interface Events {
   /** Help → Replay Onboarding. Re-opens the wizard for a look;
    *  deliberately never clears `onboardingCompleted`. */
   "ui:replayOnboarding": Record<string, never>;
-  /** Help → Copy Diagnostics Info put the app identity on the clipboard;
-   *  the focused window confirms it with a toast. */
-  "ui:diagnosticsCopied": Record<string, never>;
+  /** Help → Copy Diagnostics Info put the app identity on the clipboard.
+   *  Main names the one profile window that confirms it with a toast: the
+   *  focused one, else the active profile's, else any open one — so the copy
+   *  is confirmed even when Settings, Logs or nothing has focus. */
+  "ui:diagnosticsCopied": { profileId: string | null };
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Sessions, roles, or repository boundaries changed in Settings. */

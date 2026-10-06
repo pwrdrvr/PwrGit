@@ -281,6 +281,44 @@ describe("ProfilesSettings menu order and visibility", () => {
     expect(reorderProfiles).not.toHaveBeenCalled();
   });
 
+  it("builds a second quick move on the first, before main confirms it", async () => {
+    // Main's profile:changed never arrives here (the mock list is fixed), so
+    // the second move has to start from the order the first one asked for.
+    await render([personal, scratch, acme]);
+    for (let i = 0; i < 2; i += 1) {
+      await act(async () => {
+        grip("Acme").dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })
+        );
+      });
+    }
+    expect(reorderProfiles.mock.calls).toEqual([
+      [["personal", "acme", "scratch"]],
+      [["acme", "personal", "scratch"]]
+    ]);
+    expect(
+      [...container.querySelectorAll<HTMLElement>(".settings-profile-row")].map(
+        (element) => element.dataset["profileId"]
+      )
+    ).toEqual(["acme", "personal", "scratch"]);
+  });
+
+  it("keeps focus on the grip when a profile moves down", async () => {
+    await render([personal, scratch, acme]);
+    grip("Personal").focus();
+    await act(async () => {
+      grip("Personal").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+      );
+    });
+    expect(reorderProfiles).toHaveBeenCalledExactlyOnceWith([
+      "scratch",
+      "personal",
+      "acme"
+    ]);
+    expect(document.activeElement).toBe(grip("Personal"));
+  });
+
   it("reorders by drag and drop", async () => {
     await render([personal, scratch, acme]);
     const store = new Map<string, string>();

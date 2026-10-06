@@ -101,4 +101,29 @@ describe("profile handlers", () => {
     expect(emitEvent).not.toHaveBeenCalled();
     expect(deps.onReordered).not.toHaveBeenCalled();
   });
+
+  it("refuses a malformed order or menu switch instead of throwing", async () => {
+    const { bus, deps, first, profiles, second } = fixture();
+
+    for (const profileIds of [undefined, "abc", [first.id, 7]]) {
+      const result = await bus.dispatch("profile:reorder", {
+        profileIds
+      } as unknown as { profileIds: string[] });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("profile_order_invalid");
+    }
+    const toggled = await bus.dispatch("profile:update", {
+      profileId: first.id,
+      showInMenu: "false"
+    } as unknown as { profileId: string; showInMenu: boolean });
+    expect(toggled.ok).toBe(false);
+    if (!toggled.ok) expect(toggled.error.code).toBe("show_in_menu_invalid");
+
+    expect(profiles.list().map((p) => [p.id, p.showInMenu])).toEqual([
+      [first.id, true],
+      [second.id, true]
+    ]);
+    expect(emitEvent).not.toHaveBeenCalled();
+    expect(deps.onReordered).not.toHaveBeenCalled();
+  });
 });

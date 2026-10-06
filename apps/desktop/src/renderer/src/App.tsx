@@ -468,8 +468,10 @@ export function App() {
     const offNew = subscribe("ui:newProfile", () => {
       if (document.hasFocus()) setProfileModal({ mode: "create" });
     });
-    const offCopied = subscribe("ui:diagnosticsCopied", () => {
-      if (document.hasFocus()) {
+    const offCopied = subscribe("ui:diagnosticsCopied", ({ profileId }) => {
+      // Main picks the window, so the toast shows even when Settings or Logs
+      // has focus — and shows once, not in every window.
+      if (profileId !== null && profileId === windowProfileId()) {
         showInfoToast({
           key: "diagnostics-copied",
           title: "Diagnostics info copied",
