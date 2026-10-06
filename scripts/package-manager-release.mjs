@@ -20,6 +20,23 @@ export const distribution = {
 
 const ghJson = makeApi();
 
+// The cask's macOS floor follows the app's own LSMinimumSystemVersion, so a
+// runtime bump that raises the floor cannot leave Homebrew installing an app
+// that will not launch. An unmapped value must be added here deliberately.
+const macosCodenames = { 12: "monterey", 13: "ventura", 14: "sonoma", 15: "sequoia", 26: "tahoe" };
+const electronBuilderConfig = new URL("../apps/desktop/electron-builder.yml", import.meta.url);
+
+export function caskMacosRequirement(config = readFileSync(electronBuilderConfig, "utf8")) {
+  const values = [...config.matchAll(/^ *LSMinimumSystemVersion: *"?([^"\s#]+)"? *(?:#.*)?$/gm)].map((match) => match[1]);
+  if (values.length !== 1) throw new Error(`Expected one LSMinimumSystemVersion in electron-builder.yml, found ${values.length}`);
+  const [, major, minor] = values[0].match(/^(\d+)(?:\.(\d+))?$/) ?? [];
+  // Cask symbols name a major release, so a point-release floor cannot be expressed.
+  if (!macosCodenames[major] || Number(minor ?? 0) !== 0) {
+    throw new Error(`No Homebrew macOS symbol for LSMinimumSystemVersion "${values[0]}"; extend macosCodenames in scripts/package-manager-release.mjs`);
+  }
+  return `:${macosCodenames[major]}`;
+}
+
 export function stableVersion(release) {
   if (release.draft || release.prerelease || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) {
     throw new Error("Package managers require a published, promoted, suffix-free Stable Latest release");
@@ -160,7 +177,7 @@ export async function hashFile(path) {
   return { digest: `sha256:${hash.digest("hex")}`, size };
 }
 
-export function renderManifests(release, assets) {
+export function renderManifests(release, assets, minimumMacos = caskMacosRequirement()) {
   const version = stableVersion(release);
   const [arm, intel, windows] = assets;
   const sha = (asset) => asset.digest.slice(7);
@@ -184,7 +201,7 @@ export function renderManifests(release, assets) {
   end
 
   auto_updates true
-  depends_on macos: :monterey
+  depends_on macos: ${minimumMacos}
 
   app "PwrGit.app"
 end
