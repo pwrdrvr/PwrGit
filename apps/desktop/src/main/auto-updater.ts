@@ -821,6 +821,23 @@ function isBetaLatestRelease(
   );
 }
 
+// A suffix-free final staged as a GitHub prerelease for smoke testing, or a
+// `-prerelease.N` Stable candidate. Either is ahead of Stable Latest until
+// promotion, so prerelease followers on both trains must see it.
+function isStableCandidateAheadOfLatest(
+  release: GitHubRelease,
+  stableLatest: GitHubRelease | undefined
+): boolean {
+  if (release.prerelease !== true) return false;
+  const parsed = parseSemver(release.tag_name);
+  if (!parsed) return false;
+  if (parsed.pre.length > 0 && parsed.pre[0] !== "prerelease") return false;
+  return (
+    stableLatest === undefined ||
+    compareSemver(release.tag_name, stableLatest.tag_name) > 0
+  );
+}
+
 export type SelectedUpdateReleases = {
   latest: GitHubRelease | undefined;
   prerelease: GitHubRelease | undefined;
@@ -834,7 +851,9 @@ export type SelectedUpdateReleases = {
 //   - stable latest      → highest GitHub non-prerelease (the 1.0 / normie feed)
 //   - stable prerelease  → max(stable latest, 1.0 `-prerelease` / legacy `-beta`)
 //   - beta latest        → highest newer-core `-beta`, falling back to Stable Latest
-//   - beta prerelease    → highest newer-core alpha/beta, falling back to Stable Latest
+//   - beta prerelease    → max(stable latest, newer-core alpha/beta, staged
+//                          suffix-free final or `-prerelease` candidate ahead
+//                          of stable latest)
 // The fallback lets installed alphas/betas upgrade to their stable final without
 // changing the saved selection, so the next eligible main-train tag still wins.
 export function selectChannelReleases(
@@ -857,10 +876,12 @@ export function selectChannelReleases(
     if (firstPrereleaseId(release.tag_name) === "alpha") return false;
     return !isBetaLatestRelease(release, stableLatest, publicReleases);
   });
-  const betaPrerelease =
-    byPrecedenceDesc.find((release) =>
-      isBetaTrainRelease(release, stableLatest, publicReleases)
-    ) ?? stableLatest;
+  const betaPrerelease = byPrecedenceDesc.find(
+    (release) =>
+      release === stableLatest ||
+      isBetaTrainRelease(release, stableLatest, publicReleases) ||
+      isStableCandidateAheadOfLatest(release, stableLatest)
+  );
   return {
     latest: stableLatest,
     prerelease: stablePrerelease,
