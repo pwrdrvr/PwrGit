@@ -224,7 +224,8 @@ function electronBuilderCli() {
 }
 
 function configureStagePackageManager() {
-  // app-builder-lib 26.16.1 selects its collector from packageManager before
+  // pnpm 12 deploy copies the workspace's packageManager into this manifest.
+  // app-builder-lib 26.16.1 selects its collector from that field before
   // lockfiles or the process environment. The deploy stage is already installed:
   // npm list reads both pnpm's isolated tree and Windows' hoisted tree without
   // installing anything or running lifecycle scripts. Selecting npm here avoids
