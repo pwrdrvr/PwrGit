@@ -68,7 +68,6 @@ ISC
 MIT
 ~~~
 - @hono/node-server@2.1.1 | https://github.com/honojs/node-server
-- @modelcontextprotocol/sdk@1.30.0 | https://github.com/modelcontextprotocol/typescript-sdk
 - @modelcontextprotocol/sdk@1.31.0 | https://github.com/modelcontextprotocol/typescript-sdk
 - @octokit/endpoint@10.1.4 | github:octokit/endpoint.js
 - @octokit/graphql@8.2.2 | github:octokit/graphql.js
@@ -640,14 +639,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-@modelcontextprotocol/sdk@1.30.0 (MIT)
+@modelcontextprotocol/sdk@1.31.0 (MIT)
 --------------------------------------
 
 Applies to:
-- @modelcontextprotocol/sdk@1.30.0 (MIT)
 - @modelcontextprotocol/sdk@1.31.0 (MIT)
 
-Representative file: @modelcontextprotocol/sdk@1.30.0/LICENSE
+Representative file: @modelcontextprotocol/sdk@1.31.0/LICENSE
 
 MIT License
 
