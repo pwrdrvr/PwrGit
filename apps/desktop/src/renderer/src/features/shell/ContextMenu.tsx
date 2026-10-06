@@ -41,7 +41,8 @@ export function ContextMenu({
   onClose,
   label,
   triggerRef,
-  align = "start"
+  align = "start",
+  placement = "below"
 }: {
   x: number;
   y: number;
@@ -50,6 +51,9 @@ export function ContextMenu({
    *  its row, so the menu opens back over that row rather than out across the
    *  pane beside it. That is how `WorktreeMenu`'s kebab already behaves. */
   align?: "start" | "end";
+  /** `above` opens upward from `y`, for a trigger at the bottom of a pane
+   *  (the sidebar's Hidden list), so the menu does not cover it. */
+  placement?: "below" | "above";
   items: MenuItem[];
   onClose: () => void;
   /** Accessible menu name for callers with more specific actions. */
@@ -82,13 +86,13 @@ export function ContextMenu({
     if (!el) return;
     const r = el.getBoundingClientRect();
     let left = align === "end" ? x - r.width : x;
-    let top = y;
+    let top = placement === "above" ? y - r.height : y;
     if (left + r.width > window.innerWidth - 8) left = window.innerWidth - r.width - 8;
     if (top + r.height > window.innerHeight - 8) top = window.innerHeight - r.height - 8;
     setPos({ left: Math.max(8, left), top: Math.max(8, top) });
     // Initial focus belongs to useMenuNavigation, which also seeds the roving
     // tabindex; focusing here too would fight it on every reposition.
-  }, [x, y, items.length, align]);
+  }, [x, y, items.length, align, placement]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
