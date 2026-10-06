@@ -64,6 +64,9 @@ test.each(["darwin", "win32"])("selects npm only in the prepared manifest (%s)",
   }
 });
 
+// This integration test runs the real npm collector through PowerShell on
+// Windows. With the full CI suite competing for subprocess time, it exceeded
+// the shared 20s budget; allow a bounded minute for either deployment layout.
 test.each(["hoisted", "isolated"])("collects the installed production graph from the %s signing stage", async (layout) => {
   const cache = join(repoRoot, "node_modules", ".cache");
   mkdirSync(cache, { recursive: true });
@@ -116,4 +119,4 @@ test.each(["hoisted", "isolated"])("collects the installed production graph from
     await tmpDir.cleanup();
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
-});
+}, 60_000);
