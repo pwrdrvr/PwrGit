@@ -1659,6 +1659,52 @@ describe("selectChannelReleases", () => {
     expect(selected.stableLatest?.tag_name).toBe("v1.1.0");
   });
 
+  it("shows a newer Stable candidate as beta prerelease when no alpha or beta is ahead", async () => {
+    const { selectChannelReleases } = await import("./auto-updater");
+    const candidate = selectChannelReleases([
+      githubRelease("v1.2.0-prerelease.1", { prerelease: true }),
+      githubRelease("v1.1.6")
+    ]);
+    expect(candidate.stablePrerelease?.tag_name).toBe("v1.2.0-prerelease.1");
+    expect(candidate.betaLatest?.tag_name).toBe("v1.1.6");
+    expect(candidate.betaPrerelease?.tag_name).toBe("v1.2.0-prerelease.1");
+
+    // The shape of the published v0.31.0 / v0.30.0 pair: a suffix-free final
+    // staged as a GitHub Pre-release ahead of Latest.
+    const staged = selectChannelReleases([
+      githubRelease("v0.31.0", { prerelease: true }),
+      githubRelease("v0.30.0"),
+      githubRelease("v0.28.0", { prerelease: true })
+    ]);
+    expect(staged.stablePrerelease?.tag_name).toBe("v0.31.0");
+    expect(staged.betaLatest?.tag_name).toBe("v0.30.0");
+    expect(staged.betaPrerelease?.tag_name).toBe("v0.31.0");
+  });
+
+  it("lets a newer main-train alpha beat a maintenance Stable candidate", async () => {
+    const { selectChannelReleases } = await import("./auto-updater");
+    const selected = selectChannelReleases([
+      githubRelease("v1.2.0-alpha.1", { prerelease: true }),
+      githubRelease("v1.1.7", { prerelease: true }),
+      githubRelease("v1.1.7-prerelease.2", { prerelease: true }),
+      githubRelease("v1.1.6")
+    ]);
+    expect(selected.stablePrerelease?.tag_name).toBe("v1.1.7");
+    expect(selected.betaPrerelease?.tag_name).toBe("v1.2.0-alpha.1");
+  });
+
+  it("keeps Stable candidates at or below Stable Latest out of beta prerelease", async () => {
+    const { selectChannelReleases } = await import("./auto-updater");
+    const selected = selectChannelReleases([
+      githubRelease("v1.1.6"),
+      githubRelease("v1.1.6-prerelease.3", { prerelease: true }),
+      githubRelease("v1.1.5-prerelease.1", { prerelease: true }),
+      githubRelease("v1.1.4", { prerelease: true })
+    ]);
+    expect(selected.stablePrerelease?.tag_name).toBe("v1.1.6");
+    expect(selected.betaPrerelease?.tag_name).toBe("v1.1.6");
+  });
+
   it("leaves unavailable slots empty when there is no stable fallback", async () => {
     const { selectChannelReleases } = await import("./auto-updater");
     expect(selectChannelReleases([]).betaPrerelease).toBeUndefined();
