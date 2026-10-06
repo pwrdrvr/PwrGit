@@ -149,6 +149,7 @@ test("secondary windows share themed platform chrome", async () => {
   const cases = [
     { menu: "Settings…", title: "General" },
     { menu: "Logs", title: "Logs" },
+    { menu: "Changelog", title: "PwrGit Changelog" },
     { menu: "View License", title: "PwrGit License" },
     { menu: "Third-Party Notices", title: "PwrGit Third-Party Notices" }
   ];

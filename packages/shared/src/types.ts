@@ -56,6 +56,13 @@ export type Profile = {
    * path, not a reset.
    */
   onboardingCompleted: boolean;
+  /**
+   * Whether this profile is listed in the Profiles menu. A hidden profile
+   * keeps its data and still opens from Settings → Profiles; it just takes no
+   * menu row and no ⌘1–⌘9 slot, so a pile of test profiles does not push the
+   * everyday ones off the shortcuts.
+   */
+  showInMenu: boolean;
 };
 
 export type Worktree = {

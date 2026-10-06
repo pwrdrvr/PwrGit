@@ -78,7 +78,8 @@ const PERSONAL: Profile = {
   email: "me@example.com",
   mono: "P",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 const ACME: Profile = {
   id: "acme",
@@ -86,7 +87,8 @@ const ACME: Profile = {
   email: "me@acme.example",
   mono: "A",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 
 /** What the AI reads answer, per test. */

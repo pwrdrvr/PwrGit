@@ -25,7 +25,8 @@ const ACME: Profile = {
   email: "dev@acme.example",
   mono: "A",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 
 let container: HTMLDivElement;

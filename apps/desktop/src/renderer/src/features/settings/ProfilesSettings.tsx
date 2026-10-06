@@ -1,6 +1,10 @@
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import type { Profile } from "@pwrgit/shared";
 import { ProfileModal } from "../sidebar/ProfileModal";
+import { reorder, type DropPosition } from "../sidebar/repo-view";
+import { useListReorder } from "../sidebar/useListReorder";
+import { shortcutLabel } from "../../lib/platform";
+import { SettingsSwitch } from "./SettingsSwitch";
 import { ReadError } from "../shell/ReadError";
 import { useProfiles } from "../../state/useProfiles";
 import {
@@ -14,6 +18,12 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 
+/** Drag payload type, so a profile drag never lands in another list. */
+const PROFILE_MIME = "application/x-pwrgit-profile";
+
+/** How many profiles the Profiles menu gives a ⌘-number shortcut. */
+const MENU_SHORTCUT_SLOTS = 9;
+
 /**
  * Profiles pane (PwrAgnt's ProfilesSettings pattern, on PwrGit's profile
  * model): list every profile with its theme, identity + scan roots, open a
@@ -21,6 +31,12 @@ import {
  * owns the roots editor). Deletion is exact-name guarded and removes only
  * PwrGit-owned profile/index state; repository and worktree directories stay
  * on disk.
+ *
+ * The list's order IS the Profiles menu's order: dragging a row (or moving
+ * it with the arrow keys from its grip) changes which profile gets which
+ * ⌘1–⌘9 shortcut, and each row shows the shortcut it has right now. A
+ * profile switched out of the menu keeps its place here but takes no menu
+ * row and no shortcut, so the next shown profile moves up into its number.
  */
 export function ProfilesSettings() {
   const profiles = useProfiles();
@@ -28,6 +44,48 @@ export function ProfilesSettings() {
     { mode: "create" } | { mode: "edit"; profile: Profile } | null
   >(null);
   const [deleting, setDeleting] = useState<Profile | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [savingMenu, setSavingMenu] = useState<string | null>(null);
+
+  const ids = profiles.profiles.map((p) => p.id);
+  const commitOrder = (next: string[]): void => {
+    if (next.every((id, i) => id === ids[i])) return;
+    setOrderError(null);
+    void profiles.reorderProfiles(next).then((error) => {
+      if (error !== null) setOrderError(error);
+    });
+  };
+  const drag = useListReorder({
+    mime: PROFILE_MIME,
+    onCommit: (dragId: string, targetId: string, position: DropPosition) =>
+      commitOrder(reorder(ids, dragId, targetId, position))
+  });
+  const moveBy = (id: string, delta: -1 | 1): void => {
+    const from = ids.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    const next = [...ids];
+    next.splice(from, 1);
+    next.splice(to, 0, id);
+    commitOrder(next);
+  };
+  const setShowInMenu = (profile: Profile, showInMenu: boolean): void => {
+    setSavingMenu(profile.id);
+    setOrderError(null);
+    void profiles
+      .updateProfile({ profileId: profile.id, showInMenu })
+      .then((error) => {
+        setSavingMenu(null);
+        if (error !== null) setOrderError(error);
+      });
+  };
+
+  // The shortcut each shown profile has today, numbered over the shown ones.
+  const shortcutFor = new Map<string, string>();
+  profiles.profiles
+    .filter((p) => p.showInMenu)
+    .slice(0, MENU_SHORTCUT_SLOTS)
+    .forEach((p, i) => shortcutFor.set(p.id, shortcutLabel({ key: String(i + 1) })));
 
   return (
     <SettingsSectionStack aria-label="Profile settings" paneId="profiles">
@@ -50,7 +108,7 @@ export function ProfilesSettings() {
       <SettingsSection
         eyebrow="Profiles"
         title="Profile list"
-        description="The active profile is the one most recently used; each profile opens in its own window."
+        description={`Drag a profile, or use the arrow keys on its grip, to change the order. The Profiles menu lists them in this order, and the first nine it shows get ${shortcutLabel({ key: "1" })} through ${shortcutLabel({ key: "9" })}.`}
         chip={
           profiles.loadState.status === "loading"
             ? "Loading"
@@ -72,19 +130,37 @@ export function ProfilesSettings() {
         ) : profiles.profiles.length === 0 ? (
           <p className="settings-empty">No profiles yet.</p>
         ) : (
-          <div className="settings-profile-list">
-            {profiles.profiles.map((profile) => (
-              <ProfileRow
-                key={profile.id}
-                active={profile.id === profiles.activeProfileId}
-                profile={profile}
-                onEdit={() => setModal({ mode: "edit", profile })}
-                onOpen={() => void profiles.openProfile(profile.id)}
-                onDelete={() => setDeleting(profile)}
-                canDelete={profiles.profiles.length > 1}
-              />
-            ))}
-          </div>
+          <>
+            {orderError !== null ? (
+              <p className="settings-profile-list__error" role="alert">
+                {orderError}
+              </p>
+            ) : null}
+            <div className="settings-profile-list">
+              {profiles.profiles.map((profile, index) => (
+                <ProfileRow
+                  key={profile.id}
+                  active={profile.id === profiles.activeProfileId}
+                  profile={profile}
+                  shortcut={shortcutFor.get(profile.id) ?? null}
+                  dragProps={drag.rowProps(profile.id, profiles.profiles.length > 1)}
+                  dragging={drag.dragId === profile.id}
+                  dropPosition={
+                    drag.target?.id === profile.id ? drag.target.position : null
+                  }
+                  canMoveUp={index > 0}
+                  canMoveDown={index < profiles.profiles.length - 1}
+                  onMove={(delta) => moveBy(profile.id, delta)}
+                  savingMenu={savingMenu === profile.id}
+                  onShowInMenu={(next) => setShowInMenu(profile, next)}
+                  onEdit={() => setModal({ mode: "edit", profile })}
+                  onOpen={() => void profiles.openProfile(profile.id)}
+                  onDelete={() => setDeleting(profile)}
+                  canDelete={profiles.profiles.length > 1}
+                />
+              ))}
+            </div>
+          </>
         )}
       </SettingsSection>
 
@@ -114,6 +190,16 @@ export function ProfilesSettings() {
 function ProfileRow(props: {
   active: boolean;
   profile: Profile;
+  /** The menu shortcut this profile has now; null when it has none. */
+  shortcut: string | null;
+  dragProps: ReturnType<ReturnType<typeof useListReorder>["rowProps"]>;
+  dragging: boolean;
+  dropPosition: DropPosition | null;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMove: (delta: -1 | 1) => void;
+  savingMenu: boolean;
+  onShowInMenu: (next: boolean) => void;
   onEdit: () => void;
   onOpen: () => void;
   onDelete: () => void;
@@ -130,16 +216,55 @@ function ProfileRow(props: {
         ? profile.roots[0]
         : `${profile.roots[0]} +${profile.roots.length - 1} more`;
 
+  const arrangeable = props.canMoveUp || props.canMoveDown;
+  const onGripKey = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    if (event.key === "ArrowUp" && props.canMoveUp) {
+      event.preventDefault();
+      props.onMove(-1);
+    } else if (event.key === "ArrowDown" && props.canMoveDown) {
+      event.preventDefault();
+      props.onMove(1);
+    }
+  };
+
   return (
     <div
-      className={`settings-profile-row${props.active ? " is-active" : ""}`}
+      className={[
+        "settings-profile-row",
+        props.active ? "is-active" : "",
+        props.dragging ? "is-dragging" : "",
+        props.dropPosition === "before" ? "is-drop-before" : "",
+        props.dropPosition === "after" ? "is-drop-after" : ""
+      ]
+        .filter((c) => c !== "")
+        .join(" ")}
+      data-profile-id={profile.id}
+      {...props.dragProps}
     >
+      {arrangeable ? (
+        <button
+          className="settings-profile-row__grip"
+          type="button"
+          aria-label={`Move ${profile.name}. Use the up and down arrow keys.`}
+          onKeyDown={onGripKey}
+          {...hoverTooltip(tip, "Drag to reorder — or ↑ / ↓ while this grip has focus")}
+        >
+          <svg width="9" height="14" viewBox="0 0 9 14" fill="currentColor" aria-hidden="true">
+            <circle cx="2" cy="2" r="1.3" />
+            <circle cx="7" cy="2" r="1.3" />
+            <circle cx="2" cy="7" r="1.3" />
+            <circle cx="7" cy="7" r="1.3" />
+            <circle cx="2" cy="12" r="1.3" />
+            <circle cx="7" cy="12" r="1.3" />
+          </svg>
+        </button>
+      ) : null}
       <span className="settings-profile-row__mono" aria-hidden="true">
         {profile.mono !== "" ? profile.mono : profile.name.slice(0, 2)}
       </span>
       <div className="settings-profile-row__body">
         <span className="settings-profile-row__name">
-          {profile.name}
+          <span className="settings-profile-row__name-text">{profile.name}</span>
           {props.active ? (
             <span className="settings-card__chip settings-card__chip--ok">
               Active
@@ -148,6 +273,15 @@ function ProfileRow(props: {
           {profile.theme !== undefined ? (
             <span className="settings-card__chip">
               {profile.theme === "light" ? "Light" : "Dark"}
+            </span>
+          ) : null}
+          {/* A hidden profile shows no cap; its Off switch says why. */}
+          {props.shortcut !== null ? (
+            <span
+              className="kbd settings-profile-row__shortcut"
+              aria-label={`Profiles menu shortcut ${props.shortcut}`}
+            >
+              {props.shortcut}
             </span>
           ) : null}
         </span>
@@ -160,6 +294,15 @@ function ProfileRow(props: {
         </span>
       </div>
       <div className="settings-profile-row__actions">
+        <span className="settings-profile-row__menu-toggle">
+          <span aria-hidden="true">In Profiles menu</span>
+          <SettingsSwitch
+            checked={profile.showInMenu}
+            busy={props.savingMenu}
+            label={`Show ${profile.name} in the Profiles menu`}
+            onChange={props.onShowInMenu}
+          />
+        </span>
         <button
           className="settings-button"
           type="button"

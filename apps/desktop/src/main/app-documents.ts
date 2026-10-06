@@ -15,6 +15,12 @@ const APP_DOCUMENTS: Record<AppDocumentKind, AppDocumentDefinition> = {
   "third-party-notices": {
     title: "PwrGit Third-Party Notices",
     file: "THIRD_PARTY_LICENSES"
+  },
+  // Shipped beside the other two by electron-builder's extraResources, and
+  // read from the repo root in development, the same as they are.
+  changelog: {
+    title: "PwrGit Changelog",
+    file: "CHANGELOG.md"
   }
 };
 
@@ -25,7 +31,11 @@ export type AppDocumentRoots = {
 };
 
 export function isAppDocumentKind(value: unknown): value is AppDocumentKind {
-  return value === "license" || value === "third-party-notices";
+  return typeof value === "string" && Object.hasOwn(APP_DOCUMENTS, value);
+}
+
+export function appDocumentTitle(kind: AppDocumentKind): string {
+  return APP_DOCUMENTS[kind].title;
 }
 
 export function appDocumentPath(

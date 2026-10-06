@@ -182,7 +182,7 @@ export type LogSnapshot = {
 };
 
 /** A first-party or bundled notice document displayed inside the desktop app. */
-export type AppDocumentKind = "license" | "third-party-notices";
+export type AppDocumentKind = "license" | "third-party-notices" | "changelog";
 
 export type AppDocument = {
   kind: AppDocumentKind;
@@ -210,6 +210,8 @@ export type UpdateProfileRequest = {
   org?: string;
   /** Fixed window palette, null to return to the app setting. */
   theme?: ProfileThemeOverride | null;
+  /** List the profile in the Profiles menu (see `Profile.showInMenu`). */
+  showInMenu?: boolean;
 };
 
 /** Destructive profile operations require the current name as a race-safe,
@@ -828,6 +830,12 @@ export interface Commands {
   };
   "profile:create": { req: CreateProfileRequest; res: Profile };
   "profile:update": { req: UpdateProfileRequest; res: Profile };
+  /**
+   * Put the profiles in this order. The order is the Profiles menu's order,
+   * so it also decides which profile gets which ⌘1–⌘9 shortcut. The request
+   * must name every profile exactly once.
+   */
+  "profile:reorder": { req: { profileIds: ProfileId[] }; res: ProfileList };
   /** Remove a profile and its PwrGit-owned index data. Git directories and
    *  worktrees on disk are never touched. The final profile cannot be deleted. */
   "profile:delete": { req: DeleteProfileRequest; res: ProfileDeletion };
@@ -2346,12 +2354,14 @@ export interface Events {
     worktreeId: string;
     people: Record<string, CommitAuthorPerson>;
   };
-  /** Native Profiles-menu actions — handled by whichever window has focus. */
+  /** Native Profiles-menu action — handled by whichever window has focus. */
   "ui:newProfile": Record<string, never>;
-  "ui:manageProfile": Record<string, never>;
-  /** Help → Replay First-Run Setup. Re-opens the wizard for a look;
+  /** Help → Replay Onboarding. Re-opens the wizard for a look;
    *  deliberately never clears `onboardingCompleted`. */
   "ui:replayOnboarding": Record<string, never>;
+  /** Help → Copy Diagnostics Info put the app identity on the clipboard;
+   *  the focused window confirms it with a toast. */
+  "ui:diagnosticsCopied": Record<string, never>;
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Sessions, roles, or repository boundaries changed in Settings. */

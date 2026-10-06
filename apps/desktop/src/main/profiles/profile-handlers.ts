@@ -30,6 +30,8 @@ export type ProfileHandlerDeps = {
   /** Close any window bound to the deleted profile and move focus to the
    *  surviving active profile. */
   onDeleted?: (deletedProfileId: string, activeProfileId: string) => void;
+  /** The profile order changed; the Profiles menu and its shortcuts follow. */
+  onReordered?: () => void;
 };
 
 export function registerProfileHandlers(
@@ -104,6 +106,14 @@ export function registerProfileHandlers(
     emitEvent("profile:changed", profiles.snapshot());
     onChanged?.(profile);
     return ok(profile);
+  });
+
+  bus.register("profile:reorder", (req) => {
+    const reordered = profiles.reorder(req.profileIds);
+    if (!reordered.ok) return reordered;
+    emitEvent("profile:changed", reordered.value);
+    deps.onReordered?.();
+    return reordered;
   });
 
   bus.register("profile:completeOnboarding", (req) => {

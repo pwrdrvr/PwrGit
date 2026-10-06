@@ -66,6 +66,8 @@ createRoot(container, rendererRootErrorOptions).render(
         <AppDocumentWindow kind="license" />
       ) : hash === "#document-third-party-notices" ? (
         <AppDocumentWindow kind="third-party-notices" />
+      ) : hash === "#document-changelog" ? (
+        <AppDocumentWindow kind="changelog" />
       ) : (
         <App />
       )}

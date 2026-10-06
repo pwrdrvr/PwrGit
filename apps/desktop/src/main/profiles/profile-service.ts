@@ -24,6 +24,7 @@ type ProfileRow = {
   last_used_at: string | null;
   sort_order: number;
   onboarding_completed: number;
+  show_in_menu: number;
 };
 
 function slugify(name: string): string {
@@ -45,7 +46,8 @@ function rowToProfile(r: ProfileRow): Profile {
     email: r.email,
     mono: r.mono,
     roots: JSON.parse(r.roots) as string[],
-    onboardingCompleted: r.onboarding_completed !== 0
+    onboardingCompleted: r.onboarding_completed !== 0,
+    showInMenu: r.show_in_menu !== 0
   };
   if (r.author_name !== null) p.authorName = r.author_name;
   if (r.kind !== null) p.kind = r.kind;
@@ -153,7 +155,9 @@ export class ProfileService {
     const profile = this.get(patch.profileId);
     if (profile === null) return null;
     const sets: string[] = [];
-    const args: Record<string, string | null> = { id: patch.profileId };
+    const args: Record<string, string | number | null> = {
+      id: patch.profileId
+    };
     if (patch.name !== undefined) {
       sets.push("name = @name");
       args.name = patch.name;
@@ -174,12 +178,46 @@ export class ProfileService {
       sets.push("theme = @theme");
       args.theme = patch.theme;
     }
+    if (patch.showInMenu !== undefined) {
+      sets.push("show_in_menu = @show_in_menu");
+      args.show_in_menu = patch.showInMenu ? 1 : 0;
+    }
     if (sets.length > 0) {
       this.db
         .prepare(`UPDATE profiles SET ${sets.join(", ")} WHERE id = @id`)
         .run(args);
     }
     return this.get(patch.profileId);
+  }
+
+  /**
+   * Put the profiles in the given order. The list must name every profile
+   * exactly once: a partial or stale list (a profile created or deleted in
+   * another window since the caller read it) is refused rather than guessed
+   * at, so the caller re-reads and the user tries again on the fresh list.
+   */
+  reorder(profileIds: ProfileId[]): Result<ProfileList> {
+    const existing = this.list().map((p) => p.id);
+    const requested = new Set(profileIds);
+    if (
+      requested.size !== profileIds.length ||
+      requested.size !== existing.length ||
+      existing.some((id) => !requested.has(id))
+    ) {
+      return err({
+        kind: "validation",
+        code: "profile_order_stale",
+        message:
+          "The profile list changed while you were reordering it. Try again."
+      });
+    }
+    const setOrder = this.db.prepare(
+      "UPDATE profiles SET sort_order = ? WHERE id = ?"
+    );
+    this.db.transaction(() => {
+      profileIds.forEach((id, index) => setOrder.run(index, id));
+    })();
+    return ok(this.snapshot());
   }
 
   /**
