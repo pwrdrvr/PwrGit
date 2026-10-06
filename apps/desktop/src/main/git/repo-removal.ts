@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import {
   err,
   ok,
@@ -320,6 +320,38 @@ export async function reviewRepoRemoval(
         branches.value,
         remoteNames
       );
+    }
+  );
+
+  // A worktree nested in the main checkout's folder was measured twice, and
+  // goes to the Trash before the main checkout does: the main checkout's
+  // share is what is left. Not from a floor, which may not have reached it.
+  const [main, ...others] = checkouts;
+  if (main !== undefined && main.bytes !== null && !main.bytesPartial) {
+    for (const checkout of others) {
+      const within = relative(main.path, checkout.path);
+      if (checkout.bytes === null || within === "" || within.startsWith("..") || isAbsolute(within)) {
+        continue;
+      }
+      main.bytes = Math.max(0, main.bytes - checkout.bytes);
+    }
+  }
+
+  // A missing worktree's folder cannot be asked, but its branch lives in the
+  // main checkout's .git, and a full removal takes that with it. Count what
+  // only the branch holds, so the review and the name gate say so.
+  await mapLimit(
+    checkouts.filter(
+      (c) => c.missing && !c.isPrimary && atRisk.value.has(c.branch)
+    ),
+    REMOVAL_INSPECT_CONCURRENCY,
+    async (checkout) => {
+      const counted = await run(
+        deps.git,
+        ["rev-list", "--count", `refs/heads/${checkout.branch}`, "--not", "--remotes"],
+        repo.path
+      );
+      checkout.unpushed = counted.ok ? Number(counted.value.trim()) || 1 : 1;
     }
   );
 

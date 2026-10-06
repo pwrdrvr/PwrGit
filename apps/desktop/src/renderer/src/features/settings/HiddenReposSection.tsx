@@ -70,7 +70,7 @@ export function HiddenReposSection({ activeProfileId }: { activeProfileId: strin
                       <span className="settings-hidden-repos__name">{entry.name}</span>
                       <span className="settings-hidden-repos__meta">
                         {entry.missing
-                          ? "Not found on disk. It was moved or deleted outside PwrGit."
+                          ? "Not found on disk. It was moved or deleted."
                           : entry.worktreeCount > 1
                             ? `${entry.path} · ${entry.worktreeCount - 1} ${entry.worktreeCount === 2 ? "worktree" : "worktrees"}`
                             : entry.path}

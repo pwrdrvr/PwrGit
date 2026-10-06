@@ -48,7 +48,7 @@ The review inspects each checkout and the repository-wide state in `.git`:
 | Verdict | Means | Choices |
 | --- | --- | --- |
 | safe | No uncommitted, untracked or conflicted files, and every commit is on a remote. | none needed |
-| at risk | Changes or commits that exist nowhere else; a folder that is not found (it may be on a volume that is not mounted); or a checkout Git could not inspect. | Push first (when unpushed commits are the only risk), Keep, Discard |
+| at risk | Changes or commits that exist nowhere else; a folder that is not found (it may be on a volume that is not mounted; the review still counts the commits on its branch, which live in the main checkout's `.git`); or a checkout Git could not inspect. | Push first (when unpushed commits are the only risk), Keep, Discard |
 | blocked | A rebase, merge, cherry-pick, revert or bisect is in progress, or the worktree is locked with `git worktree lock`. | Keep, or **Open worktree** to finish it there |
 
 Stashes, and local branches that are not checked out but hold commits on no

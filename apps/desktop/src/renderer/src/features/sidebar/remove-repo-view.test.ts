@@ -61,10 +61,14 @@ describe("remove-repo-view", () => {
       "A merge is in progress. Finish or abort the merge first."
     );
     expect(checkoutFacts(checkout({ missing: true }))).toContain("not mounted");
+    expect(checkoutFacts(checkout({ missing: true, unpushed: 2 }))).toContain(
+      "Its branch holds 2 commits on no remote."
+    );
   });
 
   it("explains why Push first is missing", () => {
     expect(pushOffReason(checkout({ unpushed: 2 }))).toBeNull();
+    expect(pushOffReason(checkout({ unpushed: 2, missing: true, pushRemote: null }))).toBeNull();
     expect(pushOffReason(checkout({ unpushed: 1, branch: "" }))).toBe(
       "Push first is off: a detached HEAD has no branch to push the 1 commit to."
     );

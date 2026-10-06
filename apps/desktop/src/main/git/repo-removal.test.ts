@@ -281,6 +281,57 @@ describe("reviewRepoRemoval", () => {
     expect(checkoutVerdict(gone)).toBe("at_risk");
   });
 
+  it("counts the commits a missing worktree's branch holds, from the main checkout", async () => {
+    const f = await fixture(({ repo, root }) => {
+      const gone = pushedWorktree(repo, root, "gone");
+      commit(gone, "b.txt", "one\n", "only here");
+      commit(gone, "c.txt", "two\n", "also only here");
+      rmSync(gone, { recursive: true, force: true });
+    });
+    const r = await review(f);
+    expect(byBranch(r, "feat/gone")).toMatchObject({ missing: true, unpushed: 2 });
+    // Its branch is a checkout's, not a loose one: it is not listed twice.
+    expect(r.branches).toEqual([]);
+    const decisions: RemovalDecisions = {
+      checkouts: { [byBranch(r, "feat/gone").worktreeId]: "discard" },
+      branches: {}
+    };
+    expect(removalStatus(r, decisions).discards).toEqual(["2 commits in feat/gone"]);
+  });
+
+  it("does not count a worktree nested in the main checkout twice", async () => {
+    const f = await fixture(({ repo }) => {
+      writeFileSync(join(repo, ".gitignore"), ".worktrees/\n");
+      git(repo, ["add", ".gitignore"]);
+      git(repo, ["commit", "-q", "-m", "ignore worktrees"]);
+      git(repo, ["push", "-q", "origin", "main"]);
+      git(repo, ["worktree", "add", "-q", "-b", "feat/nested", join(repo, ".worktrees", "nested")]);
+      git(join(repo, ".worktrees", "nested"), ["push", "-q", "-u", "origin", "feat/nested"]);
+    });
+    const sizes = new Map([
+      [f.repo, 10_000],
+      [join(f.repo, ".worktrees", "nested"), 3_000]
+    ]);
+    const result = await reviewRepoRemoval(
+      {
+        db: f.db,
+        git: systemGit,
+        measure: async (path) => ({
+          bytes: sizes.get(path) ?? 0,
+          entries: 1,
+          partial: false,
+          inaccessible: 0,
+          hardLinks: 0
+        })
+      },
+      f.repoId
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(byBranch(result.value, "feat/nested").bytes).toBe(3_000);
+    expect(byBranch(result.value, "main").bytes).toBe(7_000);
+  });
+
   it("refuses a repository whose main checkout is gone", async () => {
     const f = await fixture();
     rmSync(f.repo, { recursive: true, force: true });

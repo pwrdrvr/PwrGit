@@ -25,7 +25,11 @@ export function checkoutLabel(checkout: RemovalCheckout): string {
 /** What the review found, as one line. Safe says why it is safe. */
 export function checkoutFacts(checkout: RemovalCheckout): string {
   if (checkout.missing) {
-    return "Folder not found. It may be on a volume that is not mounted.";
+    const held =
+      checkout.unpushed > 0
+        ? ` Its branch holds ${plural(checkout.unpushed, "commit")} on no remote.`
+        : "";
+    return `Folder not found. It may be on a volume that is not mounted.${held}`;
   }
   if (checkout.inspectError !== null) {
     return `Git could not inspect it: ${checkout.inspectError.split("\n")[0]}`;
@@ -53,7 +57,8 @@ export function checkoutFacts(checkout: RemovalCheckout): string {
 
 /** Why Push first is missing from an at-risk row that has commits to push. */
 export function pushOffReason(checkout: RemovalCheckout): string | null {
-  if (checkout.unpushed === 0 || canPushCheckout(checkout)) return null;
+  // A missing folder has nothing to push from; its facts say what it holds.
+  if (checkout.missing || checkout.unpushed === 0 || canPushCheckout(checkout)) return null;
   if (checkoutVerdict(checkout) !== "at_risk") return null;
   const commits = plural(checkout.unpushed, "commit");
   if (checkout.branch === "") {

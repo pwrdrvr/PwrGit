@@ -901,9 +901,9 @@ export class RepoIndexer {
     const prNumber = changeRequestNumberQuery(query);
     const prLike = prNumber === null ? null : `${prNumber} %`;
     // Rows of a hidden repository are dropped before the cap, not after it
-    // (src/main/AGENTS.md). Most profiles hide nothing, and then the clause
-    // and its per-row lookup are left out entirely.
-    const hidden = this.anyHiddenRepos()
+    // (src/main/AGENTS.md). Most profiles hide nothing indexed, and then the
+    // clause and its per-row lookup are left out entirely.
+    const hidden = this.anyHiddenRepos(only)
       ? `AND (${SEARCH_ROW_REPO_SQL}) NOT IN (
            SELECT r.id FROM repos r
            JOIN hidden_repos h ON h.profile_id = r.profile_id AND h.path = r.path)`
@@ -1340,8 +1340,18 @@ export class RepoIndexer {
     return out;
   }
 
-  private anyHiddenRepos(): boolean {
-    return this.db.prepare("SELECT 1 FROM hidden_repos LIMIT 1").get() !== undefined;
+  /** Whether a search in `profileId` (every profile when null) can meet a
+   *  hidden repository: an entry in scope whose folder is still indexed. */
+  private anyHiddenRepos(profileId: ProfileId | null): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM hidden_repos h
+           JOIN repos r ON r.profile_id = h.profile_id AND r.path = h.path
+           WHERE ? IS NULL OR h.profile_id = ? LIMIT 1`
+        )
+        .get(profileId, profileId) !== undefined
+    );
   }
 
   /** The overlay's empty-query state: all repos, pinned first, alphabetical. */

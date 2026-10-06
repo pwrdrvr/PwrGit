@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import type { HiddenRepo } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../lib/pwrgit";
 
+const HIDDEN_RELOAD_DEBOUNCE_MS = 150;
+
 /**
  * A profile's hidden repositories, kept current. Every hide and unhide in
  * main emits `repo:changed` for its profile, which is also what reloads the
- * tree, so the two cannot disagree for longer than one round trip.
+ * tree, so the two cannot disagree for longer than a debounce and a round trip.
  * `profileId` null means every profile (Settings → Profiles).
  */
 export function useHiddenRepos(profileId: string | null | undefined): {
@@ -32,11 +34,21 @@ export function useHiddenRepos(profileId: string | null | undefined): {
     };
   }, [profileId, tick]);
 
+  // `repo:changed` also fires for every fetch, branch and worktree change, in
+  // bursts during Fetch all; the list only moves on a hide, unhide, removal
+  // or scan, so a burst asks once.
   useEffect(() => {
     if (profileId === undefined) return;
-    return subscribe("repo:changed", (p) => {
-      if (profileId === null || p.profileId === profileId) reload();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const off = subscribe("repo:changed", (p) => {
+      if (profileId !== null && p.profileId !== profileId) return;
+      clearTimeout(timer);
+      timer = setTimeout(reload, HIDDEN_RELOAD_DEBOUNCE_MS);
     });
+    return () => {
+      clearTimeout(timer);
+      off();
+    };
   }, [profileId, reload]);
 
   return { hidden, reload };

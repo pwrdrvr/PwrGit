@@ -21,7 +21,7 @@ export type HiddenRepo = {
   /** The indexed repository behind the entry, while a scan still finds it. */
   repoId: RepoId | null;
   worktreeCount: number;
-  /** Neither indexed nor on disk: moved or deleted outside PwrGit. */
+  /** Neither indexed nor on disk: moved or deleted, perhaps by another profile. */
   missing: boolean;
 };
 
@@ -188,7 +188,13 @@ const plural = (n: number, one: string, many = `${one}s`): string =>
 
 function checkoutLoss(checkout: RemovalCheckout): string {
   const label = checkout.branch === "" ? checkout.path : checkout.branch;
-  if (checkout.missing) return `the record of ${label}`;
+  // A missing folder's files are out of reach; its branch's commits are in
+  // the main checkout's .git, counted by the review.
+  if (checkout.missing) {
+    return checkout.unpushed > 0
+      ? `${plural(checkout.unpushed, "commit")} in ${label}`
+      : `the record of ${label}`;
+  }
   const parts: string[] = [];
   if (checkout.uncommitted > 0) parts.push(plural(checkout.uncommitted, "uncommitted file"));
   if (checkout.untracked > 0) parts.push(plural(checkout.untracked, "untracked file"));

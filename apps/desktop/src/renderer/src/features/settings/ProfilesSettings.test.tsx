@@ -421,7 +421,7 @@ describe("ProfilesSettings hidden repositories", () => {
     ]);
     // The window's active profile carries the chip.
     expect(groups[1]?.textContent).toContain("Active");
-    expect(groups[0]?.textContent).toContain("Not found on disk. It was moved or deleted outside PwrGit.");
+    expect(groups[0]?.textContent).toContain("Not found on disk. It was moved or deleted.");
     expect(groups[1]?.textContent).toContain("/src/harbor-api · 2 worktrees");
     expect(card().textContent).toContain("2 hidden");
 

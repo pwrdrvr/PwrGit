@@ -1000,10 +1000,14 @@ export function Sidebar({
 
   /** Hide asks nothing: it loses nothing, and Undo is on the toast. */
   const hideRepo = (repo: Repo): void => {
+    // Moved before the round trip, or the refresh lands first and the window
+    // falls back to the first repository; a failed hide moves it back.
+    const selected = repo.worktrees.find((w) => w.id === selectedWorktreeId);
     selectNeighbourOf(repo);
     const profileId = repo.profileId;
     void dispatch("repo:hide", { profileId, repoId: repo.id }).then((result) => {
       if (!result.ok) {
+        if (selected !== undefined) onSelectWorktree(repo, selected);
         showErrorToast({ title: `Could not hide ${repo.name}`, message: result.error.message });
         return;
       }
