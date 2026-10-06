@@ -172,6 +172,8 @@ export function buildAppMenuTemplate(
 
   // macOS draws its own window list; elsewhere the stock Window menu offers
   // only Minimize and Close, so the open profile windows are listed here.
+  // No Close: File → Close Window already owns Ctrl+W, and a second row with
+  // the same action and key is noise (the macOS Window menu has none either).
   const openWindowItems: MenuItemConstructorOptions[] = opts.openProfileIds
     .filter((id) => labels.has(id))
     .map((id) => ({
@@ -186,7 +188,6 @@ export function buildAppMenuTemplate(
         label: "Window",
         submenu: [
           { role: "minimize" },
-          { role: "close" },
           separator,
           ...(openWindowItems.length > 0
             ? openWindowItems
