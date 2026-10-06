@@ -1,8 +1,8 @@
 // Project-level pnpm install hooks. Loaded automatically by pnpm
 // every time it resolves dependencies (`pnpm install`, `pnpm add`,
-// `pnpm install --frozen-lockfile` in CI). The companion `.npmrc`
-// sets `global-pnpmfile=` so contributors with a user-level
-// `global-pnpmfile` configured don't accidentally double-apply hooks
+// `pnpm install --frozen-lockfile` in CI). `pnpm-workspace.yaml`
+// sets `globalPnpmfile: null` so contributors with a user-level
+// global hook configured don't accidentally double-apply hooks
 // and break `--frozen-lockfile` via pnpmfileChecksum drift — every
 // machine that runs pnpm in this repo (yours, mine, CI) hashes
 // exactly this file and nothing else.
@@ -96,33 +96,9 @@ function readPackage(pkg) {
     }
   }
 
-  // `pnpm.overrides` — and `resolutions`, the yarn-compatible alias
-  // pnpm folds into the same mechanism — are not dependency fields,
-  // but pnpm resolves their values exactly like specs. Without this,
-  // a git spec parked in an override slipped past the manifest scan
-  // and was caught only by the fetcher below, whose error names
-  // neither the package nor where it was declared.
-  //
-  // That is the quietest injection point in the manifest: an override
-  // repoints a TRANSITIVE package, so it lands in nobody's
-  // `dependencies` block and a reviewer skimming the diff for a git
-  // URL in the usual place will not see it.
-  //
-  // Gated on first-party manifests. pnpm only honours overrides from
-  // the workspace root, so a registry package's own copy is inert and
-  // flagging it would be a false positive with nothing behind it. This
-  // gate is slightly wider than the root — it also covers @pwrgit/*
-  // packages, where an override is dead config pnpm ignores; a git URL
-  // sitting in one is still worth failing on rather than leaving to
-  // rot.
-  //
-  // NOT covered: specs declared in a pnpm-workspace.yaml `catalog:` /
-  // `catalogs:` block. readPackage only ever sees manifests, and the
-  // importer's spec is the literal string `catalog:` — the git URL
-  // lives in a file this hook never reads, so closing that would mean
-  // parsing YAML here with no dependencies available. The fetcher
-  // below still refuses the fetch, so a catalog entry is a worse error
-  // message, not a bypass.
+  // Keep diagnostics for git specs in obsolete first-party manifest config.
+  // pnpm 12 applies YAML overrides through updateConfig below; catalog specs
+  // are checked by the custom resolver before contacting their git remote.
   if (isWorkspaceRootPackage(pkg)) {
     scanOverrides(pkg.pnpm && pkg.pnpm.overrides, "pnpm.overrides", pkg.name);
     scanOverrides(pkg.resolutions, "resolutions", pkg.name);
@@ -165,31 +141,37 @@ function isWorkspaceRootPackage(pkg) {
 // package's manifest at fetch time), the corresponding pnpm fetcher
 // itself refuses to run.
 //
-// pnpm's `hooks.fetchers` API treats each entry as a FACTORY function
-// that's called with `({ defaultFetchers })` at fetcher-registry
-// build time; the factory's RETURN VALUE is the actual fetcher pnpm
-// invokes later when a dep needs fetching. So this function takes
-// the factory shape (the arg is ignored — we're not delegating to a
-// default) and returns the throwing fetcher.
-function blockGitFetcher(/* { defaultFetchers } */) {
-  return async () => {
+// pnpm 12 uses top-level fetcher objects; hooks.fetchers was removed in v11.
+const blockGitFetcher = {
+  canFetch(pkgId, resolution) {
+    return isGitSpec(pkgId) || resolution.type === "git" ||
+      resolution.type === "gitHostedTarball" || isGitSpec(resolution.tarball) ||
+      /^https?:\/\/(?:codeload|api)\.github\.com\//.test(resolution.tarball ?? "");
+  },
+  async fetch() {
     throw new Error(
       "[pwrgit pnpmfile] Blocked pnpm git dependency fetch. See .pnpmfile.cjs."
     );
-  };
+  }
+};
+
+// Overrides now live in pnpm-workspace.yaml and never reach readPackage.
+function updateConfig(config) {
+  scanOverrides(config.overrides, "overrides", "pnpm-workspace.yaml");
+  return config;
 }
 
 module.exports = {
   hooks: {
     readPackage,
-    fetchers: {
-      // `git`: direct git URL fetches (`git+ssh://`, `git@`, etc.)
-      // `gitHostedTarball`: pnpm's shortcut for github/gitlab/bitbucket
-      //   URLs and `user/repo` shortcuts — pnpm downloads a tarball of
-      //   the resolved commit instead of cloning. Different fetcher,
-      //   same supply-chain concern.
-      git: blockGitFetcher,
-      gitHostedTarball: blockGitFetcher
+    updateConfig
+  },
+  // Check resolved specs too, including catalog entries, before git ls-remote.
+  resolvers: [{
+    canResolve: (dep) => isGitSpec(dep.bareSpecifier),
+    resolve: (dep) => {
+      throw blockedGitSpecError(dep.alias, dep.bareSpecifier, "resolved dependency");
     }
-  }
+  }],
+  fetchers: [blockGitFetcher]
 };

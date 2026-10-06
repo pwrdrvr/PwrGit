@@ -2,6 +2,16 @@ packages:
   - apps/*
   - packages/*
 
+# pnpm 12 reads package-manager settings here, not from package.json or .npmrc.
+overrides:
+  "@types/node": "24.12.4"
+  js-yaml: "4.3.2"
+  hono: "4.13.7"
+  "@pwrdrvr/codex-app-server-protocol": "0.159.2"
+
+# Ignore machine-local hooks so every install hashes only .pnpmfile.cjs.
+globalPnpmfile: null
+
 # Dependencies that need their build scripts to run during install.
 allowBuilds:
   # v13 ships Node-API binaries. pnpm otherwise infers `node-gyp rebuild` from
@@ -14,6 +24,7 @@ allowBuilds:
   # the binary instead.
   electron-winstaller: true
   esbuild: true
+  sharp: true
 
 # Supply-chain cooldown: refuse to resolve any npm release younger than seven
 # days (10080 minutes), so a compromised publish has a week to be caught and
