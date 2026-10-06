@@ -39,7 +39,7 @@
   "dependencies": {
     "@fontsource/geist-mono": "^5.3.0",
     "@fontsource/geist-sans": "^5.3.0",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@octokit/graphql": "^8.2.1",
     "@pwrdrvr/agent-acp": "^0.16.1",
     "@pwrdrvr/agent-client": "^0.8.2",
