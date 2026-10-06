@@ -94,6 +94,16 @@ let chips: [Chip] = [
     file: "download-windows.png", family: .download, style: .secondary,
     title: "Download for Windows", subtitle: "x64 installer"
   ),
+  // Linux chips link to the .deb alias. The README lists RPM, pacman and
+  // tar.gz directly beneath them, so the subtitle names the format it hands out.
+  Chip(
+    file: "download-linux-x64.png", family: .download, style: .secondary,
+    title: "Download for Linux", subtitle: "x64 · .deb for Debian, Ubuntu"
+  ),
+  Chip(
+    file: "download-linux-arm64.png", family: .download, style: .secondary,
+    title: "Download for Linux", subtitle: "arm64 · .deb for Debian, Ubuntu"
+  ),
   Chip(file: "link-docs.png", family: .link, style: .secondary, title: "Documentation", subtitle: ""),
   Chip(file: "link-website.png", family: .link, style: .secondary, title: "pwrgit.com", subtitle: ""),
   Chip(file: "link-about.png", family: .link, style: .secondary, title: "About PwrDrvr", subtitle: ""),
