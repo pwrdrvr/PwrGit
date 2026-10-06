@@ -154,6 +154,10 @@ describe("first-party name policy", () => {
     writePackage(join(root, "apps", "desktop", "package.json"), {
       dependencies: { [`@${vendor}/p-map-iterable`]: "1.1.2" },
     });
+    write(
+      join(root, "pnpm-workspace.yaml"),
+      `minimumReleaseAgeExclude:\n  - "@${vendor}/p-map-iterable@1.2.0"\n`,
+    );
     write(join(root, "README.md"), "first-party project\n");
     runGit(root, ["add", "."]);
     runGit(root, ["config", "color.grep", "always"]);
