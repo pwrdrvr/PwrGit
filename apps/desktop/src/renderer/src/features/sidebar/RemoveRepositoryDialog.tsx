@@ -453,10 +453,13 @@ export function RemoveRepositoryDialog({
             {status.partial && <p className="remove-repo__callout">{partialCallout(review, status)}</p>}
 
             {status.needsName && (
+              <p className="remove-repo__discards">
+                This discards {status.discards.join("; ")}. None of it is on a remote.
+              </p>
+            )}
+            {status.needsName && (
               <label className="field remove-repo__gate">
-                <span className="field__label">
-                  This discards {status.discards.join("; ")}. Type {review.name} to remove it.
-                </span>
+                <span className="field__label">Type {review.name} to remove it</span>
                 <input
                   className="modal__input"
                   autoComplete="off"

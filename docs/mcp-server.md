@@ -63,7 +63,10 @@ refresh tools. **PwrGit Workspace Control** additionally grants `app.navigate`.
 Existing Sessions do not gain navigation implicitly: OAuth scopes and role
 permissions must both grant it. Reauthorize if the original OAuth scope excluded
 `app.navigate`. Repository boundaries filter catalog entries and worktrees and
-are rechecked before an action. No arbitrary command dispatch, commit, push,
+are rechecked before an action. A repository hidden in a profile (sidebar row
+menu → Hide repository) is left out of that profile's catalog, so the app read
+and navigate tools neither list nor open it; the path-based Git tools still
+read it, because it is still on disk. No arbitrary command dispatch, commit, push,
 file editing or destructive Git operation is exposed by these app tools.
 
 Desktop root discovery now uses profile roots and indexed repositories rather

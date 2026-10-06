@@ -126,6 +126,8 @@ export async function launchApp(
      *  `simulateDevUpdateCheck`). Slow it down to act on a card that only
      *  exists mid-download. */
     updateStepMs?: number;
+    /** Where Remove repository moves folders instead of the OS Trash. */
+    trashDir?: string;
   } = {}
 ): Promise<AppHandle> {
   const userData = mkdtempSync(join(tmpdir(), "pwrgit-e2e-ud-"));
@@ -200,7 +202,10 @@ export async function launchApp(
         : { PWRGIT_E2E_FAIL_READ_ONCE: opts.failReadOnce.join(",") }),
       ...(opts.updateStepMs === undefined
         ? {}
-        : { PWRGIT_E2E_UPDATE_STEP_MS: String(opts.updateStepMs) })
+        : { PWRGIT_E2E_UPDATE_STEP_MS: String(opts.updateStepMs) }),
+      ...(opts.trashDir === undefined
+        ? {}
+        : { PWRGIT_E2E_TRASH_DIR: opts.trashDir })
     })
   });
   const window = await app.firstWindow();

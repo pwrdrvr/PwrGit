@@ -161,7 +161,8 @@ describe("RemoveRepositoryDialog", () => {
 
     await act(async () => radio("What to do with feat/dirty", "Discard").click());
     // A full removal that discards work asks for the name.
-    expect(text()).toContain("This discards 3 uncommitted files, 2 commits in feat/dirty");
+    expect(text()).toContain("This discards 3 uncommitted files, 2 commits in feat/dirty. None of it is on a remote.");
+    expect(text()).toContain("Type harbor-api to remove it");
     expect(dangerButton().textContent).toBe("Remove harbor-api");
     expect(dangerButton().disabled).toBe(true);
     const input = container.querySelector<HTMLInputElement>(".remove-repo__gate input")!;

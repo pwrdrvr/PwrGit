@@ -5,6 +5,7 @@ import {
   type RemovalCheckout,
   type RemovalStatus,
   type RemovalStep,
+  type Repo,
   type RepoRemovalResult,
   type RepoRemovalReview
 } from "@pwrgit/shared";
@@ -122,7 +123,8 @@ export function resultHeadline(
     return sum + (checkout?.bytes ?? 0);
   }, 0);
   const anyDeleted = moved.some((s) => s.kind === "delete");
-  const where = anyDeleted ? "are gone" : "are in the Trash";
+  const verb = moved.length === 1 ? "is" : "are";
+  const where = anyDeleted ? `${verb} gone` : `${verb} in the Trash`;
   const size = bytes > 0 ? `, ${formatBytes(bytes)},` : "";
   if (result.outcome === "stopped") {
     return {
@@ -140,5 +142,20 @@ export function resultHeadline(
   return {
     title: `Removed ${review.name}`,
     message: `${plural(moved.length, "folder")}${size} ${where}. It is gone from this profile and will not come back in a scan. The remote still has every pushed branch.`
+  };
+}
+
+/** The toast after Hide: where the repository went, and what went with it. */
+export function hiddenToast(repo: Repo): { title: string; message: string } {
+  const linked = repo.worktrees.filter((w) => !w.isPrimary).length;
+  const worktrees =
+    linked === 0
+      ? ""
+      : linked === 1
+        ? " Its worktree is hidden with it."
+        : ` Its ${linked} worktrees are hidden with it.`;
+  return {
+    title: `Hid ${repo.name}`,
+    message: `It stays on disk and out of this profile's sidebar, search, Fetch all and Try pull all.${worktrees}`
   };
 }

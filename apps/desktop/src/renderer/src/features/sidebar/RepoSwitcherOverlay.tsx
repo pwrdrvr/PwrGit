@@ -1155,7 +1155,7 @@ export function RepoSwitcherOverlay({
                   role="option"
                   aria-selected={selectedResult(i)}
                   tabIndex={-1}
-                  className={`overlay-result overlay-result--hidden${selectedResult(i) ? " is-selected" : ""}`}
+                  className={`overlay-result${hiddenItem ? " overlay-result--hidden" : " overlay-result--command"}${selectedResult(i) ? " is-selected" : ""}`}
                   onMouseEnter={() => selectItem(i)}
                   onClick={() => pickItem(item)}
                 >

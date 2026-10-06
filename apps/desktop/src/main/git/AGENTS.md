@@ -651,3 +651,32 @@ the displayed key, and refuses existing trust entries, published-key mismatches,
 or configuration/trust changes since inspection. Preserve the terminal fallback
 for custom SSH commands, proxy routing, aliases and trust files; do not bypass
 those settings or replace existing keys to make a clone succeed.
+
+## A hidden repository is filtered in SQL, by path
+
+`hidden_repos` (0041) is keyed `(profile_id, path)`, not by `repos.id`: a
+rescan drops and recreates repo rows, and a hide has to outlive that.
+Anything that hands a profile's repositories to someone — `listRepos`,
+`browseRepos`, `searchAll`, bulk sync, maintenance, the pruner — puts
+`visibleRepoSql("r")` (`hidden-repos.ts`) in its WHERE clause, because several
+of those are capped and a filter after the cap does not give the slots back.
+⌘K rows have no repo column, so `SEARCH_ROW_REPO_SQL` maps each kind to its
+repository; a `change_request` row's `entity_id` is its `repo_open_pr` id
+(0039), not `repo:number`. A caller asking what is on disk rather than what to
+show (clone's "already cloned", fork's "Reveal checkout") passes
+`listRepos(id, { includeHidden: true })`. `hidden-repos.test.ts` covers both
+profiles.
+
+## Removing a repository never prunes
+
+`repo-removal.ts` reviews every checkout, then on `repo:remove` reviews again
+and refuses (`review_changed`) if the answers no longer fit — the renderer's
+review is never trusted to move anything. Linked worktrees go first, each
+inside its worktree lock with `lockForRemoval` held: the folder moves to the
+Trash, then `git worktree remove --force <path>` clears that one record. The
+main checkout goes last, only if every worktree went and nothing that lives
+in `.git` was kept, inside the worktree and then the repository lock. No step
+runs `git worktree prune`. Push first is the renderer's, through the tracked
+push commands, before `repo:remove` is sent; main refuses a decision set that
+still contains one. E2E swaps the Trash for a directory with
+`PWRGIT_E2E_TRASH_DIR`.

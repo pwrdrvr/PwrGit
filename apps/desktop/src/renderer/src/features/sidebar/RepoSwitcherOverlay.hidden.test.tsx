@@ -150,7 +150,7 @@ describe("RepoSwitcherOverlay hidden rows", () => {
   it("opens the sidebar's Hidden list from the command", async () => {
     await mount();
     await typeQuery("show hidden");
-    const row = container.querySelector<HTMLElement>(".overlay-result--hidden");
+    const row = container.querySelector<HTMLElement>(".overlay-result--command");
     expect(row?.textContent).toContain("Show hidden repositories");
     expect(row?.textContent).toContain("1 in Work");
     await act(async () => row?.click());

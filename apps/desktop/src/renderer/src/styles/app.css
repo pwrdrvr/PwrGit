@@ -17212,6 +17212,15 @@ button.agent-auth-node:focus-visible,
   color: var(--text-primary);
   font: 500 12.5px/1.5 var(--font-sans);
 }
+.remove-repo__discards {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font: 500 12.5px/1.5 var(--font-sans);
+}
 .remove-repo__gate {
   margin: 8px 0 0;
 }
@@ -17251,7 +17260,7 @@ button.agent-auth-node:focus-visible,
   color: var(--success-text);
 }
 .remove-repo__step.is-running .remove-repo__step-status {
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .remove-repo__step.is-failed .remove-repo__step-status {
   color: var(--danger-text);

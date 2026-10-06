@@ -62,6 +62,7 @@ import { BulkSyncDialog } from "./BulkSyncDialog";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 import { HiddenReposButton } from "./HiddenReposButton";
 import { RemoveRepositoryDialog } from "./RemoveRepositoryDialog";
+import { hiddenToast } from "./remove-repo-view";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { unhideRepo } from "../../state/useHiddenRepos";
 import {
@@ -1006,16 +1007,8 @@ export function Sidebar({
         showErrorToast({ title: `Could not hide ${repo.name}`, message: result.error.message });
         return;
       }
-      const linked = repo.worktrees.filter((w) => !w.isPrimary).length;
       showInfoToast({
-        title: `Hid ${repo.name}`,
-        message: `It stays on disk and out of this profile's sidebar, search, Fetch all and Try pull all.${
-          linked === 0
-            ? ""
-            : linked === 1
-              ? " Its worktree is hidden with it."
-              : ` Its ${linked} worktrees are hidden with it.`
-        }`,
+        ...hiddenToast(repo),
         action: {
           label: "Undo",
           run: () =>
