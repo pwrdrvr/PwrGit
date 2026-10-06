@@ -1,7 +1,12 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
-    directory: "/"
+    # Security alerts identify the workspace manifests individually. Include
+    # their locations so the security group also covers cross-directory fixes.
+    directories:
+      - "/"
+      - "/apps/*"
+      - "/packages/*"
     schedule:
       interval: "weekly"
     # Do not propose a release until it has cleared the same seven-day window
@@ -19,6 +24,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       react-runtime:
         patterns:
           - "react"
