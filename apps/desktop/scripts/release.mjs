@@ -484,7 +484,7 @@ if (!signStageOnly) {
   mkdirSync(stageDir, { recursive: true });
   runChecked("pnpm", deployArgs, { cwd: repoRoot });
 
-  configureStagePackageManager();
+  if (!linux) configureStagePackageManager();
 
   // 4. Copy the build output, notices, changelog, and electron-builder inputs into the
   //    stage so electron-builder finds them at well-known paths. pnpm deploy

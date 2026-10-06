@@ -37,6 +37,13 @@ protected job verifies a SHA-256 archive prepared by the unprivileged job and
 does not check out source or install dependencies after credentials become
 available.
 
+Preparation stamps the macOS and Windows deploy stage's `packageManager` as
+`npm@<preparation npm version>` so electron-builder uses its npm collector.
+`npm list` inspects the already installed production tree without installing
+dependencies or running lifecycle scripts; npm comes with the signing runner's
+Node runtime. Signing does not require pnpm or Corepack. The workspace stays
+on pnpm, and native Linux packaging keeps its existing pnpm collector.
+
 ## Branch lifecycle
 
 `main` owns the active `N.N` train through alpha, beta, first stable, and

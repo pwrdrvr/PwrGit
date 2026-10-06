@@ -57,6 +57,7 @@ test.each(["darwin", "win32"])("selects npm only in the prepared manifest (%s)",
     // sign-stage-only neither installs anything nor regenerates the manifest.
     const preparation = source.slice(source.indexOf("if (!signStageOnly) {"), source.indexOf("} else if (!existsSync(stageDir))"));
     expect(preparation.indexOf("configureStagePackageManager();")).toBeGreaterThan(preparation.indexOf('runChecked("pnpm", deployArgs'));
+    expect(preparation).toContain("if (!linux) configureStagePackageManager();");
     expect(source.match(/configureStagePackageManager\(\);/g)).toHaveLength(1);
   } finally {
     rmSync(stageDir, { recursive: true, force: true });
