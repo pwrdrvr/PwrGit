@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.32.0 - 2026-10-06
+
+- Updates - Fixed Beta · Prerelease to include newer staged Stable releases and Stable prerelease candidates, so you can follow those updates without changing your saved channel selection. A newer alpha or beta still takes precedence.
+- Linux - Fixed missing application-launcher icons by installing the PwrGit icon at standard desktop-theme sizes. Native packages now validate the installed icons as well as the app payload.
+
 ## v0.31.0 - 2026-10-05
 
 - Navigation - Added Back and Forward controls, keyboard shortcuts, and a history menu. Navigation remembers your worktree and open commit per profile across relaunches, while sidebar jumps keep your place instead of forcing collapsed worktree lists open.
