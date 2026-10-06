@@ -116,6 +116,7 @@ import {
   sanitizeRendererErrorReport
 } from "./renderer-errors";
 import { watchProcessIds } from "./process-ids";
+import { watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
 import { readGitIdentityDefaults } from "./profiles/git-identity";
@@ -364,6 +365,7 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
+    watchSystemShutdown();
     wireAppMenuBridge();
     wireWindowControlsBridge();
     // App log: ring buffer + file, streamed to the Logs window (Help › Logs).
