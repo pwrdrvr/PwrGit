@@ -8,7 +8,7 @@ helper. App-backed tools run whichever Git is chosen in the app's Settings, whic
 is the bundled Git unless someone picks an installed one.
 
 The desktop app exposes OAuth-protected MCP at
-`http://127.0.0.1:51731/mcp`. Enable local-agent access in Settings → Agents,
+`http://127.0.0.1:51731/mcp`. Enable local-agent access in Settings → Local Agents,
 connect a standard MCP OAuth client, and approve it in PwrGit’s native window.
 See [the connection guide](../../docs/mcp-server.md#connect-an-agent).
 

@@ -3,23 +3,27 @@ import type { IgnoreDestination, IgnoreOptions, IgnorePatternChoice } from "@pwr
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../../lib/toast";
 import { useModal } from "../../lib/useModal";
+import { currentPlatform, thisMachineNoun } from "../../lib/platform";
 
-const descriptions: Record<IgnoreDestination, string> = {
-  gitignore: "Committed with the project. Everyone who clones it gets this rule.",
-  exclude: "This clone only, never committed. Shared by all its worktrees.",
-  global: "Every repository on this Mac, in PwrGit and in your terminal."
-};
+function description(destination: IgnoreDestination, platform: string): string {
+  if (destination === "gitignore") return "Committed with the project. Everyone who clones it gets this rule.";
+  if (destination === "exclude") return "This clone only, never committed. Shared by all its worktrees.";
+  return `Every repository on this ${thisMachineNoun(platform)}, in PwrGit and in your terminal.`;
+}
 
 export function IgnoreDialog({
   worktreeId,
   path,
   directory,
-  onClose
+  onClose,
+  platform = currentPlatform()
 }: {
   worktreeId: string;
   path: string;
   directory: boolean;
   onClose: () => void;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const [options, setOptions] = useState<IgnoreOptions | null>(null);
   const [choice, setChoice] = useState<IgnorePatternChoice>(directory || path.includes("/") ? "folder" : "file");
@@ -84,7 +88,7 @@ export function IgnoreDialog({
             {options?.destinations.map((item) => (
               <button key={item.destination} type="button" className={`discovery-ignore__destination${item.destination === destination ? " is-selected" : ""}`} onClick={() => setDestination(item.destination)}>
                 <span className="discovery-ignore__radio" />
-                <span className="discovery-ignore__destination-copy"><code title={item.path}>{item.displayPath}</code><small>{descriptions[item.destination]}</small></span>
+                <span className="discovery-ignore__destination-copy"><code title={item.path}>{item.displayPath}</code><small>{description(item.destination, platform)}</small></span>
                 <span className="discovery-ignore__destination-meta"><span className={`discovery-scope discovery-scope--${item.destination}`}>{item.scope}</span>{item.destination === options.suggested && <small>suggested</small>}</span>
               </button>
             ))}
@@ -93,7 +97,7 @@ export function IgnoreDialog({
             <div className="discovery-ignore__preview">
               <code title={selectedDestination.path}>{selectedDestination.displayPath}</code>
               <code>+ {selectedPattern.pattern}</code>
-              <span>{destination === "gitignore" ? "This becomes a change to commit for the team." : destination === "exclude" ? `Takes effect in all ${options?.worktreeCount ?? 1} worktrees of this clone. Nothing to commit.` : "Every repository on this Mac will ignore it. Nothing to commit."}</span>
+              <span>{destination === "gitignore" ? "This becomes a change to commit for the team." : destination === "exclude" ? `Takes effect in all ${options?.worktreeCount ?? 1} worktrees of this clone. Nothing to commit.` : `Every repository on this ${thisMachineNoun(platform)} will ignore it. Nothing to commit.`}</span>
             </div>
           )}
           {error !== null && <div className="modal__error">{error}</div>}

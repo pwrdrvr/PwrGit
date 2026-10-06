@@ -1,3 +1,5 @@
+import { localMachineNoun } from "@pwrgit/shared";
+
 /** Renderer platform helpers. The preload bridge is authoritative: Chromium's
  *  navigator fields can be reduced or report compatibility values. */
 export function currentPlatform(): string {
@@ -55,6 +57,11 @@ export function revealPathLabel(platform: string = currentPlatform()): string {
   if (isMacPlatform(platform)) return "Reveal in Finder";
   if (platform === "win32") return "Show in Explorer";
   return "Show in folder";
+}
+
+/** What this machine is called in copy: "Mac", "PC", or "computer". */
+export function thisMachineNoun(platform: string = currentPlatform()): string {
+  return localMachineNoun(platform);
 }
 
 /** A path's non-empty segments, accepting POSIX, drive-letter, mixed, and UNC

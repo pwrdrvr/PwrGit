@@ -657,7 +657,7 @@ export class McpPolicyStore {
     } catch {
       throw new McpAccessError(
         "policy_unavailable",
-        `MCP policy is unavailable at ${this.filePath}; create a Session in PwrGit Settings > Agents`
+        `MCP policy is unavailable at ${this.filePath}; create a Session in PwrGit Settings > Local Agents`
       );
     }
     try {
@@ -695,7 +695,7 @@ export class PolicyFileAuthorizer implements McpAuthorizer {
     if (token === undefined || token === "") {
       throw new McpAccessError(
         "missing_session_token",
-        "PWRGIT_MCP_SESSION_TOKEN is required; create a Session in PwrGit Settings > Agents"
+        "PWRGIT_MCP_SESSION_TOKEN is required; create a Session in PwrGit Settings > Local Agents"
       );
     }
     return new PolicyFileAuthorizer(defaultMcpPolicyFile(env), token);

@@ -9,7 +9,7 @@ bounded inputs, fail-closed RBAC, named revocable Sessions, and contract-level
 integration tests.
 
 The Electron app does not need to remain running for stdio clients; HTTP
-clients require the app and its local-agent listener to remain running. Settings → Agents owns the
+clients require the app and its local-agent listener to remain running. Settings → Local Agents owns the
 authorization graph and writes the cross-platform `mcp-policy.json` consumed
 by standalone processes.
 
@@ -81,7 +81,7 @@ identity ceremony without improving isolation for that transport. The token is
 user-private policy file. `PWRGIT_MCP_POLICY_FILE` overrides the standard
 PwrGit app-data path when needed.
 
-Settings → Agents visualizes **Session → role → effective permissions and
+Settings → Local Agents visualizes **Session → role → effective permissions and
 repository boundary**. It can revoke Sessions, assign roles, and
 create, edit, or delete custom roles. Built-in roles are immutable and checked
 against their canonical definitions on every policy read.
@@ -113,7 +113,7 @@ MCP metadata; they are not used as authorization.
 
 ## Connect an agent
 
-Enable **Settings → Agents → Enable local-agent access**. PwrGit serves
+Enable **Settings → Local Agents → Enable local-agent access**. PwrGit serves
 MCP at `http://127.0.0.1:51731/mcp` while enabled and running. The preference
 persists across app restarts; it defaults to off.
 

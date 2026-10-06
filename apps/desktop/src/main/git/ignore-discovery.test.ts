@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { localMachineNoun } from "@pwrgit/shared";
 import { appendToIgnoreFile } from "./gitignore";
 import { ignoreDestinations, patternForChoice, readIgnoredSummary, readIgnoreOptions, suggestIgnoreDestination } from "./ignore-discovery";
 import { createSystemGit } from "./test-support/system-git";
@@ -61,6 +62,10 @@ describe("ignore discovery with linked worktrees", () => {
     if (!locations.ok) throw new Error(locations.error.message);
     const exclude = locations.value.destinations.find((item) => item.destination === "exclude")?.path;
     if (exclude === undefined) throw new Error("missing exclude");
+    expect(locations.value.destinations.find((item) => item.destination === "global")?.scope).toBe(`this ${localMachineNoun(process.platform)}`);
+    const onWindows = await ignoreDestinations(systemGit, linked, "win32");
+    if (!onWindows.ok) throw new Error(onWindows.error.message);
+    expect(onWindows.value.destinations.find((item) => item.destination === "global")?.scope).toBe("this PC");
     appendToIgnoreFile(exclude, ["/.local/"]);
     appendToIgnoreFile(global, [".DS_Store"]);
     writeFileSync(join(linked, ".gitignore"), "*.log\n");
