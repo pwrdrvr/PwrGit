@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.31.0 - 2026-10-05
+
+- Navigation - Added Back and Forward controls, keyboard shortcuts, and a history menu. Navigation remembers your worktree and open commit per profile across relaunches, while sidebar jumps keep your place instead of forcing collapsed worktree lists open.
+- Pull and merge requests - Added an in-app request view with file changes, commits, and a clear indication of which local or fetched revision you are reading. Inspect a request without checking out its branch or creating a worktree, and compare local work with the forge's head when they differ.
+- Worktrees - Added a Worktrees tab with In flight, Finished, and All filters. Other worktrees now shows up to six in-flight entries, with access to the full list and a visiting row for a selected checkout outside the visible slice. Merged-request status refreshes sooner when its upstream disappears.
+- Branches and remotes - Improved refs-browser keyboard navigation, double-click actions, and worktree-holder details to match the sidebar. Remote branch actions remain aligned and accessible in narrow windows, and creating a worktree from a request preserves its request context.
+- Image diffs - Reduced image-preview transfer and memory overhead by carrying raw image bytes instead of base64 strings. Improved preview and lightbox image ownership so closing or changing views does not invalidate images still on screen.
+- Error recovery - Added recoverable error surfaces for file details and diffs, with Retry and Logs actions instead of a blank window. Renderer errors now include stack traces in the app log; a failed image lightbox closes with an explanatory toast while leaving the diff usable.
+- Interface - Improved consistent branch, worktree, status, and button icons across platforms, corrected symbol-font fallback, and kept selection-bar actions visible in narrow panes.
+- Reliability - Improved event delivery with one shared IPC listener per window, avoiding listener-limit warnings as more repositories and views are opened.
+
 ## v0.30.0 - 2026-10-05
 
 - Linux - Added native DEB, RPM, pacman, and portable tar.gz downloads for x64 and arm64. Native packages can check and download updates in-app; Restart requests administrator authorization to install, while ordinary quit leaves updates uninstalled. Failed updates offer copyable terminal instructions, and portable builds explain manual replacement.
