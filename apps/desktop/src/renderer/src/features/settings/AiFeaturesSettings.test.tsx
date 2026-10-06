@@ -49,7 +49,8 @@ const PERSONAL: Profile = {
   email: "me@example.com",
   mono: "P",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 
 function model(overrides: Partial<CodexModelOption> & { id: string }): CodexModelOption {

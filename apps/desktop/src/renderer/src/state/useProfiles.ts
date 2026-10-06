@@ -31,6 +31,9 @@ export type UseProfiles = ProfileList & {
   createProfile: (req: CreateProfileRequest) => Promise<string | null>;
   /** Patch an existing profile. Returns an error message or null. */
   updateProfile: (req: UpdateProfileRequest) => Promise<string | null>;
+  /** Put every profile in this order (the Profiles menu's order, and so its
+   *  ⌘1–⌘9 shortcuts). Returns an error message or null. */
+  reorderProfiles: (profileIds: string[]) => Promise<string | null>;
   /** Permanently remove a profile's PwrGit-owned data. */
   deleteProfile: (req: DeleteProfileRequest) => Promise<string | null>;
   /** Replace a profile's scan roots (triggers a rescan). */
@@ -115,6 +118,14 @@ export function useProfiles(): UseProfiles {
     []
   );
 
+  const reorderProfiles = useCallback(
+    async (profileIds: string[]): Promise<string | null> => {
+      const r = await dispatch("profile:reorder", { profileIds });
+      return r.ok ? null : r.error.message;
+    },
+    []
+  );
+
   const deleteProfile = useCallback(
     async (req: DeleteProfileRequest): Promise<string | null> => {
       const r = await dispatch("profile:delete", req);
@@ -145,6 +156,7 @@ export function useProfiles(): UseProfiles {
     openProfile,
     createProfile,
     updateProfile,
+    reorderProfiles,
     deleteProfile,
     setRoots,
     pickDirectories

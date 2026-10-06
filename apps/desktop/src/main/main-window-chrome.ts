@@ -28,7 +28,8 @@ type MainChromeOptions = Pick<
  *   the painted one: `titleBarStyle: "hidden"` is what `frame: false` is, and
  *   Electron's `RootView::SetMenu` returns before building a menu bar for a
  *   window with no frame. It registers that menu's accelerators first, so
- *   Ctrl+, and Ctrl+Shift+L keep working with no bar to attach them to.
+ *   Ctrl+, and the Ctrl+1–9 profile shortcuts keep working with no bar to
+ *   attach them to.
  */
 export function mainWindowChromeOptions(
   theme: WindowChromeTheme = DEFAULT_WINDOW_CHROME_THEME,

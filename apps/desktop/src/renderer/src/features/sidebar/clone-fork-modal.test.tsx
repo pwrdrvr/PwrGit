@@ -21,7 +21,8 @@ const profile: Profile = {
   email: "test@example.com",
   mono: "T",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 
 let container: HTMLDivElement;

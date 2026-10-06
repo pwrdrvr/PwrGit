@@ -30,6 +30,8 @@ export type ProfileHandlerDeps = {
   /** Close any window bound to the deleted profile and move focus to the
    *  surviving active profile. */
   onDeleted?: (deletedProfileId: string, activeProfileId: string) => void;
+  /** The profile order changed; the Profiles menu and its shortcuts follow. */
+  onReordered?: () => void;
 };
 
 export function registerProfileHandlers(
@@ -82,6 +84,13 @@ export function registerProfileHandlers(
         message: "Commit email can't be empty"
       });
     }
+    if (req.showInMenu !== undefined && typeof req.showInMenu !== "boolean") {
+      return err({
+        kind: "validation",
+        code: "show_in_menu_invalid",
+        message: "Show in Profiles menu must be on or off"
+      });
+    }
     if (
       req.theme !== undefined &&
       req.theme !== null &&
@@ -104,6 +113,26 @@ export function registerProfileHandlers(
     emitEvent("profile:changed", profiles.snapshot());
     onChanged?.(profile);
     return ok(profile);
+  });
+
+  bus.register("profile:reorder", (req) => {
+    // The renderer is not trusted to send the shape the type promises; a
+    // malformed list is a refused request, never a throw across the bus.
+    if (
+      !Array.isArray(req.profileIds) ||
+      !req.profileIds.every((id) => typeof id === "string")
+    ) {
+      return err({
+        kind: "validation",
+        code: "profile_order_invalid",
+        message: "A profile order must be a list of profile ids"
+      });
+    }
+    const reordered = profiles.reorder(req.profileIds);
+    if (!reordered.ok) return reordered;
+    emitEvent("profile:changed", reordered.value);
+    deps.onReordered?.();
+    return reordered;
   });
 
   bus.register("profile:completeOnboarding", (req) => {

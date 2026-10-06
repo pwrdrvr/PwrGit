@@ -3,7 +3,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DeleteProfileRequest, Profile } from "@pwrgit/shared";
+import type {
+  DeleteProfileRequest,
+  Profile,
+  UpdateProfileRequest
+} from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
   useProfiles: vi.fn()
@@ -21,7 +25,8 @@ const personal: Profile = {
   email: "me@example.com",
   mono: "P",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 const acme: Profile = {
   id: "acme",
@@ -29,13 +34,20 @@ const acme: Profile = {
   email: "me@acme.dev",
   mono: "A",
   roots: ["/projects/acme"],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 
 let container: HTMLDivElement;
 let root: Root;
 const deleteProfile = vi.fn<
   (req: DeleteProfileRequest) => Promise<string | null>
+>(async () => null);
+const updateProfile = vi.fn<
+  (req: UpdateProfileRequest) => Promise<string | null>
+>(async () => null);
+const reorderProfiles = vi.fn<
+  (profileIds: string[]) => Promise<string | null>
 >(async () => null);
 
 function profileState(profiles: Profile[]) {
@@ -47,7 +59,8 @@ function profileState(profiles: Profile[]) {
     retry: vi.fn(async () => undefined),
     openProfile: vi.fn(async () => undefined),
     createProfile: vi.fn(async () => null),
-    updateProfile: vi.fn(async () => null),
+    updateProfile,
+    reorderProfiles,
     deleteProfile,
     setRoots: vi.fn(async () => undefined),
     pickDirectories: vi.fn(async () => [])
@@ -88,6 +101,10 @@ async function typeConfirmation(value: string): Promise<void> {
 }
 
 beforeEach(() => {
+  // Shortcut caps read the platform from the preload bridge.
+  (window as unknown as { pwrgit: { platform: string } }).pwrgit = {
+    platform: "darwin"
+  };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -188,5 +205,165 @@ describe("ProfilesSettings deletion", () => {
       await Promise.resolve();
     });
     expect(container.querySelector(".modal--delete-profile")).toBeNull();
+  });
+});
+
+describe("ProfilesSettings menu order and visibility", () => {
+  const scratch: Profile = {
+    id: "scratch",
+    name: "Scratch",
+    email: "",
+    mono: "S",
+    roots: [],
+    onboardingCompleted: true,
+    showInMenu: false
+  };
+
+  function grip(name: string): HTMLButtonElement {
+    return row(name).querySelector<HTMLButtonElement>(
+      ".settings-profile-row__grip"
+    )!;
+  }
+
+  it("shows each profile's menu shortcut, numbered over the profiles the menu shows", async () => {
+    await render([personal, scratch, acme]);
+
+    const shortcut = (name: string) =>
+      row(name).querySelector(".settings-profile-row__shortcut")?.textContent ?? null;
+    expect(shortcut("Personal")).toBe("⌘1");
+    expect(shortcut("Scratch")).toBeNull();
+    expect(
+      row("Scratch").querySelector('[role="switch"]')?.getAttribute("aria-checked")
+    ).toBe("false");
+    // Scratch is skipped, so Acme takes the next number rather than ⌘3.
+    expect(shortcut("Acme")).toBe("⌘2");
+  });
+
+  it("switches a profile out of the Profiles menu", async () => {
+    await render([personal, acme]);
+
+    const toggle = row("Acme").querySelector<HTMLButtonElement>(
+      '[role="switch"]'
+    )!;
+    expect(toggle.getAttribute("aria-label")).toBe(
+      "Show Acme in the Profiles menu"
+    );
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await act(async () => toggle.click());
+
+    expect(updateProfile).toHaveBeenCalledExactlyOnceWith({
+      profileId: "acme",
+      showInMenu: false
+    });
+  });
+
+  it("moves a profile with the arrow keys on its grip", async () => {
+    await render([personal, scratch, acme]);
+
+    await act(async () => {
+      grip("Acme").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })
+      );
+    });
+    expect(reorderProfiles).toHaveBeenCalledExactlyOnceWith([
+      "personal",
+      "acme",
+      "scratch"
+    ]);
+
+    // Already first: nothing to move past.
+    reorderProfiles.mockClear();
+    await act(async () => {
+      grip("Personal").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })
+      );
+    });
+    expect(reorderProfiles).not.toHaveBeenCalled();
+  });
+
+  it("builds a second quick move on the first, before main confirms it", async () => {
+    // Main's profile:changed never arrives here (the mock list is fixed), so
+    // the second move has to start from the order the first one asked for.
+    await render([personal, scratch, acme]);
+    for (let i = 0; i < 2; i += 1) {
+      await act(async () => {
+        grip("Acme").dispatchEvent(
+          new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })
+        );
+      });
+    }
+    expect(reorderProfiles.mock.calls).toEqual([
+      [["personal", "acme", "scratch"]],
+      [["acme", "personal", "scratch"]]
+    ]);
+    expect(
+      [...container.querySelectorAll<HTMLElement>(".settings-profile-row")].map(
+        (element) => element.dataset["profileId"]
+      )
+    ).toEqual(["acme", "personal", "scratch"]);
+  });
+
+  it("keeps focus on the grip when a profile moves down", async () => {
+    await render([personal, scratch, acme]);
+    grip("Personal").focus();
+    await act(async () => {
+      grip("Personal").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+      );
+    });
+    expect(reorderProfiles).toHaveBeenCalledExactlyOnceWith([
+      "scratch",
+      "personal",
+      "acme"
+    ]);
+    expect(document.activeElement).toBe(grip("Personal"));
+  });
+
+  it("reorders by drag and drop", async () => {
+    await render([personal, scratch, acme]);
+    const store = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "",
+      dropEffect: "",
+      get types() {
+        return [...store.keys()];
+      },
+      setData: (type: string, value: string) => store.set(type, value),
+      getData: (type: string) => store.get(type) ?? ""
+    };
+    const fire = (target: HTMLElement, type: string, clientY = 0) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { dataTransfer, clientY });
+      target.dispatchEvent(event);
+    };
+
+    // jsdom lays nothing out, so every row's box is empty and any pointer
+    // lands in its lower half: the drop goes after the target.
+    await act(async () => fire(row("Personal"), "dragstart"));
+    await act(async () => fire(row("Acme"), "dragover"));
+    await act(async () => fire(row("Acme"), "drop"));
+
+    expect(reorderProfiles).toHaveBeenCalledExactlyOnceWith([
+      "scratch",
+      "acme",
+      "personal"
+    ]);
+  });
+
+  it("says so when the order could not be saved", async () => {
+    reorderProfiles.mockResolvedValueOnce(
+      "The profile list changed while you were reordering it. Try again."
+    );
+    await render([personal, acme]);
+
+    await act(async () => {
+      grip("Acme").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })
+      );
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "The profile list changed while you were reordering it. Try again."
+    );
   });
 });
