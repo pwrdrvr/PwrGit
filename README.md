@@ -98,7 +98,7 @@ features, and troubleshooting live at
    (`gh`) or GitLab CLI (`glab`) for hosted repository, fork, PR, and MR
    features. **Settings → Forges** shows what is connected and the exact command
    needed when it is not.
-4. **Optionally authorize a local agent.** Settings → Agents creates named,
+4. **Optionally authorize a local agent.** Settings → Local Agents creates named,
    revocable MCP Sessions and shows the Session → role → permission graph.
    Custom roles can restrict discovery, metadata, forge status, subscriptions,
    and the repository roots an agent may inspect.
@@ -153,7 +153,7 @@ expectations live in **[CONTRIBUTING.md](CONTRIBUTING.md)** and
 
 ### Connect a local agent over MCP
 
-Open **Settings → Agents**, enable local-agent access, then use the connection
+Open **Settings → Local Agents**, enable local-agent access, then use the connection
 commands shown there. PwrGit exposes OAuth-protected MCP at
 `http://127.0.0.1:51731/mcp`; approve the client’s Session Name and role in
 PwrGit’s native window. The app must remain running for HTTP clients.

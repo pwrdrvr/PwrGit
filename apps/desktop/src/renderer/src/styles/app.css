@@ -16434,7 +16434,7 @@ body.is-col-resizing {
   padding: 0 2px 4px;
 }
 
-/* Settings > Agents — Session → role → effective permission graph. */
+/* Settings > Local Agents — Session → role → effective permission graph. */
 .settings-stack--agents {
   max-width: 1120px;
   container: agent-settings / inline-size;

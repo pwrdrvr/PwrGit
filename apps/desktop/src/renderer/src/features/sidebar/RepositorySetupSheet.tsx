@@ -4,12 +4,13 @@ import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import { showErrorToast } from "../../lib/toast";
 import { ChevronGlyph } from "../../lib/ChevronGlyph";
+import { currentPlatform, thisMachineNoun } from "../../lib/platform";
 
-const layerTitle: Record<IgnoreDestination, string> = {
-  gitignore: "Team rules",
-  exclude: "This clone",
-  global: "This Mac"
-};
+function layerTitle(destination: IgnoreDestination, platform: string): string {
+  if (destination === "gitignore") return "Team rules";
+  if (destination === "exclude") return "This clone";
+  return `This ${thisMachineNoun(platform)}`;
+}
 const hookLanes = [
   { name: "Commit", action: "git commit", hooks: ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"] },
   { name: "Push", action: "git push", hooks: ["pre-push"] },
@@ -18,10 +19,12 @@ const hookLanes = [
   { name: "Rebase", action: "git rebase", hooks: ["pre-rebase", "post-rewrite"] }
 ] as const;
 
-export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose }: {
+export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose, platform = currentPlatform() }: {
   repo: { id: string; name: string; path: string };
   initialPage?: "hooks" | "ignore";
   onClose: () => void;
+  /** Explicit only in deterministic platform component tests. */
+  platform?: string;
 }) {
   const modalRef = useModal<HTMLDivElement>({ onClose });
   const [page, setPage] = useState(initialPage);
@@ -121,7 +124,7 @@ export function RepositorySetupSheet({ repo, initialPage = "hooks", onClose }: {
               <p className="repository-setup__intro">Git checks these three places in precedence order. Within a file, later matches can override earlier ones. Rules hide untracked files only.</p>
               <div className="repository-setup__tester"><label htmlFor="repository-setup-test">Test a path</label><form onSubmit={(event) => { event.preventDefault(); void test(); }}><input id="repository-setup-test" value={testPath} onChange={(event) => { setTestPath(event.target.value); setTestResult(null); }} placeholder="build/debug.log" spellCheck={false}/><button type="submit" className="modal__cancel" disabled={testBusy || testPath.trim() === ""}>{testBusy ? "Testing…" : "Test"}</button></form>{testError !== null && <p role="alert">{testError}</p>}{testResult !== null && <p role="status">{testResult.ignored ? "Ignored" : "Not ignored"}{testResult.pattern !== null && <> · <code>{testResult.source}:{testResult.line}</code> · <code>{testResult.pattern}</code></>}</p>}</div>
               {setup.ignore.map((layer, index) => <section key={layer.destination} className={`repository-setup__layer${winner === layer.destination ? " is-winning" : ""}`}>
-                <header><span className="repository-setup__ordinal">{index + 1}</span><div><strong>{layerTitle[layer.destination]}</strong><code title={layer.path}>{layer.displayPath}</code></div><span className={`discovery-scope discovery-scope--${layer.destination}`}>{layer.scope}</span>{layer.destination === "exclude" ? <button type="button" onClick={() => { setEditing(!editing); setExcludeDraft(layer.content); }}>{editing ? "Cancel" : "Edit inline"}</button> : <button type="button" onClick={() => void openPath(layer.path)}>{layer.destination === "gitignore" ? "Open in editor" : "Open file"}</button>}</header>
+                <header><span className="repository-setup__ordinal">{index + 1}</span><div><strong>{layerTitle(layer.destination, platform)}</strong><code title={layer.path}>{layer.displayPath}</code></div><span className={`discovery-scope discovery-scope--${layer.destination}`}>{layer.scope}</span>{layer.destination === "exclude" ? <button type="button" onClick={() => { setEditing(!editing); setExcludeDraft(layer.content); }}>{editing ? "Cancel" : "Edit inline"}</button> : <button type="button" onClick={() => void openPath(layer.path)}>{layer.destination === "gitignore" ? "Open in editor" : "Open file"}</button>}</header>
                 {layer.destination === "exclude" && editing ? <div className="repository-setup__editor"><textarea aria-label="Edit .git/info/exclude" value={excludeDraft} onChange={(event) => setExcludeDraft(event.target.value)} spellCheck={false}/><button type="button" className="modal__create" onClick={() => void saveExclude()} disabled={saving || excludeDraft === layer.content}>{saving ? "Saving…" : "Save rules"}</button></div> : <div className="repository-setup__lines">{layer.lines.length === 0 ? <span>No rules yet</span> : layer.lines.map((line) => <div key={line.number} className={winner === layer.destination && testResult?.line === line.number ? "is-winning" : ""}><span>{line.number}</span><code>{line.text}</code></div>)}</div>}
               </section>)}
             </>}
