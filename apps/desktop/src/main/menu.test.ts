@@ -329,7 +329,6 @@ describe("Window menu off macOS", () => {
     const menu = submenuOf("linux", "Window", opts);
     expect(flatten(menu)).toEqual([
       "role:minimize",
-      "role:close",
       "---",
       "Personal",
       "Scratch"
@@ -337,6 +336,15 @@ describe("Window menu off macOS", () => {
     expect(find(menu, "Scratch")?.checked).toBe(true);
     click(find(menu, "Personal"));
     expect(opts.onOpenProfile).toHaveBeenCalledWith("personal");
+  });
+
+  it("binds Ctrl+W once — to File → Close Window, not again in Window", () => {
+    for (const platform of ["linux", "win32"] as const) {
+      const closeItems = buildAppMenuTemplate(options(), platform)
+        .flatMap((menu) => (menu.submenu as MenuItemConstructorOptions[]) ?? [])
+        .filter((item) => item.role === "close");
+      expect(closeItems.map((item) => item.label)).toEqual(["Close Window"]);
+    }
   });
 
   it("says so when no profile window is open", () => {
