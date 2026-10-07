@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import {
   discoverCodexCommands,
   getCodexInstallCandidatePaths
@@ -42,7 +43,10 @@ const HOMEBREW = "/opt/homebrew/bin/codex";
 const LOCAL = "/usr/local/bin/codex";
 const PINNED = "/fixture/pinned/codex";
 const OVERRIDE = "/fixture/override/codex";
-const PATH_CODEX = "/fixture/bin/codex";
+const PATH_DIRECTORY = "/fixture/bin";
+// The dependency resolves PATH entries with host path joining, even when
+// discovery is explicitly targeting macOS on a Windows test runner.
+const PATH_CODEX = join(PATH_DIRECTORY, "codex");
 
 function discover(env: NodeJS.ProcessEnv = {}, configuredCommand?: string) {
   return discoverCodexCommands({ platform: "darwin", homeDir: HOME, env, configuredCommand });
@@ -72,7 +76,7 @@ describe("macOS Codex install discovery dependency contract", () => {
   it("preserves PATH and install order when versions tie", async () => {
     const commands = [PATH_CODEX, CHATGPT, CODEX, USER_CHATGPT, USER_CODEX, HOMEBREW, LOCAL];
     commands.forEach((command) => fixtures.versions.set(command, "0.160.0"));
-    const snapshot = await discover({ PATH: "/fixture/bin" });
+    const snapshot = await discover({ PATH: PATH_DIRECTORY });
     expect(snapshot.candidates.map((candidate) => candidate.command)).toEqual(commands);
     expect(selectedCodexCandidate(snapshot)?.command).toBe(PATH_CODEX);
   });
