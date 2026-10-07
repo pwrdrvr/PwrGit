@@ -139,11 +139,13 @@ describe("what Git outside PwrGit resolves", () => {
     expect(machine.outside.kind).toBe("configured");
     if (machine.outside.kind !== "configured") return;
     expect(machine.outside.author.email).toBe("rowan@xdg.example");
-    expect(machine.config.find((entry) => entry.key === "user.email")).toMatchObject({
-      scope: "global",
-      origin: join(xdg, "config"),
-      value: "rowan@xdg.example"
-    });
+    const entry = machine.config.find((candidate) => candidate.key === "user.email");
+    expect(entry).toMatchObject({ scope: "global", value: "rowan@xdg.example" });
+    // Git for Windows appends `git/config` to $XDG_CONFIG_HOME with forward
+    // slashes, so the origin it reports mixes separators. That spelling is
+    // Git's (git/AGENTS.md: paths from git are forward-slash); compare the
+    // file, not the separators.
+    expect(entry?.origin.replace(/\\/g, "/")).toBe(join(xdg, "config").replace(/\\/g, "/"));
     // No ~/.gitconfig, so `git config --global` writes the XDG file.
     expect(machine.globalFile).toBe(join(xdg, "config"));
   });
