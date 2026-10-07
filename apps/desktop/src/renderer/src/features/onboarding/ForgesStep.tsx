@@ -35,6 +35,10 @@ const COPIED_MS = 2_000;
 
 const PANEL_ID = "onboarding-forge-panel";
 
+function tabId(kind: ForgeKind): string {
+  return `onboarding-forge-tab-${kind}`;
+}
+
 function needsAction(state: ForgeProductState): boolean {
   return state === "missing" || state === "signedOut";
 }
@@ -97,6 +101,12 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
   // so the strip never shuffles under the pointer; the next arrival sorts it
   // afresh.
   const [arrived, setArrived] = useState(false);
+  // What `forge:status` said once the arrival probe finished: sorting on this
+  // rather than on `props.forges` does not depend on the push reaching the
+  // renderer before the reply does.
+  const [arrivalForges, setArrivalForges] = useState<ForgeStatus[] | null>(
+    null
+  );
   const [order, setOrder] = useState<ForgeKind[] | null>(null);
   const [selected, setSelected] = useState<ForgeKind | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
@@ -106,12 +116,13 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
   const stripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!arrived || order !== null || forges === undefined) return;
-    const next = arrivalOrder(forges);
+    const source = arrivalForges ?? forges;
+    if (!arrived || order !== null || source === undefined) return;
+    const next = arrivalOrder(source);
     setOrder(next);
     // A chip picked while the probe ran is the reader's choice; keep it.
-    setSelected((picked) => picked ?? initialSelection(next, forges));
-  }, [arrived, forges, order]);
+    setSelected((picked) => picked ?? initialSelection(next, source));
+  }, [arrived, arrivalForges, forges, order]);
 
   // A forced probe, the same one Settings' Re-check asks for: refreshing the
   // host list makes main retire its cached status and probe again. The answer
@@ -142,9 +153,15 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
     // read once when it opened, and main answers a plain read from cache — for
     // five minutes once any forge is connected — so stepping Back and forward
     // after installing `gh` showed the pre-install answer indefinitely.
-    void recheck().then(() => {
-      if (mounted.current) setArrived(true);
-    });
+    void recheck()
+      .then(() => dispatch("forge:status", undefined))
+      .then((result) => (result.ok ? result.value.forges : null))
+      .catch(() => null)
+      .then((fresh) => {
+        if (!mounted.current) return;
+        setArrivalForges(fresh);
+        setArrived(true);
+      });
     // Coming back from the terminal is the moment an install or a sign-in has
     // just happened, so that is when to look — not only on the next tick.
     const onFocus = () => {
@@ -209,9 +226,11 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
           Where PwrGit reads pull and merge requests from.
         </h1>
         <p className="onboarding-wizard__sub">
-          Optional — without one, PwrGit does everything but show
-          change-request state. It reads each forge through that forge&rsquo;s
-          own CLI and never asks for a token.
+          {/* Two lines at most: a third pushes the 600px window's dialog
+              past its 552px cap. */}
+          Optional — PwrGit works without one, minus change-request state. It
+          reads each forge through its own CLI and never asks for a token; all
+          of this stays in Settings › Forges.
         </p>
       </div>
       {/* One live region for the step, as Settings → Forges has: a sentence
@@ -242,6 +261,7 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
                 key={kind}
                 type="button"
                 role="tab"
+                id={tabId(kind)}
                 ref={(element) => {
                   if (element === null) delete chipRefs.current[kind];
                   else chipRefs.current[kind] = element;
@@ -279,7 +299,7 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
         id={PANEL_ID}
         className="onboarding-wizard__panel"
         role="tabpanel"
-        aria-label={forgeProduct(current).label}
+        aria-labelledby={tabId(current)}
       >
         {active !== undefined && (
           <ForgePanel
@@ -331,7 +351,7 @@ function ForgePanel(props: {
           />
         </div>
         <div className="onboarding-wizard__forge-foot">
-          <TerminalHint />
+          <TerminalHint commands={1} />
         </div>
       </>
     );
@@ -359,10 +379,11 @@ function ForgePanel(props: {
 }
 
 /** Said beside a command, which is the only place it means anything. */
-function TerminalHint() {
+function TerminalHint(props: { commands: number }) {
   return (
     <span className="onboarding-wizard__forge-hint">
-      Run it in a terminal — PwrGit checks again when you switch back.
+      {props.commands > 1 ? "Run these" : "Run it"} in a terminal — PwrGit
+      checks again when you switch back.
     </span>
   );
 }
@@ -428,7 +449,7 @@ function InstallSteps(props: {
         >
           {install.guideLabel ?? "Install guide"} ↗
         </button>
-        <TerminalHint />
+        <TerminalHint commands={install.steps.length} />
       </div>
     </>
   );

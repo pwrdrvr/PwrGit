@@ -19002,7 +19002,10 @@ button.agent-auth-node:focus-visible,
   border-radius: 9px;
   background: var(--bg-panel);
   overflow-x: auto;
-  scrollbar-width: none;
+  /* Thin, not none: once the registry outgrows the strip this is the only
+     sign there is more, and the only way to it for a wheel that scrolls
+     vertically. Three chips never overflow, so it is not drawn today. */
+  scrollbar-width: thin;
 }
 .onboarding-wizard__lens-chip {
   flex: none;

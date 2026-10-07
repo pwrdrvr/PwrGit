@@ -230,24 +230,45 @@ describe("ForgesStep", () => {
   });
 
   it("sorts on the arrival probe's answer, not the stale snapshot it arrived with", async () => {
+    const fresh = [
+      status("github"),
+      status("gitlab", { installed: true }),
+      status("gitcafe")
+    ];
     let finish: () => void = () => {};
-    mocks.dispatch.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          finish = () => resolve({ ok: true, value: null });
-        })
+    mocks.dispatch.mockImplementation((command: string) =>
+      command === "forge:status"
+        ? Promise.resolve({ ok: true, value: { forges: fresh } })
+        : new Promise((resolve) => {
+            finish = () => resolve({ ok: true, value: null });
+          })
     );
-    // The wizard's snapshot predates glab's install...
+    // The wizard's snapshot predates glab's install, and no push corrects it:
+    // the step must sort on what main says once the forced probe is done.
     await mount(NOTHING_INSTALLED);
-    // ...and the forced probe's push lands before its reply.
-    await mount([status("github"), status("gitlab", { installed: true }), status("gitcafe")]);
     await act(async () => finish());
-    expect(strip()).toEqual([
-      "GitLab Signed out",
-      "GitHub Not installed",
-      "GitCafe Not installed"
+    expect(tabs().map((t) => t.getAttribute("aria-label"))).toEqual([
+      "GitLab: Not installed",
+      "GitHub: Not installed",
+      "GitCafe: Not installed"
     ]);
     expect(selectedTab()).toBe("GitLab");
+    expect(mocks.dispatch).toHaveBeenCalledWith("forge:status", undefined);
+  });
+
+  it("labels the panel by its selected tab, and points to Settings for later", async () => {
+    await mount(NOTHING_INSTALLED);
+    const panel = container.querySelector('[role="tabpanel"]');
+    expect(panel?.getAttribute("aria-labelledby")).toBe(tab("github").id);
+    expect(tab("github").getAttribute("aria-controls")).toBe(panel?.id);
+    expect(text()).toContain("all of this stays in Settings › Forges.");
+  });
+
+  it("says 'these' under GitCafe's two commands and 'it' under one", async () => {
+    await mount(NOTHING_INSTALLED);
+    expect(panelText()).toContain("Run it in a terminal");
+    await select("gitcafe");
+    expect(panelText()).toContain("Run these in a terminal");
   });
 
   it("keeps the strip's order and the selection for the whole visit", async () => {
@@ -399,9 +420,14 @@ describe("ForgesStep", () => {
   it("keeps asking main while open, so a terminal install reaches the step", async () => {
     vi.useFakeTimers();
     await mount(NOTHING_INSTALLED);
+    // Arrival reads it once to sort the strip; the tick is what comes after.
+    mocks.dispatch.mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(29_999);
+    });
     expect(mocks.dispatch).not.toHaveBeenCalledWith("forge:status", undefined);
     await act(async () => {
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(1);
     });
     expect(mocks.dispatch).toHaveBeenCalledWith("forge:status", undefined);
   });
