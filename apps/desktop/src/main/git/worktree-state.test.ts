@@ -341,6 +341,75 @@ describe("WorktreeStateService (system git)", () => {
     expect(repoGone).toHaveBeenCalledExactlyOnceWith(added.value.id);
   });
 
+  it.each([
+    ["status", false],
+    ["rev-list", false],
+    ["log", false],
+    ["status", true]
+  ] as const)(
+    "settles deletion during %s (already pruned: %s) for a coalesced focus refresh",
+    async (pausedCommand, alreadyPruned) => {
+      const root = mkdtempSync(join(tmpdir(), "pwrgit-state-delete-race-"));
+      const repo = join(root, "repo");
+      const isolatedDb = openDatabase(":memory:");
+      let resume!: () => void;
+      try {
+        mkdirSync(repo);
+        git(repo, ["init", "-b", "main"]);
+        git(repo, ["config", "user.email", "t@t.com"]);
+        git(repo, ["config", "user.name", "Tester"]);
+        git(repo, ["commit", "--allow-empty", "-m", "init"]);
+        const profile = new ProfileService(isolatedDb).create({
+          name: "Race",
+          email: "r@t.com"
+        });
+        const added = await new RepoIndexer(isolatedDb, systemGit).indexRepoAt(profile.id, repo);
+        if (!added.ok) throw new Error("indexRepoAt failed");
+        const primary = added.value.worktrees.find((w) => w.isPrimary);
+        if (primary === undefined) throw new Error("primary not indexed");
+        await new WorktreeStateService(isolatedDb, systemGit).compute(primary.id);
+
+        let reached!: () => void;
+        const paused = new Promise<void>((resolve) => { reached = resolve; });
+        const released = new Promise<void>((resolve) => { resume = resolve; });
+        const pausingGit: GitExec = async (args, cwd, options) => {
+          const result = await systemGit(args, cwd, options);
+          if (args[0] === pausedCommand) {
+            reached();
+            await released;
+          }
+          return result;
+        };
+        const isolated = new WorktreeStateService(isolatedDb, pausingGit);
+        const repoGone = vi.fn();
+        isolated.onRepoPathMissing(repoGone);
+        const running = isolated.compute(primary.id);
+        await paused;
+        rmSync(repo, { recursive: true, force: true, maxRetries: 15, retryDelay: 300 });
+        if (alreadyPruned) {
+          isolatedDb.prepare("DELETE FROM repos WHERE id = ?").run(added.value.id);
+        }
+        const focusRefresh = isolated.compute(primary.id);
+        resume();
+        const states = await Promise.all([running, focusRefresh]);
+        if (alreadyPruned) {
+          expect(states).toEqual([null, null]);
+          expect(repoGone).not.toHaveBeenCalled();
+        } else {
+          for (const state of states) {
+            expect(state).toMatchObject({ missing: true, dirty: 0, ahead: 0, behind: 0 });
+          }
+          expect(repoGone).toHaveBeenCalledExactlyOnceWith(added.value.id);
+          expect(isolated.getCached(primary.id)?.missing).toBe(true);
+        }
+      } finally {
+        resume?.();
+        isolatedDb.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   // `fetch --prune` drops the tracking ref at once, while the branch's PR is
   // cached on a longer TTL; the listener is how the PR cache hears the ref
   // went (gone-pr-refresh.ts). Every gone probe calls it, and `firstSeen`
