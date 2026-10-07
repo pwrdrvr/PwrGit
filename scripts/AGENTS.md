@@ -9,6 +9,29 @@ a CLI, so each guards `runCli()` with `isCliEntrypoint(import.meta.url)` from
 [lib/cli-entrypoint.mjs](lib/cli-entrypoint.mjs). Use it rather than
 open-coding the `process.argv[1]` comparison a fourth time.
 
+## Machine resource policy
+
+`resource-run.mjs` wraps repository checks, builds, dev/watch and package tools.
+Below 16 GiB of total effective capacity (host total, OS limit, and every
+visible cgroup ancestor), PwrGit uses 2048 MiB Node old space and one workspace
+or test worker. At 16 GiB or above, argv and environment pass through unchanged.
+Keep Vitest's default process isolation; SQLite staging supports native test
+workers separately from Electron.
+
+PwrGit and PwrAgent share `~/.cache/pwragent-tools-<sha256(home)[0:16]>/heavy-tool`
+using proper-lockfile (30 s stale, 5 s heartbeat). The sibling
+`heavy-tool.owner.json` and `PWRAGENT_TOOL_RESOURCE_OWNER` carry matching
+`{pid,path,token}`; POSIX also records `groupPid` and `groupStartedAt` before
+starting the tool, protecting stale recovery against PID reuse.
+Only verified descendants inherit a lease. Coordinate contract changes with
+both projects. Keep fixture lanes separate from the outer test runner's lease.
+
+Use `node scripts/resource-run.mjs <tool> ...` for ad hoc heavy probes. Direct
+`pnpm exec` or `node` calls bypass this repository launcher. Long-running dev
+and watch commands hold the lane until they exit. Cancellation drains the
+POSIX process group or Windows native Job before releasing the lease; do not
+replace Windows ownership with a `taskkill /T` fallback.
+
 ## The dependency cooldown
 
 `check-dependency-maturity.mjs` (`pnpm deps:maturity`) re-applies
