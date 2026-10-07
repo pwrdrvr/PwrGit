@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.34.0 - 2026-10-07
+
+- Minor - Maintenance release; no user-facing application changes since v0.33.0.
+
 ## v0.33.0 - 2026-10-06
 
 - Profiles - Added drag-and-drop and keyboard reordering in Settings, plus a switch to hide a profile from the Profiles menu without deleting it. Menu order and the first nine profile shortcuts follow your visible profiles.
