@@ -84,7 +84,7 @@ class ActWarningGuard {
       task.result.errors.push(...errors.map((error) => ({
         name: error.name,
         message: error.message,
-        stack: error.stack,
+        ...(error.stack === undefined ? {} : { stack: error.stack }),
       })));
       updates.push([task.id, task.result, task.meta]);
       // A late failure must also change already completed ancestor suites.
