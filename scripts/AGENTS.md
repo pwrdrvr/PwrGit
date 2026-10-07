@@ -21,15 +21,22 @@ workers separately from Electron.
 PwrGit and PwrAgent share `~/.cache/pwragent-tools-<sha256(home)[0:16]>/heavy-tool`
 using proper-lockfile (30 s stale, 5 s heartbeat). The sibling
 `heavy-tool.owner.json` and `PWRAGENT_TOOL_RESOURCE_OWNER` carry matching
-`{pid,path,token}`; POSIX also records `groupPid` and `groupStartedAt` before
-starting the tool, protecting stale recovery against PID reuse.
+`{pid,path,token}`. The sidecar additionally records `ownerStartedAt`; POSIX
+records `groupPid`, `groupStartedAt`, a separate fresh `descendantToken`, and
+observed `descendantGroups: [{pid,startedAt}]`. Publish identities and the private
+capability before starting tools. The internal `PWRAGENT_TOOL_DESCENDANT_TOKEN`
+marks only constrained POSIX bridge/tool descendants so fast-exiting launchers
+can be recovered after reparenting; copied owner JSON alone grants no cleanup.
+Keep the inherited owner environment at exactly three fields. Validate start
+identities before stale recovery or signalling, and keep legacy live owners
+with unreadable/missing identities fail closed.
 Only verified descendants inherit a lease. Coordinate contract changes with
 both projects. Keep fixture lanes separate from the outer test runner's lease.
 
 Use `node scripts/resource-run.mjs <tool> ...` for ad hoc heavy probes. Direct
 `pnpm exec` or `node` calls bypass this repository launcher. Long-running dev
 and watch commands hold the lane until they exit. Cancellation drains the
-POSIX process group or Windows native Job before releasing the lease; do not
+primary and detached POSIX tool groups or Windows native Job before releasing the lease; do not
 replace Windows ownership with a `taskkill /T` fallback.
 
 ## The dependency cooldown

@@ -1,10 +1,12 @@
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { DESCENDANT_ENV, ownerRunning } from "./lib/tool-processes.mjs";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { isAncestorPid, MACHINE_TOOL_LOCK, OWNER_ENV } from "./resource-run.mjs";
+import { isAncestorPid, MACHINE_TOOL_LOCK, OWNER_ENV, processStartedAt } from "./resource-run.mjs";
 
 const directories = [];
 const children = new Set();
@@ -62,6 +64,12 @@ async function waitFor(file) {
     try { return await readFile(file, "utf8"); } catch { await delay(50); }
   }
   throw new Error(`Timed out waiting for ${file}`);
+}
+
+function processRunning(pid) {
+  try {
+    return !execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).trim().startsWith("Z");
+  } catch { return false; }
 }
 
 afterEach(async () => {
@@ -247,6 +255,141 @@ describe("shared resource lease", () => {
     expect((await launch(f, { args: evalArgs("process.exitCode=0") }).completed).code).toBe(0);
   });
 
+  it.skipIf(process.platform === "win32").each(["SIGTERM", "SIGKILL"])("drains detached descendants before the next lease after %s", async (signal) => {
+    const f = await fixture();
+    const ready = path.join(f.directory, "detached-pid");
+    const task = `const c=require('child_process').spawn(process.execPath,['-e','process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});require('fs').writeFileSync(${JSON.stringify(ready)},String(c.pid));setInterval(()=>{},1000)`;
+    const a = launch(f, { args: evalArgs(task) });
+    const pid = Number(await waitFor(ready));
+    try {
+      expect(processRunning(pid)).toBe(true);
+      a.child.kill(signal);
+      if (signal === "SIGKILL") {
+        await new Promise((resolve) => a.child.once("exit", resolve));
+        const old = new Date(Date.now() - 60_000);
+        await utimes(`${f.lockPath}.lock`, old, old);
+      }
+      const probe = `const cp=require('child_process');let live=false;try{live=!cp.execFileSync('ps',['-o','stat=','-p',${JSON.stringify(String(pid))}],{encoding:'utf8'}).trim().startsWith('Z')}catch{};console.log(live);process.exitCode=live?9:0`;
+      const b = await launch(f, { args: evalArgs(probe) }).completed;
+      expect((await a.completed).signal).toBe(signal);
+      expect(b.code, b.stderr).toBe(0);
+      expect(b.stdout.trim()).toBe("false");
+      expect(processRunning(pid)).toBe(false);
+    } finally {
+      if (processRunning(pid)) process.kill(-pid, "SIGKILL");
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("drains a detached child when its launcher exits immediately", async () => {
+    const f = await fixture();
+    const ready = path.join(f.directory, "orphan-pid");
+    const task = `const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});require('fs').writeFileSync(${JSON.stringify(ready)},String(c.pid));c.unref()`;
+    const a = launch(f, { args: evalArgs(task) });
+    const pid = Number(await waitFor(ready));
+    try {
+      expect((await a.completed).code).toBe(0);
+      expect(processRunning(pid)).toBe(false);
+      await expect(stat(`${f.lockPath}.owner.json`)).rejects.toThrow();
+    } finally { if (processRunning(pid)) process.kill(-pid, "SIGKILL"); }
+  });
+
+  it.skipIf(process.platform === "win32").each([true, false])("drains detached groups during stale recovery with journaled=%s even when the bridge is dead", async (journaled) => {
+    const f = await fixture();
+    const ready = path.join(f.directory, "stale-detached-pid");
+    const task = `const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});require('fs').writeFileSync(${JSON.stringify(ready)},String(c.pid));setInterval(()=>{},1000)`;
+    const a = launch(f, { args: evalArgs(task) });
+    const pid = Number(await waitFor(ready));
+    try {
+      let owner;
+      for (let i = 0; i < 100; i++) {
+        owner = JSON.parse(await readFile(`${f.lockPath}.owner.json`, "utf8"));
+        if (!journaled || owner.descendantGroups.some((group) => group.pid === pid)) break;
+        await delay(20);
+      }
+      if (journaled) expect(owner.descendantGroups).toContainEqual({ pid, startedAt: processStartedAt(pid) });
+      expect(owner.descendantToken).toBeTruthy();
+      expect(owner.descendantToken).not.toBe(owner.token);
+      expect(owner.ownerStartedAt).toBe(processStartedAt(a.child.pid));
+      a.child.kill("SIGSTOP");
+      if (!journaled) {
+        // Emulate a crash before a polling observation reached the ledger.
+        await writeFile(`${f.lockPath}.owner.json`, JSON.stringify({ ...owner, descendantGroups: [] }));
+      }
+      process.kill(-owner.groupPid, "SIGKILL");
+      a.child.kill("SIGKILL");
+      await a.completed;
+      expect(processRunning(pid)).toBe(true);
+      const old = new Date(Date.now() - 60_000);
+      await utimes(`${f.lockPath}.lock`, old, old);
+      const result = await launch(f, { args: evalArgs("process.exitCode=0") }).completed;
+      expect(result.code, result.stderr).toBe(0);
+      expect(processRunning(pid)).toBe(false);
+    } finally { if (processRunning(pid)) process.kill(-pid, "SIGKILL"); }
+  });
+
+  it.skipIf(process.platform === "win32")("leaves an unrelated detached group with copied public owner JSON alive", async () => {
+    const f = await fixture();
+    const ready = path.join(f.directory, "owned-ready");
+    const a = launch(f, { args: evalArgs(`require('fs').writeFileSync(${JSON.stringify(ready)},'ready');setInterval(()=>{},1000)`) });
+    await waitFor(ready);
+    const recorded = JSON.parse(await readFile(`${f.lockPath}.owner.json`, "utf8"));
+    const unrelatedReady = path.join(f.directory, "unrelated-pid");
+    const unrelated = spawn(process.execPath, evalArgs(`require('fs').writeFileSync(${JSON.stringify(unrelatedReady)},String(process.pid));setInterval(()=>{},1000)`), {
+      detached: true, stdio: "ignore", env: { ...process.env,
+        [OWNER_ENV]: JSON.stringify({ pid: recorded.pid, path: recorded.path, token: recorded.token }),
+        [DESCENDANT_ENV]: randomUUID(),
+      },
+    });
+    const finished = new Promise((resolve) => unrelated.once("close", resolve));
+    try {
+      await waitFor(unrelatedReady);
+      a.child.kill("SIGTERM");
+      expect((await a.completed).signal).toBe("SIGTERM");
+      expect(processRunning(unrelated.pid)).toBe(true);
+      expect((await launch(f, { args: evalArgs("process.exitCode=0") }).completed).code).toBe(0);
+      expect(processRunning(unrelated.pid)).toBe(true);
+    } finally { unrelated.kill("SIGKILL"); await finished; }
+  });
+
+  it("distinguishes live owners with reused PIDs while keeping legacy owners fail closed", () => {
+    const current = processStartedAt(process.pid);
+    expect(ownerRunning({ pid: process.pid, ownerStartedAt: current })).toBe(true);
+    expect(ownerRunning({ pid: process.pid, ownerStartedAt: "different-start" })).toBe(false);
+    expect(ownerRunning({ pid: process.pid })).toBe(true);
+    expect(ownerRunning({ pid: 2147483647, ownerStartedAt: "old" })).toBe(false);
+  }, 30_000);
+
+  it("publishes process identity only in the sidecar, keeping inherited environment at three fields", async () => {
+    const f = await fixture();
+    const result = await launch(f, { args: evalArgs(`console.log(Object.keys(JSON.parse(process.env.${OWNER_ENV})).sort().join(','))`) }).completed;
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe("path,pid,token");
+  }, 30_000);
+
+  it("recovers a stale owner whose live PID has a different start identity", async () => {
+    const f = await fixture();
+    await mkdir(`${f.lockPath}.lock`);
+    await writeFile(`${f.lockPath}.owner.json`, JSON.stringify({ pid: process.pid, ownerStartedAt: "different-start", path: f.lockPath, token: "old" }));
+    const old = new Date(Date.now() - 60_000);
+    await utimes(`${f.lockPath}.lock`, old, old);
+    const result = await launch(f, { args: evalArgs("process.exitCode=0") }).completed;
+    expect(result.code, result.stderr).toBe(0);
+    expect(processStartedAt(process.pid)).toBeTruthy();
+  }, 30_000);
+
+  it("refuses stale recovery when a live legacy owner has no start identity", async () => {
+    const f = await fixture();
+    await mkdir(`${f.lockPath}.lock`);
+    const owner = { pid: process.pid, path: f.lockPath, token: "old" };
+    await writeFile(`${f.lockPath}.owner.json`, JSON.stringify(owner));
+    const old = new Date(Date.now() - 60_000);
+    await utimes(`${f.lockPath}.lock`, old, old);
+    const result = await launch(f, { args: evalArgs("process.exitCode=0") }).completed;
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("live owner");
+    expect(JSON.parse(await readFile(`${f.lockPath}.owner.json`, "utf8"))).toEqual(owner);
+  }, 30_000);
+
   it.skipIf(process.platform === "win32")("recovers a SIGKILL lease and terminates the old group before starting the next command", async () => {
     const f = await fixture();
     const ready = path.join(f.directory, "ready");
@@ -266,7 +409,7 @@ describe("shared resource lease", () => {
     await expect(stat(`${f.lockPath}.owner.json`)).rejects.toThrow();
   });
 
-  it.skipIf(process.platform === "win32")("leaves a reused live process group alone during stale recovery", async () => {
+  it.skipIf(process.platform === "win32").each(["primary", "descendant"])("leaves a reused live %s process group alone during stale recovery", async (kind) => {
     const f = await fixture();
     const ready = path.join(f.directory, "unrelated-ready");
     const unrelated = spawn(process.execPath, evalArgs(`require('fs').writeFileSync(${JSON.stringify(ready)},'ready');setInterval(()=>{},1000)`), { detached: true, stdio: "ignore" });
@@ -274,7 +417,11 @@ describe("shared resource lease", () => {
     try {
       await waitFor(ready);
       await mkdir(`${f.lockPath}.lock`);
-      await writeFile(`${f.lockPath}.owner.json`, JSON.stringify({ pid: 2147483647, path: f.lockPath, token: "old-lease", groupPid: unrelated.pid, groupStartedAt: "different-start" }));
+      await writeFile(`${f.lockPath}.owner.json`, JSON.stringify({ pid: 2147483647, path: f.lockPath, token: "old-lease",
+        groupPid: kind === "primary" ? unrelated.pid : 2147483646,
+        groupStartedAt: "different-start",
+        descendantGroups: kind === "descendant" ? [{ pid: unrelated.pid, startedAt: "different-start" }] : [],
+      }));
       const old = new Date(Date.now() - 60_000);
       await utimes(`${f.lockPath}.lock`, old, old);
       expect((await launch(f, { args: evalArgs("process.exitCode=0") }).completed).code).toBe(0);
