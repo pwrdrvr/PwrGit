@@ -47,6 +47,14 @@ function commit(dir: string, file: string, body: string, message: string): void 
   git(dir, ["commit", "-q", "-m", message]);
 }
 
+/**
+ * A path the way Git reports it, which is what every checkout, step and trash
+ * call carries. On Windows Git prints forward slashes and the long name of a
+ * directory, where `join` gives backslashes and `tmpdir()` can give an 8.3
+ * short name (`RUNNER~1`); `realpathSync.native` expands the latter.
+ */
+const gitPath = (...parts: string[]): string => join(...parts).replaceAll("\\", "/");
+
 type Fixture = {
   root: string;
   repo: string;
@@ -68,10 +76,10 @@ afterEach(() => {
  * `<root>/harbor-api`, worktrees under `<root>/wt-<name>`.
  */
 async function fixture(setup: (f: { repo: string; root: string }) => void = () => {}): Promise<Fixture> {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "pwrgit-repo-removal-")));
+  const root = gitPath(realpathSync.native(mkdtempSync(join(tmpdir(), "pwrgit-repo-removal-"))));
   roots.push(root);
-  const origin = join(root, "origin.git");
-  const repo = join(root, "harbor-api");
+  const origin = gitPath(root, "origin.git");
+  const repo = gitPath(root, "harbor-api");
   mkdirSync(repo);
   execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
   git(repo, ["init", "-q", "-b", "main"]);
@@ -96,13 +104,13 @@ async function fixture(setup: (f: { repo: string; root: string }) => void = () =
     db,
     indexer,
     repoId: added.value.id,
-    wt: (name) => join(root, `wt-${name}`)
+    wt: (name) => gitPath(root, `wt-${name}`)
   };
 }
 
 /** A linked worktree on a new branch, pushed with an upstream. */
 function pushedWorktree(repo: string, root: string, name: string): string {
-  const path = join(root, `wt-${name}`);
+  const path = gitPath(root, `wt-${name}`);
   git(repo, ["worktree", "add", "-q", "-b", `feat/${name}`, path]);
   commit(path, `${name}.txt`, `${name}\n`, `work on ${name}`);
   git(path, ["push", "-q", "-u", "origin", `feat/${name}`]);
@@ -181,7 +189,7 @@ describe("reviewRepoRemoval", () => {
     const f = await fixture(({ repo, root }) => pushedWorktree(repo, root, "done"));
     const r = await review(f);
     expect(r.name).toBe("harbor-api");
-    expect(r.remotes).toEqual([{ name: "origin", url: join(f.root, "origin.git") }]);
+    expect(r.remotes).toEqual([{ name: "origin", url: gitPath(f.root, "origin.git") }]);
     // Worktrees first, the main checkout last: the removal order.
     expect(r.checkouts.map((c) => [c.branch, c.isPrimary])).toEqual([
       ["feat/done", false],
@@ -208,12 +216,12 @@ describe("reviewRepoRemoval", () => {
       writeFileSync(join(dirty, "a.txt"), "edited\n");
       writeFileSync(join(dirty, "scratch.txt"), "notes\n");
       // Two commits on a branch that was never pushed: the only risk.
-      const ahead = join(root, "wt-ahead");
+      const ahead = gitPath(root, "wt-ahead");
       git(repo, ["worktree", "add", "-q", "-b", "feat/ahead", ahead]);
       commit(ahead, "x.txt", "1\n", "one");
       commit(ahead, "x.txt", "2\n", "two");
       // A detached HEAD on a commit no remote has.
-      const detached = join(root, "wt-detached");
+      const detached = gitPath(root, "wt-detached");
       git(repo, ["worktree", "add", "-q", "--detach", detached]);
       commit(detached, "d.txt", "d\n", "detached work");
       // A stash and a branch nothing has checked out, both in the shared .git.
@@ -305,12 +313,12 @@ describe("reviewRepoRemoval", () => {
       git(repo, ["add", ".gitignore"]);
       git(repo, ["commit", "-q", "-m", "ignore worktrees"]);
       git(repo, ["push", "-q", "origin", "main"]);
-      git(repo, ["worktree", "add", "-q", "-b", "feat/nested", join(repo, ".worktrees", "nested")]);
-      git(join(repo, ".worktrees", "nested"), ["push", "-q", "-u", "origin", "feat/nested"]);
+      git(repo, ["worktree", "add", "-q", "-b", "feat/nested", gitPath(repo, ".worktrees", "nested")]);
+      git(gitPath(repo, ".worktrees", "nested"), ["push", "-q", "-u", "origin", "feat/nested"]);
     });
     const sizes = new Map([
       [f.repo, 10_000],
-      [join(f.repo, ".worktrees", "nested"), 3_000]
+      [gitPath(f.repo, ".worktrees", "nested"), 3_000]
     ]);
     const result = await reviewRepoRemoval(
       {
@@ -446,7 +454,7 @@ describe("executeRepoRemoval", () => {
 
   it("refuses a push choice: pushing is the renderer's, before removal", async () => {
     const f = await fixture(({ repo, root }) => {
-      const ahead = join(root, "wt-ahead");
+      const ahead = gitPath(root, "wt-ahead");
       git(repo, ["worktree", "add", "-q", "-b", "feat/ahead", ahead]);
       commit(ahead, "x.txt", "1\n", "one");
     });
