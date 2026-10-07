@@ -170,8 +170,14 @@ describe("ForgesStep", () => {
     expect(button("Copy gh auth login").textContent).toBe("Copy");
   });
 
+  it("forces a probe on arrival, so stepping back and forward sees an install", async () => {
+    await mount(NOTHING_INSTALLED);
+    expect(mocks.dispatch).toHaveBeenCalledWith("forge:hosts", { refresh: true });
+  });
+
   it("forces a probe from Re-check and when the window regains focus", async () => {
     await mount(NOTHING_INSTALLED);
+    mocks.dispatch.mockClear();
     await act(async () => {
       button("Re-check").click();
     });
@@ -192,21 +198,21 @@ describe("ForgesStep", () => {
           finish = () => resolve({ ok: true, value: null });
         })
     );
+    // Arriving starts the probe; it is still running when the user looks.
     await mount([
       status("github", { installed: true, loggedIn: true }),
       status("gitlab"),
       status("gitcafe")
     ]);
-    await act(async () => {
-      button("Re-check").click();
-    });
     const chips = () =>
       [...container.querySelectorAll(".onboarding-wizard__forge-chip")].map(
         (e) => e.textContent
       );
     expect(chips()).toEqual(["Connected", "Checking…", "Checking…"]);
+    expect(button("Checking…").getAttribute("aria-busy")).toBe("true");
     // A second request while one is in flight is the same request.
     await act(async () => {
+      button("Checking…").click();
       window.dispatchEvent(new Event("focus"));
     });
     expect(

@@ -167,11 +167,17 @@ test("Forges hands a missing CLI its install commands, then notices the install"
     ]);
   }
 
-  // Installed from a terminal while the step is open. Main re-reads the
-  // fixture on every probe; Re-check is what forces one.
+  // Installed from a terminal, then Back and forward again. Main re-reads the
+  // fixture on every probe, so this is exactly the round trip that used to
+  // keep showing the pre-install answer: arriving at the step must force one.
   forges.config.hosts.gitlab = { ...missing, installed: true };
   forges.write();
-  await window.getByRole("button", { name: "Re-check" }).click();
+  // The wizard's own Back — the window's history control is also "Back".
+  await window
+    .locator(".onboarding-wizard__footer")
+    .getByRole("button", { name: "Back" })
+    .click();
+  await nextButton(handle).click();
 
   await expect(row("gitlab").locator(".onboarding-wizard__forge-chip")).toHaveText(
     "Signed out"
@@ -181,5 +187,13 @@ test("Forges hands a missing CLI its install commands, then notices the install"
   );
   await expect(row("github").locator(".onboarding-wizard__forge-chip")).toHaveText(
     "Not installed"
+  );
+
+  // And without leaving the step: signed in from the terminal, then Re-check.
+  forges.config.hosts.gitlab = { ...missing, installed: true, loggedIn: true };
+  forges.write();
+  await window.getByRole("button", { name: "Re-check" }).click();
+  await expect(row("gitlab").locator(".onboarding-wizard__forge-chip")).toHaveText(
+    "Connected"
   );
 });

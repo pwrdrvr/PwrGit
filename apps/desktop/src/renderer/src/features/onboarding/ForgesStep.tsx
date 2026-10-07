@@ -72,6 +72,11 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
 
   useEffect(() => {
     mounted.current = true;
+    // Arriving at the step is a reason to look too. The wizard's statuses were
+    // read once when it opened, and main answers a plain read from cache — for
+    // five minutes once any forge is connected — so stepping Back and forward
+    // after installing `gh` showed the pre-install answer indefinitely.
+    void recheck();
     // Coming back from the terminal is the moment an install or a sign-in has
     // just happened, so that is when to look — not only on the next tick.
     const onFocus = () => void recheck();
