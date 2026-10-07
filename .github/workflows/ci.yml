@@ -27,13 +27,12 @@ permissions:
 
 jobs:
   # Keep the pull_request trigger path-unfiltered so the required check jobs
-  # exist on every PR. Documentation-only PRs skip those jobs below instead.
+  # exist on every PR. Docs/Dependabot-only PRs skip those jobs below instead.
   changes:
     name: Classify Changes
     runs-on: ubuntu-latest
     outputs:
       code_impacting: ${{ steps.classify.outputs.code_impacting }}
-      docs_only: ${{ steps.classify.outputs.docs_only }}
     steps:
       - name: Classify changed files
         id: classify
@@ -42,12 +41,11 @@ jobs:
           script: |
             const fullCi = (reason) => {
               core.setOutput("code_impacting", "true");
-              core.setOutput("docs_only", "false");
               core.notice(`Running full CI: ${reason}`);
             };
 
             if (context.eventName !== "pull_request") {
-              fullCi(`${context.eventName} events are never docs-only`);
+              fullCi(`${context.eventName} events always run full CI`);
               return;
             }
 
@@ -72,26 +70,26 @@ jobs:
               return;
             }
 
-            const isDocumentationPath = (path) =>
+            const isNonCodePath = (path) =>
+              path === ".github/dependabot.yml" ||
               path.startsWith("docs/") || path.toLowerCase().endsWith(".md");
             const codeImpactingFile = files.find((file) => {
               const paths = [file.filename, file.previous_filename].filter(Boolean);
-              return paths.some((path) => !isDocumentationPath(path));
+              return paths.some((path) => !isNonCodePath(path));
             });
-            const docsOnly = codeImpactingFile === undefined;
+            const nonCodeOnly = codeImpactingFile === undefined;
 
-            core.setOutput("code_impacting", String(!docsOnly));
-            core.setOutput("docs_only", String(docsOnly));
+            core.setOutput("code_impacting", String(!nonCodeOnly));
             await core.summary
               .addHeading("Changed-file classification")
               .addTable([
                 [{data: "Classification", header: true}, {data: "Files", header: true}],
-                [docsOnly ? "Documentation only" : "Code impacting", String(files.length)],
+                [nonCodeOnly ? "Non-code only" : "Code impacting", String(files.length)],
               ])
               .addRaw(
-                docsOnly
-                  ? "Only `docs/**` and Markdown files changed; expensive CI jobs are skipped."
-                  : `Full CI runs because \`${codeImpactingFile.filename}\` is not documentation-only.`,
+                nonCodeOnly
+                  ? "Only documentation or Dependabot configuration changed; expensive CI jobs are skipped."
+                  : `Full CI runs because \`${codeImpactingFile.filename}\` requires it.`,
               )
               .write();
 
