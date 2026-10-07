@@ -183,6 +183,7 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
   if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);
   if (name === "identity:machine") return ok(machineIdentity);
+  if (name === "repo:hiddenList") return ok([]);
   if (name === "profile:list") {
     return ok({ activeProfileId: PERSONAL.id, profiles: [PERSONAL, ACME] });
   }
@@ -654,6 +655,7 @@ describe("Settings nav — AI", () => {
     expect(chip(row)).toBe("guessed");
     expect(row.getAttribute("aria-label")).toBe("Git identity: Git is guessing your email");
     expect(navChild("Profile list")).toBeDefined();
+    expect(navChild("Hidden repos")).toBeDefined();
   });
 
   it("gives AI Features a jump link per section", async () => {

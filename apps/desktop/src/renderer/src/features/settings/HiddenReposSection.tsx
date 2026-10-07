@@ -41,6 +41,7 @@ export function HiddenReposSection({ activeProfileId }: { activeProfileId: strin
 
   return (
     <SettingsSection
+      sectionId="hidden"
       eyebrow="Profiles"
       title="Hidden repositories"
       description="Repositories that stay in a scanned folder but out of that profile's window, search, bulk sync and agent results. Hide one from its row menu in the sidebar."

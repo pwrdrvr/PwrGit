@@ -81,7 +81,11 @@ export function profilesNavChildren(machine: MachineGitIdentity | null): Setting
       ? "Git identity: Git is guessing your email"
       : "Git identity: not set outside PwrGit";
   }
-  return [git, { label: "Profile list", sectionId: "list" }];
+  return [
+    git,
+    { label: "Profile list", sectionId: "list" },
+    { label: "Hidden repos", sectionId: "hidden" }
+  ];
 }
 
 export type PaneRoute = {
