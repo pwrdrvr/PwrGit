@@ -10,15 +10,34 @@ describe("machine capacity", () => {
     [16 * GIB - 1, true], [16 * GIB, false], [16 * GIB + 1, false],
     [8 * GIB, true], [32 * GIB, false],
   ])("uses the strict threshold at %d bytes", (hostMemory, constrained) => {
-    expect(getToolResourcePolicy({ hostMemory, constrainedMemory: 0, cgroupLimits: [] })).toEqual({ hostMemory, effectiveMemory: hostMemory, constrained });
+    expect(getToolResourcePolicy({ env: {}, hostMemory, constrainedMemory: 0, cgroupLimits: [] })).toEqual({ hostMemory, effectiveMemory: hostMemory, constrained });
   });
 
   it("uses total host capacity and the smallest finite OS/ancestor limit", () => {
-    const policy = (host, os, groups) => getToolResourcePolicy({ hostMemory: host * GIB, constrainedMemory: os * GIB, cgroupLimits: groups.map((n) => n * GIB) });
+    const policy = (host, os, groups) => getToolResourcePolicy({ env: {}, hostMemory: host * GIB, constrainedMemory: os * GIB, cgroupLimits: groups.map((n) => n * GIB) });
     expect(policy(32, 24, [20, 8, 12]).effectiveMemory).toBe(8 * GIB);
     expect(policy(8, 24, [20, 32]).effectiveMemory).toBe(8 * GIB);
     expect(policy(32, 0, [Infinity, NaN, -1]).constrained).toBe(false);
     expect(policy(32, 0, [0]).effectiveMemory).toBe(0);
+  });
+
+  it.each([{ CI: "true" }, { CI: "1" }, { CI: "TRUE" }, { CI: " yes " }, { GITHUB_ACTIONS: "true", CI: "false" }])("preserves CI command and environment semantics despite a small container (%j)", (env) => {
+    const policy = getToolResourcePolicy({ env, hostMemory: 32 * GIB, constrainedMemory: 8 * GIB, cgroupLimits: [4 * GIB] });
+    expect(policy).toEqual({ hostMemory: 32 * GIB, effectiveMemory: 4 * GIB, constrained: false });
+    const inherited = { ...env, NODE_OPTIONS: "--max-old-space-size=6144 --trace-warnings" };
+    for (const [command, args] of [
+      ["node", ["--max-old-space-size=6144", "-e", "console.log(1)"]],
+      ["pnpm", ["-r", "--parallel", "--workspace-concurrency=8", "typecheck"]],
+      ["vitest", ["run", "--maxWorkers=4", "--fileParallelism=true"]],
+      ["playwright", ["test", "--workers=4"]],
+    ]) {
+      expect(resourceEnvironment(command, args, inherited, policy)).toBe(inherited);
+      expect(resourceCommand(command, args, policy)).toBe(args);
+    }
+  });
+
+  it.each([{}, { CI: "false" }, { CI: " FALSE " }, { CI: "0" }, { CI: "" }, { CI: "  " }])("keeps developer restrictions when CI is absent or disabled (%j)", (env) => {
+    expect(getToolResourcePolicy({ env, hostMemory: 8 * GIB, constrainedMemory: 0, cgroupLimits: [] }).constrained).toBe(true);
   });
 
   it.each([

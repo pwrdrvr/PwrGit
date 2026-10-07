@@ -61,13 +61,18 @@ export function getToolResourcePolicy({
   hostMemory = totalmem(),
   constrainedMemory = process.constrainedMemory?.() ?? 0,
   cgroupLimits = readCgroupMemoryLimits(),
+  env = process.env,
 } = {}) {
   // Node's OS API uses zero for "unknown/unconstrained". An explicitly read
   // zero cgroup hard limit is a real limit, distinct from an unreadable file.
   const capacities = [hostMemory, constrainedMemory].filter((value) => Number.isFinite(value) && value > 0)
     .concat(cgroupLimits.filter((value) => Number.isFinite(value) && value >= 0));
   const effectiveMemory = Math.min(...capacities);
-  return { hostMemory, effectiveMemory, constrained: effectiveMemory < LOW_MEMORY_THRESHOLD };
+  // CI owns its scheduling and worker budget. This policy protects developer
+  // machines sharing several builds/worktrees, rather than isolated CI jobs.
+  const ciValue = (env.CI ?? "").trim();
+  const ci = (ciValue !== "" && !/^(false|0)$/i.test(ciValue)) || env.GITHUB_ACTIONS === "true";
+  return { hostMemory, effectiveMemory, constrained: !ci && effectiveMemory < LOW_MEMORY_THRESHOLD };
 }
 
 const HEAP_FLAG = /^--max[-_]old[-_]space[-_]size(?:[-_]percentage)?(?:=|$)/;
