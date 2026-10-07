@@ -67,19 +67,19 @@ export function aiFeatureNavChildren(): SettingsNavChild[] {
 }
 
 /**
- * Profiles' children. "Git outside PwrGit" carries a warning while Git has no
+ * Profiles' children. "Git identity" carries a warning while Git has no
  * identity of its own, so the condition stays findable after the launch
  * notice was dismissed; nothing at all while unprobed or fine.
  */
 export function profilesNavChildren(machine: MachineGitIdentity | null): SettingsNavChild[] {
-  const git: SettingsNavChild = { label: "Git outside PwrGit", sectionId: "git-identity" };
+  const git: SettingsNavChild = { label: "Git identity", sectionId: "git-identity" };
   if (machine !== null && machine.outside.kind !== "configured") {
     const guessed = machine.outside.kind === "guessed";
     git.dot = "warn";
-    git.chip = guessed ? "guessing" : "not set";
+    git.chip = guessed ? "guessed" : "unset";
     git.stateLabel = guessed
-      ? "Git outside PwrGit: guessing your email"
-      : "Git outside PwrGit: no identity set";
+      ? "Git identity: Git is guessing your email"
+      : "Git identity: not set outside PwrGit";
   }
   return [git, { label: "Profile list", sectionId: "list" }];
 }

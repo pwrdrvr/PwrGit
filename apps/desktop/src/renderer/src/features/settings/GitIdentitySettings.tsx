@@ -9,7 +9,7 @@ import { SettingsSwitch } from "./SettingsSwitch";
 import type { AppSettingsState } from "./useAppSettings";
 
 /**
- * Settings › Profiles › Git outside PwrGit: the identity Terminal, scripts and
+ * Settings › Profiles › Git identity: the identity Terminal, scripts and
  * coding agents get on this computer, and the one place PwrGit writes Git
  * config — at a click, after showing the file and the values it will write.
  */
@@ -36,8 +36,8 @@ export function GitIdentitySection({
   return (
     <SettingsSection
       sectionId="git-identity"
-      eyebrow="Git"
-      title="Git outside PwrGit"
+      eyebrow="Git outside PwrGit"
+      title="Git identity"
       description="The identity Terminal, scripts and coding agents get on this computer. PwrGit’s own commits use each profile’s identity below."
       chip={chip}
       chipKind={view === null ? "default" : view.status === "configured" ? "ok" : "warn"}

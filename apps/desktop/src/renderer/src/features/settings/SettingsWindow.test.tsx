@@ -639,7 +639,7 @@ describe("Settings nav — AI", () => {
     await render();
     await act(async () => navButton("Profiles").click());
     // Configured: a plain jump link, like any other card.
-    expect(dotTone(navChild("Git outside PwrGit"))).toBeUndefined();
+    expect(dotTone(navChild("Git identity"))).toBeUndefined();
 
     machineIdentity = {
       ...CONFIGURED_GIT,
@@ -649,10 +649,10 @@ describe("Settings nav — AI", () => {
     root = createRoot(container);
     await render();
     await act(async () => navButton("Profiles").click());
-    const row = navChild("Git outside PwrGit");
+    const row = navChild("Git identity");
     expect(dotTone(row)).toBe("warn");
-    expect(chip(row)).toBe("guessing");
-    expect(row.getAttribute("aria-label")).toBe("Git outside PwrGit: guessing your email");
+    expect(chip(row)).toBe("guessed");
+    expect(row.getAttribute("aria-label")).toBe("Git identity: Git is guessing your email");
     expect(navChild("Profile list")).toBeDefined();
   });
 

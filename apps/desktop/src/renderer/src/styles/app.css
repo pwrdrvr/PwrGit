@@ -10788,7 +10788,7 @@ button.ref-chip:focus-visible {
 }
 .commit-identity-popover__warn {
   margin: 0;
-  color: var(--danger-text);
+  color: var(--status-warning);
 }
 .commit-identity-popover__note {
   margin: 0;
@@ -20287,7 +20287,7 @@ button.agent-auth-node:focus-visible,
 }
 .git-identity-card__warn {
   margin: 0;
-  color: var(--danger-text);
+  color: var(--status-warning);
   font: 400 12px/1.45 var(--font-sans);
 }
 .git-identity-setup {
