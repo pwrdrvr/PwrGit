@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
-import type { AppDocument, AppDocumentKind } from "@pwrgit/shared";
+import {
+  APP_DOCUMENT_TITLES,
+  type AppDocument,
+  type AppDocumentKind
+} from "@pwrgit/shared";
 import { AuxiliaryTitleBar } from "../chrome/AuxiliaryTitleBar";
 import { dispatch } from "../../lib/pwrgit";
 
@@ -24,9 +28,7 @@ export function AppDocumentWindow(props: { kind: AppDocumentKind }) {
     };
   }, [props.kind]);
 
-  const title =
-    document?.title ??
-    (props.kind === "license" ? "PwrGit License" : "PwrGit Third-Party Notices");
+  const title = document?.title ?? APP_DOCUMENT_TITLES[props.kind];
 
   return (
     <main className="document-window">

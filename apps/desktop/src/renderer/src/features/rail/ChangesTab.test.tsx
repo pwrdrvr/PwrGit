@@ -549,6 +549,7 @@ describe("ChangesTab folder actions", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    (window as unknown as { pwrgit: { platform: string } }).pwrgit = { platform: "win32" };
     mocks.confirmDialog.mockResolvedValue(true);
     mocks.subscribe.mockReturnValue(() => undefined);
     mocks.dispatch.mockImplementation(async (command: string) =>
@@ -558,7 +559,7 @@ describe("ChangesTab folder actions", () => {
           ? ok({ patterns: [{ choice: "folder", pattern: "/dist/", count: 2 }], destinations: [
               { destination: "gitignore", path: "/repo/.gitignore", displayPath: ".gitignore", scope: "committed · team" },
               { destination: "exclude", path: "/repo/.git/info/exclude", displayPath: ".git/info/exclude", scope: "this clone · 1 worktree" },
-              { destination: "global", path: "/home/.config/git/ignore", displayPath: "~/.config/git/ignore", scope: "this Mac" }
+              { destination: "global", path: "/home/.config/git/ignore", displayPath: "~/.config/git/ignore", scope: "this PC" }
             ], suggested: "gitignore", worktreeCount: 1 })
         : command === "changes:ignore"
           ? ok({ added: ["/dist/"], targetPath: "/repo/.gitignore" })
@@ -583,6 +584,7 @@ describe("ChangesTab folder actions", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    Reflect.deleteProperty(window, "pwrgit");
   });
 
   it("discards a whole folder from its row, after confirming the count", async () => {
@@ -625,6 +627,8 @@ describe("ChangesTab folder actions", () => {
     });
 
     expect(document.querySelector(".discovery-ignore")).not.toBeNull();
+    // The global excludes file is named for the machine it lives on, not "this Mac" everywhere.
+    expect(document.querySelector(".discovery-ignore")?.textContent).toContain("Every repository on this PC, in PwrGit and in your terminal.");
     await act(async () => {
       const add = [...document.querySelectorAll(".discovery-ignore button")].find((button) => button.textContent === "Add ignore rule");
       if (!(add instanceof HTMLButtonElement)) throw new Error("no add button");

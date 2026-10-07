@@ -40,7 +40,7 @@ export function AgentConsentWindow() {
         <ul>{role.permissions.map(p => <li key={p}>{MCP_AGENT_CAPABILITY_DETAILS[p].label}</li>)}</ul>
         <p className="selectable">Repositories: {role.repositoryRoots?.join(", ") ?? "All bounded repositories"}</p>
       </> : <p>No role fits the permissions requested by this agent.</p>}
-      <p>You can revoke this Session in Settings → Agents at any time.</p>
+      <p>You can revoke this Session in Settings → Local Agents at any time.</p>
       <div className="agent-access-request__actions">
         <button className="settings-button" aria-disabled={busy} onClick={() => void decide("deny")}>Deny</button>
         <button className="settings-button settings-button--primary" disabled={!name.trim() || !role}

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   nativeImage,
   nativeTheme,
@@ -22,7 +23,10 @@ import {
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
-import { registerAppIdentityHandlers } from "./app-identity";
+import {
+  readAppIdentity,
+  registerAppIdentityHandlers
+} from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { registerAgentHandlers } from "./ai/agent-handlers";
 import { LocalAgentSession } from "./ai/agent-session";
@@ -897,15 +901,44 @@ if (!gotSingleInstanceLock) {
       rebuildAppMenu({
         profiles: profiles.snapshot().profiles,
         currentProfileId: windows.focusedProfileId() ?? profiles.getActiveId(),
+        openProfileIds: windows.openProfileIds(),
         onOpenProfile: (profileId) => openProfileWindow(profileId),
         onNewProfile: () => emitEvent("ui:newProfile", {}),
-        onManageProfiles: () => emitEvent("ui:manageProfile", {}),
+        // The profile LIST, not the focused window's profile: that one is a
+        // click away in the sidebar's profile chip.
+        onManageProfiles: () =>
+          openAuxiliaryWindow((palette) =>
+            openSettingsWindow(palette, { page: "profiles" })
+          ),
+        // Settings → About on every platform: it carries the version, the
+        // release notes link and the build, where the native panel shows a
+        // name and a version (and on Linux, a bare GTK dialog).
+        onAbout: () =>
+          openAuxiliaryWindow((palette) =>
+            openSettingsWindow(palette, { page: "about" })
+          ),
         onReplayOnboarding: () => emitEvent("ui:replayOnboarding", {}),
         onCheckForUpdates: () => {
           void checkForAppUpdatesFromMenu();
         },
         onOpenSettings: () => openAuxiliaryWindow(openSettingsWindow),
         onOpenLogs: () => openAuxiliaryWindow(openLogsWindow),
+        onOpenChangelog: () =>
+          openAuxiliaryWindow((palette) =>
+            openAppDocumentWindow("changelog", palette)
+          ),
+        onCopyDiagnostics: () => {
+          clipboard.writeText(readAppIdentity().diagnosticsText);
+          const open = windows.openProfileIds();
+          const activeId = profiles.getActiveId();
+          emitEvent("ui:diagnosticsCopied", {
+            profileId:
+              windows.focusedProfileId() ??
+              (activeId !== null && open.includes(activeId)
+                ? activeId
+                : (open[0] ?? null))
+          });
+        },
         onOpenLicense: () =>
           openAuxiliaryWindow((palette) =>
             openAppDocumentWindow("license", palette)
@@ -948,6 +981,8 @@ if (!gotSingleInstanceLock) {
       const opened = windows.open(profileId);
       if (opened.created) {
         diagnostics.attachWindow(opened.window);
+        // The Window menu lists open profile windows off macOS.
+        opened.window.once("closed", () => refreshMenu());
         if (startupCpuWindowPending) {
           startupCpuWindowPending = false;
           startupCpu?.attachFirstWindow(opened.window);
@@ -963,6 +998,7 @@ if (!gotSingleInstanceLock) {
         refreshMenu();
       },
       openWindow: openProfileWindow,
+      onReordered: () => refreshMenu(),
       onDeleted: (deletedProfileId, activeProfileId) => {
         // A renderer's profile binding is immutable, so it cannot survive the
         // row it represents. Drop ephemeral selections/reveals and close it.

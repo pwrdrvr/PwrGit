@@ -102,7 +102,8 @@ async function openAndPick(onReveal = vi.fn()): Promise<void> {
     <CloneRepoDialog
       profile={{
         id: "p", name: "Test", email: "test@example.com", mono: "T",
-        roots: [], onboardingCompleted: true
+        roots: [], onboardingCompleted: true,
+        showInMenu: true
       }}
       onCloned={() => undefined}
       onReveal={onReveal}

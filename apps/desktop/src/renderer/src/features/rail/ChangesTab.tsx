@@ -9,6 +9,7 @@ import {
 import type { ChangeSet, FileChange, HookRun, IgnoredSummary, PwrGitError, Worktree } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { fileStatusChipProps } from "../../lib/fileStatus";
+import { thisMachineNoun } from "../../lib/platform";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import { ContextMenu } from "../shell/ContextMenu";
@@ -610,7 +611,7 @@ export function ChangesTab({
         title="Hidden by ignore rules"
         sentence="Git hid these untracked files using personal rules outside the team's .gitignore."
         where={<div className="discovery-explain__rules">{ignored.rules.map((rule) => <div key={`${rule.source}:${rule.line}:${rule.pattern}`}><code>{rule.source}:{rule.line}</code><code>{rule.pattern}</code><span>{rule.count} file{rule.count === 1 ? "" : "s"}</span></div>)}</div>}
-        scope={[...new Set(ignored.rules.map((rule) => rule.destination === "exclude" ? `this clone · ${ignored.worktreeCount} worktree${ignored.worktreeCount === 1 ? "" : "s"}` : "this Mac"))]}
+        scope={[...new Set(ignored.rules.map((rule) => rule.destination === "exclude" ? `this clone · ${ignored.worktreeCount} worktree${ignored.worktreeCount === 1 ? "" : "s"}` : `this ${thisMachineNoun()}`))]}
         command="git check-ignore -v --stdin"
         actions={[{ label: "Copy rule details", onClick: () => void copyText(ignored.rules.map((rule) => `${rule.source}:${rule.line} ${rule.pattern} (${rule.count})`).join("\n")) }]}
         manual={{ label: "gitignore(5)", onClick: () => void dispatch("shell:openExternal", { url: "https://git-scm.com/docs/gitignore" }) }}

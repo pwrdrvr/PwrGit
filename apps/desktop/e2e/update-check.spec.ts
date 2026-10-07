@@ -28,14 +28,14 @@ async function checkForUpdates(app: ElectronApplication): Promise<void> {
   await app.evaluate(({ Menu }) => {
     for (const top of Menu.getApplicationMenu()?.items ?? []) {
       const item = top.submenu?.items.find(
-        (candidate) => candidate.label === "Check for Updates"
+        (candidate) => candidate.label === "Check for Updates…"
       );
       if (item !== undefined) {
         item.click();
         return;
       }
     }
-    throw new Error("Menu item not found: Check for Updates");
+    throw new Error("Menu item not found: Check for Updates…");
   });
 }
 

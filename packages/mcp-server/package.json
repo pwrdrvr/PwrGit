@@ -27,12 +27,12 @@
     "typecheck": "node ../../scripts/resource-run.mjs tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "ws": "^8.18.3",
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "ws": "^8.22.0",
     "dugite": "^3.2.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.2"
   }
 }

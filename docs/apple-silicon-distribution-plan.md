@@ -312,7 +312,7 @@ Proposed README download block, to apply when destinations exist:
 · [Windows x64](https://github.com/pwrdrvr/PwrGit/releases/latest)
 · [Debian installation instructions](https://docs.pwrgit.com/install/#debian)
 
-macOS 12 or newer. Both Mac downloads are signed and notarized.
+macOS 13 Ventura or newer. Both Mac downloads are signed and notarized.
 Choose universal if you're unsure which Mac you have.
 ```
 

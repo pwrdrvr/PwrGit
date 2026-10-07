@@ -23,7 +23,8 @@ const PROFILE: Profile = {
   email: "",
   mono: "P",
   roots: [],
-  onboardingCompleted: false
+  onboardingCompleted: false,
+  showInMenu: true
 };
 
 let container: HTMLDivElement;

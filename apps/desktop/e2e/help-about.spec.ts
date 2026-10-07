@@ -66,9 +66,10 @@ async function openedLinks(app: ElectronApplication): Promise<string[]> {
   );
 }
 
-async function openSettings(app: ElectronApplication): Promise<Page> {
+/** About PwrGit opens Settings on its About page, on every platform. */
+async function openAbout(app: ElectronApplication): Promise<Page> {
   const settingsWindowPromise = app.waitForEvent("window");
-  await clickMenuItem(app, "Settings…");
+  await clickMenuItem(app, "About PwrGit");
   const settings = await settingsWindowPromise;
   await settings.waitForSelector(".settings-screen");
   return settings;
@@ -79,26 +80,29 @@ test("Help and About expose identity, canonical support links, and recovery", as
   const { app } = handle;
   await stubExternalOpening(app, false);
 
-  expect(await helpLabels(app)).toEqual(
-    expect.arrayContaining([
-      "PwrGit Documentation",
-      "PwrGit Website",
-      "Release Notes",
-      "View Source",
-      "Report an Issue…",
-      "Security Reporting (Private)…",
-      "Check for Updates",
-      "View License",
-      "Third-Party Notices",
-      "Logs"
-    ])
-  );
+  // The PwrSuite Help layout; Check for Updates… and About close it out
+  // off macOS, where there is no app menu to hold them.
+  expect(await helpLabels(app)).toEqual([
+    "PwrGit Documentation",
+    "Changelog",
+    "Replay Onboarding…",
+    "Report an Issue…",
+    "Report a Security Vulnerability…",
+    "Copy Diagnostics Info",
+    "Logs",
+    "PwrGit Website",
+    "View Source",
+    "View License",
+    "Third-Party Notices",
+    ...(process.platform === "darwin"
+      ? []
+      : ["Check for Updates…", "About PwrGit"])
+  ]);
 
   await clickMenuItem(app, "PwrGit Documentation");
   await expect.poll(() => openedLinks(app)).toContain(PWRGIT_LINKS.documentation);
 
-  const settings = await openSettings(app);
-  await settings.getByRole("button", { name: "About", exact: true }).click();
+  const settings = await openAbout(app);
   const about = settings.locator("[aria-label='About PwrGit']");
   await expect(about).toBeVisible();
 
@@ -154,6 +158,14 @@ test("Help and About expose identity, canonical support links, and recovery", as
   expect(copiedIdentity).toContain(`Electron: ${runtime.electronVersion}`);
   expect(copiedIdentity).toContain("Build: Development");
   expect(copiedIdentity).toContain(`${runtime.platformVersion} (${runtime.arch})`);
+
+  // Help → Copy Diagnostics Info puts the same identity on the system
+  // clipboard from main, with no Settings window needed.
+  await app.evaluate(({ clipboard }) => clipboard.writeText(""));
+  await clickMenuItem(app, "Copy Diagnostics Info");
+  await expect
+    .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+    .toBe(copiedIdentity);
 
   await stubExternalOpening(app, true);
   await settings.getByRole("button", { name: "Open documentation" }).click();

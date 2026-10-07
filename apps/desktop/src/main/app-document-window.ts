@@ -10,14 +10,11 @@ import {
   auxiliaryWindowChromeOptions,
   hideAuxiliaryWindowMenuBar
 } from "./auxiliary-window-chrome";
+import { appDocumentTitle } from "./app-documents";
 import { windowChrome } from "./window-chrome";
 import { applyWindowSecurityHardening } from "./window-security";
 
 const documentWindows = new Map<AppDocumentKind, BrowserWindow>();
-
-function titleFor(kind: AppDocumentKind): string {
-  return kind === "license" ? "PwrGit License" : "PwrGit Third-Party Notices";
-}
 
 /**
  * Opens one focused viewer per bundled document. The renderer gets only the
@@ -41,7 +38,7 @@ export function openAppDocumentWindow(
     minWidth: 640,
     minHeight: 480,
     show: false,
-    title: titleFor(kind),
+    title: appDocumentTitle(kind),
     ...auxiliaryWindowChromeOptions(appearance.resolvedTheme),
     backgroundColor: windowChrome(appearance.resolvedTheme).background,
     webPreferences: {

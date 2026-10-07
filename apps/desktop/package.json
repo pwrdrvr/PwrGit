@@ -39,7 +39,7 @@
   "dependencies": {
     "@fontsource/geist-mono": "^5.3.0",
     "@fontsource/geist-sans": "^5.3.0",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@octokit/graphql": "^8.2.1",
     "@pwrdrvr/agent-acp": "^0.16.1",
     "@pwrdrvr/agent-client": "^0.8.2",
@@ -58,10 +58,10 @@
     "pixelmatch": "^7.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "ws": "^8.21.3"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@electron/asar": "^4.3.0",
+    "@electron/asar": "^4.3.1",
     "@electron/rebuild": "^4.2.0",
     "@playwright/test": "^1.63.0",
     "@types/better-sqlite3": "^7.6.13",
@@ -70,7 +70,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.4.5",
-    "electron-builder": "26.16.1",
+    "electron-builder": "26.17.0",
     "electron-vite": "^5.0.0",
     "sharp": "^0.35.4",
     "vite": "^7.3.5"

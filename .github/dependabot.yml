@@ -1,6 +1,9 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
+    # One pnpm workspace, one shared lockfile. The root scan discovers member
+    # manifests through pnpm-workspace.yaml; separate scans duplicate updates
+    # and can change a member manifest without updating the shared lockfile.
     directory: "/"
     schedule:
       interval: "weekly"
@@ -19,6 +22,10 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
       react-runtime:
         patterns:
           - "react"

@@ -8,7 +8,8 @@ const p = (id: string, name: string, email: string): Profile => ({
   email,
   mono: "",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 });
 
 describe("profileWindowTitle", () => {

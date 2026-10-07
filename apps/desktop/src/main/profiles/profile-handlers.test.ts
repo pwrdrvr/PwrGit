@@ -22,7 +22,8 @@ function fixture() {
     openWindow: vi.fn(() => true),
     consumeReveal: vi.fn(() => null),
     onDeleted: vi.fn(),
-    onChanged: vi.fn()
+    onChanged: vi.fn(),
+    onReordered: vi.fn()
   } satisfies ProfileHandlerDeps;
   const bus = new CommandBus();
   registerProfileHandlers(bus, profiles, deps);
@@ -72,5 +73,57 @@ describe("profile handlers", () => {
     expect(deps.onDeleted).not.toHaveBeenCalled();
     expect(deps.onChanged).not.toHaveBeenCalled();
     expect(emitEvent).not.toHaveBeenCalled();
+  });
+
+  it("reorders profiles, publishes the new order and rebuilds the menu", async () => {
+    const { bus, deps, first, second } = fixture();
+
+    const result = await bus.dispatch("profile:reorder", {
+      profileIds: [second.id, first.id]
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.profiles.map((p) => p.id)).toEqual([second.id, first.id]);
+    expect(emitEvent).toHaveBeenCalledExactlyOnceWith("profile:changed", result.value);
+    expect(deps.onReordered).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the order and the menu alone when the order is stale", async () => {
+    const { bus, deps, first, profiles, second } = fixture();
+
+    const result = await bus.dispatch("profile:reorder", {
+      profileIds: [second.id]
+    });
+
+    expect(result.ok).toBe(false);
+    expect(profiles.list().map((p) => p.id)).toEqual([first.id, second.id]);
+    expect(emitEvent).not.toHaveBeenCalled();
+    expect(deps.onReordered).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed order or menu switch instead of throwing", async () => {
+    const { bus, deps, first, profiles, second } = fixture();
+
+    for (const profileIds of [undefined, "abc", [first.id, 7]]) {
+      const result = await bus.dispatch("profile:reorder", {
+        profileIds
+      } as unknown as { profileIds: string[] });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("profile_order_invalid");
+    }
+    const toggled = await bus.dispatch("profile:update", {
+      profileId: first.id,
+      showInMenu: "false"
+    } as unknown as { profileId: string; showInMenu: boolean });
+    expect(toggled.ok).toBe(false);
+    if (!toggled.ok) expect(toggled.error.code).toBe("show_in_menu_invalid");
+
+    expect(profiles.list().map((p) => [p.id, p.showInMenu])).toEqual([
+      [first.id, true],
+      [second.id, true]
+    ]);
+    expect(emitEvent).not.toHaveBeenCalled();
+    expect(deps.onReordered).not.toHaveBeenCalled();
   });
 });

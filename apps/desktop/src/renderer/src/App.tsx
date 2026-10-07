@@ -13,7 +13,7 @@ import type {
   TagSummary,
   Worktree
 } from "@pwrgit/shared";
-import { showErrorToast } from "./lib/toast";
+import { showErrorToast, showInfoToast } from "./lib/toast";
 import { useAgentOffered } from "./features/agent/agent-store";
 import { ChangeRequestRail } from "./features/change-request/ChangeRequestRail";
 import { ChangeRequestView } from "./features/change-request/ChangeRequestView";
@@ -462,14 +462,22 @@ export function App() {
     });
   }, []);
 
-  // Native Profiles-menu actions land in the focused window.
+  // Native menu actions land in the focused window. (Manage Profiles… opens
+  // Settings → Profiles from main; it needs no window to handle it.)
   useEffect(() => {
     const offNew = subscribe("ui:newProfile", () => {
       if (document.hasFocus()) setProfileModal({ mode: "create" });
     });
-    const offManage = subscribe("ui:manageProfile", () => {
-      if (document.hasFocus() && activeProfile !== null) {
-        setProfileModal({ mode: "edit", profile: activeProfile });
+    const offCopied = subscribe("ui:diagnosticsCopied", ({ profileId }) => {
+      // Main picks the window, so the toast shows even when Settings or Logs
+      // has focus — and shows once, not in every window.
+      if (profileId !== null && profileId === windowProfileId()) {
+        showInfoToast({
+          key: "diagnostics-copied",
+          title: "Diagnostics info copied",
+          message:
+            "PwrGit's version, build and platform are on the clipboard, ready to paste into an issue."
+        });
       }
     });
     // Replay is a look, not a reset: it re-opens the wizard without ever
@@ -482,10 +490,10 @@ export function App() {
     });
     return () => {
       offNew();
-      offManage();
+      offCopied();
       offReplay();
     };
-  }, [activeProfile]);
+  }, []);
 
   // Window title carries the profile so the Window menu / Mission Control can
   // tell the profile windows apart (email-disambiguated on name collisions).

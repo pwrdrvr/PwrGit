@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import {
   err,
+  localMachineNoun,
   ok,
   type IgnoreDestination,
   type IgnoreDestinationOption,
@@ -51,7 +52,7 @@ export function suggestIgnoreDestination(path: string, projectTracksToolFolder =
   return "gitignore";
 }
 
-export async function ignoreDestinations(git: GitExec, cwd: string): Promise<Result<{ destinations: IgnoreDestinationOption[]; worktreeCount: number }>> {
+export async function ignoreDestinations(git: GitExec, cwd: string, platform: string = process.platform): Promise<Result<{ destinations: IgnoreDestinationOption[]; worktreeCount: number }>> {
   const common = await git(["rev-parse", "--git-common-dir"], cwd, NO_OPTIONAL_LOCKS);
   if (!common.ok) return common;
   const checked = requireExit0(common.value, ["rev-parse", "--git-common-dir"]);
@@ -79,7 +80,7 @@ export async function ignoreDestinations(git: GitExec, cwd: string): Promise<Res
     destinations: [
       { destination: "gitignore", path: join(cwd, ".gitignore"), displayPath: ".gitignore", scope: "committed · team" },
       { destination: "exclude", path: join(commonDir, "info", "exclude"), displayPath: ".git/info/exclude", scope: `this clone · ${worktreeCount} worktree${worktreeCount === 1 ? "" : "s"}` },
-      { destination: "global", path: globalPath, displayPath: globalPath === defaultGlobal ? "~/.config/git/ignore" : globalPath, scope: "this Mac" }
+      { destination: "global", path: globalPath, displayPath: globalPath === defaultGlobal ? "~/.config/git/ignore" : globalPath, scope: `this ${localMachineNoun(platform)}` }
     ]
   });
 }

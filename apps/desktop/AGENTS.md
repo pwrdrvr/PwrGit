@@ -65,7 +65,11 @@ missing `dist/`.
 A major Electron bump also touches, beyond `package.json` and the lock:
 `electronVersion` and `LSMinimumSystemVersion` in
 [electron-builder.yml](electron-builder.yml), `THIRD_PARTY_LICENSES`
-(`pnpm licenses:generate`), and the README's macOS floor. electron-vite 5.0.0
+(`pnpm licenses:generate`), and the README's macOS floor. The Homebrew cask's
+`depends_on macos:` is derived from `LSMinimumSystemVersion` by
+[package-manager-release.mjs](../../scripts/package-manager-release.mjs), but
+the tap's publisher only rewrites `version`/`sha256` in the cask already on
+`pwrdrvr/homebrew-tap`, so a raised floor also needs a PR there. electron-vite 5.0.0
 maps Electron majors to build targets only through 39 and falls back to
 `node22.20` / `chrome142` above that — older than the runtime, so safe, and
 unchanged by a bump.

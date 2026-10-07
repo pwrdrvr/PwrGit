@@ -207,4 +207,43 @@ describe("ProfileService", () => {
     expect(s.list()).toHaveLength(1);
     expect(s.getActiveId()).toBe(profile.id);
   });
+
+  it("lists new profiles at the bottom and keeps the order it is given", () => {
+    const s = service();
+    const a = s.create({ name: "Alpha", email: "a@example.com" });
+    const b = s.create({ name: "Bravo", email: "b@example.com" });
+    const c = s.create({ name: "Charlie", email: "c@example.com" });
+    expect(s.list().map((p) => p.id)).toEqual([a.id, b.id, c.id]);
+
+    const reordered = s.reorder([c.id, a.id, b.id]);
+    expect(reordered.ok).toBe(true);
+    expect(s.list().map((p) => p.id)).toEqual([c.id, a.id, b.id]);
+
+    // A profile created after a reorder still lands at the bottom.
+    const d = s.create({ name: "Delta", email: "d@example.com" });
+    expect(s.list().map((p) => p.id)).toEqual([c.id, a.id, b.id, d.id]);
+  });
+
+  it("refuses an order that does not name every profile exactly once", () => {
+    const s = service();
+    const a = s.create({ name: "Alpha", email: "a@example.com" });
+    const b = s.create({ name: "Bravo", email: "b@example.com" });
+    for (const stale of [[a.id], [a.id, a.id], [a.id, b.id, "gone"], [b.id, "gone"]]) {
+      const result = s.reorder(stale);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe("profile_order_stale");
+    }
+    expect(s.list().map((p) => p.id)).toEqual([a.id, b.id]);
+  });
+
+  it("shows profiles in the menu by default and persists hiding one", () => {
+    const s = service();
+    const a = s.create({ name: "Alpha", email: "a@example.com" });
+    expect(a.showInMenu).toBe(true);
+
+    expect(s.update({ profileId: a.id, showInMenu: false })?.showInMenu).toBe(false);
+    // Other edits leave the menu flag alone.
+    expect(s.update({ profileId: a.id, name: "Alpha 2" })?.showInMenu).toBe(false);
+    expect(s.update({ profileId: a.id, showInMenu: true })?.showInMenu).toBe(true);
+  });
 });

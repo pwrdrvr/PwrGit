@@ -46,7 +46,8 @@ const WORK: Profile = {
   email: "me@example.com",
   mono: "W",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 
 async function answer(name: string, request?: unknown): Promise<unknown> {

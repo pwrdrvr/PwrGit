@@ -50,7 +50,8 @@ const PERSONAL: Profile = {
   email: "me@example.com",
   mono: "P",
   roots: [],
-  onboardingCompleted: true
+  onboardingCompleted: true,
+  showInMenu: true
 };
 
 async function answer(name: string, req?: unknown): Promise<unknown> {

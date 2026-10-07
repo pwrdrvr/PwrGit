@@ -16434,7 +16434,7 @@ body.is-col-resizing {
   padding: 0 2px 4px;
 }
 
-/* Settings > Agents — Session → role → effective permission graph. */
+/* Settings > Local Agents — Session → role → effective permission graph. */
 .settings-stack--agents {
   max-width: 1120px;
   container: agent-settings / inline-size;
@@ -16872,6 +16872,88 @@ button.agent-auth-node:focus-visible,
   border-color: var(--accent-border);
   background: var(--accent-tint);
 }
+/* Reorder: the same drag source and insertion line as the sidebar rows, so
+   the gesture reads the same in both places. The row anchors the line. */
+.settings-profile-row {
+  position: relative;
+}
+.settings-profile-row.is-dragging {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+.settings-profile-row.is-drop-before::after,
+.settings-profile-row.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  pointer-events: none;
+}
+/* The list's gap is 8px; the line sits in the middle of it. */
+.settings-profile-row.is-drop-before::after {
+  top: -5px;
+}
+.settings-profile-row.is-drop-after::after {
+  bottom: -5px;
+}
+.settings-profile-row__grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 30px;
+  margin: 0 -6px 0 -4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-subtle);
+  cursor: grab;
+}
+.settings-profile-row__grip:hover {
+  color: var(--text-secondary);
+}
+.settings-profile-row__grip:active {
+  cursor: grabbing;
+}
+.settings-profile-row__grip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+}
+.settings-profile-row__name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-profile-row__name > :not(.settings-profile-row__name-text) {
+  flex: 0 0 auto;
+}
+.settings-profile-row__shortcut {
+  font-weight: 500;
+}
+.settings-profile-row__menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 11.5px/1.2 var(--font-sans);
+  color: var(--text-muted);
+}
+/* The row's actions are right-aligned, so the On/Off word's own width would
+   slide the switch sideways under the pointer on every toggle ("Off" is ~2px
+   wider). Reserve the wider word's room so the switch holds still. */
+.settings-profile-row__menu-toggle .settings-switch__word {
+  min-width: 1.75em;
+}
+.settings-profile-list__error {
+  margin: 10px 0 0;
+  color: var(--danger-text);
+  font: 500 12px/1.4 var(--font-sans);
+}
 .settings-profile-row__mono {
   display: inline-flex;
   align-items: center;
@@ -16895,6 +16977,8 @@ button.agent-auth-node:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
+  min-width: 0;
   font: 600 13px/1.2 var(--font-sans);
   color: var(--text-primary);
 }
