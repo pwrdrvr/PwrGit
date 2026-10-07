@@ -1,12 +1,10 @@
 version: 2
 updates:
   - package-ecosystem: "npm"
-    # Security alerts identify the workspace manifests individually. Include
-    # their locations so the security group also covers cross-directory fixes.
-    directories:
-      - "/"
-      - "/apps/*"
-      - "/packages/*"
+    # One pnpm workspace, one shared lockfile. The root scan discovers member
+    # manifests through pnpm-workspace.yaml; separate scans duplicate updates
+    # and can change a member manifest without updating the shared lockfile.
+    directory: "/"
     schedule:
       interval: "weekly"
     # Do not propose a release until it has cleared the same seven-day window
@@ -37,14 +35,6 @@ updates:
         update-types:
           - "minor"
           - "patch"
-      # The root pnpm scan already includes workspace dependencies. Combine
-      # matching version bumps from the explicit manifest directories with it.
-      # Keep this after react-runtime so React retains its coordinated group.
-      workspace-versions:
-        applies-to: version-updates
-        group-by: dependency-name
-        patterns:
-          - "*"
     ignore:
       - dependency-name: "*"
         update-types:
