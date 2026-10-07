@@ -20,7 +20,7 @@ vi.mock("../../lib/toast", () => ({
   showInfoToast: vi.fn()
 }));
 
-import { RepoRow } from "./RepoRow";
+import { RepoRow, removeRepoHint } from "./RepoRow";
 import { ChangeRequestSelectionContext } from "../change-request/change-request-selection";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -104,6 +104,8 @@ afterEach(async () => {
 });
 
 const onReorder = vi.fn();
+const onHideRepo = vi.fn();
+const onRemoveRepo = vi.fn();
 
 async function render(
   selectedWorktreeId: string | null,
@@ -144,6 +146,8 @@ async function render(
           onRevealWorktree={noop}
           onCreateWorktreeFromRef={noop}
           onForkRepo={noop}
+          onHideRepo={onHideRepo}
+          onRemoveRepo={onRemoveRepo}
           arrangeable={false}
           dragProps={{ draggable: false }}
           dragging={false}
@@ -263,5 +267,43 @@ describe("RepoRow's Other worktrees past the cap", () => {
     onReorder.mockClear();
     chord(row("live-5"));
     expect(onReorder).not.toHaveBeenCalled();
+  });
+});
+
+describe("RepoRow's actions menu", () => {
+  const openMenu = async (): Promise<HTMLElement[]> => {
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="widget actions"]'
+    );
+    expect(trigger).not.toBeNull();
+    await act(async () => trigger?.click());
+    return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  };
+
+  it("ends with Hide and Remove, each saying what it does", async () => {
+    await render(null);
+    const items = await openMenu();
+    const labels = items.map((item) => item.textContent ?? "");
+    expect(labels.at(-2)).toBe(
+      "Hide repositoryStays on disk. Unhide from the sidebar's Hidden list."
+    );
+    expect(labels.at(-1)).toBe(
+      "Remove repository…Review, then move the checkout and its 11 worktrees to the Trash."
+    );
+    expect(items.at(-1)?.className).toContain("pop-menu__item--danger");
+    await act(async () => items.at(-2)?.click());
+    expect(onHideRepo).toHaveBeenCalledTimes(1);
+    const again = await openMenu();
+    await act(async () => again.at(-1)?.click());
+    expect(onRemoveRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts linked worktrees only, and drops the clause when there are none", () => {
+    expect(removeRepoHint({ ...repo, worktrees: [worktrees[0]!] })).toBe(
+      "Review, then move the checkout to the Trash."
+    );
+    expect(removeRepoHint({ ...repo, worktrees: worktrees.slice(0, 2) })).toBe(
+      "Review, then move the checkout and its 1 worktree to the Trash."
+    );
   });
 });

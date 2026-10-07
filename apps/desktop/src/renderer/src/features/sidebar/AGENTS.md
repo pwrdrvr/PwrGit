@@ -295,3 +295,16 @@ Back restores it by key. Both run in Sidebar's layout effects, before paint,
 and while one holds its row the "reveal the selection" scroll stands down.
 A row someone can jump *from* needs a stable `data-nav-anchor`. A ghost
 keeps `data-wt-id`, so reveals and anchors find it like the real row.
+
+## Hide and Remove live on the repo row's menu
+
+Hide asks nothing and offers Undo on its toast; Remove opens
+`RemoveRepositoryDialog`, whose rules (`removalStatus`, `checkoutChoices`)
+are in `@pwrgit/shared` so the button the dialog enables is the one main
+accepts. Both move the selection to the neighbouring repository first
+(`selectNeighbourOf`), or the window falls back to the first repo. Hidden
+repositories come back through `HiddenReposButton` (the footer row, drawn only
+while something is hidden), Settings → Profiles, and the palette, which shows
+a hidden repository only for its full name. Main excludes hidden rows from
+`repo:search`, so do not filter them here. Design:
+`design/Remove and Hide Repository - UX Review.dc.html`.

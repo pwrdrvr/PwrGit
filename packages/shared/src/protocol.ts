@@ -135,6 +135,13 @@ import type {
   CodexProviderDiscovery
 } from "./ai-providers";
 import type { SettingsRoute } from "./settings-pages";
+import type {
+  HiddenRepo,
+  RemovalDecisions,
+  RepoRemovalProgress,
+  RepoRemovalResult,
+  RepoRemovalReview
+} from "./repo-removal";
 
 export type ProfileList = {
   activeProfileId: ProfileId | null;
@@ -871,6 +878,53 @@ export interface Commands {
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
+  /**
+   * Take a repository out of one profile's view without touching disk. The
+   * sidebar, lenses, counts, bulk sync, maintenance, ⌘K and the agent catalog
+   * all leave it out from then on; a rescan still finds it, and still hides
+   * it. Keyed by the repository's path, so the hide outlives its repo row.
+   */
+  "repo:hide": {
+    req: { profileId: ProfileId; repoId: RepoId };
+    res: HiddenRepo;
+  };
+  /** Undo a hide, or forget one whose repository is no longer on disk. */
+  "repo:unhide": { req: { profileId: ProfileId; path: string }; res: null };
+  /** One profile's hidden repositories, or every profile's when omitted
+   *  (Settings → Profiles lists them all, grouped). */
+  "repo:hiddenList": {
+    req: { profileId?: ProfileId };
+    res: HiddenRepo[];
+  };
+  /**
+   * Inspect every checkout of a repository before removing it: dirt,
+   * untracked files, commits on no remote, operations in progress, locks,
+   * stashes and local branches nothing has checked out. Reads only.
+   */
+  "repo:removalReview": {
+    req: { repoId: RepoId };
+    res: RepoRemovalReview;
+  };
+  /**
+   * Move a repository's linked worktrees and then its main checkout to the
+   * Trash. Main reviews again and refuses (`review_changed`) unless every
+   * item of the fresh review is safe or answered; Push first is done by the
+   * caller beforehand, so only keep / discard arrive here. A Keep turns this
+   * into removing only the other worktrees. `confirmName` must equal the
+   * repository's name when a full removal discards work. A failed Trash move
+   * stops before the main checkout; `deletePermanently` names folders the
+   * user then chose to delete outright instead.
+   */
+  "repo:remove": {
+    req: {
+      operationId: string;
+      repoId: RepoId;
+      decisions: RemovalDecisions;
+      confirmName?: string;
+      deletePermanently?: string[];
+    };
+    res: RepoRemovalResult;
+  };
   /** Reconcile one repo with Git, discovering external worktree changes. */
   "repo:refreshWorktrees": {
     req: { repoId: string };
@@ -2283,6 +2337,8 @@ export type Res<C extends CommandName> = Commands[C]["res"];
 export interface Events {
   "profile:changed": ProfileList;
   "repo:changed": { profileId: ProfileId };
+  /** Each step of a running `repo:remove`, as the whole step list. */
+  "repo:removalProgress": RepoRemovalProgress;
   /** Live Git progress for one clone command, correlated by operation id. */
   "repo:cloneProgress": {
     operationId: string;

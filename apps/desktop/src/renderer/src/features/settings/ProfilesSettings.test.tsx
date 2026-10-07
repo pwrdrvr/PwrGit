@@ -3,14 +3,22 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  DeleteProfileRequest,
-  Profile,
-  UpdateProfileRequest
+import {
+  ok,
+  type DeleteProfileRequest,
+  type HiddenRepo,
+  type Profile,
+  type UpdateProfileRequest
 } from "@pwrgit/shared";
 
 const mocks = vi.hoisted(() => ({
-  useProfiles: vi.fn()
+  useProfiles: vi.fn(),
+  dispatch: vi.fn()
+}));
+
+vi.mock("../../lib/pwrgit", () => ({
+  dispatch: mocks.dispatch,
+  subscribe: () => () => undefined
 }));
 
 vi.mock("../../state/useProfiles", () => ({
@@ -100,11 +108,17 @@ async function typeConfirmation(value: string): Promise<void> {
   });
 }
 
+let hidden: HiddenRepo[] = [];
+
 beforeEach(() => {
   // Shortcut caps read the platform from the preload bridge.
   (window as unknown as { pwrgit: { platform: string } }).pwrgit = {
     platform: "darwin"
   };
+  hidden = [];
+  mocks.dispatch.mockImplementation((channel: string) =>
+    Promise.resolve(ok(channel === "repo:hiddenList" ? hidden : null))
+  );
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -365,5 +379,61 @@ describe("ProfilesSettings menu order and visibility", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
       "The profile list changed while you were reordering it. Try again."
     );
+  });
+});
+
+describe("ProfilesSettings hidden repositories", () => {
+  const entry = (over: Partial<HiddenRepo>): HiddenRepo => ({
+    profileId: "personal",
+    profileName: "Personal",
+    path: "/src/harbor-api",
+    name: "harbor-api",
+    hiddenAt: "2026-10-01T00:00:00.000Z",
+    repoId: "r1",
+    worktreeCount: 3,
+    missing: false,
+    ...over
+  });
+
+  const card = (): HTMLElement =>
+    [...container.querySelectorAll<HTMLElement>("section, div")].find((el) =>
+      el.querySelector(".settings-hidden-repos, .settings-empty") !== null &&
+      el.textContent?.includes("Hidden repositories") === true
+    )!;
+
+  it("says so when nothing is hidden", async () => {
+    await render([personal]);
+    expect(container.textContent).toContain("Hidden repositories");
+    expect(container.textContent).toContain("No hidden repositories.");
+    expect(container.textContent).toContain("0 hidden");
+  });
+
+  it("groups every profile's entries, and forgets one that is gone", async () => {
+    hidden = [
+      entry({ profileId: "acme", profileName: "Acme", path: "/projects/acme/legacy", name: "legacy", repoId: null, worktreeCount: 0, missing: true }),
+      entry({})
+    ];
+    await render([personal, acme]);
+    const groups = [...container.querySelectorAll<HTMLElement>(".settings-hidden-repos__group")];
+    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual([
+      "Hidden in Acme",
+      "Hidden in Personal"
+    ]);
+    // The window's active profile carries the chip.
+    expect(groups[1]?.textContent).toContain("Active");
+    expect(groups[0]?.textContent).toContain("Not found on disk. It was moved or deleted.");
+    expect(groups[1]?.textContent).toContain("/src/harbor-api · 2 worktrees");
+    expect(card().textContent).toContain("2 hidden");
+
+    await act(async () => button(groups[0]!, "Forget").click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("repo:unhide", {
+      profileId: "acme",
+      path: "/projects/acme/legacy"
+    });
+    await act(async () => button(groups[1]!, "Unhide").click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("repo:unhide", {
+      profileId: "personal",
+      path: "/src/harbor-api"
+    });
   });
 });

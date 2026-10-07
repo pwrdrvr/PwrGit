@@ -4,7 +4,8 @@ Open **Garbage collection…** in the sidebar to maintain every known repository
 in the current profile. Enable **Include all profiles** to cover all known
 repositories. Repositories do not need to be expanded in the sidebar first.
 Linked worktrees share an object store, so collection and branch review process
-that store once per run.
+that store once per run. A [hidden repository](hide-and-remove-repositories.md)
+is not maintained until it is unhidden.
 
 ## Garbage collection
 

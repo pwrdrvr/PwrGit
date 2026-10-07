@@ -8,6 +8,7 @@ import { execGit, sanitizeGitLogDetail } from "./dugite";
 import type { RepoIndexer } from "./repo-indexer";
 import type { WorktreeRefresher } from "./worktree-handlers";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { visibleRepoSql } from "./hidden-repos";
 
 export type BulkSyncHandlers = {
   /** Cancel work owned by a renderer window that has gone away. */
@@ -22,15 +23,16 @@ type WorktreeRow = {
   path: string;
 };
 
-function profileRepos(db: DB, profileId: string): BulkSyncRepoInput[] | null {
+export function profileRepos(db: DB, profileId: string): BulkSyncRepoInput[] | null {
   const profile = db
     .prepare("SELECT id FROM profiles WHERE id = ?")
     .get(profileId) as { id: string } | undefined;
   if (profile === undefined) return null;
   const repos = db
     .prepare(
-      `SELECT id, name, path FROM repos
-       WHERE profile_id = ?
+      // A hidden repository sits out Fetch all and Try pull all.
+      `SELECT id, name, path FROM repos r
+       WHERE profile_id = ? AND ${visibleRepoSql("r")}
        ORDER BY name COLLATE NOCASE, name, id`
     )
     .all(profileId) as RepoRow[];
@@ -41,7 +43,7 @@ function profileRepos(db: DB, profileId: string): BulkSyncRepoInput[] | null {
        JOIN repos r ON r.id = w.repo_id
        -- A checkout that is gone has nothing to pull; the repo-level fetch
        -- still runs from the primary.
-       WHERE r.profile_id = ? AND w.missing = 0
+       WHERE r.profile_id = ? AND w.missing = 0 AND ${visibleRepoSql("r")}
        ORDER BY w.repo_id, w.is_primary DESC, w.branch COLLATE NOCASE, w.id`
     )
     .all(profileId) as WorktreeRow[];

@@ -44,6 +44,7 @@ import {
   listWorktrees,
   type WorktreeInfo
 } from "./git-service";
+import { SEARCH_ROW_REPO_SQL, visibleRepoSql } from "./hidden-repos";
 import { claimWorktreeOwnership } from "./repo-ownership";
 import { checkoutExists } from "./worktree-liveness";
 import { forkSourceFromRow } from "./worktree-state";
@@ -76,7 +77,7 @@ const SKIP_DIRS = new Set([
   "Library"
 ]);
 
-function hashId(path: string): string {
+export function hashId(path: string): string {
   return createHash("sha1").update(path).digest("hex").slice(0, 12);
 }
 
@@ -483,7 +484,12 @@ export class RepoIndexer {
       : ok(repo);
   }
 
-  listRepos(profileId: ProfileId): Repo[] {
+  /** `includeHidden` is for callers asking what is on disk rather than what
+   *  to show — clone's "already cloned" and fork's "Reveal checkout". */
+  listRepos(
+    profileId: ProfileId,
+    options: { includeHidden?: boolean } = {}
+  ): Repo[] {
     // NOCASE so "apple" sorts next to "Apple" rather than after "Zebra" —
     // SQLite's default TEXT collation is binary (all uppercase before any
     // lowercase). The trailing `name` breaks NOCASE ties deterministically.
@@ -495,8 +501,11 @@ export class RepoIndexer {
         // NULLS LAST. `sort_order` is dropped from the key: it has only ever
         // held its DEFAULT 0, so it contributed nothing but a false suggestion
         // that repo ordering already existed.
-        `SELECT id, profile_id, name, path, pinned, custom_order FROM repos
+        // A hidden repository is not listed at all (hidden-repos.ts): the
+        // sidebar, its lens counts and every bulk action start from this list.
+        `SELECT id, profile_id, name, path, pinned, custom_order FROM repos r
          WHERE profile_id = ?
+           ${options.includeHidden === true ? "" : `AND ${visibleRepoSql("r")}`}
          ORDER BY pinned DESC, (custom_order IS NULL), custom_order,
                   name COLLATE NOCASE, name`
       )
@@ -714,6 +723,17 @@ export class RepoIndexer {
     run();
   }
 
+  /** Forget a repository whose main checkout PwrGit just moved to the Trash.
+   *  Everything keyed to `repos(id)` cascades; `branch_pr` predates that FK,
+   *  so it is cleared first, as profile deletion does. A hide entry is kept:
+   *  it is keyed by path and Settings lists it as not found until forgotten. */
+  deleteRepo(repoId: string): void {
+    this.db.transaction(() => {
+      this.db.prepare("DELETE FROM branch_pr WHERE repo_id = ?").run(repoId);
+      this.db.prepare("DELETE FROM repos WHERE id = ?").run(repoId);
+    })();
+  }
+
   /** Drop one worktree row without re-listing the repo: for a path git no
    *  longer recognises, a refresh would only confirm the row is a fossil (and
    *  pay a full branch re-index to do it). */
@@ -880,6 +900,14 @@ export class RepoIndexer {
     // #1060 and every branch spelled `issue-10604` crowd #106 past the cap.
     const prNumber = changeRequestNumberQuery(query);
     const prLike = prNumber === null ? null : `${prNumber} %`;
+    // Rows of a hidden repository are dropped before the cap, not after it
+    // (src/main/AGENTS.md). Most profiles hide nothing indexed, and then the
+    // clause and its per-row lookup are left out entirely.
+    const hidden = this.anyHiddenRepos(only)
+      ? `AND (${SEARCH_ROW_REPO_SQL}) NOT IN (
+           SELECT r.id FROM repos r
+           JOIN hidden_repos h ON h.profile_id = r.profile_id AND h.path = r.path)`
+      : "";
     const refs = this.db
       .prepare(
         // One statement for both scopes: a null `profileId` satisfies the
@@ -887,6 +915,7 @@ export class RepoIndexer {
         `SELECT entity_id, kind FROM search_fts_index
          WHERE search_fts_index MATCH ? AND kind <> 'change_request'
            AND (? IS NULL OR profile_id = ?)
+           ${hidden}
          ORDER BY CASE WHEN kind = 'repo' AND name = ? COLLATE NOCASE
                        THEN -1
                        WHEN name = ? COLLATE NOCASE
@@ -918,6 +947,7 @@ export class RepoIndexer {
         `SELECT entity_id, kind FROM search_fts_index
          WHERE search_fts_index MATCH ? AND kind = 'change_request'
            AND (? IS NULL OR profile_id = ?)
+           ${hidden}
          ORDER BY CASE WHEN pr LIKE ? THEN 0 ELSE 1 END,
                   profile_id = ? DESC,
                   bm25(search_fts_index, 0.0, 0.0, 10.0, 2.0, 4.0, 8.0, 0.0)
@@ -1310,6 +1340,20 @@ export class RepoIndexer {
     return out;
   }
 
+  /** Whether a search in `profileId` (every profile when null) can meet a
+   *  hidden repository: an entry in scope whose folder is still indexed. */
+  private anyHiddenRepos(profileId: ProfileId | null): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM hidden_repos h
+           JOIN repos r ON r.profile_id = h.profile_id AND r.path = h.path
+           WHERE ? IS NULL OR h.profile_id = ? LIMIT 1`
+        )
+        .get(profileId, profileId) !== undefined
+    );
+  }
+
   /** The overlay's empty-query state: all repos, pinned first, alphabetical. */
   private browseRepos(scope: SearchScope = EVERY_PROFILE): RepoSearchHit[] {
     const only = scope.allProfiles ? null : scope.profileId;
@@ -1321,7 +1365,7 @@ export class RepoIndexer {
         `SELECT r.id, r.name, r.path, r.profile_id, r.pinned, p.name AS profile_name,
                 (SELECT COUNT(*) FROM worktrees w WHERE w.repo_id = r.id) AS wt_count
          FROM repos r JOIN profiles p ON p.id = r.profile_id
-         WHERE ? IS NULL OR r.profile_id = ?
+         WHERE (? IS NULL OR r.profile_id = ?) AND ${visibleRepoSql("r")}
          ORDER BY r.profile_id = ? DESC, r.pinned DESC,
                   r.name COLLATE NOCASE, r.name LIMIT 50`
       )

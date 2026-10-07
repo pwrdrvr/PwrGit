@@ -457,7 +457,7 @@ export class CloneService {
       });
     }
     const forges = await this.statuses();
-    const local = localForgeState(this.indexer.listRepos(profileId));
+    const local = localForgeState(this.indexer.listRepos(profileId, { includeHidden: true }));
     return ok({ owners: knownOwners(profile, forges, local), forges });
   }
 
@@ -500,7 +500,7 @@ export class CloneService {
     // for the checkouts each result is marked with. `listRepos` is two queries
     // plus an ownership pass over every worktree, and this runs on every
     // settled keystroke.
-    const local = localForgeState(this.indexer.listRepos(profileId));
+    const local = localForgeState(this.indexer.listRepos(profileId, { includeHidden: true }));
     const owners =
       parsed.owner !== null
         ? [parsed.owner]
@@ -555,7 +555,7 @@ export class CloneService {
       cloneDestinations(
         this.db,
         profile,
-        includeNested ? this.indexer.listRepos(profileId) : []
+        includeNested ? this.indexer.listRepos(profileId, { includeHidden: true }) : []
       )
     );
   }
@@ -607,7 +607,7 @@ export class CloneService {
     if (unavailable !== null) return unavailable;
     try {
       const repository = await provider.viewRepo(nameWithOwner);
-      const local = localForgeState(this.indexer.listRepos(profileId));
+      const local = localForgeState(this.indexer.listRepos(profileId, { includeHidden: true }));
       repository.localPaths =
         local.pathsByRepo.get(
           repoKey(repository.hostname, repository.nameWithOwner)

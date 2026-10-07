@@ -96,6 +96,14 @@ const FOCUS_REASON_COPY: Record<
   }
 };
 
+/** The menu's second line for Remove: what the review leads to, counted. */
+export function removeRepoHint(repo: Repo): string {
+  const linked = repo.worktrees.filter((w) => !w.isPrimary).length;
+  const worktrees =
+    linked === 0 ? "" : ` and its ${linked} ${linked === 1 ? "worktree" : "worktrees"}`;
+  return `Review, then move the checkout${worktrees} to the Trash.`;
+}
+
 export function RepoRow({
   repo,
   expanded,
@@ -130,6 +138,8 @@ export function RepoRow({
   onOpenSetup,
   onCleanUpBranches,
   onPruneWorktrees,
+  onHideRepo,
+  onRemoveRepo,
   arrangeable,
   dragProps,
   dragging,
@@ -196,6 +206,11 @@ export function RepoRow({
   /** Open Maintenance › Prune worktrees — the refs browser's Finished view
    *  offers it. */
   onPruneWorktrees?: (() => void) | undefined;
+  /** Take this repository out of the profile's window, search and bulk
+   *  actions; it stays on disk. */
+  onHideRepo?: (() => void) | undefined;
+  /** Open the guided removal review for this repository. */
+  onRemoveRepo?: (() => void) | undefined;
   /** The current lens is one the user can arrange by hand (Pinned only). */
   arrangeable: boolean;
   /** Repo-level drag handlers from the sidebar's useListReorder. */
@@ -323,6 +338,20 @@ export function RepoRow({
           repoId: repo.id,
           force: true
         })
+    },
+    { type: "sep" },
+    {
+      type: "item",
+      label: "Hide repository",
+      hint: "Stays on disk. Unhide from the sidebar's Hidden list.",
+      onSelect: () => onHideRepo?.()
+    },
+    {
+      type: "item",
+      label: "Remove repository…",
+      danger: true,
+      hint: removeRepoHint(repo),
+      onSelect: () => onRemoveRepo?.()
     }
   ];
   const navigation = groupWorktreesForNavigation(

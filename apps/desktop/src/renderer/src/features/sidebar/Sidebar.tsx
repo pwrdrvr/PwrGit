@@ -60,6 +60,11 @@ import {
 } from "./sidebar-anchor";
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import { MaintenanceDialog } from "./MaintenanceDialog";
+import { HiddenReposButton } from "./HiddenReposButton";
+import { RemoveRepositoryDialog } from "./RemoveRepositoryDialog";
+import { hiddenToast } from "./remove-repo-view";
+import { showErrorToast, showInfoToast } from "../../lib/toast";
+import { unhideRepo } from "../../state/useHiddenRepos";
 import {
   DEFAULT_LENS,
   filterReposByLens,
@@ -361,6 +366,8 @@ export function Sidebar({
     | { repo?: { id: string; name: string }; worktrees?: true }
     | null
   >(null);
+  /** The repository the Remove review is open on. */
+  const [removing, setRemoving] = useState<Repo | null>(null);
   const [sel, setSel] = useState<Selection>({
     repoId: "",
     ids: EMPTY_IDS,
@@ -979,6 +986,46 @@ export function Sidebar({
   // `map` hands us (repo, index, list), which is exactly the posinset/setsize
   // pair each row needs — within its folder group when grouped, within the
   // filtered list when not. See RepoRow for why they are stated explicitly.
+  /** Move the selection off a repository that is about to leave the list, to
+   *  the one after it as drawn (or before it, at the end). Without this the
+   *  window falls back to the first repository, a jump across the list. */
+  const selectNeighbourOf = (repo: Repo): void => {
+    if (!repo.worktrees.some((w) => w.id === selectedWorktreeId)) return;
+    const list = filtered.some((r) => r.id === repo.id) ? filtered : repos;
+    const at = list.findIndex((r) => r.id === repo.id);
+    const next = list[at + 1] ?? list[at - 1];
+    const worktree = next?.worktrees.find((w) => w.isPrimary) ?? next?.worktrees[0];
+    if (next !== undefined && worktree !== undefined) onSelectWorktree(next, worktree);
+  };
+
+  /** Hide asks nothing: it loses nothing, and Undo is on the toast. */
+  const hideRepo = (repo: Repo): void => {
+    // Moved before the round trip, or the refresh lands first and the window
+    // falls back to the first repository; a failed hide moves it back.
+    const selected = repo.worktrees.find((w) => w.id === selectedWorktreeId);
+    selectNeighbourOf(repo);
+    const profileId = repo.profileId;
+    void dispatch("repo:hide", { profileId, repoId: repo.id }).then((result) => {
+      if (!result.ok) {
+        if (selected !== undefined) onSelectWorktree(repo, selected);
+        showErrorToast({ title: `Could not hide ${repo.name}`, message: result.error.message });
+        return;
+      }
+      showInfoToast({
+        ...hiddenToast(repo),
+        action: {
+          label: "Undo",
+          run: () =>
+            void unhideRepo({ profileId, path: repo.path }).then((failure) => {
+              if (failure !== null) {
+                showErrorToast({ title: `Could not unhide ${repo.name}`, message: failure });
+              }
+            })
+        }
+      });
+    });
+  };
+
   const renderRepo = (repo: Repo, index: number, list: Repo[]) => {
     // Live, not held — unlike the row's position. The selected tint below
     // (`containsSelection`) follows the selection immediately and cannot
@@ -1042,6 +1089,8 @@ export function Sidebar({
           setMaintenance({ repo: { id: repo.id, name: repo.name } })
         }
         onPruneWorktrees={() => setMaintenance({ worktrees: true })}
+        onHideRepo={() => hideRepo(repo)}
+        onRemoveRepo={() => setRemoving(repo)}
         onRevealWorktree={(worktreeId) => {
           const worktree = repo.worktrees.find(
             (candidate) => candidate.id === worktreeId
@@ -1400,6 +1449,9 @@ export function Sidebar({
       {/* The profile's AI switch, under the list rather than in it: the tree
           owns only rows, and this is a setting for the whole window. Off
           until turned on — see AiFeaturesSwitch. */}
+      {activeProfile !== null && (
+        <HiddenReposButton profile={activeProfile} />
+      )}
       {activeProfile !== null && <AiFeaturesSwitch profile={activeProfile} />}
 
       {newWorktree !== null && (
@@ -1448,6 +1500,19 @@ export function Sidebar({
                 initialTab: "branches" as const,
                 autoReview: true
               })}
+        />
+      )}
+
+      {removing !== null && (
+        <RemoveRepositoryDialog
+          repo={removing}
+          platform={platform}
+          onClose={() => setRemoving(null)}
+          onRemoved={() => selectNeighbourOf(removing)}
+          onOpenWorktree={(worktreeId) => {
+            const worktree = removing.worktrees.find((w) => w.id === worktreeId);
+            if (worktree !== undefined) onSelectWorktree(removing, worktree);
+          }}
         />
       )}
 

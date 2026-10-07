@@ -9,6 +9,7 @@ import {
   type ChangeRequestLocation,
   type Commit,
   type FileSearchHit,
+  type HiddenRepo,
   type RepoSearchHit,
   type SearchHitStatus
 } from "@pwrgit/shared";
@@ -35,6 +36,11 @@ import { ContextMenu } from "../shell/ContextMenu";
 import { SettingsSegmented } from "../settings/SettingsLayout";
 import { PrChip } from "./PrChip";
 import { worktreeFolderLabel } from "./repo-view";
+import {
+  requestShowHiddenRepos,
+  unhideRepo,
+  useHiddenRepos
+} from "../../state/useHiddenRepos";
 import { PinIcon } from "./WorktreeRow";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { DotGlyph } from "../../lib/DotGlyph";
@@ -125,7 +131,30 @@ const hitKindLabel = (hit: RepoSearchHit): string =>
 export type PaletteItem =
   | { kind: "commit"; commit: Commit }
   | { kind: "file"; hit: FileSearchHit }
-  | { kind: "repo"; hit: RepoSearchHit };
+  | { kind: "repo"; hit: RepoSearchHit }
+  /** A hidden repository the query names in full. Main leaves hidden repos
+   *  out of the search entirely, so this is the only way one shows here. */
+  | { kind: "hidden"; entry: HiddenRepo }
+  /** "Show hidden repositories": opens the sidebar's Hidden list. */
+  | { kind: "show-hidden"; count: number; profileName: string };
+
+/** A palette row's own name, for the labels that name it. */
+export const paletteItemName = (item: PaletteItem): string =>
+  item.kind === "commit"
+    ? item.commit.shortHash
+    : item.kind === "hidden"
+      ? item.entry.name
+      : item.kind === "show-hidden"
+        ? "Show hidden repositories"
+        : item.hit.name;
+
+const SHOW_HIDDEN_PHRASES = ["show hidden repositories", "hidden repositories"];
+
+/** The command answers a query that starts spelling it out: "hidd", "show h". */
+export function namesShowHidden(query: string): boolean {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  return q.length >= 4 && SHOW_HIDDEN_PHRASES.some((phrase) => phrase.startsWith(q));
+}
 
 /** A row's menu entry: copy a value, or open a URL in the browser. */
 type CopyAction = { label: string; value: string; open?: true };
@@ -138,6 +167,10 @@ function paletteCopyActions(item: PaletteItem | undefined): CopyAction[] {
   if (item.kind === "file") {
     return [{ label: "Copy file path", value: item.hit.path }];
   }
+  if (item.kind === "hidden") {
+    return [{ label: "Copy repo path", value: item.entry.path }];
+  }
+  if (item.kind === "show-hidden") return [];
   const hit = item.hit;
   if (hit.kind === "repo") {
     return [
@@ -183,7 +216,11 @@ export const paletteItemKey = (item: PaletteItem): string =>
     ? `commit:${item.commit.hash}`
     : item.kind === "file"
       ? `file:${item.hit.path}`
-      : hitKey(item.hit);
+      : item.kind === "hidden"
+        ? `hidden:${item.entry.path}`
+        : item.kind === "show-hidden"
+          ? "command:show-hidden"
+          : hitKey(item.hit);
 
 export function selectedPaletteItemIndex(
   items: PaletteItem[],
@@ -199,9 +236,25 @@ export function buildPaletteItems(
   results: RepoSearchHit[],
   query: string,
   files: FileSearchHit[] = [],
-  focusedRepoId: string | null = null
+  focusedRepoId: string | null = null,
+  hidden: { entries: HiddenRepo[]; profileName: string } = { entries: [], profileName: "" }
 ): PaletteItem[] {
   const exactName = query.trim().normalize("NFC").toLowerCase();
+  // Only the full name, any case: typing part of a name you hid should not
+  // bring it back into view, but naming it is asking for it.
+  const hiddenExact: PaletteItem[] =
+    exactName === ""
+      ? []
+      : hidden.entries
+          .filter(
+            (entry) =>
+              !entry.missing && entry.name.normalize("NFC").toLowerCase() === exactName
+          )
+          .map((entry) => ({ kind: "hidden" as const, entry }));
+  const showHidden: PaletteItem[] =
+    hidden.entries.length > 0 && namesShowHidden(query)
+      ? [{ kind: "show-hidden", count: hidden.entries.length, profileName: hidden.profileName }]
+      : [];
   // `106` names change request #106 as surely as a repo's full name names the
   // repo, and a bare number also looks like a commit hash prefix and a path —
   // so whatever holds #106 leads, above both.
@@ -238,7 +291,9 @@ export function buildPaletteItems(
   // short enough that it cannot crowd the other kinds out.
   return [
     ...focusedBranches.map((hit) => ({ kind: "repo" as const, hit })),
+    ...showHidden,
     ...exactRepos.map((hit) => ({ kind: "repo" as const, hit })),
+    ...hiddenExact,
     ...files.map((hit) => ({ kind: "file" as const, hit })),
     ...commits.map((commit) => ({ kind: "commit" as const, commit })),
     ...otherResults.map((hit) => ({ kind: "repo" as const, hit }))
@@ -276,6 +331,28 @@ function CommitIcon() {
     >
       <path d="M3 12h6M15 12h6" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+/** Lucide `eye-off`: a hidden repository, and the command that lists them. */
+function EyeOffIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M10.7 5.1A10.7 10.7 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.7 2.7" />
+      <path d="M14.1 14.2a3 3 0 0 1-4.2-4.2" />
+      <path d="M17.5 17.5A10.8 10.8 0 0 1 12 19c-7 0-10-7-10-7a13.2 13.2 0 0 1 4.5-5.5" />
+      <path d="m2 2 20 20" />
     </svg>
   );
 }
@@ -459,10 +536,23 @@ export function RepoSwitcherOverlay({
         : [directCommit, ...commitResults],
     [commitResults, directCommit]
   );
+  const windowProfile = windowProfileId();
+  const { hidden } = useHiddenRepos(windowProfile ?? undefined);
+  const hiddenScope = useMemo(
+    () => ({ entries: hidden, profileName: hidden[0]?.profileName ?? "" }),
+    [hidden]
+  );
   const items = useMemo<PaletteItem[]>(
     () =>
-      buildPaletteItems(allCommitResults, results, query, files, focusedRepoId),
-    [allCommitResults, results, query, files, focusedRepoId]
+      buildPaletteItems(
+        allCommitResults,
+        results,
+        query,
+        files,
+        focusedRepoId,
+        hiddenScope
+      ),
+    [allCommitResults, results, query, files, focusedRepoId, hiddenScope]
   );
   const sel = selectedPaletteItemIndex(items, selectedItemKey);
   const selectedResult = (index: number): boolean => index === sel && (!showSetupCommand || selectedItemKey !== null);
@@ -497,7 +587,7 @@ export function RepoSwitcherOverlay({
 
   const rowActions = (item: PaletteItem) => {
     const key = paletteItemKey(item);
-    const name = item.kind === "commit" ? item.commit.shortHash : item.hit.name;
+    const name = paletteItemName(item);
     return (
       <>
         {copyStatus?.key === key && <span role="status" className="overlay-result__meta">{copyStatus.message}</span>}
@@ -664,7 +754,40 @@ export function RepoSwitcherOverlay({
     }
   }, [sel, items.length]);
 
+  /** Return on a hidden repository: unhide it, then open it as any other
+   *  repository hit. The reveal waits for the tree to list it again. */
+  const pickHidden = async (entry: HiddenRepo): Promise<void> => {
+    const failure = await unhideRepo(entry);
+    if (failure !== null) {
+      setBranchError(failure);
+      return;
+    }
+    if (entry.repoId === null) {
+      onClose();
+      return;
+    }
+    onPick({
+      kind: "repo",
+      repoId: entry.repoId,
+      name: entry.name,
+      path: entry.path,
+      profileId: entry.profileId,
+      profileName: entry.profileName,
+      worktreeCount: entry.worktreeCount,
+      pinned: false
+    });
+  };
+
   const pickItem = (item: PaletteItem | undefined): void => {
+    if (item?.kind === "hidden") {
+      void pickHidden(item.entry);
+      return;
+    }
+    if (item?.kind === "show-hidden") {
+      onClose();
+      requestShowHiddenRepos();
+      return;
+    }
     if (item?.kind === "commit") onPickCommit(item.commit);
     else if (item?.kind === "file") onPickFile(item.hit.path);
     else if (item?.kind === "repo") {
@@ -1023,6 +1146,38 @@ export function RepoSwitcherOverlay({
                 </div>
               );
             }
+            if (item.kind === "hidden" || item.kind === "show-hidden") {
+              const hiddenItem = item.kind === "hidden";
+              return (
+                <div
+                  key={paletteItemKey(item)}
+                  id={rowId(i)}
+                  role="option"
+                  aria-selected={selectedResult(i)}
+                  tabIndex={-1}
+                  className={`overlay-result${hiddenItem ? " overlay-result--hidden" : " overlay-result--command"}${selectedResult(i) ? " is-selected" : ""}`}
+                  onMouseEnter={() => selectItem(i)}
+                  onClick={() => pickItem(item)}
+                >
+                  <span className="a11y-sr-only">{hiddenItem ? "Hidden repo" : "Command"}</span>
+                  <span className="overlay-result__kind" aria-hidden="true">
+                    <EyeOffIcon />
+                  </span>
+                  <span className="overlay-result__name">
+                    {hiddenItem ? item.entry.name : "Show hidden repositories"}
+                  </span>
+                  <span className="overlay-result__meta">
+                    {hiddenItem
+                      ? "hidden"
+                      : `${item.count} in ${item.profileName}`}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  {hiddenItem && (
+                    <span className="overlay-result__meta">Return to unhide</span>
+                  )}
+                </div>
+              );
+            }
             const r = item.hit;
             return (
               // A div, not a button: the pin star inside is a real <button>,
@@ -1214,7 +1369,7 @@ export function RepoSwitcherOverlay({
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          label={`Copy actions for ${menu.item.kind === "commit" ? menu.item.commit.shortHash : menu.item.hit.name}`}
+          label={`Copy actions for ${paletteItemName(menu.item)}`}
           triggerRef={menuTriggerRef}
           onClose={closeMenu}
           items={paletteCopyActions(menu.item).map((action) => ({

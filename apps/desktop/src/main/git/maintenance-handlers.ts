@@ -30,6 +30,7 @@ import {
   reviewStaleBranches,
   type BranchPrEvidence
 } from "./repository-maintenance";
+import { visibleRepoSql } from "./hidden-repos";
 
 export function maintenanceRepos(
   db: DB,
@@ -44,7 +45,8 @@ export function maintenanceRepos(
     .prepare(
       `SELECT r.id, r.name, r.path, r.profile_id AS profileId, p.name AS profileName
     FROM repos r JOIN profiles p ON p.id = r.profile_id
-    ${scope.allProfiles === true ? "" : "WHERE r.profile_id = ?"}
+    WHERE ${visibleRepoSql("r")}
+    ${scope.allProfiles === true ? "" : "AND r.profile_id = ?"}
     ORDER BY p.name COLLATE NOCASE, r.name COLLATE NOCASE, r.id`
     )
     .all(

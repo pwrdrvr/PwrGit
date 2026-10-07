@@ -66,7 +66,9 @@ for that.
   never asks for a password and stores no token of its own.
 - **Worktrees are the model.** Repositories and their linked worktrees live
   together in the sidebar; create, pin, and remove them without losing which
-  checkout owns which branch.
+  checkout owns which branch. Hide a repository you are not working in, or
+  [remove it from disk](docs/hide-and-remove-repositories.md) after a review
+  that names every change, commit and stash it would lose.
 - **Agents can use it too.** A local, OAuth-protected MCP server lets an agent
   you approve find repositories and worktrees, read their status, and open
   them in PwrGit. Each agent gets a named session and a role you can revoke in

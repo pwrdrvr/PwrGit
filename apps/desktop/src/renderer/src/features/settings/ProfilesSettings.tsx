@@ -6,6 +6,7 @@ import { useListReorder } from "../sidebar/useListReorder";
 import { shortcutLabel } from "../../lib/platform";
 import { SettingsSwitch } from "./SettingsSwitch";
 import { ReadError } from "../shell/ReadError";
+import { HiddenReposSection } from "./HiddenReposSection";
 import { useProfiles } from "../../state/useProfiles";
 import {
   SettingsPanelHead,
@@ -188,6 +189,8 @@ export function ProfilesSettings() {
           </>
         )}
       </SettingsSection>
+
+      <HiddenReposSection activeProfileId={profiles.activeProfileId} />
 
       {modal !== null && (
         <ProfileModal
