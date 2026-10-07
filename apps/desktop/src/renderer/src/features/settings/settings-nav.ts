@@ -16,6 +16,7 @@
 import {
   SETTINGS_PAGE_SUBS,
   type AiFeaturesSettingsSub,
+  type MachineGitIdentity,
   type SettingsPage
 } from "@pwrgit/shared";
 import type { AiProviderStatus, AiProviderTone } from "./ai-provider-status";
@@ -63,6 +64,28 @@ export function aiFeatureNavChildren(): SettingsNavChild[] {
     label: AI_FEATURE_SECTION_LABELS[sub],
     sectionId: sub
   }));
+}
+
+/**
+ * Profiles' children. "Git identity" carries a warning while Git has no
+ * identity of its own, so the condition stays findable after the launch
+ * notice was dismissed; nothing at all while unprobed or fine.
+ */
+export function profilesNavChildren(machine: MachineGitIdentity | null): SettingsNavChild[] {
+  const git: SettingsNavChild = { label: "Git identity", sectionId: "git-identity" };
+  if (machine !== null && machine.outside.kind !== "configured") {
+    const guessed = machine.outside.kind === "guessed";
+    git.dot = "warn";
+    git.chip = guessed ? "guessed" : "unset";
+    git.stateLabel = guessed
+      ? "Git identity: Git is guessing your email"
+      : "Git identity: not set outside PwrGit";
+  }
+  return [
+    git,
+    { label: "Profile list", sectionId: "list" },
+    { label: "Hidden repos", sectionId: "hidden" }
+  ];
 }
 
 export type PaneRoute = {

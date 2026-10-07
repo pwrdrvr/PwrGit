@@ -7,16 +7,11 @@ import type { GitExec } from "../git/dugite";
 /**
  * The identity a commit would actually carry, asked of git rather than parsed.
  *
- * `readGitIdentityDefaults` (the first-run *seed*) regexes the first `name =`
- * and the first `email =` anywhere in `~/.gitconfig`. It is not section-aware,
- * so the two can come from different sections — a `[github] name = handle`
- * ahead of `[user]` seeds the forge handle as the commit author — and it does
- * not follow `include`, so an identity kept in an included file reads as empty
- * while `git config --get user.name` answers fine.
- *
- * The seed can live with that: it is documented best-effort and only picks a
- * default nobody is shown. A wizard that puts the value on screen and says
- * "commits will be signed off as this" cannot, so it asks git.
+ * A regex over `~/.gitconfig` is not section-aware, so a `[github] name =
+ * handle` ahead of `[user]` reads as the commit author, and it does not follow
+ * `include`, so an identity kept in an included file reads as empty while
+ * `git config --get user.name` answers fine. The first-run seed made both
+ * mistakes until it switched to this read too (`readSeedIdentity`).
  */
 export async function readEffectiveGitIdentity(
   git: GitExec,

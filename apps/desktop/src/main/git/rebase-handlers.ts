@@ -186,7 +186,7 @@ export function registerRebaseHandlers(
       approvalToken,
       sourceHead: checked.value.sourceHead,
       message:
-        "Check passed under PwrGit's no-hooks, no-signing policy. Other repo-local Git settings can still affect Apply.",
+        "Check passed in an isolated copy, with hooks off and nothing signed. Apply signs only if Git is set to sign commits. Other repo-local Git settings can still affect Apply.",
       proof: checked.value.proof
     });
   });
@@ -240,10 +240,19 @@ export function registerRebaseHandlers(
         { head: approval.sourceHead, headRef: approval.sourceRef },
         // Messages come from this request: they are data, and may have been
         // edited after the check without changing what it proved.
-        program.value
+        program.value,
+        req.unsigned === true ? "off" : "config"
       )
     );
-    if (!result.ok) return result;
+    if (!result.ok) {
+      // A signer that refused left the worktree restored at the checked
+      // head, so the proof still holds: keep the approval for the one
+      // follow-up that makes sense, applying without a signature.
+      if (result.error.code === "signing_failed" && req.unsigned !== true) {
+        approvals.set(req.approvalToken, approval);
+      }
+      return result;
+    }
     refresher.refreshWorktree(req.worktreeId);
     return ok(null);
   });

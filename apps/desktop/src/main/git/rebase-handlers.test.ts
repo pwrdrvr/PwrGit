@@ -152,6 +152,32 @@ describe("rebase handler approval gate", () => {
     });
   });
 
+  it("keeps the approval after a refused signature, for one unsigned apply", async () => {
+    const { bus, apply } = setup();
+    apply.mockResolvedValueOnce(
+      err({
+        kind: "rebase",
+        code: "signing_failed",
+        message: "Git couldn’t sign the rewritten commits: no secret key."
+      })
+    );
+    await bus.dispatch("rebase:check", { worktreeId: "wt-1", commits, op: "squash" });
+    const request = { worktreeId: "wt-1", commits, op: "squash" as const, approvalToken: "approval-1" };
+
+    const signed = await bus.dispatch("rebase:apply", request);
+    expect(signed.ok).toBe(false);
+    expect(apply.mock.calls[0]?.[7]).toBe("config");
+
+    const unsigned = await bus.dispatch("rebase:apply", { ...request, unsigned: true });
+    expect(unsigned.ok).toBe(true);
+    expect(apply.mock.calls[1]?.[7]).toBe("off");
+
+    // One-shot again once it has been spent.
+    const again = await bus.dispatch("rebase:apply", { ...request, unsigned: true });
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.error.code).toBe("dry_run_required");
+  });
+
   it("returns a typed snag and issues no approval when the check fails", async () => {
     const { bus, dryRun, apply } = setup();
     dryRun.mockResolvedValueOnce(

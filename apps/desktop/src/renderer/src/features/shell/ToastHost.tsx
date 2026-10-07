@@ -4,6 +4,7 @@ import { AppUpdateToast } from "../update/AppUpdateToast";
 import { ReleaseNotesLink } from "../update/ReleaseNotesLink";
 import { RemoteActivityToast } from "../remote/RemoteActivityToast";
 import { CodexVersionNotice } from "../settings/CodexVersionNotice";
+import { GitIdentityNotice } from "../identity/GitIdentityNotice";
 import { dispatch } from "../../lib/pwrgit";
 import {
   dismissToast,
@@ -30,11 +31,15 @@ const AUTO_DISMISS_MS = 9_000;
  *  a childless flex column at a fixed corner has no size and paints nothing. */
 export function ToastHost({
   profileId = null,
+  profile = null,
   selectedWorktreeId = null,
   repos,
   onReveal
 }: {
   profileId?: string | null;
+  /** This window's profile identity, which the Git identity notice names as
+   *  what PwrGit commits with. */
+  profile?: { name: string; email: string } | null;
   /** The checkout on screen — its own toolbar reports its operations, so the
    *  activity cards below skip it. */
   selectedWorktreeId?: string | null;
@@ -78,6 +83,7 @@ export function ToastHost({
           card, for the reason the sort above gives: they outlive the come-and-go
           and must not be shoved around by it. */}
       <RemoteActivityToast selectedWorktreeId={selectedWorktreeId} />
+      <GitIdentityNotice profile={profile} />
       <CodexVersionNotice profileId={profileId} />
       <AppUpdateToast />
     </div>

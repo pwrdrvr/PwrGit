@@ -300,6 +300,43 @@ Two related traps in the same area:
 - **`GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank `-c user.email`.** Tests that set
   those in the environment cannot prove identity handling; unset them for that
   assertion (see `execGitWithoutIdentityEnv`).
+
+## A PwrGit commit records the profile, completely
+
+`commit-identity.ts` owns who a commit is by. Every commit PwrGit writes
+(commit, amend, annotated tag, operation continue, the rebase assistant) gets
+`commitIdentityArgs` plus `SCRUBBED_IDENTITY_ENV`. Four things are easy to undo:
+
+- **`-c user.email` alone is not enforcement.** It loses to `author.email` /
+  `committer.email` at any scope and to `GIT_AUTHOR_*` / `GIT_COMMITTER_*` /
+  `EMAIL` in the environment PwrGit inherited from a shell. So the args set all
+  three keys, and the env overlay *unsets* the variables (an `undefined` value
+  removes a key for a Node child). The footer's prediction (`git var`, same
+  args, same env) can then not drift from what is written.
+- **An empty profile email must not reach `-c`.** `-c user.email=` makes Git
+  record `Name <>`. With no email the args pass `user.useConfigOnly=true`
+  instead, so Git uses its own config or refuses, never guesses.
+- **`git var` succeeding proves nothing on macOS.** With nothing configured,
+  macOS Git invents `login@host.local` and exits 0; Linux Git refuses. "Is Git
+  configured outside PwrGit" is the same call under `user.useConfigOnly=true`
+  (`resolveOutsideIdentity`), from `tmpdir()` for the machine-wide answer.
+- **Refusal text puts the reason last.** Git opens with an "Author identity
+  unknown" banner; the trailing `fatal:` line says which field is missing.
+
+The rebase assistant's *check* never signs (`commit.gpgSign=false`, so it can
+never prompt). *Apply* honours the user's signing config and, when the signer
+fails, aborts, restores and returns `signing_failed`; the handler keeps the
+approval for exactly one explicit `unsigned: true` apply. "Is it signed" comes
+from the commit's `gpgsig` header (`git log --pretty=raw`), never `%G?`, which
+reports an SSH signature as `N` without `gpg.ssh.allowedSignersFile`.
+
+`identity:writeGlobal` is the only identity config PwrGit ever writes, and only
+from the Settings dialog that previewed it. `git config --global` picks the file
+(`GIT_CONFIG_GLOBAL`, else `~/.gitconfig` if present, else the XDG file);
+`globalConfigFile` reproduces that choice for the preview. Tests isolate
+`HOME`, `XDG_CONFIG_HOME` and `GIT_CONFIG_NOSYSTEM`, or the dev machine's own
+identity leaks into every assertion.
+
 ## A scan that found nothing is not proof anything was deleted
 
 `rescanProfile` prunes the repos a scan did not see, and that delete cascades

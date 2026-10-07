@@ -13,7 +13,7 @@ describe("SETTINGS_NAV_GROUPS", () => {
   it("expands exactly the pages that own subs", () => {
     // The same table main checks `settings:open` against, so a row can only
     // offer a child a deep link could also reach.
-    expect([...SETTINGS_NAV_GROUPS].sort()).toEqual(["ai-features", "ai-providers", "forges"]);
+    expect([...SETTINGS_NAV_GROUPS].sort()).toEqual(["ai-features", "ai-providers", "forges", "profiles"]);
     for (const page of SETTINGS_PAGES) {
       expect(SETTINGS_NAV_GROUPS.has(page), page).toBe(settingsPageSubs(page).length > 0);
     }

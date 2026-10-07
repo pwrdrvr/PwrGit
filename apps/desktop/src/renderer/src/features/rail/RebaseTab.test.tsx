@@ -244,7 +244,7 @@ describe("rebase tool copy", () => {
       <RebaseTab worktreeId={null} sourceHead={null} selectedHashes={[]} op={null} onClear={() => undefined} />
     );
     expect(panel).toContain("Rebase tool");
-    expect(panel).toContain("Isolated check · hooks and signing disabled");
+    expect(panel).toContain("Isolated check · hooks off, nothing signed");
     expect(panel).toContain("inspect the");
   });
 

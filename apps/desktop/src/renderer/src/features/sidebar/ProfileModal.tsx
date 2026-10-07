@@ -169,7 +169,10 @@ export function ProfileModal({
         </div>
 
         <label className="field">
-          <span className="field__label">Commit email</span>
+          <span className="field__label">
+            Commit email{" "}
+            <span className="field__hint">· used for commits made in PwrGit</span>
+          </span>
           <input
             className="modal__input"
             value={email}
@@ -181,7 +184,8 @@ export function ProfileModal({
         <div className="field-row">
           <label className="field">
             <span className="field__label">
-              Author name <span className="field__opt">optional</span>
+              Author name{" "}
+              <span className="field__opt">optional · falls back to Git’s user.name</span>
             </span>
             <input
               className="modal__input"

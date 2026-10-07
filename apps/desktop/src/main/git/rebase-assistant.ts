@@ -16,7 +16,11 @@ import {
   type Result
 } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
-import type { CommitIdentity } from "./git-service";
+import {
+  commitIdentityArgs,
+  SCRUBBED_IDENTITY_ENV,
+  type CommitIdentity
+} from "./commit-identity";
 
 export type RebaseSourceState = {
   head: string;
@@ -36,6 +40,13 @@ export type RebaseFailure = Omit<PwrGitError, "detail"> & {
   detail?: string;
   snag?: RebaseSnagDetail;
 };
+
+/**
+ * Whether a rewrite may sign. The isolated check never does: its commits are
+ * thrown away, and a signer can stop to ask for a passphrase. Apply follows
+ * Git's own `commit.gpgSign`, so a branch that was signed stays signed.
+ */
+export type RebaseSigningMode = "config" | "off";
 
 export type RebaseDryRunOptions = {
   /** Test seam; production checks use the operating system temp directory. */
@@ -420,22 +431,39 @@ async function preflightRebase(
 
 function gitConfigArgs(
   identity: CommitIdentity,
-  hooksPath: string
+  hooksPath: string,
+  signing: RebaseSigningMode
 ): string[] {
-  const args = [
+  return [
     "-c",
     `core.hooksPath=${hooksPath}`,
-    "-c",
-    "commit.gpgSign=false",
+    ...(signing === "off" ? ["-c", "commit.gpgSign=false"] : []),
     "-c",
     "rerere.enabled=false",
-    "-c",
-    `user.email=${identity.email}`
+    ...commitIdentityArgs(identity)
   ];
-  if (identity.name !== undefined && identity.name !== "") {
-    args.push("-c", `user.name=${identity.name}`);
-  }
-  return args;
+}
+
+/**
+ * Whether a failed pick or commit was the signer refusing rather than the
+ * content. Git reports every signing failure (a locked key with no agent, a
+ * missing key file, gpg not found) as `failed to write commit object` after
+ * the signer's own line; read as a conflict, it sent people hunting for one.
+ */
+export function signingFailureReason(stderr: string): string | null {
+  if (!/failed to write commit object|gpg failed to sign/i.test(stderr)) return null;
+  const cause = stderr
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(
+      (line) =>
+        line !== "" &&
+        !/^fatal: failed to write commit object/i.test(line) &&
+        !/^\(no gpg output\)$/i.test(line)
+    );
+  return (cause ?? "the signer gave no reason")
+    .replace(/^(error|fatal):\s*/i, "")
+    .replace(/[?:]\s*$/, "");
 }
 
 async function conflictedFiles(git: GitExec, cwd: string): Promise<string[]> {
@@ -494,6 +522,7 @@ async function rewriteHistory(
   op: RebaseOperation,
   program: HistoryEditProgram,
   identity: CommitIdentity,
+  signing: RebaseSigningMode,
   base: string,
   expectedTreeOf: string,
   restoreHead?: string,
@@ -502,7 +531,11 @@ async function rewriteHistory(
     `pwrgit-disabled-hooks-${randomUUID()}`
   )
 ): Promise<Result<RewriteOutcome, RebaseFailure>> {
-  const configArgs = gitConfigArgs(identity, hooksPath);
+  const configArgs = gitConfigArgs(identity, hooksPath, signing);
+  // Identity variables inherited from whatever launched PwrGit would outrank
+  // every `-c` above, so the steps that write commits run without them.
+  const write = (args: string[]): ReturnType<GitExec> =>
+    git([...configArgs, ...args], cwd, { env: { ...SCRUBBED_IDENTITY_ENV } });
   const label = OP_LABEL[op];
   const restore = async (): Promise<void> => {
     if (restoreHead !== undefined) {
@@ -524,9 +557,20 @@ async function rewriteHistory(
   const subjects = new Map(commits.map((c) => [c.hash, c.subject]));
   const total = program.commits.reduce((sum, c) => sum + c.members.length, 0);
   let step = 0;
+  const signingRefused = async (stderr: string): Promise<RebaseFailure | null> => {
+    if (signing === "off") return null;
+    const reason = signingFailureReason(stderr);
+    if (reason === null) return null;
+    await write(["cherry-pick", "--abort"]);
+    await restore();
+    return {
+      ...rebaseError("signing_failed", `Git couldn’t sign the rewritten commits: ${reason}.`),
+      detail: stderr.trim()
+    };
+  };
   const conflict = async (hash: string): Promise<RebaseFailure> => {
     const files = await conflictedFiles(git, cwd);
-    await git([...configArgs, "cherry-pick", "--abort"], cwd);
+    await write(["cherry-pick", "--abort"]);
     await restore();
     return rebaseError("conflict", `${label} hit a conflict.`, {
       kind: "conflict",
@@ -542,19 +586,24 @@ async function rewriteHistory(
     if (commit.message === null && commit.members.length === 1) {
       const hash = commit.members[0]!;
       step += 1;
-      const pick = await git([...configArgs, "cherry-pick", hash], cwd);
+      const pick = await write(["cherry-pick", hash]);
+      if (pick.ok && pick.value.exitCode !== 0) {
+        const refused = await signingRefused(pick.value.stderr);
+        if (refused !== null) return err(refused);
+      }
       if (!pick.ok || pick.value.exitCode !== 0) return err(await conflict(hash));
       continue;
     }
     for (const hash of commit.members) {
       step += 1;
-      const pick = await git([...configArgs, "cherry-pick", "--no-commit", hash], cwd);
+      const pick = await write(["cherry-pick", "--no-commit", hash]);
       if (!pick.ok || pick.value.exitCode !== 0) return err(await conflict(hash));
     }
-    const made = await git(
-      [...configArgs, "commit", "-m", commit.message ?? ""],
-      cwd
-    );
+    const made = await write(["commit", "-m", commit.message ?? ""]);
+    if (made.ok && made.value.exitCode !== 0) {
+      const refused = await signingRefused(made.value.stderr);
+      if (refused !== null) return err(refused);
+    }
     if (!made.ok || made.value.exitCode !== 0) {
       await restore();
       return err(
@@ -656,6 +705,7 @@ async function simulateInTemporaryRepository(
     op,
     program,
     identity,
+    "off",
     validated.value.base,
     source.head,
     undefined,
@@ -788,7 +838,8 @@ export async function applyRebase(
   op: RebaseOperation,
   identity: CommitIdentity,
   expectedSource?: RebaseSourceState,
-  program?: HistoryEditProgram
+  program?: HistoryEditProgram,
+  signing: RebaseSigningMode = "config"
 ): Promise<Result<void, RebaseFailure>> {
   const resolved = resolveProgram(commits, op, program);
   if (!resolved.ok) return resolved;
@@ -801,6 +852,7 @@ export async function applyRebase(
     op,
     resolved.value,
     identity,
+    signing,
     preflight.value.base,
     preflight.value.source.head,
     preflight.value.source.head
@@ -814,6 +866,12 @@ export async function applyRebase(
       return err({
         ...result.error,
         message: `${lead} The worktree was restored unchanged.`
+      });
+    }
+    if (result.error.code === "signing_failed") {
+      return err({
+        ...result.error,
+        message: `${result.error.message} The worktree was restored unchanged.`
       });
     }
     return result;

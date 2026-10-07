@@ -78,7 +78,21 @@ function profileState(profiles: Profile[]) {
 async function render(profiles: Profile[]): Promise<void> {
   mocks.useProfiles.mockReturnValue(profileState(profiles));
   await act(async () => {
-    root.render(<ProfilesSettings />);
+    root.render(
+      <ProfilesSettings
+        // The Git identity card above the list has its own suite
+        // (GitIdentitySettings.test.tsx); unprobed, it only stays out of the way.
+        machine={null}
+        settings={{
+          snapshot: null,
+          loading: false,
+          saving: false,
+          error: null,
+          refresh: async () => undefined,
+          update: async () => undefined
+        }}
+      />
+    );
   });
 }
 

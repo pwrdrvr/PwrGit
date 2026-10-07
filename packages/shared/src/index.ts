@@ -23,3 +23,4 @@ export * from "./ai-providers";
 export * from "./settings-pages";
 export * from "./executable-path";
 export * from "./local-machine";
+export * from "./commit-identity";
