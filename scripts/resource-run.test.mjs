@@ -21,7 +21,7 @@ async function fixture() {
     const spec = JSON.parse(Buffer.from(process.argv[2], 'base64').toString());
     try {
       const result = await runResourceCommand(spec.command ?? process.execPath, spec.args, {
-        policy: { constrained: spec.high !== true, effectiveMemory: 12 * 1024 ** 3 },
+        policy: spec.auto ? undefined : { constrained: spec.high !== true, effectiveMemory: 12 * 1024 ** 3 },
         lockPath: spec.lockPath, cwd: spec.cwd, env: process.env,
       });
       if (result.signal) { setTimeout(()=>process.exit(1),1000); process.kill(process.pid, result.signal); }
@@ -98,6 +98,26 @@ describe("shared resource lease", () => {
     await expect(stat(`${f.lockPath}.lock`)).rejects.toThrow();
     await expect(stat(`${f.lockPath}.owner.json`)).rejects.toThrow();
   });
+
+  it.each([
+    [{ CI: "true" }, false], [{ CI: "true" }, true],
+    [{ GITHUB_ACTIONS: "true", CI: "false" }, false], [{ GITHUB_ACTIONS: "true", CI: "false" }, true],
+  ])("bypasses the queue and preserves heap/environment/argv for CI (%j), nested=%s", async (ciEnv, nested) => {
+    const f = await fixture();
+    // A live private lane must not delay an automatically detected CI job.
+    await mkdir(`${f.lockPath}.lock`);
+    const owner = { pid: process.pid, path: f.lockPath, token: "another-build", ownerStartedAt: processStartedAt(process.pid) };
+    await writeFile(`${f.lockPath}.owner.json`, JSON.stringify(owner));
+    const originalStat = await stat(`${f.lockPath}.lock`);
+    const args = ["--max-old-space-size=6144", "-e", "console.log(JSON.stringify({options:process.env.NODE_OPTIONS,argv:process.argv.slice(1),marker:process.env.PWRAGENT_TOOL_DESCENDANT_TOKEN}));process.exitCode=7", "--", "application-arg"];
+    const launchArgs = nested ? ["--max-old-space-size=6144", f.driver, encode({ auto: true, lockPath: f.lockPath, args })] : args;
+    const result = await launch(f, { auto: true, args: launchArgs }, { ...ciEnv, NODE_OPTIONS: "--max-old-space-size=6144 --trace-warnings", PWRAGENT_TOOL_DESCENDANT_TOKEN: "original-marker" }).completed;
+    expect(result.code, result.stderr).toBe(7);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toEqual({ options: "--max-old-space-size=6144 --trace-warnings", argv: ["application-arg"], marker: "original-marker" });
+    expect(JSON.parse(await readFile(`${f.lockPath}.owner.json`, "utf8"))).toEqual(owner);
+    expect((await stat(`${f.lockPath}.lock`)).mtimeMs).toBe(originalStat.mtimeMs);
+  }, 30_000);
 
   it("caps actual Node CLI and inherited percentage overrides while preserving warnings", async () => {
     const f = await fixture();

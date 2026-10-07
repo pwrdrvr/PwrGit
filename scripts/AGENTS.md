@@ -15,6 +15,9 @@ open-coding the `process.argv[1]` comparison a fourth time.
 Below 16 GiB of total effective capacity (host total, OS limit, and every
 visible cgroup ancestor), PwrGit uses 2048 MiB Node old space and one workspace
 or test worker. At 16 GiB or above, argv and environment pass through unchanged.
+CI (nonempty `CI`, except `false`/`0`, or `GITHUB_ACTIONS=true`) bypasses the cap, shared lane and
+worker restrictions, retaining the CI job's original environment/argv and
+parallelism. This policy targets developer machines sharing several builds.
 Keep Vitest's default process isolation; SQLite staging supports native test
 workers separately from Electron.
 
