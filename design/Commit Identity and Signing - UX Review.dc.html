@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-elev: #101010; --bg-side: #050505; --bg-in: #080808;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --info: #9fc8ff; --infosoft: rgba(159, 200, 255, 0.12);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+          button { font-family: inherit; }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-turn + .dv-turn { border-top: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 820px; text-wrap: pretty; }
+          .dv-sub b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          .stage { display: flex; flex-direction: column; gap: 11px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); }
+          .stage-h { display: flex; align-items: center; gap: 8px; font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); }
+          .stage-h em { font: 500 9.5px/1 var(--mono); font-style: normal; color: var(--tsub); text-transform: none; letter-spacing: 0; }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 760px; }
+          .note b { color: var(--t2); font-weight: 600; }
+          code, .mono { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+          .pair { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .pin.w { background: var(--warn); color: #050505; }
+          .find { width: 470px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0 0 3px; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem b { color: var(--t2); font-weight: 600; }
+          pre.probe { margin: 4px 0 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-in); font: 500 9.5px/1.5 var(--mono); color: var(--t2); white-space: pre-wrap; }
+          pre.probe i { font-style: normal; color: var(--t3); }
+          pre.probe b { color: var(--accb); font-weight: 600; }
+
+          /* ---- matrix table ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--t1); font-weight: 600; }
+          .m5 { grid-template-columns: 150px 170px 150px 170px minmax(0, 1fr); }
+          .m4 { grid-template-columns: 170px 210px 150px minmax(0, 1fr); }
+          .m6 { grid-template-columns: 150px 200px 110px 150px 180px minmax(0, 1fr); }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+          .st.keep { background: var(--oksoft); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          /* =======================================================
+             Rail commit box, at shipped size (app.css .commit-box)
+             ======================================================= */
+          .rail { width: 340px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-side); overflow: visible; position: relative; }
+          .rail-files { padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 4px; }
+          .rail-sec { font: 600 9.5px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; color: var(--t3); padding: 2px 0 4px; }
+          .rail-file { display: flex; gap: 8px; align-items: center; font: 500 11.5px/1.6 var(--mono); color: var(--t2); }
+          .rail-file .s { width: 12px; color: var(--okt); font-weight: 700; }
+          .cbox { border-top: 1px solid var(--line); padding: 12px; background: var(--bg-side); border-radius: 0 0 9px 9px; }
+          .cmsg { margin-bottom: 8px; background: var(--bg-in); border: 1px solid var(--line2); border-radius: 7px; padding: 8px 10px; min-height: 32px; font: 500 12px/1.35 var(--sans); color: var(--t1); }
+          .cact { display: flex; gap: 8px; }
+          .cbtn { flex: 1; height: 32px; border-radius: 7px; border: none; background: var(--acc); color: var(--accon); font: 700 12px/1 var(--sans); cursor: pointer; }
+          .cbtn.dis { background: rgba(247, 243, 235, 0.07); color: var(--t3); cursor: not-allowed; }
+          .abtn { height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--line2); background: var(--bg-elev); color: var(--t2); font: 600 12px/1 var(--sans); cursor: pointer; }
+          .abtn.hot { border-color: var(--abord); color: var(--t1); }
+          /* as built: plain text, not a control */
+          .cas-old { margin-top: 8px; font: 500 10.5px/1.3 var(--mono); color: var(--tsub); }
+
+          /* proposed: the same line, as a quiet button that opens details */
+          .cas { margin-top: 8px; display: flex; align-items: flex-start; gap: 6px; width: 100%; padding: 3px 5px; margin-left: -5px; margin-right: -5px; width: calc(100% + 10px); border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--tsub); font: 500 10.5px/1.35 var(--mono); text-align: left; cursor: pointer; }
+          .cas:hover, .cas.open { border-color: var(--line); background: rgba(247, 243, 235, 0.04); color: var(--t2); }
+          .cas .lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; overflow-wrap: anywhere; }
+          .cas .lab { color: var(--t3); }
+          .cas .dot { flex: none; width: 6px; height: 6px; border-radius: 999px; margin-top: 4px; background: transparent; }
+          .cas.warn .dot { background: var(--warn); }
+          .cas.bad .dot { background: var(--bad); }
+          .cas.warn .why { color: var(--warn); }
+          .cas.bad .why { color: var(--badt); }
+          .cas .why { font-family: var(--sans); font-size: 10.5px; }
+          .cas .chev { flex: none; width: 12px; height: 12px; margin-top: 1px; color: var(--t3); }
+          .cblock { margin-top: 8px; padding: 7px 9px; border-radius: 6px; background: var(--badsoft); font: 500 11px/1.4 var(--sans); color: var(--badt); }
+          .cblock a { color: var(--t1); text-decoration: underline; text-underline-offset: 2px; }
+
+          /* =======================================================
+             Identity details popover
+             ======================================================= */
+          .idp { width: 392px; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg-elev); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42); overflow: hidden; }
+          .idp-h { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 8px; border-bottom: 1px solid var(--line); }
+          .idp-h b { font: 650 12px/1.2 var(--sans); color: var(--t1); }
+          .idp-h span { font: 500 10px/1.2 var(--mono); color: var(--t3); }
+          .idp-sec { padding: 9px 12px 10px; }
+          .idp-sec + .idp-sec { border-top: 1px solid var(--line); }
+          .idp-q { margin: 0 0 6px; font: 650 9.5px/1.2 var(--sans); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t3); }
+          .idr { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 2px 10px; padding: 3px 0; align-items: baseline; }
+          .idr .k { font: 500 11px/1.4 var(--sans); color: var(--t3); }
+          .idr .v { font: 550 11px/1.4 var(--mono); color: var(--t1); overflow-wrap: anywhere; }
+          .idr .v.none { color: var(--tsub); font-family: var(--sans); font-weight: 500; }
+          .idr .v.warn { color: var(--warn); }
+          .idr .v.bad { color: var(--badt); }
+          .idr .src { grid-column: 2; font: 400 10.5px/1.4 var(--sans); color: var(--t3); }
+          .idr .src code { font-size: 9.5px; color: var(--t2); }
+          .idp-msg { margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; font: 500 11px/1.45 var(--sans); color: var(--t2); background: rgba(247, 243, 235, 0.04); }
+          .idp-msg.warn { background: var(--warnsoft); color: var(--t1); }
+          .idp-msg.bad { background: var(--badsoft); color: var(--badt); }
+          .idp-msg.info { background: var(--infosoft); color: var(--t1); }
+          .idp-act { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+          .pbtn { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 6px; background: transparent; color: var(--t2); font: 600 11px/1 var(--sans); cursor: pointer; }
+          .pbtn.pri { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .pbtn:hover { border-color: var(--abord); color: var(--accb); }
+          .rc { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 1px 8px; padding: 4px 0; }
+          .rc + .rc { border-top: 1px dashed var(--line); }
+          .rc .sha { font: 500 10px/1.5 var(--mono); color: var(--t3); }
+          .rc .who { font: 500 10.5px/1.5 var(--mono); color: var(--t1); overflow-wrap: anywhere; }
+          .rc .meta { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px; }
+          .tg { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; font: 600 9px/1 var(--sans); letter-spacing: 0.02em; background: rgba(247, 243, 235, 0.06); color: var(--t3); white-space: nowrap; }
+          .tg.ok { background: var(--oksoft); color: var(--okt); }
+          .tg.warn { background: var(--warnsoft); color: var(--warn); }
+          .tg.info { background: var(--infosoft); color: var(--info); }
+          .tg.acc { background: var(--asoft); color: var(--accb); }
+          .tg.hide { display: none; }
+          .idp-src { padding: 8px 12px 10px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.25); }
+          .idp-src summary, .disc { font: 600 10.5px/1.3 var(--sans); color: var(--t2); cursor: pointer; }
+          .srow { display: grid; grid-template-columns: 112px 64px minmax(0, 1fr); gap: 8px; padding: 3px 0; font: 500 9.5px/1.45 var(--mono); color: var(--t2); }
+          .srow .sc { color: var(--t3); }
+          .srow .fv { overflow-wrap: anywhere; }
+          .srow.off { opacity: 0.5; text-decoration: line-through; text-decoration-color: rgba(247, 243, 235, 0.35); }
+          .srow.win .fv { color: var(--t1); }
+
+          /* =======================================================
+             Toasts, at shipped size (.app-toast)
+             ======================================================= */
+          .toast { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; width: 420px; padding: 12px 14px; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg-elev); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42); position: relative; }
+          .toast-eb { margin: 0 0 4px; font: 700 10.5px/1.2 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--acc); }
+          .toast-msg { margin: 0; font: 500 12.5px/1.35 var(--sans); color: var(--t1); }
+          .toast-hint { margin: 6px 0 0; font: 400 11.5px/1.4 var(--sans); color: var(--t3); }
+          .toast-hint code { font-size: 10.5px; color: var(--t1); }
+          .toast-act { display: flex; flex-wrap: wrap; gap: 6px; }
+          .tbtn { display: inline-flex; align-items: center; height: 26px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--t2); font: 600 11px/1 var(--sans); cursor: pointer; }
+          .tbtn.pri { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .toast-x { position: absolute; top: 9px; right: 9px; width: 18px; height: 18px; color: var(--t3); }
+
+          /* =======================================================
+             Settings card + dialog (shipped .settings-panel shapes)
+             ======================================================= */
+          .sp { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 10px; }
+          .sp-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); background: var(--bg-elev); border-radius: 10px 10px 0 0; }
+          .sp-hm { flex: 1; min-width: 0; }
+          .sp-eb { margin: 0 0 4px; font: 650 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--acc); }
+          .sp-t { margin: 0; font: 700 15px/1.2 var(--sans); letter-spacing: -0.005em; color: var(--t1); }
+          .sp-d { margin: 5px 0 0; font: 400 12px/1.5 var(--sans); color: var(--t3); max-width: 62ch; }
+          .sp-b { padding: 4px 16px 12px; }
+          .chip { flex: 0 0 auto; font: 600 10.5px/1 var(--sans); letter-spacing: 0.03em; color: var(--t3); background: var(--bg-elev); border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+          .chip.ok { color: var(--okt); background: var(--oksoft); border-color: transparent; }
+          .chip.warn { color: var(--warn); background: var(--warnsoft); border-color: transparent; }
+          .chip.err { color: var(--badt); background: var(--badsoft); border-color: transparent; }
+          .f { display: flex; align-items: flex-start; gap: 18px; padding: 11px 0; }
+          .f + .f { border-top: 1px solid var(--line); }
+          .f-l { display: flex; flex-direction: column; gap: 3px; flex: 0 0 190px; font: 550 12.5px/1.35 var(--sans); color: var(--t1); }
+          .f-sub { font: 400 11.5px/1.45 var(--sans); color: var(--t3); }
+          .f-c { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; flex: 1; min-width: 0; }
+          .f-v { font: 550 11.5px/1.45 var(--mono); color: var(--t1); overflow-wrap: anywhere; }
+          .f-v.none { color: var(--tsub); font-family: var(--sans); }
+          .f-v.warn { color: var(--warn); }
+          .f-help { font: 400 11px/1.45 var(--sans); color: var(--tsub); max-width: 52ch; overflow-wrap: anywhere; }
+          .f-help code { font-size: 10px; }
+          .sbtn { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg-elev); color: var(--t1); font: 550 11.5px/1 var(--sans); cursor: pointer; }
+          .sbtn.pri { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .sw { display: inline-flex; align-items: center; gap: 8px; font: 500 11.5px/1.3 var(--sans); color: var(--t2); }
+          .sw i { width: 26px; height: 15px; border-radius: 999px; background: var(--acc); position: relative; }
+          .sw i::after { content: ""; position: absolute; top: 2px; right: 2px; width: 11px; height: 11px; border-radius: 999px; background: var(--accon); }
+
+          .dlg { width: 520px; border: 1px solid var(--line2); border-radius: 12px; background: var(--bg-elev); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5); padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+          .dlg-t { margin: 0; font: 700 15px/1.2 var(--sans); color: var(--t1); }
+          .dlg-d { margin: 0; font: 400 12px/1.5 var(--sans); color: var(--t3); }
+          .fld { display: flex; flex-direction: column; gap: 5px; }
+          .fld-l { font: 600 11.5px/1.2 var(--sans); color: var(--t2); }
+          .fld-l span { font-weight: 400; color: var(--t3); }
+          .inp { height: 30px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-in); display: flex; align-items: center; font: 500 12px/1 var(--sans); color: var(--t1); }
+          .seed { display: flex; flex-wrap: wrap; gap: 5px; }
+          .seed span { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; font: 550 10.5px/1 var(--mono); color: var(--t2); }
+          .seed span.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .scope { display: flex; flex-direction: column; gap: 4px; }
+          .scope label { display: flex; gap: 8px; align-items: flex-start; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; font: 500 11.5px/1.4 var(--sans); color: var(--t2); }
+          .scope label.on { border-color: var(--abord); background: var(--asoft); color: var(--t1); }
+          .scope label i { flex: none; width: 12px; height: 12px; margin-top: 2px; border-radius: 999px; border: 1.5px solid var(--t3); }
+          .scope label.on i { border-color: var(--acc); background: radial-gradient(var(--acc) 0 3px, transparent 3.5px); }
+          .scope label small { display: block; font: 400 10.5px/1.4 var(--sans); color: var(--t3); }
+          .diff { border: 1px solid var(--line); border-radius: 7px; background: var(--bg-in); padding: 8px 10px; font: 500 10.5px/1.6 var(--mono); color: var(--t2); }
+          .diff .fn { color: var(--t3); margin-bottom: 3px; }
+          .diff .add { color: var(--okt); }
+          .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+
+          /* profile modal field */
+          .pm { width: 470px; border: 1px solid var(--line2); border-radius: 12px; background: var(--bg-elev); padding: 16px 18px; display: flex; flex-direction: column; gap: 11px; }
+          .pm-t { font: 700 14px/1.2 var(--sans); color: var(--t1); }
+          .pm-hint { font: 400 11px/1.45 var(--sans); color: var(--t3); }
+          .pm-cmp { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-panel); font: 500 11px/1.4 var(--sans); color: var(--t3); }
+          .pm-cmp .v { font: 550 11px/1.4 var(--mono); color: var(--t1); overflow-wrap: anywhere; }
+          .pm-cmp .v.none { font-family: var(--sans); color: var(--tsub); }
+          .lnk { font: 600 11px/1 var(--sans); color: var(--accb); background: none; border: 0; padding: 0; cursor: pointer; white-space: nowrap; }
+
+          /* signing: commit card badge */
+          .cc { width: 360px; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg-elev); padding: 11px 13px; display: flex; flex-direction: column; gap: 6px; }
+          .cc-t { font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+          .cc-r { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 6px; font: 500 10.5px/1.45 var(--sans); color: var(--t3); }
+          .cc-r .v { font: 500 10.5px/1.45 var(--mono); color: var(--t2); overflow-wrap: anywhere; }
+          .steps { display: flex; flex-direction: column; gap: 8px; }
+          .step { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 9px; }
+          .step .n { width: 18px; height: 18px; border-radius: 999px; background: rgba(247, 243, 235, 0.08); color: var(--t1); font: 700 10px/18px var(--mono); text-align: center; }
+          .step .n.ok { background: var(--oksoft); color: var(--okt); }
+          .step h5 { margin: 0 0 3px; font: 600 12px/1.3 var(--sans); color: var(--t1); }
+          .step p { margin: 0 0 5px; font: 400 11px/1.45 var(--sans); color: var(--t3); }
+
+          /* prototype */
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--abord); border-radius: 9px; background: var(--bg-panel); }
+          .seg { display: flex; flex-wrap: wrap; gap: 4px; max-width: 840px; }
+          .seg button { height: 24px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--t2); font: 550 10.5px/1 var(--sans); cursor: pointer; }
+          .seg button.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .readout { padding: 8px 10px; border-left: 2px solid var(--acc); background: rgba(247, 243, 235, 0.03); font: 400 11px/1.5 var(--sans); color: var(--t2); max-width: 840px; }
+          .readout b { color: var(--t1); }
+          .pgrid { display: flex; gap: 18px; align-items: flex-start; }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; the footer reports an intention, not a resolution</span>
+        </div>
+        <p class="dv-sub">A PwrAgent PR landed with a GitHub noreply author while PwrGit's Personal profile reads a custom email. Both are correct. An agent hit <code>Author identity unknown</code> on a machine with no Git identity at all, and passed a per-command <code>-c user.email=&#8230;noreply&#8230;</code>. PwrGit had nothing to do with it, and it had no way to tell anyone. The goal of this review: <b>make "Git outside PwrGit has no identity" discoverable, help set it up deliberately, and make PwrGit's own footer tell the truth</b>, then do the same for commit signing. Every probe below was run against isolated <code>HOME</code> / <code>XDG_CONFIG_HOME</code> fixtures with Git&nbsp;2.56. Identities are contrived.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a As built">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Rail commit box, as built &#8212; <code>ChangesTab.tsx</code> <code>.commit-as</code></div>
+            <div class="stage" style="width:370px">
+              <div class="stage-h"><span class="pin">1</span>As built <em>the profile value, printed</em></div>
+              <div class="rail">
+                <div class="rail-files">
+                  <div class="rail-sec">Staged &#183; 3</div>
+                  <div class="rail-file"><span class="s">M</span>src/limits/bucket.ts</div>
+                  <div class="rail-file"><span class="s">M</span>src/limits/headers.ts</div>
+                  <div class="rail-file"><span class="s">A</span>test/limits.test.ts</div>
+                </div>
+                <div class="cbox">
+                  <div class="cmsg">Add rate-limit headers</div>
+                  <div class="cact"><button class="cbtn">Commit 3 files</button><button class="abtn">Amend</button></div>
+                  <div class="cas-old">as rowan@vale.example</div>
+                </div>
+              </div>
+              <p class="note" style="max-width:340px">The line reads the profile's stored email. It is not what Git will write: a repo's <code>author.email</code> or an inherited <code>GIT_AUTHOR_EMAIL</code> wins over it (finding&nbsp;1). Under Amend, the author it names is not the author Git keeps.</p>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>What the probes and the code say</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>PwrGit's <code>-c user.email</code> is enforced against some config and not the rest</h4><p>It beats repo, worktree, includeIf and global <code>user.email</code>. It loses to <code>author.email</code> / <code>committer.email</code> at any scope, and to <code>GIT_AUTHOR_*</code> / <code>GIT_COMMITTER_*</code> / <code>EMAIL</code> in the app's inherited environment. A PwrGit launched from a shell inherits that shell's env.</p>
+<pre class="probe"><i>$ git config author.email bot@ci.example</i>
+<i>$ git -c user.email=rowan@vale.example var GIT_AUTHOR_IDENT</i>
+Rowan Vale &lt;<b>bot@ci.example</b>&gt;
+<i>$ GIT_AUTHOR_EMAIL=env@x.example git -c user.email=&#8230; var GIT_AUTHOR_IDENT</i>
+Rowan Vale &lt;<b>env@x.example</b>&gt;</pre></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>"Not configured" fails on Linux and silently invents an identity on macOS</h4><p>On the Ubuntu machine Git refused to commit. On macOS, with nothing configured, <code>git var</code> exits 0 and makes up an email from the login and hostname. A terminal or agent commit goes out as <code>rowan@Rowans-MBP.local</code>. <b>So <code>git var</code> succeeding is not evidence of a configured identity.</b> The configured-only probe is the same call under <code>user.useConfigOnly=true</code>.</p>
+<pre class="probe"><i>$ git var GIT_AUTHOR_IDENT          # nothing configured, macOS</i>
+Rowan Vale &lt;<b>rowan@Rowans-MBP.local</b>&gt;
+<i>$ git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT</i>
+fatal: no email was given and auto-detection is disabled</pre></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>First-run seeding regexes <code>~/.gitconfig</code></h4><p><code>profiles/git-identity.ts</code> skips includes, includeIf, XDG <code>git/config</code> and sections. The probe resolved <code>ada@work.example.test</code> from an includeIf file and <code>ada@xdg.example.test</code> outside it. A regex sees neither. Replace it with <code>git config --show-origin --show-scope --get-all</code>, run from a neutral directory.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>The rebase assistant strips signatures</h4><p><code>rebase-assistant.ts</code> passes <code>-c commit.gpgSign=false</code>. Someone who signs every commit gets an unsigned branch back from a PwrGit rebase, and nothing says so. On GitHub with vigilant mode, those commits then show "Unverified". Honour the user's setting, and fail the operation readably when the signer is unavailable.</p></div></div>
+              <div class="fitem"><span class="pin w">5</span><div><h4><code>%G?</code> misreports SSH signatures</h4><p>Without <code>gpg.ssh.allowedSignersFile</code>, an SSH-signed commit reports <code>N</code>, the same as unsigned, plus a stderr error. "Is it signed" has to come from the commit object's <code>gpgsig</code> / <code>gpgsig-sha256</code> header (one <code>cat-file --batch</code>). "Is it verified" can only come from the forge.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>GitHub's verdict is already in a payload PwrGit fetches</h4><p>The Person card's exact-commit proof calls <code>repos/&#8230;/commits/&#123;sha&#125;</code>, and that response carries <code>commit.verification</code> (<code>verified</code>, <code>reason</code>). Signing status on GitHub costs no new request. GitLab needs one <code>/commits/:sha/signature</code> call, where a 404 means unsigned. GitCafe's CLI has no exact-commit read, so it stays unknown and silent.</p></div></div>
+              <div class="fitem"><span class="pin q">?</span><div><h4>Most PwrGit operations need no identity</h4><p>Fetch, fast-forward pull and bulk sync create no commits. Pull's autostash falls back to <code>git stash &lt;git@stash&gt;</code> even with <code>useConfigOnly</code>. The ones that do pass the profile are commit, amend, annotated tag, the rebase assistant, and operation continue. That list is the scope of 1c.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1c" data-screen-label="1c Operation matrix">
+            <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Operation matrix &#8212; what each PwrGit operation records, today</div>
+            <div class="tbl" style="width:1010px">
+              <div class="tr m5 head"><span>Operation</span><span>Author recorded</span><span>Committer recorded</span><span>Signature</span><span>Today vs proposed</span></div>
+              <div class="tr m5"><b>Commit</b><span>profile, unless <code>author.*</code> / env</span><span>profile, unless <code>committer.*</code> / env</span><span>per <code>commit.gpgSign</code></span><span><span class="st chg">change</span> footer shows the resolved pair; overrides explained (2a)</span></div>
+              <div class="tr m5"><b>Amend</b><span><b>original author kept</b> (no <code>--reset-author</code>)</span><span>profile</span><span>re-signed if enabled, else dropped</span><span><span class="st chg">change</span> footer previews "keeps author X" while Amend is hovered or focused</span></div>
+              <div class="tr m5"><b>Rebase assistant</b><span>each original author kept</span><span>profile, every rewritten commit</span><span><span class="st bug">forced off</span></span><span><span class="st bug">fix</span> drop <code>commit.gpgSign=false</code> (finding&nbsp;4)</span></div>
+              <div class="tr m5"><b>Continue merge / cherry&#8209;pick / revert</b><span>merge: profile; pick/revert: original</span><span>profile</span><span>per config</span><span><span class="st keep">keep</span> list the kept authors in the continue sheet</span></div>
+              <div class="tr m5"><b>Annotated tag</b><span>&#8212; (tagger = profile)</span><span>&#8212;</span><span>per <code>tag.gpgSign</code></span><span><span class="st keep">keep</span></span></div>
+              <div class="tr m5"><b>Pull / sync / stash</b><span>no new authored commit</span><span>stash: <code>git stash</code> fallback</span><span>&#8212;</span><span><span class="st keep">keep</span> never blocked by a missing identity</span></div>
+              <div class="tr m5"><b>Terminal / agent</b><span>whatever Git resolves for <i>that</i> process</span><span>same</span><span>per config</span><span><span class="st q">explain</span> PwrGit can show what Git resolves without its overrides, not promise it</span></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;should continue-merge show the authors it keeps?&#8221; &#183; &#8220;turn finding 4 into an issue&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Commit footer and identity details &#8212; three questions, one popover</span>
+        </div>
+        <p class="dv-sub">The <code>as &#8230;</code> line stays where it is, at the size it is, and becomes a quiet button. A quiet line means "Git will record exactly this". A dot and a short reason mean "something other than your profile decides". A red block replaces the line only when Git cannot resolve a usable identity, the one case Commit is disabled. Clicking opens the details popover. It answers, in order: <b>Who will PwrGit record? What does Git outside PwrGit resolve here? What is already recorded?</b> Sources and file paths sit behind a disclosure at the bottom.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="2a" data-screen-label="2a Footer ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>Footer ladder &#8212; the same 340&nbsp;px rail, six states</div>
+            <div class="pair">
+              <div class="stage" style="width:370px">
+                <div class="stage-h"><span class="pin ok">&#10003;</span>Quiet <em>Git resolves to the profile</em></div>
+                <div class="cbox" style="border:1px solid var(--line);border-radius:9px">
+                  <div class="cact"><button class="cbtn">Commit 3 files</button><button class="abtn">Amend</button></div>
+                  <button class="cas"><span class="dot"></span><span class="lines"><span>as Rowan Vale &lt;rowan@vale.example&gt;</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button>
+                </div>
+                <div class="stage-h"><span class="pin ok">&#10003;</span>Quiet, noreply <em>valid; not a warning</em></div>
+                <div class="cbox" style="border:1px solid var(--line);border-radius:9px">
+                  <div class="cact"><button class="cbtn">Commit 3 files</button><button class="abtn">Amend</button></div>
+                  <button class="cas"><span class="dot"></span><span class="lines"><span>as Rowan Vale &lt;4242+rowanv@users.noreply.github.com&gt;</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button>
+                </div>
+                <div class="stage-h"><span class="pin w">!</span>Override <em>repo author.email wins</em></div>
+                <div class="cbox" style="border:1px solid var(--line);border-radius:9px">
+                  <div class="cact"><button class="cbtn">Commit 3 files</button><button class="abtn">Amend</button></div>
+                  <button class="cas warn"><span class="dot"></span><span class="lines"><span>as Rowan Vale &lt;bot@ci.example&gt;</span><span class="why">This repository&#8217;s author.email overrides your profile</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button>
+                </div>
+              </div>
+              <div class="stage" style="width:370px">
+                <div class="stage-h"><span class="pin w">!</span>Split <em>author and committer differ</em></div>
+                <div class="cbox" style="border:1px solid var(--line);border-radius:9px">
+                  <div class="cact"><button class="cbtn">Commit 3 files</button><button class="abtn">Amend</button></div>
+                  <button class="cas warn"><span class="dot"></span><span class="lines"><span><span class="lab">author&#160;&#160;&#160;</span>rowan@vale.example</span><span><span class="lab">committer</span> rowan@acme.example</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button>
+                </div>
+                <div class="stage-h"><span class="pin q">i</span>Amend hovered <em>preview, not a warning</em></div>
+                <div class="cbox" style="border:1px solid var(--line);border-radius:9px">
+                  <div class="cact"><button class="cbtn">Commit 3 files</button><button class="abtn hot">Amend</button></div>
+                  <button class="cas"><span class="dot"></span><span class="lines"><span>Amend keeps author Kit Moreau &lt;kit@moreau.example&gt;</span><span><span class="lab">committer</span> rowan@vale.example</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button>
+                </div>
+                <div class="stage-h"><span class="pin">&#215;</span>Blocked <em>Git cannot resolve a name</em></div>
+                <div class="cbox" style="border:1px solid var(--line);border-radius:9px">
+                  <div class="cact"><button class="cbtn dis">Commit 3 files</button><button class="abtn" style="opacity:.5">Amend</button></div>
+                  <div class="cblock">Git has no name to record for this commit. <a>Add an author name to Personal&#8230;</a></div>
+                </div>
+              </div>
+              <div class="find" style="width:300px">
+                <div class="fitem"><span class="pin q">?</span><div><h4>Same line, same place</h4><p>The control is the existing mono line, gaining a hover surface and a chevron so it reads as clickable (control-affordance rules). It never grows taller than two lines.</p></div></div>
+                <div class="fitem"><span class="pin q">?</span><div><h4>No toast from the footer</h4><p>Overrides and splits are steady facts about a checkout. A toast on every commit is the repeated error the brief rules out. The dot stays until the cause goes.</p></div></div>
+                <div class="fitem"><span class="pin q">?</span><div><h4>Name falls back first</h4><p>A missing profile name is not a block when Git has a <code>user.name</code> from config. The footer then shows that name and the popover names its file. On macOS, Git never runs out of names. Blocking is for the Linux case where it does.</p></div></div>
+                <div class="fitem"><span class="pin q">?</span><div><h4>Re-resolved, not polled</h4><p>One resolve on worktree select, on window focus, and before Commit/Amend runs. The pre-commit resolve is what guards a config edited in a terminal a second ago.</p></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2b" data-screen-label="2b Details popover">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Details popover &#8212; this machine&#8217;s exact case, sources expanded</div>
+            <div class="idp">
+              <div class="idp-h"><b>Commit identity</b><span>vale-api &#8250; feat/rate-limit</span></div>
+              <div class="idp-sec">
+                <p class="idp-q">PwrGit will record</p>
+                <div class="idr"><span class="k">Author</span><span class="v">Rowan Vale &lt;rowan@vale.example&gt;</span><span class="src">From your Personal profile</span></div>
+                <div class="idr"><span class="k">Committer</span><span class="v">Same as author</span></div>
+              </div>
+              <div class="idp-sec">
+                <p class="idp-q">Git outside PwrGit, in this checkout</p>
+                <div class="idr"><span class="k">Name</span><span class="v none">Not configured</span></div>
+                <div class="idr"><span class="k">Email</span><span class="v none">Not configured</span></div>
+                <p class="idp-msg info">Terminal and agent commits here will fail with &#8220;Author identity unknown&#8221;, unless the command supplies its own identity.</p>
+                <div class="idp-act"><button class="pbtn pri">Set up Git identity&#8230;</button></div>
+              </div>
+              <div class="idp-sec">
+                <p class="idp-q">Recorded in recent commits</p>
+                <div class="rc"><span class="sha">e836177</span><span class="who">4242+rowanv@users.noreply.github.com</span><span class="meta"><span class="tg info">GitHub noreply</span><span class="tg">differs from profile</span><span class="tg ok">@rowanv on GitHub</span></span></div>
+                <div class="rc"><span class="sha">2247b1d</span><span class="who">4242+rowanv@users.noreply.github.com</span><span class="meta"><span class="tg info">GitHub noreply</span><span class="tg">differs from profile</span></span></div>
+                <div class="rc"><span class="sha">9c01e4a</span><span class="who">rowan@vale.example</span><span class="meta"><span class="tg acc">+1 co-author</span><span class="tg ok">Verified</span></span></div>
+                <p class="note" style="margin-top:4px">A commit records who, not how. PwrGit can show that these differ. It cannot say which tool chose the address.</p>
+              </div>
+              <div class="idp-src">
+                <div class="disc">&#9662; Where these come from</div>
+                <div class="srow win"><span>user.email</span><span class="sc">command</span><span class="fv">-c rowan@vale.example (PwrGit)</span></div>
+                <div class="srow win"><span>user.name</span><span class="sc">command</span><span class="fv">-c Rowan Vale (PwrGit)</span></div>
+                <div class="srow"><span>user.*</span><span class="sc">global</span><span class="fv">~/.gitconfig &#8212; no [user]</span></div>
+                <div class="srow"><span>user.*</span><span class="sc">xdg</span><span class="fv">~/.config/git/config &#8212; absent</span></div>
+                <div class="srow"><span>author.* / env</span><span class="sc">&#8212;</span><span class="fv">none set</span></div>
+                <div class="idp-act"><button class="pbtn">Edit Personal&#8230;</button><button class="pbtn">Copy diagnostics</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="2c" data-screen-label="2c Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Live &#8212; pick a state, hover Amend, click the footer line</div>
+            <div class="proto">
+              <div class="seg">
+                <sc-for list="{{states}}" as="s" hint-placeholder-count="10"><button class="{{s.cls}}" onClick="{{s.pick}}">{{s.label}}</button></sc-for>
+              </div>
+              <div class="pgrid">
+                <div style="display:flex;flex-direction:column;gap:12px">
+                  <div class="rail">
+                    <div class="rail-files">
+                      <div class="rail-sec">Staged &#183; 3</div>
+                      <div class="rail-file"><span class="s">M</span>src/limits/bucket.ts</div>
+                      <div class="rail-file"><span class="s">M</span>src/limits/headers.ts</div>
+                      <div class="rail-file"><span class="s">A</span>test/limits.test.ts</div>
+                    </div>
+                    <div class="cbox">
+                      <div class="cmsg">Add rate-limit headers</div>
+                      <div class="cact"><button class="{{commitCls}}">Commit 3 files</button><button class="{{amendCls}}" onPointerOver="{{amendIn}}" onPointerLeave="{{amendOut}}" onFocus="{{amendIn}}" onBlur="{{amendOut}}">Amend</button></div>
+                      <sc-if value="{{showLine}}">
+                        <button class="{{lineCls}}" onClick="{{toggle}}"><span class="dot"></span><span class="lines"><span>{{line1}}</span><span class="{{line2Cls}}">{{line2}}</span></span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button>
+                      </sc-if>
+                      <sc-if value="{{blocked}}">
+                        <div class="cblock">{{blockText}} <a onClick="{{toggle}}">{{blockLink}}</a></div>
+                      </sc-if>
+                    </div>
+                  </div>
+                  <sc-if value="{{hasToast}}">
+                    <div class="toast" style="width:340px">
+                      <div><p class="toast-eb">{{toastEb}}</p><p class="toast-msg">{{toastMsg}}</p><p class="toast-hint">{{toastHint}}</p></div>
+                      <div class="toast-act"><button class="tbtn pri">{{toastA1}}</button><button class="tbtn">Not now</button></div>
+                    </div>
+                  </sc-if>
+                </div>
+                <sc-if value="{{open}}">
+                  <div class="idp">
+                    <div class="idp-h"><b>Commit identity</b><span>vale-api &#8250; feat/rate-limit</span></div>
+                    <div class="idp-sec">
+                      <p class="idp-q">{{meQ}}</p>
+                      <sc-for list="{{me}}" as="r" hint-placeholder-count="2"><div class="idr"><span class="k">{{r.k}}</span><span class="{{r.vCls}}">{{r.v}}</span><span class="src">{{r.src}}</span></div></sc-for>
+                      <sc-if value="{{hasMeMsg}}"><p class="{{meMsgCls}}">{{meMsg}}</p></sc-if>
+                      <sc-if value="{{hasMeAct}}"><div class="idp-act"><sc-for list="{{meAct}}" as="a" hint-placeholder-count="2"><button class="{{a.cls}}">{{a.t}}</button></sc-for></div></sc-if>
+                    </div>
+                    <div class="idp-sec">
+                      <p class="idp-q">Git outside PwrGit, in this checkout</p>
+                      <sc-for list="{{out}}" as="r" hint-placeholder-count="2"><div class="idr"><span class="k">{{r.k}}</span><span class="{{r.vCls}}">{{r.v}}</span><span class="src">{{r.src}}</span></div></sc-for>
+                      <sc-if value="{{hasOutMsg}}"><p class="{{outMsgCls}}">{{outMsg}}</p></sc-if>
+                      <sc-if value="{{hasOutAct}}"><div class="idp-act"><button class="pbtn pri">{{outAct}}</button></div></sc-if>
+                    </div>
+                    <div class="idp-sec">
+                      <p class="idp-q">Recorded in recent commits</p>
+                      <sc-for list="{{rec}}" as="c" hint-placeholder-count="3"><div class="rc"><span class="sha">{{c.sha}}</span><span class="who">{{c.who}}</span><span class="meta"><sc-for list="{{c.tags}}" as="t" hint-placeholder-count="2"><span class="{{t.cls}}">{{t.t}}</span></sc-for></span></div></sc-for>
+                    </div>
+                    <div class="idp-src">
+                      <div class="disc">&#9662; Where these come from</div>
+                      <sc-for list="{{srcs}}" as="x" hint-placeholder-count="4"><div class="{{x.cls}}"><span>{{x.key}}</span><span class="sc">{{x.scope}}</span><span class="fv">{{x.val}}</span></div></sc-for>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+              <div class="readout"><b>Behaviour:</b> {{behaviour}}</div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;should the popover also open from the Profile chip in the title bar?&#8221; &#183; &#8220;draw the rebase sheet&#8217;s kept-authors list&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">The durable notice &#8212; &#8220;Git outside PwrGit has no identity&#8221;</span>
+        </div>
+        <p class="dv-sub">This is the operator's ask: a toast that stays until it is handled, with one button into Settings. It uses the shipped <code>showInfoToast(&#123; sticky, key, layout: "stacked", action &#125;)</code>, so no new toast machinery. It is <b>info-toned, not an error</b>: PwrGit's own commits are fine, and the toast says so first. It speaks for the machine, so main raises it in one window only (the update toast's rule), keyed so a second check replaces it rather than stacking.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Missing">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Nothing configured (Linux, Windows, and macOS with <code>useConfigOnly</code>)</div>
+            <div class="toast">
+              <div><p class="toast-eb">Git identity</p><p class="toast-msg">Git outside PwrGit has no name or email set.</p><p class="toast-hint">PwrGit commits as <code>rowan@vale.example</code> from your Personal profile. Commits from Terminal or coding agents on this computer will fail with &#8220;Author identity unknown&#8221;.</p></div>
+              <div class="toast-act"><button class="tbtn pri">Set up in Settings&#8230;</button><button class="tbtn">Not now</button></div>
+              <svg class="toast-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Guessed">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Git is guessing (macOS default): the quieter but worse case</div>
+            <div class="toast">
+              <div><p class="toast-eb">Git identity</p><p class="toast-msg">Git outside PwrGit is guessing your email.</p><p class="toast-hint">Commits from Terminal or coding agents would record <code>rowan@Rowans-MBP.local</code>, an address built from this computer&#8217;s name that no forge can link to you. PwrGit itself commits as <code>rowan@vale.example</code>.</p></div>
+              <div class="toast-act"><button class="tbtn pri">Set up in Settings&#8230;</button><button class="tbtn">Not now</button></div>
+              <svg class="toast-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>When it appears, and when it does not</div>
+            <div class="tbl" style="width:900px">
+              <div class="tr m4 head"><span>Moment</span><span>Probe (bundled Git, neutral cwd)</span><span>Toast</span><span>Why</span></div>
+              <div class="tr m4"><b>Launch, first window shown</b><span><code>git -c user.useConfigOnly=true var GIT_AUTHOR_IDENT</code>, plus a plain run to tell 3a from 3b. Two spawns, once.</span><span><span class="st chg">3a / 3b</span></span><span>A machine fact, checked where nothing repo-local can mask it</span></div>
+              <div class="tr m4"><b>&#8220;Not now&#8221; or &#215;</b><span>&#8212;</span><span><span class="st q">gone until next launch</span></span><span>Durable, not nagging: once per launch at most</span></div>
+              <div class="tr m4"><b>&#8220;Don&#8217;t remind me&#8221; in Settings (4a)</b><span>still probed; the result shows in the card</span><span><span class="st q">never</span></span><span>A deliberate &#8220;I only commit in PwrGit&#8221; is a valid choice</span></div>
+              <div class="tr m4"><b>Fixed in a terminal while open</b><span>re-probe on window focus, only while the toast stands</span><span><span class="st keep">withdrawn</span></span><span>A sticky toast for a solved problem is a lie</span></div>
+              <div class="tr m4"><b>Profile has no email either</b><span>&#8212;</span><span><span class="st chg">copy swaps</span></span><span>&#8220;Neither PwrGit nor Git has an identity&#8221;. The footer block (2a) covers PwrGit.</span></div>
+              <div class="tr m4"><b>Only repo-local / includeIf config</b><span>global unset; this checkout set</span><span><span class="st q">no toast</span></span><span>Shown in the popover and in 4a&#8217;s overrides list, not as a machine alarm</span></div>
+            </div>
+            <p class="note">Fleeting at launch is wrong, since Settings is a click away and a nine-second toast is gone before the user has read it. An error tone is wrong too: nothing failed in PwrGit. The Settings nav row for Profiles also carries a warning dot while the condition holds, so the issue stays findable after "Not now".</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;should &#8216;Not now&#8217; be &#8216;Remind me in a week&#8217;?&#8221; &#183; &#8220;draw the Settings nav dot&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Settings &#8250; Profiles &#8212; a &#8220;Git outside PwrGit&#8221; card above the profiles that override it</span>
+        </div>
+        <p class="dv-sub">The toast lands here: <code>settings:open &#123; page: "profiles", sub: "git-identity" &#125;</code>. Profiles is where people already decide "who do I commit as", so the machine identity sits on top, and each profile row below says it overrides it. <b>Writing Git config is a scope change to KTD4.</b> KTD4 forbids PwrGit writing identity <i>implicitly</i>. This writes it once, at an explicit click, after previewing the exact file, lines and effect. Repo and worktree overrides are listed read-only.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Card">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>The card &#8212; not configured, with the overrides it would not touch</div>
+            <div class="sp" style="width:720px">
+              <div class="sp-h">
+                <div class="sp-hm">
+                  <p class="sp-eb">Git</p>
+                  <h3 class="sp-t">Git outside PwrGit</h3>
+                  <p class="sp-d">The identity Terminal, scripts and coding agents get on this computer. PwrGit&#8217;s own commits use each profile&#8217;s identity below.</p>
+                </div>
+                <span class="chip warn">Not configured</span>
+              </div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">Name<span class="f-sub">user.name</span></div><div class="f-c"><span class="f-v none">Not configured</span></div></div>
+                <div class="f"><div class="f-l">Email<span class="f-sub">user.email</span></div><div class="f-c"><span class="f-v none">Not configured</span><span class="f-help">Commits outside PwrGit fail with &#8220;Author identity unknown&#8221;.</span><button class="sbtn pri">Set up Git identity&#8230;</button></div></div>
+                <div class="f"><div class="f-l">Overrides<span class="f-sub">set per repository</span></div><div class="f-c"><span class="f-help">2 checkouts set their own email and keep it whatever you choose here:</span><span class="f-v">vale-ops &#8212; rowan@acme.example <span class="mono" style="color:var(--t3)">&#183; includeIf gitdir:~/work/</span></span><span class="f-v">vale-api/wt-hotfix &#8212; rowan@vale.example <span class="mono" style="color:var(--t3)">&#183; worktree</span></span></div></div>
+                <div class="f"><div class="f-l">Remind me<span class="f-sub">launch notice (3a)</span></div><div class="f-c"><span class="sw"><i></i>Notify when Git outside PwrGit has no identity</span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Set-up dialog">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Set up &#8212; seeded from what PwrGit already knows, previewed before it writes</div>
+            <div class="dlg">
+              <p class="dlg-t">Set up Git identity</p>
+              <p class="dlg-d">Used by Git everywhere on this computer, unless a repository sets its own. Existing commits do not change.</p>
+              <div class="fld"><span class="fld-l">Start from</span><div class="seed"><span class="on">Personal &#183; rowan@vale.example</span><span>Acme &#183; rowan@acme.example</span><span>GitHub noreply &#183; 4242+rowanv@&#8230;</span></div></div>
+              <div class="fld"><span class="fld-l">Name</span><div class="inp">Rowan Vale</div></div>
+              <div class="fld"><span class="fld-l">Email <span>&#183; the noreply address keeps your email private on GitHub</span></span><div class="inp">rowan@vale.example</div></div>
+              <div class="fld"><span class="fld-l">Write to</span>
+                <div class="scope">
+                  <label class="on"><i></i><span>This computer (global)<small>~/.gitconfig &#8212; Git&#8217;s own choice for <code>--global</code> here</small></span></label>
+                  <label><i></i><span>Only this repository, vale-api<small>.git/config &#8212; this checkout and its worktrees</small></span></label>
+                </div>
+              </div>
+              <div class="diff"><div class="fn">~/.gitconfig &#183; adds 3 lines</div><div class="add">+ [user]</div><div class="add">+ &#9;name = Rowan Vale</div><div class="add">+ &#9;email = rowan@vale.example</div></div>
+              <p class="note">Same as <code>git config --global user.name "Rowan Vale"</code> and <code>user.email</code>. vale-ops keeps <code>rowan@acme.example</code>. PwrGit&#8217;s Personal profile is unchanged.</p>
+              <div class="dlg-foot"><button class="sbtn">Cancel</button><button class="sbtn pri">Write to ~/.gitconfig</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Profile editor">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Profile editor &#8212; scope beside the field, and the external identity to compare</div>
+            <div class="pm">
+              <div class="pm-t">Edit Personal</div>
+              <div class="fld"><span class="fld-l">Commit email <span>&#183; used for commits made in PwrGit</span></span><div class="inp">rowan@vale.example</div></div>
+              <div class="fld"><span class="fld-l">Author name <span>&#183; optional, falls back to Git&#8217;s user.name</span></span><div class="inp">Rowan Vale</div></div>
+              <div class="pm-hint">Terminal and agent commits can use a different Git identity.</div>
+              <div class="pm-cmp">
+                <span>Git outside PwrGit</span><span class="v none">Not configured</span><button class="lnk">Set up&#8230;</button>
+              </div>
+              <div class="pm-cmp">
+                <span>Git outside PwrGit</span><span class="v">Rowan V &lt;4242+rowanv@users.noreply.github.com&gt;</span><button class="lnk">Use for Personal</button>
+              </div>
+              <p class="note">Two alternatives for the comparison row (one shows at a time). &#8220;Use for Personal&#8221; copies the detected identity into the fields above, unsaved. It never links the two, and editing either later leaves the other alone.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;make the profile able to follow Git instead of storing a copy&#8221; &#183; &#8220;should the repo-scoped write exist in v1 at all?&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 5 ============================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">Commit signing &#8212; a cheap &#8220;did you know&#8221;, and a precise &#8220;why not verified&#8221;</span>
+        </div>
+        <p class="dv-sub">Signing has three separate facts, and each comes from a different source. <b>Configured?</b> One <code>git config --get-regexp</code>, local and instant. <b>Signed?</b> A <code>gpgsig</code> header on the pushed commits, one <code>cat-file --batch</code>. <b>Verified?</b> Only the forge knows, because it depends on the key being on the account as a <i>signing</i> key and the email being on the account. PwrGit only asks after a push the user made, about at most one of the commits they authored, at most once per launch per repository.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="5a" data-screen-label="5a Probe ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>What PwrGit can know, and what it costs</div>
+            <div class="tbl" style="width:1000px">
+              <div class="tr m6 head"><span>Question</span><span>Probe</span><span>Cost</span><span>GitHub</span><span>GitLab</span><span>Result used for</span></div>
+              <div class="tr m6"><b>Signing configured?</b><span><code>commit.gpgsign gpg.format user.signingkey</code> with origin</span><span>1 spawn / launch</span><span>&#8212;</span><span>&#8212;</span><span>Card 5c status; skip the nudge if on</span></div>
+              <div class="tr m6"><b>Pushed commits signed?</b><span><code>gpgsig</code> / <code>gpgsig-sha256</code> header, commits just pushed</span><span>1 spawn / push</span><span>&#8212;</span><span>&#8212;</span><span>Nudge 5b-1, only if mine and all unsigned</span></div>
+              <div class="tr m6"><b>Forge verdict?</b><span>exact-commit read, newest pushed commit authored by the profile</span><span>0 extra on GitHub</span><span><code>commit.verification</code> (already in the Person card payload)</span><span><code>/commits/:sha/signature</code>; 404 = unsigned</span><span>Badge 5d; nudge 5b-2 on a fixable reason</span></div>
+              <div class="tr m6"><b>Key uploaded for signing?</b><span>not probed</span><span>&#8212;</span><span>needs <code>read:ssh_signing_key</code> scope gh lacks by default</span><span>key <code>usage_type</code></span><span>Inferred from the verdict&#8217;s <code>reason</code> instead</span></div>
+              <div class="tr m6"><b>GitCafe</b><span>&#8212;</span><span>&#8212;</span><span>&#8212;</span><span>no exact-commit read in the CLI</span><span>Unknown, and silent</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="5b" data-screen-label="5b Nudges">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Two nudges &#8212; info, not sticky, once each</div>
+            <div class="pair">
+              <div class="toast">
+                <div><p class="toast-eb">Did you know</p><p class="toast-msg">Your commits can show as Verified on GitHub.</p><p class="toast-hint">The 3 commits you just pushed to <code>feat/rate-limit</code> aren&#8217;t signed. Git can sign with the SSH key you already use. Setup takes about a minute.</p></div>
+                <div class="toast-act"><button class="tbtn pri">Show me how&#8230;</button><button class="tbtn">Don&#8217;t show again</button></div>
+                <svg class="toast-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </div>
+              <div class="toast">
+                <div><p class="toast-eb">Commit signing</p><p class="toast-msg">GitHub couldn&#8217;t verify your signed commit.</p><p class="toast-hint"><code>9c01e4a</code> is signed, but the key isn&#8217;t on your GitHub account as a signing key (<code>unknown_key</code>). Adding it fixes this commit and every later one.</p></div>
+                <div class="toast-act"><button class="tbtn pri">Add signing key&#8230;</button><button class="tbtn">Not now</button></div>
+                <svg class="toast-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              </div>
+            </div>
+            <p class="note">The second toast has a sibling for each fixable <code>reason</code>: <code>unverified_email</code> / <code>no_user</code> become &#8220;the commit email isn&#8217;t on your GitHub account&#8221;, and <code>expired_key</code> becomes &#8220;the signing key has expired&#8221;. Anything else (<code>bad_email</code>, <code>malformed_signature</code>, <code>gpgverify_unavailable</code>) shows only as the 5d badge, never as a toast.</p>
+          </div>
+
+          <div class="dv-opt" id="5c" data-screen-label="5c Signing card">
+            <div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>Settings &#8250; Profiles &#8250; Commit signing &#8212; the same preview-before-write rule</div>
+            <div class="sp" style="width:720px">
+              <div class="sp-h">
+                <div class="sp-hm">
+                  <p class="sp-eb">Git</p>
+                  <h3 class="sp-t">Commit signing</h3>
+                  <p class="sp-d">Signed commits show as Verified on GitHub and GitLab once the key is on your account. Applies to PwrGit, Terminal and agents alike.</p>
+                </div>
+                <span class="chip">Off</span>
+              </div>
+              <div class="sp-b">
+                <div class="steps" style="padding-top:10px">
+                  <div class="step"><span class="n">1</span><div><h5>Choose a key</h5><p>Found in <code>~/.ssh</code>. The marked one is what <code>ssh -G github.com</code> uses to push.</p><div class="seed"><span class="on">id_ed25519.pub &#183; pushes to github.com</span><span>acme_ed25519.pub</span></div></div></div>
+                  <div class="step"><span class="n">2</span><div><h5>Tell Git to sign</h5><div class="diff"><div class="fn">~/.gitconfig &#183; adds 5 lines</div><div class="add">+ [gpg]</div><div class="add">+ &#9;format = ssh</div><div class="add">+ [user]</div><div class="add">+ &#9;signingkey = ~/.ssh/id_ed25519.pub</div><div class="add">+ [commit] gpgsign = true</div></div></div></div>
+                  <div class="step"><span class="n">3</span><div><h5>Tell GitHub it&#8217;s yours</h5><p>Add the same public key again, as a <b>Signing key</b>. An authentication key alone does not verify commits.</p><div class="idp-act"><button class="pbtn pri">Copy public key</button><button class="pbtn">Open GitHub key settings</button><button class="pbtn">Copy gh command</button></div></div></div>
+                  <div class="step"><span class="n">4</span><div><h5>Check</h5><p>After your next push, PwrGit reads GitHub&#8217;s verdict on one commit and shows it here.</p></div></div>
+                </div>
+                <div class="f"><div class="f-l">Verify locally<span class="f-sub">optional</span></div><div class="f-c"><span class="f-help">Also write <code>gpg.ssh.allowedSignersFile</code> so <code>git log --show-signature</code> can check SSH signatures without a forge.</span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="5d" data-screen-label="5d Commit card">
+            <div class="dv-olabel"><a class="dv-oid" href="#5d">5d</a>Commit context card &#8212; committer and signature, when they say something</div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div class="cc">
+                <div class="cc-t">Add rate-limit headers</div>
+                <div class="cc-r"><span>Author</span><span class="v">Kit Moreau &lt;kit@moreau.example&gt;</span></div>
+                <div class="cc-r"><span>Committer</span><span class="v">Rowan Vale &lt;rowan@vale.example&gt; &#183; amended</span></div>
+                <div class="cc-r"><span>Co-author</span><span class="v">Rowan Vale &lt;4242+rowanv@users.noreply.github.com&gt;</span></div>
+                <div class="cc-r"><span>Signature</span><span><span class="tg ok">Verified on GitHub</span></span></div>
+              </div>
+              <div class="cc">
+                <div class="cc-t">Tighten bucket refill</div>
+                <div class="cc-r"><span>Author</span><span class="v">Rowan Vale &lt;rowan@vale.example&gt;</span></div>
+                <div class="cc-r"><span>Signature</span><span><span class="tg warn">Signed &#183; key not on GitHub</span></span></div>
+              </div>
+              <p class="note" style="max-width:360px">The Committer row appears only when the committer differs from the author. Unsigned commits show no Signature row, so most commits look the same as today. Unpushed signed commits read &#8220;Signed&#8221; with no forge claim.</p>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw the same flow for GPG keys&#8221; &#183; &#8220;where does vigilant mode fit?&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 6 ============================ -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t6">6</a>
+          <span class="dv-tname">Behaviour per state, and the decisions this needs</span>
+        </div>
+        <p class="dv-sub">The 2c prototype's states, written down as the contract an implementation is tested against. <b>Recommended rule:</b> the profile is enforced completely inside PwrGit. That means also passing <code>-c author.*</code> / <code>committer.*</code> and scrubbing <code>GIT_AUTHOR_*</code> / <code>GIT_COMMITTER_*</code> / <code>EMAIL</code> from PwrGit's commit spawns. Nothing then "wins" by accident, and the footer reports a resolution that cannot drift from what Git writes. Anyone who wants repo-specific identity gets it on purpose, through decision&nbsp;A.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="6a" data-screen-label="6a State contract">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>State contract</div>
+            <div class="tbl" style="width:1080px">
+              <div class="tr m5 head"><span>State</span><span>Footer</span><span>Commit</span><span>Notice</span><span>Details / test fixture</span></div>
+              <div class="tr m5"><b>Matching</b><span>quiet, one line</span><span>allowed</span><span>none</span><span>global <code>user.*</code> = profile</span></div>
+              <div class="tr m5"><b>Missing outside (Linux)</b><span>quiet</span><span>allowed</span><span>3a, sticky</span><span>no <code>[user]</code> anywhere; <code>useConfigOnly</code> probe fails</span></div>
+              <div class="tr m5"><b>Guessed outside (macOS)</b><span>quiet</span><span>allowed</span><span>3b, sticky</span><span>plain probe ok, <code>useConfigOnly</code> fails; show the guessed address</span></div>
+              <div class="tr m5"><b>Noreply / different</b><span>quiet</span><span>allowed</span><span>none</span><span>&#8220;differs from profile&#8221; tag on history only; noreply tagged, never flagged</span></div>
+              <div class="tr m5"><b>includeIf / repo / worktree <code>user.*</code></b><span>quiet + &#8220;overrides this repo&#8217;s user.email&#8221; in details</span><span>allowed</span><span>none</span><span>fixtures: includeIf gitdir, <code>config.worktree</code> with <code>extensions.worktreeConfig</code>, two worktrees</span></div>
+              <div class="tr m5"><b>Env override</b><span>today: dot + source. Recommended: quiet, scrubbed</span><span>allowed</span><span>none</span><span>the details still name the inherited variable, as information</span></div>
+              <div class="tr m5"><b>Missing name</b><span>falls back to Git&#8217;s <code>user.name</code>; block only if none</span><span>blocked only when unresolvable</span><span>none</span><span>block links to the profile editor&#8217;s name field</span></div>
+              <div class="tr m5"><b>Author &#8800; committer</b><span>two lines + dot</span><span>allowed</span><span>none</span><span><code>committer.email</code> in repo config; recommended rule makes this unreachable in PwrGit</span></div>
+              <div class="tr m5"><b>Amend</b><span>while Amend is hovered or focused: &#8220;keeps author X&#8221;</span><span>allowed</span><span>none</span><span>original author by another person; assert author kept, committer = profile</span></div>
+              <div class="tr m5"><b>Account offline / unknown</b><span>quiet</span><span>allowed</span><span>none</span><span>history tag &#8220;GitHub link unknown&#8221;; never &#8220;not linked&#8221; without a forge answer</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="6b" data-screen-label="6b Decisions">
+            <div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>Open decisions, with a recommendation each</div>
+            <div class="find" style="width:640px">
+              <div class="fitem"><span class="pin q">A</span><div><h4>Enforce or explain?</h4><p><b>Enforce completely</b>, as above, plus an opt-in profile mode, <b>&#8220;Follow Git in each repository&#8221;</b>, which passes no <code>-c</code> at all and lets includeIf and repo config decide. The footer then names the deciding file. Explaining an inconsistent enforcement only teaches people that the footer is unreliable.</p></div></div>
+              <div class="fitem"><span class="pin q">B</span><div><h4>Is writing global config in scope?</h4><p><b>Yes, explicitly, at a click, previewed</b> (4b/5c). KTD4 stays true for every implicit path. Amend the plan&#8217;s KTD4 text so the next reviewer does not find a contradiction.</p></div></div>
+              <div class="fitem"><span class="pin q">C</span><div><h4>Share the profile identity with agents?</h4><p><b>Not in this change.</b> Setting the global identity (4b) already fixes the case that started this. Injecting <code>GIT_AUTHOR_*</code> into agent sessions is a cross-app contract with PwrAgent, and it needs its own design.</p></div></div>
+              <div class="fitem"><span class="pin q">D</span><div><h4>Should the rebase assistant sign?</h4><p><b>Yes</b>, by honouring config (finding&nbsp;4). If the signer is unavailable, for example pinentry with no TTY, fail with a readable "signing failed" and offer to rebase unsigned for that run only.</p></div></div>
+              <div class="fitem"><span class="pin q">E</span><div><h4>Where should the card live?</h4><p><b>Settings &#8250; Profiles</b>, as drawn. The alternative is General, beside Git runtime. That groups by &#8220;machine Git facts&#8221; but splits &#8220;who do I commit as&#8221; across two pages.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="6c" data-screen-label="6c Tests">
+            <div class="dv-olabel"><a class="dv-oid" href="#6c">6c</a>Real-Git tests the resolver owes</div>
+            <div class="find" style="width:380px">
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Isolated, always</h4><p>Every fixture sets <code>HOME</code>, <code>XDG_CONFIG_HOME</code>, <code>GIT_CONFIG_NOSYSTEM=1</code>, and clears the identity env. Without that, the dev machine's own config leaks in.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Cases</h4><p>nothing set &#183; guessed (assert <code>useConfigOnly</code> fails while plain passes) &#183; XDG only &#183; includeIf gitdir &#183; repo &#183; worktree with two worktrees &#183; <code>author.email</code> &#183; each env var &#183; name missing &#183; amend keeps author &#183; rebase keeps authors and signs &#183; SSH-signed header detected without allowed signers.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Writes</h4><p>4b's preview equals the bytes written, the target file matches Git's own <code>--global</code> choice, and a repo override survives a global write.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;write 6a as the resolver&#8217;s AGENTS.md note&#8221; &#183; &#8220;prototype decision A&#8217;s Follow Git mode in the profile editor&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          const P = "Rowan Vale <rowan@vale.example>";
+          const NR = "4242+rowanv@users.noreply.github.com";
+          const tag = (t, c) => ({ t: t, cls: "tg " + (c || "") });
+          const recDefault = [
+            { sha: "9c01e4a", who: "rowan@vale.example", tags: [tag("+1 co-author", "acc"), tag("Verified", "ok")] },
+            { sha: "51d0b7e", who: "rowan@vale.example", tags: [tag("@rowanv on GitHub", "ok")] }
+          ];
+          const pw = (k, v) => ({ key: k, scope: "command", val: v + " (PwrGit)", cls: "srow win" });
+          this.defs = [
+            { id: "match", label: "Matching",
+              line1: "as " + P, line2: "", tone: "",
+              me: [{ k: "Author", v: P, src: "From your Personal profile" }, { k: "Committer", v: "Same as author" }],
+              out: [{ k: "Identity", v: P, src: "~/.gitconfig · global" }],
+              rec: recDefault,
+              srcs: [pw("user.email", "rowan@vale.example"), { key: "user.email", scope: "global", val: "~/.gitconfig = rowan@vale.example", cls: "srow" }],
+              beh: "Quiet line. Git inside and outside PwrGit agree. No notice anywhere." },
+            { id: "missing", label: "Missing Git default",
+              line1: "as " + P, line2: "", tone: "",
+              me: [{ k: "Author", v: P, src: "From your Personal profile" }, { k: "Committer", v: "Same as author" }],
+              out: [{ k: "Name", v: "Not configured", none: true }, { k: "Email", v: "Not configured", none: true }],
+              outMsg: "Terminal and agent commits here will fail with “Author identity unknown”, unless the command supplies its own identity.", outMsgCls: "info", outAct: "Set up Git identity…",
+              rec: [{ sha: "e836177", who: NR, tags: [tag("GitHub noreply", "info"), tag("differs from profile")] }, { sha: "2247b1d", who: NR, tags: [tag("GitHub noreply", "info"), tag("differs from profile")] }],
+              srcs: [pw("user.email", "rowan@vale.example"), pw("user.name", "Rowan Vale"), { key: "user.*", scope: "global", val: "~/.gitconfig — no [user]", cls: "srow" }, { key: "user.*", scope: "xdg", val: "~/.config/git/config — absent", cls: "srow" }],
+              toast: { eb: "Git identity", msg: "Git outside PwrGit has no name or email set.", hint: "PwrGit commits as rowan@vale.example from your Personal profile. Terminal and agent commits on this computer will fail.", a1: "Set up in Settings…" },
+              beh: "PwrGit's commit is fine, so the footer stays quiet. The machine-level gap is the sticky launch toast (3a), plus the popover's middle section. “Not now” hides it until next launch." },
+            { id: "guessed", label: "Guessed (macOS)",
+              line1: "as " + P, line2: "", tone: "",
+              me: [{ k: "Author", v: P, src: "From your Personal profile" }, { k: "Committer", v: "Same as author" }],
+              out: [{ k: "Identity", v: "Rowan Vale <rowan@Rowans-MBP.local>", warn: true, src: "Guessed from this computer's name. Nothing is configured." }],
+              outMsg: "Terminal and agent commits won't fail. They'll record an address no forge can link to you.", outMsgCls: "warn", outAct: "Set up Git identity…",
+              rec: recDefault,
+              srcs: [pw("user.email", "rowan@vale.example"), { key: "user.email", scope: "auto", val: "login + hostname (no config)", cls: "srow" }],
+              toast: { eb: "Git identity", msg: "Git outside PwrGit is guessing your email.", hint: "Terminal and agent commits would record rowan@Rowans-MBP.local. PwrGit itself commits as rowan@vale.example.", a1: "Set up in Settings…" },
+              beh: "Detected only by the user.useConfigOnly=true probe failing while the plain probe passes. The quieter case, but the worse one, so it gets the same sticky toast (3b)." },
+            { id: "noreply", label: "Noreply / different",
+              line1: "as Rowan Vale <" + NR + ">", line2: "", tone: "",
+              me: [{ k: "Author", v: "Rowan Vale <" + NR + ">", src: "From your Personal profile · GitHub noreply, keeps your email private" }, { k: "Committer", v: "Same as author" }],
+              out: [{ k: "Identity", v: P, src: "~/.gitconfig · global" }],
+              outMsg: "Different from PwrGit's. That's allowed: both can be yours.", outMsgCls: "",
+              rec: [{ sha: "a17c2f0", who: NR, tags: [tag("GitHub noreply", "info"), tag("@rowanv on GitHub", "ok")] }, { sha: "9c01e4a", who: "rowan@vale.example", tags: [tag("differs from profile"), tag("@rowanv on GitHub", "ok")] }],
+              srcs: [pw("user.email", NR), { key: "user.email", scope: "global", val: "~/.gitconfig = rowan@vale.example", cls: "srow off" }],
+              beh: "Quiet. A noreply address is valid and is tagged as one, never flagged. The difference from Git outside PwrGit is a sentence in the popover, not a warning." },
+            { id: "cond", label: "includeIf / repo / worktree",
+              line1: "as " + P, line2: "", tone: "",
+              me: [{ k: "Author", v: P, src: "From your Personal profile, which overrides this checkout's user.email" }, { k: "Committer", v: "Same as author" }],
+              meMsg: "Outside PwrGit, this checkout commits as rowan@acme.example. To use that here too, set the profile to “Follow Git” (decision A).", meMsgCls: "idp-msg",
+              out: [{ k: "Identity", v: "Rowan Vale <rowan@acme.example>", src: "includeIf gitdir:~/work/ → ~/.gitconfig-acme" }],
+              rec: [{ sha: "c4e9a10", who: "rowan@acme.example", tags: [tag("differs from profile"), tag("from Terminal?")] }, { sha: "9c01e4a", who: "rowan@vale.example", tags: [tag("Verified", "ok")] }],
+              srcs: [pw("user.email", "rowan@vale.example"), { key: "user.email", scope: "global", val: "~/.gitconfig-acme (includeIf) = rowan@acme.example", cls: "srow off" }, { key: "user.email", scope: "worktree", val: ".git/worktrees/wt-hotfix/config.worktree — not this one", cls: "srow off" }],
+              beh: "Quiet footer: PwrGit's -c user.email already beats includeIf, repo and worktree user.*. The popover says so and names the file. That is the one place someone with a work-repo identity learns that PwrGit ignores it." },
+            { id: "env", label: "Environment override",
+              line1: "as Rowan Vale <ci-bot@acme.example>", line2: "GIT_AUTHOR_EMAIL in PwrGit's environment sets the author", tone: "warn",
+              me: [{ k: "Author", v: "Rowan Vale <ci-bot@acme.example>", warn: true, src: "GIT_AUTHOR_EMAIL, inherited when PwrGit was started" }, { k: "Committer", v: P, src: "From your Personal profile" }],
+              meMsg: "Today Git would use this. Under the recommended rule, PwrGit removes inherited GIT_AUTHOR_* before committing, and this becomes a note.", meMsgCls: "idp-msg warn",
+              meAct: [{ t: "Edit Personal…", cls: "pbtn" }],
+              out: [{ k: "Identity", v: P, src: "~/.gitconfig · global" }],
+              rec: recDefault,
+              srcs: [{ key: "GIT_AUTHOR_EMAIL", scope: "env", val: "ci-bot@acme.example", cls: "srow win" }, { key: "user.email", scope: "command", val: "-c rowan@vale.example (PwrGit)", cls: "srow off" }],
+              beh: "Today: a dot and the source, and Commit stays enabled. A deliberate override is legitimate, so it is never a blanket block. Recommended: scrub the env so the footer turns quiet." },
+            { id: "noname", label: "Missing name",
+              line1: "", line2: "", tone: "", blocked: true,
+              blockText: "Git has no name to record for this commit.", blockLink: "Add an author name to Personal…",
+              me: [{ k: "Author", v: "No name · rowan@vale.example", bad: true, src: "Profile has no author name, and Git has no user.name" }, { k: "Committer", v: "Same as author" }],
+              meAct: [{ t: "Add author name…", cls: "pbtn pri" }],
+              out: [{ k: "Name", v: "Not configured", none: true }, { k: "Email", v: "Not configured", none: true }],
+              outAct: "Set up Git identity…",
+              rec: recDefault,
+              srcs: [pw("user.email", "rowan@vale.example"), { key: "user.name", scope: "—", val: "unset everywhere; no system full name", cls: "srow" }],
+              beh: "The only blocking state. Commit and Amend are disabled, and the line becomes a red block linking to the profile's name field. If Git has any user.name, the footer shows it and commits." },
+            { id: "split", label: "Author ≠ committer",
+              line1: "author    rowan@vale.example", line2: "committer rowan@acme.example", tone: "warn", line2Plain: true,
+              me: [{ k: "Author", v: P, src: "From your Personal profile" }, { k: "Committer", v: "Rowan Vale <rowan@acme.example>", warn: true, src: "committer.email in .git/config" }],
+              out: [{ k: "Author", v: P }, { k: "Committer", v: "Rowan Vale <rowan@acme.example>" }],
+              rec: recDefault,
+              srcs: [pw("user.email", "rowan@vale.example"), { key: "committer.email", scope: "local", val: ".git/config = rowan@acme.example", cls: "srow win" }],
+              beh: "Both lines, with a dot. Not blocked. Under the recommended rule, PwrGit also passes -c committer.email, and this becomes a note in the details." },
+            { id: "amend", label: "Amend keeps author",
+              line1: "as " + P, line2: "", tone: "", amendDemo: true,
+              me: [{ k: "Author", v: "Kit Moreau <kit@moreau.example>", src: "Kept from 9c01e4a. Amend never resets the author." }, { k: "Committer", v: P, src: "From your Personal profile" }],
+              meQ: "Amend will record",
+              out: [{ k: "Identity", v: P, src: "~/.gitconfig · global" }],
+              rec: [{ sha: "9c01e4a", who: "kit@moreau.example", tags: [tag("HEAD · will be amended", "acc"), tag("Signed", "ok")] }, { sha: "51d0b7e", who: "rowan@vale.example", tags: [] }],
+              srcs: [pw("user.email", "rowan@vale.example"), { key: "author", scope: "HEAD", val: "Kit Moreau <kit@moreau.example> (kept)", cls: "srow win" }],
+              beh: "Hover or focus Amend. The footer previews the identity Amend writes, which is not the one Commit writes. The signature is re-made only if signing is on; otherwise it's dropped, and the popover says so." },
+            { id: "offline", label: "Account unknown / offline",
+              line1: "as " + P, line2: "", tone: "",
+              me: [{ k: "Author", v: P, src: "From your Personal profile" }, { k: "Committer", v: "Same as author" }],
+              out: [{ k: "Identity", v: P, src: "~/.gitconfig · global" }],
+              rec: [{ sha: "9c01e4a", who: "rowan@vale.example", tags: [tag("GitHub link unknown"), tag("Signed")] }, { sha: "51d0b7e", who: "rowan@vale.example", tags: [tag("not pushed")] }],
+              srcs: [pw("user.email", "rowan@vale.example")],
+              beh: "Quiet. History says “unknown”, never “not linked”, until the forge answers. A signed commit with no forge verdict reads “Signed”, with no claim of Verified." }
+          ];
+          this.state = { sel: "missing", open: true, amendHover: false };
+        }
+        renderVals() {
+          const s = this.state;
+          const d = this.defs.find((x) => x.id === s.sel) || this.defs[0];
+          const amendView = s.amendHover && !d.blocked;
+          const row = (r) => ({
+            k: r.k, v: r.v, src: r.src || "",
+            vCls: "v" + (r.none ? " none" : "") + (r.warn ? " warn" : "") + (r.bad ? " bad" : "")
+          });
+          let line1 = d.line1;
+          let line2 = d.line2;
+          let tone = d.tone;
+          if (amendView) {
+            line1 = d.id === "amend" ? "Amend keeps author Kit Moreau <kit@moreau.example>" : "Amend keeps author Rowan Vale <rowan@vale.example>";
+            line2 = "committer rowan@vale.example";
+            tone = "";
+          }
+          const meAct = d.meAct || [];
+          return {
+            states: this.defs.map((x) => ({
+              label: x.label,
+              cls: x.id === s.sel ? "on" : "",
+              pick: () => { this.setState({ sel: x.id, open: true, amendHover: x.id === "amend" }); }
+            })),
+            commitCls: d.blocked ? "cbtn dis" : "cbtn",
+            amendCls: "abtn" + (amendView ? " hot" : ""),
+            amendIn: () => { this.setState({ amendHover: true }); },
+            amendOut: () => { if (this.state.sel !== "amend") { this.setState({ amendHover: false }); } },
+            showLine: !d.blocked,
+            blocked: Boolean(d.blocked),
+            blockText: d.blockText || "",
+            blockLink: d.blockLink || "",
+            lineCls: "cas" + (tone ? " " + tone : "") + (s.open ? " open" : ""),
+            line1: line1,
+            line2: line2,
+            line2Cls: line2 === "" ? "" : (d.line2Plain || amendView ? "" : "why"),
+            toggle: () => { this.setState({ open: !this.state.open }); },
+            open: s.open,
+            meQ: amendView ? "Amend will record" : "PwrGit will record",
+            me: (amendView && d.id !== "amend")
+              ? [row({ k: "Author", v: "Rowan Vale <rowan@vale.example>", src: "Kept from HEAD. Amend never resets the author." }), row({ k: "Committer", v: "Rowan Vale <rowan@vale.example>", src: "From your Personal profile" })]
+              : d.me.map(row),
+            hasMeMsg: Boolean(d.meMsg),
+            meMsg: d.meMsg || "",
+            meMsgCls: d.meMsgCls || "idp-msg",
+            hasMeAct: meAct.length > 0,
+            meAct: meAct,
+            out: d.out.map(row),
+            hasOutMsg: Boolean(d.outMsg),
+            outMsg: d.outMsg || "",
+            outMsgCls: "idp-msg" + (d.outMsgCls ? " " + d.outMsgCls : ""),
+            hasOutAct: Boolean(d.outAct),
+            outAct: d.outAct || "",
+            rec: d.rec,
+            srcs: d.srcs,
+            hasToast: Boolean(d.toast),
+            toastEb: d.toast ? d.toast.eb : "",
+            toastMsg: d.toast ? d.toast.msg : "",
+            toastHint: d.toast ? d.toast.hint : "",
+            toastA1: d.toast ? d.toast.a1 : "",
+            behaviour: d.beh
+          };
+        }
+      }
+    </script>
+  </body>
+</html>
