@@ -289,6 +289,8 @@ export class WorktreeStateService {
    * not a change it can see.
    */
   private markMissing(wt: WorktreeRow): WorktreeState | null {
+    // A background rescan may already have pruned this row while Git ran.
+    if (this.worktreeRow(wt.id) === null) return null;
     if (wt.is_primary === 1) this.repoPathMissing?.(wt.repo_id);
     this.db.transaction(() => {
       this.db
@@ -313,6 +315,12 @@ export class WorktreeStateService {
       }
     })();
     return this.getCached(wt.id);
+  }
+
+  private cachedUnlessMissing(wt: WorktreeRow): WorktreeState | null {
+    return checkoutExists(wt.path)
+      ? this.getCached(wt.id)
+      : this.markMissing(wt);
   }
 
   /**
@@ -492,13 +500,13 @@ export class WorktreeStateService {
       wt.path,
       NO_OPTIONAL_LOCKS
     );
-    // The checkout was there a moment ago, so a failed status is transient
-    // (an index lock, a repo mid-write, a deletion racing this probe — the
-    // next probe settles it): keep the cached snapshot.
+    // Preserve cached state for transient Git failures, but check for deletion
+    // again: a focus refresh can share this in-flight probe rather than start
+    // another one after the checkout disappeared.
     const status = statusRaw.ok
       ? requireExit0(statusRaw.value, ["status"])
       : statusRaw;
-    if (!status.ok) return this.getCached(worktreeId);
+    if (!status.ok) return this.cachedUnlessMissing(wt);
     if (wt.missing === 1) {
       this.db
         .prepare("UPDATE worktrees SET missing = 0 WHERE id = ?")
@@ -518,10 +526,10 @@ export class WorktreeStateService {
         ["rev-list", "--count", parsed.head, "--not", "--remotes"], wt.path
       );
       if (!unpublished.ok || unpublished.value.exitCode !== 0) {
-        return this.getCached(worktreeId);
+        return this.cachedUnlessMissing(wt);
       }
       const count = Number(unpublished.value.stdout.trim());
-      if (!Number.isSafeInteger(count) || count < 0) return this.getCached(worktreeId);
+      if (!Number.isSafeInteger(count) || count < 0) return this.cachedUnlessMissing(wt);
       ahead = count;
     }
 
@@ -586,6 +594,10 @@ export class WorktreeStateService {
         : await this.forkSource(wt.repo_id, wt.repo_path, wt.path).catch(
             () => null
           );
+
+    // Even successful commands can have read the checkout just before it went.
+    // Never publish those counts as live once the probe can see it is gone.
+    if (!checkoutExists(wt.path)) return this.markMissing(wt);
 
     const state: WorktreeState = {
       worktreeId,
