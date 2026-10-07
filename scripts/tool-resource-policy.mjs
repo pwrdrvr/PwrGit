@@ -72,6 +72,7 @@ export function getToolResourcePolicy({
 
 const HEAP_FLAG = /^--max[-_]old[-_]space[-_]size(?:[-_]percentage)?(?:=|$)/;
 const NODE_VALUE_OPTIONS = new Set([
+  "-e", "--eval", "-p", "--print", "-pe", "-ep", "--run",
   "-r", "--require", "--import", "--loader", "--experimental-loader",
   "--title", "-C", "--conditions", "--input-type", "--env-file", "--env-file-if-exists",
   "--experimental-config-file", "--diagnostic-dir", "--icu-data-dir", "--openssl-config",
@@ -80,6 +81,19 @@ const NODE_VALUE_OPTIONS = new Set([
   "--heap-prof-dir", "--heap-prof-name", "--heap-prof-interval",
   "--cpu-prof-dir", "--cpu-prof-name", "--cpu-prof-interval",
   "--max-semi-space-size", "--max_semi_space_size", "--stack-size", "--stack_size",
+  "--allow-fs-read", "--allow-fs-write", "--build-snapshot-config",
+  "--disable-proto", "--disable-warning", "--experimental-package-map",
+  "--experimental-sea-config", "--experimental-test-tag-filter", "--debug-port",
+  "--inspect-publish-uid", "--localstorage-file", "--network-family-autoselection-attempt-timeout",
+  "--redirect-warnings", "--report-directory", "--report-dir", "--report-filename", "--report-signal",
+  "--secure-heap", "--secure-heap-min", "--snapshot-blob", "--test-concurrency",
+  "--test-coverage-branches", "--test-coverage-exclude", "--test-coverage-functions",
+  "--test-coverage-include", "--test-coverage-lines", "--test-global-setup",
+  "--experimental-test-isolation", "--test-isolation", "--test-name-pattern", "--test-random-seed",
+  "--test-reporter", "--test-reporter-destination", "--test-rerun-failures", "--test-shard",
+  "--test-skip-pattern", "--test-timeout", "--tls-cipher-list", "--tls-keylog",
+  "--trace-event-categories", "--trace-event-file-pattern", "--trace-require-module",
+  "--unhandled-rejections", "--use-largepages", "--v8-pool-size", "--watch-kill-signal", "--watch-path",
 ]);
 
 function removeHeapOptions(tokens) {
@@ -88,7 +102,12 @@ function removeHeapOptions(tokens) {
     const token = tokens[i].replace(/^"|"$/g, "");
     if (HEAP_FLAG.test(token)) {
       if (!token.includes("=") && i + 1 < tokens.length && !tokens[i + 1].startsWith("--")) i++;
-    } else retained.push(tokens[i]);
+    } else {
+      retained.push(tokens[i]);
+      // A flag-looking value belongs to its option, not to V8's startup
+      // settings (for example --title --max-old-space-size=6144).
+      if (NODE_VALUE_OPTIONS.has(token) && i + 1 < tokens.length) retained.push(tokens[++i]);
+    }
   }
   return retained;
 }
@@ -133,14 +152,14 @@ export function resourceCommand(command, args, policy, heapMiB = 2048) {
   if (!policy.constrained) return args;
   const name = path.basename(command).replace(/\.(cmd|exe)$/i, "").toLowerCase();
   if (name === "node") {
-    // Only Node's prefix is options: an application's similarly named args
-    // after its entrypoint must remain application args.
+    // Eval/print consumes an expression but Node continues parsing startup
+    // options afterwards. A script/positional argument or -- ends that scan.
     let end = args.length;
     for (let i = 0; i < args.length; i++) {
-      if (["--", "-e", "--eval", "-p", "--print"].includes(args[i]) || !args[i].startsWith("-")) { end = i; break; }
+      if (args[i] === "--" || args[i] === "-" || !args[i].startsWith("-")) { end = i; break; }
       if (NODE_VALUE_OPTIONS.has(args[i]) || (HEAP_FLAG.test(args[i]) && !args[i].includes("="))) i++;
     }
-    return [...removeHeapOptions(args.slice(0, end)), `--max-old-space-size=${heapMiB}`, ...args.slice(end)];
+    return [`--max-old-space-size=${heapMiB}`, ...removeHeapOptions(args.slice(0, end)), ...args.slice(end)];
   }
   if (name === "pnpm") {
     const capped = withoutOptions(args, ["--node-options"]);

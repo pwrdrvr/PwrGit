@@ -117,6 +117,35 @@ describe("shared resource lease", () => {
     expect(data.heap).toBe(await nodeHeapBaseline(f));
   });
 
+  it.each(["-e", "--eval", "-p", "--print", "-pe"])("caps actual late heap flags after %s without rewriting option operands or application arguments", async (evalFlag) => {
+    const f = await fixture();
+    const expression = "JSON.stringify({heap:require('v8').getHeapStatistics().heap_size_limit,argv:process.argv.slice(1),title:process.title})";
+    const code = ["-e", "--eval"].includes(evalFlag) ? `console.log(${expression})` : expression;
+    const result = await launch(f, { args: ["--title=--max-old-space-size=6144", evalFlag, code, "--max-old-space-size=6144", "--max-old-space-size-percentage", "90", "--", "--max-old-space-size=777"] }, { NODE_OPTIONS: "--trace-warnings --max-old-space-size=6144" }).completed;
+    expect(result.code, result.stderr).toBe(0);
+    const data = JSON.parse(result.stdout);
+    expect(data.heap).toBe(await nodeHeapBaseline(f));
+    expect(data.argv).toEqual(["--max-old-space-size=777"]);
+    expect(data.title).toBe("--max-old-space-size=6144");
+  }, 30_000);
+
+  it("preserves Node's diagnostic for a flag-shaped pair-form title value", async () => {
+    const f = await fixture();
+    const result = await launch(f, { args: ["--title", "--max-old-space-size=6144", "-e", "process.exitCode=0"] }).completed;
+    expect(result.code).toBe(9);
+    expect(result.stderr).toContain("--title requires an argument");
+  }, 30_000);
+
+  it("caps late flags after an equals-form eval and preserves flags after a positional application argument", async () => {
+    const f = await fixture();
+    const code = "console.log(JSON.stringify({heap:require('v8').getHeapStatistics().heap_size_limit,argv:process.argv.slice(1)}))";
+    const result = await launch(f, { args: [`--eval=${code}`, "--max-old-space-size=6144", "application-arg", "--max-old-space-size=777"] }).completed;
+    expect(result.code, result.stderr).toBe(0);
+    const data = JSON.parse(result.stdout);
+    expect(data.heap).toBe(await nodeHeapBaseline(f));
+    expect(data.argv).toEqual(["application-arg", "--max-old-space-size=777"]);
+  }, 30_000);
+
   // Native Windows shim parsing is verified separately from Node's argv.
   it.skipIf(process.platform !== "win32")("preserves .cmd argv on a larger machine without acquiring a lease", async () => {
     const f = await fixture();

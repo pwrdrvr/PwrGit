@@ -67,13 +67,26 @@ describe("constrained command policy", () => {
 
   it("rewrites CLI Node overrides without changing script arguments", () => {
     expect(resourceCommand("node", ["--max-old-space-size=6144", "--max_old_space_size_percentage", "90", "-r", "a b.cjs", "script.js", "--max-old-space-size=777"], low))
-      .toEqual(["-r", "a b.cjs", "--max-old-space-size=2048", "script.js", "--max-old-space-size=777"]);
+      .toEqual(["--max-old-space-size=2048", "-r", "a b.cjs", "script.js", "--max-old-space-size=777"]);
     expect(resourceCommand("node", ["--max-old-space-size=6144", "-e", "console.log(1)"], low))
       .toEqual(["--max-old-space-size=2048", "-e", "console.log(1)"]);
     expect(resourceCommand("node", ["--title", "probe", "--max-old-space-size=6144", "script.js"], low))
-      .toEqual(["--title", "probe", "--max-old-space-size=2048", "script.js"]);
+      .toEqual(["--max-old-space-size=2048", "--title", "probe", "script.js"]);
     expect(resourceCommand("NODE.EXE", ["--max-old-space-size=6144", "-e", "console.log(1)"], low))
       .toEqual(["--max-old-space-size=2048", "-e", "console.log(1)"]);
+  });
+
+  it.each(["-e", "--eval", "-p", "--print", "-pe"])("removes startup overrides after a %s expression while preserving operands", (evalFlag) => {
+    const expression = "'--max-old-space-size=6144'";
+    expect(resourceCommand("node", ["--title", "--max-old-space-size=6144", evalFlag, expression, "--max_old_space_size", "6144", "--max-old-space-size-percentage=90", "--", "--max-old-space-size=777"], low))
+      .toEqual(["--max-old-space-size=2048", "--title", "--max-old-space-size=6144", evalFlag, expression, "--", "--max-old-space-size=777"]);
+    expect(cappedNodeOptions("--title --max-old-space-size=6144 --max-old-space-size=6144"))
+      .toBe("--title --max-old-space-size=6144 --max-old-space-size=2048");
+  });
+
+  it("preserves equals-form expressions and stops at the first application positional argument", () => {
+    expect(resourceCommand("node", ["--eval=console.log(1)", "--max-old-space-size=6144", "application-arg", "--max-old-space-size=777"], low))
+      .toEqual(["--max-old-space-size=2048", "--eval=console.log(1)", "application-arg", "--max-old-space-size=777"]);
   });
 
   it("replaces both pair and equals pnpm concurrency and parallel overrides", () => {
