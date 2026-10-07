@@ -29,6 +29,10 @@ export default defineConfig({
   test: {
     environment: "node",
     runner: "apps/desktop/test-support/act-warning-runner.ts",
+    // Discovery contract tests mock filesystem/process I/O. Transform the
+    // dependency so those mocks also apply to its imports; externalized Node
+    // modules would otherwise probe the operator's real installed CLIs.
+    server: { deps: { inline: ["@pwrdrvr/codex-discovery"] } },
     setupFiles: [
       "apps/desktop/test-support/github-network-setup.mjs",
       "apps/desktop/src/main/git/test-support/tripwire-setup.ts",
