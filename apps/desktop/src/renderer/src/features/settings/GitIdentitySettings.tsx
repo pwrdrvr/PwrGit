@@ -1,9 +1,13 @@
 import { useState } from "react";
-import type { IdentityConfigEntry, MachineGitIdentity, Profile } from "@pwrgit/shared";
+import {
+  lastConfigEntry,
+  type IdentityConfigEntry,
+  type MachineGitIdentity,
+  type Profile
+} from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
 import { outsideView } from "../identity/identity-view";
-import { useMachineIdentity } from "../identity/useCommitIdentity";
 import { SettingsField, SettingsSection } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
 import type { AppSettingsState } from "./useAppSettings";
@@ -14,13 +18,16 @@ import type { AppSettingsState } from "./useAppSettings";
  * config — at a click, after showing the file and the values it will write.
  */
 export function GitIdentitySection({
+  machine,
   profiles,
   settings
 }: {
+  /** Read once per Settings window (`SettingsWindow`), so the nav row and
+   *  this card are one answer and one set of Git processes. */
+  machine: MachineGitIdentity | null;
   profiles: readonly Profile[];
   settings: AppSettingsState;
 }) {
-  const { machine } = useMachineIdentity();
   const [setup, setSetup] = useState(false);
   const reminder = settings.snapshot?.general.gitIdentityReminder ?? true;
   const view = machine === null ? null : outsideView(machine.outside, "machine");
@@ -49,12 +56,12 @@ export function GitIdentitySection({
               <dt>Name</dt>
               <dd>
                 {view.rows[0]?.value}
-                <EntryOrigin entry={globalEntry(machine.config, "user.name")} keyName="user.name" />
+                <EntryOrigin entry={lastConfigEntry(machine.config, "user.name")} keyName="user.name" />
               </dd>
               <dt>Email</dt>
               <dd>
                 {view.rows[1]?.value}
-                <EntryOrigin entry={globalEntry(machine.config, "user.email")} keyName="user.email" />
+                <EntryOrigin entry={lastConfigEntry(machine.config, "user.email")} keyName="user.email" />
               </dd>
             </dl>
             {view.consequence !== null && (
@@ -110,14 +117,6 @@ function EntryOrigin({ entry, keyName }: { entry: IdentityConfigEntry | undefine
   );
 }
 
-/** The value Git uses: the last one listed, since later scopes win. */
-function globalEntry(config: readonly IdentityConfigEntry[], key: string): IdentityConfigEntry | undefined {
-  for (let i = config.length - 1; i >= 0; i -= 1) {
-    if (config[i]?.key === key) return config[i];
-  }
-  return undefined;
-}
-
 type Seed = { label: string; name: string; email: string };
 
 /** Starting points: what PwrGit already knows, never typed twice. */
@@ -156,9 +155,11 @@ function GitIdentitySetupDialog({
   onClose: () => void;
 }) {
   const seeds = setupSeeds(machine, profiles);
+  // What the file being written holds now: global scope only, so a system
+  // value is never shown as a line of ~/.gitconfig that the write replaces.
   const current = {
-    name: globalEntry(machine.config, "user.name")?.value ?? null,
-    email: globalEntry(machine.config, "user.email")?.value ?? null
+    name: lastConfigEntry(machine.config, "user.name", ["global"])?.value ?? null,
+    email: lastConfigEntry(machine.config, "user.email", ["global"])?.value ?? null
   };
   const first = seeds[0];
   const [name, setName] = useState(current.name ?? first?.name ?? "");
@@ -184,14 +185,17 @@ function GitIdentitySetupDialog({
       return;
     }
     // Verified, not assumed: Git is asked again after the write, and a value
-    // that still does not resolve (a system config overriding it, say) is
-    // reported rather than papered over by closing.
-    const outside = result.value.outside;
-    if (
+    // that still does not win is reported rather than papered over by
+    // closing. The name is checked as config holds it, not as `git var`
+    // prints it: Git trims quotes, commas and the like from the ends of an
+    // ident name, so `Rowan "Ro"` resolves as `Rowan "Ro` and would read as
+    // overridden.
+    const { outside, config } = result.value;
+    const nameWins = lastConfigEntry(config, "user.name")?.value === trimmed.name;
+    const emailWins =
       outside.kind === "configured" &&
-      outside.author.name === trimmed.name &&
-      outside.author.email.toLowerCase() === trimmed.email.toLowerCase()
-    ) {
+      outside.author.email.toLowerCase() === trimmed.email.toLowerCase();
+    if (nameWins && emailWins) {
       onClose();
       return;
     }

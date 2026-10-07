@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
 import type { CommitIdentityInspection } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
@@ -44,6 +44,20 @@ export function CommitIdentityFooter({
   const surfaceRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
   useDismissable({ open, onDismiss: close, triggerRef, surfaceRef });
+  // A press anywhere else closes it. Not a fixed backdrop: the rail is a
+  // size container, which makes it the containing block for `position:
+  // fixed`, so a backdrop would cover the rail and miss the rest of the window.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target as Node | null;
+      if (target === null) return;
+      if (surfaceRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [open, close]);
   const popoverId = useId();
 
   const view: FooterView =
@@ -74,10 +88,7 @@ export function CommitIdentityFooter({
           </button>
         )}
         {open && inspection !== null && (
-          <>
-            <div className="commit-identity__backdrop" onClick={close} />
-            <IdentityPopover id={popoverId} ref={surfaceRef} inspection={inspection} onClose={close} />
-          </>
+          <IdentityPopover id={popoverId} ref={surfaceRef} inspection={inspection} onClose={close} />
         )}
       </div>
     );
@@ -126,10 +137,7 @@ export function CommitIdentityFooter({
         <span className="commit-identity__chevron" aria-hidden="true" />
       </button>
       {open && inspection !== null && (
-        <>
-          <div className="commit-identity__backdrop" onClick={close} />
-          <IdentityPopover id={popoverId} ref={surfaceRef} inspection={inspection} onClose={close} />
-        </>
+        <IdentityPopover id={popoverId} ref={surfaceRef} inspection={inspection} onClose={close} />
       )}
     </div>
   );

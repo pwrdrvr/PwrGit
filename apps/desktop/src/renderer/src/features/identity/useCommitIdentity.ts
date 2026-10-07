@@ -6,12 +6,17 @@ import { dispatch, subscribe } from "../../lib/pwrgit";
  * Who a commit in this checkout will be recorded as, resolved by Git.
  *
  * Re-resolved, never polled: on select, on window focus (a config edited in a
- * terminal a moment ago), on a profile or identity change, and whenever the
- * caller asks — the commit box asks after every commit, so the "recent
- * commits" list includes the one just made. Main collapses concurrent asks for
- * one checkout into a single inspection.
+ * terminal a moment ago), on a profile or identity change, when the checkout's
+ * HEAD moves (a branch switch, pull or rebase inside PwrGit, which Amend's
+ * "keeps author" preview reads), and whenever the caller asks — the commit box
+ * asks after every commit. Main collapses concurrent asks for one checkout
+ * into a single inspection.
  */
-export function useCommitIdentity(worktreeId: string | null): {
+export function useCommitIdentity(
+  worktreeId: string | null,
+  /** The checkout's HEAD as last computed; a change re-resolves. */
+  head?: string | null
+): {
   inspection: CommitIdentityInspection | null;
   refresh: () => void;
 } {
@@ -51,6 +56,14 @@ export function useCommitIdentity(worktreeId: string | null): {
       window.removeEventListener("focus", run);
     };
   }, [worktreeId]);
+
+  // Not on first sight: the effect above has just asked.
+  const seenHead = useRef(head);
+  useEffect(() => {
+    if (seenHead.current === head) return;
+    seenHead.current = head;
+    load.current();
+  }, [head]);
 
   const refresh = useCallback(() => load.current(), []);
   return { inspection, refresh };

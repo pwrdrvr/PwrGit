@@ -109,10 +109,18 @@ export function noticeCopy(
       : null;
   if (machine.outside.kind === "guessed") {
     const guessed = machine.outside.author.email;
-    return {
-      message: "Git outside PwrGit is guessing your email.",
-      hint: `Commits from Terminal or coding agents would record ${guessed}, an address built from this computer’s name that no forge can link to you.${pwrgit === null ? "" : ` ${pwrgit}`}`
-    };
+    const suffix = pwrgit === null ? "" : ` ${pwrgit}`;
+    // An address from `$EMAIL` may well be right; it is only missing from
+    // Git itself, so anything launched without that shell gets nothing.
+    return machine.outside.source === "environment"
+      ? {
+          message: "Git outside PwrGit has no identity of its own.",
+          hint: `Commits from a shell that exports EMAIL record ${guessed}; Terminal or agent sessions started any other way have no email to commit with.${suffix}`
+        }
+      : {
+          message: "Git outside PwrGit is guessing your email.",
+          hint: `Commits from Terminal or coding agents would record ${guessed}, an address built from this computer’s name that no forge can link to you.${suffix}`
+        };
   }
   if (pwrgit === null) {
     return {

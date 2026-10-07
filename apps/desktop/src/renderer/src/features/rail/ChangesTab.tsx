@@ -416,7 +416,7 @@ export function ChangesTab({
   };
   const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
-  const identity = useCommitIdentity(wtId);
+  const identity = useCommitIdentity(wtId, worktree?.head ?? null);
   // Git would refuse: the one identity state that disables Commit and Amend.
   const identityBlocked = identity.inspection !== null && !identity.inspection.pwrgit.ok;
   const [amendHover, setAmendHover] = useState(false);

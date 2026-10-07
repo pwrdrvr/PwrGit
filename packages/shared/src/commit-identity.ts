@@ -59,13 +59,15 @@ export type PwrGitIdentityPrediction =
  * What Git resolves without PwrGit's per-command identity: what a terminal or
  * an agent gets in the same place, unless its own command overrides it.
  *
- * `guessed` is Git building an address from the login and host name because
- * nothing is configured. macOS Git does this and commits; Linux Git usually
- * cannot and refuses, which is `missing`.
+ * `guessed` is Git committing with nothing configured. `source` says where
+ * the address came from: the `EMAIL` environment variable a shell exported
+ * (`environment`), or the login and host name (`system`) — macOS Git does the
+ * latter and commits; Linux Git usually cannot and refuses, which is
+ * `missing`.
  */
 export type OutsideGitIdentity =
   | { kind: "configured"; author: GitPerson; committer: GitPerson }
-  | { kind: "guessed"; author: GitPerson }
+  | { kind: "guessed"; author: GitPerson; source: "environment" | "system" }
   | { kind: "missing"; message: string };
 
 /** One commit's recorded identities, newest first from HEAD. */
@@ -107,6 +109,25 @@ export type CommitIdentityInspection = {
   recent: RecordedCommitIdentity[];
   signing: CommitSigning;
 };
+
+/**
+ * The entry Git uses for `key`: config lists lowest precedence first, so the
+ * last match wins. `scopes` narrows the search, for "what does this file hold"
+ * rather than "what does Git use".
+ */
+export function lastConfigEntry(
+  entries: readonly IdentityConfigEntry[],
+  key: string,
+  scopes?: readonly GitConfigScope[]
+): IdentityConfigEntry | undefined {
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i];
+    if (entry === undefined || entry.key !== key) continue;
+    if (scopes !== undefined && !scopes.includes(entry.scope)) continue;
+    return entry;
+  }
+  return undefined;
+}
 
 /** `identity:machine` — Git's identity with no repository in the way. */
 export type MachineGitIdentity = {

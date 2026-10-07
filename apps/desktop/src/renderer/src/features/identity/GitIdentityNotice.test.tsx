@@ -76,11 +76,22 @@ describe("Git identity launch notice", () => {
   it("names the guessed address on macOS", async () => {
     machine = {
       ...missing(),
-      outside: { kind: "guessed", author: { name: "Rowan Vale", email: "rowan@Rowans-MBP.local" } }
+      outside: { kind: "guessed", author: { name: "Rowan Vale", email: "rowan@Rowans-MBP.local" }, source: "system" }
     };
     await render();
     expect(container.textContent).toContain("Git outside PwrGit is guessing your email.");
     expect(container.textContent).toContain("rowan@Rowans-MBP.local");
+  });
+
+  it("says an address from $EMAIL reaches only shells that export it", async () => {
+    machine = {
+      ...missing(),
+      outside: { kind: "guessed", author: { name: "Rowan Vale", email: "rowan@vale.example" }, source: "environment" }
+    };
+    await render();
+    expect(container.textContent).toContain("Git outside PwrGit has no identity of its own.");
+    expect(container.textContent).toContain("a shell that exports EMAIL");
+    expect(container.textContent).not.toContain("computer’s name");
   });
 
   it("goes to Settings › Profiles › Git outside PwrGit", async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ok } from "@pwrgit/shared";
 import { CommandBus } from "../command-bus";
-import type { DB } from "../persistence/db";
+import { openDatabase, type DB } from "../persistence/db";
 import type { GitExec } from "./dugite";
 import { registerCommitIdentityHandlers } from "./commit-identity-handlers";
 
@@ -74,5 +74,71 @@ describe("identity launch notice", () => {
     expect((await ask(1)).notice).toBe(false);
     state.configured = false;
     expect((await ask(2)).notice).toBe(true);
+  });
+});
+
+/** Answers `git var` with whatever identity the command line carried, so the
+ *  inspection reports exactly the profile the handler chose. */
+function echoingGit(): GitExec {
+  return vi.fn(async (args: string[]) => {
+    if (args.includes("var")) {
+      const value = (key: string) =>
+        args.find((arg) => arg.startsWith(`${key}=`))?.slice(key.length + 1);
+      const email = value("user.email");
+      if (email === undefined) {
+        return ok({ stdout: "", stderr: "fatal: no email was given and auto-detection is disabled\n", exitCode: 128 });
+      }
+      return ok({ stdout: `${value("user.name") ?? "Guessed"} <${email}> 1 +0000\n`, stderr: "", exitCode: 0 });
+    }
+    return ok({ stdout: "", stderr: "", exitCode: 1 });
+  }) as unknown as GitExec;
+}
+
+describe("identity:inspect", () => {
+  it("answers each worktree with its own profile's identity, across two profiles", async () => {
+    // Two profiles whose repositories share a branch name: the worktree →
+    // repo → profile join, and the in-flight key, must never cross them.
+    const db = openDatabase(":memory:");
+    db.prepare(
+      "INSERT INTO profiles (id, name, email, author_name) VALUES ('personal', 'Personal', 'rowan@vale.example', 'Rowan Vale')"
+    ).run();
+    db.prepare(
+      "INSERT INTO profiles (id, name, email, author_name) VALUES ('acme', 'Acme', 'rowan@acme.example', 'R. Vale')"
+    ).run();
+    db.prepare(
+      "INSERT INTO repos (id, profile_id, name, path) VALUES ('r-personal', 'personal', 'api', '/repos/api')"
+    ).run();
+    db.prepare(
+      "INSERT INTO repos (id, profile_id, name, path) VALUES ('r-acme', 'acme', 'api', '/work/api')"
+    ).run();
+    const worktree = db.prepare(
+      "INSERT INTO worktrees (id, repo_id, branch, path, is_primary) VALUES (?, ?, 'main', ?, 1)"
+    );
+    worktree.run("wt-personal", "r-personal", "/repos/api");
+    worktree.run("wt-acme", "r-acme", "/work/api");
+
+    const bus = new CommandBus();
+    registerCommitIdentityHandlers(bus, db, {
+      git: echoingGit(),
+      reminderEnabled: () => true,
+      windowAlive: () => true,
+      emitChanged: vi.fn()
+    });
+    // Asked together, the way two windows focusing at once would.
+    const [personal, acme] = await Promise.all([
+      bus.dispatch("identity:inspect", { worktreeId: "wt-personal" }, {}),
+      bus.dispatch("identity:inspect", { worktreeId: "wt-acme" }, {})
+    ]);
+    if (!personal.ok || !acme.ok) throw new Error("inspect failed");
+    expect(acme.value.worktreeId).toBe("wt-acme");
+    expect(acme.value.profile).toEqual({ name: "Acme", email: "rowan@acme.example", authorName: "R. Vale" });
+    expect(acme.value.pwrgit).toMatchObject({
+      ok: true,
+      author: { name: "R. Vale", email: "rowan@acme.example" }
+    });
+    expect(personal.value.pwrgit).toMatchObject({
+      ok: true,
+      author: { name: "Rowan Vale", email: "rowan@vale.example" }
+    });
   });
 });

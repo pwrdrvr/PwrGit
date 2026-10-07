@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   err,
+  lastConfigEntry,
   ok,
   type CommitIdentityInspection,
   type CommitSigning,
@@ -161,7 +162,8 @@ export async function predictPwrGitIdentity(
  */
 export async function resolveOutsideIdentity(
   git: GitExec,
-  cwd: string
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env
 ): Promise<OutsideGitIdentity> {
   const strictArgs = ["-c", "user.useConfigOnly=true"];
   const [author, committer] = await Promise.all([
@@ -172,7 +174,18 @@ export async function resolveOutsideIdentity(
     return { kind: "configured", author: author.value, committer: committer.value };
   }
   const guess = await identVar(git, cwd, [], "GIT_AUTHOR_IDENT", SCRUBBED_COMMAND_ENV);
-  if (guess.ok) return { kind: "guessed", author: guess.value };
+  if (guess.ok) {
+    // Git's guess takes `$EMAIL` before the login@hostname it builds, so an
+    // address equal to that variable came from the shell, not the machine.
+    const exported = env["EMAIL"]?.trim() ?? "";
+    const fromEnvironment =
+      exported !== "" && guess.value.email.toLowerCase() === exported.toLowerCase();
+    return {
+      kind: "guessed",
+      author: guess.value,
+      source: fromEnvironment ? "environment" : "system"
+    };
+  }
   return { kind: "missing", message: guess.error };
 }
 
@@ -241,10 +254,7 @@ export function readIdentityConfig(
 
 /** The value Git uses for `key`: the last one listed wins. */
 export function lastValue(entries: IdentityConfigEntry[], key: string): string | null {
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    if (entries[i]!.key === key) return entries[i]!.value;
-  }
-  return null;
+  return lastConfigEntry(entries, key)?.value ?? null;
 }
 
 function truthy(value: string | null): boolean {
@@ -357,7 +367,7 @@ export async function inspectCommitIdentity(
 ): Promise<CommitIdentityInspection> {
   const [pwrgit, outside, config, recent] = await Promise.all([
     predictPwrGitIdentity(git, cwd, profileCommitIdentity(profile)),
-    resolveOutsideIdentity(git, cwd),
+    resolveOutsideIdentity(git, cwd, env),
     readIdentityConfig(git, cwd),
     readRecentCommitIdentities(git, cwd)
   ]);
@@ -405,7 +415,7 @@ export async function resolveMachineIdentity(
   globalFile: string;
 }> {
   const [outside, config] = await Promise.all([
-    resolveOutsideIdentity(git, cwd),
+    resolveOutsideIdentity(git, cwd, env),
     readConfigEntries(git, cwd, MACHINE_KEYS)
   ]);
   return { outside, config, globalFile: globalConfigFile(env) };

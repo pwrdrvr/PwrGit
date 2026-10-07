@@ -4,6 +4,7 @@
 
 import {
   formatGitPerson,
+  lastConfigEntry,
   noreplyForge,
   samePerson,
   type CommitIdentityInspection,
@@ -89,15 +90,26 @@ export function pwrgitSourceLine(inspection: CommitIdentityInspection): string {
     return `From ${profileLabel}`;
   }
   const parts: string[] = [];
-  if (pwrgit.nameSource === "git") {
-    parts.push(`name from Git’s user.name${originSuffix(lastEntry(config, "user.name"))}`);
-  }
-  if (pwrgit.emailSource === "git") {
-    parts.push(`email from Git’s user.email${originSuffix(lastEntry(config, "user.email"))}`);
-  }
+  if (pwrgit.nameSource === "git") parts.push(gitSourcePart(config, "name"));
+  if (pwrgit.emailSource === "git") parts.push(gitSourcePart(config, "email"));
   const fromProfile =
     pwrgit.nameSource === "profile" ? "name" : pwrgit.emailSource === "profile" ? "email" : null;
   return `${capitalize(parts.join(", "))}${fromProfile === null ? "" : `; ${fromProfile} from ${profileLabel}`}`;
+}
+
+/**
+ * Which config key supplied a half the profile left empty. `author.*`
+ * outranks `user.*`; with neither set, the name was guessed from the OS
+ * account (an email cannot be: PwrGit forbids that guess).
+ */
+function gitSourcePart(config: readonly IdentityConfigEntry[], half: "name" | "email"): string {
+  const entry = lastConfigEntry(config, `author.${half}`) ?? lastConfigEntry(config, `user.${half}`);
+  if (entry === undefined) {
+    return half === "name"
+      ? "name guessed by Git from this computer’s account"
+      : "email from Git’s configuration";
+  }
+  return `${half} from Git’s ${entry.key}${originSuffix(entry)}`;
 }
 
 export function signingLine(signing: CommitSigning): string {
@@ -138,7 +150,10 @@ export function outsideView(outside: OutsideGitIdentity, where: "checkout" | "ma
         { label: "Name", value: outside.author.name },
         { label: "Email", value: `${outside.author.email} (guessed)` }
       ],
-      consequence: `Terminal and agent commits${here} record ${outside.author.email}, an address Git built from this computer’s name that no forge can link to you.`
+      consequence:
+        outside.source === "environment"
+          ? `Terminal and agent commits${here} record ${outside.author.email} from the EMAIL environment variable, but only in shells that export it; nothing is configured in Git.`
+          : `Terminal and agent commits${here} record ${outside.author.email}, an address Git built from this computer’s name that no forge can link to you.`
     };
   }
   return {
@@ -208,13 +223,6 @@ export function identityDiagnostics(inspection: CommitIdentityInspection): strin
     );
   }
   return lines.join("\n");
-}
-
-function lastEntry(config: readonly IdentityConfigEntry[], key: string): IdentityConfigEntry | undefined {
-  for (let i = config.length - 1; i >= 0; i -= 1) {
-    if (config[i]?.key === key) return config[i];
-  }
-  return undefined;
 }
 
 function originSuffix(entry: IdentityConfigEntry | undefined): string {

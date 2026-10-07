@@ -76,7 +76,7 @@ afterEach(() => {
 describe("Settings › Profiles › Git outside PwrGit", () => {
   it("reports an unconfigured Git and writes only after the preview", async () => {
     await act(async () => {
-      root.render(<GitIdentitySection profiles={[personal]} settings={settings()} />);
+      root.render(<GitIdentitySection machine={MISSING} profiles={[personal]} settings={settings()} />);
     });
     expect(container.textContent).toContain("Not configured");
     expect(container.textContent).toContain("“Author identity unknown”");
@@ -99,7 +99,7 @@ describe("Settings › Profiles › Git outside PwrGit", () => {
       name === "identity:writeGlobal" || name === "identity:machine" ? ok(MISSING) : ok(null)
     );
     await act(async () => {
-      root.render(<GitIdentitySection profiles={[personal]} settings={settings()} />);
+      root.render(<GitIdentitySection machine={MISSING} profiles={[personal]} settings={settings()} />);
     });
     await act(async () => button("Set up Git identity…").click());
     await act(async () => button("Write to Git config").click());
@@ -110,11 +110,60 @@ describe("Settings › Profiles › Git outside PwrGit", () => {
 
   it("switches the launch reminder in General settings", async () => {
     await act(async () => {
-      root.render(<GitIdentitySection profiles={[personal]} settings={settings()} />);
+      root.render(<GitIdentitySection machine={MISSING} profiles={[personal]} settings={settings()} />);
     });
     const toggle = container.querySelector<HTMLButtonElement>("[role='switch']");
     await act(async () => toggle?.click());
     expect(update).toHaveBeenCalledWith({ general: { gitIdentityReminder: false } });
+  });
+});
+
+describe("the set-up dialog's preview and check", () => {
+  it("previews only what the global file holds, never a system value", async () => {
+    const systemOnly: MachineGitIdentity = {
+      ...MISSING,
+      config: [{ key: "user.name", value: "Lab Default", scope: "system", origin: "/etc/gitconfig" }]
+    };
+    await act(async () => {
+      root.render(<GitIdentitySection machine={systemOnly} profiles={[personal]} settings={settings()} />);
+    });
+    await act(async () => button("Set up Git identity…").click());
+    const from = [...container.querySelectorAll(".git-identity-setup__from")].map((cell) => cell.textContent);
+    expect(from).toEqual(["not set", "not set"]);
+  });
+
+  it("accepts a name Git trims when it prints it", async () => {
+    // `git var` drops trailing quotes from an ident name; config keeps them.
+    const quoted = 'Rowan "Ro"';
+    mocks.dispatch.mockImplementation(async (name: string) =>
+      name === "identity:writeGlobal"
+        ? ok({
+            ...CONFIGURED,
+            outside: {
+              kind: "configured",
+              author: { name: 'Rowan "Ro', email: ROWAN.email },
+              committer: { name: 'Rowan "Ro', email: ROWAN.email }
+            },
+            config: [
+              { key: "user.name", value: quoted, scope: "global", origin: "/home/rowan/.gitconfig" },
+              { key: "user.email", value: ROWAN.email, scope: "global", origin: "/home/rowan/.gitconfig" }
+            ]
+          })
+        : ok(null)
+    );
+    await act(async () => {
+      root.render(
+        <GitIdentitySection
+          machine={MISSING}
+          profiles={[{ ...personal, authorName: quoted }]}
+          settings={settings()}
+        />
+      );
+    });
+    await act(async () => button("Set up Git identity…").click());
+    await act(async () => button("Write to Git config").click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("identity:writeGlobal", { name: quoted, email: ROWAN.email });
+    expect(container.querySelector("[role='dialog']")).toBeNull();
   });
 });
 

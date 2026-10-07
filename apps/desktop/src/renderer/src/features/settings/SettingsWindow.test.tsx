@@ -643,7 +643,7 @@ describe("Settings nav — AI", () => {
 
     machineIdentity = {
       ...CONFIGURED_GIT,
-      outside: { kind: "guessed", author: { name: "Rowan Vale", email: "rowan@rowans-mbp.local" } }
+      outside: { kind: "guessed", author: { name: "Rowan Vale", email: "rowan@rowans-mbp.local" }, source: "system" }
     };
     await act(async () => root.unmount());
     root = createRoot(container);

@@ -11,7 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { RebaseCommitRef } from "@pwrgit/shared";
+import { ok, type RebaseCommitRef } from "@pwrgit/shared";
+import type { GitExec } from "./dugite";
 import {
   globalConfigFile,
   identityEnvOverrides,
@@ -122,10 +123,26 @@ describe("what Git outside PwrGit resolves", () => {
     const box = sandbox({ EMAIL: "rowan@Rowans-MBP.local" });
     writeGlobal(box, "[user]\n\tname = Rowan Vale\n");
     const cwd = repo(box, "plain");
-    const outside = await resolveOutsideIdentity(createSystemGit({ env: box.env }), cwd);
+    const outside = await resolveOutsideIdentity(createSystemGit({ env: box.env }), cwd, box.env);
     expect(outside).toEqual({
       kind: "guessed",
-      author: { name: "Rowan Vale", email: "rowan@Rowans-MBP.local" }
+      author: { name: "Rowan Vale", email: "rowan@Rowans-MBP.local" },
+      // The address is the shell's, not one Git built from the host name.
+      source: "environment"
+    });
+  });
+
+  it("calls a guess with no $EMAIL behind it the machine's own", async () => {
+    // The login@hostname guess only exists on some machines, so Git's two
+    // answers are played back: the strict probe refuses, the plain one guesses.
+    const git = (async (args: string[]) =>
+      args.includes("user.useConfigOnly=true")
+        ? ok({ stdout: "", stderr: "fatal: no email was given and auto-detection is disabled\n", exitCode: 128 })
+        : ok({ stdout: "Rowan Vale <rowan@Rowans-MBP.local> 1 +0000\n", stderr: "", exitCode: 0 })) as unknown as GitExec;
+    expect(await resolveOutsideIdentity(git, "/anywhere", {})).toEqual({
+      kind: "guessed",
+      author: { name: "Rowan Vale", email: "rowan@Rowans-MBP.local" },
+      source: "system"
     });
   });
 

@@ -85,9 +85,43 @@ describe("pwrgitSourceLine", () => {
   });
 });
 
+describe("pwrgitSourceLine, with nothing configured", () => {
+  it("says Git guessed a name it found in no config file", () => {
+    const line = pwrgitSourceLine(
+      inspection({
+        pwrgit: { ok: true, author: ROWAN, committer: ROWAN, nameSource: "git", emailSource: "profile" },
+        config: []
+      })
+    );
+    expect(line).toBe("Name guessed by Git from this computer’s account; email from your Personal profile");
+  });
+
+  it("names author.name when that, not user.name, supplied it", () => {
+    const line = pwrgitSourceLine(
+      inspection({
+        pwrgit: { ok: true, author: ROWAN, committer: ROWAN, nameSource: "git", emailSource: "profile" },
+        config: [
+          { key: "user.name", value: "Someone", scope: "global", origin: "/home/rowan/.gitconfig" },
+          { key: "author.name", value: ROWAN.name, scope: "local", origin: ".git/config" }
+        ]
+      })
+    );
+    expect(line).toBe("Name from Git’s author.name in .git/config; email from your Personal profile");
+  });
+});
+
 describe("outsideView", () => {
+  it("does not blame the host name for an address the shell exported", () => {
+    const view = outsideView(
+      { kind: "guessed", author: { name: "Rowan Vale", email: ROWAN.email }, source: "environment" },
+      "machine"
+    );
+    expect(view.consequence).toContain("from the EMAIL environment variable");
+    expect(view.consequence).not.toContain("computer’s name");
+  });
+
   it("says what a terminal commit does when Git is guessing", () => {
-    const view = outsideView({ kind: "guessed", author: { name: "Rowan Vale", email: "rowan@Rowans-MBP.local" } }, "machine");
+    const view = outsideView({ kind: "guessed", author: { name: "Rowan Vale", email: "rowan@Rowans-MBP.local" }, source: "system" }, "machine");
     expect(view.status).toBe("guessed");
     expect(view.consequence).toContain("record rowan@Rowans-MBP.local");
     expect(view.consequence).toContain("on this computer");

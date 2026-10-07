@@ -68,6 +68,22 @@ describe("CommitIdentityFooter", () => {
     expect(container.querySelector("[role='dialog']")).toBeNull();
   });
 
+  it("closes on a press anywhere outside it, not just inside the rail", async () => {
+    await render(inspection());
+    await act(async () => button("as Rowan Vale <rowan@vale.example>").click());
+    expect(container.querySelector("[role='dialog']")).not.toBeNull();
+    // Inside the popover: stays open.
+    await act(async () => {
+      container.querySelector("[role='dialog'] h3")?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(container.querySelector("[role='dialog']")).not.toBeNull();
+    // Elsewhere in the window (the graph, the sidebar): closes.
+    await act(async () => {
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(container.querySelector("[role='dialog']")).toBeNull();
+  });
+
   it("previews the author Amend keeps while Amend is hovered", async () => {
     await render(inspection({ recent: [recorded({ author: KIT })] }), true);
     expect(container.textContent).toContain("Amend keeps author Kit Moreau <kit@moreau.example>");

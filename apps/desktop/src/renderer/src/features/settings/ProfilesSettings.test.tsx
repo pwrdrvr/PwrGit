@@ -25,12 +25,6 @@ vi.mock("../../state/useProfiles", () => ({
   useProfiles: mocks.useProfiles
 }));
 
-// The Git identity card above the list has its own suite
-// (GitIdentitySettings.test.tsx); here it only has to stay out of the way.
-vi.mock("../identity/useCommitIdentity", () => ({
-  useMachineIdentity: () => ({ machine: null, refresh: () => undefined })
-}));
-
 import { ProfilesSettings } from "./ProfilesSettings";
 
 const personal: Profile = {
@@ -86,6 +80,9 @@ async function render(profiles: Profile[]): Promise<void> {
   await act(async () => {
     root.render(
       <ProfilesSettings
+        // The Git identity card above the list has its own suite
+        // (GitIdentitySettings.test.tsx); unprobed, it only stays out of the way.
+        machine={null}
         settings={{
           snapshot: null,
           loading: false,

@@ -10721,11 +10721,6 @@ button.ref-chip:focus-visible {
   margin-left: auto;
   font-weight: 500;
 }
-.commit-identity__backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 39;
-}
 .commit-identity-popover {
   position: absolute;
   bottom: calc(100% + var(--popover-gap));

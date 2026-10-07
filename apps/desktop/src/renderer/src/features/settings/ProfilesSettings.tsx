@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
-import type { Profile } from "@pwrgit/shared";
+import type { MachineGitIdentity, Profile } from "@pwrgit/shared";
 import { ProfileModal } from "../sidebar/ProfileModal";
 import { reorder, type DropPosition } from "../sidebar/repo-view";
 import { useListReorder } from "../sidebar/useListReorder";
@@ -44,6 +44,8 @@ const MENU_SHORTCUT_SLOTS = 9;
  */
 export function ProfilesSettings(props: {
   settings: AppSettingsState;
+  /** Git's identity outside PwrGit, read by the window for the nav too. */
+  machine: MachineGitIdentity | null;
   /** A card the nav asked to reveal: `git-identity` or `list`. */
   focusSection?: SettingsFocusRequest;
 }) {
@@ -142,7 +144,11 @@ export function ProfilesSettings(props: {
         }
       />
 
-      <GitIdentitySection profiles={profiles.profiles} settings={props.settings} />
+      <GitIdentitySection
+        machine={props.machine}
+        profiles={profiles.profiles}
+        settings={props.settings}
+      />
 
       <SettingsSection
         sectionId="list"

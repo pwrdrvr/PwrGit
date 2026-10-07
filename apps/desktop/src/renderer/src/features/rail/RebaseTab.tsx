@@ -343,7 +343,7 @@ export function RebaseTab({
   const [applied, setApplied] = useState(false);
   // Apply rewrites every commit with the profile as committer, signed when Git
   // is set to sign: both are said beside the button before anyone presses it.
-  const identity = useCommitIdentity(worktreeId);
+  const identity = useCommitIdentity(worktreeId, sourceHead);
   const [tidy, setTidy] = useState<TidyState>({ kind: "idle" });
   const [edits, setEdits] = useState<TidyEdits>(NO_EDITS);
   /** The chip's override, for this request only; a new selection drops it. */
@@ -884,7 +884,7 @@ export function RebaseTab({
               )}
             </div>
           )}
-          {identity.inspection?.worktreeId === worktreeId && identity.inspection !== null && (
+          {identity.inspection !== null && identity.inspection.worktreeId === worktreeId && (
             <div className="rebase-note rebase-note--identity">
               {rebaseIdentityLine(identity.inspection)}
             </div>

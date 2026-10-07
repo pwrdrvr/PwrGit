@@ -179,7 +179,8 @@ function SettingsWindowBody(props: {
   // the children. Main answers from cache, so this costs one IPC per window.
   const forges = useForgeStatuses();
   // Same reason: the Profiles row warns while Git has no identity, whether or
-  // not the reader opens Profiles.
+  // not the reader opens Profiles. The Profiles card reads this one too, so the
+  // window spends one probe per focus, not one per reader.
   const { machine } = useMachineIdentity();
   const ai = useAiProvidersContext();
   const [route, setRoute] = useState<SettingsRoute>(() =>
@@ -392,6 +393,7 @@ function SettingsWindowBody(props: {
               {...(route.focus === undefined ? {} : { focus: route.focus })}
               settings={settings}
               aiProfile={aiProfile}
+              machine={machine}
               onEditDefaults={editDefaults}
             />
             {settings.error !== null && (
@@ -435,13 +437,14 @@ function SettingsSectionBody(props: {
   focus?: SettingsFocusRequest;
   settings: AppSettingsState;
   aiProfile: AiProfileSelection;
+  machine: MachineGitIdentity | null;
   onEditDefaults: () => void;
 }) {
   const { settings } = props;
   const focus = props.focus === undefined ? {} : { focusSection: props.focus };
 
   if (props.section === "profiles") {
-    return <ProfilesSettings settings={settings} {...focus} />;
+    return <ProfilesSettings settings={settings} machine={props.machine} {...focus} />;
   }
 
   // Neither AI pane reads the app snapshot: their settings are per profile
