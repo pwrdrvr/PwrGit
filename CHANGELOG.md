@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.33.0 - 2026-10-06
+
+- Profiles - Added drag-and-drop and keyboard reordering in Settings, plus a switch to hide a profile from the Profiles menu without deleting it. Menu order and the first nine profile shortcuts follow your visible profiles.
+- Menus and diagnostics - Improved consistent PwrSuite menu organization across platforms, added in-app About and Changelog views and Copy Diagnostics Info, and made Reload Window available without Developer Mode. Windows and Linux list open profile windows without duplicating Close Window.
+- Local settings - Fixed platform-specific wording for settings scoped to this Mac, PC, or computer, and corrected agent-access guidance to point to Settings → Local Agents.
+- Reliability - Fixed clean shutdown on macOS and Linux so PwrGit finishes its normal quit path before system power-off, with a bounded fallback if quitting stalls.
+- Minor - Updated MCP, WebSocket, and packaging dependencies.
+
 ## v0.32.0 - 2026-10-06
 
 - Updates - Fixed Beta · Prerelease to include newer staged Stable releases and Stable prerelease candidates, so you can follow those updates without changing your saved channel selection. A newer alpha or beta still takes precedence.
