@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { FORGE_KINDS, forgeInstall, forgeProduct } from "@pwrgit/shared";
 import {
   launchApp,
   readActiveProfile,
   type AppHandle
 } from "./fixtures/electron-app";
+import { createForgeFixture } from "./fixtures/forge-fixture";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import { lensChip, repoGroup } from "./fixtures/steps";
 
@@ -128,4 +130,78 @@ test("skipping counts as done, so the next launch is not ambushed", async () => 
 
   await expect(wizard(handle)).toBeHidden();
   expect(await onboardingCompleted(handle)).toBe(true);
+});
+
+test("Forges hands a missing CLI its install commands, then notices the install", async () => {
+  sandbox = createGitSandbox();
+  const missing = { installed: false, loggedIn: false, owners: [], repositories: {} };
+  const forges = createForgeFixture(sandbox, {
+    github: { ...missing },
+    gitlab: { ...missing },
+    gitcafe: { ...missing }
+  });
+  handle = await launchApp({
+    seedOnboarding: false,
+    forgeFixturePath: forges.path
+  });
+  const { window } = handle;
+  // Scoped to the strip: the sidebar's lens filter behind the scrim is a
+  // tablist too.
+  const chip = (kind: (typeof FORGE_KINDS)[number]) =>
+    window.getByRole("tablist", { name: "Forges" }).getByRole("tab", {
+      name: new RegExp(`^${forgeProduct(kind).label}:`)
+    });
+  const chipState = (kind: (typeof FORGE_KINDS)[number]) =>
+    chip(kind).locator(".onboarding-wizard__lens-state");
+  const panelCommands = window
+    .getByRole("tabpanel")
+    .locator(".onboarding-wizard__well-cmd");
+
+  await nextButton(handle).click();
+  await nextButton(handle).click();
+  await expect(title(handle)).toHaveText(
+    "Where PwrGit reads pull and merge requests from."
+  );
+
+  // The app and this runner share a machine, so the commands the step chose
+  // are this process's platform's.
+  for (const kind of FORGE_KINDS) {
+    await expect(chipState(kind)).toHaveText("Not installed");
+    await chip(kind).click();
+    await expect(panelCommands).toHaveText([
+      ...forgeInstall(kind, process.platform).steps
+    ]);
+  }
+
+  // Installed from a terminal, then Back and forward again. Main re-reads the
+  // fixture on every probe, so this is exactly the round trip that used to
+  // keep showing the pre-install answer: arriving at the step must force one.
+  forges.config.hosts.gitlab = { ...missing, installed: true };
+  forges.write();
+  // The wizard's own Back — the window's history control is also "Back".
+  await window
+    .locator(".onboarding-wizard__footer")
+    .getByRole("button", { name: "Back" })
+    .click();
+  await nextButton(handle).click();
+
+  // Detected now, so it sorts first, and it is what needs doing next.
+  await expect(
+    window.getByRole("tablist", { name: "Forges" }).getByRole("tab").first()
+  ).toHaveAccessibleName(
+    "GitLab: Signed out"
+  );
+  await expect(chip("gitlab")).toHaveAttribute("aria-selected", "true");
+  await expect(panelCommands).toHaveText("glab auth login");
+  await expect(chipState("github")).toHaveText("Not installed");
+
+  // And without leaving the step: signed in from the terminal, then Re-check.
+  forges.config.hosts.gitlab = { ...missing, installed: true, loggedIn: true };
+  forges.write();
+  await window.getByRole("button", { name: "Re-check" }).click();
+  await expect(chipState("gitlab")).toHaveText("Connected");
+  await expect(chip("gitlab")).toHaveAttribute("aria-selected", "true");
+  await expect(window.getByRole("tabpanel")).toContainText(
+    "glab is installed and signed in."
+  );
 });

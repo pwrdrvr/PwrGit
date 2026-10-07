@@ -606,33 +606,45 @@ if (!gotSingleInstanceLock) {
      */
     let probedTargets = forgeTargetSignature(forgeHosts);
     let reprobeTimer: NodeJS.Timeout | undefined;
-    const onForgeTargetsMaybeMoved = (): void => {
+    const reprobeMovedTargets = async (): Promise<void> => {
+      // A forced read retires the cache and any in-flight pass itself.
+      const probing = forgeStatus.list({ force: true }).catch(() => undefined);
+      // Same signature, same trigger: the gate the identity refresh obeys is
+      // built from exactly these targets, so anything that moves them moves
+      // its answer too, and anything that leaves them alone must cost nothing.
+      // Defined below, and only ever reached once startup has wired it.
+      refreshIdentitiesAfterGateChange();
+      await probing;
+    };
+    /** Schedules the re-probe and says whether the targets moved. */
+    const onForgeTargetsMaybeMoved = (): boolean => {
       const next = forgeTargetSignature(forgeHosts);
-      if (next === probedTargets) return;
+      if (next === probedTargets) return false;
       probedTargets = next;
       if (reprobeTimer !== undefined) clearTimeout(reprobeTimer);
       reprobeTimer = setTimeout(() => {
         reprobeTimer = undefined;
-        // A forced read retires the cache and any in-flight pass itself.
-        void forgeStatus.list({ force: true }).catch(() => undefined);
-        // Same signature, same debounce: the gate the identity refresh obeys
-        // is built from exactly these targets, so anything that moves them
-        // moves its answer too, and anything that leaves them alone must cost
-        // nothing. Defined below, and only ever reached from a timer.
-        refreshIdentitiesAfterGateChange();
+        void reprobeMovedTargets();
       }, FORGE_REPROBE_DEBOUNCE_MS);
+      return true;
     };
     const forgeHostsView = new ForgeHostsView(forgeHosts, async () => {
-      const previousTargets = probedTargets;
       const refreshed = await forgeHostDirectory.refresh({ force: true });
-      onForgeTargetsMaybeMoved();
-      // Login/logout can change credentials without changing a configured
-      // host's target signature. An explicit Re-check must refresh auth too;
-      // changed targets already schedule their forced probe above.
-      // Swallowed like the forced read above: a probe that refuses is not a
-      // reason to discard host enumeration that already succeeded, and Re-check
-      // must still hand back `refreshed`.
-      if (probedTargets === previousTargets) {
+      // Swallowed: a probe that refuses is not a reason to discard host
+      // enumeration that already succeeded, and Re-check must still hand back
+      // `refreshed`.
+      if (onForgeTargetsMaybeMoved()) {
+        // An explicit Re-check is a caller waiting on the answer — Settings'
+        // button, Setup › Forges sorting its strip. The debounce is for a burst
+        // of switch writes, not for this, so run the pass now and return only
+        // once it has: answering first let the caller read the pre-sign-in
+        // status that the scheduled pass was about to replace.
+        if (reprobeTimer !== undefined) clearTimeout(reprobeTimer);
+        reprobeTimer = undefined;
+        await reprobeMovedTargets();
+      } else {
+        // Login/logout can change credentials without changing a configured
+        // host's target signature. An explicit Re-check must refresh auth too.
         await forgeStatus.list({ force: true }).catch(() => undefined);
       }
       return refreshed;

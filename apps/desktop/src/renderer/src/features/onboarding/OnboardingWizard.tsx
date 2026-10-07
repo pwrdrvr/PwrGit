@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   forgeProduct,
-  type ForgeKind,
   type GitIdentityRead,
   type Profile,
-  type Repo,
-  FORGE_KINDS
+  type Repo
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { pathLeaf } from "../../lib/platform";
-import {
-  forgeProductState,
-  forgeStateSentence
-} from "../settings/ForgeProductSection";
+import { forgeProductState } from "../settings/ForgeProductSection";
 import { useForgeStatuses } from "../settings/useForgeStatuses";
 import {
   hoverTooltip,
@@ -26,6 +21,7 @@ import {
   railLabel,
   type WizardStep
 } from "./steps";
+import { ForgesStep } from "./ForgesStep";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { CheckGlyph } from "../../lib/CheckGlyph";
 import { InfoGlyph } from "../../lib/InfoGlyph";
@@ -407,58 +403,6 @@ function IdentityStep(props: {
       <p className="onboarding-wizard__hint">
         Changing these here writes them to this PwrGit profile only. Your global{" "}
         <code>~/.gitconfig</code> is not edited.
-      </p>
-    </div>
-  );
-}
-
-function ForgesStep(props: { forges: ReturnType<typeof useForgeStatuses> }) {
-  const { forges } = props;
-  return (
-    <div>
-      <div className="onboarding-wizard__head">
-        <h1 className="onboarding-wizard__title">
-          Where PwrGit reads pull and merge requests from.
-        </h1>
-        <p className="onboarding-wizard__sub">
-          Optional. Without a forge, PwrGit still finds, branches, commits and
-          pushes — you just will not see change-request state on a row. PwrGit
-          reads through the CLIs you already have; it never asks for a token.
-        </p>
-      </div>
-      <div className="onboarding-wizard__forges">
-        {FORGE_KINDS.map((kind: ForgeKind) => {
-          const status = forges?.find((f) => f.kind === kind);
-          const state = forgeProductState(status);
-          const product = forgeProduct(kind);
-          const sentence = forgeStateSentence(kind, state);
-          return (
-            <div key={kind} className="onboarding-wizard__forge">
-              <span
-                className={`onboarding-wizard__forge-dot is-${state}`}
-                aria-hidden="true"
-              />
-              <div className="onboarding-wizard__forge-main">
-                <div className="onboarding-wizard__forge-name">
-                  {product.label}
-                </div>
-                <div className="onboarding-wizard__forge-sentence">
-                  {sentence ?? `Checking ${product.label}…`}
-                </div>
-              </div>
-              {state === "signedOut" && (
-                <code className="onboarding-wizard__forge-cmd">
-                  {product.cli} auth login
-                </code>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <p className="onboarding-wizard__hint">
-        PwrGit cannot sign you in — <code>gh</code> and <code>glab</code> own
-        that. Run the command in a terminal and this updates itself. All of it
-        lives in Settings › Forges afterwards.
       </p>
     </div>
   );

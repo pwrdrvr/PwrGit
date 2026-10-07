@@ -23,17 +23,7 @@ import {
   signInCommand
 } from "./ForgeProductSection";
 import { AddForgeHostDialog } from "./AddForgeHostDialog";
-
-/**
- * How often this pane asks main to re-examine its probe while it is open.
- *
- * Main answers most of these from cache without spawning anything: its TTL is
- * what decides when a real probe happens (a minute for a broken forge, five for
- * a working one). Something has to ask, though — main never probes on its own,
- * so without this tick `forge:statusChanged` would have nothing to announce and
- * a terminal-side `gh auth login` would never reach an open pane.
- */
-const RECHECK_MS = 30_000;
+import { FORGE_RECHECK_MS } from "./useForgeStatuses";
 
 /**
  * Settings → Forges: one section per hosting product.
@@ -155,7 +145,7 @@ export function ForgesSettings(props: {
     });
     void readHosts(false);
     void readStatus();
-    const timer = window.setInterval(() => void readStatus(), RECHECK_MS);
+    const timer = window.setInterval(() => void readStatus(), FORGE_RECHECK_MS);
     return () => {
       mounted.current = false;
       hostsRequest.current += 1;

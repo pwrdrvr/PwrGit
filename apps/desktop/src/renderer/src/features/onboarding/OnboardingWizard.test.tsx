@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/pwrgit", () => ({ dispatch: mocks.dispatch }));
-vi.mock("../settings/useForgeStatuses", () => ({
+vi.mock("../settings/useForgeStatuses", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../settings/useForgeStatuses")>()),
   useForgeStatuses: mocks.useForgeStatuses
 }));
 
@@ -86,6 +87,7 @@ beforeEach(() => {
     }
   });
   mocks.useForgeStatuses.mockReturnValue([]);
+  (window as unknown as { pwrgit: { platform: string } }).pwrgit = { platform: "darwin" };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);

@@ -31,7 +31,15 @@ export type ForgeProduct = {
    * drifted would print a command naming a CLI the app never invokes.
    */
   readonly cli: string;
-  readonly installHint?: string;
+  /**
+   * How to get `cli` onto this machine, per platform.
+   *
+   * Reaches the user as commands to paste into a terminal, so every step is the
+   * vendor's own published instruction — never a guess at a distro package,
+   * which is how a too-old `gh` (no `gh auth token`) would arrive looking
+   * installed and then fail every read.
+   */
+  readonly install: ForgeInstall;
   readonly signInHost: { readonly flag: string; readonly apiPath?: string };
   /**
    * The hosted instance.
@@ -134,6 +142,37 @@ export type ForgeProduct = {
   readonly capabilities: ForgeCapabilities;
 };
 
+/** The platforms PwrGit ships on, spelled as `process.platform` spells them. */
+export type ForgeInstallPlatform = "darwin" | "win32" | "linux";
+
+/** One platform's way to install a product's CLI. */
+export type ForgeInstallSteps = {
+  /** Terminal commands, in order. Each is copied verbatim, so no prose here. */
+  readonly steps: readonly string[];
+  /** The package manager the steps assume, when they assume one. */
+  readonly via?: string;
+  /** The vendor's own install page for this platform. */
+  readonly guideUrl: string;
+  /** The link's text, when "Install guide" undersells what it leads to. */
+  readonly guideLabel?: string;
+  /**
+   * The install only reaches PwrGit after a relaunch.
+   *
+   * True for winget: Windows hands a new install's PATH to processes started
+   * after it, and `cliSearchPath()` on win32 is the PATH this process launched
+   * with. Bun's `~/.bun/bin` is searched explicitly, so `cafe` needs no
+   * relaunch anywhere.
+   */
+  readonly relaunchAfterInstall?: boolean;
+};
+
+export type ForgeInstall = {
+  /** One sentence said before the steps on every platform, commands in
+   *  backticks — see `codeSpans` in the renderer. */
+  readonly note?: string;
+  readonly platforms: Readonly<Record<ForgeInstallPlatform, ForgeInstallSteps>>;
+};
+
 /**
  * Frozen, not merely `Readonly<>`.
  *
@@ -148,7 +187,27 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
   gitcafe: {
     label: "GitCafe",
     cli: "cafe",
-    installHint: "Install Bun, then run `bun i -g @gitcafe/cli` to install or update cafe (0.5.0 or newer). Both bun and cafe must be available.",
+    install: {
+      // An older cafe probes as missing, so say the same command updates it.
+      note: "`cafe` 0.5.0 or newer runs on Bun, so Bun comes first if you do not have it. The second command also updates an older `cafe`.",
+      platforms: {
+        darwin: {
+          steps: ["curl -fsSL https://bun.com/install | bash", "bun i -g @gitcafe/cli"],
+          guideUrl: "https://bun.com/docs/installation",
+          guideLabel: "Bun install guide"
+        },
+        win32: {
+          steps: ['powershell -c "irm bun.com/install.ps1|iex"', "bun i -g @gitcafe/cli"],
+          guideUrl: "https://bun.com/docs/installation",
+          guideLabel: "Bun install guide"
+        },
+        linux: {
+          steps: ["curl -fsSL https://bun.com/install | bash", "bun i -g @gitcafe/cli"],
+          guideUrl: "https://bun.com/docs/installation",
+          guideLabel: "Bun install guide"
+        }
+      }
+    },
     signInHost: { flag: "--host", apiPath: "/api" },
     saasHost: "git.cafe",
     changeRequestLabel: "Pull request",
@@ -171,6 +230,25 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
   github: {
     label: "GitHub",
     cli: "gh",
+    install: {
+      platforms: {
+        darwin: { steps: ["brew install gh"], via: "Homebrew", guideUrl: "https://cli.github.com/" },
+        win32: {
+          steps: ["winget install --id GitHub.cli"],
+          via: "winget",
+          guideUrl: "https://cli.github.com/",
+          relaunchAfterInstall: true
+        },
+        // GitHub's apt route is a repository setup, and distro `gh` packages
+        // can predate `gh auth token`; the guide is the honest answer there.
+        linux: {
+          steps: ["brew install gh"],
+          via: "Homebrew",
+          guideUrl: "https://github.com/cli/cli/blob/trunk/docs/install_linux.md",
+          guideLabel: "Linux packages"
+        }
+      }
+    },
     signInHost: { flag: "--hostname" },
     saasHost: "github.com",
     changeRequestLabel: "Pull request",
@@ -199,6 +277,24 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
   gitlab: {
     label: "GitLab",
     cli: "glab",
+    install: {
+      platforms: {
+        darwin: { steps: ["brew install glab"], via: "Homebrew", guideUrl: "https://gitlab.com/gitlab-org/cli#installation" },
+        win32: {
+          steps: ["winget install glab.glab"],
+          via: "winget",
+          guideUrl: "https://gitlab.com/gitlab-org/cli#installation",
+          relaunchAfterInstall: true
+        },
+        // Homebrew is the method GitLab itself supports on Linux.
+        linux: {
+          steps: ["brew install glab"],
+          via: "Homebrew",
+          guideUrl: "https://gitlab.com/gitlab-org/cli#installation",
+          guideLabel: "Linux packages"
+        }
+      }
+    },
     signInHost: { flag: "--hostname" },
     saasHost: "gitlab.com",
     changeRequestLabel: "Merge request",
@@ -239,6 +335,12 @@ function freeze(
     Object.freeze(product.capabilities);
     Object.freeze(product.addHost);
     Object.freeze(product.signInHost);
+    for (const steps of Object.values(product.install.platforms)) {
+      Object.freeze(steps.steps);
+      Object.freeze(steps);
+    }
+    Object.freeze(product.install.platforms);
+    Object.freeze(product.install);
     Object.freeze(product);
   }
   return Object.freeze(products);
@@ -412,6 +514,25 @@ export function forgeAllowsPathDepth(kind: ForgeKind, segments: number): boolean
   // throwing out of a resolver whose callers treat it as total.
   const product = forgeProductFor(kind);
   return product !== null && segments >= 2 && segments <= product.maxPathSegments;
+}
+
+/**
+ * How to install a product's CLI on `platform`.
+ *
+ * Takes the platform as a string because that is what the preload bridge
+ * hands the renderer. Anything that is not macOS or Windows reads Linux's
+ * entry: every other Unix PwrGit could run on is closer to it than to either.
+ */
+export function forgeInstall(
+  kind: ForgeKind,
+  platform: string
+): ForgeInstallSteps & { readonly note?: string } {
+  const { install } = forgeProduct(kind);
+  const steps =
+    platform === "darwin" || platform === "win32"
+      ? install.platforms[platform]
+      : install.platforms.linux;
+  return install.note === undefined ? steps : { ...steps, note: install.note };
 }
 
 /** Copyable CLI sign-in syntax, shared by both settings sections. */

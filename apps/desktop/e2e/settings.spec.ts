@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { FORGE_KINDS, forgeProduct } from "@pwrgit/shared";
+import { FORGE_KINDS, forgeInstall, forgeProduct } from "@pwrgit/shared";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
 import { createForgeFixture } from "./fixtures/forge-fixture";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
@@ -213,11 +213,10 @@ test("menu opens the Settings window; panes render and settings persist", async 
     // line would send this to the else branch and assert an Add button a
     // not-installed product deliberately does not render.
     if ((await chip.textContent())?.trim() === "Not installed") {
-      await expect(section).toContainText(
-        product.installHint?.replaceAll("`", "") ?? `Install the ${product.label} CLI`
-      );
-      for (const command of product.installHint?.matchAll(/`([^`]+)`/g) ?? []) {
-        await expect(section.locator("code", { hasText: command[1] })).toBeVisible();
+      // The app and this runner share a machine, so the platform the pane
+      // picked its commands for is this process's.
+      for (const step of forgeInstall(kind, process.platform).steps) {
+        await expect(section.locator("code", { hasText: step })).toBeVisible();
       }
     } else {
       await expect(

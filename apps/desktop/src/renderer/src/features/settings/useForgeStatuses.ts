@@ -3,6 +3,19 @@ import type { ForgeStatus } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
 /**
+ * How often a surface that is waiting on a terminal-side install or sign-in
+ * asks main to re-examine its probe: Settings → Forges and Setup › Forges.
+ *
+ * Something has to ask: main never probes on its own, so without a tick
+ * `forge:statusChanged` would have nothing to announce. Main answers from cache
+ * until its own TTL says to probe — a minute while no forge can be read, five
+ * once any is connected — so most ticks spawn nothing, and a tick alone can
+ * take that long to notice. Both surfaces also force a
+ * probe from Re-check, which is the prompt one.
+ */
+export const FORGE_RECHECK_MS = 30_000;
+
+/**
  * Every product's probe, kept current for as long as the caller is mounted.
  *
  * One read on mount, and pushes after that. Main answers `forge:status` from
