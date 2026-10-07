@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   err,
+  forgeInstall,
   forgeProduct,
   ok,
   type ForgeHostRow,
@@ -410,6 +411,26 @@ describe("ForgesSettings", () => {
 });
 
 describe("GitCafe settings", () => {
+  it.each([
+    ["win32", "winget"],
+    ["linux", "Homebrew"]
+  ])("names %s's install command, its package manager and the guide", async (platform, via) => {
+    (window as unknown as { pwrgit: { platform: string } }).pwrgit = { platform };
+    await render([forge({ kind: "gitlab", cli: "glab", installed: false, loggedIn: false })]);
+    const install = forgeInstall("gitlab", platform);
+    expect(
+      [...container.querySelectorAll("code")].map((node) => node.textContent)
+    ).toEqual(expect.arrayContaining([...install.steps]));
+    expect(container.textContent).toContain(`Uses ${via}.`);
+    const guide = [...container.querySelectorAll("button")].find((b) =>
+      (b.textContent ?? "").startsWith(install.guideLabel ?? "Install guide")
+    );
+    expect(guide).toBeDefined();
+    await act(async () => guide?.click());
+    expect(mocks.dispatch).toHaveBeenCalledWith("shell:openExternal", {
+      url: install.guideUrl
+    });
+  });
   it("shows the Bun installation and minimum CLI version remedy", async () => {
     await render([forge({ kind: "gitcafe", installed: false, loggedIn: false })]);
     expect(container.textContent).toContain("GitCafe");

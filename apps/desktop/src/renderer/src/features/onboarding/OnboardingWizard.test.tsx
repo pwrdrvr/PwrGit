@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/pwrgit", () => ({ dispatch: mocks.dispatch }));
-vi.mock("../settings/useForgeStatuses", () => ({
+vi.mock("../settings/useForgeStatuses", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../settings/useForgeStatuses")>()),
   useForgeStatuses: mocks.useForgeStatuses
 }));
 

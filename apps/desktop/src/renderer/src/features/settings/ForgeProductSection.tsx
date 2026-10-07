@@ -20,6 +20,7 @@ import {
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
 import { currentPlatform } from "../../lib/platform";
+import { dispatch } from "../../lib/pwrgit";
 
 /** What each capability buys the user, in their words rather than the API's. */
 const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
@@ -49,7 +50,8 @@ export type ForgeProductState =
   | "off"
   | "signedOut";
 
-const STATE_LABELS: Record<Exclude<ForgeProductState, "unknown">, string> = {
+/** Exported for Setup › Forges, whose chips must say the same words. */
+export const STATE_LABELS: Record<Exclude<ForgeProductState, "unknown">, string> = {
   missing: "Not installed",
   connected: "Connected",
   off: "Off",
@@ -669,7 +671,20 @@ function remedy(status: ForgeStatus, state: ForgeProductState): ReactNode {
             <code>{step}</code>
           </span>
         ))}
-        .
+        .{install.via === undefined ? "" : ` Uses ${install.via}.`}{" "}
+        {/* The guide is the way in for anyone without that package manager —
+            on Linux, most people. */}
+        <button
+          type="button"
+          className="settings-inline-button"
+          onClick={() =>
+            void dispatch("shell:openExternal", { url: install.guideUrl }).catch(
+              () => {}
+            )
+          }
+        >
+          {install.guideLabel ?? "Install guide"} ↗
+        </button>
       </>
     );
   }

@@ -175,19 +175,48 @@ describe("ForgesStep", () => {
     expect(mocks.dispatch).toHaveBeenCalledWith("forge:hosts", { refresh: true });
   });
 
-  it("forces a probe from Re-check and when the window regains focus", async () => {
+  it("forces a probe from Re-check every time, however recent the last", async () => {
     await mount(NOTHING_INSTALLED);
     mocks.dispatch.mockClear();
     await act(async () => {
       button("Re-check").click();
     });
     expect(mocks.dispatch).toHaveBeenCalledWith("forge:hosts", { refresh: true });
+  });
 
-    mocks.dispatch.mockClear();
-    await act(async () => {
-      window.dispatchEvent(new Event("focus"));
-    });
-    expect(mocks.dispatch).toHaveBeenCalledWith("forge:hosts", { refresh: true });
+  it("forces a probe on window focus, at most once per five seconds", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    try {
+      await mount(NOTHING_INSTALLED);
+      const forced = () =>
+        mocks.dispatch.mock.calls.filter(([command]) => command === "forge:hosts")
+          .length;
+      expect(forced()).toBe(1);
+
+      // Focus straight after arriving: the arrival probe already answered it.
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(forced()).toBe(1);
+
+      now.mockReturnValue(1_005_000);
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(forced()).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("only says to run commands while a row has some", async () => {
+    await mount(NOTHING_INSTALLED);
+    expect(text()).toContain("Run these in a terminal.");
+    await mount(
+      FORGE_KINDS.map((kind) => status(kind, { installed: true, loggedIn: true }))
+    );
+    expect(text()).not.toContain("Run these in a terminal.");
+    expect(text()).toContain("All of it lives in Settings › Forges afterwards.");
   });
 
   it("shows Checking… on blocked rows while a forced probe runs", async () => {

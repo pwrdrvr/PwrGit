@@ -16,26 +16,20 @@ import {
   forgeProductState,
   forgeStateSentence,
   signInCommandFor,
+  STATE_LABELS,
   type ForgeProductState
 } from "../settings/ForgeProductSection";
+import { FORGE_RECHECK_MS } from "../settings/useForgeStatuses";
 
 /**
- * How often the step asks main to re-examine its probe while it is open — the
- * same tick Settings → Forges runs. Main answers from cache until its own TTL
- * (a minute for a forge nobody can read) says to probe, so most ticks spawn
- * nothing; without one, a terminal-side install never reaches this step.
+ * Window focus forces a probe, but focus can flicker several times while
+ * someone reads a terminal; one forced pass per this window is plenty. Arrival
+ * and Re-check are deliberate acts and are never throttled.
  */
-const RECHECK_MS = 30_000;
+const FOCUS_RECHECK_MIN_MS = 5_000;
 
 /** "Copied" is feedback, not a state, and reverts like Settings' does. */
 const COPIED_MS = 2_000;
-
-const CHIP_LABELS: Record<Exclude<ForgeProductState, "unknown">, string> = {
-  missing: "Not installed",
-  signedOut: "Signed out",
-  off: "Off",
-  connected: "Connected"
-};
 
 /**
  * Setup › Forges: each product's state, and the one thing that unblocks it on
@@ -50,6 +44,7 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
   const [checking, setChecking] = useState(false);
   const [copied, setCopied] = useState<string | undefined>();
   const checkingRef = useRef(false);
+  const lastForcedAt = useRef(Number.NEGATIVE_INFINITY);
   const mounted = useRef(true);
 
   // A forced probe, the same one Settings' Re-check asks for: refreshing the
@@ -59,6 +54,7 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
   const recheck = useCallback(async () => {
     if (checkingRef.current) return;
     checkingRef.current = true;
+    lastForcedAt.current = Date.now();
     setChecking(true);
     try {
       await dispatch("forge:hosts", { refresh: true });
@@ -79,11 +75,14 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
     void recheck();
     // Coming back from the terminal is the moment an install or a sign-in has
     // just happened, so that is when to look — not only on the next tick.
-    const onFocus = () => void recheck();
+    const onFocus = () => {
+      if (Date.now() - lastForcedAt.current < FOCUS_RECHECK_MIN_MS) return;
+      void recheck();
+    };
     window.addEventListener("focus", onFocus);
     const timer = window.setInterval(() => {
       void dispatch("forge:status", undefined).catch(() => {});
-    }, RECHECK_MS);
+    }, FORGE_RECHECK_MS);
     return () => {
       mounted.current = false;
       window.removeEventListener("focus", onFocus);
@@ -107,6 +106,9 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
     const status = forges?.find((f) => f.kind === kind);
     return { kind, status, state: forgeProductState(status) };
   });
+  const blocked = states.some(
+    ({ state }) => state === "missing" || state === "signedOut"
+  );
   // Only while a winget product is still missing: it is a fact about this
   // process's PATH, and once nothing needs it, it is noise.
   const relaunchFor = states
@@ -174,8 +176,11 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
       )}
       <div className="onboarding-wizard__recheck">
         <p className="onboarding-wizard__hint">
-          Run these in a terminal. PwrGit checks again when you switch back to
-          this window. All of it lives in Settings › Forges afterwards.
+          {/* Only while a row has commands: "run these" with none on screen
+              points at nothing. */}
+          {blocked &&
+            "Run these in a terminal. PwrGit checks again when you switch back to this window. "}
+          All of it lives in Settings › Forges afterwards.
         </p>
         <button
           type="button"
@@ -210,7 +215,7 @@ function ForgeRow(props: {
   const chip =
     state === "unknown" || showChecking
       ? { tone: "pending", label: "Checking…" }
-      : { tone: state, label: CHIP_LABELS[state] };
+      : { tone: state, label: STATE_LABELS[state] };
 
   return (
     <div className="onboarding-wizard__forge">

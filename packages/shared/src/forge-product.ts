@@ -188,7 +188,8 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     label: "GitCafe",
     cli: "cafe",
     install: {
-      note: "`cafe` 0.5.0 or newer runs on Bun, so Bun comes first if you do not have it.",
+      // An older cafe probes as missing, so say the same command updates it.
+      note: "`cafe` 0.5.0 or newer runs on Bun, so Bun comes first if you do not have it. The second command also updates an older `cafe`.",
       platforms: {
         darwin: {
           steps: ["curl -fsSL https://bun.com/install | bash", "bun i -g @gitcafe/cli"],
