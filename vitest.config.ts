@@ -28,6 +28,7 @@ const REAL_GIT_TIMEOUT_MS = 20_000;
 export default defineConfig({
   test: {
     environment: "node",
+    runner: "apps/desktop/test-support/act-warning-runner.ts",
     setupFiles: [
       "apps/desktop/test-support/github-network-setup.mjs",
       "apps/desktop/src/main/git/test-support/tripwire-setup.ts",
