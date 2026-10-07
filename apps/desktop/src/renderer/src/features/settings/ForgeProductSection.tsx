@@ -3,6 +3,7 @@ import {
   changeRequestNoun,
   FORGE_HOST_LABEL_MAX,
   forgeAllHostsOff,
+  forgeInstall,
   forgeProduct,
   forgeSignInCommand,
   type ForgeCapabilities,
@@ -18,6 +19,7 @@ import {
   type SettingsChipTone
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
+import { currentPlatform } from "../../lib/platform";
 
 /** What each capability buys the user, in their words rather than the API's. */
 const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
@@ -620,7 +622,7 @@ function blocks(state: ForgeProductState): boolean {
 }
 
 /**
- * Render a product's `installHint` the way the hand-written branches beside it
+ * Render a product's install `note` the way the hand-written branches beside it
  * render theirs: commands in a `<code>`.
  *
  * The registry is plain data shared with the main process, so it marks its
@@ -647,11 +649,27 @@ function remedy(status: ForgeStatus, state: ForgeProductState): ReactNode {
   const label = forgeProduct(status.kind).label;
   const noun = changeRequestNoun(status.kind);
   if (state === "missing") {
-    const installHint = forgeProduct(status.kind).installHint;
-    if (installHint !== undefined) return codeSpans(installHint);
+    // The wizard's Forges step reads the same entry, so the two surfaces
+    // cannot name different commands for one machine.
+    const install = forgeInstall(status.kind, currentPlatform());
     return (
       <>
-        Install the {label} CLI (<code>{status.cli}</code>) to see status here.
+        {install.note === undefined ? (
+          <>
+            Install the {label} CLI, <code>{status.cli}</code>, to see status
+            here.
+          </>
+        ) : (
+          codeSpans(install.note)
+        )}{" "}
+        In a terminal, run{" "}
+        {install.steps.map((step, index) => (
+          <span key={step}>
+            {index > 0 ? ", then " : ""}
+            <code>{step}</code>
+          </span>
+        ))}
+        .
       </>
     );
   }
@@ -708,7 +726,7 @@ function capabilities(status: ForgeStatus): ReactNode {
  * switched gitlab.com off entirely. With several waiting, the first is named:
  * any of them moves the state, and the rows above own the full per-host list.
  */
-function signInCommandFor(status: ForgeStatus): string {
+export function signInCommandFor(status: ForgeStatus): string {
   const waiting = awaitingSignIn(status);
   if (waiting.length === 0 || waiting.includes(forgeProduct(status.kind).saasHost)) {
     return forgeSignInCommand(status.kind);

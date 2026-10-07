@@ -86,6 +86,7 @@ beforeEach(() => {
     }
   });
   mocks.useForgeStatuses.mockReturnValue([]);
+  (window as unknown as { pwrgit: { platform: string } }).pwrgit = { platform: "darwin" };
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);

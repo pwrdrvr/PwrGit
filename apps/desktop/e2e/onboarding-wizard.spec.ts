@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { FORGE_KINDS, forgeInstall, forgeProduct } from "@pwrgit/shared";
 import {
   launchApp,
   readActiveProfile,
   type AppHandle
 } from "./fixtures/electron-app";
+import { createForgeFixture } from "./fixtures/forge-fixture";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
 import { lensChip, repoGroup } from "./fixtures/steps";
 
@@ -128,4 +130,56 @@ test("skipping counts as done, so the next launch is not ambushed", async () => 
 
   await expect(wizard(handle)).toBeHidden();
   expect(await onboardingCompleted(handle)).toBe(true);
+});
+
+test("Forges hands a missing CLI its install commands, then notices the install", async () => {
+  sandbox = createGitSandbox();
+  const missing = { installed: false, loggedIn: false, owners: [], repositories: {} };
+  const forges = createForgeFixture(sandbox, {
+    github: { ...missing },
+    gitlab: { ...missing },
+    gitcafe: { ...missing }
+  });
+  handle = await launchApp({
+    seedOnboarding: false,
+    forgeFixturePath: forges.path
+  });
+  const { window } = handle;
+  const row = (kind: (typeof FORGE_KINDS)[number]) =>
+    window.locator(".onboarding-wizard__forge", {
+      hasText: forgeProduct(kind).label
+    });
+
+  await nextButton(handle).click();
+  await nextButton(handle).click();
+  await expect(title(handle)).toHaveText(
+    "Where PwrGit reads pull and merge requests from."
+  );
+
+  // The app and this runner share a machine, so the commands the step chose
+  // are this process's platform's.
+  for (const kind of FORGE_KINDS) {
+    await expect(row(kind).locator(".onboarding-wizard__forge-chip")).toHaveText(
+      "Not installed"
+    );
+    await expect(row(kind).locator(".onboarding-wizard__well-cmd")).toHaveText([
+      ...forgeInstall(kind, process.platform).steps
+    ]);
+  }
+
+  // Installed from a terminal while the step is open. Main re-reads the
+  // fixture on every probe; Re-check is what forces one.
+  forges.config.hosts.gitlab = { ...missing, installed: true };
+  forges.write();
+  await window.getByRole("button", { name: "Re-check" }).click();
+
+  await expect(row("gitlab").locator(".onboarding-wizard__forge-chip")).toHaveText(
+    "Signed out"
+  );
+  await expect(row("gitlab").locator(".onboarding-wizard__well-cmd")).toHaveText(
+    "glab auth login"
+  );
+  await expect(row("github").locator(".onboarding-wizard__forge-chip")).toHaveText(
+    "Not installed"
+  );
 });

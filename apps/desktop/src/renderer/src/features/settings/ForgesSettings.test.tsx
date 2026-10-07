@@ -68,6 +68,8 @@ beforeEach(() => {
   // so without this a folded section survives into the next test.
   __resetCollapsedPanesForTests();
   vi.clearAllMocks();
+  // The preload bridge's platform picks a missing CLI's install commands.
+  (window as unknown as { pwrgit: { platform: string } }).pwrgit = { platform: "darwin" };
   listener = undefined;
   rows = [];
   mocks.subscribe.mockImplementation((_channel: string, cb: typeof listener) => {
@@ -420,6 +422,10 @@ describe("GitCafe settings", () => {
     expect(
       [...container.querySelectorAll("code")].map((node) => node.textContent)
     ).toContain("bun i -g @gitcafe/cli");
+    // Bun comes first, as its own command — not prose saying "install Bun".
+    expect(
+      [...container.querySelectorAll("code")].map((node) => node.textContent)
+    ).toContain("curl -fsSL https://bun.com/install | bash");
   });
   it("uses GitCafe's host syntax when signed out of an added host", async () => {
     await render([forge({ kind: "gitcafe", loggedIn: false, hosts: [{ host: "cafe.example", enabled: true, loggedIn: false }] })]);
