@@ -305,8 +305,8 @@ describe("ProfilesSettings menu order and visibility", () => {
 
   it("keeps focus on the grip when a profile moves down", async () => {
     await render([personal, scratch, acme]);
-    grip("Personal").focus();
     await act(async () => {
+      grip("Personal").focus();
       grip("Personal").dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
       );

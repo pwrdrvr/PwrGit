@@ -66,5 +66,13 @@ it("keeps a pin whose trigger is in the document", async () => {
 
   expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   expect(popover!.pinnedKind).toBe("pull");
-  button.remove();
+  // Removing the trigger dismisses the card through a MutationObserver.
+  await act(async () => button.remove());
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(popover!.pinnedKind).toBeNull();
+  let carried = true;
+  await act(async () => {
+    carried = popover!.settle({ status: "error", summary: "Pull failed" });
+  });
+  expect(carried).toBe(false);
 });
