@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  changeRequestPluralLabel,
   FORGE_KINDS,
   forgeInstall,
   forgeProduct,
@@ -11,6 +12,7 @@ import { copyText } from "../../lib/copyText";
 import { currentPlatform } from "../../lib/platform";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import { InfoGlyph } from "../../lib/InfoGlyph";
+import { tablistKeyHandler } from "../../lib/tablistKeys";
 import {
   codeSpans,
   forgeProductState,
@@ -31,9 +33,55 @@ const FOCUS_RECHECK_MIN_MS = 5_000;
 /** "Copied" is feedback, not a state, and reverts like Settings' does. */
 const COPIED_MS = 2_000;
 
+const PANEL_ID = "onboarding-forge-panel";
+
+function needsAction(state: ForgeProductState): boolean {
+  return state === "missing" || state === "signedOut";
+}
+
+function stateOf(
+  forges: readonly ForgeStatus[],
+  kind: ForgeKind
+): ForgeProductState {
+  return forgeProductState(forges.find((f) => f.kind === kind));
+}
+
 /**
- * Setup › Forges: each product's state, and the one thing that unblocks it on
- * this machine — the install commands for this OS, or the sign-in command.
+ * The strip's order: every forge PwrGit found a CLI for, then the ones it did
+ * not, each group in registry order. What the reader already has is what they
+ * came to confirm; what they lack is the long tail.
+ */
+export function arrivalOrder(forges: readonly ForgeStatus[]): ForgeKind[] {
+  const detected = (kind: ForgeKind) => {
+    const state = stateOf(forges, kind);
+    return state !== "missing" && state !== "unknown";
+  };
+  return [
+    ...FORGE_KINDS.filter(detected),
+    ...FORGE_KINDS.filter((kind) => !detected(kind))
+  ];
+}
+
+/** The first forge that needs something, or the first chip when none does. */
+export function initialSelection(
+  order: readonly ForgeKind[],
+  forges: readonly ForgeStatus[]
+): ForgeKind {
+  return (
+    order.find((kind) => needsAction(stateOf(forges, kind))) ??
+    order[0] ??
+    FORGE_KINDS[0]
+  );
+}
+
+/**
+ * Setup › Forges: a strip of every forge with its state, and one panel holding
+ * the selected forge's remedy for this machine — the install commands for this
+ * OS, or the sign-in command.
+ *
+ * One panel rather than a card per forge because the step has to fit the
+ * smallest window the app allows (600px, so a 552px dialog). Three full cards
+ * were 826px, and the registry is built so that a fourth forge is one entry.
  *
  * The commands live in the shared registry (`forgeInstall`), never here, so
  * this step and Settings → Forges cannot disagree about what to run.
@@ -43,27 +91,49 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
   const platform = currentPlatform();
   const [checking, setChecking] = useState(false);
   const [copied, setCopied] = useState<string | undefined>();
-  const checkingRef = useRef(false);
+  // Taken once per visit, after the arrival probe has answered — the wizard's
+  // own snapshot predates it, so sorting on that would file a forge installed
+  // since as missing. A chip whose forge changes state later keeps its place,
+  // so the strip never shuffles under the pointer; the next arrival sorts it
+  // afresh.
+  const [arrived, setArrived] = useState(false);
+  const [order, setOrder] = useState<ForgeKind[] | null>(null);
+  const [selected, setSelected] = useState<ForgeKind | null>(null);
+  const inFlight = useRef<Promise<void> | null>(null);
   const lastForcedAt = useRef(Number.NEGATIVE_INFINITY);
   const mounted = useRef(true);
+  const chipRefs = useRef<Partial<Record<ForgeKind, HTMLButtonElement>>>({});
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!arrived || order !== null || forges === undefined) return;
+    const next = arrivalOrder(forges);
+    setOrder(next);
+    // A chip picked while the probe ran is the reader's choice; keep it.
+    setSelected((picked) => picked ?? initialSelection(next, forges));
+  }, [arrived, forges, order]);
 
   // A forced probe, the same one Settings' Re-check asks for: refreshing the
   // host list makes main retire its cached status and probe again. The answer
   // arrives as `forge:statusChanged`, which the wizard's `useForgeStatuses`
   // already listens to — so all this owns is the "Checking…" in between.
-  const recheck = useCallback(async () => {
-    if (checkingRef.current) return;
-    checkingRef.current = true;
+  // A request while one is in flight joins it rather than starting another.
+  const recheck = useCallback((): Promise<void> => {
+    if (inFlight.current !== null) return inFlight.current;
     lastForcedAt.current = Date.now();
     setChecking(true);
-    try {
-      await dispatch("forge:hosts", { refresh: true });
-    } catch {
-      // Nothing to say here: the rows keep the last answer they had.
-    } finally {
-      checkingRef.current = false;
-      if (mounted.current) setChecking(false);
-    }
+    const running = dispatch("forge:hosts", { refresh: true })
+      .then(
+        () => undefined,
+        // Nothing to say here: the chips keep the last answer they had.
+        () => undefined
+      )
+      .finally(() => {
+        inFlight.current = null;
+        if (mounted.current) setChecking(false);
+      });
+    inFlight.current = running;
+    return running;
   }, []);
 
   useEffect(() => {
@@ -72,7 +142,9 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
     // read once when it opened, and main answers a plain read from cache — for
     // five minutes once any forge is connected — so stepping Back and forward
     // after installing `gh` showed the pre-install answer indefinitely.
-    void recheck();
+    void recheck().then(() => {
+      if (mounted.current) setArrived(true);
+    });
     // Coming back from the terminal is the moment an install or a sign-in has
     // just happened, so that is when to look — not only on the next tick.
     const onFocus = () => {
@@ -102,22 +174,33 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
       .catch(() => {});
   }, []);
 
-  const states = FORGE_KINDS.map((kind) => {
+  const kinds = order ?? [...FORGE_KINDS];
+  const current = selected ?? kinds[0] ?? FORGE_KINDS[0];
+  const states = kinds.map((kind) => {
     const status = forges?.find((f) => f.kind === kind);
     return { kind, status, state: forgeProductState(status) };
   });
-  const blocked = states.some(
-    ({ state }) => state === "missing" || state === "signedOut"
-  );
-  // Only while a winget product is still missing: it is a fact about this
-  // process's PATH, and once nothing needs it, it is noise.
-  const relaunchFor = states
-    .filter(
-      ({ kind, state }) =>
-        state === "missing" &&
-        forgeInstall(kind, platform).relaunchAfterInstall === true
-    )
-    .map(({ kind }) => forgeProduct(kind).cli);
+
+  // Keep the selected chip in view once the registry outgrows the strip.
+  // Measured and scrolled by hand: `scrollIntoView` would scroll every
+  // ancestor too, the dialog body included.
+  useEffect(() => {
+    const strip = stripRef.current;
+    const chip = chipRefs.current[current];
+    if (strip === null || chip === undefined) return;
+    const left = chip.offsetLeft - strip.offsetLeft;
+    const right = left + chip.offsetWidth;
+    if (left < strip.scrollLeft) strip.scrollLeft = left;
+    else if (right > strip.scrollLeft + strip.clientWidth)
+      strip.scrollLeft = right - strip.clientWidth;
+  }, [current]);
+
+  const onKeyDown = tablistKeyHandler(kinds, current, (next) => {
+    setSelected(next);
+    chipRefs.current[next]?.focus();
+  });
+
+  const active = states.find((s) => s.kind === current);
 
   return (
     <div>
@@ -126,62 +209,61 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
           Where PwrGit reads pull and merge requests from.
         </h1>
         <p className="onboarding-wizard__sub">
-          Optional. Without a forge, PwrGit still finds, branches, commits and
-          pushes — you just will not see change-request state on a row. PwrGit
-          reads through each forge&rsquo;s own CLI; it never asks for a token.
+          Optional — without one, PwrGit does everything but show
+          change-request state. It reads each forge through that forge&rsquo;s
+          own CLI and never asks for a token.
         </p>
       </div>
-      {/* One live region for the step, as Settings → Forges has: a chip per
-          row would announce three times for one probe pass. */}
+      {/* One live region for the step, as Settings → Forges has: a sentence
+          per chip would announce three times for one probe pass. */}
       <p aria-live="polite" className="a11y-sr-only" role="status">
         {states
           .map(({ kind, state }) => forgeStateSentence(kind, state))
           .filter((line) => line !== null)
           .join(". ")}
       </p>
-      <div className="onboarding-wizard__forges">
-        {states.map(({ kind, status, state }) => (
-          <ForgeRow
-            key={kind}
-            kind={kind}
-            status={status}
-            state={state}
-            platform={platform}
-            checking={checking}
-            copied={copied}
-            onCopy={copy}
-          />
-        ))}
-      </div>
-      {relaunchFor.length > 0 && (
-        <div className="onboarding-wizard__notice">
-          <span className="onboarding-wizard__notice-icon" aria-hidden="true">
-            <InfoGlyph />
-          </span>
-          <div>
-            <b>
-              Reopen PwrGit after installing{" "}
-              {relaunchFor.map((cli, i) => (
-                <span key={cli}>
-                  {i > 0 ? " or " : ""}
-                  <code>{cli}</code>
-                </span>
-              ))}
-              .
-            </b>{" "}
-            Windows only gives a new install&rsquo;s PATH to apps started after
-            it, so this window cannot see it yet.
-          </div>
+      <div className="onboarding-wizard__lens-row">
+        <div
+          ref={stripRef}
+          className="onboarding-wizard__lens"
+          role="tablist"
+          aria-label="Forges"
+          onKeyDown={onKeyDown}
+        >
+          {states.map(({ kind, state }) => {
+            const label = forgeProduct(kind).label;
+            const word =
+              state === "unknown" || (checking && needsAction(state))
+                ? "Checking…"
+                : STATE_LABELS[state];
+            const isCurrent = kind === current;
+            return (
+              <button
+                key={kind}
+                type="button"
+                role="tab"
+                ref={(element) => {
+                  if (element === null) delete chipRefs.current[kind];
+                  else chipRefs.current[kind] = element;
+                }}
+                // Roving tab stop: the strip is one stop, arrows move within.
+                tabIndex={isCurrent ? 0 : -1}
+                aria-selected={isCurrent}
+                aria-controls={PANEL_ID}
+                aria-label={`${label}: ${word}`}
+                className={`onboarding-wizard__lens-chip${isCurrent ? " is-active" : ""}`}
+                onClick={() => setSelected(kind)}
+              >
+                <span
+                  className={`onboarding-wizard__forge-dot is-${state}`}
+                  aria-hidden="true"
+                />
+                <span className="onboarding-wizard__lens-name">{label}</span>
+                <span className="onboarding-wizard__lens-state">{word}</span>
+              </button>
+            );
+          })}
         </div>
-      )}
-      <div className="onboarding-wizard__recheck">
-        <p className="onboarding-wizard__hint">
-          {/* Only while a row has commands: "run these" with none on screen
-              points at nothing. */}
-          {blocked &&
-            "Run these in a terminal. PwrGit checks again when you switch back to this window. "}
-          All of it lives in Settings › Forges afterwards.
-        </p>
         <button
           type="button"
           className="onboarding-wizard__btn onboarding-wizard__btn--ghost"
@@ -193,78 +275,95 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
           {checking ? "Checking…" : "Re-check"}
         </button>
       </div>
+      <div
+        id={PANEL_ID}
+        className="onboarding-wizard__panel"
+        role="tabpanel"
+        aria-label={forgeProduct(current).label}
+      >
+        {active !== undefined && (
+          <ForgePanel
+            kind={active.kind}
+            status={active.status}
+            state={active.state}
+            platform={platform}
+            copied={copied}
+            onCopy={copy}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function ForgeRow(props: {
+function ForgePanel(props: {
   kind: ForgeKind;
   status: ForgeStatus | undefined;
   state: ForgeProductState;
   platform: string;
-  checking: boolean;
   copied: string | undefined;
   onCopy: (command: string) => void;
 }) {
-  const { kind, status, state, platform } = props;
+  const { kind, status, state } = props;
   const product = forgeProduct(kind);
-  // A blocked row is the one a re-check might move; a connected one keeps its
-  // chip, so nothing that is fine flickers when the window regains focus.
-  const showChecking =
-    props.checking && (state === "missing" || state === "signedOut");
-  const chip =
-    state === "unknown" || showChecking
-      ? { tone: "pending", label: "Checking…" }
-      : { tone: state, label: STATE_LABELS[state] };
-
-  return (
-    <div className="onboarding-wizard__forge">
-      <span
-        className={`onboarding-wizard__forge-dot is-${state}`}
-        aria-hidden="true"
+  if (state === "missing") {
+    return (
+      <InstallSteps
+        kind={kind}
+        platform={props.platform}
+        copied={props.copied}
+        onCopy={props.onCopy}
       />
-      <div className="onboarding-wizard__forge-main">
-        <div className="onboarding-wizard__forge-head">
-          <span className="onboarding-wizard__forge-name">{product.label}</span>
-          <span className={`onboarding-wizard__forge-chip is-${chip.tone}`}>
-            {chip.label}
-          </span>
-        </div>
-        {state === "missing" && (
-          <InstallSteps
-            kind={kind}
-            platform={platform}
+    );
+  }
+  if (state === "signedOut" && status !== undefined) {
+    return (
+      <>
+        <p className="onboarding-wizard__forge-sentence">
+          <code>{product.cli}</code> is installed. Sign in with it — it opens a
+          browser or asks for a token, and keeps the credential itself.
+        </p>
+        <div className="onboarding-wizard__forge-steps">
+          <CommandWell
+            command={signInCommandFor(status)}
             copied={props.copied}
             onCopy={props.onCopy}
           />
-        )}
-        {state === "signedOut" && status !== undefined && (
-          <>
-            <p className="onboarding-wizard__forge-sentence">
-              <code>{product.cli}</code> is installed. Sign in with it — it opens
-              a browser or asks for a token, and keeps the credential itself.
-            </p>
-            <div className="onboarding-wizard__forge-steps">
-              <CommandWell
-                command={signInCommandFor(status)}
-                copied={props.copied}
-                onCopy={props.onCopy}
-              />
-            </div>
-          </>
-        )}
-        {state === "off" && (
-          <p className="onboarding-wizard__forge-sentence">
-            Every {product.label} host is switched off in Settings › Forges.
-          </p>
-        )}
-        {state === "connected" && (
-          <p className="onboarding-wizard__forge-sentence">
-            <code>{product.cli}</code> is installed and signed in.
-          </p>
-        )}
-      </div>
-    </div>
+        </div>
+        <div className="onboarding-wizard__forge-foot">
+          <TerminalHint />
+        </div>
+      </>
+    );
+  }
+  if (state === "off") {
+    return (
+      <p className="onboarding-wizard__forge-sentence">
+        Every {product.label} host is switched off in Settings › Forges.
+      </p>
+    );
+  }
+  if (state === "connected") {
+    return (
+      <p className="onboarding-wizard__forge-sentence">
+        <code>{product.cli}</code> is installed and signed in. PwrGit reads{" "}
+        {changeRequestPluralLabel(kind).toLowerCase()} through it.
+      </p>
+    );
+  }
+  return (
+    <p className="onboarding-wizard__forge-sentence">
+      Checking {product.label}…
+    </p>
+  );
+}
+
+/** Said beside a command, which is the only place it means anything. */
+function TerminalHint() {
+  return (
+    <span className="onboarding-wizard__forge-hint">
+      Run it in a terminal — PwrGit checks again when you switch back.
+    </span>
   );
 }
 
@@ -300,6 +399,22 @@ function InstallSteps(props: {
           />
         ))}
       </div>
+      {/* A fact about this process's PATH, so it belongs to the forge whose
+          install needs it, and goes when that forge is found. */}
+      {install.relaunchAfterInstall === true && (
+        <p className="onboarding-wizard__forge-relaunch">
+          <span className="onboarding-wizard__notice-icon" aria-hidden="true">
+            <InfoGlyph />
+          </span>
+          <span>
+            <b>
+              Reopen PwrGit after installing <code>{product.cli}</code>.
+            </b>{" "}
+            Windows only gives a new install&rsquo;s PATH to apps started after
+            it, so this window cannot see it yet.
+          </span>
+        </p>
+      )}
       <div className="onboarding-wizard__forge-foot">
         {install.via !== undefined && <span>Uses {install.via}.</span>}
         <button
@@ -313,6 +428,7 @@ function InstallSteps(props: {
         >
           {install.guideLabel ?? "Install guide"} ↗
         </button>
+        <TerminalHint />
       </div>
     </>
   );

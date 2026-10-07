@@ -18870,21 +18870,6 @@ button.agent-auth-node:focus-visible,
   color: var(--text-subtle);
 }
 
-.onboarding-wizard__forges {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-width: 760px;
-}
-.onboarding-wizard__forge {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: var(--bg-panel);
-}
 .onboarding-wizard__forge-dot {
   width: 8px;
   height: 8px;
@@ -18902,14 +18887,6 @@ button.agent-auth-node:focus-visible,
 .onboarding-wizard__forge-dot.is-missing {
   background: var(--danger-base);
 }
-.onboarding-wizard__forge-main {
-  flex: 1;
-  min-width: 0;
-}
-.onboarding-wizard__forge-name {
-  font: 600 13px/1.3 var(--font-sans, sans-serif);
-  color: var(--text-primary);
-}
 .onboarding-wizard__forge-sentence {
   font: 400 11px/1.55 var(--font-sans, sans-serif);
   color: var(--text-muted);
@@ -18917,33 +18894,6 @@ button.agent-auth-node:focus-visible,
 }
 .onboarding-wizard__forge-dot.is-off {
   background: var(--status-suspended);
-}
-.onboarding-wizard__forge-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.onboarding-wizard__forge-chip {
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 7px;
-  border-radius: 999px;
-  font: 650 10px/1 var(--font-sans, sans-serif);
-  background: var(--bg-panel-elevated);
-  color: var(--text-muted);
-}
-.onboarding-wizard__forge-chip.is-missing {
-  background: var(--danger-soft);
-  color: var(--danger-text);
-}
-.onboarding-wizard__forge-chip.is-signedOut {
-  background: var(--warn-soft);
-  color: var(--status-warning);
-}
-.onboarding-wizard__forge-chip.is-connected {
-  background: var(--success-soft);
-  color: var(--success-text);
 }
 .onboarding-wizard__forge-sentence code,
 .onboarding-wizard__forge-foot code {
@@ -19027,19 +18977,105 @@ button.agent-auth-node:focus-visible,
 .onboarding-wizard__forge-link:hover {
   text-decoration: underline;
 }
-.onboarding-wizard__recheck {
+/* The strip is the overview — one chip per forge, its state in words beside
+   the dot — and picks which forge the single panel below explains. One panel,
+   not a card per forge, is what keeps the step inside the 552px dialog a
+   600px window leaves. */
+.onboarding-wizard__lens-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   max-width: 760px;
-  margin-top: 14px;
+  margin-bottom: 10px;
 }
-.onboarding-wizard__recheck .onboarding-wizard__hint {
-  flex: 1;
-  margin: 0;
-}
-.onboarding-wizard__recheck .onboarding-wizard__btn {
+.onboarding-wizard__lens-row .onboarding-wizard__btn {
+  flex: none;
   gap: 6px;
+  margin-left: auto;
+}
+.onboarding-wizard__lens {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--bg-panel);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.onboarding-wizard__lens-chip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px 0 10px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 12px/1 var(--font-sans, sans-serif);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.onboarding-wizard__lens-chip .onboarding-wizard__forge-dot {
+  margin-top: 0;
+}
+.onboarding-wizard__lens-chip:hover:not(.is-active) {
+  background: var(--bg-panel-hover);
+}
+/* The sidebar lens's active treatment, for the reason it gives: the --accent
+   hairline is what clears 3:1 against the strip (SC 1.4.11). */
+.onboarding-wizard__lens-chip.is-active {
+  border-color: var(--accent);
+  background: var(--bg-row-active);
+  color: var(--text-primary);
+}
+.onboarding-wizard__lens-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.onboarding-wizard__lens-state {
+  font: 500 10.5px/1 var(--font-sans, sans-serif);
+  color: var(--text-muted);
+}
+/* Sized for the tallest remedy — GitCafe's two wells — so switching chips
+   never resizes the dialog; the foot sits at the bottom of every panel. */
+.onboarding-wizard__panel {
+  display: flex;
+  flex-direction: column;
+  max-width: 760px;
+  min-height: 176px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+.onboarding-wizard__panel > .onboarding-wizard__forge-sentence:first-child {
+  margin-top: 0;
+}
+.onboarding-wizard__panel .onboarding-wizard__forge-foot {
+  margin-top: auto;
+  padding-top: 10px;
+}
+.onboarding-wizard__forge-hint {
+  margin-left: auto;
+}
+.onboarding-wizard__forge-relaunch {
+  display: flex;
+  gap: 8px;
+  margin: 9px 0 0;
+  font: 400 11px/1.55 var(--font-sans, sans-serif);
+  color: var(--text-secondary);
+}
+.onboarding-wizard__forge-relaunch b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.onboarding-wizard__forge-relaunch code {
+  font: 500 92% var(--font-mono);
+  color: var(--accent);
 }
 
 .onboarding-wizard__roots {

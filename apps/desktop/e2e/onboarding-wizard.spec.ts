@@ -145,10 +145,17 @@ test("Forges hands a missing CLI its install commands, then notices the install"
     forgeFixturePath: forges.path
   });
   const { window } = handle;
-  const row = (kind: (typeof FORGE_KINDS)[number]) =>
-    window.locator(".onboarding-wizard__forge", {
-      hasText: forgeProduct(kind).label
+  // Scoped to the strip: the sidebar's lens filter behind the scrim is a
+  // tablist too.
+  const chip = (kind: (typeof FORGE_KINDS)[number]) =>
+    window.getByRole("tablist", { name: "Forges" }).getByRole("tab", {
+      name: new RegExp(`^${forgeProduct(kind).label}:`)
     });
+  const chipState = (kind: (typeof FORGE_KINDS)[number]) =>
+    chip(kind).locator(".onboarding-wizard__lens-state");
+  const panelCommands = window
+    .getByRole("tabpanel")
+    .locator(".onboarding-wizard__well-cmd");
 
   await nextButton(handle).click();
   await nextButton(handle).click();
@@ -159,10 +166,9 @@ test("Forges hands a missing CLI its install commands, then notices the install"
   // The app and this runner share a machine, so the commands the step chose
   // are this process's platform's.
   for (const kind of FORGE_KINDS) {
-    await expect(row(kind).locator(".onboarding-wizard__forge-chip")).toHaveText(
-      "Not installed"
-    );
-    await expect(row(kind).locator(".onboarding-wizard__well-cmd")).toHaveText([
+    await expect(chipState(kind)).toHaveText("Not installed");
+    await chip(kind).click();
+    await expect(panelCommands).toHaveText([
       ...forgeInstall(kind, process.platform).steps
     ]);
   }
@@ -179,21 +185,23 @@ test("Forges hands a missing CLI its install commands, then notices the install"
     .click();
   await nextButton(handle).click();
 
-  await expect(row("gitlab").locator(".onboarding-wizard__forge-chip")).toHaveText(
-    "Signed out"
+  // Detected now, so it sorts first, and it is what needs doing next.
+  await expect(
+    window.getByRole("tablist", { name: "Forges" }).getByRole("tab").first()
+  ).toHaveAccessibleName(
+    "GitLab: Signed out"
   );
-  await expect(row("gitlab").locator(".onboarding-wizard__well-cmd")).toHaveText(
-    "glab auth login"
-  );
-  await expect(row("github").locator(".onboarding-wizard__forge-chip")).toHaveText(
-    "Not installed"
-  );
+  await expect(chip("gitlab")).toHaveAttribute("aria-selected", "true");
+  await expect(panelCommands).toHaveText("glab auth login");
+  await expect(chipState("github")).toHaveText("Not installed");
 
   // And without leaving the step: signed in from the terminal, then Re-check.
   forges.config.hosts.gitlab = { ...missing, installed: true, loggedIn: true };
   forges.write();
   await window.getByRole("button", { name: "Re-check" }).click();
-  await expect(row("gitlab").locator(".onboarding-wizard__forge-chip")).toHaveText(
-    "Connected"
+  await expect(chipState("gitlab")).toHaveText("Connected");
+  await expect(chip("gitlab")).toHaveAttribute("aria-selected", "true");
+  await expect(window.getByRole("tabpanel")).toContainText(
+    "glab is installed and signed in."
   );
 });

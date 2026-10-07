@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../lib/pwrgit", () => ({ dispatch: mocks.dispatch }));
 vi.mock("../../lib/copyText", () => ({ copyText: mocks.copyText }));
 
-import { ForgesStep } from "./ForgesStep";
+import { ForgesStep, arrivalOrder, initialSelection } from "./ForgesStep";
 
 function status(
   kind: ForgeKind,
@@ -38,6 +38,12 @@ function status(
 }
 
 const NOTHING_INSTALLED = FORGE_KINDS.map((kind) => status(kind));
+/** GitHub connected, GitLab signed out, GitCafe missing. */
+const MIXED = [
+  status("github", { installed: true, loggedIn: true }),
+  status("gitlab", { installed: true }),
+  status("gitcafe")
+];
 
 let container: HTMLDivElement;
 let root: Root;
@@ -50,10 +56,40 @@ function text(): string {
   return container.textContent ?? "";
 }
 
+function panelText(): string {
+  return container.querySelector('[role="tabpanel"]')?.textContent ?? "";
+}
+
 function commands(): string[] {
   return [...container.querySelectorAll(".onboarding-wizard__well-cmd")].map(
     (e) => e.textContent ?? ""
   );
+}
+
+function tabs(): HTMLButtonElement[] {
+  return [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+}
+
+/** The strip as the reader sees it: name and state word, in order. */
+function strip(): string[] {
+  return tabs().map(
+    (t) =>
+      `${t.querySelector(".onboarding-wizard__lens-name")?.textContent} ${t.querySelector(".onboarding-wizard__lens-state")?.textContent}`
+  );
+}
+
+function selectedTab(): string | undefined {
+  return tabs()
+    .find((t) => t.getAttribute("aria-selected") === "true")
+    ?.querySelector(".onboarding-wizard__lens-name")?.textContent ?? undefined;
+}
+
+function tab(kind: ForgeKind): HTMLButtonElement {
+  const found = tabs().find((t) =>
+    t.getAttribute("aria-label")?.startsWith(`${forgeProduct(kind).label}:`)
+  );
+  if (found === undefined) throw new Error(`no tab for ${kind}`);
+  return found;
 }
 
 function button(label: string): HTMLButtonElement {
@@ -66,6 +102,13 @@ function button(label: string): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 
+async function select(kind: ForgeKind): Promise<void> {
+  await act(async () => {
+    tab(kind).click();
+  });
+}
+
+/** Re-render in place: the same visit, so the strip keeps its order. */
 async function mount(forges: ForgeStatus[] | undefined): Promise<void> {
   await act(async () => {
     root.render(<ForgesStep forges={forges} />);
@@ -89,27 +132,60 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
+describe("arrivalOrder / initialSelection", () => {
+  it("puts every detected forge first, each group in registry order", () => {
+    const forges = [
+      status("github"),
+      status("gitlab"),
+      status("gitcafe", { installed: true, loggedIn: true })
+    ];
+    expect(arrivalOrder(forges)).toEqual(["gitcafe", "github", "gitlab"]);
+    expect(arrivalOrder(MIXED)).toEqual(["github", "gitlab", "gitcafe"]);
+  });
+
+  it("selects the first forge that needs something, else the first chip", () => {
+    expect(initialSelection(arrivalOrder(MIXED), MIXED)).toBe("gitlab");
+    const allConnected = FORGE_KINDS.map((kind) =>
+      status(kind, { installed: true, loggedIn: true })
+    );
+    expect(initialSelection(arrivalOrder(allConnected), allConnected)).toBe(
+      "github"
+    );
+  });
+});
+
 describe("ForgesStep", () => {
+  it("shows one chip per forge and one panel, for the selected forge only", async () => {
+    await mount(NOTHING_INSTALLED);
+    expect(strip()).toEqual([
+      "GitHub Not installed",
+      "GitLab Not installed",
+      "GitCafe Not installed"
+    ]);
+    expect(selectedTab()).toBe("GitHub");
+    expect(commands()).toEqual(["brew install gh"]);
+    expect(text()).toContain("Uses Homebrew.");
+  });
+
   it.each(["darwin", "win32", "linux"])(
     "offers this machine's install commands on %s, from the registry",
     async (platform) => {
       setPlatform(platform);
       await mount(NOTHING_INSTALLED);
-      expect(commands()).toEqual(
-        FORGE_KINDS.flatMap((kind) => [...forgeInstall(kind, platform).steps])
-      );
+      for (const kind of FORGE_KINDS) {
+        await select(kind);
+        expect(commands()).toEqual([...forgeInstall(kind, platform).steps]);
+      }
     }
   );
 
-  it("names the macOS package manager and numbers GitCafe's two steps", async () => {
+  it("numbers GitCafe's two steps", async () => {
     await mount(NOTHING_INSTALLED);
+    await select("gitcafe");
     expect(commands()).toEqual([
-      "brew install gh",
-      "brew install glab",
       "curl -fsSL https://bun.com/install | bash",
       "bun i -g @gitcafe/cli"
     ]);
-    expect(text()).toContain("Uses Homebrew.");
     expect(
       [...container.querySelectorAll(".onboarding-wizard__well-step")].map(
         (e) => e.textContent
@@ -128,23 +204,89 @@ describe("ForgesStep", () => {
     });
   });
 
-  it("tells Windows users to reopen PwrGit only while a winget CLI is missing", async () => {
+  it("tells Windows users to reopen PwrGit on a winget forge's panel only", async () => {
     setPlatform("win32");
     await mount(NOTHING_INSTALLED);
-    expect(text()).toContain("Reopen PwrGit after installing gh or glab.");
-
-    await mount([
-      status("github", { installed: true }),
-      status("gitlab", { installed: true, loggedIn: true }),
-      status("gitcafe")
-    ]);
+    expect(panelText()).toContain("Reopen PwrGit after installing gh.");
     // GitCafe is found through ~/.bun/bin without a relaunch.
+    await select("gitcafe");
     expect(text()).not.toContain("Reopen PwrGit");
   });
 
   it("never shows the relaunch note off Windows", async () => {
     await mount(NOTHING_INSTALLED);
     expect(text()).not.toContain("Reopen PwrGit");
+  });
+
+  it("sorts detected forges first and opens on the first that needs something", async () => {
+    await mount(MIXED);
+    await act(async () => {}); // the arrival probe settles
+    expect(strip()).toEqual([
+      "GitHub Connected",
+      "GitLab Signed out",
+      "GitCafe Not installed"
+    ]);
+    expect(selectedTab()).toBe("GitLab");
+  });
+
+  it("sorts on the arrival probe's answer, not the stale snapshot it arrived with", async () => {
+    let finish: () => void = () => {};
+    mocks.dispatch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ ok: true, value: null });
+        })
+    );
+    // The wizard's snapshot predates glab's install...
+    await mount(NOTHING_INSTALLED);
+    // ...and the forced probe's push lands before its reply.
+    await mount([status("github"), status("gitlab", { installed: true }), status("gitcafe")]);
+    await act(async () => finish());
+    expect(strip()).toEqual([
+      "GitLab Signed out",
+      "GitHub Not installed",
+      "GitCafe Not installed"
+    ]);
+    expect(selectedTab()).toBe("GitLab");
+  });
+
+  it("keeps the strip's order and the selection for the whole visit", async () => {
+    await mount(NOTHING_INSTALLED);
+    await select("gitlab");
+    // gh is installed and glab signed in from a terminal mid-visit.
+    await mount([
+      status("github", { installed: true }),
+      status("gitlab", { installed: true, loggedIn: true }),
+      status("gitcafe")
+    ]);
+    expect(strip()).toEqual([
+      "GitHub Signed out",
+      "GitLab Connected",
+      "GitCafe Not installed"
+    ]);
+    expect(selectedTab()).toBe("GitLab");
+    expect(panelText()).toContain(
+      "glab is installed and signed in. PwrGit reads merge requests through it."
+    );
+  });
+
+  it("moves along the strip with the arrow keys, as one tab stop", async () => {
+    await mount(NOTHING_INSTALLED);
+    expect(tabs().map((t) => t.tabIndex)).toEqual([0, -1, -1]);
+    await act(async () => {
+      tab("github").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })
+      );
+    });
+    expect(selectedTab()).toBe("GitLab");
+    expect(document.activeElement).toBe(tab("gitlab"));
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0, -1]);
+    await act(async () => {
+      tab("gitlab").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", bubbles: true })
+      );
+    });
+    expect(selectedTab()).toBe("GitCafe");
   });
 
   it("makes the sign-in command copyable, and says so for two seconds", async () => {
@@ -154,9 +296,8 @@ describe("ForgesStep", () => {
       status("gitlab", { installed: true, loggedIn: true }),
       status("gitcafe")
     ]);
-    expect(commands()[0]).toBe("gh auth login");
-    expect(text()).toContain("Signed out");
-    expect(text()).toContain("glab is installed and signed in.");
+    expect(selectedTab()).toBe("GitHub");
+    expect(commands()).toEqual(["gh auth login"]);
 
     await act(async () => {
       button("Copy gh auth login").click();
@@ -168,6 +309,19 @@ describe("ForgesStep", () => {
       vi.advanceTimersByTime(2_000);
     });
     expect(button("Copy gh auth login").textContent).toBe("Copy");
+  });
+
+  it("only says to run something in a terminal beside a command", async () => {
+    await mount(NOTHING_INSTALLED);
+    expect(panelText()).toContain("Run it in a terminal");
+    const allConnected = FORGE_KINDS.map((kind) =>
+      status(kind, { installed: true, loggedIn: true })
+    );
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await mount(allConnected);
+    expect(panelText()).toContain("gh is installed and signed in.");
+    expect(text()).not.toContain("Run it in a terminal");
   });
 
   it("forces a probe on arrival, so stepping back and forward sees an install", async () => {
@@ -209,17 +363,7 @@ describe("ForgesStep", () => {
     }
   });
 
-  it("only says to run commands while a row has some", async () => {
-    await mount(NOTHING_INSTALLED);
-    expect(text()).toContain("Run these in a terminal.");
-    await mount(
-      FORGE_KINDS.map((kind) => status(kind, { installed: true, loggedIn: true }))
-    );
-    expect(text()).not.toContain("Run these in a terminal.");
-    expect(text()).toContain("All of it lives in Settings › Forges afterwards.");
-  });
-
-  it("shows Checking… on blocked rows while a forced probe runs", async () => {
+  it("shows Checking… on chips that need something while a forced probe runs", async () => {
     let finish: () => void = () => {};
     mocks.dispatch.mockImplementation(
       () =>
@@ -228,16 +372,12 @@ describe("ForgesStep", () => {
         })
     );
     // Arriving starts the probe; it is still running when the user looks.
-    await mount([
-      status("github", { installed: true, loggedIn: true }),
-      status("gitlab"),
-      status("gitcafe")
+    await mount(MIXED);
+    expect(strip()).toEqual([
+      "GitHub Connected",
+      "GitLab Checking…",
+      "GitCafe Checking…"
     ]);
-    const chips = () =>
-      [...container.querySelectorAll(".onboarding-wizard__forge-chip")].map(
-        (e) => e.textContent
-      );
-    expect(chips()).toEqual(["Connected", "Checking…", "Checking…"]);
     expect(button("Checking…").getAttribute("aria-busy")).toBe("true");
     // A second request while one is in flight is the same request.
     await act(async () => {
@@ -249,7 +389,11 @@ describe("ForgesStep", () => {
     ).toHaveLength(1);
 
     await act(async () => finish());
-    expect(chips()).toEqual(["Connected", "Not installed", "Not installed"]);
+    expect(strip()).toEqual([
+      "GitHub Connected",
+      "GitLab Signed out",
+      "GitCafe Not installed"
+    ]);
   });
 
   it("keeps asking main while open, so a terminal install reaches the step", async () => {
