@@ -8,6 +8,7 @@ import {
   type DiagnosticsSettings as DiagnosticsSettingsShape,
   type ForgeKind,
   type ForgeStatus,
+  type MachineGitIdentity,
   type ProfileId,
   type SettingsPage,
   type SettingsRoute as SettingsDeepLink
@@ -39,11 +40,13 @@ import {
   aiFeatureNavChildren,
   aiProviderNavChild,
   paneScrollForRoute,
+  profilesNavChildren,
   type SettingsNavChild
 } from "./settings-nav";
 import type { SettingsFocusRequest } from "./SettingsLayout";
 import { useForgeStatuses } from "./useForgeStatuses";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
+import { useMachineIdentity } from "../identity/useCommitIdentity";
 
 /**
  * Nav order and labels. The ids are `SETTINGS_PAGES` (@pwrgit/shared), the
@@ -175,6 +178,9 @@ function SettingsWindowBody(props: {
   // for a product whose pane the reader has not opened — which is the point of
   // the children. Main answers from cache, so this costs one IPC per window.
   const forges = useForgeStatuses();
+  // Same reason: the Profiles row warns while Git has no identity, whether or
+  // not the reader opens Profiles.
+  const { machine } = useMachineIdentity();
   const ai = useAiProvidersContext();
   const [route, setRoute] = useState<SettingsRoute>(() =>
     routeFromDeepLink(parseSettingsRouteHash(window.location.hash), 0)
@@ -270,7 +276,7 @@ function SettingsWindowBody(props: {
             const open = openGroups[item.id] === true;
             const sublistId = `settings-nav-sublist-${item.id}`;
             const holdsRoute = route.section === item.id;
-            const children = isGroup ? navChildren(item.id, forges, ai.statuses) : [];
+            const children = isGroup ? navChildren(item.id, forges, ai.statuses, machine) : [];
             // The child that actually carries the marker — routed to, and
             // reachable. Derived rather than inferred from "is there a focus,
             // is the group open", because those are proxies: a folded group's
@@ -411,8 +417,10 @@ function SettingsWindowBody(props: {
 function navChildren(
   section: SettingsPage,
   forges: ForgeStatus[] | undefined,
-  aiStatuses: readonly AiProviderStatus[]
+  aiStatuses: readonly AiProviderStatus[],
+  machine: MachineGitIdentity | null
 ): SettingsNavChild[] {
+  if (section === "profiles") return profilesNavChildren(machine);
   if (section === "forges") {
     return FORGE_KINDS.map((kind) => forgeNavChild(kind, forges));
   }
@@ -433,7 +441,7 @@ function SettingsSectionBody(props: {
   const focus = props.focus === undefined ? {} : { focusSection: props.focus };
 
   if (props.section === "profiles") {
-    return <ProfilesSettings />;
+    return <ProfilesSettings settings={settings} {...focus} />;
   }
 
   // Neither AI pane reads the app snapshot: their settings are per profile

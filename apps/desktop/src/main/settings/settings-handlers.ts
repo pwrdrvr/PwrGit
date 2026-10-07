@@ -89,6 +89,9 @@ function sanitizePatch(patch: AppSettingsPatch): {
     if (typeof gen.searchAllProfiles === "boolean") {
       general.searchAllProfiles = gen.searchAllProfiles;
     }
+    if (typeof gen.gitIdentityReminder === "boolean") {
+      general.gitIdentityReminder = gen.gitIdentityReminder;
+    }
     if (gen.maintenanceBranchMode === "review" || gen.maintenanceBranchMode === "auto") {
       general.maintenanceBranchMode = gen.maintenanceBranchMode;
     }

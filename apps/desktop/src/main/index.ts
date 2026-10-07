@@ -113,6 +113,7 @@ import { OpenPrService } from "./github/open-pr-service";
 import { registerChangeRequestHandlers } from "./github/change-request-handlers";
 import { PrService } from "./github/pr-service";
 import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
+import { registerCommitIdentityHandlers } from "./git/commit-identity-handlers";
 import {
   initLogFile,
   logMain,
@@ -128,7 +129,7 @@ import { watchProcessIds } from "./process-ids";
 import { watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
 import { openDatabase } from "./persistence/db";
-import { readGitIdentityDefaults } from "./profiles/git-identity";
+import { readSeedIdentity } from "./profiles/git-identity";
 import { registerProfileHandlers } from "./profiles/profile-handlers";
 import { readEffectiveGitIdentity } from "./profiles/git-identity-read";
 import {
@@ -493,7 +494,12 @@ if (!gotSingleInstanceLock) {
     // The profile NAME is a workspace label ("Personal", "Acme", "PwrDrvr"),
     // not a person — the git identity name seeds the commit AUTHOR instead.
     // (Seeding name from user.name gave every profile the same title.)
-    const identity = readGitIdentityDefaults(process.env["PWRGIT_GITCONFIG"]);
+    // Asked of Git, and only when there is no profile to keep: every later
+    // launch would spend two Git processes on a seed nobody uses.
+    const identity =
+      profiles.list().length === 0
+        ? await readSeedIdentity(execGit, process.env["PWRGIT_GITCONFIG"])
+        : {};
     profiles.ensureSeed(
       {
         name: "Personal",
@@ -1173,6 +1179,17 @@ if (!gotSingleInstanceLock) {
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerStashHandlers(bus, db, refresher, worktreeOperations);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
+    registerCommitIdentityHandlers(bus, db, {
+      git: execGit,
+      reminderEnabled: () =>
+        settingsSnapshot(settings, diagnosticsOutputRoot, appVersion).general
+          .gitIdentityReminder,
+      windowAlive: (id) => {
+        const contents = webContents.fromId(id);
+        return contents !== undefined && !contents.isDestroyed();
+      },
+      emitChanged: () => emitEvent("identity:changed", {})
+    });
     // Asked of git rather than parsed out of ~/.gitconfig: the first-run seed
     // above is not section-aware and does not follow `include`, and the wizard
     // puts this value on screen as what commits will carry.

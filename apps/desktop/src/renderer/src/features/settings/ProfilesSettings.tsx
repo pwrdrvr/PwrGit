@@ -11,8 +11,11 @@ import { useProfiles } from "../../state/useProfiles";
 import {
   SettingsPanelHead,
   SettingsSection,
-  SettingsSectionStack
+  SettingsSectionStack,
+  type SettingsFocusRequest
 } from "./SettingsLayout";
+import { GitIdentitySection } from "./GitIdentitySettings";
+import type { AppSettingsState } from "./useAppSettings";
 import { useModal } from "../../lib/useModal";
 import {
   hoverTooltip,
@@ -39,7 +42,11 @@ const MENU_SHORTCUT_SLOTS = 9;
  * profile switched out of the menu keeps its place here but takes no menu
  * row and no shortcut, so the next shown profile moves up into its number.
  */
-export function ProfilesSettings() {
+export function ProfilesSettings(props: {
+  settings: AppSettingsState;
+  /** A card the nav asked to reveal: `git-identity` or `list`. */
+  focusSection?: SettingsFocusRequest;
+}) {
   const profiles = useProfiles();
   const [modal, setModal] = useState<
     { mode: "create" } | { mode: "edit"; profile: Profile } | null
@@ -114,7 +121,11 @@ export function ProfilesSettings() {
     .forEach((p, i) => shortcutFor.set(p.id, shortcutLabel({ key: String(i + 1) })));
 
   return (
-    <SettingsSectionStack aria-label="Profile settings" paneId="profiles">
+    <SettingsSectionStack
+      aria-label="Profile settings"
+      paneId="profiles"
+      {...(props.focusSection === undefined ? {} : { focusSection: props.focusSection })}
+    >
       <SettingsPanelHead
         eyebrow="Profiles"
         title="PwrGit profiles"
@@ -131,7 +142,10 @@ export function ProfilesSettings() {
         }
       />
 
+      <GitIdentitySection profiles={profiles.profiles} settings={props.settings} />
+
       <SettingsSection
+        sectionId="list"
         eyebrow="Profiles"
         title="Profile list"
         description={`Drag a profile, or use the arrow keys on its grip, to change the order. The Profiles menu lists them in this order, and the first nine it shows get ${shortcutLabel({ key: "1" })} through ${shortcutLabel({ key: "9" })}.`}

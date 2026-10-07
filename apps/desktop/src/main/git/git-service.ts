@@ -60,6 +60,11 @@ import { parseRemoteUrl } from "../forge/resolve";
 import { delay } from "../util/timing";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { parseHookTrace } from "./hook-trace";
+import {
+  commitIdentityArgs,
+  SCRUBBED_IDENTITY_ENV,
+  type CommitIdentity
+} from "./commit-identity";
 
 /** A symbolic HEAD whose branch ref does not exist is a valid unborn branch.
  * Keep this stricter than a failed `rev-parse HEAD`: that can also mean a
@@ -396,11 +401,14 @@ export async function commitFileDiff(
   return ok(raw.value.stdout);
 }
 
-export type CommitIdentity = { name?: string; email: string };
+export type { CommitIdentity } from "./commit-identity";
 
 /**
  * Commit staged changes under a per-commit identity override — PwrGit never
- * writes repo-local `user.email` (KTD4). Amend rewrites the last commit.
+ * writes repo-local `user.email` (KTD4). The override is complete
+ * (`commitIdentityArgs`, and inherited identity variables removed), so what
+ * the commit footer shows is what Git records. Amend rewrites the last
+ * commit and keeps its author; only the committer is this identity.
  */
 export async function commitChanges(
   git: GitExec,
@@ -409,10 +417,7 @@ export async function commitChanges(
   identity: CommitIdentity,
   options: { amend?: boolean; noVerify?: boolean } = {}
 ): Promise<Result<{ hooks: HookRun[] }>> {
-  const args = ["-c", `user.email=${identity.email}`];
-  if (identity.name !== undefined && identity.name !== "") {
-    args.push("-c", `user.name=${identity.name}`);
-  }
+  const args = commitIdentityArgs(identity);
   args.push("commit");
   if (options.amend === true) args.push("--amend");
   if (options.noVerify === true) args.push("--no-verify");
@@ -430,7 +435,12 @@ export async function commitChanges(
   let raw: Awaited<ReturnType<GitExec>>;
   let hooks: HookRun[] = [];
   try {
-    raw = await git(args, cwd, tracePath === null ? undefined : { env: { GIT_TRACE2_EVENT: tracePath } });
+    raw = await git(args, cwd, {
+      env: {
+        ...SCRUBBED_IDENTITY_ENV,
+        ...(tracePath === null ? {} : { GIT_TRACE2_EVENT: tracePath })
+      }
+    });
     if (tracePath !== null && existsSync(tracePath)) {
       try {
         hooks = parseHookTrace(readFileSync(tracePath, "utf8"));
@@ -3761,10 +3771,7 @@ export async function createTagAt(
     // Annotated tags need a tagger identity. Use the repository profile as a
     // per-command override, just like commits, so tag creation neither depends
     // on a machine-global gitconfig nor writes identity into the repository.
-    args.push("-c", `user.email=${identity.email}`);
-    if (identity.name !== undefined && identity.name !== "") {
-      args.push("-c", `user.name=${identity.name}`);
-    }
+    args.push(...commitIdentityArgs(identity));
     args.push(
       "tag",
       "--annotate",
@@ -3777,7 +3784,7 @@ export async function createTagAt(
   } else {
     args.push("tag", "--", valid.value, commitId);
   }
-  const created = await git(args, cwd);
+  const created = await git(args, cwd, { env: { ...SCRUBBED_IDENTITY_ENV } });
   if (!created.ok) return created;
   if (created.value.exitCode !== 0) {
     return err(tagMutationError(created.value.stderr, "Could not create the tag"));

@@ -18,6 +18,8 @@ import { SubmodulePanel } from "./SubmodulePanel";
 import { DiscoveryExplainPopover } from "./DiscoveryExplainPopover";
 import { IgnoreDialog } from "./IgnoreDialog";
 import { AgentSaw } from "../agent/AgentSaw";
+import { CommitIdentityFooter } from "../identity/CommitIdentityFooter";
+import { useCommitIdentity } from "../identity/useCommitIdentity";
 import { DraftFooter } from "../agent/DraftFooter";
 import { openAiSettings, useAgent } from "../agent/agent-store";
 import { useMessageDraft, type DraftSource } from "../agent/useMessageDraft";
@@ -414,6 +416,10 @@ export function ChangesTab({
   };
   const [hasSubmoduleConcern, setHasSubmoduleConcern] = useState(false);
   const wtId = worktree?.id ?? null;
+  const identity = useCommitIdentity(wtId);
+  // Git would refuse: the one identity state that disables Commit and Amend.
+  const identityBlocked = identity.inspection !== null && !identity.inspection.pwrgit.ok;
+  const [amendHover, setAmendHover] = useState(false);
   // Staged changes only: an agent draft never sees unstaged edits.
   const draft = useMessageDraft({
     worktreeId: wtId,
@@ -534,6 +540,9 @@ export function ChangesTab({
     setCommitting(true);
     // A rejected dispatch must not leave Commit and Amend disabled for good.
     void dispatch("changes:commit", { worktreeId: wtId, message, amend, noVerify }).finally(() => setCommitting(false)).then((r) => {
+      // Either way: a commit adds to "recent commits", and a refusal may mean
+      // the identity changed under the footer since it last resolved.
+      identity.refresh();
       if (r.ok) {
         draft.reset("");
         setCommitOutcome({ hooks: r.value.hooks });
@@ -603,7 +612,8 @@ export function ChangesTab({
   const stagedTotal = truncated?.staged ?? staged.length;
   const unstagedTotal = truncated?.unstaged ?? unstaged.length;
   const hasChanges = staged.length > 0 || unstaged.length > 0;
-  const canCommit = message.trim() !== "" && staged.length > 0;
+  const canCommit = message.trim() !== "" && staged.length > 0 && !identityBlocked;
+  const amendDisabled = message.trim() === "" || committing || identityBlocked;
   const ignoredFooter = ignored !== null && ignored.count > 0 ? (
     <div className="discovery-ignored-footer">
       <span>{ignored.count} untracked file{ignored.count === 1 ? "" : "s"} hidden by ignore rules</span>
@@ -933,8 +943,12 @@ export function ChangesTab({
           </button>
           <button
             className="amend-btn"
-            disabled={message.trim() === "" || committing}
+            disabled={amendDisabled}
             onClick={() => commit(true)}
+            onMouseEnter={() => setAmendHover(true)}
+            onMouseLeave={() => setAmendHover(false)}
+            onFocus={() => setAmendHover(true)}
+            onBlur={() => setAmendHover(false)}
           >
             Amend
           </button>
@@ -952,7 +966,12 @@ export function ChangesTab({
             </div>
           </div>
         )}
-        <div className="commit-as">as {activeEmail !== "" ? activeEmail : "—"}</div>
+        <CommitIdentityFooter
+          inspection={identity.inspection?.worktreeId === wtId ? identity.inspection : null}
+          fallbackEmail={activeEmail}
+          // A disabled button never sees mouseleave, so the preview keys off both.
+          amendHover={amendHover && !amendDisabled}
+        />
       </div>
       {ignoreTarget !== null && wtId !== null && <IgnoreDialog worktreeId={wtId} path={ignoreTarget.path} directory={ignoreTarget.directory} onClose={() => setIgnoreTarget(null)} />}
       {tip.tooltipNode}

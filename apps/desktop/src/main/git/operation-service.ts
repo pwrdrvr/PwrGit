@@ -12,6 +12,7 @@ import {
 } from "@pwrgit/shared";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { insideWorktree } from "./worktree-path";
+import { commitIdentityArgs, SCRUBBED_IDENTITY_ENV } from "./commit-identity";
 
 /**
  * Reports what Git is in the middle of, and offers only the two ways out that
@@ -223,15 +224,16 @@ export async function continueOperation(
   const beforeStep = before.value.operation?.progress?.current ?? null;
 
   const args = [
-    ...(identity === undefined ? [] : ["-c", `user.email=${identity.email}`]),
-    ...(identity?.name === undefined || identity.name === ""
-      ? []
-      : ["-c", `user.name=${identity.name}`]),
+    ...(identity === undefined ? [] : commitIdentityArgs(identity)),
     ...CONTINUE_ARGS[operation]
   ];
   // Git would otherwise open $EDITOR for the commit/todo message and hang.
   const raw = await git(args, cwd, {
-    env: { GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true" }
+    env: {
+      ...(identity === undefined ? {} : SCRUBBED_IDENTITY_ENV),
+      GIT_EDITOR: "true",
+      GIT_SEQUENCE_EDITOR: "true"
+    }
   });
   if (!raw.ok) return raw;
 

@@ -1449,6 +1449,7 @@ export function App() {
 
       <ToastHost
         profileId={activeProfile?.id ?? null}
+        profile={activeProfile}
         selectedWorktreeId={selection?.worktreeId ?? null}
         repos={repos}
         onReveal={revealInSidebar}

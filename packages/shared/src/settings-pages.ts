@@ -38,14 +38,20 @@ export function isSettingsPage(value: unknown): value is SettingsPage {
  *  master switch — leads, because nothing below it runs while it is off. */
 export const AI_FEATURE_SECTIONS = ["availability", "default-agents", "guidance"] as const;
 
+/** Profiles' sections. Git's own identity leads: it is what every profile's
+ *  identity overrides, and where the launch notice sends people. */
+export const PROFILES_SECTIONS = ["git-identity", "list"] as const;
+
 /**
  * Places within a page, keyed by the page that owns them.
  *
  * Every sub names a card inside its page's pane — a nav child scrolls to it,
- * never opens a pane of its own (settings/AGENTS.md). Forges has one per
- * product, AI Providers one per provider, AI Features one per section.
+ * never opens a pane of its own (settings/AGENTS.md). Profiles and AI
+ * Features have one per section, Forges one per product, AI Providers one per
+ * provider.
  */
 export const SETTINGS_PAGE_SUBS = {
+  profiles: PROFILES_SECTIONS,
   forges: FORGE_KINDS,
   "ai-providers": AI_PROVIDER_IDS,
   "ai-features": AI_FEATURE_SECTIONS

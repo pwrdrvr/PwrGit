@@ -38,6 +38,8 @@ import {
 } from "./history-edit";
 import { CheckGlyph } from "../../lib/CheckGlyph";
 import { CloseGlyph } from "../../lib/CloseGlyph";
+import { rebaseIdentityLine } from "../identity/identity-view";
+import { useCommitIdentity } from "../identity/useCommitIdentity";
 import { DotGlyph } from "../../lib/DotGlyph";
 
 /** Matches the main process: a failed plan is revised at most twice. */
@@ -71,7 +73,15 @@ type CheckState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "clean"; approvalToken: string; proof: RebaseProof; shape: string }
-  | { kind: "snag"; code: string; message: string; detail?: RebaseSnagDetail };
+  | {
+      kind: "snag";
+      code: string;
+      message: string;
+      detail?: RebaseSnagDetail;
+      /** Apply was refused only because Git could not sign. Main kept the
+       *  approval, for exactly one explicit unsigned apply. */
+      unsignedRetry?: { approvalToken: string };
+    };
 
 type TidyState =
   | { kind: "idle" }
@@ -331,6 +341,9 @@ export function RebaseTab({
   const [check, setCheck] = useState<CheckState>({ kind: "idle" });
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
+  // Apply rewrites every commit with the profile as committer, signed when Git
+  // is set to sign: both are said beside the button before anyone presses it.
+  const identity = useCommitIdentity(worktreeId);
   const [tidy, setTidy] = useState<TidyState>({ kind: "idle" });
   const [edits, setEdits] = useState<TidyEdits>(NO_EDITS);
   /** The chip's override, for this request only; a new selection drops it. */
@@ -532,18 +545,24 @@ export function RebaseTab({
     requestTidy();
   }, [op, plan?.valid, agent.ready, key]);
 
-  const apply = async (): Promise<void> => {
-    if (worktreeId === null || op === null || plan === null || !plan.valid || check.kind !== "clean") {
-      return;
-    }
+  const apply = async (unsigned = false): Promise<void> => {
+    if (worktreeId === null || op === null || plan === null || !plan.valid) return;
+    const approvalToken =
+      check.kind === "clean"
+        ? check.approvalToken
+        : unsigned && check.kind === "snag"
+          ? check.unsignedRetry?.approvalToken
+          : undefined;
+    if (approvalToken === undefined) return;
     if (op !== "reorder" && program === null) return;
     setApplying(true);
     const result = await dispatch("rebase:apply", {
       worktreeId,
       commits,
       op,
-      approvalToken: check.approvalToken,
-      ...(program !== null ? { program } : {})
+      approvalToken,
+      ...(program !== null ? { program } : {}),
+      ...(unsigned ? { unsigned: true } : {})
     });
     setApplying(false);
     if (result.ok) {
@@ -552,7 +571,14 @@ export function RebaseTab({
       // would clear that one instead of this finished rebase.
       clearTimer.current = setTimeout(onClear, 900);
     } else {
-      setCheck({ kind: "snag", code: result.error.code, message: result.error.message });
+      setCheck({
+        kind: "snag",
+        code: result.error.code,
+        message: result.error.message,
+        ...(result.error.code === "signing_failed" && !unsigned
+          ? { unsignedRetry: { approvalToken } }
+          : {})
+      });
     }
   };
 
@@ -572,7 +598,7 @@ export function RebaseTab({
   // "8 → 3" once there is a plan to count; "8 commits" until then.
   const headSub =
     op === null || commits.length === 0
-      ? "Isolated check · hooks and signing disabled"
+      ? "Isolated check · hooks off, nothing signed"
       : `${resultCommits === null ? `${commits.length} commits` : `${commits.length} → ${resultCommits}`}${branch !== null && branch !== "" ? ` · ${branch}` : ""}`;
   const ledgerCheck: LedgerCheck =
     check.kind === "clean"
@@ -846,10 +872,26 @@ export function RebaseTab({
                   {op === "tidy" ? "Discard" : "Clear"}
                 </button>
               </div>
+              {check.kind === "snag" && check.unsignedRetry !== undefined && !applied && (
+                <button
+                  type="button"
+                  className="rebase-check"
+                  disabled={applying}
+                  onClick={() => void apply(true)}
+                >
+                  {applying ? "Applying…" : "Apply without signing, this once"}
+                </button>
+              )}
+            </div>
+          )}
+          {identity.inspection?.worktreeId === worktreeId && identity.inspection !== null && (
+            <div className="rebase-note rebase-note--identity">
+              {rebaseIdentityLine(identity.inspection)}
             </div>
           )}
           <div className="rebase-note">
-            Hooks, signing, and rerere are disabled for both check and apply.
+            Hooks and rerere are off for both check and apply. The check
+            signs nothing; Apply signs only if Git is set to sign commits.
             Other repo-local Git settings can still affect Apply. Nothing is
             pushed.
           </div>

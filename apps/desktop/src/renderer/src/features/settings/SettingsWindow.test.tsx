@@ -14,6 +14,7 @@ import {
   type AppSettingsSnapshot,
   type CodexProviderDiscovery,
   type ForgeStatus,
+  type MachineGitIdentity,
   type Profile,
   type Res
 } from "@pwrgit/shared";
@@ -93,6 +94,17 @@ const ACME: Profile = {
 
 /** What the AI reads answer, per test. */
 let aiSettings: AiProviderSettings;
+const CONFIGURED_GIT: MachineGitIdentity = {
+  outside: {
+    kind: "configured",
+    author: { name: "Rowan Vale", email: "rowan@vale.example" },
+    committer: { name: "Rowan Vale", email: "rowan@vale.example" }
+  },
+  config: [],
+  globalFile: "/Users/you/.gitconfig",
+  notice: false
+};
+let machineIdentity: MachineGitIdentity;
 let codexDiscovery: CodexProviderDiscovery;
 let acpDiscovery: AcpAgentDiscovery;
 
@@ -170,6 +182,7 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "forge:status") return ok({ forges });
   if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
   if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);
+  if (name === "identity:machine") return ok(machineIdentity);
   if (name === "profile:list") {
     return ok({ activeProfileId: PERSONAL.id, profiles: [PERSONAL, ACME] });
   }
@@ -202,6 +215,7 @@ beforeEach(() => {
   installBridge();
   vi.clearAllMocks();
   forges = [];
+  machineIdentity = CONFIGURED_GIT;
   aiSettings = DEFAULT_AI_PROVIDER_SETTINGS;
   codexDiscovery = codex();
   acpDiscovery = {
@@ -344,7 +358,7 @@ describe("Settings nav — groups", () => {
     await act(async () => navButton("Forges").click());
 
     const caret = container.querySelector<HTMLButtonElement>(
-      ".settings-nav__caret"
+      '.settings-nav__caret[aria-controls="settings-nav-sublist-forges"]'
     );
     await act(async () => caret?.click());
 
@@ -363,7 +377,7 @@ describe("Settings nav — groups", () => {
     expect(navButton("Forges").getAttribute("aria-current")).toBeNull();
 
     const caret = container.querySelector<HTMLButtonElement>(
-      ".settings-nav__caret"
+      '.settings-nav__caret[aria-controls="settings-nav-sublist-forges"]'
     );
     await act(async () => caret?.click());
 
@@ -381,7 +395,7 @@ describe("Settings nav — groups", () => {
     expect(container.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
 
     const caret = container.querySelector<HTMLButtonElement>(
-      ".settings-nav__caret"
+      '.settings-nav__caret[aria-controls="settings-nav-sublist-forges"]'
     );
     await act(async () => caret?.click());
 
@@ -619,6 +633,27 @@ describe("Settings nav — AI", () => {
     // Not enabled, not installed: grey, and says which.
     expect(dotTone(navChild("Kimi Code CLI"))).toBe("off");
     expect(chip(navChild("Kimi Code CLI"))).toBe("missing");
+  });
+
+  it("warns on Profiles' Git row while Git outside PwrGit has no identity", async () => {
+    await render();
+    await act(async () => navButton("Profiles").click());
+    // Configured: a plain jump link, like any other card.
+    expect(dotTone(navChild("Git outside PwrGit"))).toBeUndefined();
+
+    machineIdentity = {
+      ...CONFIGURED_GIT,
+      outside: { kind: "guessed", author: { name: "Rowan Vale", email: "rowan@rowans-mbp.local" } }
+    };
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render();
+    await act(async () => navButton("Profiles").click());
+    const row = navChild("Git outside PwrGit");
+    expect(dotTone(row)).toBe("warn");
+    expect(chip(row)).toBe("guessing");
+    expect(row.getAttribute("aria-label")).toBe("Git outside PwrGit: guessing your email");
+    expect(navChild("Profile list")).toBeDefined();
   });
 
   it("gives AI Features a jump link per section", async () => {

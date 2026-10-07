@@ -10633,10 +10633,241 @@ button.ref-chip:focus-visible {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.commit-as {
+/* The commit footer's identity line: what Git will record, as a quiet button
+   that opens the details. It keeps the old `as …` line's place and size; the
+   hover surface and chevron are what say it can be clicked. */
+.commit-identity {
+  position: relative;
   margin-top: 8px;
-  font: 500 10.5px/1.3 var(--font-mono);
+}
+.commit-identity__line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% + 8px);
+  margin: 0 -4px;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   color: var(--text-subtle);
+  font: 500 10.5px/1.3 var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+.commit-identity__line:hover:not(:disabled),
+.commit-identity__line.is-open {
+  background: var(--bg-panel-hover);
+  color: var(--text-secondary);
+}
+.commit-identity__line:disabled {
+  cursor: default;
+}
+.commit-identity__line:focus-visible,
+.commit-identity__fix:focus-visible,
+.commit-identity__details:focus-visible,
+.commit-identity-popover__action:focus-visible,
+.commit-identity-popover__sources summary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.commit-identity__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.commit-identity__row {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-identity__key {
+  color: var(--text-muted);
+}
+.commit-identity__chevron {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-135deg) translate(-1px, -1px);
+  opacity: 0.7;
+}
+.commit-identity--blocked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger-border);
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+  font: 500 11.5px/1.4 var(--font-sans);
+}
+.commit-identity__fix,
+.commit-identity__details {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--danger-text);
+  font: 600 11.5px/1.4 var(--font-sans);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.commit-identity__details {
+  margin-left: auto;
+  font-weight: 500;
+}
+.commit-identity__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+}
+.commit-identity-popover {
+  position: absolute;
+  bottom: calc(100% + var(--popover-gap));
+  left: -4px;
+  right: -4px;
+  z-index: 40;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-menu);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  box-shadow: var(--shadow-popover);
+  color: var(--text-secondary);
+  font: 400 11.5px/1.45 var(--font-sans);
+  animation: pg-fade 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.commit-identity-popover__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.commit-identity-popover__section + .commit-identity-popover__section {
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+.commit-identity-popover h3 {
+  margin: 0;
+  font: 600 10px/1 var(--font-sans);
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.commit-identity-popover dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+}
+.commit-identity-popover dt {
+  color: var(--text-muted);
+}
+.commit-identity-popover dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.commit-identity-popover code {
+  font: 500 10.5px/1.45 var(--font-mono);
+}
+.commit-identity-popover__src {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+.commit-identity-popover__warn {
+  margin: 0;
+  color: var(--danger-text);
+}
+.commit-identity-popover__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+.commit-identity-popover__commits {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.commit-identity-popover__commits li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.commit-identity-popover__sha {
+  color: var(--text-muted);
+}
+.commit-identity-popover__who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.commit-identity-popover__tag {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-panel-hover);
+  color: var(--text-secondary);
+  font: 600 9.5px/1.4 var(--font-sans);
+}
+.commit-identity-popover__sources summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 600;
+  border-radius: 4px;
+}
+.commit-identity-popover__sources table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.commit-identity-popover__sources td {
+  padding: 3px 4px 3px 0;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.commit-identity-popover__sources td:first-child {
+  width: 40%;
+}
+.commit-identity-popover__sources td:nth-child(2) {
+  width: 18%;
+  color: var(--text-muted);
+}
+.commit-identity-popover__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.commit-identity-popover__action {
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+  cursor: pointer;
+}
+.commit-identity-popover__action:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
 }
 
 .changes-clean {
@@ -17473,11 +17704,13 @@ button.agent-auth-node:focus-visible,
 
 /* Installer guidance needs the full card width, with one action row below
    the text, shaped like the "Update ready" card. */
-.codex-version-notice {
+.codex-version-notice,
+.git-identity-notice {
   grid-template-columns: minmax(0, 1fr);
   width: 420px;
 }
-.codex-version-notice .app-toast__actions {
+.codex-version-notice .app-toast__actions,
+.git-identity-notice .app-toast__actions {
   flex-wrap: wrap;
 }
 /* Prose in a toast. `__detail` is mono, for command output; this is not. */
@@ -20020,4 +20253,119 @@ button.agent-auth-node:focus-visible,
   white-space: nowrap;
   color: var(--text-secondary);
   font: 500 10.5px/1.3 var(--font-mono);
+}
+
+/* Settings › Profiles › Git outside PwrGit. */
+.git-identity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.git-identity-card__rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 14px;
+  margin: 0;
+  font: 400 12.5px/1.4 var(--font-sans);
+}
+.git-identity-card__rows dt {
+  color: var(--text-muted);
+}
+.git-identity-card__rows dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.git-identity-card__origin {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.git-identity-card__origin code {
+  font: 500 10.5px/1.4 var(--font-mono);
+}
+.git-identity-card__warn {
+  margin: 0;
+  color: var(--danger-text);
+  font: 400 12px/1.45 var(--font-sans);
+}
+.git-identity-setup {
+  width: min(480px, 92vw);
+}
+.git-identity-setup__lede {
+  margin: -4px 0 14px;
+  color: var(--text-secondary);
+  font: 400 12px/1.45 var(--font-sans);
+}
+.git-identity-setup__seeds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.git-identity-setup__seed {
+  max-width: 100%;
+  padding: 5px 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 500 11.5px/1.2 var(--font-sans);
+  cursor: pointer;
+}
+.git-identity-setup__seed:hover {
+  color: var(--text-primary);
+  background: var(--bg-panel-hover);
+}
+.git-identity-setup__seed.is-active {
+  border-color: var(--accent-border);
+  background: var(--bg-row-active);
+  color: var(--text-primary);
+}
+.git-identity-setup__seed:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.git-identity-setup__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  font: 400 11.5px/1.45 var(--font-sans);
+}
+.git-identity-setup__preview p {
+  margin: 0;
+}
+.git-identity-setup__preview code,
+.git-identity-setup__preview pre {
+  font: 500 11px/1.45 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.git-identity-setup__preview pre {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+}
+.git-identity-setup__preview table {
+  border-collapse: collapse;
+}
+.git-identity-setup__preview td {
+  padding: 2px 10px 2px 0;
+  vertical-align: top;
+}
+.git-identity-setup__from {
+  color: var(--text-muted);
+}
+.git-identity-setup__same {
+  color: var(--text-muted);
+}
+.rebase-note--identity {
+  color: var(--text-secondary);
 }

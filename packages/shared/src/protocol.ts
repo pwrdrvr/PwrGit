@@ -111,6 +111,10 @@ import type {
   StashEntry,
   WorktreeState
 } from "./types";
+import type {
+  CommitIdentityInspection,
+  MachineGitIdentity
+} from "./commit-identity";
 import type { ImagePreview, ImageRevision } from "./image";
 import type {
   AgentAccessSnapshot,
@@ -683,6 +687,12 @@ export type GeneralSettings = {
   /** Maintenance › Local branches: keep branches touched within this many
    *  days. Null switches the age guard off. */
   branchCleanupKeepDays: BranchCleanupKeepDays | null;
+  /**
+   * Show the launch notice when Git outside PwrGit has no identity of its
+   * own. On by default; switching it off is a deliberate "I only commit in
+   * PwrGit", and the Settings card keeps reporting the state either way.
+   */
+  gitIdentityReminder: boolean;
 };
 
 export type ExperimentalSettings = {
@@ -771,7 +781,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   searchAllProfiles: false,
   branchCleanupPrProof: DEFAULT_BRANCH_CLEANUP_OPTIONS.prProof,
   maintenanceBranchMode: "review",
-  branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays
+  branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays,
+  gitIdentityReminder: true
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
@@ -875,6 +886,35 @@ export interface Commands {
    * must not repeat it.
    */
   "git:readIdentity": { req: void; res: GitIdentityRead };
+  /**
+   * Who a PwrGit commit in this checkout records, what Git outside PwrGit
+   * resolves here, and what recent commits already recorded. Every value is
+   * Git's own resolution, so the commit footer never promises an identity Git
+   * would not write.
+   */
+  "identity:inspect": {
+    req: { worktreeId: string };
+    res: CommitIdentityInspection;
+  };
+  /**
+   * Git's identity outside any repository. `claimNotice` asks whether THIS
+   * window shows the launch notice; main answers yes to one window at a time.
+   */
+  "identity:machine": {
+    req: { claimNotice?: boolean };
+    res: MachineGitIdentity;
+  };
+  /** "Not now" on the launch notice: quiet for the rest of this launch. */
+  "identity:dismissNotice": { req: void; res: null };
+  /**
+   * Write `user.name` and `user.email` with `git config --global`, at an
+   * explicit click after a preview. The answer is Git's identity re-read
+   * afterwards, which is the only proof the write took effect.
+   */
+  "identity:writeGlobal": {
+    req: { name: string; email: string };
+    res: MachineGitIdentity;
+  };
 
   // Repos & discovery (U6)
   "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
@@ -1974,6 +2014,12 @@ export interface Commands {
       op: RebaseOperation;
       program?: HistoryEditProgram;
       approvalToken: string;
+      /**
+       * Apply follows Git's `commit.gpgSign`. After a `signing_failed`
+       * refusal (the worktree was restored, and the approval survives it),
+       * this re-applies once with signing off, at the user's explicit choice.
+       */
+      unsigned?: boolean;
     };
     res: null;
   };
@@ -2430,6 +2476,9 @@ export interface Events {
   "ui:diagnosticsCopied": { profileId: string | null };
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
+  /** Git identity config changed through PwrGit, or a launch notice was
+   *  dismissed. Readers re-ask; nothing rides on the payload. */
+  "identity:changed": Record<string, never>;
   /** Sessions, roles, or repository boundaries changed in Settings. */
   "localAgents:changed": McpAgentPolicySnapshot;
   "agentAccess:changed": AgentAccessSnapshot;

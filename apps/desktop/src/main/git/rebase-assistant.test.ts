@@ -553,7 +553,7 @@ describe("dryRunRebase (disposable clone)", () => {
     ]);
   });
 
-  it("uses the same no-hooks and no-signing policy for check and apply", async () => {
+  it("checks without hooks or signing, and applies under Git's signing config", async () => {
     const repo = makeRepo();
     const hook = join(repo, ".git", "hooks", "commit-msg");
     writeFileSync(hook, "#!/bin/sh\nexit 1\n");
@@ -562,6 +562,7 @@ describe("dryRunRebase (disposable clone)", () => {
     git(repo, ["config", "user.signingKey", "missing-test-key"]);
     const commits = topCommits(repo, 3);
 
+    // The check's commits are thrown away, so it never asks the signer.
     const checked = await dryRunRebase(
       systemGit,
       repo,
@@ -571,20 +572,40 @@ describe("dryRunRebase (disposable clone)", () => {
     );
     expect(checked.ok).toBe(true);
     if (!checked.ok) return;
+    const source = {
+      head: checked.value.sourceHead,
+      headRef: checked.value.sourceRef
+    };
 
+    // Apply follows commit.gpgSign. A signer that cannot sign is reported as
+    // what it is, not as a conflict, and nothing moved.
     const applied = await applyRebase(
       systemGit,
       repo,
       commits,
       "squash",
       { email: "me@acme.io", name: "Me" },
-      {
-        head: checked.value.sourceHead,
-        headRef: checked.value.sourceRef
-      }
+      source
     );
+    expect(applied.ok).toBe(false);
+    if (applied.ok) return;
+    expect(applied.error.code).toBe("signing_failed");
+    expect(applied.error.message).toMatch(/restored unchanged/);
+    expect(gitOut(repo, ["rev-parse", "HEAD"])).toBe(checked.value.sourceHead);
+    expect(gitOut(repo, ["status", "--porcelain"])).toBe("");
 
-    expect(applied.ok).toBe(true);
+    // The explicit follow-up: the same rewrite with signing off.
+    const unsigned = await applyRebase(
+      systemGit,
+      repo,
+      commits,
+      "squash",
+      { email: "me@acme.io", name: "Me" },
+      source,
+      undefined,
+      "off"
+    );
+    expect(unsigned.ok).toBe(true);
     expect(gitOut(repo, ["rev-list", "--count", "HEAD"])).toBe("2");
   });
 });

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ok } from "@pwrgit/shared";
 import { readEffectiveGitIdentity } from "./git-identity-read";
-import { readGitIdentityDefaults } from "./git-identity";
 import type { GitExec } from "../git/dugite";
 
 /** A GitExec that answers `config --get <key>` from a map; anything unset
@@ -84,52 +83,5 @@ describe("readEffectiveGitIdentity", () => {
     );
     expect(identity.email).toBe("dana@example.com");
     expect(identity.conditionalDirs).toEqual([]);
-  });
-});
-
-/**
- * The reason this module exists. These are the seed's actual answers — it is
- * documented best-effort and is not wrong to ship, but it must never be what
- * the wizard puts on screen as "commits will be signed off as this".
- */
-describe("why the wizard does not reuse the first-run seed", () => {
-  it("seed: reads a name and an email out of different sections", () => {
-    const path = configFile(
-      [
-        "[github]",
-        "\tname = dwhitfield",
-        "[user]",
-        "\tname = Dana Whitfield",
-        "\temail = dana@example.com"
-      ].join("\n")
-    );
-    // The forge handle, paired with the [user] email — one identity from two
-    // sections, because the regex has no notion of which section it is in.
-    expect(readGitIdentityDefaults(path)).toEqual({
-      name: "dwhitfield",
-      email: "dana@example.com"
-    });
-  });
-
-  it("seed: comes back empty when the identity lives in an included file", () => {
-    const path = configFile(
-      ["[include]", "\tpath = ~/.gitconfig.d/identity", "[core]", "\teditor = nvim"].join(
-        "\n"
-      )
-    );
-    expect(readGitIdentityDefaults(path)).toEqual({});
-  });
-
-  it("git: answers both cases correctly, which is why the wizard asks it", async () => {
-    const identity = await readEffectiveGitIdentity(
-      gitReturning({
-        "user.name": "Dana Whitfield",
-        "user.email": "dana@example.com"
-      }),
-      "/somewhere",
-      configFile("[include]\n\tpath = ~/.gitconfig.d/identity\n")
-    );
-    expect(identity.name).toBe("Dana Whitfield");
-    expect(identity.email).toBe("dana@example.com");
   });
 });

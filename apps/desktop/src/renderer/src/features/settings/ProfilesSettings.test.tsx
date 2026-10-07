@@ -25,6 +25,12 @@ vi.mock("../../state/useProfiles", () => ({
   useProfiles: mocks.useProfiles
 }));
 
+// The Git identity card above the list has its own suite
+// (GitIdentitySettings.test.tsx); here it only has to stay out of the way.
+vi.mock("../identity/useCommitIdentity", () => ({
+  useMachineIdentity: () => ({ machine: null, refresh: () => undefined })
+}));
+
 import { ProfilesSettings } from "./ProfilesSettings";
 
 const personal: Profile = {
@@ -78,7 +84,18 @@ function profileState(profiles: Profile[]) {
 async function render(profiles: Profile[]): Promise<void> {
   mocks.useProfiles.mockReturnValue(profileState(profiles));
   await act(async () => {
-    root.render(<ProfilesSettings />);
+    root.render(
+      <ProfilesSettings
+        settings={{
+          snapshot: null,
+          loading: false,
+          saving: false,
+          error: null,
+          refresh: async () => undefined,
+          update: async () => undefined
+        }}
+      />
+    );
   });
 }
 
