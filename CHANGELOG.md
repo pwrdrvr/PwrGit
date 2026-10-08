@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.35.0 - 2026-10-08
+
+- Repositories - Added Hide repository per profile, with Undo and ways to unhide from the sidebar, Settings, or search. Hidden repositories leave that profile's navigation, bulk sync, maintenance, and agent catalog without changing files on disk.
+- Repository removal - Added a guided Remove repository review of linked worktrees, stashes, and unpublished commits. Choose what to keep, push, or discard before moving folders to Trash or the Recycle Bin; remote repositories are not touched, and changed checkout state is reviewed again before removal.
+- Commit identity - Added a footer showing the author, committer, and signing settings Git will actually use. PwrGit operations honor the profile identity despite conflicting Git configuration or inherited identity variables. Settings → Profiles now explains Git's own identity and previews global name/email changes before you apply them, with guidance when external Git lacks a configured identity.
+- History editing - Improved the rebase assistant to honor Git's commit-signing preference when applying a plan. Review the committer and signing key before applying; a signing failure restores the worktree and offers an explicit unsigned retry instead of silently dropping signing.
+- Forge setup - Added platform-specific, copyable CLI installation and sign-in commands with vendor guides. A compact forge selector and fresh Re-check results make setup easier to follow; Windows guidance explains when a relaunch is needed after installing a CLI.
+
 ## v0.34.0 - 2026-10-07
 
 - Minor - Maintenance release; no user-facing application changes since v0.33.0.
