@@ -57,6 +57,10 @@ function git(cwd: string, args: string[]): string {
 function initRepo(path: string): void {
   mkdirSync(path, { recursive: true });
   git(path, ["init", "-b", "main"]);
+  // No detached `git maintenance run --auto` after each commit: its
+  // `objects/maintenance.lock` can vanish mid-cpSync of a just-committed
+  // repo and fail the copy with ENOENT.
+  git(path, ["config", "maintenance.auto", "false"]);
   git(path, ["config", "user.name", "PwrGit Test"]);
   git(path, ["config", "user.email", "test@pwrgit.com"]);
   git(path, ["config", "core.autocrlf", "false"]);
