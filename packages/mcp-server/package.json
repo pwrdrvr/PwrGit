@@ -21,10 +21,10 @@
     "./agent-access-protocol": "./src/agent-access-protocol.ts"
   },
   "scripts": {
-    "build": "node ../../scripts/resource-run.mjs tsc -p tsconfig.build.json",
+    "build": "node ../../scripts/resource-run.mjs node ../../node_modules/typescript/lib/tsc.js -p tsconfig.build.json",
     "prepare": "pnpm run build",
     "start": "node ./bin/pwrgit-mcp.js",
-    "typecheck": "node ../../scripts/resource-run.mjs tsc --noEmit -p tsconfig.json"
+    "typecheck": "node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.31.0",

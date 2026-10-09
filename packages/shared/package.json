@@ -18,6 +18,6 @@
     "./mcp-policy": "./src/mcp-policy.ts"
   },
   "scripts": {
-    "typecheck": "node ../../scripts/resource-run.mjs tsc --noEmit -p tsconfig.json"
+    "typecheck": "node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json"
   }
 }

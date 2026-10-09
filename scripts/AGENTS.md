@@ -42,6 +42,17 @@ and watch commands hold the lane until they exit. Cancellation drains the
 primary and detached POSIX tool groups or Windows native Job before releasing the lease; do not
 replace Windows ownership with a `taskkill /T` fallback.
 
+## Compiler measurements
+
+`typecheck.mjs` resolves TS7's CLI explicitly; `PWRGIT_TYPECHECK_COMPILER=typescript`
+selects TS6 for fallback or comparison. Keep TS6 for dependency-cruiser and MCP
+emit. `benchmark-checks.mjs OUTPUT` runs on macOS through `resource-run.mjs`:
+identical sources/configs/dependencies, three paired workspace typecheck/full-lint
+samples, warm caches, CI mode and 6 GiB Node old space. It verifies repository
+file inventories and rejects injected type/unused-binding defects before timing.
+Run on the managed E2E guest or the opt-in CI workflow; do not compare hardware
+or infer editor/session memory from process RSS. Keep raw artifacts outside Git.
+
 ## The dependency cooldown
 
 `check-dependency-maturity.mjs` (`pnpm deps:maturity`) re-applies
