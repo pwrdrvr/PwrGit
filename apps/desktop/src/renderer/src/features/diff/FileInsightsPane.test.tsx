@@ -1011,7 +1011,8 @@ describe("FileInsightsPane", () => {
 
     const first = dispatchMock.mock.calls.find(([name]) => name === "file:blame");
     expect(first?.[1]).toMatchObject({ aimLine: 250 });
-    expect((first?.[1] as Record<string, unknown>)["cursor"]).toBeUndefined();
+    expect(first).toBeDefined();
+    expect((first![1] as Record<string, unknown>)["cursor"]).toBeUndefined();
     expect(
       container.querySelector('[data-line="250"]')?.className
     ).toContain("is-target");
