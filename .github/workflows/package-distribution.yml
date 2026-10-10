@@ -225,6 +225,8 @@ jobs:
           key: ${{ needs.prepare.outputs.universal_cache }}
       - name: Acquire and hash macOS bytes, including cache restores
         if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
         run: node scripts/package-manager-release.mjs download "$RUNNER_TEMP/distribution" macos
       - uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         if: (steps.validated.outputs.cache-hit != 'true' || inputs.force_validation) && steps.arm64.outputs.cache-hit != 'true'
