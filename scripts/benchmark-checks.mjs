@@ -1,20 +1,33 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { cpus, loadavg, totalmem } from "node:os";
-import { resolve, join } from "node:path";
+import { resolve, join, relative, sep, isAbsolute } from "node:path";
 import { compilerPath } from "./typecheck.mjs";
 import { isCliEntrypoint } from "./lib/cli-entrypoint.mjs";
+import { runBenchmarkCommand } from "./benchmark-command.mjs";
 
 const projects = ["packages/shared", "packages/mcp-server", "apps/desktop"];
 const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
-export function runCli() {
+export function benchmarkEnvironment(cwd = process.cwd(), env = process.env) {
+  return { ...env, PWD: realpathSync(cwd), CI: "true", NODE_OPTIONS: "--max-old-space-size=6144" };
+}
+
+export function repositoryInventory(stdout, cwd = process.cwd()) {
+  const root = realpathSync(cwd);
+  return stdout.split(/\r?\n/).filter(Boolean).map((file) => relative(root, realpathSync(file)))
+    .filter((file) => file && !isAbsolute(file) && file !== ".." && !file.startsWith(`..${sep}`)
+      && !file.split(sep).includes("node_modules"))
+    .map((file) => file.split(sep).join("/")).sort();
+}
+
+export async function runCli() {
   if (process.platform !== "darwin") throw new Error("Benchmark requires macOS time -l");
   const output = resolve(process.argv[2] ?? "check-benchmark");
   mkdirSync(output, { recursive: true });
   // Both variants use the same dependencies, configs, sources and job. CI mode
   // bypasses the developer lane/worker cap; 6 GiB leaves room on the 8 GiB VM.
-  const env = { ...process.env, CI: "true", NODE_OPTIONS: "--max-old-space-size=6144" };
+  const env = benchmarkEnvironment();
   const metadata = {
     revision: spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(),
     runner: process.env.RUNNER_NAME ?? "managed-e2e-vm",
@@ -30,7 +43,7 @@ export function runCli() {
     for (const compiler of ["typescript", "native"]) {
       const result = spawnSync(process.execPath, [compilerPath(compiler), "--listFilesOnly", "-p", `${project}/tsconfig.json`], { env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
       if (result.status !== 0) throw new Error(`Inventory failed: ${project} ${compiler}: ${result.stdout} ${result.stderr}`);
-      variants[compiler] = result.stdout.split(/\r?\n/).filter((file) => file.startsWith(`${process.cwd()}/`) && !file.includes("/node_modules/")).map((file) => file.slice(process.cwd().length + 1)).sort();
+      variants[compiler] = repositoryInventory(result.stdout);
     }
     if (JSON.stringify(variants.typescript) !== JSON.stringify(variants.native)) throw new Error(`Source inventory differs: ${project}`);
     inventories[project] = variants;
@@ -51,16 +64,15 @@ export function runCli() {
 
   const samples = [];
   // Prime the policy cache and require a passing baseline before comparing.
-  const warmup = spawnSync("pnpm", ["lint"], { env: { ...env, PWRGIT_TYPECHECK_COMPILER: "typescript" }, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 600_000 });
+  const warmup = await runBenchmarkCommand("pnpm", ["lint"], { env: { ...env, PWRGIT_TYPECHECK_COMPILER: "typescript" } });
   writeFileSync(join(output, "warmup.log"), (warmup.stdout ?? "") + (warmup.stderr ?? ""));
-  if (warmup.status !== 0) throw new Error("Baseline warmup failed; inspect warmup.log");
+  if (warmup.status !== 0 || warmup.error) throw new Error("Baseline warmup failed; inspect warmup.log", { cause: warmup.error });
   for (const script of ["typecheck", "lint"]) {
     for (let iteration = 1; iteration <= 3; iteration++) {
       for (const compiler of ["typescript", "native"]) {
         const loadBefore = loadavg();
-        const result = spawnSync("/usr/bin/time", ["-l", "pnpm", script], {
-          env: { ...env, PWRGIT_TYPECHECK_COMPILER: compiler }, encoding: "utf8",
-          maxBuffer: 16 * 1024 * 1024, timeout: 600_000,
+        const result = await runBenchmarkCommand("/usr/bin/time", ["-l", "pnpm", script], {
+          env: { ...env, PWRGIT_TYPECHECK_COMPILER: compiler },
         });
         writeFileSync(join(output, `${script}-${compiler}-${iteration}.log`), (result.stdout ?? "") + (result.stderr ?? ""));
         const seconds = /([\d.]+)\s+real\b/.exec(result.stderr ?? "");
@@ -72,6 +84,7 @@ export function runCli() {
         samples.push(sample);
         writeFileSync(join(output, "samples.json"), JSON.stringify({ metadata, samples }, null, 2));
         console.log(JSON.stringify(sample));
+        if (result.error) throw new Error("Benchmark command failed; refusing to start another sample", { cause: result.error });
       }
     }
   }
@@ -89,4 +102,4 @@ export function runCli() {
   if (comparisons.some((row) => !row.passes)) process.exitCode = 1;
 }
 
-if (isCliEntrypoint(import.meta.url)) runCli();
+if (isCliEntrypoint(import.meta.url)) await runCli();

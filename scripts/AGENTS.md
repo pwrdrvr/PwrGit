@@ -50,6 +50,9 @@ emit. `benchmark-checks.mjs OUTPUT` runs on macOS through `resource-run.mjs`:
 identical sources/configs/dependencies, three paired workspace typecheck/full-lint
 samples, warm caches, CI mode and 6 GiB Node old space. It verifies repository
 file inventories and rejects injected type/unused-binding defects before timing.
+Inventory paths and compiler `PWD` use the physical checkout path. Timed
+commands use an IPC gate and the existing POSIX descendant tracker; timeout
+cleanup drains the entire command tree before returning, and aborts sampling.
 Run on the managed E2E guest or the opt-in CI workflow; do not compare hardware
 or infer editor/session memory from process RSS. Keep raw artifacts outside Git.
 
