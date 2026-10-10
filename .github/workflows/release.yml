@@ -208,7 +208,7 @@ jobs:
             apps/desktop/release-stage/dist/*.zip
             apps/desktop/release-stage/dist/*.blockmap
             apps/desktop/release-stage/dist/latest-mac.yml
-          retention-days: 30
+          retention-days: 90
 
   linux-build:
     name: Package and validate Linux (${{ matrix.arch }})
@@ -494,7 +494,7 @@ jobs:
             apps/desktop/release-stage/dist/PwrGit.Setup*.exe
             apps/desktop/release-stage/dist/latest.yml
             apps/desktop/release-stage/dist/SHA256SUMS
-          retention-days: 7
+          retention-days: 90
 
   publish-release-assets:
     name: Create release and publish platform assets
