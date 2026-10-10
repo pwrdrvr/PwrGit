@@ -88,6 +88,14 @@ describe("Artifacts authentication on every Git network operation", () => {
     expect(await git(["fetch", "--all"], directory, { env: result.value })).toMatchObject({ ok: true, value: { exitCode: 0 } });
     expect(await authenticate(["fetch", "origin"], directory, {})).toMatchObject({ ok: false, error: { code: "artifacts_token_required" } });
   });
+  it.each(["C:\\repos\\local.git", "C:/repos/local.git", "file:///repos/local.git"])("does not authenticate a hostless local remote (%s)", async (localRemote) => {
+    // Exercise Windows drive paths on every platform, without fetching a
+    // nonexistent fixture path or relying on the host's path separator.
+    await git(["remote", "set-url", "origin", localRemote], directory);
+    const authenticate = createArtifactsGitAuthentication(store, git, () => ({ [hostname]: "artifacts" }));
+    expect(await authenticate(["fetch", "--all"], directory, {})).toEqual(ok({}));
+    expect(await authenticate(["clone", localRemote], directory, {})).toEqual(ok({}));
+  });
   it("honors fetch.all, explicit remotes and the last --all/--no-all override", async () => {
     await git(["remote", "set-url", "origin", "https://github.com/team/repo.git"], directory);
     await git(["remote", "add", "secondary", otherRemote], directory);

@@ -218,6 +218,9 @@ export function classifyForgeHost(
   overrides: ForgeHostMap = {}
 ): ForgeHost {
   const normalized = hostname.trim().toLowerCase().replace(/^www\./, "");
+  // Local file URLs and Windows drive paths have no URL hostname. A product
+  // without a shared SaaS host must never claim those remotes.
+  if (normalized === "") return "other";
   // `Object.hasOwn`, not a bare index: `overrides` is a plain object, and a
   // hostname is attacker-adjacent input straight out of a git remote. A single
   // label of `constructor` or `__proto__` — both legal intranet hostnames —
