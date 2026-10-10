@@ -141,6 +141,8 @@ function FolderProfileRow({
 }) {
   const tally = folderTally(profile);
   const listed = differingRepos(profile, enabled);
+  // Counted like the card's chip: every repo that disagrees, listed or not.
+  const differ = profile.repos.filter((repo) => !repo.matches).length;
   const overlapped = new Set(profile.overlaps.map((overlap) => overlap.root));
   const repoCount = (root: string): number => {
     const prefix = root.replace(/[\\/]+$/, "");
@@ -155,7 +157,7 @@ function FolderProfileRow({
         ? { text: "Matches", kind: "ok" }
         : tally.tone === "warn"
           ? {
-              text: listed.length > 0 && listed.length < profile.repos.length ? `${listed.length} differ` : "Differs",
+              text: differ > 0 && differ < profile.repos.length ? `${differ} differ` : "Differs",
               kind: "warn"
             }
           : null;

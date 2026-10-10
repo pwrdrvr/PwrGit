@@ -168,9 +168,16 @@ export function folderTally(profile: FolderProfileIdentity): FolderRowView {
     if (email === null && list.every((repo) => repo.source === "none")) {
       return { tone: "warn", text: `No email configured for ${list.length === 1 ? "its repo" : `these ${repos(list.length)}`}` };
     }
+    // A repo that pins its own email stays wrong after the switch, so say so
+    // even when its email happens to be the one every other repo uses.
+    const pinned = list.filter((repo) => repo.source === "local").length;
+    const own = pinned > 0 && pinned < list.length ? ` · ${pinned === 1 ? "1 sets its own email" : `${pinned} set their own email`}` : "";
     return {
       tone: "warn",
-      text: email !== null ? `${allCommit(list.length)} as ${email}${from(list[0])}` : `${repos(list.length)} commit as other emails`
+      text:
+        email !== null
+          ? `${allCommit(list.length)} as ${email}${from(list[0])}${own}`
+          : `${repos(list.length)} commit as other emails${own}`
     };
   }
   const local = differ.filter((repo) => repo.source === "local").length;

@@ -137,6 +137,11 @@ describe("Settings › By folder", () => {
     expect(differingRepos(profile, false).map((r) => r.name)).toEqual(["infra"]);
   });
 
+  it("still names a pinned repo when every repo uses the same other email", () => {
+    const profile = work([repo("api", FROM_GLOBAL), repo("infra", { ...FROM_GLOBAL, source: "local" })]);
+    expect(folderTally(profile).text).toBe(`All 2 repos commit as ${PERSONAL} · 1 sets its own email`);
+  });
+
   it("leaves repos that only follow the global identity to the switch while it is off", () => {
     const profile = work([repo("api", FROM_GLOBAL)]);
     expect(folderTally(profile).text).toBe(`Its 1 repo commits as ${PERSONAL} · from /Users/rowan/.gitconfig`);

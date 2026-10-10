@@ -117,6 +117,8 @@ describe("Settings › Profiles › By folder", () => {
     await render(report(false));
     expect(container.textContent).toContain("1 repo differs");
     expect(container.textContent).toContain(`1 of 2 repos match`);
+    // The tag counts the same repos the card's chip does.
+    expect(container.querySelector(".folder-identity__side")?.textContent).toBe("1 differ");
 
     await act(async () => container.querySelector<HTMLButtonElement>("[role='switch']")!.click());
     expect(mocks.dispatch).toHaveBeenCalledWith("identity:folderPlan", { enabled: true });
