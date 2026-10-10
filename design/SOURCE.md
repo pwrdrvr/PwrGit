@@ -117,6 +117,7 @@ first.
 | `Worktree Chip Glyphs - UX Review.dc.html` | Why the worktree holder chip's `⌂` and `⑂` looked wrong: neither character is in a bundled face, so an OS fallback font drew them, and the sidebar's PR chip drew `⌂` for every worktree. Then the four ways to draw primary vs linked worktree (house plus the palette's 3a mark recommended), and where it lands: one branch, worktree, checkout and repository drawing on every surface. Written here and pushed up; every specimen is live SVG and contrived names, no captures. |
 | `Remove and Hide Repository - UX Review.dc.html` | Two ways to get a repository out of the way. Hide: the row menu with and without hint lines, the state after a hide (no confirmation; an Undo toast), and where a hidden repository is still counted. Remove: the guided review dialog &mdash; what moves to the Trash and what the remote keeps, a verdict per checkout (safe, at risk, blocked), Push first / Keep / Discard, the partial removal that keeps the main checkout, the name gate, progress and the result states &mdash; then three places to find hidden repositories (a sidebar footer list, a Settings card, an exact-name &#8984;K row) and the map of every surface that excludes them. Written here and pushed up; everything invented. Interactive. |
 | `Commit Identity and Signing - UX Review.dc.html` | Who a commit is recorded as, and whether it is signed. Why the rail's `as …` line names the profile rather than what Git will write: `author.email` and inherited `GIT_AUTHOR_*` beat PwrGit's `-c user.email`. Why "no identity" fails on Linux but makes up `user@host.local` on macOS. Then the footer as a quiet button with an identity-details popover answering three questions, a sticky launch notice for a machine with no Git identity, Settings › Profiles cards that preview every `git config` write, a commit-signing nudge built on the forge verdict PwrGit already fetches, and a state contract with open decisions. Sections 1&ndash;4 are built (pwrdrvr/PwrGit#448); the signing nudges, card and badge in section 5 are not. Interactive. |
+| `Git Identity by Folder - UX Review.dc.html` | Round 2 of commit identity: Git's identity per profile folder. What isolated-`HOME` probes showed about `includeIf "gitdir/i:…"` (an included file reports scope `global` and names itself; a `[user]` written after the include wins; a repo's own `user.email` beats it; worktrees follow their main repo). Why overlapping profile roots are refused. Then the profile popup's "Git outside PwrGit" row in six states, the Settings › Profiles › By folder card off and on, the previewed writes (turn on, remove a repo override, the profile editor's overlap refusal and sync disclosure), a live prototype, and the command contract. Built in the PR that adds it. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -549,6 +550,15 @@ fixtures with `GIT_CONFIG_NOSYSTEM=1`, on Git 2.56 under macOS. Its identities
 It carries no `assets/`. Card **2c** is a live `DCLogic` prototype of all ten
 identity states. Its turn 6 records decisions that are still open: enforce or
 explain, and writing global config versus KTD4.
+
+`Git Identity by Folder - UX Review.dc.html` was written here and pushed up
+on 2026-10-10 through the MCP's `write_files`, then replaced locally by the
+served copy with lines 4&ndash;6 stripped, so the repo holds the project's
+59,903 bytes (sha256 `ca07e4904593…`). Its CSS starts from the round-1 artboard's,
+pruned to the rules it uses. Every probe it quotes ran against an isolated
+`HOME` with `GIT_CONFIG_NOSYSTEM=1`, on Git 2.56 under macOS. Its identities
+(`rowan@vale.example`, `rowan@northwind.example`) and repositories are
+invented. It carries no `assets/`. Card **5a** is a live `DCLogic` prototype.
 
 ## Deliberately NOT copied in
 
