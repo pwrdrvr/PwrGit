@@ -147,6 +147,14 @@ describe("Settings › Profiles › By folder", () => {
     expect(accept).toHaveBeenCalled();
   });
 
+  it("says a removed override falls back to the global identity while the switch is off", async () => {
+    await render(report(false, true));
+    await act(async () => button("Remove override…").click());
+    const dialog = document.querySelector("[role='dialog']");
+    expect(dialog?.textContent).toContain(`Afterwards it follows Git’s global identity, ${PERSONAL}`);
+    expect(dialog?.textContent).not.toContain(`Afterwards it commits as ${WORK}`);
+  });
+
   it("says In step when every repo matches", async () => {
     await render(report(true));
     expect(container.textContent).toContain("In step");

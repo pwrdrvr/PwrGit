@@ -181,6 +181,20 @@ describe("identity by folder, against real Git", () => {
     expect(existsSync(managedIncludeFile(box.globalFile, "work"))).toBe(false);
   });
 
+  it("leaves the global config alone when an include file can't be written", async () => {
+    const box = sandbox();
+    const rows = profiles(box.root);
+    await applyFolderSync(box.deps, await planFolderSync(box.deps, rows, true));
+    const before = readFileSync(box.globalFile, "utf8");
+    // A directory where the file goes: the write fails before any unset ran.
+    const work = managedIncludeFile(box.globalFile, "work");
+    rmSync(work);
+    mkdirSync(work);
+    const plan = await planFolderSync(box.deps, rows, true);
+    expect((await applyFolderSync(box.deps, plan)).ok).toBe(false);
+    expect(readFileSync(box.globalFile, "utf8")).toBe(before);
+  });
+
   it("drops an include file when its profile goes", async () => {
     const box = sandbox();
     const rows = profiles(box.root);
@@ -208,7 +222,8 @@ describe("identity by folder, pure rules", () => {
         { id: "deep", name: "Deep", mono: "D", email: "d@x.example", authorName: null, roots: ["/a/b/c"] },
         { id: "shallow", name: "Shallow", mono: "S", email: "s@x.example", authorName: null, roots: ["/a"] },
         { id: "none", name: "None", mono: "N", email: "", authorName: null, roots: ["/z"] },
-        { id: "rootless", name: "Rootless", mono: "R", email: "r@x.example", authorName: null, roots: [] }
+        { id: "rootless", name: "Rootless", mono: "R", email: "r@x.example", authorName: null, roots: [] },
+        { id: "tabbed", name: "Tabbed", mono: "T", email: "t@x.example", authorName: "Rowan\tVale", roots: ["/t"] }
       ],
       "/home/rowan/.gitconfig",
       "linux"
@@ -216,7 +231,8 @@ describe("identity by folder, pure rules", () => {
     expect(includes.map((entry) => entry.condition)).toEqual(["gitdir:/a/", "gitdir:/a/b/c/"]);
     expect(skipped).toEqual([
       { profileId: "none", name: "None", reason: "no_email" },
-      { profileId: "rootless", name: "Rootless", reason: "no_roots" }
+      { profileId: "rootless", name: "Rootless", reason: "no_roots" },
+      { profileId: "tabbed", name: "Tabbed", reason: "unwritable" }
     ]);
   });
 

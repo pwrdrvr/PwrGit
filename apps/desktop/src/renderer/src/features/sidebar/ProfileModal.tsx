@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
+  comparableRoot,
   findRootOverlaps,
+  foldsPathCase,
   rootOverlapMessage,
   type CreateProfileRequest,
   type Profile,
@@ -82,9 +84,10 @@ export function ProfileModal({
   // email, so a folder that equals, holds or sits in another profile's is
   // refused. Only additions: an overlap saved before this rule can still be
   // saved while it is untangled.
-  const caseInsensitive = currentPlatform() === "darwin" || currentPlatform() === "win32";
+  const caseInsensitive = foldsPathCase(currentPlatform());
+  const savedRoots = new Set((profile?.roots ?? []).map((root) => comparableRoot(root, caseInsensitive)));
   const overlaps = findRootOverlaps(
-    roots.filter((root) => !(profile?.roots ?? []).includes(root)),
+    roots.filter((root) => !savedRoots.has(comparableRoot(root, caseInsensitive))),
     profiles.filter((other) => other.id !== profile?.id),
     caseInsensitive
   );

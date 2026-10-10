@@ -248,9 +248,16 @@ export type FolderSyncPlan = {
   files: { path: string; content: string; exists: boolean }[];
   /** PwrGit's include files no profile needs any more. */
   deleteFiles: string[];
-  /** Profiles that get no include, and why. */
-  skipped: { profileId: string; name: string; reason: "no_email" | "no_roots" }[];
+  /** Profiles that get no include, and why. `unwritable`: the email or
+   *  author name carries a control character a config file can't hold. */
+  skipped: { profileId: string; name: string; reason: "no_email" | "no_roots" | "unwritable" }[];
 };
+
+/** Whether `platform`'s file system folds case, so two roots that differ only
+ *  in case are one folder. Main, the profile editor and the report share it. */
+export function foldsPathCase(platform: string): boolean {
+  return platform === "darwin" || platform === "win32";
+}
 
 /** A root as compared: forward slashes, no trailing slash, optionally folded. */
 export function comparableRoot(root: string, caseInsensitive: boolean): string {

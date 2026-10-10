@@ -74,6 +74,21 @@ describe("the profile popup's Git row", () => {
     expect(view).toEqual({ tone: "warn", text: "1 of 3 repos commits as another email" });
   });
 
+  it("calls a name-only difference a name, not the profile's own email", () => {
+    const named = { authorName: "Rowan Vale" };
+    const nameOnly: Partial<FolderRepoIdentity> = { authorName: "rowan", source: "global", matches: false };
+    expect(folderRowView(work([repo("api", nameOnly), repo("billing", nameOnly)], named), CONFIGURED)).toEqual({
+      tone: "warn",
+      text: "Another author name in all 2 repos"
+    });
+    expect(folderRowView(work([repo("api"), repo("billing", nameOnly)], named), CONFIGURED).text).toBe(
+      "1 of 2 repos uses another author name"
+    );
+    expect(folderTally(work([repo("api", { ...nameOnly, origin: "/Users/rowan/.gitconfig" })], named)).text).toBe(
+      `Its 1 repo commits as ${WORK} with another author name · from /Users/rowan/.gitconfig`
+    );
+  });
+
   it("puts a shared folder first", () => {
     const view = folderRowView(
       work([repo("api")], {

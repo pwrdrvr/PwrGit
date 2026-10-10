@@ -2,7 +2,8 @@ import { useState } from "react";
 import type {
   FolderProfileIdentity,
   FolderRepoIdentity,
-  FolderSyncPlan
+  FolderSyncPlan,
+  OutsideGitIdentity
 } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { useModal } from "../../lib/useModal";
@@ -117,6 +118,8 @@ export function FolderIdentitySection({
         <ClearOverrideDialog
           repo={clearing.repo}
           profile={clearing.profile}
+          enabled={enabled}
+          machine={report?.machine ?? null}
           onClose={() => setClearing(null)}
           onApplied={(next) => {
             folders.accept(next);
@@ -224,6 +227,12 @@ function FolderProfileRow({
   );
 }
 
+const SKIP_REASONS: Record<FolderSyncPlan["skipped"][number]["reason"], string> = {
+  no_email: "no commit email",
+  no_roots: "no repo folders",
+  unwritable: "its email or author name has a control character"
+};
+
 /** The exact lines, then Write. Off removes PwrGit's includes and files. */
 function FolderSyncDialog({
   plan,
@@ -309,7 +318,7 @@ function FolderSyncDialog({
             <p className="folder-sync__skip">
               No include for{" "}
               {plan.skipped
-                .map((entry) => `${entry.name} (${entry.reason === "no_email" ? "no commit email" : "no repo folders"})`)
+                .map((entry) => `${entry.name} (${SKIP_REASONS[entry.reason]})`)
                 .join(", ")}
               .
             </p>
@@ -343,11 +352,17 @@ function FolderSyncDialog({
 function ClearOverrideDialog({
   repo,
   profile,
+  enabled,
+  machine,
   onClose,
   onApplied
 }: {
   repo: FolderRepoIdentity;
   profile: FolderProfileIdentity;
+  /** With the switch off there is no folder identity: the repo falls back to
+   *  Git's global one, and the dialog must say that instead. */
+  enabled: boolean;
+  machine: OutsideGitIdentity | null;
   onClose: () => void;
   onApplied: (report: NonNullable<FolderIdentityState["report"]>) => void;
 }) {
@@ -382,8 +397,23 @@ function ClearOverrideDialog({
       >
         <div className="modal__title" id="clear-override-title">Remove {repo.name}’s own email?</div>
         <p className="git-identity-setup__lede">
-          This repository sets <code>{repo.email}</code> in its own config, which wins over the {profile.name}{" "}
-          profile’s folder identity. Afterwards it commits as <code>{profile.email}</code>.
+          {enabled ? (
+            <>
+              This repository sets <code>{repo.email}</code> in its own config, which wins over the{" "}
+              {profile.name} profile’s folder identity. Afterwards it commits as <code>{profile.email}</code>.
+            </>
+          ) : (
+            <>
+              This repository sets <code>{repo.email}</code> in its own config. Afterwards it follows Git’s global
+              identity
+              {machine?.kind === "configured" ? (
+                <>
+                  , <code>{machine.author.email}</code>
+                </>
+              ) : null}
+              , until “Match Git to each profile” is on.
+            </>
+          )}
         </p>
         <div className="folder-sync__diff">
           <p className="folder-sync__file">

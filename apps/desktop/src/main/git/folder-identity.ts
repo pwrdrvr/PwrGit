@@ -5,6 +5,7 @@ import {
   comparableRoot,
   err,
   findRootOverlaps,
+  foldsPathCase,
   lastConfigEntry,
   ok,
   type FolderIdentityReport,
@@ -53,7 +54,7 @@ export type FolderRepoRow = { id: string; profileId: string; name: string; path:
 
 /** Case-insensitive file systems hand Git paths in whatever case they were typed. */
 export function caseInsensitivePaths(platform: NodeJS.Platform = process.platform): boolean {
-  return platform === "darwin" || platform === "win32";
+  return foldsPathCase(platform);
 }
 
 /** The include file PwrGit writes for `profileId`, beside the global file.
@@ -141,8 +142,12 @@ export function desiredIncludes(
   for (const profile of profiles) {
     const email = profile.email.trim();
     const roots = profile.roots.map((root) => root.trim()).filter((root) => root !== "");
-    if (email === "" || !writable(email) || !writable(profile.authorName ?? "")) {
+    if (email === "") {
       skipped.push({ profileId: profile.id, name: profile.name, reason: "no_email" });
+      continue;
+    }
+    if (!writable(email) || !writable(profile.authorName ?? "")) {
+      skipped.push({ profileId: profile.id, name: profile.name, reason: "unwritable" });
       continue;
     }
     if (roots.length === 0) {
@@ -312,26 +317,16 @@ function configFailure(action: string, stderr: string): Result<never> {
 }
 
 /**
- * Apply `plan`: remove PwrGit's includes, write the include files, append
- * the includes at the end of the global file, delete orphaned files. Only
- * PwrGit's own entries and files are touched.
+ * Apply `plan`: write the include files, remove PwrGit's includes, append
+ * them at the end of the global file, delete orphaned files. Files go first
+ * so a failed write leaves the global config as it was. Only PwrGit's own
+ * entries and files are touched.
  */
 export async function applyFolderSync(
   deps: FolderIdentityDeps,
   plan: FolderSyncPlan
 ): Promise<Result<null>> {
   const cwd = tmpdir();
-  for (const entry of plan.remove) {
-    const raw = await deps.git(
-      ["config", "--global", "--fixed-value", "--unset-all", `includeIf.${entry.condition}.path`, entry.path],
-      cwd
-    );
-    if (!raw.ok) return raw;
-    // 5: nothing matched — already gone, which is the goal.
-    if (raw.value.exitCode !== 0 && raw.value.exitCode !== 5) {
-      return configFailure(`remove the include for ${entry.condition}`, raw.value.stderr);
-    }
-  }
   for (const file of plan.files) {
     try {
       await writeFile(file.path, file.content, "utf8");
@@ -342,6 +337,17 @@ export async function applyFolderSync(
         message: `PwrGit couldn’t write ${file.path}.`,
         detail: cause instanceof Error ? cause.message : String(cause)
       });
+    }
+  }
+  for (const entry of plan.remove) {
+    const raw = await deps.git(
+      ["config", "--global", "--fixed-value", "--unset-all", `includeIf.${entry.condition}.path`, entry.path],
+      cwd
+    );
+    if (!raw.ok) return raw;
+    // 5: nothing matched — already gone, which is the goal.
+    if (raw.value.exitCode !== 0 && raw.value.exitCode !== 5) {
+      return configFailure(`remove the include for ${entry.condition}`, raw.value.stderr);
     }
   }
   for (const entry of plan.add) {

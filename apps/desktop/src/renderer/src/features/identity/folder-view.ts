@@ -24,6 +24,11 @@ function allCommit(count: number): string {
   return count === 1 ? "Its 1 repo commits" : `All ${count} repos commit`;
 }
 
+/** The repo commits with the profile's email; only the author name differs. */
+function emailMatches(repo: FolderRepoIdentity, profile: FolderProfileIdentity): boolean {
+  return repo.email !== null && repo.email.toLowerCase() === profile.email.trim().toLowerCase();
+}
+
 /** The one email every repo in `list` uses, or null when they disagree. */
 function sharedEmail(list: readonly FolderRepoIdentity[]): string | null {
   const first = list[0]?.email ?? null;
@@ -78,6 +83,17 @@ export function folderRowView(
     return {
       tone: "ok",
       text: list.length === 1 ? `${profile.email} in its 1 repo` : `${profile.email} in all ${repos(list.length)}`
+    };
+  }
+  // A profile that sets an author name differs on the name alone too; saying
+  // "commits as <its own email>" would read as a contradiction.
+  if (differ.every((repo) => emailMatches(repo, profile))) {
+    return {
+      tone: "warn",
+      text:
+        differ.length === list.length
+          ? `Another author name in ${list.length === 1 ? "its 1 repo" : `all ${repos(list.length)}`}`
+          : `${differ.length} of ${repos(list.length)} use${differ.length === 1 ? "s" : ""} another author name`
     };
   }
   if (differ.length === list.length) {
@@ -162,6 +178,9 @@ export function folderTally(profile: FolderProfileIdentity): FolderRowView {
       : "";
   if (differ.length === 0) {
     return { tone: "ok", text: `${allCommit(list.length)} as ${profile.email}${from(list[0])}` };
+  }
+  if (differ.length === list.length && differ.every((repo) => emailMatches(repo, profile))) {
+    return { tone: "warn", text: `${allCommit(list.length)} as ${profile.email} with another author name${from(list[0])}` };
   }
   if (differ.length === list.length) {
     const email = sharedEmail(list);

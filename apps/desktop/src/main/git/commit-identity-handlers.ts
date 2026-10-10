@@ -182,23 +182,26 @@ export function registerCommitIdentityHandlers(
       .all() as FolderRepoRow[];
 
   // One read per scope at a time: Settings and every window's popup can ask
-  // together, and each read is a Git process per repository.
+  // together, and each read is a Git process per repository. A read after a
+  // write passes `fresh`: one already in flight started before the write and
+  // would answer with the old config. Later askers join the fresh one.
   const folderReads = new Map<string, Promise<FolderIdentityReport>>();
-  const readFolders = (profileId?: string): Promise<FolderIdentityReport> => {
+  const readFolders = (profileId?: string, fresh = false): Promise<FolderIdentityReport> => {
     const key = profileId ?? "*";
-    let pending = folderReads.get(key);
-    if (pending === undefined) {
-      pending = inspectFolderIdentity(
-        { git },
-        {
-          enabled: deps.folderSyncEnabled(),
-          profiles: folderProfiles(),
-          repos: folderRepos(),
-          ...(profileId === undefined ? {} : { profileId })
-        }
-      ).finally(() => folderReads.delete(key));
-      folderReads.set(key, pending);
-    }
+    const inFlight = folderReads.get(key);
+    if (inFlight !== undefined && !fresh) return inFlight;
+    const pending: Promise<FolderIdentityReport> = inspectFolderIdentity(
+      { git },
+      {
+        enabled: deps.folderSyncEnabled(),
+        profiles: folderProfiles(),
+        repos: folderRepos(),
+        ...(profileId === undefined ? {} : { profileId })
+      }
+    ).finally(() => {
+      if (folderReads.get(key) === pending) folderReads.delete(key);
+    });
+    folderReads.set(key, pending);
     return pending;
   };
 
@@ -231,7 +234,7 @@ export function registerCommitIdentityHandlers(
           : `removed ${plan.remove.length} includeIf entries and ${plan.deleteFiles.length} include files`
       );
       deps.emitChanged();
-      return ok(await readFolders());
+      return ok(await readFolders(undefined, true));
     })
   );
 
@@ -245,7 +248,7 @@ export function registerCommitIdentityHandlers(
     if (!cleared.ok) return cleared;
     logMain("info", "identity", `removed a repository's own identity from ${repo.name}`);
     deps.emitChanged();
-    return ok(await readFolders());
+    return ok(await readFolders(undefined, true));
   });
 
   const resyncFolders = (): Promise<void> =>

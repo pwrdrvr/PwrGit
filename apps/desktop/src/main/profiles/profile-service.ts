@@ -9,7 +9,7 @@ import type {
   RootOverlap,
   UpdateProfileRequest
 } from "@pwrgit/shared";
-import { comparableRoot, err, findRootOverlaps, ok } from "@pwrgit/shared";
+import { comparableRoot, err, findRootOverlaps, foldsPathCase, ok } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 
 type ProfileRow = {
@@ -312,7 +312,7 @@ export class ProfileService {
    */
   addedRootOverlaps(id: ProfileId | null, roots: readonly string[]): RootOverlap[] {
     const all = this.list();
-    const caseInsensitive = process.platform === "darwin" || process.platform === "win32";
+    const caseInsensitive = foldsPathCase(process.platform);
     const existing = new Set(
       (all.find((profile) => profile.id === id)?.roots ?? []).map((root) => comparableRoot(root, caseInsensitive))
     );
