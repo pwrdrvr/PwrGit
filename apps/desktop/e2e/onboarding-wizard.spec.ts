@@ -74,7 +74,7 @@ test("walks a first run from welcome to a populated sidebar", async () => {
 
   // Forges → the scan explainer → the folder picker.
   await expect(title(handle)).toHaveText(
-    "Where PwrGit reads pull and merge requests from."
+    "Connect Git hosting and storage."
   );
   await nextButton(handle).click();
   await expect(title(handle)).toHaveText(
@@ -160,14 +160,25 @@ test("Forges hands a missing CLI its install commands, then notices the install"
   await nextButton(handle).click();
   await nextButton(handle).click();
   await expect(title(handle)).toHaveText(
-    "Where PwrGit reads pull and merge requests from."
+    "Connect Git hosting and storage."
   );
 
   // The app and this runner share a machine, so the commands the step chose
   // are this process's platform's.
   for (const kind of FORGE_KINDS) {
-    await expect(chipState(kind)).toHaveText("Not installed");
     await chip(kind).click();
+    if (forgeProduct(kind).authentication === "repo-token") {
+      await expect(chipState(kind)).toHaveText("Add token");
+      await expect(panelCommands).toHaveCount(0);
+      await expect(window.getByRole("tabpanel")).toContainText(
+        "save the exact remote and repo token in Settings"
+      );
+      await expect(
+        window.getByRole("tabpanel").getByRole("button", { name: "Token guide ↗" })
+      ).toBeVisible();
+      continue;
+    }
+    await expect(chipState(kind)).toHaveText("Not installed");
     await expect(panelCommands).toHaveText([
       ...forgeInstall(kind, process.platform).steps
     ]);
