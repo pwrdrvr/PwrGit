@@ -12,7 +12,7 @@ describe("Oxlint correctness scope", () => {
       "__pwrgit_lint_probe.ts",
       "apps/desktop/src/main/__pwrgit_lint_probe.ts",
       "apps/desktop/src/renderer/src/__pwrgit_lint_probe.ts",
-      "packages/shared/src/__pwrgit_lint_probe.test.ts",
+      "scripts/__pwrgit_lint_probe.test.ts",
       "scripts/__pwrgit_lint_probe.mjs",
     ];
     const created = [];

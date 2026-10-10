@@ -55,7 +55,9 @@ and standalone design prototypes are excluded.
 The `no-empty-pattern` exceptions cover Playwright's required destructured
 fixture parameters and the renderer's `act` fixture. Keep those narrow.
 `oxlint-config.test.mjs` injects unsafe-access and conditional-Hooks defects to
-verify scope and rejection. Syntax lint adds coverage; PwrGit had no ESLint
+verify scope and rejection. Keep test-shaped probes outside Vitest's discovered
+source patterns so watch mode cannot schedule them as suites.
+Syntax lint adds coverage; PwrGit had no ESLint
 baseline to accelerate. Oxfmt/automatic formatting requires its own scoped
 change rather than a bulk format alongside correctness checks.
 
