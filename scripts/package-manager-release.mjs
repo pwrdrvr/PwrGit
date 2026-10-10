@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Package managers follow the promoted Stable Latest release, never a build tag.
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -282,22 +284,29 @@ export function validationPlan(release, report, validatorDigest, windowsValidato
   };
 }
 
-export async function downloadAssets(assets, downloads, { fetch: fetchAsset = fetch } = {}) {
+export async function downloadAssets(assets, downloads, { fetch: fetchAsset } = {}) {
   mkdirSync(downloads, { recursive: true });
   for (const asset of assets) {
     const path = join(downloads, asset.name);
     if (!existsSync(path)) {
-      const response = await fetchAsset(asset.url);
-      if (!response.ok || !response.body) throw new Error(`Download failed: ${asset.name} HTTP ${response.status}`);
-      const temporaryDirectory = mkdtempSync(join(downloads, ".download-"));
-      const temporaryPath = join(temporaryDirectory, asset.name);
-      try {
-        await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
-        const actual = await hashFile(temporaryPath);
-        if (actual.digest !== asset.digest || actual.size !== asset.size) throw new Error(`Downloaded bytes do not match GitHub: ${asset.name}`);
-        renameSync(temporaryPath, path);
-      } finally {
-        rmSync(temporaryDirectory, { recursive: true, force: true });
+      if (!fetchAsset) {
+        execFileSync("python3", [fileURLToPath(new URL("./build-artifact.py", import.meta.url)),
+          "--url", asset.url, "--sha256", asset.digest.slice(7), "--size", String(asset.size), "--output", path],
+        { stdio: "inherit" });
+      } else {
+        // Fixture-only injection; production always uses the artifact resolver.
+        const response = await fetchAsset(asset.url);
+        if (!response.ok || !response.body) throw new Error(`Download failed: ${asset.name} HTTP ${response.status}`);
+        const temporaryDirectory = mkdtempSync(join(downloads, ".download-"));
+        const temporaryPath = join(temporaryDirectory, asset.name);
+        try {
+          await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
+          const actual = await hashFile(temporaryPath);
+          if (actual.digest !== asset.digest || actual.size !== asset.size) throw new Error(`Downloaded bytes do not match GitHub: ${asset.name}`);
+          renameSync(temporaryPath, path);
+        } finally {
+          rmSync(temporaryDirectory, { recursive: true, force: true });
+        }
       }
     }
     // Exact cache hits are still untrusted bytes. A corrupt restore fails closed.
@@ -320,7 +329,7 @@ export async function downloadPlatform(directory, platform, options = {}) {
   }
 }
 
-export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset = fetch, metadataOnly = false, validatorDigest, windowsValidatorDigest = validatorDigest } = {}) {
+export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset, metadataOnly = false, validatorDigest, windowsValidatorDigest = validatorDigest } = {}) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("Usage: prepare vX.Y.Z <output-directory>");
   const report = await audit({ api });
   if (tag !== report.stableTag) throw new Error(`Only Stable Latest ${report.stableTag} can update the package managers`);

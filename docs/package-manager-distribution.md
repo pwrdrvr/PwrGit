@@ -1,5 +1,23 @@
 # Winget and Homebrew distribution
 
+## Automatic Homebrew publication and CI byte acquisition
+
+PwrGit's Homebrew publisher runs in `pwrdrvr/homebrew-tap` through
+`bump-pwrgit.yml` and the shared `sync.yml`. It validates both native Mac profiles and
+commits the cask directly to `main`; routine updates do not open bump PRs or
+require a merge. The tap polls every 15 minutes. Product synchronization can
+dispatch immediately with `HOMEBREW_TAP_DISPATCH_TOKEN` (tap-only Actions write),
+or await the schedule when that optional credential is absent. Homebrew does
+not depend on Winget submission credentials or upstream review.
+
+CI acquires installers/checksums from retained successful release-build Actions
+artifacts for the exact stable tag commit, verifies SHA-256 and size against
+release metadata, and never falls back to published release downloads. Signed
+platform artifacts retain for 90 days. Missing/expired artifacts, corrupt bytes
+or moved tags are explicit blockers; restore the original build artifacts.
+Already published tap versions skip native validation and byte acquisition.
+PwrDrvr release-asset URLs remain end-user URLs, not CI acquisition sources.
+
 GitHub Releases in `pwrdrvr/PwrGit` are the artifact authority. Both channels
 follow **promoted, suffix-free Stable Latest**. Do not cut or promote a release
 solely to populate a package manager. Alpha, beta and Stable candidates continue
@@ -73,8 +91,8 @@ workflow; the explicit dispatch above remains part of promotion through the skil
 Routine audits do not request release asset bytes and therefore do not add
 installer downloads to GitHub statistics. Synchronization reads metadata and
 returns when the tap is already current. A needed tap update verifies both DMGs
-using its installer cache; cache misses download release bytes. Keep those validation downloads
-separate from estimates of user adoption.
+using its installer cache; cache misses acquire original Actions build artifacts.
+Release-asset downloads are prohibited, including after cache eviction.
 
 Native validation and Winget submission-file generation are explicit operations,
 not daily/PR/release-event checks. When published-byte or installation evidence
@@ -364,3 +382,5 @@ PwrGit publisher architecture checks subsequently passed in
 Publication was skipped because these are PR runs. A separate tap child
 PR scopes registration CI to changed casks. Use current run results rather than
 the historical October 2 checks above.
+
+Windows native validation installs only from a loopback mirror of verified Actions artifact bytes, including an indexed previous version when one exists. Production manifests keep their public release URLs; installation-only copies replace those URLs. Missing or corrupt artifacts block validation instead of causing WinGet to download a public release.
