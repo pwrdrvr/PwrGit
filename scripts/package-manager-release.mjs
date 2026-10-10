@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Package managers follow the promoted Stable Latest release, never a build tag.
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -282,11 +284,17 @@ export function validationPlan(release, report, validatorDigest, windowsValidato
   };
 }
 
-export async function downloadAssets(assets, downloads, { fetch: fetchAsset = fetch } = {}) {
+export async function downloadAssets(assets, downloads, { fetch: fetchAsset } = {}) {
   mkdirSync(downloads, { recursive: true });
   for (const asset of assets) {
     const path = join(downloads, asset.name);
     if (!existsSync(path)) {
+      if (!fetchAsset) {
+        execFileSync("python3", [fileURLToPath(new URL("./build-artifact.py", import.meta.url)),
+          "--url", asset.url, "--sha256", asset.digest.slice(7), "--size", String(asset.size), "--output", path],
+        { stdio: "inherit" });
+      } else {
+      // Fixture-only injection; production always uses the artifact resolver.
       const response = await fetchAsset(asset.url);
       if (!response.ok || !response.body) throw new Error(`Download failed: ${asset.name} HTTP ${response.status}`);
       const temporaryDirectory = mkdtempSync(join(downloads, ".download-"));
@@ -298,6 +306,7 @@ export async function downloadAssets(assets, downloads, { fetch: fetchAsset = fe
         renameSync(temporaryPath, path);
       } finally {
         rmSync(temporaryDirectory, { recursive: true, force: true });
+      }
       }
     }
     // Exact cache hits are still untrusted bytes. A corrupt restore fails closed.

@@ -24,7 +24,7 @@ function ghApi(endpoint, body, token) {
 }
 export async function syncHomebrew(version, {
   api = ghApi, dispatchToken = process.env.HOMEBREW_TAP_DISPATCH_TOKEN,
-  pause = sleep, attempts = 40,
+  pause = sleep, attempts = 70,
 } = {}) {
   if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) throw new Error("Expected promoted stable X.Y.Z version");
   const source = `repos/${tap}/contents/Casks/pwrgit.rb?ref=main`;
@@ -37,16 +37,17 @@ export async function syncHomebrew(version, {
     return result ? Buffer.from(result.content, "base64").toString("utf8").match(/^  version "(\d+\.\d+\.\d+)"$/m)?.[1] : null;
   };
   if (await publishedVersion() === version) return { version, state: "published", workflowUrl };
-  if (!dispatchToken) {
-    throw new Error(`Homebrew has not published ${version}. Immediate dispatch needs HOMEBREW_TAP_DISPATCH_TOKEN (fine-grained PAT: pwrdrvr/homebrew-tap only, Actions write). The tap's 15-minute schedule also publishes validated updates after initial setup is merged. Check ${workflowUrl}; do not open a routine bump PR.`);
-  }
   const remote = await api(`repos/${tap}/actions/workflows/${workflow}`);
   if (!remote || remote.state !== "active") throw new Error(`Homebrew publisher is not installed/active on tap main. Merge the tap setup before dispatching: ${workflowUrl}`);
   const dispatchedAt = Date.now();
-  await api(`repos/${tap}/actions/workflows/${workflow}/dispatches`, { ref: "main", inputs: { version } }, dispatchToken);
+  if (dispatchToken) {
+    await api(`repos/${tap}/actions/workflows/${workflow}/dispatches`, { ref: "main", inputs: { version } }, dispatchToken);
+  } else {
+    console.log("Immediate dispatch token is not configured; waiting for the tap's 15-minute artifact-backed publisher.");
+  }
   const currentRun = async () => {
-    const runs = await api(`repos/${tap}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=10`);
-    return runs?.workflow_runs.find((candidate) => candidate.display_title === `PwrGit Homebrew sync ${version}` &&
+    const runs = await api(`repos/${tap}/actions/workflows/${workflow}/runs?event=${dispatchToken ? "workflow_dispatch" : "schedule"}&per_page=10`);
+    return runs?.workflow_runs.find((candidate) => (!dispatchToken || candidate.display_title === `PwrGit Homebrew sync ${version}`) &&
       Date.parse(candidate.created_at) >= dispatchedAt - 1000);
   };
   let run;
@@ -58,10 +59,11 @@ export async function syncHomebrew(version, {
     }
     await pause(30_000);
   }
-  throw new Error(`Homebrew target ${version} is not on tap main after 20 minutes. Tap run: ${run?.html_url ?? workflowUrl}; status=${run?.status ?? "unknown"}, conclusion=${run?.conclusion ?? "pending"}. Inspect this run, fix its failed step, then dispatch the same workflow. No update PR approval is needed.`);
+  throw new Error(`Homebrew target ${version} is not on tap main after ${attempts * 30 / 60} minutes. Tap run: ${run?.html_url ?? workflowUrl}; status=${run?.status ?? "unknown"}, conclusion=${run?.conclusion ?? "pending"}. Inspect this run, fix its failed step, then dispatch the same workflow. No update PR approval is needed.`);
 }
 export async function runCli(args = process.argv.slice(2)) {
-  const result = await syncHomebrew(args[0]);
+  const latest = args[0] ? null : ghApi("repos/pwrdrvr/PwrGit/releases/latest");
+  const result = await syncHomebrew(args[0] || latest?.tag_name?.replace(/^v/, ""));
   const summary = `Homebrew PwrGit ${result.version}: verified published on tap main. [Tap workflow](${result.workflowUrl}). Users receive it after brew update; client installation checks remain separate.\n`;
   console.log(summary);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
