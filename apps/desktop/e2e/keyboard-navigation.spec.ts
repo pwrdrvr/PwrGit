@@ -37,7 +37,9 @@ test("a popup menu takes the arrows, and Escape returns focus to its trigger", a
 
   // Focus enters the menu on open, so the arrows have somewhere to start —
   // before this the menu was a dead end for anyone not using a mouse.
-  const items = window.locator(".profile-menu__item, .profile-menu__action");
+  // Every menuitem the menu roves through, the "Git outside PwrGit" row
+  // between the profiles and the actions included.
+  const items = window.locator(".profile-menu__item, .profile-menu__git, .profile-menu__action");
   await expect(items.first()).toBeFocused();
 
   // Roving tabindex: exactly one item is in the tab order at a time, which is

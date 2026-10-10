@@ -98,6 +98,15 @@ describe("profile popup › Git outside PwrGit", () => {
     expect(row?.textContent).toContain("Commits as rowan@vale.example in its 1 repo");
   });
 
+  it("is a stop in the menu's arrow walk, between the profiles and the actions", async () => {
+    await openMenu();
+    const menu = container.querySelector<HTMLElement>(".profile-menu")!;
+    await act(async () => {
+      menu.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement?.className).toContain("profile-menu__git");
+  });
+
   it("opens Settings › Profiles › By folder and closes the menu", async () => {
     await openMenu();
     await act(async () => container.querySelector<HTMLButtonElement>(".profile-menu__git")!.click());
