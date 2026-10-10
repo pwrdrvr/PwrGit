@@ -1,5 +1,23 @@
 # Winget and Homebrew distribution
 
+## Automatic Homebrew publication and CI byte acquisition
+
+PwrGit's Homebrew publisher runs in `pwrdrvr/homebrew-tap` through
+`bump-pwrgit.yml` and the shared `sync.yml`. It validates both native Mac profiles and
+commits the cask directly to `main`; routine updates do not open bump PRs or
+require a merge. The tap polls every 15 minutes. Product synchronization can
+dispatch immediately with `HOMEBREW_TAP_DISPATCH_TOKEN` (tap-only Actions write),
+or await the schedule when that optional credential is absent. Homebrew does
+not depend on Winget submission credentials or upstream review.
+
+CI acquires installers/checksums from retained successful release-build Actions
+artifacts for the exact stable tag commit, verifies SHA-256 and size against
+release metadata, and never falls back to published release downloads. Signed
+platform artifacts retain for 90 days. Missing/expired artifacts, corrupt bytes
+or moved tags are explicit blockers; restore the original build artifacts.
+Already published tap versions skip native validation and byte acquisition.
+PwrDrvr release-asset URLs remain end-user URLs, not CI acquisition sources.
+
 GitHub Releases in `pwrdrvr/PwrGit` are the artifact authority. Both channels
 follow **promoted, suffix-free Stable Latest**. Do not cut or promote a release
 solely to populate a package manager. Alpha, beta and Stable candidates continue

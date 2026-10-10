@@ -294,19 +294,19 @@ export async function downloadAssets(assets, downloads, { fetch: fetchAsset } = 
           "--url", asset.url, "--sha256", asset.digest.slice(7), "--size", String(asset.size), "--output", path],
         { stdio: "inherit" });
       } else {
-      // Fixture-only injection; production always uses the artifact resolver.
-      const response = await fetchAsset(asset.url);
-      if (!response.ok || !response.body) throw new Error(`Download failed: ${asset.name} HTTP ${response.status}`);
-      const temporaryDirectory = mkdtempSync(join(downloads, ".download-"));
-      const temporaryPath = join(temporaryDirectory, asset.name);
-      try {
-        await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
-        const actual = await hashFile(temporaryPath);
-        if (actual.digest !== asset.digest || actual.size !== asset.size) throw new Error(`Downloaded bytes do not match GitHub: ${asset.name}`);
-        renameSync(temporaryPath, path);
-      } finally {
-        rmSync(temporaryDirectory, { recursive: true, force: true });
-      }
+        // Fixture-only injection; production always uses the artifact resolver.
+        const response = await fetchAsset(asset.url);
+        if (!response.ok || !response.body) throw new Error(`Download failed: ${asset.name} HTTP ${response.status}`);
+        const temporaryDirectory = mkdtempSync(join(downloads, ".download-"));
+        const temporaryPath = join(temporaryDirectory, asset.name);
+        try {
+          await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryPath));
+          const actual = await hashFile(temporaryPath);
+          if (actual.digest !== asset.digest || actual.size !== asset.size) throw new Error(`Downloaded bytes do not match GitHub: ${asset.name}`);
+          renameSync(temporaryPath, path);
+        } finally {
+          rmSync(temporaryDirectory, { recursive: true, force: true });
+        }
       }
     }
     // Exact cache hits are still untrusted bytes. A corrupt restore fails closed.

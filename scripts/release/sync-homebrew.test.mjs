@@ -26,7 +26,7 @@ test("dispatches the tap's main workflow with a write token and verifies publica
   expect(calls.filter((call) => !call.body).every((call) => call.token === undefined)).toBe(true);
 });
 test("reports setup dependencies and a bounded schedule wait without opening PRs", async () => {
-  await expect(syncHomebrew("0.29.0", { ...source(), dispatchToken: "", pause: async () => {}, attempts: 1 })).rejects.toThrow("not on tap main");
+  await expect(syncHomebrew("0.29.0", { ...source(), dispatchToken: "", pause: async () => {}, attempts: 1 })).rejects.toThrow("actions/runs/123");
   await expect(syncHomebrew("0.29.0", { ...source({ installed: false }), dispatchToken: "test-token" })).rejects.toThrow("not installed/active");
 });
 test("refuses stale targets and reports failed tap runs after a bounded wait", async () => {
