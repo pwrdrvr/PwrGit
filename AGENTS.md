@@ -65,7 +65,7 @@ same repaired helper inherits its permissions but is not a complete setup fix.
 pnpm dev        # run the app (electron-vite dev)
 pnpm build      # production build
 pnpm test       # vitest across the workspace
-pnpm typecheck  # tsc across packages
+pnpm typecheck  # TypeScript 7 native compiler across packages
 pnpm lint       # every check CI runs, cheapest-first (see below)
 ```
 
@@ -96,6 +96,13 @@ that main, preload, and renderer stay three separate bundles sharing only
 `@pwrgit/shared` — violations there type-check and usually bundle, then fail at
 launch, so `tsc` will not catch them. The config's header comments explain each
 rule.
+
+`typecheck` selects the exact-pinned `typescript-native` alias through
+`scripts/typecheck.mjs`. Keep TypeScript 6 (`typescript`) for dependency-cruiser's
+JavaScript API and MCP declaration/JS emit. Both dependencies publish `tsc`, so
+do not rely on whichever binary happens to win `node_modules/.bin/tsc`.
+For a comparison or fallback, run `PWRGIT_TYPECHECK_COMPILER=typescript pnpm typecheck`.
+Editor/LSP selection is independent; compiler timings do not measure session memory.
 
 `typecheck` also carries the unused-code gate: `tsconfig.base.json` sets
 `noUnusedLocals` and `noUnusedParameters`, which `apps/desktop`,

@@ -1,7 +1,7 @@
 {
   "name": "@pwrgit/desktop",
   "productName": "PwrGit",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "private": true,
   "description": "Cross-platform desktop git client",
   "homepage": "https://github.com/pwrdrvr/PwrGit",
@@ -30,7 +30,7 @@
     "package:linux": "node ../../scripts/resource-run.mjs node ./scripts/release.mjs --linux --no-publish",
     "package:win": "node ../../scripts/resource-run.mjs node ./scripts/release.mjs --win",
     "release": "node ../../scripts/resource-run.mjs node ./scripts/release.mjs",
-    "typecheck": "node ../../scripts/resource-run.mjs tsc --noEmit -p tsconfig.json",
+    "typecheck": "node ../../scripts/resource-run.mjs node ../../scripts/typecheck.mjs --noEmit -p tsconfig.json",
     "pretest:e2e": "node ../../scripts/resource-run.mjs electron-vite build",
     "test:e2e": "node ../../scripts/resource-run.mjs playwright test -c playwright.config.ts",
     "pretest:docs-shots": "node ../../scripts/resource-run.mjs electron-vite build",

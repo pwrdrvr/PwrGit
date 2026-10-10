@@ -1,0 +1,32 @@
+name: Development Check Performance
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-performance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    if: github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'ci:benchmark-checks')
+    name: Paired TS6 and TS7 checks
+    runs-on: [self-hosted, macOS, ARM64, pwrdrvr-macos]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pwrdrvr/configure-nodejs@v1
+        with:
+          node-version: 24.x
+      - name: Compare identical sources and check commands on this runner
+        run: node scripts/resource-run.mjs node scripts/benchmark-checks.mjs check-benchmark
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: check-performance-${{ runner.name }}
+          path: check-benchmark/
+          retention-days: 30

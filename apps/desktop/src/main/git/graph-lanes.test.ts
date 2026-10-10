@@ -92,7 +92,15 @@ function buildDivergedRelease(root: string): void {
   const remote = join(root, "remote.git");
   mkdirSync(repo, { recursive: true });
   git(root, "init", "--bare", "remote.git");
+  // Every commit, fetch and push below — on the remote's side too — would
+  // otherwise spawn a detached `git maintenance run --auto`, which can still
+  // hold `objects/maintenance.lock` after beforeAll returns. A lock that
+  // vanishes mid-copy fails `divergedRelease()`'s cpSync with ENOENT on
+  // `.git/objects`. Repo config, not GIT_ENV: the local transport strips
+  // GIT_CONFIG_* before it runs receive-pack in the remote.
+  git(remote, "config", "maintenance.auto", "false");
   git(repo, "init", "-b", "main");
+  git(repo, "config", "maintenance.auto", "false");
   git(repo, "config", "user.email", "t@t.com");
   git(repo, "config", "user.name", "Tester");
   git(repo, "config", "core.autocrlf", "false");
