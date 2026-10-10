@@ -134,6 +134,12 @@ Keep label names namespaced when they start, skip, or narrow CI work.
 | `ci:windows-signing` | `release.yml` | For same-repo PRs, runs the release Windows prepare/build/Azure-sign/Authenticode-verification path and uploads the signed installer to the workflow run. It never creates a GitHub Release. |
 | `ci:linux-packages` | `release.yml` | For same-repo PRs, runs `linux-build` on x64 and arm64: native DEB/RPM/pacman/tar.gz packaging, manifest checks and the installed-DEB smoke test, uploading the packages to the workflow run. Use it on PRs that touch Linux packaging. It never creates a GitHub Release. |
 
+`ci:benchmark-checks` opts same-repo PRs into `check-performance.yml`: three
+paired TS6/TS7 samples of identical typecheck and full-lint commands on one
+self-hosted Mac. Artifacts record revisions, source inventories, injected defect
+rejection, versions, load and RSS. Caches are warm; do not compare runners or
+interpret process RSS as LSP memory. Fork PRs cannot run this workflow.
+
 If you add another label-influenced workflow path, document it here in the same
 change as the workflow update.
 
