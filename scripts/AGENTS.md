@@ -42,6 +42,25 @@ and watch commands hold the lane until they exit. Cancellation drains the
 primary and detached POSIX tool groups or Windows native Job before releasing the lease; do not
 replace Windows ownership with a `taskkill /T` fallback.
 
+## Syntax correctness lint
+
+`lint:syntax` runs exact-pinned Oxlint with `.oxlintrc.json` from the repository
+root. Rules are explicit so adding a plugin cannot silently enable new rule
+categories. Classic Rules of Hooks apply only to renderer sources; React
+Compiler migration rules are outside this check. TS unused bindings remain
+owned by `tsconfig.base.json`, including its strict treatment of `_` locals.
+JS files use Oxlint's unused-binding check. Generated output, dependency trees
+and standalone design prototypes are excluded.
+
+The `no-empty-pattern` exceptions cover Playwright's required destructured
+fixture parameters and the renderer's `act` fixture. Keep those narrow.
+`oxlint-config.test.mjs` injects unsafe-access and conditional-Hooks defects to
+verify scope and rejection. Keep test-shaped probes outside Vitest's discovered
+source patterns so watch mode cannot schedule them as suites.
+Syntax lint adds coverage; PwrGit had no ESLint
+baseline to accelerate. Oxfmt/automatic formatting requires its own scoped
+change rather than a bulk format alongside correctness checks.
+
 ## Compiler measurements
 
 `typecheck.mjs` resolves TS7's CLI explicitly; `PWRGIT_TYPECHECK_COMPILER=typescript`

@@ -1,0 +1,99 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript"
+  ],
+  "categories": {
+    "correctness": "off"
+  },
+  "env": {
+    "builtin": true,
+    "browser": true,
+    "node": true
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/out/**",
+    "**/dist/**",
+    "**/dist-bundle/**",
+    "**/coverage/**",
+    "**/test-results/**",
+    "**/playwright-report/**",
+    "apps/desktop/.local/**",
+    "design/**"
+  ],
+  "rules": {
+    "no-async-promise-executor": "error",
+    "no-cond-assign": "error",
+    "no-constant-binary-expression": "error",
+    "no-constant-condition": "error",
+    "no-debugger": "error",
+    "no-dupe-else-if": "error",
+    "no-duplicate-case": "error",
+    "no-empty": "error",
+    "no-empty-character-class": "error",
+    "no-empty-pattern": "error",
+    "no-ex-assign": "error",
+    "no-extra-boolean-cast": "error",
+    "no-fallthrough": "error",
+    "no-global-assign": "error",
+    "no-invalid-regexp": "error",
+    "no-loss-of-precision": "error",
+    "no-misleading-character-class": "error",
+    "no-prototype-builtins": "error",
+    "no-self-assign": "error",
+    "no-sparse-arrays": "error",
+    "no-unassigned-vars": "error",
+    "no-unexpected-multiline": "error",
+    "no-unsafe-finally": "error",
+    "no-unsafe-negation": "error",
+    "no-unsafe-optional-chaining": "error",
+    "no-unused-labels": "error",
+    "no-useless-backreference": "error",
+    "no-useless-catch": "error",
+    "require-yield": "error",
+    "use-isnan": "error",
+    "valid-typeof": "error",
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/*.ts",
+        "**/*.tsx",
+        "**/*.mts",
+        "**/*.cts"
+      ],
+      "rules": {
+        "no-unused-vars": "off",
+        "no-undef": "off"
+      }
+    },
+    {
+      "files": [
+        "apps/desktop/e2e/**/*.ts",
+        "apps/desktop/src/renderer/src/test-support/react-act-setup.ts"
+      ],
+      "rules": {
+        "no-empty-pattern": "off"
+      }
+    },
+    {
+      "files": [
+        "apps/desktop/src/renderer/**/*.{ts,tsx}"
+      ],
+      "plugins": [
+        "react"
+      ],
+      "rules": {
+        "react/rules-of-hooks": "error"
+      }
+    }
+  ]
+}

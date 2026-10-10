@@ -11,7 +11,7 @@
     "preinstall": "node ./scripts/check-node-version.mjs",
     "build": "node scripts/resource-run.mjs pnpm --filter @pwrgit/mcp-server build && node scripts/resource-run.mjs pnpm --filter @pwrgit/desktop build",
     "dev": "node scripts/resource-run.mjs pnpm --filter @pwrgit/desktop dev",
-    "lint": "node scripts/resource-run.mjs pnpm lint:forge-kinds && node scripts/resource-run.mjs pnpm lint:colors && node scripts/resource-run.mjs pnpm deps:maturity && node scripts/resource-run.mjs pnpm licenses:check && node scripts/resource-run.mjs pnpm lint:boundaries && node scripts/resource-run.mjs pnpm typecheck",
+    "lint": "node scripts/resource-run.mjs pnpm lint:syntax && node scripts/resource-run.mjs pnpm lint:forge-kinds && node scripts/resource-run.mjs pnpm lint:colors && node scripts/resource-run.mjs pnpm deps:maturity && node scripts/resource-run.mjs pnpm licenses:check && node scripts/resource-run.mjs pnpm lint:boundaries && node scripts/resource-run.mjs pnpm typecheck",
     "lint:boundaries": "node scripts/resource-run.mjs depcruise --config .dependency-cruiser.cjs packages/ apps/desktop/src/",
     "lint:colors": "node scripts/resource-run.mjs node ./scripts/lint-renderer-colors.mjs",
     "lint:forge-kinds": "node scripts/resource-run.mjs node ./scripts/check-forge-kind-branching.mjs",
@@ -28,13 +28,15 @@
     "distribution:audit": "node scripts/package-manager-release.mjs audit",
     "distribution:prepare": "node scripts/package-manager-release.mjs prepare",
     "fix:linux-sandbox": "node ./scripts/linux-sandbox.mjs --fix",
-    "check:linux-sandbox": "node ./scripts/linux-sandbox.mjs --warn"
+    "check:linux-sandbox": "node ./scripts/linux-sandbox.mjs --warn",
+    "lint:syntax": "node scripts/resource-run.mjs oxlint"
   },
   "devDependencies": {
     "@types/node": "24.19.0",
     "cross-spawn": "^7.0.6",
     "dependency-cruiser": "^18.4.0",
     "jsdom": "^30.1.1",
+    "oxlint": "1.85.0",
     "proper-lockfile": "^4.1.2",
     "typescript": "^6.0.2",
     "typescript-native": "npm:typescript@7.0.2",

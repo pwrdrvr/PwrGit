@@ -75,7 +75,7 @@ It covers live schema discovery, guest setup, ownership, and the script fallback
 when MCP is unavailable. Use the dedicated E2E VM, never a GHA runner or the
 physical host desktop for this workflow.
 
-`pnpm lint` chains `lint:forge-kinds` → `lint:colors` → `deps:maturity` →
+`pnpm lint` chains `lint:syntax` → `lint:forge-kinds` → `lint:colors` → `deps:maturity` →
 `licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
 doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
 so **add new repo-wide checks to the chain in the root `package.json`**, not as
