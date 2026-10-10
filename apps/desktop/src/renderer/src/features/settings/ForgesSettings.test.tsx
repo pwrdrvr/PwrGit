@@ -95,6 +95,7 @@ function respond(handlers: {
   hosts?: () => unknown;
 }): void {
   mocks.dispatch.mockImplementation(async (channel: string) => {
+    if (channel === "artifacts:credentials") return ok({ secureStorageAvailable: true, credentials: [] });
     if (channel === "forge:hosts") {
       return handlers.hosts?.() ?? ok({ hosts: rows });
     }
@@ -126,7 +127,7 @@ describe("ForgesSettings", () => {
     // Two reads, both over the bus, and nothing that reaches a vendor API.
     expect(
       new Set(mocks.dispatch.mock.calls.map((call) => call[0]))
-    ).toEqual(new Set(["forge:hosts", "forge:status"]));
+    ).toEqual(new Set(["forge:hosts", "forge:status", "artifacts:credentials"]));
     expect(statusCalls()).toHaveLength(1);
     expect(container.textContent).toContain("GitHub");
     expect(container.textContent).toContain("Connected");

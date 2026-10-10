@@ -76,6 +76,7 @@ export type ForgeProbeTarget = {
  * one of them probing the other's CLI, and the real one not at all.
  */
 const DEFAULT_PROBES: Readonly<{ [K in ForgeKind]: ForgeProbe & { kind: K } }> = {
+  artifacts: { kind: "artifacts", cli: "", installed: async () => true, loggedIn: async () => false },
   gitcafe: { kind: "gitcafe", cli: "cafe", installed: cafeInstalled, loggedIn: cafeLoggedIn },
   github: {
     kind: "github",
@@ -108,6 +109,7 @@ function glabDefaultHost(): string {
 
 export type ForgeStatusServiceDeps = {
   probes?: ForgeProbe[];
+  repoTokenAvailable?: (host: string | undefined) => boolean;
   /**
    * Which forge hosts to probe, and whether the user's switch allows each one.
    *
@@ -133,7 +135,7 @@ export type ForgeStatusServiceDeps = {
 /** Both SaaS hosts, on — what host resolution knows before any CLI has been
  *  enumerated, and so the honest default for a caller that injects nothing. */
 function saasHosts(): ForgeProbeTarget[] {
-  return FORGE_KINDS.map((kind) => ({
+  return FORGE_KINDS.filter((kind) => forgeProduct(kind).saasHost !== "").map((kind) => ({
     kind,
     host: forgeProduct(kind).saasHost,
     enabled: true,
@@ -181,7 +183,12 @@ export class ForgeStatusService {
   private readonly listeners = new Set<(statuses: ForgeStatus[]) => void>();
 
   constructor(deps: ForgeStatusServiceDeps = {}) {
-    this.probes = deps.probes ?? FORGE_KINDS.map((kind) => DEFAULT_PROBES[kind]);
+    this.probes = deps.probes ?? FORGE_KINDS.map((kind) => {
+      const probe = DEFAULT_PROBES[kind];
+      return forgeProduct(kind).authentication === "repo-token" ? {
+        ...probe, loggedIn: async (host: string | undefined) => deps.repoTokenAvailable?.(host) ?? false
+      } : probe;
+    });
     this.hosts = deps.hosts ?? saasHosts;
     this.now = deps.now ?? (() => Date.now());
     this.ttlMs = deps.ttlMs ?? STATUS_TTL_MS;

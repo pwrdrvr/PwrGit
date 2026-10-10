@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
   isForgeKind,
+  forgeProductFor,
   type CloneCatalog,
   type CloneDestination,
   type CloneProgress,
@@ -337,7 +338,7 @@ export function CloneRepoDialog({
   // toggle that leads straight to "install the CLI" is a dead end dressed up
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => forgeCanAnswerAnywhere(status))
+    .filter((status) => status.capabilities.repositoryApi !== false && forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
   // Snap onto a forge that can actually answer. Without this a machine with
   // only GitLab signed in leaves `host` on its "github" default forever: the
@@ -364,6 +365,9 @@ export function CloneRepoDialog({
   const cliDisabled =
     catalog !== null && !forgeCanAnswerDialog(forgeStatus, activeHostname);
 
+  const gitOnly = forgeProductFor(activeHost)?.authentication === "repo-token";
+  useEffect(() => { if (gitOnly) setProtocol("https"); }, [gitOnly]);
+
   // ── Clone from: the original, or your fork ──────────────────────────────
   // Asked only once a forge repository is picked, never per keystroke: the
   // accounts a fork could land in (one forge call per instance), then one
@@ -372,7 +376,8 @@ export function CloneRepoDialog({
   const forgeSource =
     selectedRepository !== null &&
     selectedRepository.localPath === undefined &&
-    isForgeKind(selectedRepository.host)
+    isForgeKind(selectedRepository.host) &&
+    forgeProductFor(selectedRepository.host)?.capabilities.repositoryApi !== false
       ? selectedRepository
       : null;
   const forkOwnersHost: ForgeKind | null =
@@ -522,7 +527,7 @@ export function CloneRepoDialog({
     profileId: profile.id,
     query: sourceQuery,
     host,
-    enabled: usableHosts.includes(host) && localSourcePath === null
+    enabled: usableHosts.includes(host) && localSourcePath === null && forgeProductFor(exactHost ?? undefined)?.capabilities.repositoryApi !== false
   });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
@@ -650,7 +655,8 @@ export function CloneRepoDialog({
       hostname: repository.hostname,
       nameWithOwner: repository.nameWithOwner
     });
-    setSourceQuery(repository.nameWithOwner);
+    setSourceQuery(forgeProductFor(repository.host)?.authentication === "repo-token"
+      ? repository.httpsUrl : repository.nameWithOwner);
     clearSubmitError();
     window.requestAnimationFrame(() => destinationInputRef.current?.focus());
   };
@@ -1051,7 +1057,7 @@ export function CloneRepoDialog({
                     <strong>Local path</strong>
                     <small>git clone</small>
                   </button>
-                ) : PROTOCOL_IDS.map((candidate) => {
+                ) : PROTOCOL_IDS.filter((candidate) => !gitOnly || candidate === "https").map((candidate) => {
                   const disabled = candidate === "cli" && cliDisabled;
                   const detail = protocolDetail(
                     candidate,
@@ -1290,7 +1296,7 @@ export function CloneRepoDialog({
                       void copyText(hostVerificationCommand).then(() => setCommandCopied(true)).catch(() => setCommandCopied(false));
                     }}>{commandCopied ? "Copied" : "Copy command"}</button>
                   </p>
-                  {!cliDisabled && (
+                  {!cliDisabled && !gitOnly && (
                     <p>
                       <button type="button" className="ssh-trust__button ssh-trust__button--quiet" onClick={() => {
                         setProtocol("cli");

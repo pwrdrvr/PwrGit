@@ -27,8 +27,9 @@ import type { ForgeRepoProvider, ForgeRepoRegistry } from "./repo-provider";
  * omission. As a record, `tsc` asks for the entry.
  */
 const REPO_PROVIDERS: Readonly<{
-  [K in ForgeKind]: (hostname: string) => ForgeRepoProvider & { host: K };
+  [K in ForgeKind]: ((hostname: string) => ForgeRepoProvider & { host: K }) | null;
 }> = {
+  artifacts: null,
   github: (hostname) => new GitHubRepoProvider(undefined, hostname),
   gitlab: (hostname) => new GitLabRepoProvider(undefined, hostname),
   gitcafe: (hostname) => new GitCafeRepoProvider(undefined, hostname)
@@ -39,6 +40,7 @@ const REPO_PROVIDERS: Readonly<{
 export function registerRepoProviders(registry: ForgeRepoRegistry): void {
   for (const kind of FORGE_KINDS) {
     const build = REPO_PROVIDERS[kind];
+    if (build === null) continue;
     // The SaaS instance comes from the registry, not from each provider
     // module's private default, so the hostname `register` seeds `byHost`
     // under is the same one `ForgeHosts` probes and resolves.

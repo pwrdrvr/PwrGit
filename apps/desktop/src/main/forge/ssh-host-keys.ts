@@ -98,6 +98,7 @@ export function createForgeSshHostKeyProviders(fetcher: typeof fetch = fetch): R
         return { sourceUrl, keys };
       }
     },
+    artifacts: { async lookup() { return null; } },
     gitcafe: { async lookup() { return null; } }
   };
 }

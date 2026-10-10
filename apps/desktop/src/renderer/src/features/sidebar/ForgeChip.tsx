@@ -1,3 +1,4 @@
+import { forgeProductFor } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import type { ForgeChipView } from "./forge-chip";
@@ -44,12 +45,13 @@ import { ForgeMark } from "./ForgeMark";
 const MARK_SIZE = { bare: 12, inPill: 11 } as const;
 export function ForgeChip({ chip, url = null }: { chip: ForgeChipView; url?: string | null }) {
   const tip = useViewportTooltip();
+  const browseLabel = forgeProductFor(chip.kind ?? undefined)?.browseUrl ? "Open Cloudflare dashboard" : "Open repository in browser";
   const Tag = url === null ? "span" : "a";
   return (
     <Tag
       aria-hidden={url === null ? true : undefined}
       href={url ?? undefined}
-      aria-label={url === null ? undefined : `Open repository in browser: ${url}`}
+      aria-label={url === null ? undefined : `${browseLabel}: ${url}`}
       onClick={url === null ? undefined : (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -62,7 +64,7 @@ export function ForgeChip({ chip, url = null }: { chip: ForgeChipView; url?: str
         if (event.key === "Enter" || event.key === " ") event.stopPropagation();
       }}
       className={`forge-chip${chip.name === null ? " forge-chip--mark" : ""}`}
-      {...hoverTooltip(tip, url === null ? chip.title : `${chip.title}. Open repository in browser: ${url}`)}
+      {...hoverTooltip(tip, url === null ? chip.title : `${chip.title}. ${browseLabel}: ${url}`)}
     >
       {chip.kind !== null && (
         <ForgeMark

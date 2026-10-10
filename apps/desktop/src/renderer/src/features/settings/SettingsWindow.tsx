@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   FORGE_KINDS,
   forgeLabel,
+  forgeProduct,
   parseSettingsRouteHash,
   type AppSettingsPatch,
   type AppSettingsSnapshot,
@@ -116,7 +117,9 @@ function forgeNavChild(
   // and a green one a wrong guess, and this row's whole job is to be trusted at
   // a glance.
   if (state === "unknown") return base;
-  const { dot, chip } = FORGE_STATE_NAV[state];
+  const { dot, chip: stateChip } = FORGE_STATE_NAV[state];
+  const chip = forgeProduct(kind).authentication === "repo-token" && (state === "signedOut" || state === "missing")
+    ? "add token" : stateChip;
   return {
     ...base,
     dot,

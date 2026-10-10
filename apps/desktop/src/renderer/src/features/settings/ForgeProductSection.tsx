@@ -1,3 +1,4 @@
+import { ArtifactsSettingsSection } from "./ArtifactsSettingsSection";
 import { useRef, useState, type ReactNode } from "react";
 import {
   changeRequestNoun,
@@ -24,6 +25,9 @@ import { dispatch } from "../../lib/pwrgit";
 
 /** What each capability buys the user, in their words rather than the API's. */
 const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
+  changeRequests: "Pull or merge requests",
+  repositoryApi: "Repository search and forks",
+  ssh: "Git over SSH",
   batchedBranchLookup: "Branch status in bulk",
   batchedCommitAssociation: "Commit links in bulk",
   changeSizeAndTimeline: "Diff size and timeline",
@@ -129,7 +133,9 @@ export function forgeStateSentence(
   state: ForgeProductState
 ): string | null {
   if (state === "unknown") return null;
-  return `${forgeProduct(kind).label}: ${STATE_LABELS[state]}`;
+  const label = forgeProduct(kind).authentication === "repo-token" && state !== "off"
+    ? (state === "connected" ? "Tokens saved" : "Add token") : STATE_LABELS[state];
+  return `${forgeProduct(kind).label}: ${label}`;
 }
 
 export function forgeProductState(
@@ -189,6 +195,9 @@ export function ForgeProductSection(props: {
   onAdd: () => void;
 }) {
   const { kind, hosts, status } = props;
+  if (forgeProduct(kind).authentication === "repo-token") {
+    return <ArtifactsSettingsSection kind={kind} blocked={props.blocked} />;
+  }
   const state = forgeProductState(status);
   const { label, addHost } = forgeProduct(kind);
   const rows = hosts ?? [];

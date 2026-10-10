@@ -13,6 +13,8 @@ import {
 import {
   err,
   forgeCloneUrls,
+  forgeProductFor,
+  parseArtifactsRemote,
   forgeLoggedInAtSaas,
   forgeBlockAt,
   forgeCliNames,
@@ -584,6 +586,9 @@ export class CloneService {
         message: "Enter a repository as owner/name."
       });
     }
+    if (forgeProductFor(host)?.capabilities.repositoryApi === false) {
+      return err({ kind: "remote", code: "unsupported_host", message: "Repository lookup is unavailable through this integration. Paste the exact Artifacts HTTPS remote and save its repository token in Settings → Forges → Cloudflare Artifacts, then clone directly." });
+    }
     const provider = this.forges.get(host, hostname);
     if (provider === null) {
       // `host` is the enum, and `other` is not a word to show anyone. This is
@@ -866,6 +871,10 @@ export class CloneService {
     // alone cloned a same-named stranger's repository from github.com/gitlab.com.
     const provider = this.forges.get(source.host, source.hostname);
 
+    const product = forgeProductFor(source.host);
+    if (product?.authentication === "repo-token" && source.protocol !== "https") {
+      return err({ kind: "remote", code: "unsupported_protocol", message: "Cloudflare Artifacts supports HTTPS Git with a repo token. Choose HTTPS." });
+    }
     if (source.protocol === "cli") {
       if (provider === null) {
         return err({
@@ -910,7 +919,10 @@ export class CloneService {
       return ok(true);
     }
 
-    const urls = forgeCloneUrls(source.hostname, source.nameWithOwner);
+    const urls = forgeCloneUrls(source.hostname, source.nameWithOwner, source.host);
+    if (product?.authentication === "repo-token" && parseArtifactsRemote(urls.httpsUrl) === null) {
+      return err({ kind: "validation", code: "invalid_artifacts_remote", message: "Paste the exact HTTPS remote returned by Cloudflare Artifacts." });
+    }
     const remote = source.protocol === "ssh" ? urls.sshUrl : urls.httpsUrl;
     const cloned = await this.git(
       ["clone", "--progress", "--", remote, destination],

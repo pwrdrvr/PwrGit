@@ -786,7 +786,7 @@ export type RemoteActivity = {
 };
 
 /**
- * Hosting products PwrGit can read change-request status from.
+ * Git hosting and storage products PwrGit integrates with.
  *
  * The array is the source and `ForgeKind` is derived from it, so the members
  * are enumerable at runtime as well as checkable at compile time. Every
@@ -801,7 +801,7 @@ export type RemoteActivity = {
  * stacks one section per member in this sequence, so a product is placed here
  * deliberately rather than wherever a sort happens to put it.
  */
-export const FORGE_KINDS = ["github", "gitlab", "gitcafe"] as const;
+export const FORGE_KINDS = ["github", "gitlab", "gitcafe", "artifacts"] as const;
 
 export type ForgeKind = (typeof FORGE_KINDS)[number];
 
@@ -835,6 +835,12 @@ export function toForgeHost(value: unknown): ForgeHost {
  * means "never ask" rather than "ask and handle the failure".
  */
 export type ForgeCapabilities = {
+  /** False for Git storage without a change-request API. Defaults to true for legacy snapshots. */
+  changeRequests?: boolean;
+  /** Whether this integration reads repository metadata and offers search/fork. */
+  repositoryApi?: boolean;
+  /** Whether the product documents Git over SSH. */
+  ssh?: boolean;
   /** Resolves many branches per request rather than one at a time. */
   batchedBranchLookup: boolean;
   /**

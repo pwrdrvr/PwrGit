@@ -223,14 +223,13 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
     <div>
       <div className="onboarding-wizard__head">
         <h1 className="onboarding-wizard__title">
-          Where PwrGit reads pull and merge requests from.
+          Connect Git hosting and storage.
         </h1>
         <p className="onboarding-wizard__sub">
           {/* Two lines at most: a third pushes the 600px window's dialog
               past its 552px cap. */}
-          Optional — PwrGit works without one, minus change-request state. It
-          reads each forge through its own CLI and never asks for a token; all
-          of this stays in Settings › Forges.
+          Optional — manage connections in Settings › Forges. CLIs keep forge
+          API credentials; Artifacts uses encrypted repository tokens.
         </p>
       </div>
       {/* One live region for the step, as Settings → Forges has: a sentence
@@ -254,7 +253,7 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
             const word =
               state === "unknown" || (checking && needsAction(state))
                 ? "Checking…"
-                : STATE_LABELS[state];
+                : forgeStateSentence(kind, state)?.slice(label.length + 2) ?? STATE_LABELS[state];
             const isCurrent = kind === current;
             return (
               <button
@@ -326,6 +325,12 @@ function ForgePanel(props: {
 }) {
   const { kind, status, state } = props;
   const product = forgeProduct(kind);
+  if (product.authentication === "repo-token") {
+    return <>
+      <p className="onboarding-wizard__forge-sentence">Cloudflare Artifacts stores Git repositories over HTTPS. After setup, save the exact remote and repo token in Settings › Forges › Cloudflare Artifacts. Read tokens allow clone, fetch and pull; write tokens also allow push. Pull requests, forks and SSH are unavailable through this integration.</p>
+      <button type="button" className="onboarding-wizard__forge-link" onClick={() => void dispatch("shell:openExternal", { url: "https://developers.cloudflare.com/artifacts/guides/authentication/" }).catch(() => {})}>Token guide ↗</button>
+    </>;
+  }
   if (state === "missing") {
     return (
       <InstallSteps

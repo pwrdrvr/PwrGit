@@ -25,12 +25,18 @@ export type ForgeProduct = {
   /** The product's name, as the user sees it written. */
   readonly label: string;
   /**
-   * The binary PwrGit speaks through.
+   * The binary PwrGit speaks through, or empty for repository-token Git.
    *
    * Reaches the user as a command they are told to run, so a second copy that
    * drifted would print a command naming a CLI the app never invokes.
    */
   readonly cli: string;
+  /** CLI-owned auth by default; Git storage may instead accept a repo token. */
+  readonly authentication?: "repo-token";
+  /** Git transport path prefix, absent on conventional forges. */
+  readonly gitPathPrefix?: string;
+  /** A documented portal when no repository-specific web URL is published. */
+  readonly browseUrl?: string;
   /**
    * How to get `cli` onto this machine, per platform.
    *
@@ -42,7 +48,7 @@ export type ForgeProduct = {
   readonly install: ForgeInstall;
   readonly signInHost: { readonly flag: string; readonly apiPath?: string };
   /**
-   * The hosted instance.
+   * The hosted instance, or empty for account-scoped hosts with no SaaS default.
    *
    * The ONE host resolution recognises without enumeration — a hostname is
    * evidence of nothing else, so every self-managed instance must be
@@ -184,6 +190,35 @@ export type ForgeInstall = {
  * caller in that process.
  */
 export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze({
+  artifacts: {
+    label: "Cloudflare Artifacts",
+    cli: "",
+    authentication: "repo-token",
+    gitPathPrefix: "git/",
+    browseUrl: "https://dash.cloudflare.com/",
+    install: { platforms: {
+      darwin: { steps: [], guideUrl: "https://developers.cloudflare.com/artifacts/guides/authentication/" },
+      win32: { steps: [], guideUrl: "https://developers.cloudflare.com/artifacts/guides/authentication/" },
+      linux: { steps: [], guideUrl: "https://developers.cloudflare.com/artifacts/guides/authentication/" }
+    } },
+    signInHost: { flag: "" },
+    // Account-scoped hosts are explicitly registered, never a made-up SaaS host.
+    saasHost: "",
+    changeRequestLabel: "Change request",
+    changeRequestSigil: "",
+    changeRequestBranchPrefix: "",
+    organizationNoun: "namespace",
+    maxPathSegments: 2,
+    hostAllowlistEnv: "PWRGIT_ARTIFACTS_HOSTS",
+    addHost: { button: "Add repository token…", sub: "Use the exact remote returned by Artifacts.", title: "Connect an Artifacts repository", placeholder: "<account-id>.artifacts.cloudflare.net" },
+    forkCompletesAsynchronously: false,
+    capabilities: {
+      changeRequests: false, repositoryApi: false, ssh: false,
+      batchedBranchLookup: false, batchedCommitAssociation: false,
+      changeSizeAndTimeline: false, commitAuthorIdentity: false,
+      forkDefaultBranchOnly: false
+    }
+  },
   gitcafe: {
     label: "GitCafe",
     cli: "cafe",
@@ -496,7 +531,7 @@ export function forgeKindForCli(cli: string): ForgeKind | null {
 
 /** Every product's CLI, in `FORGE_KINDS` order. */
 export function forgeCliNames(): string[] {
-  return FORGE_KINDS.map((kind) => FORGE_PRODUCTS[kind].cli);
+  return FORGE_KINDS.map((kind) => FORGE_PRODUCTS[kind].cli).filter(Boolean);
 }
 
 /**
