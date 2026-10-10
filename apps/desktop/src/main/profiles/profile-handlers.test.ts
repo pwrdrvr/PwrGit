@@ -126,4 +126,19 @@ describe("profile handlers", () => {
     expect(emitEvent).not.toHaveBeenCalled();
     expect(deps.onReordered).not.toHaveBeenCalled();
   });
+
+  it("refuses a new profile whose folder sits inside another profile's", async () => {
+    const { bus, profiles, first } = fixture();
+    profiles.setRoots(first.id, ["/home/rowan/Work"]);
+    const result = await bus.dispatch("profile:create", {
+      name: "OSS",
+      email: "oss@example.com",
+      roots: ["/home/rowan/Work/oss"]
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("root_overlap");
+    expect(result.error.message).toContain("/home/rowan/Work/oss is inside /home/rowan/Work, a folder of “First”.");
+    expect(profiles.list().map((profile) => profile.name)).not.toContain("OSS");
+  });
 });

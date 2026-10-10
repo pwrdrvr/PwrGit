@@ -1,4 +1,10 @@
-import { err, ok, type CommitIdentityInspection, type MachineGitIdentity } from "@pwrgit/shared";
+import {
+  err,
+  ok,
+  type CommitIdentityInspection,
+  type FolderIdentityReport,
+  type MachineGitIdentity
+} from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import type { DB } from "../persistence/db";
 import { logMain } from "../logs";
@@ -8,6 +14,16 @@ import {
   writeGlobalIdentity
 } from "./commit-identity";
 import type { GitExec } from "./dugite";
+import {
+  applyFolderSync,
+  clearRepoOverride,
+  inspectFolderIdentity,
+  planFolderSync,
+  planIsApplied,
+  type FolderProfileRow,
+  type FolderRepoRow
+} from "./folder-identity";
+import { visibleRepoSql } from "./hidden-repos";
 import { worktreeMissingError } from "./worktree-liveness";
 
 export type CommitIdentityHandlerDependencies = {
@@ -17,6 +33,16 @@ export type CommitIdentityHandlerDependencies = {
   /** Whether a window that once claimed the notice still exists. */
   windowAlive: (webContentsId: number) => boolean;
   emitChanged: () => void;
+  /** Settings › Profiles › By folder, read and written by main only. */
+  folderSyncEnabled: () => boolean;
+  setFolderSyncEnabled: (enabled: boolean) => void;
+};
+
+/** What the profile-change hook calls; `index.ts` wires it to `profile:changed`. */
+export type CommitIdentityHandles = {
+  /** Re-apply the folder includes when the switch is on and the config no
+   *  longer says what the profiles do. Serialized; a no-op otherwise. */
+  resyncFolders: () => Promise<void>;
 };
 
 type InspectionRow = {
@@ -40,7 +66,7 @@ export function registerCommitIdentityHandlers(
   bus: CommandBus,
   db: DB,
   deps: CommitIdentityHandlerDependencies
-): void {
+): CommitIdentityHandles {
   const git = deps.git;
   const inFlight = new Map<string, Promise<CommitIdentityInspection>>();
   let noticeOwner: number | null = null;
@@ -120,4 +146,133 @@ export function registerCommitIdentityHandlers(
     deps.emitChanged();
     return ok(await machine(false, ctx.webContentsId));
   });
+
+  // ---- Identity by folder -------------------------------------------------
+
+  const folderProfiles = (): FolderProfileRow[] =>
+    (
+      db
+        .prepare(
+          `SELECT id, name, mono, email, author_name, roots FROM profiles
+           ORDER BY sort_order, created_at`
+        )
+        .all() as {
+        id: string;
+        name: string;
+        mono: string;
+        email: string;
+        author_name: string | null;
+        roots: string;
+      }[]
+    ).map((row) => ({
+      id: row.id,
+      name: row.name,
+      mono: row.mono,
+      email: row.email,
+      authorName: row.author_name,
+      roots: parseRoots(row.roots)
+    }));
+
+  const folderRepos = (): FolderRepoRow[] =>
+    db
+      .prepare(
+        `SELECT r.id AS id, r.profile_id AS profileId, r.name AS name, r.path AS path
+         FROM repos r WHERE ${visibleRepoSql("r")}`
+      )
+      .all() as FolderRepoRow[];
+
+  // One read per scope at a time: Settings and every window's popup can ask
+  // together, and each read is a Git process per repository. A read after a
+  // write passes `fresh`: one already in flight started before the write and
+  // would answer with the old config. Later askers join the fresh one.
+  const folderReads = new Map<string, Promise<FolderIdentityReport>>();
+  const readFolders = (profileId?: string, fresh = false): Promise<FolderIdentityReport> => {
+    const key = profileId ?? "*";
+    const inFlight = folderReads.get(key);
+    if (inFlight !== undefined && !fresh) return inFlight;
+    const pending: Promise<FolderIdentityReport> = inspectFolderIdentity(
+      { git },
+      {
+        enabled: deps.folderSyncEnabled(),
+        profiles: folderProfiles(),
+        repos: folderRepos(),
+        ...(profileId === undefined ? {} : { profileId })
+      }
+    ).finally(() => {
+      if (folderReads.get(key) === pending) folderReads.delete(key);
+    });
+    folderReads.set(key, pending);
+    return pending;
+  };
+
+  bus.register("identity:folders", async (req) => ok(await readFolders(req.profileId)));
+
+  bus.register("identity:folderPlan", async (req) =>
+    ok(await planFolderSync({ git }, folderProfiles(), req.enabled))
+  );
+
+  // Every write goes through this chain, so a switch flip and a profile edit
+  // never interleave their unset/add sequences in the same file.
+  let writes: Promise<unknown> = Promise.resolve();
+  const serialized = <T>(work: () => Promise<T>): Promise<T> => {
+    const next = writes.then(work, work);
+    writes = next.catch(() => undefined);
+    return next;
+  };
+
+  bus.register("identity:setFolderSync", (req) =>
+    serialized(async () => {
+      const plan = await planFolderSync({ git }, folderProfiles(), req.enabled);
+      const applied = await applyFolderSync({ git }, plan);
+      if (!applied.ok) return applied;
+      deps.setFolderSyncEnabled(req.enabled);
+      logMain(
+        "info",
+        "identity",
+        req.enabled
+          ? `wrote ${plan.add.length} includeIf entries and ${plan.files.length} include files`
+          : `removed ${plan.remove.length} includeIf entries and ${plan.deleteFiles.length} include files`
+      );
+      deps.emitChanged();
+      return ok(await readFolders(undefined, true));
+    })
+  );
+
+  bus.register("identity:clearRepoOverride", async (req) => {
+    const repo = folderRepos().find((row) => row.id === req.repoId);
+    const profile = folderProfiles().find((row) => row.id === repo?.profileId);
+    if (repo === undefined || profile === undefined) {
+      return err({ kind: "repo", code: "not_found", message: "Repository not found." });
+    }
+    const cleared = await clearRepoOverride(git, repo.path, profile);
+    if (!cleared.ok) return cleared;
+    logMain("info", "identity", `removed a repository's own identity from ${repo.name}`);
+    deps.emitChanged();
+    return ok(await readFolders(undefined, true));
+  });
+
+  const resyncFolders = (): Promise<void> =>
+    serialized(async () => {
+      if (!deps.folderSyncEnabled()) return;
+      const plan = await planFolderSync({ git }, folderProfiles(), true);
+      if (await planIsApplied({ git }, plan)) return;
+      const applied = await applyFolderSync({ git }, plan);
+      if (!applied.ok) {
+        logMain("warn", "identity", `couldn’t update the folder includes: ${applied.error.message}`);
+        return;
+      }
+      logMain("info", "identity", `updated ${plan.add.length} includeIf entries after a profile change`);
+      deps.emitChanged();
+    });
+
+  return { resyncFolders };
+}
+
+function parseRoots(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((root): root is string => typeof root === "string") : [];
+  } catch {
+    return [];
+  }
 }

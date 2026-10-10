@@ -34,7 +34,7 @@ export type OnboardingWizardProps = {
   /** Help-menu replay: show the wizard without persisting completion. */
   isReplay: boolean;
   pickDirectories: () => Promise<string[]>;
-  onSetRoots: (profileId: string, roots: string[]) => Promise<void>;
+  onSetRoots: (profileId: string, roots: string[]) => Promise<unknown>;
   onSetIdentity: (
     profileId: string,
     identity: { authorName: string; email: string }

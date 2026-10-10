@@ -15,6 +15,8 @@ import {
   type SettingsFocusRequest
 } from "./SettingsLayout";
 import { GitIdentitySection } from "./GitIdentitySettings";
+import { FolderIdentitySection } from "./FolderIdentitySettings";
+import type { FolderIdentityState } from "../identity/useCommitIdentity";
 import type { AppSettingsState } from "./useAppSettings";
 import { useModal } from "../../lib/useModal";
 import {
@@ -46,7 +48,9 @@ export function ProfilesSettings(props: {
   settings: AppSettingsState;
   /** Git's identity outside PwrGit, read by the window for the nav too. */
   machine: MachineGitIdentity | null;
-  /** A card the nav asked to reveal: `git-identity` or `list`. */
+  /** Git's identity per profile folder, read by the window for the nav too. */
+  folders: FolderIdentityState;
+  /** A card the nav asked to reveal: `git-identity`, `git-folders`, `list`… */
   focusSection?: SettingsFocusRequest;
 }) {
   const profiles = useProfiles();
@@ -150,6 +154,14 @@ export function ProfilesSettings(props: {
         settings={props.settings}
       />
 
+      <FolderIdentitySection
+        folders={props.folders}
+        onEditProfile={(profileId) => {
+          const profile = profiles.profiles.find((p) => p.id === profileId);
+          if (profile !== undefined) setModal({ mode: "edit", profile });
+        }}
+      />
+
       <SettingsSection
         sectionId="list"
         eyebrow="Profiles"
@@ -216,6 +228,7 @@ export function ProfilesSettings(props: {
         <ProfileModal
           mode={modal.mode}
           profile={modal.mode === "edit" ? modal.profile : undefined}
+          profiles={profiles.profiles}
           onCreate={profiles.createProfile}
           onUpdate={profiles.updateProfile}
           onSetRoots={profiles.setRoots}
