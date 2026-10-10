@@ -26,7 +26,9 @@ function setup(options: { reminder?: boolean; configured?: boolean } = {}) {
     git: gitWith(() => state.configured),
     reminderEnabled: () => options.reminder ?? true,
     windowAlive: (id) => state.alive.has(id),
-    emitChanged
+    emitChanged,
+    folderSyncEnabled: () => false,
+    setFolderSyncEnabled: () => undefined
   });
   const ask = async (webContentsId: number, claimNotice = true) => {
     const result = await bus.dispatch("identity:machine", { claimNotice }, { webContentsId });
@@ -122,7 +124,9 @@ describe("identity:inspect", () => {
       git: echoingGit(),
       reminderEnabled: () => true,
       windowAlive: () => true,
-      emitChanged: vi.fn()
+      emitChanged: vi.fn(),
+      folderSyncEnabled: () => false,
+      setFolderSyncEnabled: () => undefined
     });
     // Asked together, the way two windows focusing at once would.
     const [personal, acme] = await Promise.all([

@@ -1439,6 +1439,7 @@ export function App() {
           profile={
             profileModal.mode === "edit" ? profileModal.profile : undefined
           }
+          profiles={profiles}
           onCreate={createProfile}
           onUpdate={updateProfile}
           onSetRoots={setRoots}

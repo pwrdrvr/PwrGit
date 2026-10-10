@@ -37,7 +37,8 @@ export type UseProfiles = ProfileList & {
   /** Permanently remove a profile's PwrGit-owned data. */
   deleteProfile: (req: DeleteProfileRequest) => Promise<string | null>;
   /** Replace a profile's scan roots (triggers a rescan). */
-  setRoots: (profileId: string, roots: string[]) => Promise<void>;
+  /** Null on success, else main's refusal (a folder another profile has). */
+  setRoots: (profileId: string, roots: string[]) => Promise<string | null>;
   /** Native multi-select folder picker; [] if cancelled. */
   pickDirectories: () => Promise<string[]>;
 };
@@ -134,8 +135,9 @@ export function useProfiles(): UseProfiles {
     []
   );
 
-  const setRoots = useCallback(async (profileId: string, roots: string[]) => {
-    await dispatch("profile:setRoots", { profileId, roots });
+  const setRoots = useCallback(async (profileId: string, roots: string[]): Promise<string | null> => {
+    const r = await dispatch("profile:setRoots", { profileId, roots });
+    return r.ok ? null : r.error.message;
   }, []);
 
   const pickDirectories = useCallback(async (): Promise<string[]> => {

@@ -70,7 +70,7 @@ function profileState(profiles: Profile[]) {
     updateProfile,
     reorderProfiles,
     deleteProfile,
-    setRoots: vi.fn(async () => undefined),
+    setRoots: vi.fn(async () => null),
     pickDirectories: vi.fn(async () => [])
   };
 }
@@ -83,6 +83,7 @@ async function render(profiles: Profile[]): Promise<void> {
         // The Git identity card above the list has its own suite
         // (GitIdentitySettings.test.tsx); unprobed, it only stays out of the way.
         machine={null}
+        folders={{ report: null, refresh: () => undefined, accept: () => undefined }}
         settings={{
           snapshot: null,
           loading: false,

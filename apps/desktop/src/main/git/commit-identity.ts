@@ -230,7 +230,7 @@ export function parseConfigEntries(stdout: string): IdentityConfigEntry[] {
   return entries;
 }
 
-async function readConfigEntries(
+export async function readConfigEntries(
   git: GitExec,
   cwd: string,
   pattern: string

@@ -246,4 +246,16 @@ describe("ProfileService", () => {
     expect(s.update({ profileId: a.id, name: "Alpha 2" })?.showInMenu).toBe(false);
     expect(s.update({ profileId: a.id, showInMenu: true })?.showInMenu).toBe(true);
   });
+
+  it("judges only the folders a save adds against other profiles' folders", () => {
+    const s = service();
+    const work = s.create({ name: "Work", email: "w@example.com", roots: ["/home/rowan/Work"] });
+    const personal = s.create({ name: "Personal", email: "p@example.com", roots: ["/home/rowan/Work/oss"] });
+    // Already saved before the rule: re-saving it is not a new overlap.
+    expect(s.addedRootOverlaps(personal.id, ["/home/rowan/Work/oss", "/home/rowan/Code"])).toEqual([]);
+    expect(s.addedRootOverlaps(personal.id, ["/home/rowan/Work/site"])).toEqual([
+      expect.objectContaining({ root: "/home/rowan/Work/site", profileId: work.id, relation: "inside" })
+    ]);
+    expect(s.addedRootOverlaps(work.id, ["/home/rowan/Work", "/home/rowan"])[0]?.relation).toBe("contains");
+  });
 });

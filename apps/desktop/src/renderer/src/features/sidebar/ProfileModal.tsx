@@ -1,10 +1,13 @@
-import { useState } from "react";
-import type {
-  CreateProfileRequest,
-  Profile,
-  ProfileThemeOverride,
-  UpdateProfileRequest
+import { useEffect, useState } from "react";
+import {
+  findRootOverlaps,
+  rootOverlapMessage,
+  type CreateProfileRequest,
+  type Profile,
+  type ProfileThemeOverride,
+  type UpdateProfileRequest
 } from "@pwrgit/shared";
+import { currentPlatform } from "../../lib/platform";
 import { SettingsSegmented } from "../settings/SettingsLayout";
 import { PlusGlyph } from "../../lib/PlusGlyph";
 import { dispatch } from "../../lib/pwrgit";
@@ -32,6 +35,7 @@ const PROFILE_THEMES: Array<{ value: ProfileThemeChoice; label: string }> = [
 export function ProfileModal({
   mode,
   profile,
+  profiles = [],
   onCreate,
   onUpdate,
   onSetRoots,
@@ -40,9 +44,12 @@ export function ProfileModal({
 }: {
   mode: "create" | "edit";
   profile?: Profile | undefined;
+  /** Every profile, so a folder another profile owns is refused as it is
+   *  added rather than at Save. Main refuses it either way. */
+  profiles?: readonly Profile[];
   onCreate: (req: CreateProfileRequest) => Promise<string | null>;
   onUpdate: (req: UpdateProfileRequest) => Promise<string | null>;
-  onSetRoots: (profileId: string, roots: string[]) => Promise<void>;
+  onSetRoots: (profileId: string, roots: string[]) => Promise<string | null>;
   pickDirectories: () => Promise<string[]>;
   onClose: () => void;
 }) {
@@ -71,7 +78,34 @@ export function ProfileModal({
   const removeRoot = (root: string): void =>
     setRoots((prev) => prev.filter((r) => r !== root));
 
-  const canSave = name.trim() !== "" && email.trim() !== "";
+  // A repository belongs to one profile and its folder identity to one
+  // email, so a folder that equals, holds or sits in another profile's is
+  // refused. Only additions: an overlap saved before this rule can still be
+  // saved while it is untangled.
+  const caseInsensitive = currentPlatform() === "darwin" || currentPlatform() === "win32";
+  const overlaps = findRootOverlaps(
+    roots.filter((root) => !(profile?.roots ?? []).includes(root)),
+    profiles.filter((other) => other.id !== profile?.id),
+    caseInsensitive
+  );
+  const overlapRoots = new Set(overlaps.map((overlap) => overlap.root));
+
+  // Settings › Profiles › By folder: while on, saving rewrites this
+  // profile's include, so the editor says so.
+  const [folderSync, setFolderSync] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void dispatch("settings:read", undefined)
+      .then((result) => {
+        if (live && result.ok) setFolderSync(result.value.general.gitIdentityByFolder);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const canSave = name.trim() !== "" && email.trim() !== "" && overlaps.length === 0;
 
   const rootsChanged =
     roots.length !== (profile?.roots.length ?? 0) ||
@@ -116,8 +150,12 @@ export function ProfileModal({
       setError(msg);
       return;
     }
-    if (rootsChanged) await onSetRoots(id, roots);
+    const rootsError = rootsChanged ? await onSetRoots(id, roots) : null;
     setBusy(false);
+    if (rootsError !== null) {
+      setError(rootsError);
+      return;
+    }
     onClose();
   };
 
@@ -180,6 +218,13 @@ export function ProfileModal({
             placeholder="you@company.com"
           />
         </label>
+        {folderSync && (
+          <p className="profile-modal__git-note">
+            <strong>Git outside PwrGit follows this profile.</strong>{" "}
+            {mode === "create" ? "Creating it adds" : "Saving updates"} the include PwrGit keeps in your
+            global Git config, so Terminal and coding agents in these folders commit as this email too.
+          </p>
+        )}
 
         <div className="field-row">
           <label className="field">
@@ -217,7 +262,7 @@ export function ProfileModal({
               </div>
             )}
             {roots.map((r) => (
-              <div className="rootlist__item" key={r}>
+              <div className={`rootlist__item${overlapRoots.has(r) ? " is-overlap" : ""}`} key={r}>
                 <span className="rootlist__path" {...hoverTooltip(tip, r)}>
                   {r}
                 </span>
@@ -232,6 +277,12 @@ export function ProfileModal({
               </div>
             ))}
           </div>
+          {overlaps[0] !== undefined && (
+            <p className="rootlist__error" role="alert">
+              {rootOverlapMessage(overlaps[0])} Choose another folder, or remove it from “
+              {overlaps[0].profileName}” first.
+            </p>
+          )}
           <button className="rootlist__add" onClick={() => void addFolders()}>
             <PlusGlyph /> Add folders…
           </button>

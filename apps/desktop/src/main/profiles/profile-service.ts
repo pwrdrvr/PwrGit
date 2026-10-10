@@ -6,9 +6,10 @@ import type {
   ProfileId,
   ProfileList,
   Result,
+  RootOverlap,
   UpdateProfileRequest
 } from "@pwrgit/shared";
-import { err, ok } from "@pwrgit/shared";
+import { comparableRoot, err, findRootOverlaps, ok } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
 
 type ProfileRow = {
@@ -301,6 +302,26 @@ export class ProfileService {
       activeProfileId: nextActiveId,
       profiles: this.list()
     });
+  }
+
+  /**
+   * Roots in `roots` that this profile does not already have and that equal,
+   * contain or sit inside another profile's root. Only additions are judged,
+   * so a profile that already overlaps can still be saved while it is
+   * untangled; Settings › Profiles › By folder keeps reporting it.
+   */
+  addedRootOverlaps(id: ProfileId | null, roots: readonly string[]): RootOverlap[] {
+    const all = this.list();
+    const caseInsensitive = process.platform === "darwin" || process.platform === "win32";
+    const existing = new Set(
+      (all.find((profile) => profile.id === id)?.roots ?? []).map((root) => comparableRoot(root, caseInsensitive))
+    );
+    const added = roots.filter((root) => !existing.has(comparableRoot(root, caseInsensitive)));
+    return findRootOverlaps(
+      added,
+      all.filter((profile) => profile.id !== id),
+      caseInsensitive
+    );
   }
 
   /**

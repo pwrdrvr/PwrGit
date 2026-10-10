@@ -163,3 +163,144 @@ export function formatGitPerson(person: GitPerson): string {
 export function samePerson(a: GitPerson, b: GitPerson): boolean {
   return a.name === b.name && a.email.toLowerCase() === b.email.toLowerCase();
 }
+
+// ---------------------------------------------------------------------------
+// Identity by folder: Git's `includeIf "gitdir:…"` per profile root.
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the email Git uses in one repository came from. `pwrgit` is PwrGit's
+ * include for the repository's own profile; `pwrgit-other` is another
+ * profile's (only possible when roots overlap); `include` is any include the
+ * user wrote; `none` means Git would guess or refuse.
+ */
+export type FolderIdentitySource =
+  | "pwrgit"
+  | "pwrgit-other"
+  | "global"
+  | "include"
+  | "local"
+  | "system"
+  | "none";
+
+/** What Git outside PwrGit records in one indexed repository. */
+export type FolderRepoIdentity = {
+  repoId: string;
+  name: string;
+  path: string;
+  /** The winning `author.email`, else `user.email`; null when neither is set. */
+  email: string | null;
+  /** The winning `author.name`, else `user.name`. */
+  authorName: string | null;
+  source: FolderIdentitySource;
+  /** The file the winning email came from, or null with `none`. */
+  origin: string | null;
+  /** The email (and the name, when the profile sets one) equal the profile's. */
+  matches: boolean;
+};
+
+/** A root shared with another profile: equal, or one inside the other. */
+export type RootOverlap = {
+  root: string;
+  profileId: string;
+  profileName: string;
+  otherRoot: string;
+  /** How `root` relates to `otherRoot`. */
+  relation: "same" | "inside" | "contains";
+};
+
+export type FolderProfileIdentity = {
+  profileId: string;
+  name: string;
+  mono: string;
+  email: string;
+  authorName: string | null;
+  roots: string[];
+  overlaps: RootOverlap[];
+  /** The include file PwrGit writes for this profile. */
+  includeFile: string;
+  /** Indexed, visible repositories, by name. */
+  repos: FolderRepoIdentity[];
+};
+
+/** `identity:folders`. */
+export type FolderIdentityReport = {
+  /** Settings › Profiles › "Match Git to each profile". */
+  enabled: boolean;
+  globalFile: string;
+  /** Git's identity with no repository in the way, for profiles with no repos. */
+  machine: OutsideGitIdentity;
+  profiles: FolderProfileIdentity[];
+};
+
+/** One `[includeIf "<condition>"] path = <path>` entry. */
+export type FolderInclude = { condition: string; path: string };
+
+/** `identity:folderPlan` — what turning the switch on or off writes. */
+export type FolderSyncPlan = {
+  enabled: boolean;
+  globalFile: string;
+  /** PwrGit's includes now in the global file, removed first. */
+  remove: FolderInclude[];
+  /** Appended at the end of the global file, in this order. */
+  add: FolderInclude[];
+  /** Include files written (created or replaced). */
+  files: { path: string; content: string; exists: boolean }[];
+  /** PwrGit's include files no profile needs any more. */
+  deleteFiles: string[];
+  /** Profiles that get no include, and why. */
+  skipped: { profileId: string; name: string; reason: "no_email" | "no_roots" }[];
+};
+
+/** A root as compared: forward slashes, no trailing slash, optionally folded. */
+export function comparableRoot(root: string, caseInsensitive: boolean): string {
+  let path = root.trim().replace(/\\/g, "/");
+  while (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
+  return caseInsensitive ? path.toLowerCase() : path;
+}
+
+/**
+ * Roots in `roots` that equal, contain or sit inside a root of another
+ * profile. A repository can belong to one profile — the indexer reassigns a
+ * repo found under two — and its folder identity to one email.
+ */
+export function findRootOverlaps(
+  roots: readonly string[],
+  others: readonly { id: string; name: string; roots: readonly string[] }[],
+  caseInsensitive: boolean
+): RootOverlap[] {
+  const overlaps: RootOverlap[] = [];
+  for (const root of roots) {
+    const mine = comparableRoot(root, caseInsensitive);
+    if (mine === "") continue;
+    for (const other of others) {
+      for (const otherRoot of other.roots) {
+        const theirs = comparableRoot(otherRoot, caseInsensitive);
+        if (theirs === "") continue;
+        const relation =
+          mine === theirs
+            ? "same"
+            : mine.startsWith(`${theirs}/`)
+              ? "inside"
+              : theirs.startsWith(`${mine}/`)
+                ? "contains"
+                : null;
+        if (relation !== null) {
+          overlaps.push({ root, profileId: other.id, profileName: other.name, otherRoot, relation });
+        }
+      }
+    }
+  }
+  return overlaps;
+}
+
+/** The sentence the profile editor shows for a refused root. */
+export function rootOverlapMessage(overlap: RootOverlap): string {
+  const where =
+    overlap.relation === "same"
+      ? `${overlap.root} is already a folder of “${overlap.profileName}”.`
+      : overlap.relation === "inside"
+        ? `${overlap.root} is inside ${overlap.otherRoot}, a folder of “${overlap.profileName}”.`
+        : `${overlap.root} contains ${overlap.otherRoot}, a folder of “${overlap.profileName}”.`;
+  return `${where} A repository can belong to one profile, and its Git identity to one email.`;
+}
