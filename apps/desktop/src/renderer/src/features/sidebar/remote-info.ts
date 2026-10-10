@@ -77,7 +77,7 @@ export function remoteWebUrl(
   if (parsed === null || !isForgeKind(parsed.host)) return null;
   if (!isSafeForgeHostname(parsed.hostname)) return null;
   if (!isSafeProjectPath(parsed.nameWithOwner)) return null;
-  return forgeWebUrl(parsed.hostname, parsed.nameWithOwner);
+  return forgeWebUrl(parsed.hostname, parsed.nameWithOwner, parsed.host);
 }
 
 /**
@@ -106,5 +106,5 @@ export function repoWebUrl(identity: RepoIdentity | undefined): string | null {
   if (identity === undefined || !isForgeKind(identity.host)) return null;
   if (!isSafeForgeHostname(identity.hostname)) return null;
   if (!isSafeProjectPath(identity.nameWithOwner)) return null;
-  return forgeWebUrl(identity.hostname, identity.nameWithOwner);
+  return forgeWebUrl(identity.hostname, identity.nameWithOwner, identity.host);
 }

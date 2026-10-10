@@ -22,7 +22,8 @@ function envProviders(env: NodeJS.ProcessEnv): ReadonlyMap<string, ForgeProvider
   for (const [name, provider] of [
     [GITHUB_HOSTS_ENV, "github"],
     [GITLAB_HOSTS_ENV, "gitlab"],
-    [GITCAFE_HOSTS_ENV, "gitcafe"]
+    [GITCAFE_HOSTS_ENV, "gitcafe"],
+    ["PWRGIT_ARTIFACTS_HOSTS", "artifacts"]
   ] as const) {
     for (const entry of (env[name] ?? "").split(",")) {
       const host = entry.trim().toLowerCase().replace(/^www\./, "");
@@ -110,23 +111,28 @@ export function parseRemoteIdentity(
     pathname = matched[2] ?? null;
   }
   if (host === null || pathname === null || host.includes("\\")) return null;
-  const path = normalizeProjectPath(pathname);
-  if (path === null) return null;
   const normalizedHost = host.toLowerCase().replace(/^www\./, "");
   const provider = classifyProvider(normalizedHost, env);
+  if (provider === "artifacts") {
+    const match = /^https:\/\/([a-f0-9]{32}\.artifacts\.cloudflare\.net)\/git\/([A-Za-z0-9][A-Za-z0-9_.-]{1,62})\/([A-Za-z0-9][A-Za-z0-9_.-]*)\.git$/i.exec(value);
+    if (match === null) return null;
+    return { provider, host: normalizedHost, path: `${match[2]}/${match[3]}` };
+  }
+  const path = normalizeProjectPath(pathname);
+  if (path === null) return null;
   if ((provider === "github" || provider === "gitcafe") && path.split("/").length !== 2) return null;
   return { provider, host: normalizedHost, path };
 }
 
 export type RepositoryTarget = {
-  provider: "github" | "gitlab" | "gitcafe" | null;
+  provider: "github" | "gitlab" | "gitcafe" | "artifacts" | null;
   host: string | null;
   path: string;
 };
 
 export function parseRepositoryTarget(
   value: string,
-  provider?: "github" | "gitlab" | "gitcafe",
+  provider?: "github" | "gitlab" | "gitcafe" | "artifacts",
   env: NodeJS.ProcessEnv = process.env
 ): RepositoryTarget | null {
   const fromRemote = parseRemoteIdentity(value, env);
@@ -152,6 +158,17 @@ export function parseRepositoryTarget(
   const trimmed = value.trim().replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
   const hostQualified = /^([^/]+\.[^/]+)\/(.+)$/.exec(trimmed);
   if (hostQualified !== null) {
+    // A checkout target is host/namespace/repository, not a Git transport
+    // URL. Artifacts' strict /git/... .git contract applies only to remotes.
+    const host = hostQualified[1]!.toLowerCase();
+    if (classifyProvider(host, env) === "artifacts") {
+      const path = normalizeProjectPath(hostQualified[2]!);
+      if ((provider !== undefined && provider !== "artifacts") ||
+          !/^[a-f0-9]{32}\.artifacts\.cloudflare\.net$/.test(host) ||
+          path === null ||
+          !/^[A-Za-z0-9][A-Za-z0-9_.-]{1,62}\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(path)) return null;
+      return { provider: "artifacts", host, path };
+    }
     const candidate = parseRemoteIdentity(`https://${trimmed}`, env);
     if (candidate === null) return null;
     if (candidate.provider === "other") {

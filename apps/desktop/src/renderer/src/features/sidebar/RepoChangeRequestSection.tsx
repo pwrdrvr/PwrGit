@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   forgeLabel,
+  forgeProductFor,
   type ChangeRequestEntry,
   type ChangeRequestList,
   type Repo,
@@ -151,7 +152,7 @@ export function RepoChangeRequestSection({
   // the forge, so the heading arrives with Branches and Tags instead of
   // pushing them down a moment later.
   const predicted =
-    repo.identity === undefined || repo.identity.host === "other"
+    repo.identity === undefined || repo.identity.host === "other" || forgeProductFor(repo.identity.host)?.capabilities.changeRequests === false
       ? null
       : repo.identity.host;
   const loading = list == null;

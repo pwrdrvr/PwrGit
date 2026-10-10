@@ -111,6 +111,12 @@ describe("execGitRecords", () => {
 });
 
 describe("sanitizeGitLogDetail", () => {
+  it("redacts both full and secret-only Artifacts tokens", () => {
+    const secret = `art_v1_${"a".repeat(40)}`;
+    const detail = sanitizeGitLogDetail(`token ${secret}?expires=1900000000\n${secret}`);
+    expect(detail).not.toContain(secret); expect(detail).not.toContain("1900000000");
+    expect(detail.match(/redacted credential/g)).toHaveLength(2);
+  });
   it("redacts common URL, header, query, and GitHub token credentials", () => {
     const detail = sanitizeGitLogDetail(
       "fatal: https://harold:secret@example.com/repo?token=abc123\n" +

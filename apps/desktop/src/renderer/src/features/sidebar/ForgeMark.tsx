@@ -4,6 +4,7 @@ import { useBrandTheme, type BrandTheme } from "../../lib/brandTheme";
 import invertocatBlackUrl from "../../assets/github/invertocat-black.svg";
 import invertocatWhiteUrl from "../../assets/github/invertocat-white.svg";
 import tanukiUrl from "../../assets/gitlab/tanuki.svg";
+import cloudflareUrl from "../../assets/cloudflare/favicon.png";
 import cafeUrl from "../../assets/gitcafe/favicon.svg";
 
 /**
@@ -53,6 +54,7 @@ const MARKS: Record<ForgeKind, Mark> = {
   },
   /** GitLab publishes the tanuki in full color, and it reads on both themes. */
   gitlab: { themed: false, url: () => tanukiUrl },
+  artifacts: { themed: false, url: () => cloudflareUrl },
   gitcafe: { themed: false, url: () => cafeUrl }
 };
 

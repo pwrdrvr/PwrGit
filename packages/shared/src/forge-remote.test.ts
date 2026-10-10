@@ -90,6 +90,11 @@ describe("parseForgeRemote", () => {
     ).toBeNull();
   });
 
+  it.each(["", " \t\n"])("does not classify an empty hostname as a forge (%j)", (hostname) => {
+    expect(classifyForgeHost(hostname)).toBe("other");
+    expect(classifyForgeHost(hostname, { "": "artifacts" })).toBe("other");
+  });
+
   it("never reads a prototype member out of the host map", () => {
     // `overrides` is a plain object and a hostname comes straight out of a git
     // remote. A bare index returned the `Object` FUNCTION for a host literally

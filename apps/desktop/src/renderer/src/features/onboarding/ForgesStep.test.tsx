@@ -139,8 +139,8 @@ describe("arrivalOrder / initialSelection", () => {
       status("gitlab"),
       status("gitcafe", { installed: true, loggedIn: true })
     ];
-    expect(arrivalOrder(forges)).toEqual(["gitcafe", "github", "gitlab"]);
-    expect(arrivalOrder(MIXED)).toEqual(["github", "gitlab", "gitcafe"]);
+    expect(arrivalOrder(forges)).toEqual(["gitcafe", "github", "gitlab", "artifacts"]);
+    expect(arrivalOrder(MIXED)).toEqual(["github", "gitlab", "gitcafe", "artifacts"]);
   });
 
   it("selects the first forge that needs something, else the first chip", () => {
@@ -160,7 +160,8 @@ describe("ForgesStep", () => {
     expect(strip()).toEqual([
       "GitHub Not installed",
       "GitLab Not installed",
-      "GitCafe Not installed"
+      "GitCafe Not installed",
+      "Cloudflare Artifacts Add token"
     ]);
     expect(selectedTab()).toBe("GitHub");
     expect(commands()).toEqual(["brew install gh"]);
@@ -224,7 +225,8 @@ describe("ForgesStep", () => {
     expect(strip()).toEqual([
       "GitHub Connected",
       "GitLab Signed out",
-      "GitCafe Not installed"
+      "GitCafe Not installed",
+      "Cloudflare Artifacts Checking…"
     ]);
     expect(selectedTab()).toBe("GitLab");
   });
@@ -250,7 +252,8 @@ describe("ForgesStep", () => {
     expect(tabs().map((t) => t.getAttribute("aria-label"))).toEqual([
       "GitLab: Not installed",
       "GitHub: Not installed",
-      "GitCafe: Not installed"
+      "GitCafe: Not installed",
+      "Cloudflare Artifacts: Add token"
     ]);
     expect(selectedTab()).toBe("GitLab");
     expect(mocks.dispatch).toHaveBeenCalledWith("forge:status", undefined);
@@ -261,7 +264,7 @@ describe("ForgesStep", () => {
     const panel = container.querySelector('[role="tabpanel"]');
     expect(panel?.getAttribute("aria-labelledby")).toBe(tab("github").id);
     expect(tab("github").getAttribute("aria-controls")).toBe(panel?.id);
-    expect(text()).toContain("all of this stays in Settings › Forges.");
+    expect(text()).toContain("manage connections in Settings › Forges.");
   });
 
   it("says 'these' under GitCafe's two commands and 'it' under one", async () => {
@@ -283,7 +286,8 @@ describe("ForgesStep", () => {
     expect(strip()).toEqual([
       "GitHub Signed out",
       "GitLab Connected",
-      "GitCafe Not installed"
+      "GitCafe Not installed",
+      "Cloudflare Artifacts Checking…"
     ]);
     expect(selectedTab()).toBe("GitLab");
     expect(panelText()).toContain(
@@ -293,7 +297,7 @@ describe("ForgesStep", () => {
 
   it("moves along the strip with the arrow keys, as one tab stop", async () => {
     await mount(NOTHING_INSTALLED);
-    expect(tabs().map((t) => t.tabIndex)).toEqual([0, -1, -1]);
+    expect(tabs().map((t) => t.tabIndex)).toEqual([0, -1, -1, -1]);
     await act(async () => {
       tab("github").dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })
@@ -301,13 +305,13 @@ describe("ForgesStep", () => {
     });
     expect(selectedTab()).toBe("GitLab");
     expect(document.activeElement).toBe(tab("gitlab"));
-    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0, -1]);
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0, -1, -1]);
     await act(async () => {
       tab("gitlab").dispatchEvent(
         new KeyboardEvent("keydown", { key: "End", bubbles: true })
       );
     });
-    expect(selectedTab()).toBe("GitCafe");
+    expect(selectedTab()).toBe("Cloudflare Artifacts");
   });
 
   it("makes the sign-in command copyable, and says so for two seconds", async () => {
@@ -397,7 +401,8 @@ describe("ForgesStep", () => {
     expect(strip()).toEqual([
       "GitHub Connected",
       "GitLab Checking…",
-      "GitCafe Checking…"
+      "GitCafe Checking…",
+      "Cloudflare Artifacts Checking…"
     ]);
     expect(button("Checking…").getAttribute("aria-busy")).toBe("true");
     // A second request while one is in flight is the same request.
@@ -413,7 +418,8 @@ describe("ForgesStep", () => {
     expect(strip()).toEqual([
       "GitHub Connected",
       "GitLab Signed out",
-      "GitCafe Not installed"
+      "GitCafe Not installed",
+      "Cloudflare Artifacts Checking…"
     ]);
   });
 

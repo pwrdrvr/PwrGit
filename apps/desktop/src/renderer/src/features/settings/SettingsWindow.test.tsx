@@ -179,6 +179,7 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   // General is the window's opening pane, so it renders in every test and
   // reads its half of the snapshot. No other pane here looks inside one.
   if (name === "settings:read") return ok(SNAPSHOT);
+  if (name === "artifacts:credentials") return ok({ secureStorageAvailable: true, credentials: [] });
   if (name === "forge:status") return ok({ forges });
   if (name === "forge:hosts") return ok({ hosts: [], overrides: {} });
   if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);

@@ -49,6 +49,27 @@ afterEach(() => {
   while (created.length > 0) rmSync(created.pop()!, { recursive: true, force: true });
 });
 
+it("stores only local Artifacts identity, preserving unknown permissions and the other profile", async () => {
+  const host = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+  const gh = vi.fn(async () => { throw new Error("No forge API should be called"); });
+  const { db, indexer, profileId, identities, glab } = await fixture(gh, {
+    origin: `https://${host}/git/default/demo.git`, overrides: { [host]: "artifacts" }
+  });
+  const profiles = new ProfileService(db);
+  const secondRoot = temporaryRoot(); const secondPath = join(secondRoot, "other");
+  initRepo(secondPath, "git@github.com:team/other.git");
+  const second = profiles.create({ name: "Second", email: "second@example.test", roots: [secondRoot] });
+  await indexer.indexRepoAt(second.id, secondPath);
+  const before = indexer.listRepos(second.id);
+  const repo = indexer.listRepos(profileId)[0]!;
+  await identities.refresh([repo]);
+  expect(identities.read([repo.id]).get(repo.id)).toMatchObject({ host: "artifacts", hostname: host, owner: "default", name: "demo", visibility: "unknown" });
+  expect(identities.read([repo.id]).get(repo.id)?.viewerCanPush).toBeUndefined();
+  expect(identities.read([repo.id]).get(repo.id)?.parent).toBeUndefined();
+  expect(gh).not.toHaveBeenCalled(); expect(glab).not.toHaveBeenCalled();
+  expect(indexer.listRepos(second.id)).toEqual(before);
+});
+
 function initRepo(path: string, origin: string): void {
   mkdirSync(path, { recursive: true });
   const run = (...args: string[]) =>
