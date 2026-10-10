@@ -158,6 +158,17 @@ export function parseRepositoryTarget(
   const trimmed = value.trim().replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "");
   const hostQualified = /^([^/]+\.[^/]+)\/(.+)$/.exec(trimmed);
   if (hostQualified !== null) {
+    // A checkout target is host/namespace/repository, not a Git transport
+    // URL. Artifacts' strict /git/... .git contract applies only to remotes.
+    const host = hostQualified[1]!.toLowerCase();
+    if (classifyProvider(host, env) === "artifacts") {
+      const path = normalizeProjectPath(hostQualified[2]!);
+      if ((provider !== undefined && provider !== "artifacts") ||
+          !/^[a-f0-9]{32}\.artifacts\.cloudflare\.net$/.test(host) ||
+          path === null ||
+          !/^[A-Za-z0-9][A-Za-z0-9_.-]{1,62}\/[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(path)) return null;
+      return { provider: "artifacts", host, path };
+    }
     const candidate = parseRemoteIdentity(`https://${trimmed}`, env);
     if (candidate === null) return null;
     if (candidate.provider === "other") {

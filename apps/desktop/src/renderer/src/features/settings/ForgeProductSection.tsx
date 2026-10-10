@@ -196,7 +196,7 @@ export function ForgeProductSection(props: {
 }) {
   const { kind, hosts, status } = props;
   if (forgeProduct(kind).authentication === "repo-token") {
-    return <ArtifactsSettingsSection kind={kind} blocked={props.blocked} />;
+    return <ArtifactsSettingsSection kind={kind} blocked={props.blocked} forgeStatus={status} />;
   }
   const state = forgeProductState(status);
   const { label, addHost } = forgeProduct(kind);

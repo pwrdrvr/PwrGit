@@ -66,36 +66,65 @@ export function createArtifactsGitAuthentication(
     const command = commandArgs(args);
     const verb = command[0];
     if (verb === undefined || !NETWORK.has(verb)) return ok(env);
+    // URL expansion is a local query, including when this hook calls back
+    // through execGit. It must neither acquire credentials nor recurse.
+    if (verb === "ls-remote" && command.includes("--get-url")) return ok(env);
     const target = firstOperand(command);
     const overrides = hosts();
     if (!Object.values(overrides).some((kind) => forgeProductFor(kind)?.authentication === "repo-token")) return ok(env);
+    const prefix = args.slice(0, args.length - command.length);
+    const readGit = (query: string[]) => git([...prefix, ...query], cwd, { env });
+    const resolveUrl = async (url: string): Promise<string[]> => {
+      // This expands insteadOf without contacting the remote, and works
+      // outside a repository (clone's cwd).
+      const result = await readGit(["ls-remote", "--get-url", "--", url]);
+      return result.ok && result.value.exitCode === 0
+        ? result.value.stdout.trim().split(/\r?\n/).filter(Boolean)
+        : [url];
+    };
     let urls: string[] = [];
-    if (target !== undefined && /^(?:[a-z][a-z0-9+.-]*:\/\/|[^/]+@[^/]+:)/i.test(target)) {
-      urls = [target];
+    if (target !== undefined && (verb === "clone" || /^(?:[a-z][a-z0-9+.-]*:\/\/|[^/]+@[^/]+:)/i.test(target))) {
+      urls = await resolveUrl(target);
     } else if (verb !== "clone") {
       // Git itself resolves pushurl and url.*.insteadOf; do not reimplement it.
-      const namesResult = await git(["remote"], cwd);
+      const namesResult = await readGit(["remote"]);
       if (!namesResult.ok || namesResult.value.exitCode !== 0) return ok(env);
       const names = namesResult.value.stdout.trim().split(/\r?\n/).filter(Boolean);
       let selected = target === undefined ? [] : names.filter((name) => name === target);
-      if (verb === "fetch" && command.includes("--all")) selected = names;
+      const allOverride = command.filter((arg) => arg === "--all" || arg === "--no-all").at(-1);
+      let fetchAll = verb === "fetch" && allOverride === "--all";
+      if (verb === "fetch" && allOverride === undefined && target === undefined && !command.includes("--multiple")) {
+        const result = await readGit(["config", "--bool", "--get", "fetch.all"]);
+        fetchAll = result.ok && result.value.exitCode === 0 && result.value.stdout.trim() === "true";
+      }
+      if (fetchAll) {
+        selected = [];
+        for (const name of names) {
+          // Git treats the deprecated skipDefaultUpdate as the same setting:
+          // whichever spelling occurs last wins. --bool handles yes/on/1.
+          const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const result = await readGit(["config", "--bool", "--get-regexp", `^remote\\.${escapedName}\\.(skipFetchAll|skipDefaultUpdate)$`]);
+          if (!(result.ok && result.value.exitCode === 0 && result.value.stdout.trim().endsWith(" true"))) selected.push(name);
+        }
+      }
       else if (verb === "fetch" && command.includes("--multiple")) selected = names.filter((name) => command.slice(1).includes(name));
       else if (target === undefined) {
-        const branchResult = await git(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd);
+        const branchResult = await readGit(["symbolic-ref", "--quiet", "--short", "HEAD"]);
         const branch = branchResult.ok && branchResult.value.exitCode === 0 ? branchResult.value.stdout.trim() : "";
         const keys = verb === "push" ? [`branch.${branch}.pushRemote`, "remote.pushDefault", `branch.${branch}.remote`] : [`branch.${branch}.remote`];
         for (const key of keys) {
           if (branch === "" && key.startsWith("branch.")) continue;
-          const result = await git(["config", "--get", key], cwd);
+          const result = await readGit(["config", "--get", key]);
           if (result.ok && result.value.stdout.trim() === ".") return ok(env);
           if (result.ok && result.value.exitCode === 0 && names.includes(result.value.stdout.trim())) { selected = [result.value.stdout.trim()]; break; }
         }
         if (selected.length === 0) selected = names.includes("origin") ? ["origin"] : names.length === 1 ? names : [];
       }
       for (const name of selected) {
-        const result = await git(["remote", "get-url", ...(verb === "push" ? ["--push", "--all"] : []), "--", name], cwd);
+        const result = await readGit(["remote", "get-url", ...(verb === "push" ? ["--push", "--all"] : []), "--", name]);
         if (result.ok && result.value.exitCode === 0) urls.push(...result.value.stdout.trim().split(/\r?\n/));
       }
+      if (target !== undefined && selected.length === 0 && !fetchAll && !command.includes("--multiple")) urls = await resolveUrl(target);
     }
     const credentials: { remote: string; token: string }[] = [];
     for (const url of new Set(urls)) {

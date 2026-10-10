@@ -73,6 +73,61 @@ describe("Artifacts authentication on every Git network operation", () => {
     await git(["config", "branch.main.remote", "."], directory);
     expect(await authenticate(["pull"], directory, {})).toEqual(ok({}));
   });
+  it.each(["true", "yes", "1"])("fetch all skips opted-out remotes (%s) before checking tokens", async (value) => {
+    store.remove(remote);
+    const localRemote = join(directory, "local.git");
+    await git(["init", "--bare", localRemote], directory);
+    await git(["remote", "add", "local", localRemote], directory);
+    await git(["config", "remote.origin.skipFetchAll", value], directory);
+    const authenticate = createArtifactsGitAuthentication(store, git, () => ({ [hostname]: "artifacts" }));
+    const result = await authenticate(["fetch", "--all"], directory, {});
+    expect(result).toEqual(ok({}));
+    if (!result.ok) throw new Error(result.error.code);
+    // The same real Git configuration fetches the local remote without ever
+    // contacting the excluded Cloudflare remote.
+    expect(await git(["fetch", "--all"], directory, { env: result.value })).toMatchObject({ ok: true, value: { exitCode: 0 } });
+    expect(await authenticate(["fetch", "origin"], directory, {})).toMatchObject({ ok: false, error: { code: "artifacts_token_required" } });
+  });
+  it("honors fetch.all, explicit remotes and the last --all/--no-all override", async () => {
+    await git(["remote", "set-url", "origin", "https://github.com/team/repo.git"], directory);
+    await git(["remote", "add", "secondary", otherRemote], directory);
+    await git(["config", "fetch.all", "true"], directory);
+    const authenticate = createArtifactsGitAuthentication(store, git, () => ({ [hostname]: "artifacts" }));
+    for (const args of [["fetch", "--prune"], ["fetch", "--no-all", "--all"]]) {
+      const result = await authenticate(args, directory, {});
+      expect(result.ok).toBe(true); if (!result.ok) throw new Error(result.error.code);
+      expect(config(result.value, `http.${otherRemote}/.extraHeader`)).toContain(`Authorization: Bearer ${otherToken}`);
+    }
+    for (const args of [["fetch", "--no-all"], ["fetch", "--all", "--no-all"], ["fetch", "origin"]]) {
+      expect(await authenticate(args, directory, {})).toEqual(ok({}));
+    }
+    await git(["config", "remote.secondary.skipFetchAll", "true"], directory);
+    store.remove(otherRemote);
+    expect(await authenticate(["fetch", "--prune"], directory, {})).toEqual(ok({}));
+    expect(await authenticate(["fetch", "--multiple", "secondary"], directory, {})).toMatchObject({ ok: false, error: { code: "artifacts_token_required" } });
+  });
+  it.each(["clone", "fetch", "pull", "push", "ls-remote"])("resolves literal URL rewrites before authenticating %s", async (verb) => {
+    const alias = "https://git-alias.invalid/demo.git";
+    // An isolated global file exercises the same rewrite source as terminal
+    // Git without reading or changing this user's global configuration.
+    const globalConfig = join(directory, "global-config");
+    await git(["config", "--file", globalConfig, `url.${remote}.insteadOf`, alias], directory);
+    const authenticate = createArtifactsGitAuthentication(store, git, () => ({ [hostname]: "artifacts" }));
+    const result = await authenticate([verb, alias], directory, { GIT_CONFIG_GLOBAL: globalConfig });
+    expect(result.ok).toBe(true); if (!result.ok) throw new Error(result.error.code);
+    expect(config(result.value, `http.${remote}/.extraHeader`)).toContain(`Authorization: Bearer ${token}`);
+    expect(config(result.value, `http.${alias}/.extraHeader`)).toEqual([]);
+    expect(JSON.stringify(await git(["config", "--local", "--list"], directory))).not.toContain(token);
+  });
+  it("resolves clone aliases outside a repository and honors invocation config", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "pwrgit-artifacts-clone-"));
+    try {
+      const authenticate = createArtifactsGitAuthentication(store, git, () => ({ [hostname]: "artifacts" }));
+      const result = await authenticate(["-c", `url.${remote}.insteadOf=artifacts-demo:`, "clone", "artifacts-demo:"], outside, {});
+      expect(result.ok).toBe(true); if (!result.ok) throw new Error(result.error.code);
+      expect(config(result.value, `http.${remote}/.extraHeader`)).toContain(`Authorization: Bearer ${token}`);
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
   it("does no work for local commands, existing forges or an unregistered account", async () => {
     const spy = vi.fn(git);
     const authenticate = createArtifactsGitAuthentication(store, spy, () => ({}));
@@ -81,8 +136,9 @@ describe("Artifacts authentication on every Git network operation", () => {
     expect(spy).not.toHaveBeenCalled();
     const registered = createArtifactsGitAuthentication(store, spy, () => ({ [hostname]: "artifacts" }));
     expect(await registered(["status"], directory, {})).toEqual(ok({}));
-    expect(await registered(["clone", "https://github.com/team/repo.git"], directory, {})).toEqual(ok({}));
     expect(spy).not.toHaveBeenCalled();
+    expect(await registered(["clone", "https://github.com/team/repo.git"], directory, {})).toEqual(ok({}));
+    expect(spy).toHaveBeenCalledExactlyOnceWith(["ls-remote", "--get-url", "--", "https://github.com/team/repo.git"], directory, { env: {} });
   });
   it("fails before network activity for missing tokens, invalid protocols and partial clone", async () => {
     const authenticate = createArtifactsGitAuthentication(store, git, () => ({ [hostname]: "artifacts" }));

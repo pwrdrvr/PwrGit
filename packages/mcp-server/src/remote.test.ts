@@ -32,6 +32,22 @@ describe("remote identity", () => {
       "u:p"
     );
   });
+  it("matches host-qualified Artifacts coordinates while keeping remote validation strict", () => {
+    const host = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+    const env = { PWRGIT_ARTIFACTS_HOSTS: host };
+    const identity = parseRemoteIdentity(`https://${host}/git/default/demo.git`, env)!;
+    for (const spelling of [`${host}/default/demo`, `${host}/default/demo.git`]) {
+      const target = parseRepositoryTarget(spelling, "artifacts", env);
+      expect(target).toEqual({ provider: "artifacts", host, path: "default/demo" });
+      expect(targetMatchesRemote(target!, identity)).toBe(true);
+      expect(parseRepositoryTarget(spelling, "github", env)).toBeNull();
+    }
+    expect(parseRemoteIdentity(`https://${host}/default/demo`, env)).toBeNull();
+    expect(parseRemoteIdentity(`https://${host}/git/default/demo`, env)).toBeNull();
+    for (const path of ["a/demo", "default/nested/demo", "default/..", "default/demo?token=secret"]) {
+      expect(parseRepositoryTarget(`${host}/${path}`, "artifacts", env)).toBeNull();
+    }
+  });
 
   it("does not guess a provider for an unknown self-hosted forge", () => {
     expect(parseRemoteIdentity("git@example.test:team/repo.git")).toEqual({

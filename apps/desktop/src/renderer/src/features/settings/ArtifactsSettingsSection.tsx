@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
-import { forgeProduct, parseArtifactsRemote, type ArtifactsCredentialStatus, type ForgeKind } from "@pwrgit/shared";
+import { forgeProduct, parseArtifactsRemote, type ArtifactsCredentialStatus, type ForgeKind, type ForgeStatus } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { SettingsField, SettingsSection } from "./SettingsLayout";
 
 /** Repo tokens are entered once and never returned by a read command. */
-export function ArtifactsSettingsSection({ kind, blocked }: { kind: ForgeKind; blocked: boolean }) {
+export function ArtifactsSettingsSection({ kind, blocked, forgeStatus }: { kind: ForgeKind; blocked: boolean; forgeStatus: ForgeStatus | undefined }) {
   const [status, setStatus] = useState<ArtifactsCredentialStatus | null>(null);
   const [remote, setRemote] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const product = forgeProduct(kind);
+  // Re-check and status pushes replace this snapshot. Read expiry metadata
+  // again so the card and the live navigation cannot disagree. Cleanup
+  // retires an older read that lands after a newer probe.
   useEffect(() => {
     let active = true;
     void dispatch("artifacts:credentials", undefined).then((result) => {
@@ -18,7 +21,7 @@ export function ArtifactsSettingsSection({ kind, blocked }: { kind: ForgeKind; b
       if (result.ok) setStatus(result.value); else setError(result.error.message);
     }).catch(() => { if (active) setError("PwrGit could not read credential metadata. Reopen Settings and retry."); });
     return () => { active = false; };
-  }, []);
+  }, [forgeStatus]);
   const save = async () => {
     if (busy || blocked) return;
     setBusy(true); setError(null);
