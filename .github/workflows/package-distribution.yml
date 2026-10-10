@@ -147,7 +147,7 @@ jobs:
     needs: audit
     if: ${{ inputs.audit_only != true && github.event_name != 'pull_request' && (github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft)) && (github.event_name == 'release' || github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
