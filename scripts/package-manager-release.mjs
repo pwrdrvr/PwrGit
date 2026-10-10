@@ -329,7 +329,7 @@ export async function downloadPlatform(directory, platform, options = {}) {
   }
 }
 
-export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset = fetch, metadataOnly = false, validatorDigest, windowsValidatorDigest = validatorDigest } = {}) {
+export async function prepare(tag, directory, { api = ghJson, fetch: fetchAsset, metadataOnly = false, validatorDigest, windowsValidatorDigest = validatorDigest } = {}) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("Usage: prepare vX.Y.Z <output-directory>");
   const report = await audit({ api });
   if (tag !== report.stableTag) throw new Error(`Only Stable Latest ${report.stableTag} can update the package managers`);

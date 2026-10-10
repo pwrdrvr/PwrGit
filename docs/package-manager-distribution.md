@@ -91,8 +91,8 @@ workflow; the explicit dispatch above remains part of promotion through the skil
 Routine audits do not request release asset bytes and therefore do not add
 installer downloads to GitHub statistics. Synchronization reads metadata and
 returns when the tap is already current. A needed tap update verifies both DMGs
-using its installer cache; cache misses download release bytes. Keep those validation downloads
-separate from estimates of user adoption.
+using its installer cache; cache misses acquire original Actions build artifacts.
+Release-asset downloads are prohibited, including after cache eviction.
 
 Native validation and Winget submission-file generation are explicit operations,
 not daily/PR/release-event checks. When published-byte or installation evidence
@@ -382,3 +382,5 @@ PwrGit publisher architecture checks subsequently passed in
 Publication was skipped because these are PR runs. A separate tap child
 PR scopes registration CI to changed casks. Use current run results rather than
 the historical October 2 checks above.
+
+Windows native validation installs only from a loopback mirror of verified Actions artifact bytes, including an indexed previous version when one exists. Production manifests keep their public release URLs; installation-only copies replace those URLs. Missing or corrupt artifacts block validation instead of causing WinGet to download a public release.

@@ -44,6 +44,7 @@ on:
       - scripts/lib/distribution-api*
       - docs/package-manager-distribution.md
       - .agents/skills/release/**
+      - scripts/release/winget-loopback*
       - scripts/release/verify-*
       - scripts/lib/cli-entrypoint.mjs
       - scripts/release/sync-homebrew*
@@ -130,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Distribution API token source: $TOKEN_SOURCE"
-          node scripts/package-manager-release.mjs plan "$STABLE_TAG" "$RUNNER_TEMP/distribution" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-macos-distribution.sh', '.github/workflows/package-distribution.yml') }}" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-winget-install.ps1', '.github/workflows/package-distribution.yml') }}"
+          node scripts/package-manager-release.mjs plan "$STABLE_TAG" "$RUNNER_TEMP/distribution" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-macos-distribution.sh', 'scripts/build-artifact.py', '.github/workflows/package-distribution.yml') }}" "${{ hashFiles('scripts/package-manager-release.mjs', 'scripts/lib/cli-entrypoint.mjs', 'scripts/release/verify-winget-install.ps1', 'scripts/release/winget-loopback.mjs', 'scripts/build-artifact.py', '.github/workflows/package-distribution.yml') }}"
       - name: Upload metadata plan (native validation is separate)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -284,7 +285,13 @@ jobs:
       - name: Acquire and hash Windows bytes, including cache restores
         if: steps.validated.outputs.cache-hit != 'true' || inputs.force_validation
         shell: pwsh
-        run: node scripts/package-manager-release.mjs download "$env:RUNNER_TEMP/distribution" windows
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_READ_TOKEN || github.token }}
+        run: |
+          node scripts/package-manager-release.mjs download "$env:RUNNER_TEMP/distribution" windows
+          if ($LASTEXITCODE) { throw "Artifact acquisition failed" }
+          node scripts/release/winget-loopback.mjs prepare "$env:RUNNER_TEMP/distribution"
+          if ($LASTEXITCODE) { throw "Upgrade baseline artifact acquisition failed" }
       - uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         if: (steps.validated.outputs.cache-hit != 'true' || inputs.force_validation) && steps.installer.outputs.cache-hit != 'true'
         with:

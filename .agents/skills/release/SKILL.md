@@ -415,7 +415,7 @@ runbook for bounded Retry-After/reset budgets and remaining gates.
 
 The default dispatch audits sources and synchronizes Homebrew without downloading
 installers in PwrGit. The tap returns if current; a changed cask verifies both
-DMGs using installer caches and downloads on cache misses. Do not repeat asset validation during daily
+DMGs using installer caches and original build artifacts on cache misses. Release-download fallback is prohibited. Do not repeat asset validation during daily
 audits or for unchanged package sources. When generating a Winget submission or
 when fresh native evidence is needed, explicitly dispatch once with
 `-f validate_assets=true`, or run

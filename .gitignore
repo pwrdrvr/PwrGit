@@ -76,3 +76,6 @@ apps/desktop/docs-screenshots/
 
 # Python release-tool bytecode
 __pycache__/
+
+# Local task artifacts and PR descriptions
+.local/
