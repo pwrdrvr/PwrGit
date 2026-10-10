@@ -553,8 +553,10 @@ explain, and writing global config versus KTD4.
 
 `Git Identity by Folder - UX Review.dc.html` was written here and pushed up
 on 2026-10-10 through the MCP's `write_files`, then replaced locally by the
-served copy with lines 4&ndash;6 stripped, so the repo holds the project's
-59,903 bytes (sha256 `ca07e4904593…`). Its CSS starts from the round-1 artboard's,
+served copy with lines 4&ndash;6 stripped. One example folder name was then
+renamed here, because the license check's prohibited-name list caught it, so
+the repo's 59,904 bytes (sha256 `301785192f13…`) differ from the project's
+copy by that one word. Its CSS starts from the round-1 artboard's,
 pruned to the rules it uses. Every probe it quotes ran against an isolated
 `HOME` with `GIT_CONFIG_NOSYSTEM=1`, on Git 2.56 under macOS. Its identities
 (`rowan@vale.example`, `rowan@northwind.example`) and repositories are
