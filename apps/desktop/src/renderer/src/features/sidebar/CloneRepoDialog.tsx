@@ -613,9 +613,10 @@ export function CloneRepoDialog({
   // One line for every reason the list is empty, so the states cannot
   // contradict each other. `checkError` wins over a bare "no matches": when
   // the box holds an exact slug, why THAT lookup failed is the useful answer.
+  const hasRepositoryBrowser = forgeProductFor(host)?.capabilities.repositoryBrowser === true;
   const emptyMessage =
     checkError ??
-    sourceEmptyMessage({
+    (hasRepositoryBrowser ? catalogError : sourceEmptyMessage({
       catalogLoaded: catalog !== null,
       catalogError,
       status: forgeStatus,
@@ -626,7 +627,7 @@ export function CloneRepoDialog({
       owners: (catalog?.owners ?? [])
         .filter((owner) => owner.host === host)
         .map((owner) => owner.login)
-    });
+    }));
 
   const destinationResults = useMemo(
     () => filterCloneDestinations(destinations, destinationQuery),
@@ -790,7 +791,7 @@ export function CloneRepoDialog({
           <span>
             <strong>Clone a repository</strong>
             <small>
-              Find GitHub repos from owners already used in {profile.name}
+              {hasRepositoryBrowser ? "Browse an account and namespace, or paste an HTTPS remote" : `Find ${forgeLabel(host)} repos from owners already used in ${profile.name}`}
             </small>
           </span>
           <button
@@ -839,7 +840,7 @@ export function CloneRepoDialog({
                 disabled={busy}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="Search, enter owner/name, or paste a local path…"
+                placeholder={hasRepositoryBrowser ? "Paste an HTTPS remote or a local path…" : "Search, enter owner/name, or paste a local path…"}
                 onChange={(event) => {
                   setSourceQuery(event.target.value);
                   setSelectedRepository(null);
@@ -886,8 +887,8 @@ export function CloneRepoDialog({
               )}
             </div>
 
-            {forgeProductFor(host)?.capabilities.repositoryBrowser === true && <ArtifactsRepositoryBrowser disabled={busy} status={statusFor(catalog?.forges ?? [], host)} onChoose={chooseRepository} />}
-            <div className="clone-source-results" role="listbox">
+            {hasRepositoryBrowser && <ArtifactsRepositoryBrowser disabled={busy} status={statusFor(catalog?.forges ?? [], host)} onChoose={chooseRepository} />}
+            {(sourceResults.length > 0 || emptyMessage !== null) && <div className="clone-source-results" role="listbox">
               {sourceResults.map((repository, index) => (
                 <button
                   type="button"
@@ -934,7 +935,7 @@ export function CloneRepoDialog({
                   {emptyMessage}
                 </div>
               )}
-            </div>
+            </div>}
           </section>
 
           {offerPair && selectedRepository !== null && (

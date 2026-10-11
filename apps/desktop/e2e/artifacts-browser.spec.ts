@@ -32,6 +32,8 @@ test("browse an Artifacts account and namespace, then select its exact HTTPS rep
   await dialog.getByRole("button", { name: "Browse Cloudflare repositories" }).click();
   await dialog.getByLabel("Cloudflare account", { exact: true }).selectOption(hostname);
   await dialog.getByLabel("Artifacts namespace", { exact: true }).selectOption("default");
+  await expect(dialog).toContainText("Browse an account and namespace, or paste an HTTPS remote");
+  await expect(dialog).not.toContainText("Type a name to search");
   await expect(dialog.getByRole("option", { name: "default/demo · Read only" })).toBeVisible();
   await dialog.screenshot({ path: testInfo.outputPath("artifacts-browser.png") });
   await dialog.getByRole("option", { name: "default/demo · Read only" }).click();

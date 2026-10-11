@@ -49,32 +49,32 @@ export function ArtifactsRepositoryBrowser({ disabled, status, onChoose }: {
     const result = await dispatch("artifacts:repo", { remote: repository.httpsUrl });
     if (result.ok) onChoose(result.value); else setError(result.error.message);
   });
-  return <div className="clone-section">
-    <button className="settings-inline-button" type="button" disabled={disabled || busy} onClick={() => void load()}>Browse Cloudflare repositories</button>
+  return <div className="artifacts-browser">
+    <button className="modal__cancel" type="button" disabled={disabled || busy} onClick={() => void load()}>Browse Cloudflare repositories</button>
     {accounts?.loggedIn && <>
       <label className="clone-label">Cloudflare account
-        <select className="settings-input" aria-label="Cloudflare account" value={hostname} disabled={disabled || busy} onChange={(event) => void chooseAccount(event.target.value)}>
+        <select className="modal__input" aria-label="Cloudflare account" value={hostname} disabled={disabled || busy} onChange={(event) => void chooseAccount(event.target.value)}>
           <option value="">Choose an account…</option>
           {accounts.accounts.filter((account) => !status?.hosts?.some((entry) => entry.host === account.hostname && !entry.enabled)).map((account) => <option key={account.hostname} value={account.hostname}>{account.name}</option>)}
         </select>
       </label>
       {hostname && <label className="clone-label">Namespace
-        <select className="settings-input" aria-label="Artifacts namespace" value={namespace} disabled={disabled || busy} onChange={(event) => void chooseNamespace(event.target.value)}>
+        <select className="modal__input" aria-label="Artifacts namespace" value={namespace} disabled={disabled || busy} onChange={(event) => void chooseNamespace(event.target.value)}>
           <option value="">{namespaces.length ? "Choose a namespace…" : "No namespaces available"}</option>
           {namespaces.map((entry) => <option key={entry} value={entry}>{entry}</option>)}
         </select>
       </label>}
       {namespace && <>
-        <input className="settings-input" aria-label="Filter Artifacts repositories" placeholder="Filter repositories" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        <input className="modal__input" aria-label="Filter Artifacts repositories" placeholder="Filter repositories" value={filter} onChange={(event) => setFilter(event.target.value)} />
         <div className="clone-source-results" role="listbox" aria-label="Artifacts repositories">
           {repos.filter((repo) => repo.name.toLowerCase().includes(filter.toLowerCase())).map((repo) => <button type="button" role="option" aria-selected={false} className="clone-source-row" key={repo.httpsUrl} disabled={disabled || busy} onClick={() => void pick(repo)}>{repo.nameWithOwner}{repo.viewerCanPush === false ? " · Read only" : ""}</button>)}
         </div>
         {repos.length === 0 && !busy && <p>No repositories in this namespace.</p>}
         <label className="clone-label">Create a repository in {namespace}
-          <input className="settings-input" aria-label="New Artifacts repository name" value={name} onChange={(event) => setName(event.target.value)} disabled={disabled || busy} />
+          <input className="modal__input" aria-label="New Artifacts repository name" value={name} onChange={(event) => setName(event.target.value)} disabled={disabled || busy} />
         </label>
         <p>Creates an empty repository in the selected Cloudflare account and namespace.</p>
-        <button type="button" className="settings-inline-button" disabled={disabled || busy || !name.trim()} onClick={() => void create()}>Create repository</button>
+        <button type="button" className="modal__cancel" disabled={disabled || busy || !name.trim()} onClick={() => void create()}>Create repository</button>
       </>}
     </>}
     {busy && <p role="status">Loading Cloudflare…</p>}

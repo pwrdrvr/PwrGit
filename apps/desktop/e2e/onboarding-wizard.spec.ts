@@ -171,8 +171,9 @@ test("Forges hands a missing CLI its install commands, then notices the install"
       await expect(chipState(kind)).toHaveText("Connect");
       await expect(panelCommands).toHaveCount(0);
       await expect(window.getByRole("tabpanel")).toContainText(
-        "save the exact remote and repo token in Settings"
+        "wrangler login"
       );
+      await expect(window.getByRole("tabpanel")).toContainText("save the exact remote and repo token there");
       await expect(
         window.getByRole("tabpanel").getByRole("button", { name: "Token guide ↗" })
       ).toBeVisible();
