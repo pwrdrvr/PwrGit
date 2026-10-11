@@ -35,6 +35,22 @@ function config(env: Record<string, string | undefined>, key: string): string[] 
 }
 
 describe("Artifacts authentication on every Git network operation", () => {
+  it("issues a fresh scope-specific token for every network command and keeps manual tokens as the unconnected fallback", async () => {
+    const issue = vi.fn(async () => ok(otherToken as string | null));
+    const authenticate = createArtifactsGitAuthentication(store, git, () => ({ [hostname]: "artifacts" }), issue);
+    for (const verb of ["clone", "fetch", "pull", "push"]) {
+      const result = await authenticate([verb, remote], directory, {});
+      expect(result.ok).toBe(true); if (!result.ok) throw new Error(result.error.code);
+      expect(issue).toHaveBeenLastCalledWith(remote, verb === "push" ? "write" : "read");
+      expect(config(result.value, `http.${remote}/.extraHeader`)).toContain(`Authorization: Bearer ${otherToken}`);
+    }
+    expect(issue).toHaveBeenCalledTimes(4);
+    issue.mockResolvedValueOnce(ok(null));
+    const fallback = await authenticate(["fetch", "origin"], directory, {});
+    expect(fallback.ok).toBe(true); if (!fallback.ok) throw new Error(fallback.error.code);
+    expect(config(fallback.value, `http.${remote}/.extraHeader`)).toContain(`Authorization: Bearer ${token}`);
+    expect(store.token(remote)).toEqual(ok(token));
+  });
   it.each([
     ["clone", "--depth", "1", "--", remote, "destination"],
     ["fetch", "--prune", "origin"], ["pull", "--ff-only"],

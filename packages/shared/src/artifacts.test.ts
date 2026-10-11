@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { artifactsTokenExpiry, parseArtifactsRemote } from "./artifacts";
 import { classifyForgeHost, forgeCloneUrls, forgeWebUrl, parseForgeRemote } from "./forge-remote";
-import { forgeProduct } from "./forge-product";
+import { forgeProduct, forgeSignInCommand } from "./forge-product";
 
 const hostname = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
 const remote = `https://${hostname}/git/default/demo.git`;
 
 describe("documented Artifacts Git coordinates", () => {
+  it("uses Wrangler's documented login command without a host flag", () => {
+    expect(forgeSignInCommand("artifacts")).toBe("wrangler login");
+    expect(forgeSignInCommand("artifacts", hostname)).toBe("wrangler login");
+  });
   it("requires an explicit host mapping and removes the Git route prefix", () => {
     expect(classifyForgeHost(hostname)).toBe("other");
     expect(parseForgeRemote(remote)?.host).toBe("other");

@@ -1,17 +1,46 @@
 # Cloudflare Artifacts
 
-PwrGit supports existing Artifacts repositories through Git over HTTPS.
+PwrGit supports Artifacts accounts through Wrangler and Git over HTTPS.
 Artifacts stores Git history and refs. Cloudflare's [announcement](https://blog.cloudflare.com/next-git-platform-on-cloudflare/)
 describes it as the foundation for Git platforms; it has no documented pull
 request, issue, or review API.
 
-## Connect an existing repository
+## Connect with Wrangler
+
+1. Use an existing Cloudflare account with Artifacts access (Workers Paid).
+   Install the user-managed Wrangler CLI with `npm install -g wrangler` and
+   run `wrangler login` in a terminal. Restart PwrGit after changing its PATH.
+   PwrGit does not install Wrangler, create accounts, or upgrade plans.
+2. Open **Settings → Forges → Cloudflare Artifacts → Re-check Wrangler**.
+   PwrGit reads validated account metadata from `wrangler whoami --json`.
+   Each account is explicitly registered; its Enabled checkbox controls access.
+3. Open **Clone**, select Cloudflare Artifacts if another forge is selected,
+   and click **Browse Cloudflare repositories**. Choose an account and namespace,
+   then select a repository. The picker lists that namespace and filters locally;
+   it does not pretend Wrangler offers global repository search.
+4. Clone uses the exact remote returned by Wrangler. Fetch and pull issue a
+   fresh read token; push issues a fresh write token. Tokens expire after one
+   hour, stay in memory, and never replace the credential-free Git remote.
+5. **Create repository** explicitly creates an empty repository in the selected
+   account/namespace with `main` as the default branch. It does not create a
+   namespace. Creation is never retried automatically; after an uncertain failure,
+   browse the namespace before submitting again.
+
+Wrangler owns OAuth/API credentials. PwrGit never reads its credential files or
+reuses a token from `whoami` output. Commands run outside repositories so a
+checkout's Wrangler configuration and local environment files cannot redirect
+account selection. Each operation pins the selected account explicitly.
+Cloudflare permission, access, and unsupported/old Wrangler errors stay visible.
+Repository metadata can mark a repo read-only; otherwise push permission and
+visibility remain unknown. Listing a repository does not prove push access.
+
+## Connect with a manually issued repository token
 
 1. Use an existing Cloudflare account with access to Artifacts. The
    [pricing](https://developers.cloudflare.com/artifacts/platform/pricing/) and
    [changelog](https://developers.cloudflare.com/artifacts/platform/changelog/)
    pages describe an open beta requiring Workers Paid as of October 10, 2026.
-   PwrGit does not create accounts, upgrade plans, or provision repositories.
+   PwrGit does not create accounts or upgrade plans. Repository creation requires an explicit action in Clone.
 2. Copy the exact `remote` returned by the Artifacts REST API or Workers binding:
    `https://<ACCOUNT_ID>.artifacts.cloudflare.net/git/<namespace>/<repo>.git`.
    Obtain a repo token using the [authentication guide](https://developers.cloudflare.com/artifacts/guides/authentication/).
@@ -23,17 +52,15 @@ request, issue, or review API.
    Cloudflare login or validating the token's scope/revocation.
 4. Paste the same remote into **Clone** and use HTTPS. Existing checkouts can
    use it as their remote. Clone, fetch, pull and push receive the saved token
-   each time; the remote stored in `.git/config` remains credential-free.
+   each time when Wrangler is not connected to that account; the remote stored in `.git/config` remains credential-free.
 5. When the token expires or is revoked, issue a replacement in Cloudflare and
    save it for the same remote. Forgetting a token removes the local credential;
    it does not revoke the token in Cloudflare or remove the registered host.
 
-Tokens are repository-scoped: save one for each remote you use. PwrGit cannot
+Manually supplied tokens are repository-scoped: save one for each remote you use. Connected Wrangler accounts obtain fresh tokens automatically; a failed issuance is reported rather than silently falling back to a saved token. PwrGit cannot
 infer read/write scope from the token. A read token, a `read_only` repository,
 or revoked access can cause push to fail; Git's server error remains visible.
-Expiry and missing-credential errors point back to Settings. Visibility and
-push permissions remain unknown because this integration does not fetch
-repository metadata.
+Expiry and missing-credential errors point back to Settings. Visibility and push permissions remain unknown for a manually supplied remote. The Wrangler browser reports read-only repositories when its response provides that flag.
 
 ## Credential handling
 
@@ -51,7 +78,7 @@ repository. Diagnostic tracing is disabled during authenticated operations.
 Tokens never enter a persistent Git config. External terminal commands and
 the standalone MCP server do not receive these credentials.
 
-Saving a connection explicitly registers that account's host as Artifacts.
+Saving a connection or discovering an account through Wrangler explicitly registers that account's host as Artifacts.
 There is no shared SaaS hostname and no suffix-based provider discovery.
 Standalone MCP remote identity can opt in with
 `PWRGIT_ARTIFACTS_HOSTS=<account-id>.artifacts.cloudflare.net`; it can then
@@ -67,14 +94,13 @@ provider `artifacts`. This does not add live forge API features or Git auth.
   behavior. The forge badge opens the Cloudflare dashboard, without constructing
   an undocumented repository web page.
 - No SSH, Git LFS, anonymous access, PRs, issues or review API are documented.
-  PwrGit hides the PR/fork/SSH/CLI choices for a registered Artifacts source.
+  PwrGit hides the PR/fork/SSH and CLI-clone choices for a registered Artifacts source.
   Commit-author account lookup remains inconclusive.
-- Cloudflare documents repository management, listing, forking, public HTTPS
-  import and token issuance in its REST API. This slice does not implement
-  those control-plane operations, repository search, or automatic token minting.
-  Wrangler's documented `--json` flag has no published response schema; PwrGit
-  does not guess it, read Wrangler's config, or extract its OAuth/API token.
-  Workers deployment and contest submissions are outside this integration.
+- Repository list/get/create and repo-token issuance use the documented Wrangler
+  commands. Fork/import/delete, namespace provisioning, and token revocation are
+  not exposed. Workers deployment and contest submissions are outside this integration.
+  Wrangler performs list pagination; a response exceeding PwrGit's bounded CLI
+  output limit fails explicitly instead of presenting a truncated catalog.
 - Cloudflare's [limits](https://developers.cloudflare.com/artifacts/platform/limits/)
   include 1 GB per repo and 32 MB per blob. No rate-limit header dialect is
   assumed by PwrGit.
@@ -86,8 +112,13 @@ Implementation was checked against official docs retrieved October 10, 2026:
 (page stamp April 25), [authentication](https://developers.cloudflare.com/artifacts/guides/authentication/),
 [REST schemas](https://developers.cloudflare.com/artifacts/api/rest-api/)
 (August 13), and [Wrangler commands](https://developers.cloudflare.com/artifacts/api/wrangler/).
-Docs stamps describe those pages, not live API availability or a successful
-credential test.
+Wrangler JSON shapes are additionally verified against Cloudflare workers-sdk
+[`fcf625da014474f656a962b9313dec54563f3573`](https://github.com/cloudflare/workers-sdk/tree/fcf625da014474f656a962b9313dec54563f3573/packages/wrangler/src/artifacts)
+and its `__tests__/artifacts.test.ts` and `__tests__/whoami.test.ts` output
+assertions. The checked-in `fixtures/wrangler.json` adapts those upstream
+assertions with contrived account IDs and tokens; it is not a live response
+capture. Unknown JSON shapes are rejected. Docs stamps describe those pages,
+not live API availability or a successful credential test.
 
 Automated checks use contrived account IDs/tokens, encrypted-storage doubles,
 real local Git config matching, and a local smart-HTTP Git fixture. The fixture

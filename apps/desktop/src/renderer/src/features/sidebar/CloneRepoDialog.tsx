@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArtifactsRepositoryBrowser } from "./ArtifactsRepositoryBrowser";
 import {
   forgeLabel,
   isForgeKind,
@@ -338,7 +339,7 @@ export function CloneRepoDialog({
   // toggle that leads straight to "install the CLI" is a dead end dressed up
   // as a choice.
   const usableHosts = (catalog?.forges ?? [])
-    .filter((status) => status.capabilities.repositoryApi !== false && forgeCanAnswerAnywhere(status))
+    .filter((status) => (status.capabilities.repositoryApi !== false || status.capabilities.repositoryBrowser === true) && forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
   // Snap onto a forge that can actually answer. Without this a machine with
   // only GitLab signed in leaves `host` on its "github" default forever: the
@@ -527,7 +528,7 @@ export function CloneRepoDialog({
     profileId: profile.id,
     query: sourceQuery,
     host,
-    enabled: usableHosts.includes(host) && localSourcePath === null && forgeProductFor(exactHost ?? undefined)?.capabilities.repositoryApi !== false
+    enabled: usableHosts.includes(host) && localSourcePath === null && forgeProductFor(host)?.capabilities.repositoryApi !== false && forgeProductFor(exactHost ?? undefined)?.capabilities.repositoryApi !== false
   });
 
   useEffect(() => setSourceSelection(0), [sourceQuery]);
@@ -885,6 +886,7 @@ export function CloneRepoDialog({
               )}
             </div>
 
+            {forgeProductFor(host)?.capabilities.repositoryBrowser === true && <ArtifactsRepositoryBrowser disabled={busy} status={statusFor(catalog?.forges ?? [], host)} onChoose={chooseRepository} />}
             <div className="clone-source-results" role="listbox">
               {sourceResults.map((repository, index) => (
                 <button

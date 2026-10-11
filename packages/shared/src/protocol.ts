@@ -1330,6 +1330,11 @@ export interface Commands {
    * runs twice, so a renderer-side probe becomes a duplicated subprocess per
    * mount; here a repeated request is just a cache read.
    */
+  "artifacts:accounts": { req: { force?: boolean }; res: import("./artifacts").ArtifactsAccountStatus };
+  "artifacts:namespaces": { req: { hostname: string }; res: string[] };
+  "artifacts:repos": { req: { hostname: string; namespace: string }; res: CloneRepository[] };
+  "artifacts:repo": { req: { remote: string }; res: CloneRepository };
+  "artifacts:createRepo": { req: { hostname: string; namespace: string; name: string }; res: CloneRepository };
   "artifacts:credentials": { req: void; res: ArtifactsCredentialStatus };
   "artifacts:saveCredential": { req: { remote: string; token: string }; res: ArtifactsCredentialStatus };
   "artifacts:removeCredential": { req: { remote: string }; res: ArtifactsCredentialStatus };

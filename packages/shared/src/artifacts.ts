@@ -35,3 +35,9 @@ export type ArtifactsCredentialStatus = {
   secureStorageAvailable: boolean;
   credentials: ArtifactsCredential[];
 };
+
+export type ArtifactsAccountStatus = {
+  installed: boolean;
+  loggedIn: boolean;
+  accounts: Array<{ hostname: string; name: string }>;
+};

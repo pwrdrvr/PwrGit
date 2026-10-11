@@ -229,7 +229,7 @@ export function ForgesStep(props: { forges: ForgeStatus[] | undefined }) {
           {/* Two lines at most: a third pushes the 600px window's dialog
               past its 552px cap. */}
           Optional — manage connections in Settings › Forges. CLIs keep forge
-          API credentials; Artifacts uses encrypted repository tokens.
+          API credentials; Artifacts also accepts encrypted repository tokens.
         </p>
       </div>
       {/* One live region for the step, as Settings → Forges has: a sentence
@@ -327,7 +327,7 @@ function ForgePanel(props: {
   const product = forgeProduct(kind);
   if (product.authentication === "repo-token") {
     return <>
-      <p className="onboarding-wizard__forge-sentence">Cloudflare Artifacts stores Git repositories over HTTPS. After setup, save the exact remote and repo token in Settings › Forges › Cloudflare Artifacts. Read tokens allow clone, fetch and pull; write tokens also allow push. Pull requests, forks and SSH are unavailable through this integration.</p>
+      <p className="onboarding-wizard__forge-sentence">Cloudflare Artifacts stores Git repositories over HTTPS. Run <code>wrangler login</code>, then re-check in Settings › Forges › Cloudflare Artifacts to browse repositories and renew Git tokens automatically. You can also save the exact remote and repo token there. Read tokens allow clone, fetch and pull; write tokens also allow push. Pull requests, forks and SSH are unavailable through this integration.</p>
       <button type="button" className="onboarding-wizard__forge-link" onClick={() => void dispatch("shell:openExternal", { url: "https://developers.cloudflare.com/artifacts/guides/authentication/" }).catch(() => {})}>Token guide ↗</button>
     </>;
   }

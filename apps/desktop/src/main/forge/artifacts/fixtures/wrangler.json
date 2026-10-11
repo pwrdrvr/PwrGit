@@ -1,0 +1,17 @@
+{
+  "source": "Cloudflare workers-sdk fcf625da014474f656a962b9313dec54563f3573 packages/wrangler/src/__tests__/artifacts.test.ts JSON output assertions; whoami.test.ts JSON output assertions; artifacts/namespaces.ts logger.json. Sanitized/adapted fixture, not a live account capture. Account IDs and tokens are contrived; apiToken exercises older whoami output redaction.",
+  "whoami": {
+    "loggedIn": true,
+    "authType": "OAuth Token",
+    "apiToken": "fixture-oauth-secret",
+    "accounts": [{"id": "0123456789abcdef0123456789abcdef", "name": "Fixture account"}]
+  },
+  "namespaces": [{"namespace": "default", "repo_count": 1, "created_at": "2026-04-20T10:00:00.000Z", "updated_at": "2026-04-20T10:00:00.000Z"}],
+  "repositories": [{
+    "id": "repo_123", "name": "starter-repo", "description": "Starter repo", "default_branch": "main",
+    "created_at": "2026-04-20T10:00:00.000Z", "updated_at": "2026-04-22T10:00:00.000Z", "last_push_at": "2026-04-22T10:00:00.000Z",
+    "source": null, "read_only": false, "status": "ready",
+    "remote": "https://0123456789abcdef0123456789abcdef.artifacts.cloudflare.net/git/default/starter-repo.git"
+  }],
+  "token": {"id": "tok_123", "plaintext": "art_v1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?expires=1900000000", "scope": "read", "expires_at": "2030-03-17T17:46:40.000Z"}
+}

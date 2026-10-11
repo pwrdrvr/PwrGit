@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
-import { forgeProduct, parseArtifactsRemote, type ArtifactsCredentialStatus, type ForgeKind, type ForgeStatus } from "@pwrgit/shared";
+import { forgeAllHostsOff, forgeProduct, parseArtifactsRemote, type ArtifactsAccountStatus, type ArtifactsCredentialStatus, type ForgeKind, type ForgeStatus } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { SettingsField, SettingsSection } from "./SettingsLayout";
 
 /** Repo tokens are entered once and never returned by a read command. */
-export function ArtifactsSettingsSection({ kind, blocked, forgeStatus }: { kind: ForgeKind; blocked: boolean; forgeStatus: ForgeStatus | undefined }) {
+export function ArtifactsSettingsSection({ kind, blocked, forgeStatus, onSetAccountEnabled }: { kind: ForgeKind; blocked: boolean; forgeStatus: ForgeStatus | undefined; onSetAccountEnabled?: (hostname: string, enabled: boolean) => void }) {
   const [status, setStatus] = useState<ArtifactsCredentialStatus | null>(null);
+  const [accounts, setAccounts] = useState<ArtifactsAccountStatus | null>(null);
+  const [checkingAccount, setCheckingAccount] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
   const [remote, setRemote] = useState("");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -20,8 +23,19 @@ export function ArtifactsSettingsSection({ kind, blocked, forgeStatus }: { kind:
       if (!active) return;
       if (result.ok) setStatus(result.value); else setError(result.error.message);
     }).catch(() => { if (active) setError("PwrGit could not read credential metadata. Reopen Settings and retry."); });
+    void dispatch("artifacts:accounts", {}).then((result) => {
+      if (active && result.ok) setAccounts(result.value);
+    }).catch(() => { if (active) setAccountError("PwrGit could not check Wrangler. Re-check the account."); });
     return () => { active = false; };
   }, [forgeStatus]);
+  const checkAccount = async () => {
+    setCheckingAccount(true); setAccountError(null);
+    try {
+      const result = await dispatch("artifacts:accounts", { force: true });
+      if (result.ok) setAccounts(result.value); else setAccountError(result.error.message);
+    } catch { setAccountError("PwrGit could not check Wrangler. Reopen Settings and retry."); }
+    finally { setCheckingAccount(false); }
+  };
   const save = async () => {
     if (busy || blocked) return;
     setBusy(true); setError(null);
@@ -44,10 +58,17 @@ export function ArtifactsSettingsSection({ kind, blocked, forgeStatus }: { kind:
   const open = (url: string) => { void dispatch("shell:openExternal", { url }); };
   return (
     <SettingsSection sectionId={kind} title={product.label} eyebrow="Integrations"
-      description="Git over HTTPS with repository-scoped tokens. Requires an existing Workers Paid account."
-      chip={status === null ? "Checking…" : status.credentials.some((entry) => !entry.expired) ? "Tokens saved" : "Add token"}
+      description="Git over HTTPS with Wrangler or repository-scoped tokens. Requires an existing Workers Paid account."
+      chip={forgeStatus !== undefined && forgeAllHostsOff(forgeStatus) ? "Off" : accounts?.loggedIn ? "Wrangler connected" : status === null ? "Checking…" : status.credentials.some((entry) => !entry.expired) ? "Tokens saved" : "Add token"}
     >
-      <p className="settings-empty">Clone, fetch, pull and push use your saved repo token. Local history, diffs and worktrees work normally. This integration has no repository search, fork, pull-request or author-account API, SSH, partial clone or Git LFS support.</p>
+      <p className="settings-empty">Connect Wrangler to browse namespaces and repositories in Clone. Git operations issue a fresh read or write token through Wrangler. Saved repository tokens work when Wrangler is not connected. No fork, pull-request or author-account API, SSH, partial clone or Git LFS support.</p>
+      <SettingsField label="Wrangler account" sub={accounts === null ? "Checking Wrangler…" : !accounts.installed ? "Install Wrangler with npm install -g wrangler, then restart PwrGit." : accounts.loggedIn ? "Wrangler manages your Cloudflare login. Repository tokens are issued in memory and expire after one hour." : "Run wrangler login in a terminal, then re-check here."}
+        control={<button className="settings-inline-button" type="button" disabled={blocked || checkingAccount} onClick={() => void checkAccount()}>{checkingAccount ? "Checking…" : "Re-check Wrangler"}</button>}
+        help="PwrGit never reads Wrangler's credential files or saves your Cloudflare API/OAuth token. Artifacts access requires the appropriate Cloudflare permissions."
+      />
+      {(accounts?.accounts ?? []).map((account) => <SettingsField key={account.hostname} label={account.name} sub={account.hostname}
+        control={<label><input type="checkbox" aria-label={`Enable ${account.name}`} disabled={blocked || onSetAccountEnabled === undefined} checked={forgeStatus?.hosts?.find((entry) => entry.host === account.hostname)?.enabled !== false} onChange={(event) => onSetAccountEnabled?.(account.hostname, event.target.checked)} /> Enabled</label>}
+      />)}
       <SettingsField label="Cloudflare setup" sub="Copy the exact Git remote and issue a repository token in Cloudflare. Read tokens allow clone, fetch and pull; write tokens also allow push."
         control={<div className="settings-field__actions">
           <button className="settings-inline-button" type="button" onClick={() => open("https://dash.cloudflare.com/")}>Open Cloudflare dashboard</button>
@@ -68,6 +89,7 @@ export function ArtifactsSettingsSection({ kind, blocked, forgeStatus }: { kind:
         />
       </form>
       {error !== null && <p className="settings-field__error" role="alert">{error}</p>}
+      {accountError !== null && <p className="settings-field__error" role="alert">{accountError}</p>}
       {status?.credentials.map((entry) => {
         const repository = parseArtifactsRemote(entry.remote);
         return <SettingsField key={entry.remote} label={repository === null ? "Saved repository" : `${repository.namespace}/${repository.repo}`}

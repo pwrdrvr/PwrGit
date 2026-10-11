@@ -65,7 +65,7 @@ it("refreshes expiry metadata when a recheck replaces the forge status", async (
   expect(container.textContent).toContain("Add token");
   expect(container.textContent).toContain("Expired");
   expect(container.textContent).not.toContain("Tokens saved");
-  expect(mocks.dispatch).toHaveBeenCalledTimes(2);
+  expect(mocks.dispatch.mock.calls.filter(([channel]) => channel === "artifacts:credentials")).toHaveLength(2);
 });
 it("ignores a stale metadata read after a newer status refresh", async () => {
   let resolveOld!: (value: ReturnType<typeof ok<ArtifactsCredentialStatus>>) => void;

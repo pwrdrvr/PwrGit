@@ -60,7 +60,8 @@ export function artifactsGitEnvironment(
 }
 
 export function createArtifactsGitAuthentication(
-  store: ArtifactsCredentials, git: GitExec, hosts: () => ForgeHostMap
+  store: ArtifactsCredentials, git: GitExec, hosts: () => ForgeHostMap,
+  issueToken?: (remote: string, scope: "read" | "write") => Promise<Result<string | null>>
 ): GitAuthentication {
   return async (args, cwd, env) => {
     const command = commandArgs(args);
@@ -135,7 +136,9 @@ export function createArtifactsGitAuthentication(
       const remote = parseArtifactsRemote(url);
       if (remote === null) return err({ kind: "remote", code: "invalid_artifacts_remote", message: "Artifacts requires its exact credential-free HTTPS remote. Copy it from Cloudflare, then update the remote in PwrGit." });
       if (command.some((arg) => arg === "--filter" || arg.startsWith("--filter="))) return err({ kind: "remote", code: "artifacts_partial_clone_unsupported", message: "Artifacts does not document partial clone support. Remove the Git --filter option and use a full or shallow clone." });
-      const token = store.token(remote.remote);
+      const issued = await issueToken?.(remote.remote, verb === "push" ? "write" : "read");
+      if (issued !== undefined && !issued.ok) return issued;
+      const token = issued?.ok && issued.value !== null ? issued : store.token(remote.remote);
       if (!token.ok) return token;
       if (token.value === null) return err({ kind: "remote", code: "artifacts_token_required", message: "Add this repository's Artifacts read or write token in Settings → Forges → Cloudflare Artifacts. Git cannot use a Cloudflare API token." });
       credentials.push({ remote: remote.remote, token: token.value });

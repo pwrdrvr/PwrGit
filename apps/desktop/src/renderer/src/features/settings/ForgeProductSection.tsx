@@ -25,6 +25,7 @@ import { dispatch } from "../../lib/pwrgit";
 
 /** What each capability buys the user, in their words rather than the API's. */
 const CAPABILITY_LABELS: Record<keyof ForgeCapabilities, string> = {
+  repositoryBrowser: "Browse repositories by account and namespace",
   changeRequests: "Pull or merge requests",
   repositoryApi: "Repository search and forks",
   ssh: "Git over SSH",
@@ -134,7 +135,7 @@ export function forgeStateSentence(
 ): string | null {
   if (state === "unknown") return null;
   const label = forgeProduct(kind).authentication === "repo-token" && state !== "off"
-    ? (state === "connected" ? "Tokens saved" : "Add token") : STATE_LABELS[state];
+    ? (state === "connected" ? "Ready" : "Connect") : STATE_LABELS[state];
   return `${forgeProduct(kind).label}: ${label}`;
 }
 
@@ -196,7 +197,10 @@ export function ForgeProductSection(props: {
 }) {
   const { kind, hosts, status } = props;
   if (forgeProduct(kind).authentication === "repo-token") {
-    return <ArtifactsSettingsSection kind={kind} blocked={props.blocked} forgeStatus={status} />;
+    return <ArtifactsSettingsSection kind={kind} blocked={props.blocked} forgeStatus={status} onSetAccountEnabled={(hostname, enabled) => {
+      const row = hosts?.find((entry) => entry.host === hostname);
+      if (row !== undefined) props.onWrite(row, { kind, enabled });
+    }} />;
   }
   const state = forgeProductState(status);
   const { label, addHost } = forgeProduct(kind);

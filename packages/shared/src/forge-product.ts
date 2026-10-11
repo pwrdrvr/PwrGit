@@ -33,6 +33,7 @@ export type ForgeProduct = {
   readonly cli: string;
   /** CLI-owned auth by default; Git storage may instead accept a repo token. */
   readonly authentication?: "repo-token";
+  readonly loginArgs?: readonly string[];
   /** Git transport path prefix, absent on conventional forges. */
   readonly gitPathPrefix?: string;
   /** A documented portal when no repository-specific web URL is published. */
@@ -192,7 +193,8 @@ export type ForgeInstall = {
 export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze({
   artifacts: {
     label: "Cloudflare Artifacts",
-    cli: "",
+    cli: "wrangler",
+    loginArgs: ["login"],
     authentication: "repo-token",
     gitPathPrefix: "git/",
     browseUrl: "https://dash.cloudflare.com/",
@@ -213,7 +215,7 @@ export const FORGE_PRODUCTS: Readonly<Record<ForgeKind, ForgeProduct>> = freeze(
     addHost: { button: "Add repository token…", sub: "Use the exact remote returned by Artifacts.", title: "Connect an Artifacts repository", placeholder: "<account-id>.artifacts.cloudflare.net" },
     forkCompletesAsynchronously: false,
     capabilities: {
-      changeRequests: false, repositoryApi: false, ssh: false,
+      changeRequests: false, repositoryApi: false, repositoryBrowser: true, ssh: false,
       batchedBranchLookup: false, batchedCommitAssociation: false,
       changeSizeAndTimeline: false, commitAuthorIdentity: false,
       forkDefaultBranchOnly: false
@@ -573,8 +575,8 @@ export function forgeInstall(
 /** Copyable CLI sign-in syntax, shared by both settings sections. */
 export function forgeSignInCommand(kind: ForgeKind, hostname?: string): string {
   const product = forgeProduct(kind);
-  const base = `${product.cli} auth login`;
-  if (hostname === undefined) return base;
+  const base = `${product.cli} ${(product.loginArgs ?? ["auth", "login"]).join(" ")}`;
+  if (hostname === undefined || product.signInHost.flag === "") return base;
   const value = product.signInHost.apiPath === undefined
     ? hostname
     : `https://${hostname}${product.signInHost.apiPath}`;

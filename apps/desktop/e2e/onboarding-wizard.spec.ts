@@ -168,7 +168,7 @@ test("Forges hands a missing CLI its install commands, then notices the install"
   for (const kind of FORGE_KINDS) {
     await chip(kind).click();
     if (forgeProduct(kind).authentication === "repo-token") {
-      await expect(chipState(kind)).toHaveText("Add token");
+      await expect(chipState(kind)).toHaveText("Connect");
       await expect(panelCommands).toHaveCount(0);
       await expect(window.getByRole("tabpanel")).toContainText(
         "save the exact remote and repo token in Settings"

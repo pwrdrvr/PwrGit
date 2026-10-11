@@ -835,6 +835,8 @@ export function toForgeHost(value: unknown): ForgeHost {
  * means "never ask" rather than "ask and handle the failure".
  */
 export type ForgeCapabilities = {
+  /** Account/namespace repository picker for storage providers without forge search. */
+  repositoryBrowser?: boolean;
   /** False for Git storage without a change-request API. Defaults to true for legacy snapshots. */
   changeRequests?: boolean;
   /** Whether this integration reads repository metadata and offers search/fork. */

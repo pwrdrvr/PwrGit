@@ -161,7 +161,7 @@ describe("ForgesStep", () => {
       "GitHub Not installed",
       "GitLab Not installed",
       "GitCafe Not installed",
-      "Cloudflare Artifacts Add token"
+      "Cloudflare Artifacts Connect"
     ]);
     expect(selectedTab()).toBe("GitHub");
     expect(commands()).toEqual(["brew install gh"]);
@@ -253,7 +253,7 @@ describe("ForgesStep", () => {
       "GitLab: Not installed",
       "GitHub: Not installed",
       "GitCafe: Not installed",
-      "Cloudflare Artifacts: Add token"
+      "Cloudflare Artifacts: Connect"
     ]);
     expect(selectedTab()).toBe("GitLab");
     expect(mocks.dispatch).toHaveBeenCalledWith("forge:status", undefined);
