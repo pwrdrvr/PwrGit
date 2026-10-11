@@ -4,6 +4,39 @@ import { expect, test } from "vitest";
 
 const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 
+const previewWorkflow = readFileSync(new URL("../.github/workflows/preview-build.yml", import.meta.url), "utf8");
+const ciWorkflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+
+function dependencySetupJobs(source) {
+  return source.split(/\n  [\w-]+:\n/).slice(1)
+    .filter((body) => body.includes("uses: pwrdrvr/configure-nodejs@"));
+}
+
+test.each([
+  ["release", workflow, 3, 45],
+  ["preview", previewWorkflow, 2, 30],
+])("%s dependency setup is bounded without shrinking the job budget", (_name, source, count, minimumJobMinutes) => {
+  const ciMacJob = ciWorkflow.split("\n  macos-e2e:\n")[1].split(/\n  [\w-]+:\n/)[0];
+  const ciSetup = ciMacJob.split(/^      - name: /m).find((step) => step.includes("uses: pwrdrvr/configure-nodejs@"));
+  const provenMinutes = Number(ciSetup.match(/^        timeout-minutes: (\d+)$/m)[1]);
+  expect(provenMinutes).toBe(10);
+  const jobs = dependencySetupJobs(source);
+  expect(jobs).toHaveLength(count);
+  for (const job of jobs) {
+    const jobMinutes = Number(job.match(/^    timeout-minutes: (\d+)$/m)?.[1]);
+    expect(jobMinutes).toBeGreaterThanOrEqual(minimumJobMinutes);
+    const steps = job.split(/^      - name: /m).slice(1);
+    const installs = steps.filter((step) => step.includes("uses: pwrdrvr/configure-nodejs@"));
+    expect(installs).toHaveLength(1);
+    for (const install of installs) {
+      // A job-only timeout, an invented action input, or failure suppression
+      // would allow a stalled install to consume packaging time again.
+      expect(Number(install.match(/^        timeout-minutes: (\d+)$/m)?.[1])).toBe(provenMinutes);
+      expect(install).not.toContain("continue-on-error:");
+    }
+  }
+});
+
 // Evaluate the boolean subset used by these actual job conditions. GitHub adds
 // success() when no status function is present, so a skipped audit ancestor must
 // be represented in the fixture rather than treating prepare's success as enough.
