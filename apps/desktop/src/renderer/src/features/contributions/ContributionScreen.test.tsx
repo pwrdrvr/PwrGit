@@ -18,8 +18,6 @@ const change = async (label: string, value: string) => {
 };
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-11T16:00:00Z"));
-  const resolved = new Intl.DateTimeFormat().resolvedOptions();
-  vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({ ...resolved, timeZone: "America/New_York" });
   snapshot = contributionFixture();
   mocks.dispatch.mockReset().mockImplementation(async name => {
     if (name === "forge:hosts") return { hosts: [{ kind: "github", host: "github.com", enabled: true, account: "demo-user" }, { kind: "gitlab", host: "gitlab.com", enabled: true }] };
@@ -34,8 +32,27 @@ beforeEach(() => {
   container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); ledger.restore(); vi.restoreAllMocks(); vi.useRealTimers(); });
-async function mount() { await act(async () => root.render(<ContributionScreen profileId="demo-profile" onClose={() => {}} />)); }
-async function connect() { await act(async () => button("Use active account").click()); }
+async function mount() {
+  await act(async () => root.render(<ContributionScreen profileId="demo-profile" onClose={() => {}} />));
+  // Select the fixture's scope through the UI, independent of the host timezone.
+  // A resolvedOptions prototype spy misses call-without-new Intl instances in
+  // some test realms, leaving UTC CI hosts with a mismatched cached snapshot.
+  for (const [label, value] of [["From", snapshot.window.startDate], ["Through", snapshot.window.endDate], ["Timezone", snapshot.window.timezone]]) {
+    const input = [...container.querySelectorAll("label")].find(node => node.firstChild?.textContent === label)?.querySelector("input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+}
+async function connect() {
+  await act(async () => button("Use active account").click());
+  expect(mocks.dispatch).toHaveBeenCalledWith("contribution:verify", {
+    profileId: "demo-profile", host: snapshot.identity.host,
+    startDate: snapshot.window.startDate, endDate: snapshot.window.endDate,
+    timezone: snapshot.window.timezone
+  });
+}
 function blobText(blob: Blob): Promise<string> { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsText(blob); }); }
 
 describe("Contributions integrated screen", () => {
