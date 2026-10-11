@@ -112,7 +112,7 @@ import { createGonePrRefresh } from "./github/gone-pr-refresh";
 import { OpenPrService } from "./github/open-pr-service";
 import { registerChangeRequestHandlers } from "./github/change-request-handlers";
 import { PrService } from "./github/pr-service";
-import { emitEvent, emitEventToWindow, registerIpc } from "./ipc";
+import { emitEvent, emitEventToWindow, observeEvent, registerIpc } from "./ipc";
 import { registerCommitIdentityHandlers } from "./git/commit-identity-handlers";
 import {
   initLogFile,
@@ -1191,7 +1191,7 @@ if (!gotSingleInstanceLock) {
     const fileInsightHandlers = registerFileInsightHandlers(bus, db);
     registerStashHandlers(bus, db, refresher, worktreeOperations);
     registerRebaseHandlers(bus, db, refresher, worktreeOperations);
-    registerCommitIdentityHandlers(bus, db, {
+    const identityHandles = registerCommitIdentityHandlers(bus, db, {
       git: execGit,
       reminderEnabled: () =>
         settingsSnapshot(settings, diagnosticsOutputRoot, appVersion).general
@@ -1200,8 +1200,28 @@ if (!gotSingleInstanceLock) {
         const contents = webContents.fromId(id);
         return contents !== undefined && !contents.isDestroyed();
       },
-      emitChanged: () => emitEvent("identity:changed", {})
+      emitChanged: () => emitEvent("identity:changed", {}),
+      folderSyncEnabled: () =>
+        settingsSnapshot(settings, diagnosticsOutputRoot, appVersion).general
+          .gitIdentityByFolder,
+      setFolderSyncEnabled: (enabled) => {
+        settings.update({ general: { ...settings.get().general, gitIdentityByFolder: enabled } });
+        emitEvent("settings:changed", settingsSnapshot(settings, diagnosticsOutputRoot, appVersion));
+      }
     });
+    // "Match Git to each profile" follows the profiles: an edit to an email,
+    // author name or folders rewrites the includes (a no-op when nothing an
+    // include carries moved), and launch repairs an include a later
+    // `[user]` section has shadowed.
+    let folderResync: ReturnType<typeof setTimeout> | null = null;
+    observeEvent("profile:changed", () => {
+      if (folderResync !== null) clearTimeout(folderResync);
+      folderResync = setTimeout(() => {
+        folderResync = null;
+        void identityHandles.resyncFolders();
+      }, 300);
+    });
+    void identityHandles.resyncFolders();
     // Asked of git rather than parsed out of ~/.gitconfig: the first-run seed
     // above is not section-aware and does not follow `include`, and the wizard
     // puts this value on screen as what commits will carry.

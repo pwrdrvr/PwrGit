@@ -113,6 +113,8 @@ import type {
 } from "./types";
 import type {
   CommitIdentityInspection,
+  FolderIdentityReport,
+  FolderSyncPlan,
   MachineGitIdentity
 } from "./commit-identity";
 import type { ImagePreview, ImageRevision } from "./image";
@@ -693,6 +695,12 @@ export type GeneralSettings = {
    * PwrGit", and the Settings card keeps reporting the state either way.
    */
   gitIdentityReminder: boolean;
+  /**
+   * Settings › Profiles › By folder: PwrGit keeps an `includeIf` per profile
+   * root in the global Git config. Set only by `identity:setFolderSync`,
+   * which writes the config, never by `settings:update`.
+   */
+  gitIdentityByFolder: boolean;
 };
 
 export type ExperimentalSettings = {
@@ -782,7 +790,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   branchCleanupPrProof: DEFAULT_BRANCH_CLEANUP_OPTIONS.prProof,
   maintenanceBranchMode: "review",
   branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays,
-  gitIdentityReminder: true
+  gitIdentityReminder: true,
+  gitIdentityByFolder: false
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
@@ -914,6 +923,36 @@ export interface Commands {
   "identity:writeGlobal": {
     req: { name: string; email: string };
     res: MachineGitIdentity;
+  };
+  /**
+   * What Git outside PwrGit records in each profile's indexed repositories,
+   * asked of Git per repository. `profileId` narrows the answer to one
+   * profile (the profile popup); omitted, every profile (Settings).
+   */
+  "identity:folders": {
+    req: { profileId?: ProfileId };
+    res: FolderIdentityReport;
+  };
+  /** The files and lines "Match Git to each profile" would write (on) or
+   *  remove (off). Reads only. */
+  "identity:folderPlan": {
+    req: { enabled: boolean };
+    res: FolderSyncPlan;
+  };
+  /**
+   * Switch "Match Git to each profile" and apply it: write PwrGit's
+   * `includeIf` per profile root and one include file per profile, or remove
+   * them all. The answer is re-read from Git afterwards.
+   */
+  "identity:setFolderSync": {
+    req: { enabled: boolean };
+    res: FolderIdentityReport;
+  };
+  /** Unset a repository's own `user.email` (and `user.name` when its profile
+   *  sets one) from its local config, so the profile's folder identity wins. */
+  "identity:clearRepoOverride": {
+    req: { repoId: string };
+    res: FolderIdentityReport;
   };
 
   // Repos & discovery (U6)

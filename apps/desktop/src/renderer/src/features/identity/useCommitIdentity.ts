@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CommitIdentityInspection, MachineGitIdentity } from "@pwrgit/shared";
+import type { CommitIdentityInspection, FolderIdentityReport, MachineGitIdentity } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 
 /**
@@ -104,4 +104,60 @@ export function useMachineIdentity(): {
 
   const refresh = useCallback(() => load.current(), []);
   return { machine, refresh };
+}
+
+export type FolderIdentityState = {
+  report: FolderIdentityReport | null;
+  refresh: () => void;
+  /** Replace the answer with one a write just returned. */
+  accept: (report: FolderIdentityReport) => void;
+};
+
+/**
+ * What Git outside PwrGit records in each profile's repositories
+ * (`identity:folders`). Asked only while `active` — the profile popup is
+ * open, or the Settings card is mounted — because each ask is a Git process
+ * per repository. The last answer stays while inactive, so reopening the
+ * popup paints at once and then settles.
+ */
+export function useFolderIdentity(options: {
+  active: boolean;
+  /** One profile (the popup); omitted, every profile (Settings). */
+  profileId?: string;
+}): FolderIdentityState {
+  const { active, profileId } = options;
+  const [report, setReport] = useState<FolderIdentityReport | null>(null);
+  const load = useRef<() => void>(() => undefined);
+
+  useEffect(() => {
+    if (!active) {
+      load.current = () => undefined;
+      return;
+    }
+    let live = true;
+    let sequence = 0;
+    const run = (): void => {
+      const request = ++sequence;
+      void dispatch("identity:folders", profileId === undefined ? {} : { profileId })
+        .then((result) => {
+          if (live && request === sequence && result.ok) setReport(result.value);
+        })
+        .catch(() => undefined);
+    };
+    load.current = run;
+    run();
+    const offIdentity = subscribe("identity:changed", run);
+    const offProfile = subscribe("profile:changed", run);
+    window.addEventListener("focus", run);
+    return () => {
+      live = false;
+      offIdentity();
+      offProfile();
+      window.removeEventListener("focus", run);
+    };
+  }, [active, profileId]);
+
+  const refresh = useCallback(() => load.current(), []);
+  const accept = useCallback((next: FolderIdentityReport) => setReport(next), []);
+  return { report, refresh, accept };
 }

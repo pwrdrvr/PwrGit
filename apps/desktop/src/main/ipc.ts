@@ -31,6 +31,24 @@ export function registerIpc(
   );
 }
 
+const mainObservers = new Map<EventChannel, Set<(payload: unknown) => void>>();
+
+/**
+ * Hear a broadcast in main too. For work that must follow a change wherever
+ * it was made — `profile:changed` is emitted by several handlers — without
+ * threading a callback through each of them. Returns the unsubscribe.
+ */
+export function observeEvent<C extends EventChannel>(
+  channel: C,
+  listener: (payload: EventPayload<C>) => void
+): () => void {
+  const set = mainObservers.get(channel) ?? new Set();
+  const wrapped = listener as (payload: unknown) => void;
+  set.add(wrapped);
+  mainObservers.set(channel, set);
+  return () => set.delete(wrapped);
+}
+
 /** Broadcast a server event to every renderer window. */
 export function emitEvent<C extends EventChannel>(
   channel: C,
@@ -39,6 +57,7 @@ export function emitEvent<C extends EventChannel>(
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(IPC_EVENT_CHANNEL, channel, payload);
   }
+  for (const listener of mainObservers.get(channel) ?? []) listener(payload);
 }
 
 /** Send a typed server event to one window without disturbing sibling themes. */

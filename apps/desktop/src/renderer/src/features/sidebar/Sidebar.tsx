@@ -1151,6 +1151,11 @@ export function Sidebar({
             onSwitch={onSwitchProfile}
             onNewProfile={onNewProfile}
             onManageProfile={onManageProfile}
+            onOpenGitIdentity={() => {
+              void dispatch("settings:open", { page: "profiles", sub: "git-folders" }).catch(
+                () => undefined
+              );
+            }}
           />
         )}
       </div>

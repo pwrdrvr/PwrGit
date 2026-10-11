@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --bg-app: #000000; --bg-panel: #0a0a0a; --bg-elev: #101010; --bg-side: #050505; --bg-in: #080808;
+            --line: rgba(247, 243, 235, 0.1); --line2: rgba(247, 243, 235, 0.14);
+            --t1: #f7f3eb; --t2: #b8b0a5; --t3: #8c857a;
+            --tsub: rgba(247, 243, 235, 0.54);
+            --acc: #ff8a1f; --accb: #ffb35c; --accon: #160a00;
+            --asoft: rgba(255, 138, 31, 0.12); --abord: rgba(255, 138, 31, 0.42);
+            --ok: #5fa969; --okt: #9ce5b3; --oksoft: rgba(74, 148, 92, 0.18);
+            --warn: #d99a3d; --warnsoft: rgba(217, 154, 61, 0.14);
+            --bad: #b94232; --badsoft: rgba(185, 66, 50, 0.24); --badt: #ffb0a1;
+            --info: #9fc8ff; --infosoft: rgba(159, 200, 255, 0.12);
+            --sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #050505; }
+          body { margin: 0; background: #050505; font-family: var(--sans); }
+          a { color: var(--accb); text-decoration: none; } a:hover { color: var(--acc); }
+          button { font-family: inherit; }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: #050505; }
+          .dv-turn + .dv-turn { border-top: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #050505; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--sans); color: var(--t3); max-width: 820px; text-wrap: pretty; }
+          .dv-sub b { color: var(--t2); font-weight: 600; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--sans); color: var(--tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+
+          .note { margin: 0; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; max-width: 760px; }
+          .note b { color: var(--t2); font-weight: 600; }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.q { background: var(--t3); color: #050505; }
+          .pin.ok { background: var(--ok); color: #050505; }
+          .pin.w { background: var(--warn); color: #050505; }
+          .find { width: 470px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0 0 3px; font: 400 10.5px/1.5 var(--sans); color: var(--t3); text-wrap: pretty; }
+          .fitem b { color: var(--t2); font-weight: 600; }
+          pre.probe { margin: 4px 0 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-in); font: 500 9.5px/1.5 var(--mono); color: var(--t2); white-space: pre-wrap; }
+          pre.probe i { font-style: normal; color: var(--t3); }
+          pre.probe b { color: var(--accb); font-weight: 600; }
+
+          /* ---- matrix table ---- */
+          .tbl { border: 1px solid var(--line); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+          .tr { display: grid; gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.45 var(--sans); color: var(--t2); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--t1); font-weight: 600; }
+          .m4 { grid-template-columns: 170px 210px 150px minmax(0, 1fr); }
+          .st { display: inline-flex; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap; }
+          .st.keep { background: var(--oksoft); color: var(--okt); }
+          .st.chg { background: var(--asoft); color: var(--accb); border: 1px solid var(--abord); }
+          .st.bug { background: var(--badsoft); color: var(--badt); }
+          .st.q { background: rgba(247, 243, 235, 0.06); color: var(--t3); }
+
+          .pbtn { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border: 1px solid var(--line2); border-radius: 6px; background: transparent; color: var(--t2); font: 600 11px/1 var(--sans); cursor: pointer; }
+          .pbtn.pri { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .pbtn:hover { border-color: var(--abord); color: var(--accb); }
+          .tg { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 999px; font: 600 9px/1 var(--sans); letter-spacing: 0.02em; background: rgba(247, 243, 235, 0.06); color: var(--t3); white-space: nowrap; }
+          .tg.ok { background: var(--oksoft); color: var(--okt); }
+          .tg.warn { background: var(--warnsoft); color: var(--warn); }
+
+          /* =======================================================
+             Settings card + dialog (shipped .settings-panel shapes)
+             ======================================================= */
+          .sp { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 10px; }
+          .sp-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 13px 16px 11px; border-bottom: 1px solid var(--line); background: var(--bg-elev); border-radius: 10px 10px 0 0; }
+          .sp-hm { flex: 1; min-width: 0; }
+          .sp-eb { margin: 0 0 4px; font: 650 10px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--acc); }
+          .sp-t { margin: 0; font: 700 15px/1.2 var(--sans); letter-spacing: -0.005em; color: var(--t1); }
+          .sp-d { margin: 5px 0 0; font: 400 12px/1.5 var(--sans); color: var(--t3); max-width: 62ch; }
+          .sp-b { padding: 4px 16px 12px; }
+          .chip { flex: 0 0 auto; font: 600 10.5px/1 var(--sans); letter-spacing: 0.03em; color: var(--t3); background: var(--bg-elev); border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+          .chip.ok { color: var(--okt); background: var(--oksoft); border-color: transparent; }
+          .chip.warn { color: var(--warn); background: var(--warnsoft); border-color: transparent; }
+          .f { display: flex; align-items: flex-start; gap: 18px; padding: 11px 0; }
+          .f + .f { border-top: 1px solid var(--line); }
+          .f-l { display: flex; flex-direction: column; gap: 3px; flex: 0 0 190px; font: 550 12.5px/1.35 var(--sans); color: var(--t1); }
+          .f-sub { font: 400 11.5px/1.45 var(--sans); color: var(--t3); }
+          .f-c { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; flex: 1; min-width: 0; }
+          .sbtn { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 6px; background: var(--bg-elev); color: var(--t1); font: 550 11.5px/1 var(--sans); cursor: pointer; }
+          .sbtn.pri { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .sw { display: inline-flex; align-items: center; gap: 8px; font: 500 11.5px/1.3 var(--sans); color: var(--t2); }
+          .sw i { width: 26px; height: 15px; border-radius: 999px; background: var(--acc); position: relative; }
+          .sw i::after { content: ""; position: absolute; top: 2px; right: 2px; width: 11px; height: 11px; border-radius: 999px; background: var(--accon); }
+          .sw.off i { background: rgba(247, 243, 235, 0.14); }
+          .sw.off i::after { right: auto; left: 2px; background: var(--t3); }
+
+          .dlg { width: 520px; border: 1px solid var(--line2); border-radius: 12px; background: var(--bg-elev); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5); padding: 18px 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+          .dlg-t { margin: 0; font: 700 15px/1.2 var(--sans); color: var(--t1); }
+          .dlg-d { margin: 0; font: 400 12px/1.5 var(--sans); color: var(--t3); }
+          .fld-l { font: 600 11.5px/1.2 var(--sans); color: var(--t2); }
+          .inp { height: 30px; padding: 0 10px; border: 1px solid var(--line2); border-radius: 7px; background: var(--bg-in); display: flex; align-items: center; font: 500 12px/1 var(--sans); color: var(--t1); }
+          .diff { border: 1px solid var(--line); border-radius: 7px; background: var(--bg-in); padding: 8px 10px; font: 500 10.5px/1.6 var(--mono); color: var(--t2); }
+          .diff .fn { color: var(--t3); margin-bottom: 3px; }
+          .diff .add { color: var(--okt); }
+          .diff .del { color: var(--badt); }
+          .diff .ctx { color: var(--t3); }
+          .diff + .diff { margin-top: 6px; }
+          .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+
+          /* profile modal */
+          .pm { width: 470px; border: 1px solid var(--line2); border-radius: 12px; background: var(--bg-elev); padding: 16px 18px; display: flex; flex-direction: column; gap: 11px; }
+          .pm-t { font: 700 14px/1.2 var(--sans); color: var(--t1); }
+          .fieldrow { display: flex; flex-direction: column; gap: 4px; }
+          .root-list { display: flex; flex-direction: column; gap: 4px; }
+          .root-li { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-panel); font: 500 11px/1 var(--mono); color: var(--t2); }
+          .root-li.bad { border-color: rgba(185, 66, 50, 0.6); background: var(--badsoft); color: var(--badt); }
+          .root-li .x { margin-left: auto; color: var(--t3); font-family: var(--sans); }
+          .ferr { font: 500 11px/1.45 var(--sans); color: var(--badt); }
+          .fdisc { padding: 7px 9px; border-radius: 7px; background: rgba(247, 243, 235, 0.04); font: 400 11px/1.45 var(--sans); color: var(--t3); }
+          .fdisc code { font-size: 10px; }
+          .fdisc b { color: var(--t2); font-weight: 600; }
+
+          /* prototype */
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--abord); border-radius: 9px; background: var(--bg-panel); }
+          .seg { display: flex; flex-wrap: wrap; gap: 4px; max-width: 840px; }
+          .seg button { height: 24px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--t2); font: 550 10.5px/1 var(--sans); cursor: pointer; }
+          .seg button.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .readout { padding: 8px 10px; border-left: 2px solid var(--acc); background: rgba(247, 243, 235, 0.03); font: 400 11px/1.5 var(--sans); color: var(--t2); max-width: 840px; }
+          .readout b { color: var(--t1); }
+          .pgrid { display: flex; gap: 18px; align-items: flex-start; }
+          .note-wide { max-width: 980px; }
+
+          /* sidebar + profile menu at shipped size (app.css .profile-menu) */
+          .side { width: 280px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg-side); padding: 14px 12px 12px; position: relative; }
+          .pchip { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 1px solid var(--abord); border-radius: 9px; background: rgba(247, 243, 235, 0.06); }
+          .mt { width: 30px; height: 30px; flex: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; font: 800 14px/1 var(--sans); background: var(--bg-elev); color: var(--t2); }
+          .mt.sm { width: 26px; height: 26px; font-size: 12px; background: var(--bg-panel); }
+          .mt.sm.on { background: rgba(255, 138, 31, 0.18); color: var(--accb); }
+          .ptx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+          .ptx .n { font: 700 13px/1 var(--sans); color: var(--t1); }
+          .ptx .n.s { font: 600 12.5px/1.1 var(--sans); }
+          .ptx .e { font: 500 10.5px/1 var(--mono); color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .caret { width: 7px; height: 7px; flex: none; margin-right: 2px; border-right: 1.6px solid var(--t3); border-bottom: 1.6px solid var(--t3); transform: rotate(-135deg); }
+          .pmenu { margin-top: 6px; background: #0d0d0d; border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42); padding: 6px; }
+          .pm-lab { padding: 6px 8px 4px; font: 600 10px/1 var(--sans); color: var(--t3); letter-spacing: 0.08em; text-transform: uppercase; }
+          .pm-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; }
+          .pm-item.on { border-color: var(--abord); background: rgba(255, 138, 31, 0.07); }
+          .pm-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--ok); flex: none; }
+          .pm-sep { height: 1px; background: rgba(247, 243, 235, 0.08); margin: 6px 4px; }
+          .pm-act { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--t2); font: 600 12px/1 var(--sans); text-align: left; }
+          .pm-ic { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: var(--bg-panel); color: var(--acc); font: 700 11px/1 var(--mono); }
+          .pm-hint { padding: 4px 8px 6px; font: 500 10.5px/1.4 var(--sans); color: rgba(247, 243, 235, 0.42); }
+
+          /* proposed: the Git-outside-PwrGit row */
+          .pm-git { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 8px; border-radius: 8px; border: 1px solid transparent; background: transparent; text-align: left; cursor: pointer; }
+          .pm-git:hover, .pm-git.hov { background: rgba(247, 243, 235, 0.06); }
+          .pm-git .pm-ic { color: var(--t2); position: relative; }
+          .pm-git .pm-ic::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border-radius: 999px; border: 2px solid #0d0d0d; background: var(--t3); }
+          .pm-git.ok .pm-ic::after { background: var(--ok); }
+          .pm-git.warn .pm-ic::after { background: var(--warn); }
+          .pm-git.wait .pm-ic::after { background: transparent; border-color: transparent; }
+          .pm-git .gtx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+          .pm-git .gk { font: 600 12px/1.15 var(--sans); color: var(--t2); }
+          .pm-git .gv { font: 500 10.5px/1.35 var(--sans); color: var(--t3); overflow-wrap: anywhere; }
+          .pm-git .gv code { font-size: 10px; color: var(--t2); }
+          .pm-git.warn .gv { color: var(--warn); }
+          .pm-git .chev2 { flex: none; width: 12px; height: 12px; margin-top: 2px; color: var(--t3); }
+
+          /* settings: identity-by-folder card */
+          .fp { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-top: 4px; }
+          .fp-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 4px 11px; padding: 10px 12px; align-items: start; }
+          .fp-row + .fp-row { border-top: 1px solid var(--line); }
+          .fp-row .mt { width: 30px; height: 30px; font-size: 13px; }
+          .fp-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+          .fp-name { display: flex; align-items: center; gap: 7px; font: 650 12.5px/1.2 var(--sans); color: var(--t1); }
+          .fp-who { font: 500 11px/1.35 var(--mono); color: var(--t2); overflow-wrap: anywhere; }
+          .fp-roots { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+          .fp-root { display: flex; align-items: baseline; gap: 7px; font: 500 10.5px/1.4 var(--mono); color: var(--t2); }
+          .fp-root .ic { flex: none; width: 12px; color: var(--t3); }
+          .fp-root .rs { font-family: var(--sans); color: var(--t3); }
+          .fp-root.warn, .fp-root.warn .rs { color: var(--warn); }
+          .fp-tally { font: 500 11px/1.4 var(--sans); color: var(--t3); }
+          .fp-tally.warn { color: var(--warn); }
+          .fp-tally.ok { color: var(--okt); }
+          .fp-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+          .fp-rev { grid-column: 2 / span 2; margin-top: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg-in); }
+          .rv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 7px 10px; align-items: center; }
+          .rv + .rv { border-top: 1px dashed var(--line); }
+          .rv .rn { font: 600 11px/1.3 var(--mono); color: var(--t1); }
+          .rv .rw { font: 400 10.5px/1.4 var(--sans); color: var(--t3); grid-column: 1; overflow-wrap: anywhere; }
+          .rv .rw code { font-size: 9.5px; }
+          .rv .ra { grid-row: 1 / span 2; grid-column: 2; }
+          .fp-foot { display: block; padding: 8px 12px; border-top: 1px solid var(--line); background: rgba(247, 243, 235, 0.02); font: 400 10.5px/1.45 var(--sans); color: var(--t3); }
+          .fp-foot code { font-size: 9.5px; }
+          code, .mono { font: 500 10px/1.4 var(--mono); color: var(--t2); }
+        </style>
+      </helmet>
+
+      <!-- ============================ TURN 1 ============================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t1">1</a>
+          <span class="dv-tname">Findings &#8212; Git can already pick an identity by folder; PwrGit profiles already own folders</span>
+        </div>
+        <p class="dv-sub">Round&nbsp;1 (<code>Commit Identity and Signing</code>, PR&nbsp;#448) made PwrGit&#8217;s own commits honest and gave Git one machine-wide identity. People with a Work and a Personal profile need more: Terminal and coding agents in <code>~/Work</code> should commit as the Work email. Git does this with a <b>conditional include</b>. An <code>[includeIf "gitdir:~/Work/"]</code> in <code>~/.gitconfig</code> pulls in a second file for every repository under that folder. A PwrGit profile already lists the folders its repos live in. <b>So the easy mode is: one switch, and PwrGit writes and maintains an include per profile folder.</b> Every probe below ran against an isolated <code>HOME</code> with <code>GIT_CONFIG_NOSYSTEM=1</code> and Git&nbsp;2.56. Identities are contrived.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Probes">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>What the probes say</div>
+            <div class="find" style="width:560px">
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>An included file reports scope <code>global</code> and names itself as the origin</h4><p>So PwrGit can tell its own include from the user&#8217;s hand-written one, and from <code>~/.gitconfig</code> itself, with the <code>--show-origin --show-scope</code> read round&nbsp;1 already does.</p>
+<pre class="probe"><span style="display:block"><i>$ git -C ~/Work/api config --show-origin --show-scope --get-regexp '^user\.'</i></span><span style="display:block">global  file:~/.gitconfig                user.email rowan@vale.example</span><span style="display:block">global  file:<b>~/.gitconfig-pwrgit-work</b>   user.email <b>rowan@northwind.example</b></span></pre></div></div>
+              <div class="fitem"><span class="pin">1</span><div><h4>Order decides: a <code>[user]</code> written after the include wins</h4><p>The include only overrides what comes before it in the file. <code>git config --global user.email</code> edits an existing <code>[user]</code> in place, but appends one when there was none, which lands it after PwrGit&#8217;s includes and silently undoes them. <b>So PwrGit re-appends its includes at the end of the file on every sync</b>, and checks the result.</p>
+<pre class="probe"><span style="display:block"><i>~/.gitconfig, in file order:</i></span><span style="display:block">&#91;includeIf "gitdir/i:~/Work/"&#93;  path = ~/.gitconfig-pwrgit-work</span><span style="display:block">&#91;user&#93;  email = rowan@vale.example   <i># appended later</i></span><span style="display:block"><i>$ git -C ~/Work/api config --get user.email</i></span><span style="display:block"><b>rowan@vale.example</b></span></pre></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The folder itself is not a repository, so it can&#8217;t be asked</h4><p><code>gitdir:</code> matches a repository&#8217;s <code>.git</code> location. <code>git -C ~/Work config</code> outside any repo ignores the include. <b>The only honest answer is per repository</b>: ask each indexed repo, one <code>git config</code> process each, bounded.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>Linked worktrees follow their main repository</h4><p>A worktree&#8217;s gitdir is <code>&lt;main&gt;/.git/worktrees/&lt;name&gt;</code>, so a checkout at <code>~/Elsewhere/wt</code> of a repo under <code>~/Work</code> still gets the Work email. That matches PwrGit, which files worktrees under their repo.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>A repository&#8217;s own <code>user.email</code> beats every include</h4><p><code>.git/config</code> is scope <code>local</code>, read after global. A repo someone pinned by hand keeps its email, and only the per-repo read can find it. That is the &#8220;differs&#8221; case the review lists, with a one-click, previewed removal.</p></div></div>
+              <div class="fitem"><span class="pin">4</span><div><h4>Two profiles sharing a folder already make a mess</h4><p><code>repos.path</code> is unique, and the indexer&#8217;s upsert reassigns <code>profile_id</code> on every scan. A repo under both profiles&#8217; roots moves to whichever profile scanned last. Nested includes would also fight: the later one wins. <b>Refuse a root that equals, contains or sits inside another profile&#8217;s root</b>, and flag the ones that already do.</p></div></div>
+              <div class="fitem"><span class="pin w">5</span><div><h4>macOS and Windows need <code>gitdir/i:</code></h4><p>Case-insensitive file systems hand Git paths in whatever case they were typed. <code>gitdir/i:/Users/rowan/work/</code> matched <code>~/Work/api</code>. Linux keeps plain <code>gitdir:</code>. A missing include file is skipped silently, so the read after a write is the only check that it took.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b States">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Per repository: where the winning email came from &#8594; what PwrGit says</div>
+            <div class="tbl" style="width:820px">
+              <div class="tr m4 head"><span>Winning <code>user.email</code></span><span>Example origin</span><span>Status</span><span>Fix offered</span></div>
+              <div class="tr m4"><b>PwrGit&#8217;s include for this profile</b><span><code>~/.gitconfig-pwrgit-work</code></span><span><span class="st keep">matches</span></span><span>&#8212;</span></div>
+              <div class="tr m4"><b>Global, same email</b><span><code>~/.gitconfig</code></span><span><span class="st keep">matches</span></span><span>&#8212; (the switch can stay off)</span></div>
+              <div class="tr m4"><b>Global, another email</b><span><code>~/.gitconfig</code></span><span><span class="st chg">differs</span></span><span>Turn on &#8220;Match Git to each profile&#8221;</span></div>
+              <div class="tr m4"><b>Repo sets its own</b><span><code>.git/config</code> &#183; local</span><span><span class="st chg">differs</span></span><span>Remove the repo&#8217;s override&#8230; (previewed)</span></div>
+              <div class="tr m4"><b>Another profile&#8217;s include</b><span><code>~/.gitconfig-pwrgit-personal</code></span><span><span class="st bug">overlap</span></span><span>Edit one profile&#8217;s folders</span></div>
+              <div class="tr m4"><b>The user&#8217;s own include</b><span><code>~/.gitconfig-moreau</code></span><span><span class="st chg">differs</span></span><span>Turn on: PwrGit&#8217;s include comes later and wins; theirs stays put</span></div>
+              <div class="tr m4"><b>Nothing</b><span>&#8212;</span><span><span class="st bug">unset</span></span><span>Turn on, or set up Git&#8217;s identity (round&nbsp;1)</span></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;what about <code>hasconfig:remote.*.url:</code> for per-org identities?&#8221; &#183; &#8220;should a repo override ever count as fine?&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 2 ============================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t2">2</a>
+          <span class="dv-tname">Profile popup &#8212; one row that says what Terminal and agents commit as in this profile&#8217;s folders</span>
+        </div>
+        <p class="dv-sub">The popup is where someone already asks &#8220;who am I right now&#8221;, and it said nothing about Git outside PwrGit. The proposed row sits between the profiles and the actions, at the menu&#8217;s shipped 256&nbsp;px. <b>It summarises the active profile&#8217;s repositories, not the machine</b>, because that is what an agent launched in one of them gets. It is a menu item: Enter or a click opens <code>Settings &#8250; Profiles &#8250; By folder</code>. The status dot sits on the icon, so the text column stays aligned with the profile names above it.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a As built">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>As built &#8212; <code>ProfileChip.tsx</code></div>
+            <div class="side"><div class="pchip"><span class="mt">W</span><span class="ptx"><span class="n">Work</span><span class="e">rowan@northwind.example</span></span><span class="caret"></span></div><div class="pmenu"><div class="pm-lab">Profiles</div><div class="pm-item"><span class="mt sm">P</span><span class="ptx"><span class="n s">Personal</span><span class="e">rowan@vale.example</span></span></div><div class="pm-item on"><span class="mt sm on">W</span><span class="ptx"><span class="n s">Work</span><span class="e">rowan@northwind.example</span></span><span class="pm-dot"></span></div><div class="pm-sep"></div><div class="pm-act"><span class="pm-ic">&#9881;</span>Edit &#8220;Work&#8221;&#8230;</div><div class="pm-act"><span class="pm-ic">+</span>New profile&#8230;</div><div class="pm-sep"></div><div class="pm-hint">Same GitHub identity &#183; theme, commit email &amp; org per profile</div></div></div>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b In step">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>In step</div>
+            <div class="side"><div class="pchip"><span class="mt">W</span><span class="ptx"><span class="n">Work</span><span class="e">rowan@northwind.example</span></span><span class="caret"></span></div><div class="pmenu"><div class="pm-lab">Profiles</div><div class="pm-item"><span class="mt sm">P</span><span class="ptx"><span class="n s">Personal</span><span class="e">rowan@vale.example</span></span></div><div class="pm-item on"><span class="mt sm on">W</span><span class="ptx"><span class="n s">Work</span><span class="e">rowan@northwind.example</span></span><span class="pm-dot"></span></div><div class="pm-sep"></div><button class="pm-git ok"><span class="pm-ic">&gt;_</span><span class="gtx"><span class="gk">Git outside PwrGit</span><span class="gv"><code>rowan@northwind.example</code> in all 12 repos</span></span><svg class="chev2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button><div class="pm-sep"></div><div class="pm-act"><span class="pm-ic">&#9881;</span>Edit &#8220;Work&#8221;&#8230;</div><div class="pm-act"><span class="pm-ic">+</span>New profile&#8230;</div><div class="pm-sep"></div><div class="pm-hint">Same GitHub identity &#183; theme, commit email &amp; org per profile</div></div></div>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Differs">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Some repos differ</div>
+            <div class="side"><div class="pchip"><span class="mt">W</span><span class="ptx"><span class="n">Work</span><span class="e">rowan@northwind.example</span></span><span class="caret"></span></div><div class="pmenu"><div class="pm-lab">Profiles</div><div class="pm-item"><span class="mt sm">P</span><span class="ptx"><span class="n s">Personal</span><span class="e">rowan@vale.example</span></span></div><div class="pm-item on"><span class="mt sm on">W</span><span class="ptx"><span class="n s">Work</span><span class="e">rowan@northwind.example</span></span><span class="pm-dot"></span></div><div class="pm-sep"></div><button class="pm-git warn"><span class="pm-ic">&gt;_</span><span class="gtx"><span class="gk">Git outside PwrGit</span><span class="gv">3 of 12 repos commit as another email</span></span><svg class="chev2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button><div class="pm-sep"></div><div class="pm-act"><span class="pm-ic">&#9881;</span>Edit &#8220;Work&#8221;&#8230;</div><div class="pm-act"><span class="pm-ic">+</span>New profile&#8230;</div><div class="pm-sep"></div><div class="pm-hint">Same GitHub identity &#183; theme, commit email &amp; org per profile</div></div></div>
+          </div>
+          <div class="dv-opt" id="2d" data-screen-label="2d Not matched">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a>Switch off, global differs</div>
+            <div class="side"><div class="pchip"><span class="mt">W</span><span class="ptx"><span class="n">Work</span><span class="e">rowan@northwind.example</span></span><span class="caret"></span></div><div class="pmenu"><div class="pm-lab">Profiles</div><div class="pm-item"><span class="mt sm">P</span><span class="ptx"><span class="n s">Personal</span><span class="e">rowan@vale.example</span></span></div><div class="pm-item on"><span class="mt sm on">W</span><span class="ptx"><span class="n s">Work</span><span class="e">rowan@northwind.example</span></span><span class="pm-dot"></span></div><div class="pm-sep"></div><button class="pm-git warn"><span class="pm-ic">&gt;_</span><span class="gtx"><span class="gk">Git outside PwrGit</span><span class="gv">Commits as <code>rowan@vale.example</code> in all 12 repos</span></span><svg class="chev2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button><div class="pm-sep"></div><div class="pm-act"><span class="pm-ic">&#9881;</span>Edit &#8220;Work&#8221;&#8230;</div><div class="pm-act"><span class="pm-ic">+</span>New profile&#8230;</div><div class="pm-sep"></div><div class="pm-hint">Same GitHub identity &#183; theme, commit email &amp; org per profile</div></div></div>
+          </div>
+          <div class="dv-opt" id="2e" data-screen-label="2e Overlap">
+            <div class="dv-olabel"><a class="dv-oid" href="#2e">2e</a>Shares a folder</div>
+            <div class="side"><div class="pchip"><span class="mt">W</span><span class="ptx"><span class="n">Work</span><span class="e">rowan@northwind.example</span></span><span class="caret"></span></div><div class="pmenu"><div class="pm-lab">Profiles</div><div class="pm-item"><span class="mt sm">P</span><span class="ptx"><span class="n s">Personal</span><span class="e">rowan@vale.example</span></span></div><div class="pm-item on"><span class="mt sm on">W</span><span class="ptx"><span class="n s">Work</span><span class="e">rowan@northwind.example</span></span><span class="pm-dot"></span></div><div class="pm-sep"></div><button class="pm-git warn"><span class="pm-ic">&gt;_</span><span class="gtx"><span class="gk">Git outside PwrGit</span><span class="gv"><code>~/Work</code> is also a folder of &#8220;Personal&#8221;</span></span><svg class="chev2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button><div class="pm-sep"></div><div class="pm-act"><span class="pm-ic">&#9881;</span>Edit &#8220;Work&#8221;&#8230;</div><div class="pm-act"><span class="pm-ic">+</span>New profile&#8230;</div><div class="pm-sep"></div><div class="pm-hint">Same GitHub identity &#183; theme, commit email &amp; org per profile</div></div></div>
+          </div>
+          <div class="dv-opt" id="2f" data-screen-label="2f No identity">
+            <div class="dv-olabel"><a class="dv-oid" href="#2f">2f</a>No Git identity at all</div>
+            <div class="side"><div class="pchip"><span class="mt">W</span><span class="ptx"><span class="n">Work</span><span class="e">rowan@northwind.example</span></span><span class="caret"></span></div><div class="pmenu"><div class="pm-lab">Profiles</div><div class="pm-item"><span class="mt sm">P</span><span class="ptx"><span class="n s">Personal</span><span class="e">rowan@vale.example</span></span></div><div class="pm-item on"><span class="mt sm on">W</span><span class="ptx"><span class="n s">Work</span><span class="e">rowan@northwind.example</span></span><span class="pm-dot"></span></div><div class="pm-sep"></div><button class="pm-git warn"><span class="pm-ic">&gt;_</span><span class="gtx"><span class="gk">Git outside PwrGit</span><span class="gv">No identity here &#8212; commits fail or use a guessed address</span></span><svg class="chev2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button><div class="pm-sep"></div><div class="pm-act"><span class="pm-ic">&#9881;</span>Edit &#8220;Work&#8221;&#8230;</div><div class="pm-act"><span class="pm-ic">+</span>New profile&#8230;</div><div class="pm-sep"></div><div class="pm-hint">Same GitHub identity &#183; theme, commit email &amp; org per profile</div></div></div>
+          </div>
+        </div>
+        <p class="note note-wide" style="margin-top:14px"><b>Priority when several apply:</b> overlap &#8594; no identity &#8594; differs &#8594; in step. A profile with no folders or no indexed repos falls back to the machine identity (&#8220;<code>rowan@vale.example</code> &#183; Git&#8217;s global identity&#8221;, neutral dot). A profile with no commit email says &#8220;Follows Git&#8217;s own identity&#8221;. Until the read lands the row says &#8220;Checking&#8230;&#8221; with no dot; it never blocks opening the menu.</p>
+        <p class="dv-next">Try next: &#8220;should the chip itself carry a warn dot?&#8221; &#183; &#8220;show the count on a profile row that isn&#8217;t active?&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 3 ============================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t3">3</a>
+          <span class="dv-tname">Settings &#8250; Profiles &#8250; By folder &#8212; one switch, every profile&#8217;s folders, and the repos that disagree</span>
+        </div>
+        <p class="dv-sub">A second card under round&nbsp;1&#8217;s &#8220;Git identity&#8221;. <b>Off by default</b>, and turning it on writes nothing until the preview (4a) is confirmed. While it is on, PwrGit rewrites its includes whenever a profile&#8217;s email, author name or folders change, and the profile editor says so (4c). That is the disclosed, opted-in exception to &#8220;never change Git config silently&#8221;. Repos that still disagree are listed per profile, with the file that wins.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Off">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Off &#8212; reports what Git does today</div>
+            <div class="sp" style="width:720px">
+              <div class="sp-h">
+                <div class="sp-hm">
+                  <p class="sp-eb">Git outside PwrGit</p>
+                  <h3 class="sp-t">Identity by folder</h3>
+                  <p class="sp-d">Git can use a different identity for repositories under a folder. PwrGit can set that up for each profile&#8217;s folders, so Terminal and coding agents commit as the profile does.</p>
+                </div>
+                <span class="chip warn">7 repos differ</span>
+              </div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">Match Git to each profile<span class="f-sub">An <code>includeIf</code> per profile folder in <code>~/.gitconfig</code></span></div><div class="f-c"><span class="sw off"><i></i>Off</span></div></div>
+                <div class="fp">
+                  <div class="fp-row">
+                    <span class="mt">P</span>
+                    <div class="fp-main">
+                      <span class="fp-name">Personal</span>
+                      <span class="fp-who">rowan@vale.example</span>
+                      <div class="fp-roots"><span class="fp-root"><span class="ic">&#9656;</span>~/Code<span class="rs">&#183; 5 repos</span></span></div>
+                      <span class="fp-tally ok">All 5 repos commit as rowan@vale.example &#183; from ~/.gitconfig</span>
+                    </div>
+                    <div class="fp-side"><span class="tg ok">Matches</span></div>
+                  </div>
+                  <div class="fp-row">
+                    <span class="mt">W</span>
+                    <div class="fp-main">
+                      <span class="fp-name">Work</span>
+                      <span class="fp-who">rowan@northwind.example</span>
+                      <div class="fp-roots"><span class="fp-root"><span class="ic">&#9656;</span>~/Work<span class="rs">&#183; 7 repos</span></span></div>
+                      <span class="fp-tally warn">All 7 repos commit as rowan@vale.example &#183; from ~/.gitconfig</span>
+                    </div>
+                    <div class="fp-side"><span class="tg warn">Differs</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b On, with exceptions">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>On &#8212; one repo pins its own email, one folder is shared</div>
+            <div class="sp" style="width:720px">
+              <div class="sp-h">
+                <div class="sp-hm">
+                  <p class="sp-eb">Git outside PwrGit</p>
+                  <h3 class="sp-t">Identity by folder</h3>
+                  <p class="sp-d">Git can use a different identity for repositories under a folder. PwrGit can set that up for each profile&#8217;s folders, so Terminal and coding agents commit as the profile does.</p>
+                </div>
+                <span class="chip warn">2 need attention</span>
+              </div>
+              <div class="sp-b">
+                <div class="f"><div class="f-l">Match Git to each profile<span class="f-sub">An <code>includeIf</code> per profile folder in <code>~/.gitconfig</code></span></div><div class="f-c"><span class="sw"><i></i>On &#8212; PwrGit keeps these in step with your profiles</span></div></div>
+                <div class="fp">
+                  <div class="fp-row">
+                    <span class="mt">P</span>
+                    <div class="fp-main">
+                      <span class="fp-name">Personal</span>
+                      <span class="fp-who">rowan@vale.example</span>
+                      <div class="fp-roots"><span class="fp-root"><span class="ic">&#9656;</span>~/Code<span class="rs">&#183; 5 repos</span></span><span class="fp-root warn"><span class="ic">!</span>~/Work/oss<span class="rs">&#183; inside Work&#8217;s ~/Work &#8212; repos move between the two profiles</span></span></div>
+                      <span class="fp-tally ok">All 5 repos commit as rowan@vale.example</span>
+                    </div>
+                    <div class="fp-side"><span class="tg warn">Shared folder</span><button class="pbtn">Edit folders&#8230;</button></div>
+                  </div>
+                  <div class="fp-row">
+                    <span class="mt">W</span>
+                    <div class="fp-main">
+                      <span class="fp-name">Work</span>
+                      <span class="fp-who">rowan@northwind.example</span>
+                      <div class="fp-roots"><span class="fp-root"><span class="ic">&#9656;</span>~/Work<span class="rs">&#183; 7 repos</span></span></div>
+                      <span class="fp-tally warn">6 of 7 repos match &#183; 1 sets its own email</span>
+                    </div>
+                    <div class="fp-side"><span class="tg warn">1 differs</span></div>
+                    <div class="fp-rev">
+                      <div class="rv"><span class="rn">infra-live</span><span class="rw">rowan@vale.example &#183; set in this repo&#8217;s <code>.git/config</code></span><span class="ra"><button class="pbtn">Remove override&#8230;</button></span></div>
+                    </div>
+                  </div>
+                  <div class="fp-foot">Writes <code>~/.gitconfig</code> (2 includes) and <code>~/.gitconfig-pwrgit-personal</code>, <code>~/.gitconfig-pwrgit-work</code>. Checked against every indexed repo just now.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        <p class="note note-wide" style="margin-top:14px"><b>Chip:</b> &#8220;Off&#8221; with nothing to report, &#8220;N repos differ&#8221; when off and global disagrees, &#8220;In step&#8221; (ok), or &#8220;N need attention&#8221; (overlaps + differing repos). The nav child &#8220;By folder&#8221; carries the same warn dot as &#8220;Git identity&#8221;. A profile with no commit email is listed as &#8220;Follows Git&#8217;s own identity&#8221; and gets no include.</p>
+        <p class="dv-next">Try next: &#8220;collapse the repo list past five rows?&#8221; &#183; &#8220;let a repo override be acknowledged and hidden?&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 4 ============================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t4">4</a>
+          <span class="dv-tname">Every write is previewed &#8212; turning it on, removing an override, and the profile editor</span>
+        </div>
+        <p class="dv-sub">Same rule as round&nbsp;1&#8217;s set-up dialog: name the file, show the lines, write at a click, then ask Git again and report a write that did not take. <b>Turning the switch off removes PwrGit&#8217;s includes and files</b> (also previewed); a user&#8217;s own includes are never touched.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Turn on">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Turn on &#8212; the exact lines</div>
+            <div class="dlg">
+              <h3 class="dlg-t">Match Git to each profile</h3>
+              <p class="dlg-d">Repositories under a profile&#8217;s folders will commit as that profile, in Terminal, scripts and coding agents too. Existing commits don&#8217;t change. Repos that set their own email keep it.</p>
+              <div class="diff"><div class="fn">~/.gitconfig &#8212; appended at the end, so they win over [user]</div><div class="ctx">  [user] &#8230; unchanged</div><div class="add">+ [includeIf "gitdir/i:/Users/rowan/Code/"]</div><div class="add">+ 	path = /Users/rowan/.gitconfig-pwrgit-personal</div><div class="add">+ [includeIf "gitdir/i:/Users/rowan/Work/"]</div><div class="add">+ 	path = /Users/rowan/.gitconfig-pwrgit-work</div></div>
+              <div class="diff"><div class="fn">~/.gitconfig-pwrgit-work &#8212; new</div><div class="ctx">  # Written by PwrGit for the &#8220;Work&#8221; profile. Edit the profile instead.</div><div class="add">+ [user]</div><div class="add">+ 	email = rowan@northwind.example</div></div>
+              <p class="dlg-d" style="font-size:11px">Plus <code>~/.gitconfig-pwrgit-personal</code> with <code>rowan@vale.example</code>. A profile without an author name keeps Git&#8217;s <code>user.name</code>. While this is on, PwrGit rewrites these when you edit a profile&#8217;s email, name or folders.</p>
+              <div class="dlg-foot"><button class="sbtn">Cancel</button><button class="sbtn pri">Write to Git config</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Remove override">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Remove a repo&#8217;s own email</div>
+            <div class="dlg" style="width:440px">
+              <h3 class="dlg-t">Remove infra-live&#8217;s own email?</h3>
+              <p class="dlg-d">This repository sets <code>user.email = rowan@vale.example</code> in its <code>.git/config</code>, which wins over the Work profile&#8217;s folder identity.</p>
+              <div class="diff"><div class="fn">~/Work/infra-live/.git/config</div><div class="add" style="color:var(--t2)">[user]</div><div class="del">- 	email = rowan@vale.example</div></div>
+              <p class="dlg-d" style="font-size:11px">Afterwards it commits as <code>rowan@northwind.example</code>. Same as <code>git -C ~/Work/infra-live config --local --unset user.email</code>.</p>
+              <div class="dlg-foot"><button class="sbtn">Cancel</button><button class="sbtn pri">Remove override</button></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Profile editor">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Profile editor &#8212; a shared folder is refused, and the sync is disclosed</div>
+            <div class="pm">
+              <div class="pm-t">Edit &#8220;Personal&#8221;</div>
+              <div class="fieldrow"><span class="fld-l">Commit email</span><div class="inp">rowan@vale.example</div></div>
+              <div class="fdisc"><b>Git outside PwrGit follows this profile.</b> Saving rewrites <code>~/.gitconfig-pwrgit-personal</code>, so Terminal and agents in these folders commit as this email too.</div>
+              <div class="fieldrow"><span class="fld-l">Repo folders</span>
+                <div class="root-list"><div class="root-li">~/Code<span class="x">Remove</span></div><div class="root-li bad">~/Work/oss<span class="x">Remove</span></div></div>
+                <span class="ferr">~/Work/oss is inside ~/Work, a folder of &#8220;Work&#8221;. A repo can belong to one profile, and its Git identity to one email. Choose a folder outside it, or remove ~/Work from Work first.</span>
+              </div>
+              <div class="dlg-foot"><button class="sbtn">Cancel</button><button class="sbtn" style="opacity:.5">Save</button></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="note note-wide" style="margin-top:14px"><b>Overlap rule:</b> a root is refused when it equals, contains or sits inside another profile&#8217;s root. Only roots being <i>added</i> are checked, so a profile that already overlaps can still be saved while it is untangled; the card and the popup keep flagging it. Comparison is on resolved absolute paths, case-folded on macOS and Windows.</p>
+        <p class="dv-next">Try next: &#8220;offer to move the overlapping folder to the other profile in one step?&#8221;</p>
+      </section>
+
+      <!-- ============================ TURN 5 ============================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t5">5</a>
+          <span class="dv-tname">Live &#8212; pick a state; the popup row and the card&#8217;s Work line follow</span>
+        </div>
+        <p class="dv-sub">The Work profile is active. Hover the popup row to see its pressed state.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Prototype</div>
+            <div class="proto">
+              <div class="seg">
+                <sc-for list="{{states}}" as="s" hint-placeholder-count="6"><button class="{{s.cls}}" onClick="{{s.pick}}">{{s.label}}</button></sc-for>
+              </div>
+              <div class="pgrid">
+                <div class="side">
+                  <div class="pchip"><span class="mt">W</span><span class="ptx"><span class="n">Work</span><span class="e">rowan@northwind.example</span></span><span class="caret"></span></div>
+                  <div class="pmenu">
+                    <div class="pm-lab">Profiles</div>
+                    <div class="pm-item"><span class="mt sm">P</span><span class="ptx"><span class="n s">Personal</span><span class="e">rowan@vale.example</span></span></div>
+                    <div class="pm-item on"><span class="mt sm on">W</span><span class="ptx"><span class="n s">Work</span><span class="e">rowan@northwind.example</span></span><span class="pm-dot"></span></div>
+                    <div class="pm-sep"></div>
+                    <button class="{{rowCls}}" onPointerOver="{{hovIn}}" onPointerLeave="{{hovOut}}"><span class="pm-ic">&gt;_</span><span class="gtx"><span class="gk">Git outside PwrGit</span><span class="gv">{{rowText}}</span></span><svg class="chev2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6" /></svg></button>
+                    <div class="pm-sep"></div>
+                    <div class="pm-act"><span class="pm-ic">&#9881;</span>Edit &#8220;Work&#8221;&#8230;</div>
+                    <div class="pm-act"><span class="pm-ic">+</span>New profile&#8230;</div>
+                  </div>
+                </div>
+                <div class="sp" style="width:520px">
+                  <div class="sp-h">
+                    <div class="sp-hm"><p class="sp-eb">Git outside PwrGit</p><h3 class="sp-t">Identity by folder</h3></div>
+                    <span class="{{chipCls}}">{{chip}}</span>
+                  </div>
+                  <div class="sp-b">
+                    <div class="f"><div class="f-l">Match Git to each profile</div><div class="f-c"><span class="{{swCls}}"><i></i>{{swText}}</span></div></div>
+                    <div class="fp">
+                      <div class="fp-row">
+                        <span class="mt">W</span>
+                        <div class="fp-main">
+                          <span class="fp-name">Work</span>
+                          <span class="fp-who">rowan@northwind.example</span>
+                          <div class="fp-roots"><span class="fp-root"><span class="ic">&#9656;</span>~/Work<span class="rs">&#183; 12 repos</span></span></div>
+                          <span class="{{tallyCls}}">{{tally}}</span>
+                        </div>
+                        <div class="fp-side"><span class="{{tagCls}}">{{tag}}</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="readout"><b>Behaviour:</b> {{behaviour}}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TURN 6 ============================ -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd">
+          <a class="dv-tid" href="#t6">6</a>
+          <span class="dv-tname">Contract &#8212; what gets built in this round</span>
+        </div>
+        <div class="dv-opts">
+          <div class="dv-opt" id="6a" data-screen-label="6a Contract">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>Commands, setting and invariants</div>
+            <div class="tbl" style="width:980px">
+              <div class="tr m4 head"><span>Piece</span><span>Shape</span><span>Who calls it</span><span>Invariant</span></div>
+              <div class="tr m4"><b><code>identity:folders</code></b><span><code>profileId?</code> &#8594; report: per profile its roots, overlaps, and every indexed repo&#8217;s winning email + origin</span><span>popup (active profile), Settings card + nav</span><span>Asked of Git per repo, at most 6 at once; concurrent asks share one run</span></div>
+              <div class="tr m4"><b><code>identity:folderPlan</code></b><span><code>enabled</code> &#8594; files and the lines added / removed</span><span>the 4a preview, and the off preview</span><span>Reads only</span></div>
+              <div class="tr m4"><b><code>identity:setFolderSync</code></b><span><code>enabled</code> &#8594; report</span><span>Write in 4a; Remove on off</span><span>Removes PwrGit&#8217;s sections, re-appends them last, writes each profile&#8217;s file, deletes orphaned ones, then re-reads</span></div>
+              <div class="tr m4"><b><code>identity:clearRepoOverride</code></b><span><code>repoId</code> &#8594; report</span><span>4b</span><span>Unsets <code>user.email</code> (and <code>user.name</code> when the profile sets one) in that repo&#8217;s local config only</span></div>
+              <div class="tr m4"><b>Setting</b><span><code>general.gitIdentityByFolder</code>, default off</span><span>set only by <code>identity:setFolderSync</code></span><span>When on, profile create / update / setRoots / delete re-sync and emit <code>identity:changed</code></span></div>
+              <div class="tr m4"><b>Managed marker</b><span>include path <code>&lt;global dir&gt;/.gitconfig-pwrgit-&lt;profile id&gt;</code></span><span>sync, report</span><span>Ids are stable slugs, so a rename never orphans a file. Anything else is the user&#8217;s and is only read.</span></div>
+              <div class="tr m4"><b>Overlap guard</b><span><code>profile:setRoots</code> / <code>profile:create</code> refuse an added root that equals, contains or is inside another profile&#8217;s</span><span>Profile editor (4c)</span><span>Existing overlaps load and save; they are reported, not blocked</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Deferred: per-remote identities via <code>hasconfig:remote.*.url:</code> &#183; signing keys per profile (<code>user.signingkey</code> in the same include) &#183; round&nbsp;1 section&nbsp;5 signing nudges.</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.defs = [
+            { id: "step", label: "In step", tone: "ok", row: "rowan@northwind.example in all 12 repos", on: true,
+              chip: "In step", chipTone: "ok", tally: "All 12 repos commit as rowan@northwind.example", tallyTone: "ok", tag: "Matches", tagTone: "ok",
+              beh: "Green dot on the row; the card says In step. Nothing asks for attention." },
+            { id: "off", label: "Off, global differs", tone: "warn", row: "Commits as rowan@vale.example in all 12 repos", on: false,
+              chip: "12 repos differ", chipTone: "warn", tally: "All 12 repos commit as rowan@vale.example · from ~/.gitconfig", tallyTone: "warn", tag: "Differs", tagTone: "warn",
+              beh: "The switch is the fix. Turning it on opens the 4a preview; nothing is written before Write." },
+            { id: "differs", label: "One repo pins its own", tone: "warn", row: "1 of 12 repos commits as another email", on: true,
+              chip: "1 needs attention", chipTone: "warn", tally: "11 of 12 repos match · 1 sets its own email", tallyTone: "warn", tag: "1 differs", tagTone: "warn",
+              beh: "The repo is listed with the file that wins (.git/config) and a previewed Remove override… (4b)." },
+            { id: "overlap", label: "Shared folder", tone: "warn", row: "~/Work is also a folder of “Personal”", on: true,
+              chip: "1 needs attention", chipTone: "warn", tally: "Repos under ~/Work move between Work and Personal on each scan", tallyTone: "warn", tag: "Shared folder", tagTone: "warn",
+              beh: "Overlap outranks everything: until it is untangled, neither the repo list nor the include can be trusted." },
+            { id: "missing", label: "No identity", tone: "warn", row: "No identity here — commits fail or use a guessed address", on: false,
+              chip: "12 repos differ", chipTone: "warn", tally: "No email configured · Git guesses rowan@Rowans-MBP.local", tallyTone: "warn", tag: "Unset", tagTone: "warn",
+              beh: "Turning the switch on fixes this profile’s folders; round 1’s Git identity card fixes everything else." },
+            { id: "checking", label: "Checking", tone: "wait", row: "Checking…", on: true,
+              chip: "Checking", chipTone: "", tally: "Asking Git about 12 repos…", tallyTone: "", tag: "…", tagTone: "",
+              beh: "The menu opens at once; the row fills in when the read lands (one git config per repo, six at a time)." }
+          ];
+          this.state = { sel: "differs", hov: false };
+        }
+        renderVals() {
+          const s = this.state;
+          const d = this.defs.find((x) => x.id === s.sel) || this.defs[0];
+          return {
+            states: this.defs.map((x) => ({
+              label: x.label,
+              cls: x.id === s.sel ? "on" : "",
+              pick: () => this.setState({ sel: x.id })
+            })),
+            rowCls: "pm-git " + d.tone + (s.hov ? " hov" : ""),
+            rowText: d.row,
+            hovIn: () => this.setState({ hov: true }),
+            hovOut: () => this.setState({ hov: false }),
+            chip: d.chip,
+            chipCls: "chip " + d.chipTone,
+            swCls: d.on ? "sw" : "sw off",
+            swText: d.on ? "On" : "Off",
+            tally: d.tally,
+            tallyCls: "fp-tally " + d.tallyTone,
+            tag: d.tag,
+            tagCls: "tg " + d.tagTone,
+            behaviour: d.beh
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

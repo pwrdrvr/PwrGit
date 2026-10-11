@@ -2,6 +2,7 @@ import {
   err,
   isProfileThemeOverride,
   ok,
+  rootOverlapMessage,
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
@@ -173,6 +174,10 @@ export function registerProfileHandlers(
         code: "theme_invalid",
         message: "Profile theme must inherit the app setting, Dark, or Light"
       });
+    }
+    const overlap = profiles.addedRootOverlaps(null, req.roots ?? [])[0];
+    if (overlap !== undefined) {
+      return err({ kind: "validation", code: "root_overlap", message: rootOverlapMessage(overlap) });
     }
     const profile = profiles.create(req);
     emitEvent("profile:changed", profiles.snapshot());

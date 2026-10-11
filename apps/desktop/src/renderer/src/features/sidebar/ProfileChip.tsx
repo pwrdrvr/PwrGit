@@ -4,6 +4,10 @@ import { useDismissable } from "../../lib/useDismissable";
 import { useMenuNavigation } from "../../lib/useMenuNavigation";
 import { SettingsGlyph } from "../../lib/SettingsGlyph";
 import { PlusGlyph } from "../../lib/PlusGlyph";
+import { ChevronGlyph } from "../../lib/ChevronGlyph";
+import { TerminalGlyph } from "../../lib/TerminalGlyph";
+import { folderRowView } from "../identity/folder-view";
+import { useFolderIdentity } from "../identity/useCommitIdentity";
 
 function monogram(p: Profile): string {
   return p.mono !== "" ? p.mono : p.name.slice(0, 1).toUpperCase();
@@ -14,15 +18,29 @@ export function ProfileChip({
   activeProfile,
   onSwitch,
   onNewProfile,
-  onManageProfile
+  onManageProfile,
+  onOpenGitIdentity
 }: {
   profiles: Profile[];
   activeProfile: Profile | null;
   onSwitch: (profileId: string) => void;
   onNewProfile: () => void;
   onManageProfile: () => void;
+  /** Settings › Profiles › By folder. */
+  onOpenGitIdentity: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Asked only while the menu is open: one Git process per repository.
+  const folders = useFolderIdentity({
+    active: open && activeProfile !== null,
+    ...(activeProfile === null ? {} : { profileId: activeProfile.id })
+  });
+  const folderProfile =
+    folders.report?.profiles.find((p) => p.profileId === activeProfile?.id) ?? null;
+  const gitRow =
+    folders.report !== null && folderProfile !== null
+      ? folderRowView(folderProfile, folders.report.machine)
+      : null;
   const chipRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
@@ -106,6 +124,30 @@ export function ProfileChip({
               </button>
             );
           })}
+          <div className="profile-menu__sep" role="separator" />
+          {/* What Terminal and coding agents commit as in this profile's
+              folders. The dot rides on the icon so the text column lines up
+              with the profile names above. */}
+          <button
+            type="button"
+            role="menuitem"
+            className={`profile-menu__git profile-menu__git--${gitRow?.tone ?? "wait"}`}
+            onClick={() => {
+              onOpenGitIdentity();
+              setOpen(false);
+            }}
+          >
+            <span className="profile-menu__action-icon profile-menu__git-icon" aria-hidden="true">
+              <TerminalGlyph />
+            </span>
+            <span className="profile-menu__git-text">
+              <span className="profile-menu__git-label">Git outside PwrGit</span>
+              <span className="profile-menu__git-value">{gitRow?.text ?? "Checking…"}</span>
+            </span>
+            <span className="profile-menu__git-chevron" aria-hidden="true">
+              <ChevronGlyph right />
+            </span>
+          </button>
           <div className="profile-menu__sep" role="separator" />
           <button
             type="button"

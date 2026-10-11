@@ -184,6 +184,9 @@ async function answer(name: string, req?: unknown): Promise<unknown> {
   if (name === "git:runtimeStatus") return ok(GIT_RUNTIME);
   if (name === "identity:machine") return ok(machineIdentity);
   if (name === "repo:hiddenList") return ok([]);
+  if (name === "identity:folders") {
+    return ok({ enabled: false, globalFile: "/home/rowan/.gitconfig", machine: machineIdentity.outside, profiles: [] });
+  }
   if (name === "profile:list") {
     return ok({ activeProfileId: PERSONAL.id, profiles: [PERSONAL, ACME] });
   }

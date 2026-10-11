@@ -8,6 +8,7 @@ import {
   type DiagnosticsSettings as DiagnosticsSettingsShape,
   type ForgeKind,
   type ForgeStatus,
+  type FolderIdentityReport,
   type MachineGitIdentity,
   type ProfileId,
   type SettingsPage,
@@ -46,7 +47,11 @@ import {
 import type { SettingsFocusRequest } from "./SettingsLayout";
 import { useForgeStatuses } from "./useForgeStatuses";
 import { useAppSettings, type AppSettingsState } from "./useAppSettings";
-import { useMachineIdentity } from "../identity/useCommitIdentity";
+import {
+  useFolderIdentity,
+  useMachineIdentity,
+  type FolderIdentityState
+} from "../identity/useCommitIdentity";
 
 /**
  * Nav order and labels. The ids are `SETTINGS_PAGES` (@pwrgit/shared), the
@@ -182,6 +187,8 @@ function SettingsWindowBody(props: {
   // not the reader opens Profiles. The Profiles card reads this one too, so the
   // window spends one probe per focus, not one per reader.
   const { machine } = useMachineIdentity();
+  // The By folder card and its nav row: one read of every profile's repos.
+  const folders = useFolderIdentity({ active: true });
   const ai = useAiProvidersContext();
   const [route, setRoute] = useState<SettingsRoute>(() =>
     routeFromDeepLink(parseSettingsRouteHash(window.location.hash), 0)
@@ -277,7 +284,7 @@ function SettingsWindowBody(props: {
             const open = openGroups[item.id] === true;
             const sublistId = `settings-nav-sublist-${item.id}`;
             const holdsRoute = route.section === item.id;
-            const children = isGroup ? navChildren(item.id, forges, ai.statuses, machine) : [];
+            const children = isGroup ? navChildren(item.id, forges, ai.statuses, machine, folders.report) : [];
             // The child that actually carries the marker — routed to, and
             // reachable. Derived rather than inferred from "is there a focus,
             // is the group open", because those are proxies: a folded group's
@@ -394,6 +401,7 @@ function SettingsWindowBody(props: {
               settings={settings}
               aiProfile={aiProfile}
               machine={machine}
+              folders={folders}
               onEditDefaults={editDefaults}
             />
             {settings.error !== null && (
@@ -420,9 +428,10 @@ function navChildren(
   section: SettingsPage,
   forges: ForgeStatus[] | undefined,
   aiStatuses: readonly AiProviderStatus[],
-  machine: MachineGitIdentity | null
+  machine: MachineGitIdentity | null,
+  folders: FolderIdentityReport | null
 ): SettingsNavChild[] {
-  if (section === "profiles") return profilesNavChildren(machine);
+  if (section === "profiles") return profilesNavChildren(machine, folders);
   if (section === "forges") {
     return FORGE_KINDS.map((kind) => forgeNavChild(kind, forges));
   }
@@ -438,13 +447,16 @@ function SettingsSectionBody(props: {
   settings: AppSettingsState;
   aiProfile: AiProfileSelection;
   machine: MachineGitIdentity | null;
+  folders: FolderIdentityState;
   onEditDefaults: () => void;
 }) {
   const { settings } = props;
   const focus = props.focus === undefined ? {} : { focusSection: props.focus };
 
   if (props.section === "profiles") {
-    return <ProfilesSettings settings={settings} machine={props.machine} {...focus} />;
+    return (
+      <ProfilesSettings settings={settings} machine={props.machine} folders={props.folders} {...focus} />
+    );
   }
 
   // Neither AI pane reads the app snapshot: their settings are per profile
