@@ -33,6 +33,7 @@ import {
 import { LineageGraph } from "./features/graph/LineageGraph";
 import { SelectionBar } from "./features/graph/SelectionBar";
 import { TitleBar } from "./features/chrome/TitleBar";
+import { ContributionScreen } from "./features/contributions/ContributionScreen";
 import { buildHistoryMenu } from "./features/chrome/historyMenu";
 import { useHistoryNavHotkeys } from "./features/chrome/useHistoryNavHotkeys";
 import { WorktreeHeader } from "./features/graph/WorktreeHeader";
@@ -88,6 +89,7 @@ import { useRepoTree } from "./state/useRepoTree";
 import { useWorktreeState } from "./state/useWorktreeState";
 
 export function App() {
+  const [contributionsOpen, setContributionsOpen] = useState(false);
   const sidebar = useColumnResize("pwrgit.sidebarWidth", 320, 240, 520, "left");
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -885,6 +887,11 @@ export function App() {
   // a place, not places: the first Back closes the top one without spending an
   // entry, as Esc does.
   const goBack = useCallback(() => {
+    if (contributionsOpen) {
+      setContributionsOpen(false);
+      requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-contributions-nav]")?.focus());
+      return;
+    }
     if (shownChangeRequest !== null) {
       setChangeRequest(null);
       return;
@@ -898,7 +905,7 @@ export function App() {
       return;
     }
     history.goBack();
-  }, [diffTarget, fileInsightTarget, history, shownChangeRequest]);
+  }, [contributionsOpen, diffTarget, fileInsightTarget, history, shownChangeRequest]);
   const goForward = useCallback(() => history.goForward(), [history]);
   useHistoryNavHotkeys({ onBack: goBack, onForward: goForward });
   const backTarget = history.stacks.back[history.stacks.back.length - 1];
@@ -947,9 +954,11 @@ export function App() {
   return (
     <div className="app">
       <TitleBar
-        repo={shownChangeRequest === null ? selectedRepo : changeRequestRepo}
-        worktree={selectedWorktree}
-        history={historyControls}
+        contributionsOpen={contributionsOpen}
+        {...(activeProfile ? { onOpenContributions: () => setContributionsOpen(open => !open) } : {})}
+        repo={contributionsOpen ? null : shownChangeRequest === null ? selectedRepo : changeRequestRepo}
+        worktree={contributionsOpen ? null : selectedWorktree}
+        history={contributionsOpen ? { ...historyControls, canGoBack: true, backLabel: "Repositories", canGoForward: false } : historyControls}
         {...(shownChangeRequest === null
           ? {}
           : { changeRequest: changeRequestState.view?.entry ?? shownChangeRequest.entry })}
@@ -981,7 +990,10 @@ export function App() {
         }}
       />
 
-      <div className="app-body" style={{ gridTemplateColumns }}>
+      {contributionsOpen && activeProfile ? <ContributionScreen profileId={activeProfile.id} onClose={() => {
+        setContributionsOpen(false);
+        requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-contributions-nav]")?.focus());
+      }} /> : <div className="app-body" style={{ gridTemplateColumns }}>
         <ChangeRequestSelectionContext.Provider value={changeRequestSelection}>
         <Sidebar
           onLocateTag={(repoId, tag) => {
@@ -1313,6 +1325,7 @@ export function App() {
         )}
       </div>
 
+      }
       {overlayOpen && (
         <RepoSwitcherOverlay
           commits={searchableCommits}

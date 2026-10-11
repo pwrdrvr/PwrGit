@@ -40,6 +40,8 @@ export function TitleBar({
   history,
   changeRequest,
   onRevealBranchWorktree,
+  onOpenContributions,
+  contributionsOpen = false,
   platform = currentPlatform()
 }: {
   repo: Repo | null;
@@ -54,6 +56,8 @@ export function TitleBar({
   /** Go to the worktree already holding a branch the picker could not check
    *  out. The strip has no worktree list of its own, so the owner resolves it. */
   onRevealBranchWorktree: (branch: string) => void;
+  onOpenContributions?: () => void;
+  contributionsOpen?: boolean;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -148,6 +152,7 @@ export function TitleBar({
         )}
 
         <div className="titlebar__spacer" />
+        {onOpenContributions && <button type="button" className="contributions-nav" data-contributions-nav aria-pressed={contributionsOpen} onClick={onOpenContributions}>Contributions</button>}
 
         {/* Linux frameless windows get neither traffic lights nor a Windows
             controls overlay — nobody draws min/max/close but us. */}
