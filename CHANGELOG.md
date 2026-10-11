@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.36.0 - 2026-10-11
+
+- Commit identity - Added opt-in Match Git to each profile in Settings → Profiles → By folder, so Terminal and coding-agent commits use the profile identity for repositories under its folders. Preview the exact Git configuration changes before enabling or disabling synchronization; PwrGit preserves hand-written includes.
+- Identity diagnostics - Added profile-menu and per-repository reports showing whether Git's actual identity matches the profile. Find repositories with local email overrides and review their removal before applying it; profile edits keep folder-based identity rules in sync when enabled.
+- Profiles - Prevented adding folders that overlap another profile's roots, avoiding conflicting identity rules and repositories moving between profiles. Existing overlaps are reported so you can resolve them.
+
 ## v0.35.0 - 2026-10-08
 
 - Repositories - Added Hide repository per profile, with Undo and ways to unhide from the sidebar, Settings, or search. Hidden repositories leave that profile's navigation, bulk sync, maintenance, and agent catalog without changing files on disk.
