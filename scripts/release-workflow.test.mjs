@@ -15,7 +15,7 @@ function dependencySetupJobs(source) {
 test.each([
   ["release", workflow, 3, 45],
   ["preview", previewWorkflow, 2, 30],
-])("%s dependency setup is bounded and keeps independent failure diagnostics", (_name, source, count, minimumJobMinutes) => {
+])("%s dependency setup is bounded without shrinking the job budget", (_name, source, count, minimumJobMinutes) => {
   const ciMacJob = ciWorkflow.split("\n  macos-e2e:\n")[1].split(/\n  [\w-]+:\n/)[0];
   const ciSetup = ciMacJob.split(/^      - name: /m).find((step) => step.includes("uses: pwrdrvr/configure-nodejs@"));
   const provenMinutes = Number(ciSetup.match(/^        timeout-minutes: (\d+)$/m)[1]);
@@ -32,17 +32,7 @@ test.each([
       // A job-only timeout, an invented action input, or failure suppression
       // would allow a stalled install to consume packaging time again.
       expect(Number(install.match(/^        timeout-minutes: (\d+)$/m)?.[1])).toBe(provenMinutes);
-      expect(install).toContain("        id: dependency-setup\n");
       expect(install).not.toContain("continue-on-error:");
-      const index = steps.indexOf(install);
-      expect(steps[index - 1]).toContain("run: bash scripts/ci/dependency-setup-timing.sh start");
-      const report = steps[index + 1];
-      expect(report).toContain("if: ${{ always() && steps.dependency-setup-start.outcome == 'success' }}");
-      expect(report).toContain("DEPENDENCY_SETUP_STARTED_AT: ${{ steps.dependency-setup-start.outputs.started-at }}");
-      expect(report).toContain("DEPENDENCY_SETUP_OUTCOME: ${{ steps.dependency-setup.outcome }}");
-      expect(report).toContain(`DEPENDENCY_SETUP_TIMEOUT_MINUTES: "${provenMinutes}"`);
-      expect(report).toContain("        timeout-minutes: 1\n");
-      expect(report).toContain("run: bash scripts/ci/dependency-setup-timing.sh report");
     }
   }
 });

@@ -55,24 +55,6 @@ repositories after rotation. See the distribution runbook for exact checks.
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:linux-packages` / `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on native Linux package/runtime validation, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. On same-repo PRs every job skips unless a label opts in: `ci:linux-packages` validates Linux packages on both CPUs and `ci:windows-signing` runs the real Windows signing path; both upload artifacts only. |
 
-Release preparation (macOS, Windows, both Linux CPUs) and preview dependency
-setup have a 10-minute **step** timeout, matching CI's macOS E2E setup policy.
-It covers the whole configure-nodejs action: cache restore/save, Node.js,
-Corepack and dependency installation. The existing 45-minute release and
-60/30-minute preview job budgets still cover testing, packaging and uploads.
-The pinned release action has no install-timeout input. Its phase timings remain
-available on normal completion; an independent `always()` report records total
-setup elapsed seconds and outcome even when the composite action's deadline
-interrupts its internal timing reporter. On interrupted installs its internal
-`installDurationMs` can be zero; that is a missing measurement, not a fast install.
-
-The v0.36.0 macOS preparation attempt stalled after root preinstall completed
-and consumed 44m37s in pnpm before the 45-minute job limit cancelled it. The
-logs do not establish the stall's cause. Successful v0.35.0 setup steps took
-13–27 seconds across these platforms; v0.36.0 Linux/Windows took 11–27 seconds.
-The 10-minute limit leaves room for cold setup without letting a stalled install
-consume the entire packaging budget.
-
 ## macOS desktop E2E
 
 Four shards run on the same self-hosted ARM64 Tart pool as PwrAgnt, selected
