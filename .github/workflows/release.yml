@@ -57,10 +57,29 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
           persist-credentials: false
 
+      # Match ci.yml's macOS E2E setup bound without shrinking packaging budgets.
+      - name: Record dependency setup start
+        id: dependency-setup-start
+        shell: bash
+        run: bash scripts/ci/dependency-setup-timing.sh start
+
       - name: Install Node.js and dependencies
+        id: dependency-setup
+        timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@8876dbf3c524c8a765543dae3ae5b55d7b5ecfb3 # v1.6.0
         with:
           node-version: 24.x
+
+      - name: Report dependency setup timing
+        # The composite action's internal reporter can share its expired timeout.
+        if: ${{ always() && steps.dependency-setup-start.outcome == 'success' }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          DEPENDENCY_SETUP_STARTED_AT: ${{ steps.dependency-setup-start.outputs.started-at }}
+          DEPENDENCY_SETUP_OUTCOME: ${{ steps.dependency-setup.outcome }}
+          DEPENDENCY_SETUP_TIMEOUT_MINUTES: "10"
+        run: bash scripts/ci/dependency-setup-timing.sh report
 
       - name: Check release metadata
         env:
@@ -252,10 +271,29 @@ jobs:
       - name: Install native package and runtime tools
         run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools cpio xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64 libsecret-1-0 python3-gi gir1.2-gtk-3.0 hicolor-icon-theme
 
+      # Match ci.yml's macOS E2E setup bound without shrinking packaging budgets.
+      - name: Record dependency setup start
+        id: dependency-setup-start
+        shell: bash
+        run: bash scripts/ci/dependency-setup-timing.sh start
+
       - name: Install Node.js and dependencies
+        id: dependency-setup
+        timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@8876dbf3c524c8a765543dae3ae5b55d7b5ecfb3 # v1.6.0
         with:
           node-version: 24.x
+
+      - name: Report dependency setup timing
+        # The composite action's internal reporter can share its expired timeout.
+        if: ${{ always() && steps.dependency-setup-start.outcome == 'success' }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          DEPENDENCY_SETUP_STARTED_AT: ${{ steps.dependency-setup-start.outputs.started-at }}
+          DEPENDENCY_SETUP_OUTCOME: ${{ steps.dependency-setup.outcome }}
+          DEPENDENCY_SETUP_TIMEOUT_MINUTES: "10"
+        run: bash scripts/ci/dependency-setup-timing.sh report
 
       - name: Check release metadata
         if: ${{ github.event_name != 'pull_request' }}
@@ -339,10 +377,29 @@ jobs:
       # Same SHA-pinned action as the macOS/Linux jobs above; it runs natively
       # on Windows and activates the pnpm version pinned in package.json's
       # `packageManager` field via Corepack.
+      # Match ci.yml's macOS E2E setup bound without shrinking packaging budgets.
+      - name: Record dependency setup start
+        id: dependency-setup-start
+        shell: bash
+        run: bash scripts/ci/dependency-setup-timing.sh start
+
       - name: Install Node.js and dependencies
+        id: dependency-setup
+        timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@8876dbf3c524c8a765543dae3ae5b55d7b5ecfb3 # v1.6.0
         with:
           node-version: 24.x
+
+      - name: Report dependency setup timing
+        # The composite action's internal reporter can share its expired timeout.
+        if: ${{ always() && steps.dependency-setup-start.outcome == 'success' }}
+        timeout-minutes: 1
+        shell: bash
+        env:
+          DEPENDENCY_SETUP_STARTED_AT: ${{ steps.dependency-setup-start.outputs.started-at }}
+          DEPENDENCY_SETUP_OUTCOME: ${{ steps.dependency-setup.outcome }}
+          DEPENDENCY_SETUP_TIMEOUT_MINUTES: "10"
+        run: bash scripts/ci/dependency-setup-timing.sh report
 
       - name: Check release metadata
         if: ${{ github.event_name != 'pull_request' }}
