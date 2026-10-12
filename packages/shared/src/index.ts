@@ -25,3 +25,4 @@ export * from "./executable-path";
 export * from "./local-machine";
 export * from "./commit-identity";
 export * from "./contributions";
+export * from "./contribution-share";

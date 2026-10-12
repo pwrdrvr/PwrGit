@@ -78,10 +78,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
-async function mount() {
+async function mount(onClose: () => void = () => {}) {
   await act(async () =>
     root.render(
-      <ContributionScreen profileId="demo-profile" onClose={() => {}} />
+      <ContributionScreen profileId="demo-profile" onClose={onClose} />
     )
   );
   // Select the fixture's scope through the UI, independent of the host timezone.
@@ -290,5 +290,29 @@ describe("Contributions integrated screen", () => {
     expect(container.textContent).not.toContain(
       `${flow.baseline} → ${flow.ending}`
     );
+  });
+  it("opens Share image from the chart and closes it on Escape without leaving the screen", async () => {
+    const onClose = vi.fn();
+    await mount(onClose);
+    await connect();
+    expect(button("Export chart")).toBeUndefined();
+    await act(async () => button("Share image…").click());
+    const dialog = container.querySelector("[role='dialog']")!;
+    expect(dialog.textContent).toContain("Names in the image");
+    const preview = decodeURIComponent(
+      dialog.querySelector("img")!.getAttribute("src")!.split(",")[1]!
+    );
+    expect(preview).not.toContain("demo-org0");
+    await act(async () =>
+      (document.activeElement as HTMLElement).dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true
+        })
+      )
+    );
+    expect(container.querySelector("[role='dialog']")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

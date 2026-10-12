@@ -32,9 +32,28 @@ Other, filters, totals and an accessible exact table. Weekly buckets start
 Monday; edge buckets include selected dates only. Bars/table periods drill into
 PR numbers, repositories and timestamps. CSV exports exactly the displayed
 buckets, timezone, measure and coverage; JSON also includes matching metadata
-and author flow. SVG export resolves theme colors into a standalone chart.
-Author flow has its own exact table/CSV. Downloads are explicit and local; CSV
-cells guard formula injection.
+and author flow. Author flow has its own exact table/CSV. Downloads are
+explicit and local; CSV cells guard formula injection.
+
+## Share image
+
+**Share image…** on the chart opens a sheet that previews a picture meant for
+pasting into chat or a post, and copies it as a 1800×760 PNG (or saves it).
+The picture stacks by organization, by repository (top 8 + Other), or shows
+the total only, with no names at all. Each namespace is shown or masked on its
+own: masked orgs become Org A, Org B… by volume, their repositories Org
+A/repo 1…, and other people's personal namespaces User A…. **Everything starts
+masked except the viewer's own personal namespace**, so a reflexive Copy never
+names an employer. Choices persist per profile, host and account in
+`localStorage`; nothing about them is sent anywhere.
+
+Names are resolved in `packages/shared/src/contribution-share.ts` before the
+picture is drawn, and the picture is a standalone SVG built from those labels
+alone (no live DOM, no `<title>` tooltips, no metadata), rasterized through a
+canvas and handed to the existing `clipboard:writeImage` IPC. The preview is
+that same SVG, so what the user checks is what they paste. The earlier
+"Export chart" SVG download is gone: it cloned the on-screen chart, carried
+every org and repository name in per-bar tooltips, and had no legend.
 
 Creation/backlog compares **authored creations** with **authored PRs merged by
 anyone**, never with the different merger population. Lifetime visible author

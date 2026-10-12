@@ -308,3 +308,234 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Share image dialog. The picture itself is drawn in share-image.ts with
+   literal colors, because it leaves the app; only the chrome around it
+   follows the theme. */
+.modal.contributions-share {
+  width: min(1240px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.contributions-share__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 12px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.contributions .contributions-share__header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.contributions button.contributions-share__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: var(--text-secondary);
+}
+.contributions-share__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  min-height: 0;
+  overflow: auto;
+}
+.contributions-share__preview {
+  margin: 0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-subtle);
+}
+.contributions-share__preview figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font: 500 10.5px var(--font-mono);
+  color: var(--text-muted);
+}
+.contributions-share__preview img {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--border-default);
+}
+.contributions-share__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 18px;
+}
+.contributions .contributions-share__controls h3 {
+  margin: 0 0 8px;
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.contributions .contributions-share__controls p {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.contributions-share__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.contributions .contributions-share__heading button {
+  min-height: 0;
+  padding: 0 0 0 10px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+}
+.contributions .contributions-share__heading button:hover {
+  background: none;
+  color: var(--accent-bright);
+}
+.contributions-share__segments {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-input);
+}
+.contributions .contributions-share__segment {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+}
+.contributions-share__segment input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.contributions-share__segment span {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.contributions-share__segment:has(input:checked) span {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.contributions-share__segment:has(input:focus-visible) span {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.contributions-share__owners {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.contributions-share__owners li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+}
+.contributions-share__owners li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+.contributions-share__owners .contributions-share__segments {
+  flex: none;
+}
+.contributions-share__owners .contributions-share__segment span {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+.contributions-share__owner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.contributions-share__owner strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 11.5px var(--font-mono);
+}
+.contributions-share__owner small {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.contributions .contributions-share__check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.contributions .contributions-share__check input {
+  min-height: 0;
+  margin: 0;
+}
+.contributions-share__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 12px 20px;
+  border-top: 1px solid var(--border-subtle);
+}
+.contributions .contributions-share__footer p {
+  flex: 1;
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.contributions .contributions-share__footer p strong {
+  color: var(--text-secondary);
+}
+.contributions .contributions-share__footer .contributions-share__error {
+  color: var(--danger-text);
+}
+/* Announced, not shown: the Copy button's own label already says Copied. */
+.contributions-share__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (max-width: 860px) {
+  .contributions-share__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .contributions-share__preview {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+}

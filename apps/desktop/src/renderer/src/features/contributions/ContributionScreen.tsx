@@ -16,6 +16,8 @@ import {
 } from "@pwrgit/shared";
 import { dispatchOrThrow } from "../../lib/pwrgit";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
+import { downloadFile } from "./download";
+import { ShareImageDialog } from "./ShareImageDialog";
 import "./contributions.css";
 
 const metricLabels: Record<ContributionMetric, string> = {
@@ -25,24 +27,14 @@ const metricLabels: Record<ContributionMetric, string> = {
   created: "PRs created by me"
 };
 const color = (index: number) => `var(--lane-${(index % 8) + 1})`;
-function download(name: string, body: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([body], { type }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 export function ContributionChart({
   data,
   label,
-  onBucket,
-  svgRef
+  onBucket
 }: {
   data: ReturnType<typeof aggregateContributions>;
   label: string;
   onBucket: (date: string) => void;
-  svgRef?: React.RefObject<SVGSVGElement | null>;
 }) {
   const width = 1100,
     height = 270,
@@ -53,7 +45,6 @@ export function ContributionChart({
   const step = plot / data.buckets.length;
   return (
     <svg
-      ref={svgRef}
       className="contributions__chart"
       viewBox={`0 0 ${width} ${height}`}
       role="img"
@@ -239,8 +230,8 @@ export function ContributionScreen({
     topN: 6
   });
   const [drillDate, setDrillDate] = useState<string | null>(null);
-  const heading = useRef<HTMLHeadingElement>(null),
-    chart = useRef<SVGSVGElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [sharing, setSharing] = useState(false);
   const generation = useRef(0);
   const scope = useMemo(
     () =>
@@ -450,13 +441,13 @@ export function ContributionScreen({
       records: rows
     };
     if (format === "json")
-      download(
+      downloadFile(
         "pwrgit-contributions.json",
         JSON.stringify(report, null, 2),
         "application/json"
       );
     else
-      download(
+      downloadFile(
         "pwrgit-contributions.csv",
         contributionCsv(
           [
@@ -478,31 +469,6 @@ export function ContributionScreen({
         ),
         "text/csv;charset=utf-8"
       );
-  };
-  const exportChart = () => {
-    if (!chart.current) return;
-    const clone = chart.current.cloneNode(true) as SVGSVGElement;
-    const sourceElements = [
-      chart.current,
-      ...chart.current.querySelectorAll("*")
-    ];
-    const cloneElements = [clone, ...clone.querySelectorAll("*")];
-    sourceElements.forEach((element, i) => {
-      const style = getComputedStyle(element),
-        target = cloneElements[i]!;
-      for (const property of ["fill", "stroke", "font-family", "font-size"])
-        target.setAttribute(property, style.getPropertyValue(property));
-    });
-    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    clone.setAttribute(
-      "style",
-      `background:${getComputedStyle(document.documentElement).getPropertyValue("--bg-app")}`
-    );
-    download(
-      "pwrgit-contributions.svg",
-      new XMLSerializer().serializeToString(clone),
-      "image/svg+xml"
-    );
   };
   const drillRows =
     drillDate && current
@@ -534,7 +500,8 @@ export function ContributionScreen({
       className="contributions selectable"
       aria-labelledby="contributions-heading"
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
+        // A dialog over the screen claims its Escape with preventDefault.
+        if (event.key === "Escape" && !event.defaultPrevented) {
           event.stopPropagation();
           onClose();
         }
@@ -995,8 +962,12 @@ export function ContributionScreen({
                 <button type="button" onClick={() => exportData("json")}>
                   Export JSON
                 </button>
-                <button type="button" onClick={exportChart}>
-                  Export chart
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  onClick={() => setSharing(true)}
+                >
+                  Share image…
                 </button>
               </div>
             </div>
@@ -1013,7 +984,6 @@ export function ContributionScreen({
               data={data}
               label={chartLabel}
               onBucket={setDrillDate}
-              svgRef={chart}
             />
             <ul className="contributions__legend" aria-label="Stacked series">
               {data.series.map((series, i) => (
@@ -1179,7 +1149,7 @@ export function ContributionScreen({
                   <button
                     type="button"
                     onClick={() =>
-                      download(
+                      downloadFile(
                         "pwrgit-author-flow.csv",
                         contributionCsv(
                           [
@@ -1344,6 +1314,14 @@ export function ContributionScreen({
           </button>
         )}
       </footer>
+      {sharing && current && (
+        <ShareImageDialog
+          profileId={profileId}
+          snapshot={current}
+          options={options}
+          onClose={() => setSharing(false)}
+        />
+      )}
     </main>
   );
 }
