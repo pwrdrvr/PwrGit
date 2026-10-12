@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.37.0 - 2026-10-11
+
+- Updates - Fixed downloaded updates getting stuck on an older release. PwrGit now checks for newer releases on the selected track and replaces the pending update, so you don't need two successive restarts to catch up. On macOS, the newer Restart offer waits until the replacement is staged and ready to install.
+
 ## v0.36.0 - 2026-10-11
 
 - Commit identity - Added opt-in Match Git to each profile in Settings → Profiles → By folder, so Terminal and coding-agent commits use the profile identity for repositories under its folders. Preview the exact Git configuration changes before enabling or disabling synchronization; PwrGit preserves hand-written includes.
