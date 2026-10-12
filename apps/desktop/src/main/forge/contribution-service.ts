@@ -21,9 +21,13 @@ export class ContributionService {
   constructor(private readonly db: DB, private readonly hosts: Pick<ForgeHosts, "kindFor" | "isEnabled">,
     private readonly providerFor: (kind: ForgeKind, host: string) => ContributionProvider | null = (kind, host) => PROVIDERS[kind]?.(host) ?? null,
     private readonly pause: (signal: AbortSignal) => Promise<void> = signal => delay(150, { signal })) {}
-  private provider(profileId: string, host: string): ContributionProvider {
+  private validateLocalScope(profileId: string, host: string): void {
     if (!this.db.prepare("SELECT 1 FROM profiles WHERE id = ?").get(profileId)) throw new Error("This analytics profile no longer exists.");
-    if (canonicalForgeHostname(host) !== host || !this.hosts.isEnabled(host).enabled) throw new Error("Enable this forge host in Settings before collecting analytics.");
+    if (canonicalForgeHostname(host) !== host) throw new Error("Analytics requires a canonical forge host.");
+  }
+  private provider(profileId: string, host: string): ContributionProvider {
+    this.validateLocalScope(profileId, host);
+    if (!this.hosts.isEnabled(host).enabled) throw new Error("Enable this forge host in Settings before collecting analytics.");
     const kind = this.hosts.kindFor(host).kind;
     const provider = kind ? this.providerFor(kind, host) : null;
     if (!provider) throw new Error("Contribution analytics is not available for this forge.");
@@ -39,7 +43,7 @@ export class ContributionService {
     return { identity, snapshot: this.read({ ...scope, viewerId: identity.id }) };
   }
   read(scope: ContributionScope): ContributionSnapshot | null {
-    this.provider(scope.profileId, scope.host);
+    this.validateLocalScope(scope.profileId, scope.host);
     const window = this.window(scope);
     this.db.prepare("DELETE FROM contribution_snapshots WHERE updated_at_ms < ?").run(Date.now() - RETENTION_MS);
     const row = this.db.prepare("SELECT snapshot FROM contribution_snapshots WHERE profile_id=? AND host=? AND viewer_id=? AND window_key=?").get(scope.profileId, scope.host, scope.viewerId, windowKey(window)) as { snapshot: string } | undefined;
@@ -101,9 +105,10 @@ export class ContributionService {
   private async collect(scope: ContributionScope, snapshot: ContributionSnapshot, provider: ContributionProvider, signal: AbortSignal): Promise<void> {
     let activationPages = 0;
     const request = async () => {
-      signal.throwIfAborted(); this.provider(scope.profileId, scope.host);
+      signal.throwIfAborted();
       if (++activationPages > ACTIVATION_PAGE_CAP) throw new Error("This pass reached its 1,000-page budget. Resume to continue the same frozen range.");
       await this.pause(signal);
+      signal.throwIfAborted(); this.provider(scope.profileId, scope.host);
     };
     const nextCursor = (previous: string | null, next: string | null, more: boolean) => {
       if (more && (!next || previous === next)) throw new Error("The forge repeated a pagination cursor; coverage is incomplete.");
@@ -236,12 +241,12 @@ export class ContributionService {
     if (this.db.prepare("SELECT 1 FROM profiles WHERE id=?").get(scope.profileId)) this.save(snapshot);
   }
   async cancel(scope: ContributionScope): Promise<void> {
-    this.provider(scope.profileId, scope.host);
+    this.validateLocalScope(scope.profileId, scope.host);
     const job = this.jobs.get(key(scope));
     if (job) { job.controller.abort(); await job.done; }
   }
   async clear(scope: ContributionScope): Promise<void> {
-    this.provider(scope.profileId, scope.host);
+    this.validateLocalScope(scope.profileId, scope.host);
     const accountJobs = [...this.jobs.entries()].filter(([jobKey]) => {
       const [profileId, host, viewerId] = JSON.parse(jobKey) as string[];
       return profileId === scope.profileId && host === scope.host && viewerId === scope.viewerId;

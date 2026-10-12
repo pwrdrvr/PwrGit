@@ -41,8 +41,16 @@ export type ContributionOptions = {
   topN?: number; ownerId?: string; repoId?: string;
 };
 
+// Reuse ICU formatters on the aggregation hot path; bound user-entered zones.
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 export function localContributionDate(instant: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
+  let formatter = dateFormatters.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" });
+    if (dateFormatters.size >= 16) dateFormatters.delete(dateFormatters.keys().next().value!);
+    dateFormatters.set(timezone, formatter);
+  }
+  const parts = formatter.formatToParts(instant);
   const value = (type: string) => parts.find(p => p.type === type)!.value;
   return `${value("year")}-${value("month")}-${value("day")}`;
 }

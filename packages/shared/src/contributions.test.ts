@@ -1,10 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { aggregateAuthorFlow, aggregateContributions, contributionCsv, contributionWindow, defaultContributionDates, type ContributionRecord } from "./contributions";
 
 const repo = { id: "R1", path: "sample-org/widget", owner: "sample-org", ownerId: "O1", ownerKind: "organization" as const, archived: false, fork: true, visibility: "PRIVATE" };
 const record = (id: string, mergedAt: string, mergedBy = "U1", author = "U2"): ContributionRecord => ({ id, repo, number: 1, mergedAt, mergedBy, author });
 
 describe("contribution dates and aggregation", () => {
+  it("reuses timezone formatting across three aggregations at the supported 20,000-record limit", () => {
+    const window = contributionWindow("2026-04-11", "2026-10-10", "Pacific/Auckland", new Date("2026-10-11T16:00:00Z"));
+    const rows = Array.from({ length: 20_000 }, (_, i) => record(`large-${i}`, window.start));
+    const OriginalFormatter = Intl.DateTimeFormat;
+    const formatter = vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function(locales, options) {
+      return new OriginalFormatter(locales, options);
+    });
+    try {
+      for (const group of ["org", "org", "repo"] as const) {
+        const data = aggregateContributions(rows, "U1", window, { group });
+        expect(data.total).toBe(20_000);
+        expect(data.days[0]?.total).toBe(20_000);
+        expect(data.days.slice(1).every(day => day.total === 0)).toBe(true);
+      }
+      expect(formatter.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally { formatter.mockRestore(); }
+  });
   it("pins six calendar months at month ends, leap years and the last complete local day", () => {
     expect(defaultContributionDates("America/New_York", new Date("2024-08-31T15:00:00Z"))).toEqual({ startDate: "2024-02-29", endDate: "2024-08-30" });
     const window = contributionWindow("2026-04-11", "2026-10-10", "America/New_York");

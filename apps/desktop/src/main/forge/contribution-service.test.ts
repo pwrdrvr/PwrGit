@@ -17,15 +17,48 @@ const base = (): ContributionProvider => ({
   pulls: async () => ({ ...page([row("P1")]), oldestUpdatedAt: "2026-05-01T04:00:00Z", openCount: 0 }),
   authored: async () => page([]), timelines: async () => []
 });
-function setup(provider = base(), pause: (signal: AbortSignal) => Promise<void> = async () => {}) {
+function setup(provider = base(), pause: (signal: AbortSignal) => Promise<void> = async () => {}, hostGate = hosts) {
   const db = openDatabase(":memory:"); databases.push(db);
   db.prepare("INSERT INTO profiles(id,name,email) VALUES(?,?,?)").run("profile1", "Sample", "sample@example.test");
   db.prepare("INSERT INTO profiles(id,name,email) VALUES(?,?,?)").run("profile2", "Other", "other@example.test");
-  const service = new ContributionService(db, hosts, () => provider, pause);
+  const service = new ContributionService(db, hostGate, () => provider, pause);
   return { db, service };
 }
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 describe("local contribution checkpoints", () => {
+  it("retains readable partial checkpoints when a host is disabled, while refusing new network reads", async () => {
+    let enabled = true;
+    const hostGate = { ...hosts, isEnabled: () => ({ enabled, source: "auto" as const }) };
+    const provider = base();
+    provider.repositories = async () => { enabled = false; return page([repo]); };
+    provider.organizations = vi.fn(provider.organizations);
+    const { service } = setup(provider, async () => {}, hostGate);
+    await service.start(scope, false); await service.settled();
+    expect(service.read(scope)).toMatchObject({ status: "partial", inventoryComplete: true, repos: [repo] });
+    expect(provider.organizations).not.toHaveBeenCalled();
+    await expect(service.verify(scope)).rejects.toThrow("Enable");
+    await expect(service.start(scope, false)).rejects.toThrow("Enable");
+    expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+    expect(service.read({ ...scope, viewerId: "U2" })).toBeNull();
+    await service.cancel(scope);
+    await service.clear(scope);
+    expect(service.read(scope)).toBeNull();
+    expect(() => service.read({ ...scope, profileId: "missing" })).toThrow("profile");
+  });
+  it("allows cancellation and deletion after a host is disabled during an in-flight collection", async () => {
+    let enabled = true;
+    const provider = base(); provider.repositories = vi.fn(provider.repositories);
+    const { service } = setup(provider, async signal => {
+      await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+      signal.throwIfAborted();
+    }, { ...hosts, isEnabled: () => ({ enabled, source: "auto" as const }) });
+    await service.start(scope, false); enabled = false;
+    expect(service.read(scope)?.status).toBe("collecting");
+    await service.cancel(scope);
+    expect(service.read(scope)?.status).toBe("canceled");
+    expect(provider.repositories).not.toHaveBeenCalled();
+    await service.clear(scope); expect(service.read(scope)).toBeNull();
+  });
   it("walks beyond 1000 PRs, dedups repeated immutable IDs, processes boundary pages before stopping", async () => {
     let pages = 0;
     const provider = base();

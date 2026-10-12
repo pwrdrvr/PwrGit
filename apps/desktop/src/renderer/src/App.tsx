@@ -376,6 +376,7 @@ export function App() {
   // exists, so the modal checks it out rather than creating it again.
   const openBranchWorktreeModal = useCallback(
     (repo: Repo, branch: BranchReveal) => {
+      setContributionsOpen(false);
       setSearchNewWorktree(
         branch.kind === "remote"
           ? {
@@ -429,6 +430,7 @@ export function App() {
     // the reveal queued rather than falling back to the primary.
     if (resolved.kind === "wait") return;
     if (resolved.kind === "select") {
+      setContributionsOpen(false);
       setChangeRequest(null);
       setSelection({ repoId: repo.id, worktreeId: resolved.worktreeId });
       // A repo-name pick must reveal the row even when its primary checkout
@@ -505,6 +507,7 @@ export function App() {
   }, [windowTitle]);
 
   const selectWorktree = useCallback((repo: Repo, worktree: Worktree) => {
+    setContributionsOpen(false);
     setChangeRequest(null);
     setSelection({ repoId: repo.id, worktreeId: worktree.id });
   }, []);
@@ -531,6 +534,8 @@ export function App() {
     (repoId: string, remote: string | null) => {
       if (selectedRepoId !== repoId) {
         setPendingReveal({ repoId, worktreeId: null, branch: null });
+      } else {
+        setContributionsOpen(false);
       }
       requestSidebarReveal(repoId, remote);
     },
@@ -565,6 +570,7 @@ export function App() {
   );
 
   const onPickCommitSearch = useCallback((commit: Commit) => {
+    setContributionsOpen(false);
     setOverlayOpen(false);
     setFileInsightTarget(null);
     setDiffTarget(null);
@@ -581,6 +587,7 @@ export function App() {
   // before, and offering to "go back" to an unrelated file's patch is worse
   // than returning to the lineage.
   const onPickFileSearch = useCallback((path: string) => {
+    setContributionsOpen(false);
     setOverlayOpen(false);
     setDiffTarget(null);
     setCommitFocus(null);
@@ -593,6 +600,7 @@ export function App() {
 
   const showLineageCommit = useCallback((hash: string, subject: string) => {
     if (!searchableCommits.some((commit) => commit.hash === hash)) return false;
+    setContributionsOpen(false);
     setFileInsightTarget(null);
     setDiffTarget(null);
     setCommitFocus({ hash, subject });
@@ -843,6 +851,7 @@ export function App() {
     };
   }, [commitFocus]);
   const restoreLocation = useCallback((location: NavigationLocation) => {
+    setContributionsOpen(false);
     // Posted before the selection moves, so the sidebar's first render on the
     // restored worktree already knows which row to put back.
     if (location.anchor !== undefined) restoreSidebarAnchor(location.anchor);

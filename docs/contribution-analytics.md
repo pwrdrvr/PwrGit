@@ -23,7 +23,9 @@ UTC `[start,end)` bounds freeze when collection begins; including today freezes
 an actual as-of timestamp and visibly labels the partial day. Complete-day
 averages exclude today’s events and denominator; inclusive calendar-date
 averages include it. Neither denominator is elapsed 24-hour periods. Civil
-midnights and zero-filled days handle 23/25-hour DST days.
+midnights and zero-filled days handle 23/25-hour DST days. Date formatters are
+reused per timezone in a bounded 16-zone cache, avoiding ICU initialization for
+every aggregation row.
 
 Daily/weekly/monthly bars stack namespaces or repositories with top-N plus
 Other, filters, totals and an accessible exact table. Weekly buckets start
@@ -118,6 +120,10 @@ Successful pages checkpoint atomically. Cancellation, failures and interrupted
 processes remain incomplete. Resume re-verifies identity and preserves original
 bounds/cursors; refresh replaces the selected snapshot with visibly collecting
 data. Charts/filter renders aggregate local rows; polling reads SQLite only.
+Disabling a forge host stops network reads while preserving profile-scoped
+cache reads, cancellation and deletion. Successful repository/commit/file
+navigation leaves Contributions, including incoming reveals of an already
+selected repository.
 One collector runs app-wide, sequentially, with 150ms request spacing, a 45s
 subprocess timeout and up to two transient timeout/5xx retries using existing
 forge backoff. A pass pauses at 1,000 pages and can resume. Quota below 200 stops
