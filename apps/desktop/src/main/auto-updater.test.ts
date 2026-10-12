@@ -510,13 +510,17 @@ describe("auto updater", () => {
     expect(checkForUpdatesMock).not.toHaveBeenCalled();
   });
 
-  it("does not check again when an update is already downloaded for the selected channel", async () => {
+  // A held download no longer ends the check: the feed is read so a newer
+  // release can replace it (auto-updater-supersede.test.ts). The same release
+  // starts nothing.
+  it("reads the feed but does not download again when the downloaded update is still the newest", async () => {
     const updater = await startUpdater();
     await vi.waitFor(() => {
       expect(checkForUpdatesMock).toHaveBeenCalledTimes(1);
     });
     updateEventHandlers.get("update-downloaded")?.({ version: "1.0.0-beta.8" });
     checkForUpdatesMock.mockClear();
+    fetchMock.mockClear();
 
     const manualResult = await updater.checkForAppUpdatesNow("manual");
 
@@ -524,6 +528,7 @@ describe("auto updater", () => {
       status: "downloaded",
       version: "1.0.0-beta.8"
     });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(checkForUpdatesMock).not.toHaveBeenCalled();
   });
 
@@ -862,8 +867,9 @@ describe("auto updater", () => {
       const second = await runDevCheck(updater, "menu");
 
       expect(second).toEqual({ status: "downloaded", version: "420.0.0" });
-      // Production short-circuits on a held download; tearing the offer back
-      // down to `checking` would make the preview lie about the real flow.
+      // Production keeps a held download when nothing newer is out, and the
+      // fake has only the one version; tearing the offer back down to
+      // `checking` would make the preview lie about the real flow.
       expect(emitEventMock).not.toHaveBeenCalled();
     });
 
