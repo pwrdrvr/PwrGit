@@ -82,7 +82,11 @@ follows the status:
   offer comes back.
 - **Windows/Linux** drop the older offer as soon as the newer download starts,
   because electron-updater deletes the older installer at that point. A
-  failure does not bring it back.
+  failure does not bring it back. electron-updater has one pending cache for
+  every track, so this holds for a download on *any* track: a beta build
+  downloaded before switching to stable is gone once a stable download
+  starts, and switching back to beta does not re-offer it. Install-on-quit
+  stays off until that download lands or fails.
 
 A held download is kept when the feed has nothing newer, when either version
 does not parse, and when the feed read fails. A deferred automatic check still

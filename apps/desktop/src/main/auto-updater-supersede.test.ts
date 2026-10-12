@@ -81,23 +81,26 @@ const originalPlatform = process.platform;
 const originalFetch = globalThis.fetch;
 let userData: string;
 
-function feed(tag: string): void {
-  const version = tag.replace(/^v/, "");
+/** Publish `tags`; one with a suffix (`v1.1.0-beta.2`) is a GitHub prerelease. */
+function feed(...tags: string[]): void {
   fetchMock.mockResolvedValue({
     headers: new Headers(),
     ok: true,
     status: 200,
-    json: async () => [{
-      tag_name: tag,
-      draft: false,
-      prerelease: false,
-      assets: [
-        { name: "latest-mac.yml", state: "uploaded" },
-        { name: `PwrGit-${version}-universal-mac.zip`, state: "uploaded" },
-        { name: "latest.yml", state: "uploaded" },
-        { name: `PwrGit-${version}-setup.exe`, state: "uploaded" }
-      ]
-    }]
+    json: async () => tags.map((tag) => {
+      const version = tag.replace(/^v/, "");
+      return {
+        tag_name: tag,
+        draft: false,
+        prerelease: version.includes("-"),
+        assets: [
+          { name: "latest-mac.yml", state: "uploaded" },
+          { name: `PwrGit-${version}-universal-mac.zip`, state: "uploaded" },
+          { name: "latest.yml", state: "uploaded" },
+          { name: `PwrGit-${version}-setup.exe`, state: "uploaded" }
+        ]
+      };
+    })
   });
 }
 
@@ -468,5 +471,87 @@ describe("a newer release replaces a downloaded update", () => {
       message: "No downloaded update is ready to install."
     });
     expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+});
+
+// electron-updater keeps ONE pending cache dir for every track. A download on
+// one track deletes the installer held for another, while
+// `downloadedUpdateHelper.file` still names it until that download fails.
+describe("Windows: a download on another track replaces the held one", () => {
+  /** v1.1.0-beta.2 downloaded on the beta train, then Settings switched to
+   *  stable and a check started downloading v1.0.5 over it. */
+  async function startCrossTrackDownload() {
+    setPlatform("win32");
+    let train: "stable" | "beta" = "beta";
+    feed("v1.0.5", "v1.1.0-beta.2");
+    const first = offerDownload("1.1.0-beta.2");
+    const updater = await import("./auto-updater");
+    updater.initAutoUpdater({ resolveSelection: () => ({ channel: "latest", train }) });
+    await vi.waitFor(() => expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1));
+    mocks.updaterEvents.emit("update-downloaded", { version: "1.1.0-beta.2" });
+    first.download.resolve([]);
+    await expect(updater.checkForAppUpdatesNow("startup")).resolves.toEqual({
+      status: "downloaded", version: "1.1.0-beta.2"
+    });
+
+    const selectTrain = (next: "stable" | "beta"): void => {
+      train = next;
+      updater.handleUpdateSelectionChange();
+    };
+    selectTrain("stable");
+    const second = offerDownload("1.0.5");
+    const check = updater.checkForAppUpdatesNow("manual");
+    await vi.waitFor(() => expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(2));
+    return { updater, selectTrain, check, ...second };
+  }
+
+  it("does not re-offer the deleted beta installer after the stable download fails", async () => {
+    const { updater, selectTrain, check, download } = await startCrossTrackDownload();
+
+    mocks.updaterEvents.emit("error", new Error("network failed"));
+    download.reject(new Error("network failed"));
+    await expect(check).resolves.toEqual({ status: "error", message: "network failed" });
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
+
+    // Back on beta, the v1.1.0-beta.2 installer is gone from disk.
+    selectTrain("beta");
+    expect(updater.readAppUpdateStatus()).not.toMatchObject({ status: "downloaded" });
+    await expect(updater.installDownloadedAppUpdate()).resolves.toEqual({
+      status: "error",
+      message: "No downloaded update is ready to install."
+    });
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("holds install-on-quit off during the download, on either track, until it fails", async () => {
+    const { updater, selectTrain, check, download } = await startCrossTrackDownload();
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
+
+    // Switching back to beta mid-download must not arm install-on-quit for
+    // the beta build electron-updater has just deleted.
+    selectTrain("beta");
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
+    expect(updater.readAppUpdateStatus()).toMatchObject({ status: "available", version: "1.0.5" });
+
+    // electron-updater clears `downloadedUpdateHelper.file` on a failure, so
+    // there is nothing stale left for install-on-quit to run.
+    download.reject(new Error("network failed"));
+    await check;
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
+  });
+
+  it("holds install-on-quit off during the download, on either track, until it lands", async () => {
+    const { updater, selectTrain, check, download } = await startCrossTrackDownload();
+
+    selectTrain("beta");
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
+    selectTrain("stable");
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(false);
+
+    mocks.updaterEvents.emit("update-downloaded", { version: "1.0.5" });
+    download.resolve([]);
+    await expect(check).resolves.toEqual({ status: "downloaded", version: "1.0.5" });
+    expect(updater.readAppUpdateStatus()).toEqual({ status: "downloaded", version: "1.0.5" });
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
   });
 });

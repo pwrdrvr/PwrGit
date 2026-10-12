@@ -152,6 +152,10 @@ let heldDownloadedUpdate: HeldDownload | undefined;
  *   while `downloadedUpdateHelper.file` still names it. The older offer is
  *   dropped when the download starts, install-on-quit is held off until the
  *   newer `update-downloaded`, and a failure does not bring the older back.
+ *   There is one cache dir for every track, so this applies to ANY download
+ *   that starts over a held one — including a held download from another
+ *   track, which the same-track check above never set this for (see
+ *   `runAvailableUpdateDownload`).
  */
 let supersedingDownload: HeldDownload | undefined;
 /** macOS only: electron-updater has the newer build and has asked Squirrel.Mac
@@ -349,8 +353,9 @@ function downloadedUpdateMatchesChannel(
 
 function syncAutoInstallOnAppQuit(selection: UpdateSelectionKey): void {
   // Windows/Linux: the replaced installer is already gone from the pending
-  // cache, but electron-updater still points at it, so quitting must not try
-  // to run it. macOS forces it on, even across a track change: MacUpdater
+  // cache, but electron-updater still points at it until this download lands
+  // or fails, so quitting must not try to run it — whichever track is
+  // selected meanwhile. macOS forces it on, even across a track change: MacUpdater
   // reads it when the newer download lands, and only then asks Squirrel to
   // stage that build — otherwise `awaitSquirrelStage` waits out its timeout.
   if (supersedingDownload !== undefined) {
@@ -690,9 +695,12 @@ async function runAvailableUpdateDownload(
     recordPendingDownloadChannel(result.updateInfo.version, selection);
   }
   if (result?.isUpdateAvailable && result.downloadPromise) {
-    if (supersedingDownload !== undefined && process.platform !== "darwin") {
+    if (heldDownloadedUpdate !== undefined && process.platform !== "darwin") {
       // Starting this download emptied electron-updater's pending cache dir,
-      // and the replaced installer with it. Do not offer what is gone.
+      // and the replaced installer with it — whichever track it was
+      // downloaded for. A held download from another track is replaced too:
+      // switching back must not offer what is gone.
+      if (supersedingDownload === undefined) beginSupersede(heldDownloadedUpdate);
       heldDownloadedUpdate = undefined;
     }
     const downloadingVersion = result.updateInfo?.version ?? download.version;
