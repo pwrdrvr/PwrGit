@@ -396,6 +396,30 @@ export function ContributionScreen({
       setWorking(false);
     }
   };
+  const verify = () =>
+    void action(async () => {
+      const result = await dispatchOrThrow("contribution:verify", {
+        profileId,
+        host,
+        ...dates,
+        timezone
+      });
+      setIdentity(result.identity);
+      setSnapshot(result.snapshot);
+    });
+  // Ask the CLI who is signed in as soon as there is a host: one identity
+  // read, no PR metadata. It is what puts a cached chart on screen at once,
+  // and a screen that waits for a click to say anything reads as broken.
+  // Once per host, so a failure or "Reconnect account" does not loop.
+  const autoVerified = useRef(new Set<string>());
+  useEffect(() => {
+    if (!host || identity || windowError || autoVerified.current.has(host))
+      return;
+    autoVerified.current.add(host);
+    verify();
+    // verify reads the current dates and timezone; host is the trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host, identity, windowError]);
   const sync = (refresh: boolean) =>
     void action(async () => {
       if (!scope || windowError || collecting) return;
@@ -618,20 +642,9 @@ export function ContributionScreen({
             disabled={!host || !!windowError}
             aria-busy={working}
             aria-disabled={working}
-            onClick={() =>
-              void action(async () => {
-                const result = await dispatchOrThrow("contribution:verify", {
-                  profileId,
-                  host,
-                  ...dates,
-                  timezone
-                });
-                setIdentity(result.identity);
-                setSnapshot(result.snapshot);
-              })
-            }
+            onClick={verify}
           >
-            Use active account
+            {working ? "Checking account…" : "Use active account"}
           </button>
         ) : (
           <button
@@ -774,11 +787,35 @@ export function ContributionScreen({
       {!current && (
         <section className="contributions__empty">
           <h2>Your merge activity, kept locally</h2>
-          <p>
-            {identity
-              ? "Collect the selected range to see daily merge counts, organizations and repositories."
-              : "Choose an existing forge account to verify your identity. Collection starts only when you ask."}
-          </p>
+          {identity ? (
+            <>
+              <p>
+                Nothing collected yet for {dates.startDate} – {dates.endDate}.
+                Collecting reads PR metadata from {identity.host} as{" "}
+                <strong>{identity.login}</strong>. A busy account takes a few
+                minutes; the chart fills in as it goes, and you can keep
+                working.
+              </p>
+              <button
+                type="button"
+                className="contributions__primary"
+                aria-busy={busy}
+                aria-disabled={busy}
+                onClick={() => {
+                  if (!busy) sync(false);
+                }}
+              >
+                <RefreshGlyph />
+                Collect my activity
+              </button>
+            </>
+          ) : (
+            <p>
+              {working
+                ? "Checking which account the GitHub CLI is signed in to…"
+                : "Choose a signed-in forge account above. Collection starts only when you ask."}
+            </p>
+          )}
           <p>
             No PR titles or bodies are collected. Cached metadata stays in this
             profile for up to 30 days.

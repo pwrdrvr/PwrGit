@@ -14,6 +14,7 @@ import {
   ContributionRateLimitError,
   type ContributionProvider
 } from "./github/contribution-provider";
+import { logMain } from "../logs";
 import { delay } from "../util/timing";
 
 export type ContributionScope = {
@@ -257,6 +258,12 @@ export class ContributionService {
     snapshot.issues = [];
     snapshot.retryAt = null;
     this.save(snapshot);
+    // Counts and dates only: never names, logins or forge payloads.
+    logMain(
+      "info",
+      "contributions",
+      `collection ${cached ? "resumed" : "started"} ${window.startDate}..${window.endDate} ${window.timezone} on ${scope.host}`
+    );
     const job: Job = { controller, done: Promise.resolve() };
     this.jobs.set(key(scope), job);
     job.done = this.collect(scope, snapshot, provider, controller.signal)
@@ -273,6 +280,7 @@ export class ContributionService {
     signal: AbortSignal
   ): Promise<void> {
     let activationPages = 0;
+    const startedAt = Date.now();
     const request = async () => {
       signal.throwIfAborted();
       if (++activationPages > ACTIVATION_PAGE_CAP)
@@ -635,6 +643,12 @@ export class ContributionService {
       snapshot.retryAt =
         cause instanceof ContributionRateLimitError ? cause.retryAt : null;
     }
+    logMain(
+      snapshot.status === "partial" ? "warn" : "info",
+      "contributions",
+      `collection ${snapshot.status} after ${Math.round((Date.now() - startedAt) / 1000)}s: ${snapshot.repoIndex}/${snapshot.repos.length} repositories, ${snapshot.pages} pages, ${snapshot.records.length} PRs`,
+      ...(snapshot.issues[0] ? [snapshot.issues[0].message] : [])
+    );
     // A profile deletion cascades snapshots; an in-flight read must not recreate it.
     if (
       this.db.prepare("SELECT 1 FROM profiles WHERE id=?").get(scope.profileId)

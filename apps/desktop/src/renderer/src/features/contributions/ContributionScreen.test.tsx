@@ -105,14 +105,20 @@ async function mount(onClose: () => void = () => {}) {
   }
 }
 async function connect() {
-  await act(async () => button("Use active account").click());
-  expect(mocks.dispatch).toHaveBeenCalledWith("contribution:verify", {
-    profileId: "demo-profile",
-    host: snapshot.identity.host,
-    startDate: snapshot.window.startDate,
-    endDate: snapshot.window.endDate,
-    timezone: snapshot.window.timezone
-  });
+  // The screen asks the CLI who is signed in on its own: an identity read,
+  // never PR metadata. The fixture's range then reads the cached snapshot.
+  expect(
+    mocks.dispatch.mock.calls.filter(([name]) => name === "contribution:verify")
+  ).toEqual([
+    [
+      "contribution:verify",
+      expect.objectContaining({
+        profileId: "demo-profile",
+        host: snapshot.identity.host
+      })
+    ]
+  ]);
+  expect(container.textContent).toContain("Verified account demo-user");
 }
 function blobText(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -126,13 +132,10 @@ function blobText(blob: Blob): Promise<string> {
 describe("Contributions integrated screen", () => {
   it("starts from local account selection, advertises only supported hosts and never collects on chart/filter renders", async () => {
     await mount();
-    expect(container.textContent).toContain(
-      "Collection starts only when you ask"
-    );
     expect(container.textContent).not.toContain("gitlab.com");
-    expect(mocks.dispatch.mock.calls.map((call) => call[0])).toEqual([
-      "forge:hosts"
-    ]);
+    expect(new Set(mocks.dispatch.mock.calls.map((call) => call[0]))).toEqual(
+      new Set(["forge:hosts", "contribution:verify", "contribution:read"])
+    );
     await connect();
     expect(container.textContent).toContain("Verified account demo-user");
     await change("Stack by", "repo");
@@ -245,7 +248,8 @@ describe("Contributions integrated screen", () => {
     await act(async () =>
       button("Clear this account’s local analytics cache").click()
     );
-    expect(container.textContent).toContain("Collect the selected range");
+    expect(container.textContent).toContain("Nothing collected yet");
+    expect(button("Collect my activity")).toBeDefined();
   });
   it("exports authored flow totals and shifts August preset scope without collecting automatically", async () => {
     await mount();
@@ -314,5 +318,30 @@ describe("Contributions integrated screen", () => {
     );
     expect(container.querySelector("[role='dialog']")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
+  });
+  it("verifies on open and offers one clear button to collect a range nothing has been read for", async () => {
+    const empty = mocks.dispatch.getMockImplementation()!;
+    mocks.dispatch.mockImplementation(async (name, req) => {
+      if (name === "contribution:verify")
+        return { identity: snapshot.identity, snapshot: null };
+      if (name === "contribution:read") return null;
+      return empty(name, req);
+    });
+    await mount();
+    expect(container.textContent).toContain(
+      "Nothing collected yet for 2026-04-11 – 2026-10-10"
+    );
+    expect(
+      mocks.dispatch.mock.calls.some(([name]) => name === "contribution:sync")
+    ).toBe(false);
+    await act(async () => button("Collect my activity").click());
+    expect(mocks.dispatch).toHaveBeenCalledWith(
+      "contribution:sync",
+      expect.objectContaining({
+        profileId: "demo-profile",
+        viewerId: snapshot.identity.id,
+        refresh: false
+      })
+    );
   });
 });
