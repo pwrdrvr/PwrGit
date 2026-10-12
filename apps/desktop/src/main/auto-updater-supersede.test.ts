@@ -323,6 +323,46 @@ describe("a newer release replaces a downloaded update", () => {
     expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
   });
 
+  it("macOS still stages the newer build when the track changes mid-download", async () => {
+    let channel: "latest" | "prerelease" = "latest";
+    feed("v1.0.1");
+    const first = offerDownload("1.0.1");
+    const updater = await import("./auto-updater");
+    updater.initAutoUpdater({ resolveSelection: () => ({ channel, train: "stable" }) });
+    await vi.waitFor(() => expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1));
+    mocks.updaterEvents.emit("update-downloaded", { version: "1.0.1" });
+    first.download.resolve([]);
+    await updater.checkForAppUpdatesNow("startup");
+    const second = await startSupersede(updater);
+
+    // The held download no longer matches the selection, which would turn
+    // install-on-quit off — and with it MacUpdater's request to Squirrel.
+    channel = "prerelease";
+    updater.handleUpdateSelectionChange();
+    expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
+    expect(updater.readAppUpdateStatus()).toMatchObject({ status: "available", version: "1.0.2" });
+
+    mocks.updaterEvents.emit("update-downloaded", { version: "1.0.2" });
+    second.download.resolve([]);
+    mocks.native.emit("update-downloaded");
+    await vi.waitFor(() => expect(second.settled()).toBe(true));
+    channel = "latest";
+    expect(updater.readAppUpdateStatus()).toEqual({ status: "downloaded", version: "1.0.2" });
+  });
+
+  it("macOS does not claim a cancel once Squirrel.Mac is staging", async () => {
+    const updater = await bootWithDownloaded();
+    const second = await startSupersede(updater);
+    mocks.updaterEvents.emit("update-downloaded", { version: "1.0.2" });
+
+    expect(updater.cancelAppUpdateDownload()).toEqual({ canceled: false });
+    expect(second.token.cancel).not.toHaveBeenCalled();
+
+    second.download.resolve([]);
+    mocks.native.emit("update-downloaded");
+    await expect(second.check).resolves.toEqual({ status: "downloaded", version: "1.0.2" });
+  });
+
   it("macOS puts the older Restart offer back when the newer download is canceled", async () => {
     const updater = await bootWithDownloaded();
     const second = await startSupersede(updater);

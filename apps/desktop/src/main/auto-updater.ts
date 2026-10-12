@@ -350,10 +350,11 @@ function downloadedUpdateMatchesChannel(
 function syncAutoInstallOnAppQuit(selection: UpdateSelectionKey): void {
   // Windows/Linux: the replaced installer is already gone from the pending
   // cache, but electron-updater still points at it, so quitting must not try
-  // to run it. macOS keeps the usual rule — MacUpdater reads this when the
-  // newer download lands, and it is what makes Squirrel stage that build.
-  if (supersedingDownload !== undefined && process.platform !== "darwin") {
-    autoUpdater.autoInstallOnAppQuit = false;
+  // to run it. macOS forces it on, even across a track change: MacUpdater
+  // reads it when the newer download lands, and only then asks Squirrel to
+  // stage that build — otherwise `awaitSquirrelStage` waits out its timeout.
+  if (supersedingDownload !== undefined) {
+    autoUpdater.autoInstallOnAppQuit = process.platform === "darwin";
     return;
   }
   autoUpdater.autoInstallOnAppQuit =
@@ -565,17 +566,16 @@ async function runUpdateCheck(
   // track replaces it, so the Restart offer names the newest build instead of
   // one the user restarts into only to be offered another straight away.
   const downloadedResult = downloadedUpdateMatchesChannel(selection);
-  if (!downloadedResult) {
-    return await runReleaseCheck(trigger, selected, selection, undefined);
-  }
   try {
     return await runReleaseCheck(trigger, selected, selection, downloadedResult);
   } catch (err) {
     // A failed look for something newer does not undo the download we have.
     // On Windows/Linux a download that started has already dropped it, and
-    // then the failure is the answer.
+    // then the failure is the answer. A deferral is not a failure: like the
+    // budget's `skipped`, it must not answer with the held build, or a click
+    // that joined this check would never read the feed.
     const held = downloadedUpdateMatchesChannel(selection);
-    if (!held) throw err;
+    if (!downloadedResult || !held || err instanceof DeferredReleaseCheck) throw err;
     logMain(
       "warn",
       "updater",
@@ -1533,7 +1533,11 @@ export function initAutoUpdater(options: AutoUpdaterOptions): void {
  */
 export function cancelAppUpdateDownload(): AppUpdateCancelResult {
   const download = activeDownload;
-  if (!download || download.canceled) return { canceled: false };
+  // macOS supersede: the bytes are down and Squirrel.Mac is staging them.
+  // Nothing can stop that, so do not claim a cancel.
+  if (!download || download.canceled || pendingSquirrelStage) {
+    return { canceled: false };
+  }
   download.canceled = true;
   logMain("info", "updater", `canceling update download ${download.version}`);
   // The flag is set first and unconditionally: `cancel` may be the empty slot
