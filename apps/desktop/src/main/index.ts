@@ -743,7 +743,8 @@ if (!gotSingleInstanceLock) {
       indexer,
       profiles,
       forges,
-      forgeStatus
+      forgeStatus,
+      () => forgeHosts.overrides()
     );
     const forkService = new ForkService(
       execGit,

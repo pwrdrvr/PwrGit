@@ -53,6 +53,10 @@ import {
 import {
   canPushOriginal,
   cloneFromDefault,
+  cloneLineageSource,
+  cloneUpstream,
+  cloneUpstreamChoiceDetail,
+  cloneUpstreamChoices,
   forkCardDetail,
   forkCardPill,
   forkCardState,
@@ -133,6 +137,7 @@ const CLONE_PROGRESS_LABELS: Record<CloneProgress["phase"], string> = {
   receiving: "Receiving objects",
   resolving: "Resolving deltas",
   checking_out: "Checking out files",
+  adding_upstream: "Adding upstream remote",
   indexing: "Adding repository to PwrGit"
 };
 
@@ -494,6 +499,48 @@ export function CloneRepoDialog({
   const forking = cloneFrom === "fork";
   const forkStep = forkAction(forkPreflight);
   const forkUpstream = defaultUpstream(forkPreflight);
+
+  // ── Upstream, when the picked repository is itself a fork ───────────────
+  // Drawn in design/Upstream When Cloning a Fork - UX Review.dc.html, 2a and
+  // 3. Your own fork gets no preflight (there is no account to fork it into
+  // but yours), and a search row carries no lineage, so the repository is
+  // read once more for exactly that case — never per keystroke.
+  const [lineageLookup, setLineageLookup] = useState<CloneRepository | null>(null);
+  const preflightWillAnswer =
+    forkOwners === null ||
+    (forkTargetLogin !== null && ownersAnswer !== "failed" && forkCheckError === null);
+  useEffect(() => {
+    setLineageLookup(null);
+    if (
+      forgeSource === null ||
+      forgeSource.parent !== undefined ||
+      preflightWillAnswer
+    ) {
+      return undefined;
+    }
+    let active = true;
+    void dispatch("repo:checkCloneSource", {
+      profileId: profile.id,
+      nameWithOwner: forgeSource.nameWithOwner,
+      host: forgeSource.host,
+      hostname: forgeSource.hostname
+    }).then((result) => {
+      if (active && result.ok) setLineageLookup(result.value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [forkSourceKey, preflightWillAnswer, profile.id]);
+  const [keepUpstream, setKeepUpstream] = useState(true);
+  const [upstreamPick, setUpstreamPick] = useState<string | null>(null);
+  const lineageSource = cloneLineageSource(
+    forgeSource,
+    forkPreflight,
+    lineageLookup
+  );
+  // The fork card adds the original itself, and a reveal clones nothing.
+  const upstreamChoices = forking ? [] : cloneUpstreamChoices(lineageSource);
+  const cloneUpstreamSlug = cloneUpstream(upstreamChoices, keepUpstream, upstreamPick);
   /** What `origin` will be: the picked repository, or the fork. Null while
    *  the fork's name is still being looked up. Every surface that names the
    *  new checkout reads this — the protocol cards, "Will create", and the
@@ -645,6 +692,7 @@ export function CloneRepoDialog({
   const chooseRepository = (repository: CloneRepository): void => {
     setSelectedRepository(repository);
     setCloneFromPick(null);
+    setUpstreamPick(null);
     setPicked({
       host: repository.host,
       hostname: repository.hostname,
@@ -706,7 +754,8 @@ export function CloneRepoDialog({
             protocol,
             parentPath: destination.path,
             host: selectedRepository.host,
-            hostname: selectedRepository.hostname
+            hostname: selectedRepository.hostname,
+            ...(cloneUpstreamSlug === null ? {} : { upstream: cloneUpstreamSlug })
           });
     activeCloneIdRef.current = null;
     setBusy(false);
@@ -1038,6 +1087,69 @@ export function CloneRepoDialog({
             </section>
           )}
 
+          {upstreamChoices.length > 0 && lineageSource !== null && (
+            <section className="clone-section">
+              <div className="fork-options">
+                <label className={`fork-option${keepUpstream ? " is-on" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={keepUpstream}
+                    disabled={busy}
+                    onChange={(event) => setKeepUpstream(event.target.checked)}
+                  />
+                  <span>
+                    <strong>
+                      Add <code>upstream</code>
+                      {upstreamChoices.length === 1 && (
+                        <>
+                          {" → "}
+                          <code className="fork-option__target">
+                            {upstreamChoices[0]!.nameWithOwner}
+                          </code>
+                        </>
+                      )}
+                    </strong>
+                    <small>
+                      {upstreamChoices.length === 1
+                        ? "The repository this one was forked from. "
+                        : ""}
+                      Fetch and rebase on it without leaving PwrGit.{" "}
+                      <code>origin</code> stays your fork.
+                    </small>
+                  </span>
+                </label>
+                {keepUpstream && upstreamChoices.length > 1 && (
+                  <div className="fork-upstream">
+                    <div className="fork-upstream__lead">
+                      {lineageSource.parent?.nameWithOwner} is itself a fork — which
+                      repository should <code>upstream</code> point at?
+                    </div>
+                    {upstreamChoices.map((choice, index) => (
+                      <label
+                        key={choice.nameWithOwner}
+                        className={`fork-upstream__row${
+                          cloneUpstreamSlug === choice.nameWithOwner ? " is-on" : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="clone-upstream"
+                          checked={cloneUpstreamSlug === choice.nameWithOwner}
+                          disabled={busy}
+                          onChange={() => setUpstreamPick(choice.nameWithOwner)}
+                        />
+                        <span>
+                          <strong>{choice.nameWithOwner}</strong>
+                          <small>{cloneUpstreamChoiceDetail(index)}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           {!revealing && (
             <section className="clone-section">
               <div className="clone-label">Clone with</div>
@@ -1251,6 +1363,9 @@ export function CloneRepoDialog({
                   </strong>
                   {forking && forkUpstream !== null && (
                     <> · upstream {forkUpstream}</>
+                  )}
+                  {!forking && cloneUpstreamSlug !== null && (
+                    <> · upstream {cloneUpstreamSlug}</>
                   )}
                 </div>
               )}

@@ -590,6 +590,82 @@ describe("ForkService.fork", () => {
     expect(phases.at(-1)).toBe("indexing");
   });
 
+  it("keeps the upstream gh repo clone adds for a fork, rather than failing on it", async () => {
+    const root = temporaryRoot();
+    const parentPath = join(root, "forks");
+    mkdirSync(parentPath, { recursive: true });
+    const origin = join(root, "origin");
+    initRepo(origin);
+
+    const repos = {
+      "facebook/react": { full_name: "facebook/react", visibility: "public" },
+      "huntharo/react": {
+        full_name: "huntharo/react",
+        name: "react",
+        visibility: "public",
+        fork: true,
+        parent: { full_name: "facebook/react" }
+      }
+    };
+    const base = fakeGh(repos);
+    // `gh repo clone` of a fork writes `upstream` itself. A bare
+    // `git remote add upstream` afterwards exited 3 and failed the fork.
+    const gh = async (args: string[]): Promise<string> => {
+      if (args[0] === "repo" && args[1] === "clone") {
+        const destination = args[3]!;
+        execFileSync("git", ["clone", "--", origin, destination], { stdio: "ignore" });
+        for (const remote of [
+          ["set-url", "origin", "https://github.com/huntharo/react.git"],
+          ["add", "upstream", "https://github.com/facebook/react.git"]
+        ]) {
+          execFileSync("git", ["remote", ...remote], { cwd: destination, stdio: "ignore" });
+        }
+        return "";
+      }
+      return base(args);
+    };
+    const db = openDatabase(":memory:");
+    const profiles = new ProfileService(db);
+    const profile = profiles.create({
+      name: "Personal",
+      email: "t@pwrgit.com",
+      roots: [root]
+    });
+    const registry = new ForgeRepoRegistry();
+    registry.register(new GitHubRepoProvider(gh));
+    const indexer = new RepoIndexer(db, systemGit);
+    const forks = new ForkService(
+      systemGit,
+      indexer,
+      profiles,
+      registry,
+      new CloneService(db, systemGit, indexer, profiles, registry, fakeForgeStatus()),
+      fakeForgeStatus()
+    );
+
+    const result = await forks.fork({
+      profileId: profile.id,
+      source: "facebook/react",
+      host: "github",
+      hostname: "github.com",
+      targetOwner: "huntharo",
+      targetOwnerKind: "user",
+      targetName: "react",
+      protocol: "cli",
+      parentPath,
+      defaultBranchOnly: false,
+      upstream: "facebook/react"
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const remotes = execFileSync("git", ["remote"], {
+      cwd: result.value.path,
+      encoding: "utf8"
+    });
+    expect(remotes.trim().split("\n")).toEqual(["origin", UPSTREAM_REMOTE]);
+  });
+
   it("says the fork succeeded when only the checkout failed", async () => {
     const { forks, profileId, parentPath } = services();
     // A destination that already exists fails before git runs.

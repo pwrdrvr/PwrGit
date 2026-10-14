@@ -229,6 +229,18 @@ reads. The default, the pill and the submit label come from `clone-from.ts` and
   protocol cards, "Will create" and the SSH recovery card all read it, so
   choosing the fork can't leave one of them describing the source.
 
+A repository that is **itself a fork** gets an "Add `upstream`" row (on by
+default; parent first, root second for a fork of a fork) and `repo:clone`
+carries the slug. Two things about where the lineage comes from:
+
+- **A search row has no `parent`**, so its absence means "not asked".
+  `cloneLineageSource` takes preflight's source, then a one-off
+  `repo:checkCloneSource`, then the pick — and only one that names a parent.
+- **Your own fork gets no preflight** when you have no other account to fork
+  into, which is exactly when the lookup runs. Don't key it per keystroke.
+
+Design: `design/Upstream When Cloning a Fork - UX Review.dc.html`.
+
 Fork… opened from a checkout (`inPlace`) forks it **in place** while the source
 is still that checkout: it asks `repo:forkCheckoutPreflight`, submits
 `repo:forkCheckout`, and draws `ForkRemotePlan` (shared with

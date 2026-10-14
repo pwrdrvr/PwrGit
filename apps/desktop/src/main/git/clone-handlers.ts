@@ -1,7 +1,7 @@
 import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
-import type { CloneService } from "./clone-service";
+import { CLONE_UPSTREAM_FAILED, type CloneService } from "./clone-service";
 
 export function registerCloneHandlers(
   bus: CommandBus,
@@ -49,6 +49,9 @@ export function registerCloneHandlers(
       if (result.ok) {
         emitEvent("repo:changed", { profileId: req.profileId });
         refreshIdentity?.(result.value.id);
+      } else if (result.error.code === CLONE_UPSTREAM_FAILED) {
+        // Cloned and indexed; only the extra remote failed.
+        emitEvent("repo:changed", { profileId: req.profileId });
       }
       return result;
     } finally {

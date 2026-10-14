@@ -27,6 +27,7 @@ import {
   type CloneProtocol,
   type CloneRepository,
   type ForgeHost,
+  type ForgeHostMap,
   type ForgeOwner,
   type ForgeStatus,
   type Err,
@@ -43,7 +44,12 @@ import type {
 } from "../forge/repo-provider";
 import type { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
+import { keepForkOriginal } from "./fork-remotes";
 import type { RepoIndexer } from "./repo-indexer";
+
+/** The clone finished and is indexed, and only the fork's original could not
+ *  be added as a remote. The handler still announces the new repository. */
+export const CLONE_UPSTREAM_FAILED = "clone_upstream_failed";
 
 /** How many repositories one search asks the forge for. A search result the
  *  user scrolls past 40 rows of is a query that needs narrowing, not a longer
@@ -434,7 +440,10 @@ export class CloneService {
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
     private readonly forges: ForgeRepoRegistry,
-    private readonly forgeStatus: ForgeStatusService
+    private readonly forgeStatus: ForgeStatusService,
+    /** `ForgeHosts.overrides()`, so a fork's original is recognised among the
+     *  remotes a forge CLI already wrote — on a self-managed instance too. */
+    private readonly hosts: () => ForgeHostMap = () => ({})
   ) {}
 
   /**
@@ -709,6 +718,8 @@ export class CloneService {
       parentPath: string;
       host?: ForgeHost;
       hostname?: string;
+      /** A fork's parent or network root, kept as a remote beside `origin`. */
+      upstream?: string | null;
     },
     onProgress: (progress: CloneProgress) => void = () => undefined,
     signal?: AbortSignal
@@ -770,6 +781,23 @@ export class CloneService {
     if (!resolved.ok) return resolved;
     const { parentPath, destination } = resolved.value;
 
+    // Asked before anything is transferred, so a refusal leaves nothing on
+    // disk. The renderer only offers what the forge said; this re-asks rather
+    // than writing a remote at any slug a renderer sends.
+    const upstreamSlug = input.upstream ?? null;
+    let upstream: string | null = null;
+    if (upstreamSlug !== null) {
+      const related = await this.forkOriginal(
+        input.profileId,
+        nameWithOwner,
+        upstreamSlug,
+        local === null ? host : null,
+        hostname
+      );
+      if (!related.ok) return related;
+      upstream = related.value;
+    }
+
     if (operationWasCanceled(signal)) {
       return err(cancellationError(signal, "Clone canceled."));
     }
@@ -810,6 +838,21 @@ export class CloneService {
       });
     }
 
+    // A finished transfer is not thrown away over a remote: the checkout is
+    // still indexed, and Refs → Remotes offers the fork parent from there.
+    let upstreamFailure: string | null = null;
+    if (upstream !== null) {
+      onProgress({ phase: "adding_upstream", percent: null });
+      const kept = await keepForkOriginal(
+        this.git,
+        destination,
+        { hostname, nameWithOwner: upstream },
+        input.protocol === "https" ? "https" : "ssh",
+        this.hosts()
+      );
+      if (!kept.ok) upstreamFailure = kept.error.message;
+    }
+
     onProgress({ phase: "indexing", percent: null });
     const indexed = await this.indexer.indexRepoAt(input.profileId, destination);
     if (!indexed.ok) {
@@ -820,10 +863,57 @@ export class CloneService {
       });
     }
     this.rememberDestination(input.profileId, parentPath);
+    if (upstreamFailure !== null) {
+      return err({
+        kind: "remote",
+        code: CLONE_UPSTREAM_FAILED,
+        message: `Cloned to ${destination}, but couldn't add the upstream remote: ${upstreamFailure} Add ${upstream} from Refs → Remotes.`
+      });
+    }
     return ok({
       ...indexed.value,
       path: canonicalExistingPath(indexed.value.path)
     });
+  }
+
+  /**
+   * The forge's own spelling of `upstream`, once it is confirmed to be the
+   * parent or the network root of the repository being cloned — the same
+   * check `ForkService` makes before it writes one.
+   */
+  private async forkOriginal(
+    profileId: string,
+    nameWithOwner: string,
+    upstream: string,
+    host: ForgeHost | null,
+    hostname: string
+  ): Promise<Result<string>> {
+    const slug = normalizeRepositoryPath(upstream);
+    if (host === null || slug === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: `Not a usable upstream: ${upstream}`
+      });
+    }
+    const source = await this.checkSource(profileId, nameWithOwner, host, hostname);
+    if (!source.ok) {
+      return err({
+        ...source.error,
+        message: `Couldn't confirm ${nameWithOwner} is a fork of ${slug}. ${source.error.message}`
+      });
+    }
+    const match = [source.value.parent, source.value.root].find(
+      (candidate) => candidate?.nameWithOwner.toLowerCase() === slug.toLowerCase()
+    );
+    if (match === undefined) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: `${slug} is not one of the repositories ${nameWithOwner} was forked from.`
+      });
+    }
+    return ok(match.nameWithOwner);
   }
 
   /** Shared by clone and fork: run the transfer itself and normalize failure.

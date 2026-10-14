@@ -243,3 +243,114 @@ it("offers no pair when the account lookup fails", async () => {
   expect(container.querySelector(".clone-from")).toBeNull();
   expect(submit().textContent).toBe("Clone repository");
 });
+
+// ── Upstream when the picked repository is itself a fork ────────────────────
+// design/Upstream When Cloning a Fork - UX Review.dc.html, 2a and 3.
+
+const parentRef = { nameWithOwner: "octo-labs/sparkline", url: "https://github.com/octo-labs/sparkline" };
+const yourFork: CloneRepository = { ...fork, parent: parentRef };
+
+/** The forge as `mockForge` answers it, except for what the exact-name check
+ *  says the picked repository is, and which accounts a fork could land in. */
+function mockPick(
+  picked: (call: number) => CloneRepository,
+  targets = [
+    { login: "riverbend", kind: "user", host: "github" },
+    { login: "lumen-co", kind: "organization", host: "github" }
+  ]
+): void {
+  mockForge(preflight());
+  let checks = 0;
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) => {
+    if (channel === "repo:checkCloneSource") return Promise.resolve(ok(picked(checks++)));
+    if (channel === "repo:forkTargets") return Promise.resolve(ok(targets));
+    return base(channel, ...rest);
+  })(dispatchMock.getMockImplementation()!));
+}
+
+const upstreamOption = (): HTMLInputElement | null =>
+  container.querySelector<HTMLInputElement>(".fork-option input[type=checkbox]");
+const willCreate = (): string =>
+  container.querySelector("#clone-destination-choice")?.textContent ?? "";
+
+it("keeps your fork's parent as upstream unless you opt out", async () => {
+  mockPick(() => yourFork);
+  await openAndPick();
+
+  // Your own fork: no Clone from pair, just the option row.
+  expect(container.querySelector(".clone-from")).toBeNull();
+  expect(upstreamOption()?.checked).toBe(true);
+  expect(container.querySelector(".fork-option")?.textContent).toContain(
+    "Add upstream → octo-labs/sparkline"
+  );
+  expect(willCreate()).toContain("upstream octo-labs/sparkline");
+
+  await act(async () => submit().click());
+  expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({
+    nameWithOwner: "riverbend/sparkline",
+    upstream: "octo-labs/sparkline"
+  }));
+});
+
+it("sends no upstream once the option is cleared", async () => {
+  mockPick(() => yourFork);
+  await openAndPick();
+
+  await act(async () => upstreamOption()!.click());
+  expect(willCreate()).not.toContain("upstream");
+
+  await act(async () => submit().click());
+  const request = dispatchMock.mock.calls.find(([channel]) => channel === "repo:clone")?.[1];
+  expect(request).toMatchObject({ nameWithOwner: "riverbend/sparkline" });
+  expect(request).not.toHaveProperty("upstream");
+});
+
+it("asks which repository upstream is for a fork of a fork, the parent first", async () => {
+  mockPick(() => ({
+    ...fork,
+    parent: { nameWithOwner: "lumen-co/sparkline", url: "https://github.com/lumen-co/sparkline" },
+    root: parentRef
+  }));
+  await openAndPick();
+
+  const radios = [...container.querySelectorAll<HTMLInputElement>("input[name=clone-upstream]")];
+  expect(radios.map((radio) => radio.closest("label")?.querySelector("strong")?.textContent)).toEqual([
+    "lumen-co/sparkline",
+    "octo-labs/sparkline"
+  ]);
+  expect(radios[0]?.checked).toBe(true);
+  expect(willCreate()).toContain("upstream lumen-co/sparkline");
+
+  await act(async () => radios[1]!.click());
+  expect(willCreate()).toContain("upstream octo-labs/sparkline");
+  await act(async () => submit().click());
+  expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({
+    upstream: "octo-labs/sparkline"
+  }));
+});
+
+it("reads the lineage once more when nothing else will, as for a search row", async () => {
+  // A search row carries no parent, and with no other account to fork into
+  // there is no preflight to supply one.
+  mockPick(
+    (call) => (call === 0 ? fork : yourFork),
+    [{ login: "riverbend", kind: "user", host: "github" }]
+  );
+  await openAndPick();
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+  expect(
+    dispatchMock.mock.calls.filter(([channel]) => channel === "repo:checkCloneSource")
+  ).toHaveLength(2);
+  expect(dispatchMock.mock.calls.some(([channel]) => channel === "repo:forkPreflight")).toBe(false);
+  expect(upstreamOption()?.checked).toBe(true);
+  expect(willCreate()).toContain("upstream octo-labs/sparkline");
+});
+
+it("offers no upstream for a repository that is not a fork", async () => {
+  mockPick(() => ({ ...fork, owner: "riverbend" }));
+  await openAndPick();
+
+  expect(upstreamOption()).toBeNull();
+  expect(willCreate()).not.toContain("upstream");
+});

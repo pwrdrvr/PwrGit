@@ -1302,6 +1302,8 @@ export type CloneProgress = {
     | "receiving"
     | "resolving"
     | "checking_out"
+    /** Cloning a fork: its original is being kept as a remote. */
+    | "adding_upstream"
     | "indexing";
   /** Phase-local completion reported by Git; null for unmetered work. */
   percent: number | null;
@@ -1396,7 +1398,6 @@ export type ForkProgress = {
     | "creating"
     | "awaiting_fork"
     | CloneProgress["phase"]
-    | "adding_upstream"
     /** Forking an existing checkout only: `origin` is being re-pointed at the
      *  fork. Its own step rather than part of `adding_upstream`, because it is
      *  the one that changes where this checkout pushes. */

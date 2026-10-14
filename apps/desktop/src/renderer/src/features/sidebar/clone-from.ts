@@ -3,6 +3,7 @@ import {
   forgeProductOrAssumed,
   type CloneRepository,
   type ForgeOwner,
+  type ForgeRepoRef,
   type ForkPreflight
 } from "@pwrgit/shared";
 
@@ -182,4 +183,72 @@ export function originalCardDetail(canPush: boolean | undefined): string {
   if (canPush === false) return "You can read it. Pushes will be refused.";
   if (canPush === true) return "You can push here.";
   return "Clone it as it is.";
+}
+
+/**
+ * Where the dialog reads the picked repository's fork lineage from.
+ *
+ * A search row carries no `parent` (`gh search repos` has no lineage), so an
+ * absent parent there means "not asked", not "not a fork". Preflight's source
+ * and the exact-name check both read the repository itself, so either one
+ * that names a parent is the answer; the pick only counts when it does too.
+ */
+export function cloneLineageSource(
+  picked: CloneRepository | null,
+  preflight: ForkPreflight | null,
+  lookedUp: CloneRepository | null
+): CloneRepository | null {
+  for (const candidate of [preflight?.source, lookedUp, picked]) {
+    if (candidate?.parent !== undefined) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The repositories a clone of a fork can keep as `upstream`: the parent
+ * first, then the network root when that is a different repository. Empty
+ * for a source that is not a fork.
+ *
+ * Parent first, where Fork… puts the root first: there the user picked an
+ * intermediate fork to fork, and the root is the usual answer. Here they
+ * already forked that intermediate fork, which is a vote for it — and it is
+ * what `gh repo clone` adds. Drawn in
+ * design/Upstream When Cloning a Fork - UX Review.dc.html, 3b.
+ */
+export function cloneUpstreamChoices(
+  source: CloneRepository | null
+): ForgeRepoRef[] {
+  if (source?.parent === undefined) return [];
+  const choices = [source.parent];
+  const root = source.root;
+  if (
+    root !== undefined &&
+    root.nameWithOwner.toLowerCase() !== source.parent.nameWithOwner.toLowerCase()
+  ) {
+    choices.push(root);
+  }
+  return choices;
+}
+
+/** What the radio row under each choice says about it. */
+export function cloneUpstreamChoiceDetail(index: number): string {
+  return index === 0 ? "the repository you forked" : "root of the fork network";
+}
+
+/**
+ * The slug `repo:clone` is asked to keep as `upstream`, or null for none.
+ * A pick that is no longer among the choices (another source was picked)
+ * falls back to the first, rather than sending a repository this source was
+ * not forked from.
+ */
+export function cloneUpstream(
+  choices: ForgeRepoRef[],
+  keep: boolean,
+  pick: string | null
+): string | null {
+  if (!keep || choices.length === 0) return null;
+  const picked = choices.find(
+    (choice) => choice.nameWithOwner.toLowerCase() === pick?.toLowerCase()
+  );
+  return (picked ?? choices[0]!).nameWithOwner;
 }

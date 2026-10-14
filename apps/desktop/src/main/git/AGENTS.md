@@ -612,6 +612,21 @@ reason — two instances can host the same slug.
 `apps/desktop/src/main/forge/AGENTS.md` has the whole rule, including why a
 hostname is never evidence of which forge runs on it.
 
+## A fresh clone of a fork keeps its original through `keepForkOriginal`
+
+`repo:clone` (with `upstream`) and `repo:fork` both add the fork's original
+after the transfer, through one helper in `fork-remotes.ts`. Two rules:
+
+- **Read the remotes first.** `gh repo clone` of a fork writes `upstream`
+  itself; a bare `git remote add upstream` then failed every fork cloned with
+  the CLI. A remote already pointing at the original is kept; a different
+  repository under that name pushes the original to `upstream-2`.
+- **Main re-asks the forge before transferring.** `CloneService` refuses a
+  slug that is not the source's `parent` or `root`, so a renderer cannot
+  have a remote written at any slug. If only the remote fails, the checkout
+  is still indexed and the error is `clone_upstream_failed`, which the
+  handler announces like a success.
+
 ## Forking a checkout in place: add `upstream` first, then re-point `origin`
 
 `ForkService.forkCheckout` forks what a checkout was cloned from and points the

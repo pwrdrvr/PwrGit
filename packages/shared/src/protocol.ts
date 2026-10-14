@@ -1088,6 +1088,11 @@ export interface Commands {
       host?: ForgeHost;
       /** The forge's hostname, so a self-hosted instance clones from itself. */
       hostname?: string;
+      /** When the source is a fork: its parent or network root, kept as a
+       *  remote beside `origin` (`upstream` unless that name is taken). Main
+       *  re-asks the forge and refuses a repository the source was not forked
+       *  from. Absent or null adds nothing. */
+      upstream?: string | null;
     };
     res: Repo;
   };
