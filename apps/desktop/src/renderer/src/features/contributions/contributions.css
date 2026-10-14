@@ -276,25 +276,36 @@
 .contributions__notice button {
   margin-top: 12px;
 }
+/* The title-strip entry point: an icon chip like the history chevrons
+   (.history-nav__chip), quiet at rest, accent while the screen is open. */
 .contributions-nav {
   -webkit-app-region: no-drag;
-  border: 1px solid var(--border-default);
-  border-radius: 5px;
+  display: inline-flex;
+  width: 28px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 12px 0 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
-  color: var(--text-secondary);
-  font: 12px var(--font-sans);
-  padding: 5px 10px;
-  margin-right: 16px;
+  color: var(--text-muted);
   cursor: pointer;
+  transition:
+    color 80ms ease,
+    background 80ms ease;
 }
-.contributions-nav[aria-pressed="true"],
 .contributions-nav:hover {
   color: var(--text-primary);
-  background: var(--accent-tint);
+  background: var(--bg-row-active);
+}
+.contributions-nav[aria-pressed="true"] {
+  color: var(--accent);
 }
 .contributions-nav:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 @media (max-width: 900px) {
   .contributions {

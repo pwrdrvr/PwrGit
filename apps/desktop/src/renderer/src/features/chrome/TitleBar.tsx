@@ -152,7 +152,35 @@ export function TitleBar({
         )}
 
         <div className="titlebar__spacer" />
-        {onOpenContributions && <button type="button" className="contributions-nav" data-contributions-nav aria-pressed={contributionsOpen} onClick={onOpenContributions}>Contributions</button>}
+        {onOpenContributions && (
+          <button
+            type="button"
+            className="contributions-nav"
+            data-contributions-nav
+            aria-label="Contributions"
+            aria-pressed={contributionsOpen}
+            onClick={onOpenContributions}
+            {...hoverTooltip(tip, "Contributions")}
+          >
+            {/* Lucide chart-column, drawn like the history chevrons. */}
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+              <path d="M18 17V9" />
+              <path d="M13 17V5" />
+              <path d="M8 17v-3" />
+            </svg>
+          </button>
+        )}
 
         {/* Linux frameless windows get neither traffic lights nor a Windows
             controls overlay — nobody draws min/max/close but us. */}
