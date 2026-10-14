@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type { ForgeHostMap } from "./forge-remote";
+import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
 import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
@@ -836,6 +837,20 @@ export type AppSettingsPatch = {
 };
 
 export interface Commands {
+  "contribution:verify": {
+    req: { profileId: string; host: string; startDate: string; endDate: string; timezone: string };
+    res: { identity: ContributionIdentity; snapshot: ContributionSnapshot | null };
+  };
+  "contribution:read": {
+    req: { profileId: string; host: string; viewerId: string; startDate: string; endDate: string; timezone: string };
+    res: ContributionSnapshot | null;
+  };
+  "contribution:sync": {
+    req: { profileId: string; host: string; viewerId: string; startDate: string; endDate: string; timezone: string; refresh: boolean };
+    res: ContributionSnapshot;
+  };
+  "contribution:cancel": { req: Commands["contribution:read"]["req"]; res: null };
+  "contribution:clear": { req: Commands["contribution:read"]["req"]; res: null };
   "navigation:record": { req: { profileId: string; selectedWorktreeId: string | null; visits?: Record<string, number> }; res: null };
   /** Liveness probe — proves the command-bus round-trip end to end. */
   ping: { req: void; res: string };

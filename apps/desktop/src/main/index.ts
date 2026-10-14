@@ -108,6 +108,8 @@ import {
 } from "./github/avatar-thumbnail-cache";
 import { GitHubCommitAuthorIdentityService } from "./github/commit-author-identity";
 import { registerGitHubHandlers } from "./github/github-handlers";
+import { ContributionService } from "./forge/contribution-service";
+import { registerContributionHandlers } from "./forge/contribution-handlers";
 import { createGonePrRefresh } from "./github/gone-pr-refresh";
 import { OpenPrService } from "./github/open-pr-service";
 import { registerChangeRequestHandlers } from "./github/change-request-handlers";
@@ -1259,6 +1261,8 @@ if (!gotSingleInstanceLock) {
       gonePrRefresh.queue(repoId, branch, firstSeen);
     });
     registerSearchStatusHandlers(bus, db);
+    const contributionService = new ContributionService(db, forgeHosts);
+    registerContributionHandlers(bus, contributionService);
     registerSettingsHandlers(bus, settings, {
       diagnosticsOutputRoot,
       appVersion,
@@ -1458,6 +1462,7 @@ if (!gotSingleInstanceLock) {
       remoteTipChecker.stop();
       gonePrRefresh.stop();
       githubHandlers.stop();
+      contributionService.stop();
       appearance.dispose();
     });
 
