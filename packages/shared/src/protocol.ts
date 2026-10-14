@@ -94,6 +94,7 @@ import type {
   RemoteResetPreview,
   RemoteResetSnapshot,
   Repo,
+  ClonedRepo,
   RepoId,
   RepoRefs,
   RemoteEndpoint,
@@ -1094,7 +1095,7 @@ export interface Commands {
        *  from. Absent or null adds nothing. */
       upstream?: string | null;
     };
-    res: Repo;
+    res: ClonedRepo;
   };
   /** Cancel an in-flight clone and remove any checkout it only partly made. */
   "repo:cancelClone": {

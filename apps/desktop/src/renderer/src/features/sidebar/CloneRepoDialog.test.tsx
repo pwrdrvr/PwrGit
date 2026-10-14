@@ -329,22 +329,99 @@ it("asks which repository upstream is for a fork of a fork, the parent first", a
   }));
 });
 
-it("reads the lineage once more when nothing else will, as for a search row", async () => {
+it("reads the lineage once more for a search row, and waits for it before cloning", async () => {
   // A search row carries no parent, and with no other account to fork into
-  // there is no preflight to supply one.
-  mockPick(
-    (call) => (call === 0 ? fork : yourFork),
-    [{ login: "riverbend", kind: "user", host: "github" }]
-  );
+  // there is no preflight to supply one. The exact-name check is refused
+  // here, so the row picked is the search row.
+  mockForge(preflight());
+  let lookup!: (value: unknown) => void;
+  let checks = 0;
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) => {
+    if (channel === "repo:checkCloneSource") {
+      return checks++ === 0
+        ? Promise.resolve({ ok: false, error: { kind: "remote", code: "repository_not_found", message: "not found" } })
+        : new Promise((resolve) => { lookup = resolve; });
+    }
+    if (channel === "repo:searchCloneSources") return Promise.resolve(ok([fork]));
+    if (channel === "repo:forkTargets") {
+      return Promise.resolve(ok([{ login: "riverbend", kind: "user", host: "github" }]));
+    }
+    return base(channel, ...rest);
+  })(dispatchMock.getMockImplementation()!));
   await openAndPick();
-  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+  // Not known yet: Clone waits rather than sending no upstream.
+  expect(checks).toBe(2);
+  expect(upstreamOption()).toBeNull();
+  expect(submit().disabled).toBe(true);
+  await act(async () => submit().click());
+  expect(dispatchMock.mock.calls.some(([channel]) => channel === "repo:clone")).toBe(false);
+
+  await act(async () => lookup(ok(yourFork)));
+  expect(dispatchMock.mock.calls.some(([channel]) => channel === "repo:forkPreflight")).toBe(false);
+  expect(upstreamOption()?.checked).toBe(true);
+  expect(submit().disabled).toBe(false);
+  await act(async () => submit().click());
+  expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({
+    upstream: "octo-labs/sparkline"
+  }));
+});
+
+it("takes the exact-name check as the answer, and asks nothing more", async () => {
+  mockPick(() => ({ ...fork }), [{ login: "riverbend", kind: "user", host: "github" }]);
+  await openAndPick();
 
   expect(
     dispatchMock.mock.calls.filter(([channel]) => channel === "repo:checkCloneSource")
-  ).toHaveLength(2);
-  expect(dispatchMock.mock.calls.some(([channel]) => channel === "repo:forkPreflight")).toBe(false);
-  expect(upstreamOption()?.checked).toBe(true);
-  expect(willCreate()).toContain("upstream octo-labs/sparkline");
+  ).toHaveLength(1);
+  expect(upstreamOption()).toBeNull();
+  expect(submit().disabled).toBe(false);
+});
+
+it("shows the checkout instead of retrying when only the upstream remote failed", async () => {
+  mockPick(() => yourFork);
+  const cloned = {
+    id: "r1", name: "sparkline", path: "/src/github/sparkline", profileId: "p",
+    pinned: false, worktrees: [],
+    upstreamFailure: "Cloned to /src/github/sparkline, but couldn't add octo-labs/sparkline as a remote: locked. Add it from Refs → Remotes."
+  };
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) =>
+    channel === "repo:clone" ? Promise.resolve(ok(cloned)) : base(channel, ...rest)
+  )(dispatchMock.getMockImplementation()!));
+  const onCloned = vi.fn();
+  await act(async () => root.render(
+    <CloneRepoDialog
+      profile={{
+        id: "p", name: "Test", email: "test@example.com", mono: "T",
+        roots: [], onboardingCompleted: true, showInMenu: true
+      }}
+      onCloned={onCloned}
+      onReveal={() => undefined}
+      onClose={() => undefined}
+    />
+  ));
+  const input = container.querySelector<HTMLInputElement>("#clone-source")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
+      .set!.call(input, "riverbend/sparkline");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>(".clone-source-row")!.click();
+  });
+
+  await act(async () => submit().click());
+  expect(onCloned).not.toHaveBeenCalled();
+  expect(container.querySelector(".clone-submit-error")?.textContent).toContain(
+    "couldn't add octo-labs/sparkline as a remote"
+  );
+  expect(submit().textContent).toBe("Show repository");
+  expect(submit().disabled).toBe(false);
+
+  await act(async () => submit().click());
+  expect(onCloned).toHaveBeenCalledWith(cloned);
+  expect(dispatchMock.mock.calls.filter(([channel]) => channel === "repo:clone")).toHaveLength(1);
 });
 
 it("offers no upstream for a repository that is not a fork", async () => {

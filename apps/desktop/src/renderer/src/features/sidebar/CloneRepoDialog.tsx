@@ -7,6 +7,7 @@ import {
   type CloneProgress,
   type CloneProtocol,
   type CloneRepository,
+  type ClonedRepo,
   type ForgeHost,
   type ForgeKind,
   type ForgeOwner,
@@ -141,6 +142,11 @@ const CLONE_PROGRESS_LABELS: Record<CloneProgress["phase"], string> = {
   indexing: "Adding repository to PwrGit"
 };
 
+/** One forge repository, as a string an effect can be keyed on. */
+function forgeRepoKey(repository: CloneRepository): string {
+  return `${repository.host}|${repository.hostname}|${repository.nameWithOwner}`;
+}
+
 export function CloneRepoDialog({
   profile,
   onCloned,
@@ -183,6 +189,10 @@ export function CloneRepoDialog({
     string | null
   >(null);
   const [busy, setBusy] = useState(false);
+  /** Cloned, but the fork's original could not be added as a remote. The
+   *  checkout exists, so the button shows it instead of offering a retry
+   *  that would fail on the folder it just made. */
+  const [clonedRepo, setClonedRepo] = useState<ClonedRepo | null>(null);
   const [canceling, setCanceling] = useState(false);
   // Typed as the fork's progress, which is a superset: when "Clone from" is
   // your fork the same panel follows `repo:fork`, whose phases include every
@@ -447,10 +457,7 @@ export function CloneRepoDialog({
 
   // Keyed on strings, for the reason ForkRepoDialog's preflight is: the
   // source object is replaced by every pick, the slug it names is not.
-  const forkSourceKey =
-    forgeSource === null
-      ? null
-      : `${forgeSource.host}|${forgeSource.hostname}|${forgeSource.nameWithOwner}`;
+  const forkSourceKey = forgeSource === null ? null : forgeRepoKey(forgeSource);
   const forkTargetLogin = forkTarget?.login ?? null;
   const forkOwnersLoaded = forkOwners !== null;
   useEffect(() => {
@@ -502,22 +509,38 @@ export function CloneRepoDialog({
 
   // ── Upstream, when the picked repository is itself a fork ───────────────
   // Drawn in design/Upstream When Cloning a Fork - UX Review.dc.html, 2a and
-  // 3. Your own fork gets no preflight (there is no account to fork it into
-  // but yours), and a search row carries no lineage, so the repository is
-  // read once more for exactly that case — never per keystroke.
-  const [lineageLookup, setLineageLookup] = useState<CloneRepository | null>(null);
+  // 3. A search row carries no lineage. The exact-name check and preflight
+  // both read the repository itself, and either answers; your own fork gets
+  // no preflight when there is no other account to fork into, so it is read
+  // once more for exactly that case — never per keystroke.
+  const [lineageAnswer, setLineageAnswer] = useState<{
+    key: string;
+    repository: CloneRepository | null;
+  } | null>(null);
+  const lineageAnswered = lineageAnswer !== null && lineageAnswer.key === forkSourceKey;
+  const pickNamesParent = forgeSource?.parent !== undefined;
+  // Preflight about the repository picked now, never one left from the last pick.
+  const pickPreflight =
+    forkPreflight !== null &&
+    forgeSource !== null &&
+    forkPreflight.source.nameWithOwner.toLowerCase() ===
+      forgeSource.nameWithOwner.toLowerCase()
+      ? forkPreflight
+      : null;
   const preflightWillAnswer =
     forkOwners === null ||
     (forkTargetLogin !== null && ownersAnswer !== "failed" && forkCheckError === null);
   useEffect(() => {
-    setLineageLookup(null);
     if (
       forgeSource === null ||
-      forgeSource.parent !== undefined ||
+      forkSourceKey === null ||
+      pickNamesParent ||
+      lineageAnswered ||
       preflightWillAnswer
     ) {
       return undefined;
     }
+    const key = forkSourceKey;
     let active = true;
     void dispatch("repo:checkCloneSource", {
       profileId: profile.id,
@@ -525,19 +548,27 @@ export function CloneRepoDialog({
       host: forgeSource.host,
       hostname: forgeSource.hostname
     }).then((result) => {
-      if (active && result.ok) setLineageLookup(result.value);
+      // A failure settles it too: the dialog stops waiting and adds nothing.
+      if (active) setLineageAnswer({ key, repository: result.ok ? result.value : null });
     });
     return () => {
       active = false;
     };
-  }, [forkSourceKey, preflightWillAnswer, profile.id]);
+  }, [forkSourceKey, pickNamesParent, lineageAnswered, preflightWillAnswer, profile.id]);
   const [keepUpstream, setKeepUpstream] = useState(true);
   const [upstreamPick, setUpstreamPick] = useState<string | null>(null);
   const lineageSource = cloneLineageSource(
     forgeSource,
-    forkPreflight,
-    lineageLookup
+    pickPreflight,
+    lineageAnswered ? lineageAnswer.repository : null
   );
+  /** Whether the dialog knows if the pick is a fork. Clone waits for it, or a
+   *  quick Enter would clone a fork without the upstream that defaults on. */
+  const lineageKnown =
+    forgeSource === null ||
+    lineageSource !== null ||
+    lineageAnswered ||
+    pickPreflight !== null;
   // The fork card adds the original itself, and a reveal clones nothing.
   const upstreamChoices = forking ? [] : cloneUpstreamChoices(lineageSource);
   const cloneUpstreamSlug = cloneUpstream(upstreamChoices, keepUpstream, upstreamPick);
@@ -606,8 +637,14 @@ export function CloneRepoDialog({
       void checked.then((result) => {
         if (!active) return;
         setChecking(false);
-        if (result.ok) setCheckedRepository(result.value);
-        else if (FORGE_UNASKED_CODES.has(result.error.code)) {
+        if (result.ok) {
+          setCheckedRepository(result.value);
+          // The forge's own read of the repository: whether it is a fork is
+          // answered, and the lineage lookup need not ask again.
+          if (result.value.localPath === undefined) {
+            setLineageAnswer({ key: forgeRepoKey(result.value), repository: result.value });
+          }
+        } else if (FORGE_UNASKED_CODES.has(result.error.code)) {
           // Built from the already-parsed `ExactRepository`, never re-parsed
           // from the query: `chooseRepository` rewrites `sourceQuery` to the
           // bare slug, and a slug has lost which instance it came from — a
@@ -707,7 +744,12 @@ export function CloneRepoDialog({
     selectedDestination ?? destinationResults[destinationSelection] ?? null;
 
   const submit = async (destination = activeDestination): Promise<void> => {
+    if (clonedRepo !== null) {
+      onCloned(clonedRepo);
+      return;
+    }
     if (selectedRepository === null || busy) return;
+    if (!forking && !lineageKnown) return;
     if (revealing && forkStep.kind === "reveal_existing") {
       onReveal(forkStep.path);
       return;
@@ -760,7 +802,15 @@ export function CloneRepoDialog({
     activeCloneIdRef.current = null;
     setBusy(false);
     setCanceling(false);
-    if (result.ok) onCloned(result.value);
+    // Only `repo:clone` answers with this; a fork's failure stays an error.
+    const cloned: ClonedRepo | null = result.ok ? result.value : null;
+    if (cloned?.upstreamFailure !== undefined) {
+      // Cloned and indexed; only the remote is missing. Say so here, and
+      // let the button take the user to the checkout rather than retry.
+      setCloneProgress(null);
+      setClonedRepo(cloned);
+      setSubmitError(cloned.upstreamFailure);
+    } else if (result.ok) onCloned(result.value);
     else {
       setCloneProgress(null);
       setSubmitError(result.error.message);
@@ -788,14 +838,18 @@ export function CloneRepoDialog({
       ? FORK_PROGRESS_LABELS[phase]
       : CLONE_PROGRESS_LABELS[phase as CloneProgress["phase"]];
   const submitDisabled =
-    busy ||
-    selectedRepository === null ||
-    (revealing
-      ? false
-      : activeDestination === null ||
-        originRepository === null ||
-        (forking && (forkTarget === null || forkStep.kind === "blocked")));
-  const submitLabel = busy
+    clonedRepo === null &&
+    (busy ||
+      selectedRepository === null ||
+      (revealing
+        ? false
+        : activeDestination === null ||
+          originRepository === null ||
+          (!forking && !lineageKnown) ||
+          (forking && (forkTarget === null || forkStep.kind === "blocked"))));
+  const submitLabel = clonedRepo !== null
+    ? "Show repository"
+    : busy
     ? operation === "fork"
       ? `${FORK_PROGRESS_LABELS[cloneProgress?.phase ?? "starting"]}${
           typeof cloneProgress?.percent === "number"

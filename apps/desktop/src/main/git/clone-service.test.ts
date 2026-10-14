@@ -1115,7 +1115,7 @@ describe("CloneService", () => {
     /** A real clone from a local source, then `origin` re-pointed at the URL
      *  the requested protocol would have written — the remote the service
      *  copies its upstream's shape from. */
-    function setup(): {
+    function setup(failRemoteAdd = false): {
       root: string;
       git: GitExec;
       calls: string[][];
@@ -1128,6 +1128,9 @@ describe("CloneService", () => {
       const calls: string[][] = [];
       const cloneGit: GitExec = async (args, cwd, options) => {
         calls.push([...args]);
+        if (failRemoteAdd && args[0] === "remote" && args[1] === "add") {
+          return ok({ stdout: "", stderr: "error: could not lock config file .git/config", exitCode: 255 });
+        }
         if (args[0] === "clone") {
           const destination = args.at(-1)!;
           const url = args.at(-2)!;
@@ -1184,6 +1187,27 @@ describe("CloneService", () => {
       // the new repository already sees both remotes.
       expect(phases.indexOf("adding_upstream")).toBeGreaterThan(-1);
       expect(phases.indexOf("adding_upstream")).toBeLessThan(phases.indexOf("indexing"));
+    });
+
+    it("keeps and indexes the checkout when only the remote fails, and says so", async () => {
+      const { root, service, profileId } = setup(true);
+
+      const result = await service().clone({
+        profileId,
+        nameWithOwner: "riverbend/sparkline",
+        protocol: "ssh",
+        parentPath: root,
+        upstream: "octo-labs/sparkline"
+      });
+
+      // A success: the handler announces it, refreshes identity, and the
+      // dialog can show the checkout instead of retrying into its folder.
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.path).toBe(join(root, "sparkline"));
+      expect(result.value.upstreamFailure).toMatch(
+        /^Cloned to .*sparkline, but couldn't add octo-labs\/sparkline as a remote: .*could not lock config file.*\. Add it from Refs → Remotes\.$/
+      );
     });
 
     it("refuses a repository the source was not forked from, before transferring anything", async () => {

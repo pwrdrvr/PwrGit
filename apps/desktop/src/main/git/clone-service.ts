@@ -26,6 +26,7 @@ import {
   type CloneProgress,
   type CloneProtocol,
   type CloneRepository,
+  type ClonedRepo,
   type ForgeHost,
   type ForgeHostMap,
   type ForgeOwner,
@@ -46,10 +47,6 @@ import type { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
 import { keepForkOriginal } from "./fork-remotes";
 import type { RepoIndexer } from "./repo-indexer";
-
-/** The clone finished and is indexed, and only the fork's original could not
- *  be added as a remote. The handler still announces the new repository. */
-export const CLONE_UPSTREAM_FAILED = "clone_upstream_failed";
 
 /** How many repositories one search asks the forge for. A search result the
  *  user scrolls past 40 rows of is a query that needs narrowing, not a longer
@@ -723,7 +720,7 @@ export class CloneService {
     },
     onProgress: (progress: CloneProgress) => void = () => undefined,
     signal?: AbortSignal
-  ): Promise<Result<Repo>> {
+  ): Promise<Result<ClonedRepo>> {
     const profile = this.profiles.get(input.profileId);
     if (profile === null) {
       return err({
@@ -839,7 +836,8 @@ export class CloneService {
     }
 
     // A finished transfer is not thrown away over a remote: the checkout is
-    // still indexed, and Refs → Remotes offers the fork parent from there.
+    // still indexed and returned as a success that says what it lacks, and
+    // Refs → Remotes offers the fork parent from there.
     let upstreamFailure: string | null = null;
     if (upstream !== null) {
       onProgress({ phase: "adding_upstream", percent: null });
@@ -850,7 +848,9 @@ export class CloneService {
         input.protocol === "https" ? "https" : "ssh",
         this.hosts()
       );
-      if (!kept.ok) upstreamFailure = kept.error.message;
+      if (!kept.ok) {
+        upstreamFailure = `Cloned to ${destination}, but couldn't add ${upstream} as a remote: ${kept.error.message.replace(/\.?\s*$/, ".")} Add it from Refs → Remotes.`;
+      }
     }
 
     onProgress({ phase: "indexing", percent: null });
@@ -863,16 +863,10 @@ export class CloneService {
       });
     }
     this.rememberDestination(input.profileId, parentPath);
-    if (upstreamFailure !== null) {
-      return err({
-        kind: "remote",
-        code: CLONE_UPSTREAM_FAILED,
-        message: `Cloned to ${destination}, but couldn't add the upstream remote: ${upstreamFailure} Add ${upstream} from Refs → Remotes.`
-      });
-    }
     return ok({
       ...indexed.value,
-      path: canonicalExistingPath(indexed.value.path)
+      path: canonicalExistingPath(indexed.value.path),
+      ...(upstreamFailure === null ? {} : { upstreamFailure })
     });
   }
 

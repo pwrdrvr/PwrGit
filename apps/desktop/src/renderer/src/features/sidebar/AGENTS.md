@@ -238,6 +238,9 @@ carries the slug. Two things about where the lineage comes from:
   `repo:checkCloneSource`, then the pick — and only one that names a parent.
 - **Your own fork gets no preflight** when you have no other account to fork
   into, which is exactly when the lookup runs. Don't key it per keystroke.
+  A successful exact-name check is already the answer.
+- **Clone waits for the answer** (`lineageKnown`). The row is on by default,
+  and a quick Enter before the forge replied would clone a fork without it.
 
 Design: `design/Upstream When Cloning a Fork - UX Review.dc.html`.
 

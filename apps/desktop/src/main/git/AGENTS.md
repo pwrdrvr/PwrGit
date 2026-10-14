@@ -623,9 +623,9 @@ after the transfer, through one helper in `fork-remotes.ts`. Two rules:
   repository under that name pushes the original to `upstream-2`.
 - **Main re-asks the forge before transferring.** `CloneService` refuses a
   slug that is not the source's `parent` or `root`, so a renderer cannot
-  have a remote written at any slug. If only the remote fails, the checkout
-  is still indexed and the error is `clone_upstream_failed`, which the
-  handler announces like a success.
+  have a remote written at any slug. If only the remote fails, the clone is
+  still a success (`ClonedRepo.upstreamFailure`): an error would leave the
+  dialog offering a retry into the folder it just made.
 
 ## Forking a checkout in place: add `upstream` first, then re-point `origin`
 

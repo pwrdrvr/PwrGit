@@ -1149,6 +1149,11 @@ export type ChangeRequestList = {
   failure?: ChangeRequestListFailure;
 };
 
+/** What `repo:clone` answers: the indexed checkout, plus why the fork's
+ *  original could not be kept as a remote when that one step failed. The
+ *  clone itself succeeded either way, so this is never an error. */
+export type ClonedRepo = Repo & { upstreamFailure?: string };
+
 export type Repo = {
   id: RepoId;
   name: string;
