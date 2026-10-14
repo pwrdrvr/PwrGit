@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.38.0 - 2026-10-13
+
+- Contributions - Added local PR activity analytics for your existing GitHub account, including enabled Enterprise hosts. Explore daily, weekly, or monthly charts by organization and repository, distinguish PRs you merged from your own PRs, and drill into exact records. GitLab and GitCafe are not yet supported for Contributions.
+- Contribution history - Added authored creation, merge, and historical backlog views with adjustable dates and timezone, exact tables, and local CSV/JSON exports. Collection can be canceled and resumed; profile-scoped checkpoints and visible coverage warnings keep incomplete or inaccessible history from appearing complete.
+- Share images - Added a previewable Contributions image you can copy or save, with per-organization name masking and a totals-only option. Organization names start masked; choose what to reveal before sharing. Analytics and exports stay local, using your existing forge authentication without a new account or hosted analytics service.
+- Updates - Fixed Windows and Linux offering a downloaded update whose installer was removed by a download on another track. Switching tracks no longer restores a stale Restart offer or attempts to install the missing file on quit.
+
 ## v0.37.0 - 2026-10-11
 
 - Updates - Fixed downloaded updates getting stuck on an older release. PwrGit now checks for newer releases on the selected track and replaces the pending update, so you don't need two successive restarts to catch up. On macOS, the newer Restart offer waits until the replacement is staged and ready to install.
