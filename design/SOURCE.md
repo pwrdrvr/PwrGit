@@ -106,6 +106,7 @@ first.
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `Fork While Cloning - UX Review.dc.html` | Why Clone marked a repository read-only and cloned it anyway, never asking whether your fork already existed, and why Fork&hellip; on a checkout already on disk still defaulted to cloning a second copy. Then a &ldquo;Clone from&rdquo; pair (the original, or your fork) in every state the forge can answer, and Fork&hellip;'s in-place mode, whose primary button becomes Fork in place. Interactive. |
 | `Upstream When Cloning a Fork - UX Review.dc.html` | Why cloning a repository that is already your fork left its original behind (SSH and HTTPS added no `upstream`; the GitHub CLI did, so the same pick gave two different checkouts). Three placements, with an on-by-default option row recommended; that row opted out, for a fork of a fork (parent or root), with the GitHub CLI's own `upstream` reused, and when only the remote fails; and the build list. Interactive. |
+| `Clone Dialog Layout Shift - UX Review.dc.html` | Why Clone with, Check out to and the Clone button jumped 66&ndash;171&nbsp;px a second after a repository was picked: the "Clone from" pair waited on an account lookup the pick started, a search row could not say it was a fork, and preflight could switch the default to your fork and add "Fork into". Four fixes weighed (a fixed slot, rows below Check out to, holding the sections, knowing the shape at the pick) with the last recommended, drawn state by state, and a before/after table of nine measured scenarios. |
 | `Fork Tracking Repair - UX Review.dc.html` | A review of #379's tracking repair, which explained a branch left pulling from and pushing to the original only in Git's words (&ldquo;Track origin/main&rdquo;). Three ways to draw where the branch pulls from and pushes to, now and after, with 2b's Now/After strips recommended; the same dialog opened from Pull and from Remotes; the receipt; and the chooser for a checkout holding more than one fork you can push to. Interactive. |
 | `Fork Route Graphic - UX Review.dc.html` | Where else the Now/After route from Fork Tracking Repair earns its place: a survey of every surface that says where a branch pulls from and pushes to, with a verdict on each. Then the ones that ship: Fork&hellip;'s plan drawn as Now and After strips, Publish naming each remote by repository and offering Fork&hellip; before a refused push, the Remotes card's route in the healthy case too, and a one-line route under each Pull menu choice. Interactive. |
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
@@ -130,6 +131,7 @@ first.
 | `assets/forges-before.png` | Shipped-app capture of Settings › Forges, from a Playwright scenario against contrived `gh`/`glab` stubs. |
 | `assets/branch-switch-{sidebar,browser}-{before,after}.png` | Shipped-app captures of the sidebar ref sections and the refs browser, from one Playwright scenario on a contrived repository, run against the renderer before and after the change. |
 | `assets/dirty-switch-prompt.png` | Shipped-app capture of the uncommitted-changes prompt, from the same contrived scenario. |
+| `assets/clone-layout-shift-other-fork-search.png` | Harness render, not an app capture: the real `CloneRepoDialog` built against a fake bridge with delayed forge answers, before and after, 0.3&nbsp;s and 2.6&nbsp;s after picking someone else's fork from search. Contrived names. |
 
 ### History and leftovers
 
@@ -390,6 +392,16 @@ draws. The project copy was verified at the same 43,238 bytes. Its styles are
 built, turn **2** places the choice, turn **3** draws 2a in each state, **4a**
 is a live `DCLogic` prototype, and turn **5** is the build list. Its names are
 contrived (`octo-labs/sparkline`, `riverbend`, `lumen-co`).
+
+`Clone Dialog Layout Shift - UX Review.dc.html` and its one asset were written
+here and pushed up with `DesignSync` (`localPath`, so the PNG never passed
+through a tool call), in the same change that builds what it draws; the project
+copy was verified at the same 50,644 bytes. Its styles are `Upstream When
+Cloning a Fork`'s, plus frame pairs and the measurement table. Turn **1** is as
+built, turn **2** weighs four fixes, turn **3** draws 2d by state, and turn
+**4** is measured. It is static: the defect is motion, so each state is drawn as
+the pick's frame beside the answered one. Names are contrived, as in its two
+sibling artboards.
 
 `Fork While Cloning - UX Review.dc.html` was written here and pushed up through
 the `claude-design` MCP, in the same change that builds what it draws. The

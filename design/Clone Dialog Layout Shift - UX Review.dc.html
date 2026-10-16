@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          /* PwrGit tokens.css, LIGHT block — the theme the report came from. */
+          :root {
+            --app: #ffffff; --side: #f7f4ef; --panel: #fdfcfa; --elev: #ffffff;
+            --hov: #f4f0e8; --hov2: #ebe5da; --rowact: #fff5e9; --actstrong: #ffe8cf;
+            --line0: rgba(0,0,0,.05); --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.12); --line3: rgba(0,0,0,.18);
+            --t1: #1a1612; --t2: #524a40; --t3: #736c64; --tsub: rgba(26,22,18,.68);
+            --acc: #b74c00; --accb: #994c00; --accon: #ffffff;
+            --asoft: rgba(183,76,0,.12); --atint: rgba(183,76,0,.08); --abord: rgba(183,76,0,.42);
+            --warn: #805200; --ok: #2e7d3c; --bad: #a8472a;
+            --sans: "Geist", "SF Pro Text", system-ui, sans-serif;
+            --mono: "Geist Mono", "SF Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: #efe9df; }
+          body { margin: 0; background: #efe9df; font-family: var(--sans); color: var(--t1); -webkit-font-smoothing: antialiased; }
+          a { color: var(--acc); text-decoration: none; } a:hover { color: var(--accb); }
+
+          /* ---- review chrome (house: "Refresh Affordances - Normalization") ---- */
+          .dv-turn { padding: 40px 44px 32px; border-bottom: 1px solid var(--line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--mono); padding: 3px 7px; background: var(--t1); color: #fff; border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 14px/1.2 var(--sans); color: var(--t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 12px/1.55 var(--sans); color: var(--t2); max-width: 820px; text-wrap: pretty; }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--mono); padding: 3px 7px; background: rgba(0,0,0,.07); color: var(--t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--acc); color: var(--accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11.5px/1.35 var(--sans); color: var(--t2); max-width: 720px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--sans); color: var(--t3); }
+          .note { margin: 0; max-width: 340px; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .note code, .fitem code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); background: rgba(0,0,0,.05); padding: 0 3px; border-radius: 3px; }
+
+          /* ---- findings ---- */
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 999px; background: var(--bad); color: #fff; font: 700 9px/1 var(--mono); }
+          .pin.gap { background: var(--warn); }
+          .pin.ok { background: var(--ok); }
+          .find { width: 420px; display: flex; flex-direction: column; gap: 12px; }
+          .fitem { display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 10px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 12px/1.3 var(--sans); color: var(--t1); }
+          .fitem p { margin: 0; font: 400 11px/1.5 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .tag { display: inline-flex; align-items: center; height: 16px; padding: 0 6px; margin-left: 6px; border-radius: 999px; font: 600 9px/1 var(--mono); letter-spacing: .03em; vertical-align: 1px; }
+          .tag.bug { background: rgba(168,71,42,.12); color: var(--bad); }
+          .tag.gap { background: rgba(128,82,0,.12); color: var(--warn); }
+          /* ---- fork dialog ---- */
+          .dlg { position: relative; width: 640px; border: 1px solid var(--line2); border-radius: 14px; background: var(--elev); box-shadow: 0 18px 50px rgba(40,26,10,.14); overflow: hidden; }
+          .dh { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+          .dh .ic { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 9px; background: var(--asoft); color: var(--acc); }
+          .dh h3 { margin: 0; font: 650 15px/1.2 var(--sans); }
+          .dh p { margin: 3px 0 0; font: 400 12px/1.3 var(--sans); color: var(--t2); }
+          .db { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; }
+          .lbl { display: flex; align-items: center; gap: 8px; font: 600 10.5px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; color: var(--t1); }
+          .lbl .grow { flex: 1; }
+          .seg { display: inline-flex; gap: 4px; }
+          .seg span { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line2); font: 600 9.5px/1 var(--mono); letter-spacing: .05em; color: var(--t2); }
+          .seg span.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .field { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--elev); font: 500 13.5px/1 var(--sans); color: var(--t1); }
+          .field .ph { color: var(--t3); }
+          .srcrow { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--rowact); }
+          .srcrow .nm { font: 600 13px/1.2 var(--mono); color: var(--t1); }
+          .srcrow .meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font: 500 11px/1.2 var(--mono); color: var(--t2); }
+          .srcrow .grow { flex: 1; }
+          .pill { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line2); font: 600 10px/1 var(--mono); color: var(--t2); background: var(--elev); }
+          .pill.warn { color: var(--warn); border-color: rgba(128,82,0,.35); }
+          .pill.wait { color: var(--t3); border-style: dashed; }
+          .bridge { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 9px; background: var(--panel); }
+          .bridge .ic { color: var(--acc); display: inline-flex; }
+          .bridge b { font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+          .bridge p { margin: 2px 0 0; font: 400 11.5px/1.45 var(--sans); color: var(--t2); }
+          .bridge p code { font: 500 11px/1 var(--mono); color: var(--t1); }
+          .cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
+          .card { padding: 9px 11px; border: 1px solid var(--line2); border-radius: 8px; font: 600 12.5px/1.2 var(--sans); color: var(--t1); }
+          .card small { display: block; margin-top: 3px; font: 500 10.5px/1 var(--mono); color: var(--t2); }
+          .card.on { border-color: var(--abord); background: var(--rowact); color: var(--accb); }
+          .fade { opacity: .45; }
+          .df { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--line); }
+          .df .grow { flex: 1; }
+          .df .hint { font: 500 11px/1 var(--mono); color: var(--t2); }
+          .pbtn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; background: var(--acc); color: #fff; font: 600 13px/1 var(--sans); }
+          .sbtn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; border: 1px solid var(--line2); background: var(--elev); color: var(--t1); font: 500 13px/1 var(--sans); }
+          .slink { font: 600 12px/1 var(--sans); color: var(--acc); padding: 7px 10px; border-radius: 7px; border: 1px solid var(--abord); background: var(--elev); white-space: nowrap; }
+
+          /* ---- plan table ---- */
+          .plan { width: 900px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+          .pr { display: grid; grid-template-columns: 36px 250px minmax(0,1fr) 110px; gap: 14px; align-items: start; padding: 10px 14px; border-bottom: 1px solid var(--line); font: 400 11.5px/1.5 var(--sans); color: var(--t2); }
+          .pr.last { border-bottom: 0; }
+          .pr.head { font: 600 9.5px/1.3 var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--t3); background: rgba(0,0,0,.025); }
+          .pr b { font: 600 12px/1.4 var(--sans); color: var(--t1); }
+          .pr code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); }
+          .pr .k { font: 700 11px/1.4 var(--mono); color: var(--acc); }
+
+          /* ---- live prototype ---- */
+          .proto { display: flex; gap: 22px; align-items: flex-start; }
+          .ctl { display: flex; flex-direction: column; gap: 12px; width: 300px; }
+          .ctlg { display: flex; flex-direction: column; gap: 6px; }
+          .ctlh { font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+          .opts { display: flex; flex-wrap: wrap; gap: 5px; }
+          .opt { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line2); background: var(--elev); font: 500 11.5px/1 var(--sans); color: var(--t2); cursor: pointer; }
+          .opt.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); font-weight: 600; }
+          .readout { padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line2); background: var(--panel); font: 400 11.5px/1.5 var(--sans); color: var(--t2); }
+          .readout b { color: var(--t1); font-weight: 650; }
+          .click { cursor: pointer; }
+
+          /* ---- clone dialog parts (app.css names in comments) ---- */
+          .rows { display: flex; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: rgba(0,0,0,.025); }   /* .clone-source-results */
+          .srow { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid transparent; border-radius: 8px; }   /* .clone-source-row */
+          .srow.pick { border-color: var(--abord); background: var(--rowact); }
+          .srow .dot { flex: none; width: 7px; height: 7px; border-radius: 999px; border: 1.5px solid var(--t2); }
+          .srow.pick .dot { background: var(--acc); border-color: var(--acc); }
+          .srow .nm { font: 600 12.5px/1.2 var(--mono); color: var(--t1); }
+          .srow small { display: block; margin-top: 2px; font: 400 11px/1.3 var(--sans); color: var(--t2); }
+          .srow .grow { flex: 1; min-width: 0; }
+          .pill.ok { color: var(--ok); border-color: rgba(46,125,60,.35); }
+          .pill.acc { color: var(--accb); border-color: var(--abord); background: var(--atint); }
+          .will { font: 500 11px/1.3 var(--mono); color: var(--t2); }
+          .will b { color: var(--accb); font-weight: 600; }
+          .ghost { display: flex; align-items: center; justify-content: center; height: 54px; border: 1px dashed var(--line3); border-radius: 9px; font: 500 11px/1.3 var(--mono); color: var(--t3); background: repeating-linear-gradient(135deg, rgba(0,0,0,.025) 0 6px, transparent 6px 12px); }
+
+          /* ---- NEW: "Clone from" choice (proposed .clone-copy) ---- */
+          .copy { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
+          .cc { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 9px; background: var(--elev); min-width: 0; }
+          .cc.on { border-color: var(--abord); background: var(--rowact); }
+          .cc.off { opacity: .5; }
+          .cc .top { display: flex; align-items: center; gap: 7px; font: 600 12.5px/1.2 var(--sans); color: var(--t1); }
+          .cc.on .top { color: var(--accb); }
+          .cc .top .grow { flex: 1; }
+          .cc .slug { font: 500 11px/1.2 var(--mono); color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .cc .why { font: 400 11px/1.4 var(--sans); color: var(--t2); text-wrap: pretty; }
+          .radio { flex: none; width: 13px; height: 13px; border-radius: 999px; border: 1.5px solid var(--line3); background: var(--elev); }
+          .cc.on .radio { border: 4px solid var(--acc); }
+          .into { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 500 11px/1 var(--mono); color: var(--t2); }
+          .into code { font: 500 11px/1 var(--mono); color: var(--accb); }
+
+          /* ---- in-place card + remote plan (.fork-remote-plan) ---- */
+          .here { display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: start; padding: 10px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--rowact); }
+          .here .ic { color: var(--acc); display: inline-flex; padding-top: 1px; }
+          .here b { font: 600 12.5px/1.3 var(--sans); color: var(--t1); }
+          .here p { margin: 2px 0 0; font: 400 11.5px/1.45 var(--sans); color: var(--t2); }
+          .qlink { font: 500 11.5px/1.3 var(--sans); color: var(--acc); white-space: nowrap; border-bottom: 1px dotted var(--abord); }
+          .rp { display: flex; flex-direction: column; gap: 4px; }
+          .rpr { display: grid; grid-template-columns: 64px minmax(0,1fr) 220px; gap: 10px; align-items: center; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+          .rpr code { font: 600 11.5px/1 var(--mono); color: var(--t1); }
+          .rpr b { display: block; font: 600 12px/1.3 var(--mono); color: var(--t1); }
+          .rpr small { font: 400 10.5px/1.3 var(--sans); color: var(--t2); }
+          .rpr .url { font: 500 10.5px/1.2 var(--mono); color: var(--t3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .chk { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border: 1px solid var(--abord); border-radius: 9px; background: var(--rowact); }
+          .chk .box { flex: none; width: 14px; height: 14px; margin-top: 1px; border-radius: 4px; background: var(--acc); color: #fff; font: 700 10px/14px var(--sans); text-align: center; }
+          .chk b { font: 600 12px/1.3 var(--sans); color: var(--t1); }
+          .chk b code { font: 600 11px/1 var(--mono); color: var(--accb); }
+          .chk small { display: block; margin-top: 2px; font: 400 11px/1.4 var(--sans); color: var(--t2); }
+          .dv-opt .dlg { width: 600px; }
+          /* ---- NEW: upstream option (proposed .clone-upstream) ---- */
+          .chk.off { border-color: var(--line2); background: var(--elev); }
+          .chk.off .box { background: var(--elev); border: 1.5px solid var(--line3); color: transparent; }
+          .chk.dis { opacity: .62; }
+          .chk .grow { flex: 1; min-width: 0; }
+          .ups { display: flex; flex-direction: column; gap: 4px; margin: -2px 0 0 24px; }
+          .upr { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+          .upr.on { border-color: var(--abord); background: var(--rowact); }
+          .upr .radio { width: 12px; height: 12px; }
+          .upr.on .radio { border: 4px solid var(--acc); }
+          .upr b { font: 600 11.5px/1.2 var(--mono); color: var(--t1); }
+          .upr small { font: 400 10.5px/1.3 var(--sans); color: var(--t2); }
+          .lead { font: 400 11px/1.4 var(--sans); color: var(--t2); margin: 0 0 2px 24px; }
+          .lead code { font: 500 10.5px/1 var(--mono); color: var(--t1); }
+          .rem { display: flex; flex-direction: column; gap: 4px; width: 420px; }
+          .remr { display: grid; grid-template-columns: 74px minmax(0,1fr); gap: 10px; align-items: center; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+          .remr code { font: 600 11.5px/1 var(--mono); color: var(--t1); }
+          .remr span { font: 500 11px/1.3 var(--mono); color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .remr.miss { border-style: dashed; background: transparent; }
+          .remr.miss code, .remr.miss span { color: var(--t3); }
+          .remcap { font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--t3); margin: 4px 0 2px; }
+        
+          /* ---- this review ---- */
+          .frames { display: flex; gap: 16px; align-items: flex-start; }
+          .frame { display: flex; flex-direction: column; gap: 6px; }
+          .fcap { display: flex; align-items: baseline; gap: 8px; font: 600 11px/1.2 var(--sans); color: var(--t1); }
+          .fcap span { font: 500 10.5px/1.2 var(--mono); color: var(--t3); }
+          .frames .dlg, .dv-opt .frames .dlg { width: 560px; }
+          .lbl { white-space: nowrap; }
+          .lbl .hint2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 500 10px/1 var(--mono); letter-spacing: 0; text-transform: none; color: var(--t3); }
+          .lbl .into2 { flex: none; }
+          .srow small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .cc .top { white-space: nowrap; }
+          .cc .why { min-height: calc(2 * 1.4em); }
+          .late { outline: 2px dashed var(--bad); outline-offset: 3px; }
+          .held { outline: 1.5px dashed var(--line3); outline-offset: 3px; }
+          .mv { display: inline-flex; align-items: center; gap: 6px; font: 600 10.5px/1.3 var(--mono); color: var(--bad); }
+          .mv.ok { color: var(--ok); }
+          .slot { display: flex; align-items: center; gap: 8px; height: 104px; padding: 0 12px; border: 1px dashed var(--line3); border-radius: 9px; font: 500 11px/1.3 var(--mono); color: var(--t3); background: repeating-linear-gradient(135deg, rgba(0,0,0,.025) 0 6px, transparent 6px 12px); }
+          .dim { opacity: .38; }
+          .lbl .into2 { display: inline-flex; gap: 4px; align-items: center; margin-left: auto; font: 500 10px/1 var(--mono); letter-spacing: 0; text-transform: none; color: var(--t3); }
+          .lbl .into2 i { font-style: normal; display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line2); font: 600 9px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--t2); }
+          .lbl .into2 i.on { border-color: var(--abord); background: var(--asoft); color: var(--accb); }
+          .lbl .into2.hid { visibility: hidden; }
+          .chk b code.wait { color: var(--t3); }
+          .mt { width: 1080px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; }
+          .mr { display: grid; grid-template-columns: 290px 270px 90px 230px 90px; gap: 12px; align-items: start; padding: 8px 14px; border-bottom: 1px solid var(--line); font: 400 11.5px/1.45 var(--sans); color: var(--t2); }
+          .mr:last-child { border-bottom: 0; }
+          .mr.head { font: 600 9.5px/1.3 var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--t3); background: rgba(0,0,0,.025); }
+          .mr b { color: var(--t1); font-weight: 600; }
+          .mr .bad { font: 600 11px/1.45 var(--mono); color: var(--bad); }
+          .mr .good { font: 600 11px/1.45 var(--mono); color: var(--ok); }
+          .mr code { font: 500 10.5px/1.4 var(--mono); color: var(--t1); }
+          .shot { width: 1140px; border-radius: 10px; box-shadow: 0 10px 30px rgba(40,26,10,.14); }
+        </style>
+      </helmet>
+
+      <div style="background:#efe9df;min-width:1280px">
+
+      <!-- ================================================================ 1 -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">As built: the forge answers after you have moved on</span></div>
+        <p class="dv-sub">Picking a repository moves focus to <b>Check out to</b>. The rows that depend on the forge &#8212; the <b>Clone from</b> pair, <b>Add upstream</b>, <b>Fork into</b> &#8212; are inserted above it when the answers land, 0.6&#8211;2&nbsp;s later, and push Clone with, Check out to and the Clone button down. Measured on a harness build of the real dialog at 1280&#215;900 with simulated latency (<code>gh api</code> ~700&nbsp;ms, accounts ~600&nbsp;ms, preflight ~1300&nbsp;ms). Names are contrived: <code>octo-labs/sparkline</code> is the original, <code>bramble/sparkline</code> someone else&#8217;s fork of it, <code>riverbend</code> the signed-in account, <code>lumen-co</code> an org.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="1a" data-screen-label="1a Someone else's fork from search">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Someone else&#8217;s fork, picked from search. Red: inserted after the pick</div>
+            <div class="frames"><div class="frame"><div class="fcap">0.3 s after the pick<span>Clone with at y=223</span></div><div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span></div></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:bramb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b></div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn fade">Clone repository</span></div></div></div><div class="frame"><div class="fcap">2.6 s after the pick<span>Clone with at y=394 (+171)</span></div><div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span><span class="pill warn">read-only</span><span class="pill"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg> octo-labs/sparkline</span></div></div><div class="lbl">Clone from <span class="hint2">origin is the one you pick</span></div>
+                <div class="copy late"><div class="cc on"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><div class="slug">bramble/sparkline</div><div class="why">You can read it. Pushes will be refused.</div></div><div class="cc"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">will be created</span></div><div class="slug">riverbend/sparkline</div><div class="why">Created on GitHub first. octo-labs/sparkline is kept as upstream.</div></div></div><div class="chk late"><span class="box">&#10003;</span><span class="grow"><b>Add <code>upstream</code> &#8594; <code>octo-labs/sparkline</code></b><small>The repository this one was forked from. Fetch and rebase on it without leaving PwrGit.</small></span></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:bramb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b> &#183; upstream octo-labs/sparkline</div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone repository</span></div></div></div></div>
+          </div>
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Why each row is late</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>The pair waits for an account lookup the pick starts<span class="tag bug">UX</span></h4><p><code>offersCloneFrom</code> needs your accounts to rule out your own repository, and <code>repo:forkTargets</code> was asked only once a row was picked. +106&nbsp;px at 0.65&nbsp;s for every repository you don&#8217;t own. On main before #476 too.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>A search row can&#8217;t say it is a fork<span class="tag bug">UX</span></h4><p><code>gh search repos</code> has no parent, so the upstream row from #476 waits for a lineage read. +66&nbsp;px at 1.05&nbsp;s. Search does report <code>isFork</code>; it was never asked for.</p></div></div>
+              <div class="fitem"><span class="pin">3</span><div><h4>Preflight can switch the default to your fork<span class="tag gap">GAP</span></h4><p>When it finds a fork you already have, <b>Fork into</b> appears under the cards (+24&nbsp;px at ~2&nbsp;s) for anyone with an org.</p></div></div>
+              <div class="fitem"><span class="pin gap">4</span><div><h4>Small ones inside rows</h4><p>The original card&#8217;s push chip is taller than its line and drops the slug 8&nbsp;px. Source-row chips slide sideways when the lineage lands.</p></div></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">House rule in play: controls must not move under the pointer (<code>pwrgit-control-affordance-rules</code>).</p>
+      </section>
+
+      <!-- ================================================================ 2 -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Four ways to keep the controls still</span></div>
+        <p class="dv-sub">Each drawn at the pick&#8217;s frame for the hardest case, someone else&#8217;s fork from search. The question for each: what can still move after the click, and what does it cost the common case?</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2a" data-screen-label="2a Fixed slot">
+            <div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a>A fixed-height slot under the source with a &#8220;checking&#8230;&#8221; placeholder</div>
+            <div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span></div></div><div class="slot">checking bramble/sparkline on GitHub&#8230; &#8212; 104px held for whatever comes back</div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:bramb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b></div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn fade">Clone repository</span></div></div>
+            <p class="note">The answer is 0, 66, 104, 170 or more px tall (nothing, upstream, pair, both, a fork of a fork&#8217;s choices). One fixed height is wrong for most of them. Sized for the pair, your own non-fork repository keeps a 104&nbsp;px hole or collapses it late; sized for the max, every clone wears 170&nbsp;px of placeholder.</p>
+          </div>
+          <div class="dv-opt" id="2b" data-screen-label="2b Below Check out to">
+            <div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>Move the forge rows below Check out to</div>
+            <div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span><span class="pill warn">read-only</span><span class="pill"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg> octo-labs/sparkline</span></div></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:bramb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="late" style="display:flex;flex-direction:column;gap:10px"><div class="lbl">Clone from <span class="hint2">origin is the one you pick</span></div>
+                <div class="copy"><div class="cc on"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><div class="slug">bramble/sparkline</div><div class="why">You can read it. Pushes will be refused.</div></div><div class="cc"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">will be created</span></div><div class="slug">riverbend/sparkline</div><div class="why">Created on GitHub first.</div></div></div><div class="chk"><span class="box">&#10003;</span><span class="grow"><b>Add <code>upstream</code> &#8594; <code>octo-labs/sparkline</code></b><small>The repository this one was forked from. Fetch and rebase on it without leaving PwrGit.</small></span></div></div><div class="will">Will create <b>~/src/github/sparkline</b> &#183; upstream octo-labs/sparkline</div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone repository</span></div></div>
+            <p class="note">Clone with and Check out to stay put; the late rows push <b>Will create</b> and the footer instead, so the Clone button moves just as it enables. It also puts the decision about what <code>origin</code> is below the protocol URLs and path it changes.</p>
+          </div>
+          <div class="dv-opt" id="2c" data-screen-label="2c Hold">
+            <div class="dv-olabel"><a class="dv-oid" href="#2c">2c</a>Hold the sections below until the forge answers, capped at 1.5&nbsp;s</div>
+            <div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span></div></div><div class="slot" style="height:200px">Asking GitHub about bramble/sparkline&#8230; (up to 1.5 s)</div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn fade">Clone repository</span></div></div>
+            <p class="note">Nothing moves that you could already use, but every pick waits up to 1.5&nbsp;s before you can choose a folder, the sections you saw before the pick disappear, and an answer slower than the cap still inserts rows. Preflight alone takes ~1.3&nbsp;s.</p>
+          </div>
+          <div class="dv-opt" id="2d" data-screen-label="2d Know the shape at the pick">
+            <div class="dv-olabel"><a class="dv-oid" href="#2d">2d</a><b>Recommended.</b> Know the shape at the pick; let the answers change words, not heights</div>
+            <div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span></div></div><div class="lbl">Clone from <span class="hint2">origin is the one you pick</span><span class="into2 hid">Fork into <i class="on">riverbend</i><i>lumen-co</i></span></div>
+                <div class="copy"><div class="cc on"><div class="top"><span class="radio"></span>The original<span class="grow"></span></div><div class="slug">bramble/sparkline</div><div class="why">Clone it as it is.</div></div><div class="cc"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">checking&#8230;</span></div><div class="slug">riverbend/sparkline</div><div class="why">Looking for a fork you already have&#8230;</div></div></div><div class="chk"><span class="box">&#10003;</span><span class="grow"><b>Add <code>upstream</code> &#8594; <code class="wait">checking…</code></b><small>The repository this one was forked from. Fetch and rebase on it without leaving PwrGit.</small></span></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:bramb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b></div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn fade">Clone repository</span></div></div>
+            <p class="note">Ask for your accounts once the box starts asking the forge (one call per instance, never on open), so the pair is decided before a row can be clicked. Ask <code>gh search</code> for <code>isFork</code>, so a fork draws its upstream row at the pick with the target reading <code>checking&#8230;</code>. Only text changes after the click. Fork into moves onto the label line (dashed: held hidden).</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ 3 -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">2d, state by state</span></div>
+        <p class="dv-sub">The rules that already hold stay: Clone waits for the lineage (<code>lineageKnown</code>), the upstream row defaults on, and creating a repository is never a default. Each pair below is the same pick before and after the forge answered; Clone with sits at the same height in both.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="3a" data-screen-label="3a Own fork from search">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a>Your own fork from search: the row is there at the pick; its target fills in</div>
+            <div class="frames"><div class="frame"><div class="fcap">At the pick<span>own fork, from search</span></div><div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">riverbend/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span></div></div><div class="chk"><span class="box">&#10003;</span><span class="grow"><b>Add <code>upstream</code> &#8594; <code class="wait">checking…</code></b><small>The repository this one was forked from. Fetch and rebase on it without leaving PwrGit.</small></span></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:riverb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone riv&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b></div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn fade">Clone repository</span></div></div></div><div class="frame"><div class="fcap">1.0 s later<span>lineage landed</span></div><div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">riverbend/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span><span class="pill"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg> octo-labs/sparkline</span></div></div><div class="chk"><span class="box">&#10003;</span><span class="grow"><b>Add <code>upstream</code> &#8594; <code>octo-labs/sparkline</code></b><small>The repository this one was forked from. Fetch and rebase on it without leaving PwrGit.</small></span></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:riverb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone riv&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b> &#183; upstream octo-labs/sparkline</div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone repository</span></div></div></div></div>
+          </div>
+          <div class="dv-opt" id="3b" data-screen-label="3b Someone else's fork">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Someone else&#8217;s fork: pair and upstream row at the pick, pills and slugs fill in</div>
+            <div class="frames"><div class="frame"><div class="fcap">At the pick<span>someone else&#8217;s fork, from search</span></div><div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span></div></div><div class="lbl">Clone from <span class="hint2">origin is the one you pick</span><span class="into2 hid">Fork into <i class="on">riverbend</i><i>lumen-co</i></span></div>
+                <div class="copy"><div class="cc on"><div class="top"><span class="radio"></span>The original<span class="grow"></span></div><div class="slug">bramble/sparkline</div><div class="why">Clone it as it is.</div></div><div class="cc"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">checking&#8230;</span></div><div class="slug">riverbend/sparkline</div><div class="why">Looking for a fork you already have&#8230;</div></div></div><div class="chk"><span class="box">&#10003;</span><span class="grow"><b>Add <code>upstream</code> &#8594; <code class="wait">checking…</code></b><small>The repository this one was forked from. Fetch and rebase on it without leaving PwrGit.</small></span></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:bramb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b></div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn fade">Clone repository</span></div></div></div><div class="frame"><div class="fcap">1.4 s later<span>preflight and lineage landed</span></div><div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span><span class="pill warn">read-only</span><span class="pill"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg> octo-labs/sparkline</span></div></div><div class="lbl">Clone from <span class="hint2">origin is the one you pick</span><span class="into2 hid">Fork into <i class="on">riverbend</i><i>lumen-co</i></span></div>
+                <div class="copy"><div class="cc on"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><div class="slug">bramble/sparkline</div><div class="why">You can read it. Pushes will be refused.</div></div><div class="cc"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill wait">will be created</span></div><div class="slug">riverbend/sparkline</div><div class="why">Created on GitHub first. octo-labs/sparkline is kept as upstream.</div></div></div><div class="chk"><span class="box">&#10003;</span><span class="grow"><b>Add <code>upstream</code> &#8594; <code>octo-labs/sparkline</code></b><small>The repository this one was forked from. Fetch and rebase on it without leaving PwrGit.</small></span></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:bramb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b> &#183; upstream octo-labs/sparkline</div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone repository</span></div></div></div></div>
+          </div>
+          <div class="dv-opt" id="3c" data-screen-label="3c Fork into on the label line">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Your fork chosen (by you, or by preflight finding one): Fork into on the label line</div>
+            <div class="frame"><div class="fcap">Your fork chosen<span>Fork into shows on the label line</span></div><div class="dlg"><div class="db"><div class="rows"><div class="srow pick"><span class="dot"></span><span class="grow"><span class="nm">bramble/sparkline</span><small>Tiny inline charts for terminals</small></span><span class="pill">public</span><span class="pill warn">read-only</span><span class="pill"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"></path><path d="M12 12v3"></path></svg> octo-labs/sparkline</span></div></div><div class="lbl">Clone from <span class="hint2">origin is the one you pick</span><span class="into2">Fork into <i class="on">riverbend</i><i>lumen-co</i></span></div>
+                <div class="copy"><div class="cc"><div class="top"><span class="radio"></span>The original<span class="grow"></span><span class="pill warn">read-only</span></div><div class="slug">bramble/sparkline</div><div class="why">You can read it. Pushes will be refused.</div></div><div class="cc on"><div class="top"><span class="radio"></span>Your fork<span class="grow"></span><span class="pill acc">on GitHub</span></div><div class="slug">riverbend/sparkline</div><div class="why">Already yours. octo-labs/sparkline is kept as upstream.</div></div></div><div style="display:none"><span class="box"></span><span class="grow"><b>Add upstream</b><small>.</small></span></div><div class="lbl">Clone with</div><div class="cards"><div class="card on">SSH<small>git@github.com:riverb&#8230;</small></div><div class="card">HTTPS<small>https://github.com/&#8230;</small></div><div class="card">GitHub CLI<small>gh repo clone bra&#8230;</small></div></div><div class="lbl">Check out to</div><div class="field"><span class="ph">src/github/</span></div><div class="will">Will create <b>~/src/github/sparkline</b> &#183; upstream octo-labs/sparkline</div></div><div class="df"><span class="hint">&#8593;&#8595; navigate</span><span class="grow"></span><span class="sbtn">Cancel</span><span class="pbtn">Clone your fork</span></div></div></div>
+            <p class="note">Held hidden on the line while the original is chosen, so neither a click on the fork card nor preflight switching to it adds a row. The label line is always as tall as the pills (17&nbsp;px), so accounts that land late don&#8217;t grow it either. Each card&#8217;s sentence holds two lines, because the fork card&#8217;s changes when preflight answers and a long slug wraps it. Before the accounts are known, a repository the forge says you can&#8217;t push to still gets the pair at the pick: no account&#8217;s own repository refuses its pushes.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ 4 -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">Measured, before and after</span></div>
+        <p class="dv-sub">Late = Clone with, Check out to or the Clone button moved more than 100&nbsp;ms after the click (rAF sampler). CLS is Chrome&#8217;s layout-shift score after the pick, excluding shifts within 500&nbsp;ms of input. *The remaining 0.0004&#8211;0.0008 is chips sliding sideways inside the picked source row; nothing below the source moves. Still moving, and not measured here: a fork of a fork&#8217;s parent-or-root choice appears when the lineage lands.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="4a" data-screen-label="4a Table">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>Nine scenarios, harness build of <code>CloneRepoDialog</code> against a fake bridge</div>
+            <div class="mt"><div class="mr head"><span>Scenario</span><span>Before: late moves of Clone with, Check out to, Clone</span><span>CLS after pick</span><span>After</span><span>CLS after pick</span></div><div class="mr"><b>Your fork, typed exactly</b><span>Rows drawn in the click&#8217;s frame</span><span>none</span><span>Rows drawn in the click&#8217;s frame</span><span>0 &#8594; 0</span></div><div class="mr"><b>Your fork, typed exactly, you have an org</b><span>Rows drawn in the click&#8217;s frame</span><span>none</span><span>Rows drawn in the click&#8217;s frame</span><span>0 &#8594; 0</span></div><div class="mr"><b>Your fork, picked from search</b><span><span class="bad">+66px @ 1.05 s</span> (upstream row)</span><span>0.0211</span><span><span class="good">none</span> &#8212; row drawn at the pick, target fills in</span><span>0.0004*</span></div><div class="mr"><b>Someone else&#8217;s repo, read-only</b><span><span class="bad">+106px @ 0.65 s</span> (pair)</span><span>0.0173</span><span><span class="good">none</span></span><span>0</span></div><div class="mr"><b>Someone else&#8217;s fork, typed exactly</b><span><span class="bad">+105px @ 0.65 s</span> (pair)</span><span>0.0204</span><span><span class="good">none</span></span><span>0</span></div><div class="mr"><b>Someone else&#8217;s fork, picked from search</b><span><span class="bad">+106px @ 0.65 s, +65px @ 1.05 s</span></span><span>0.0520</span><span><span class="good">none</span></span><span>0.0008*</span></div><div class="mr"><b>Read-only repo you already forked (you have an org)</b><span><span class="bad">+106px @ 0.65 s, +24px @ 1.95 s</span> (Fork into)</span><span>0.0206</span><span><span class="good">none</span></span><span>0</span></div><div class="mr"><b>Stress: accounts lookup 2.2 s, someone else&#8217;s repo</b><span><span class="bad">+106px @ 2.25 s</span></span><span>0.0173</span><span><span class="good">none</span> &#8212; <code>viewerCanPush: false</code> draws the pair</span><span>0</span></div><div class="mr"><b>Stress: accounts lookup 2.2 s, your fork from search</b><span><span class="bad">+66px @ 1.05 s</span></span><span>0.0211</span><span><span class="good">none</span></span><span>0.0004*</span></div></div>
+          </div>
+          <div class="dv-opt" id="4b" data-screen-label="4b Captures">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Harness renders (contrived data, not app captures). Dashed line: Clone with at 0.3&nbsp;s</div>
+            <img class="shot" src="assets/clone-layout-shift-other-fork-search.png" alt="Before and after, someone else's fork picked from search">
+          </div>
+        </div>
+      </section>
+
+      </div>
+    </x-dc>
+  </body>
+</html>
