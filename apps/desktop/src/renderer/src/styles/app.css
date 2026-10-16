@@ -4753,7 +4753,12 @@ a.forge-chip:focus-visible {
   color: var(--text-primary);
   font: 600 10.5px/1.1 var(--font-mono);
 }
+/* Two lines held: the fork card's sentence changes when preflight answers
+   ("Looking for a fork…" → "Created on GitHub first. <slug> is kept as
+   upstream."), and a long slug wraps it — which grew the pair after the
+   pick and moved everything below it. */
 .clone-from__card small {
+  min-height: calc(2 * 1.35em);
   color: var(--text-muted);
   font: 500 9.5px/1.35 var(--font-sans);
   overflow-wrap: anywhere;
