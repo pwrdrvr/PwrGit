@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Repo } from "@pwrgit/shared";
+import type { Repo, Res } from "@pwrgit/shared";
 import { confirmDialog, notifyDialog } from "../features/shell/dialogs";
 import { dispatch, subscribe } from "../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../lib/toast";
@@ -38,7 +38,8 @@ export type RemoveWorktreesOutcome = {
   removed: string[];
   /** Had changes, and the user chose to keep them (or was never asked). */
   keptDirty: string[];
-  failed: { id: string; message: string }[];
+  /** Each with a sentence for people, and Node's or Git's own words. */
+  failed: Res<"worktree:removeMany">["failed"];
 };
 
 /**

@@ -1162,32 +1162,52 @@ function worktreeAdminDir(worktreePath: string): string | null {
   }
 }
 
-const DELETE_REASONS: Record<string, string> = {
-  EACCES: "permission denied",
-  EPERM: "the system would not allow it (the file may be locked or protected)",
-  EBUSY: "it is in use by another process",
-  ENOTEMPTY: "files kept appearing in it while it was being deleted",
-  EROFS: "it is on a read-only volume"
+/**
+ * A removal failure, worded for the person reading it: `message` opens with
+ * `lead`, a short phrase the dialog sets in bold ("Permission denied"), and
+ * `detail` carries what Node or Git actually said, for Details and the log.
+ */
+export type WorktreeRemoveError = PwrGitError & { lead?: string };
+
+/** errno → [lead, the rest of the sentence]. */
+const DELETE_REASONS: Record<string, [string, string]> = {
+  EACCES: ["Permission denied", "the folder is read-only or in use"],
+  EPERM: ["Permission denied", "the folder is read-only or in use"],
+  EBUSY: ["A file is in use", "by another app — close it, then retry"],
+  ETXTBSY: ["A file is in use", "by another app — close it, then retry"],
+  ENOTEMPTY: ["Something kept writing", "to the folder while it was being deleted"],
+  EROFS: ["The volume is read-only", "so nothing on it can be deleted"]
 };
 
-/** Say which entry stopped a delete and what was left, not just an errno. */
+/** Say what stopped a delete in words, and keep the errno for Details. */
 export function describeDeleteFailure(
   worktreePath: string,
   cause: unknown
-): string {
+): WorktreeRemoveError {
   if (!(cause instanceof DeleteTreeError)) {
-    return `Could not delete ${worktreePath}: ${
-      cause instanceof Error ? cause.message : String(cause)
-    }`;
+    const raw = cause instanceof Error ? cause.message : String(cause);
+    return {
+      kind: "repo",
+      code: "delete_failed",
+      lead: "Couldn’t delete the folder",
+      message: "Couldn’t delete the folder. Details has what PwrGit saw.",
+      detail: `${worktreePath}: ${raw}`
+    };
   }
+  const [lead, rest] = (cause.code === undefined
+    ? undefined
+    : DELETE_REASONS[cause.code]) ?? ["Couldn’t delete the folder", "Details has what PwrGit saw"];
   const what = cause.relativePath === "" ? "the folder itself" : cause.relativePath;
   const why =
-    (cause.code === undefined ? undefined : DELETE_REASONS[cause.code]) ??
-    (cause.cause instanceof Error ? cause.cause.message : String(cause.cause));
+    cause.cause instanceof Error ? cause.cause.message : String(cause.cause);
   const items = cause.itemsDeleted === 1 ? "1 item was" : `${cause.itemsDeleted} items were`;
-  return `Could not delete ${what}: ${why}${
-    cause.code === undefined ? "" : ` (${cause.code})`
-  }. ${items} deleted before it stopped; the rest is still on disk and still a worktree, so removing it again picks up where this left off.`;
+  return {
+    kind: "repo",
+    code: "delete_failed",
+    lead,
+    message: `${lead} deleting ${what} — ${rest}.`,
+    detail: `${why}\n${items} deleted before it stopped. The rest of ${worktreePath} is still on disk and still a worktree, so removing it again picks up where this left off.`
+  };
 }
 
 /**
@@ -1200,7 +1220,7 @@ async function gitWorktreeRemove(
   repoPath: string,
   worktreePath: string,
   force: boolean
-): Promise<Result<void>> {
+): Promise<Result<void, WorktreeRemoveError>> {
   const args = ["worktree", "remove"];
   if (force) args.push("--force");
   args.push(worktreePath);
@@ -1220,7 +1240,9 @@ async function gitWorktreeRemove(
         ? err({
             kind: "repo",
             code: "worktree_remove_failed",
-            message: `Git no longer lists ${worktreePath}, but its folder is still on disk.`
+            lead: "Folder is no longer registered",
+            message: "Folder is no longer registered as a Git worktree, but part of it is still on disk.",
+            detail: message
           })
         : ok(undefined);
     }
@@ -1238,10 +1260,18 @@ async function gitWorktreeRemove(
       : /is a main working tree|main worktree/i.test(message)
         ? "is_primary"
         : "worktree_remove_failed";
+    if (code !== "worktree_remove_failed") {
+      return err({ kind: "repo", code, message: message || "worktree remove failed" });
+    }
+    const firstLine =
+      message.split(/\r?\n/).find((line) => line.trim() !== "")?.replace(/^(fatal|error):\s*/i, "") ??
+      "worktree remove failed";
     return err({
       kind: "repo",
       code,
-      message: message || "worktree remove failed"
+      lead: "Git couldn’t remove it",
+      message: `Git couldn’t remove it — ${firstLine}.`,
+      detail: message || "worktree remove failed"
     });
   }
 }
@@ -1277,7 +1307,7 @@ export async function worktreeRemove(
   repoPath: string,
   worktreePath: string,
   options: WorktreeRemoveOptions = { force: false }
-): Promise<Result<void>> {
+): Promise<Result<void, WorktreeRemoveError>> {
   const listed = await listWorktrees(git, repoPath);
   if (!listed.ok) return listed;
   const index = listed.value.findIndex((w) =>
@@ -1295,7 +1325,9 @@ export async function worktreeRemove(
       return err({
         kind: "repo",
         code: "not_a_worktree",
-        message: `${worktreePath} is no longer registered as a worktree of this repository. Its directory was left in place; delete it yourself if it is no longer needed.`
+        lead: "Folder is no longer registered",
+        message: "Folder is no longer registered as a Git worktree, so it was left in place. Delete it yourself if it is no longer needed.",
+        detail: `${worktreePath} is not listed by git worktree list for this repository.`
       });
     }
     // Nothing on disk and nothing in git: the removal already happened.
@@ -1312,7 +1344,9 @@ export async function worktreeRemove(
     return err({
       kind: "repo",
       code: "locked",
-      message: `${worktreePath} is locked (git worktree lock). Unlock it before removing it.`
+      lead: "Worktree is locked",
+      message: "Worktree is locked with git worktree lock. Unlock it before removing it.",
+      detail: `${worktreePath} is locked.`
     });
   }
 
@@ -1347,11 +1381,7 @@ export async function worktreeRemove(
   try {
     await deleteTree(worktreePath, options.onProgress, { deleteLast: [".git"] });
   } catch (cause) {
-    return err({
-      kind: "repo",
-      code: "worktree_remove_failed",
-      message: describeDeleteFailure(worktreePath, cause)
-    });
+    return err(describeDeleteFailure(worktreePath, cause));
   }
   // The folder is gone, so this only clears Git's record of this one
   // worktree — the targeted form of what `prune` would do to all of them.

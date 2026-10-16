@@ -459,8 +459,12 @@ describe("PruneWorktreesPanel", () => {
 });
 
 describe("PruneWorktreesPanel × removal outcome", () => {
-  const stuck =
-    "Could not delete .local/go/pkg/mod: permission denied (EACCES). 1906 items were deleted before it stopped; the rest of /w/a is still on disk and still a worktree.";
+  const stuck = {
+    message: "Permission denied deleting .local/go/pkg/mod — the folder is read-only or in use.",
+    code: "delete_failed",
+    lead: "Permission denied",
+    detail: "EACCES: permission denied, rmdir '/w/a/.local/go/pkg/mod'\n1906 items were deleted before it stopped."
+  };
 
   async function removeSelected(
     onRemove: OnRemove,
@@ -490,15 +494,23 @@ describe("PruneWorktreesPanel × removal outcome", () => {
   it("names the worktree it could not remove, why, and where it is", async () => {
     await removeSelected(async () => {
       handlers.get("worktree:removed")?.({ worktreeId: "b" });
-      return outcome({ removed: ["b"], failed: [{ id: "a", message: stuck }] });
+      return outcome({ removed: ["b"], failed: [{ id: "a", ...stuck }] });
     });
 
     const card = container.querySelector<HTMLElement>("[role='alert']");
     expect(card).not.toBeNull();
     expect(card?.textContent).toContain("alpha · fix/cache");
-    expect(card?.textContent).toContain("permission denied");
+    expect(card?.textContent).toContain("1 worktree wasn’t removed");
+    expect(card?.textContent).toContain("The other 1 was removed");
+    // Main's lead phrase is the bold part; the rest is the sentence.
+    expect(card?.querySelector("b")?.textContent).toBe("Permission denied");
+    expect(card?.textContent).toContain("the folder is read-only or in use");
     expect(card?.textContent).toContain("/w/a");
     expect(container.textContent).not.toContain("Some worktrees were not removed");
+    // Node's own words wait behind Details, not in the headline.
+    expect(card?.textContent).not.toContain("EACCES");
+    await act(async () => buttonNamed("Details").click());
+    expect(card?.querySelector(".maintenance__problem-raw")?.textContent).toContain("EACCES");
     // The failed worktree is still on the list; the removed one is not.
     expect(rows().map((row) => row.textContent)).toEqual([
       expect.stringContaining("fix/cache")
@@ -507,7 +519,7 @@ describe("PruneWorktreesPanel × removal outcome", () => {
 
   it("reveals the folder that was left behind", async () => {
     await removeSelected(async () =>
-      outcome({ failed: [{ id: "a", message: stuck }] })
+      outcome({ failed: [{ id: "a", ...stuck }] })
     , ["a"]);
     await act(async () => buttonNamed("Reveal in Finder").click());
     expect(dispatch).toHaveBeenCalledWith("shell:revealPath", { path: "/w/a" });
@@ -519,7 +531,7 @@ describe("PruneWorktreesPanel × removal outcome", () => {
     const onRemove = vi.fn<OnRemove>(async (ids, options) =>
       options?.force === true
         ? outcome({ removed: ids })
-        : outcome({ failed: [{ id: "a", message: stuck }] })
+        : outcome({ failed: [{ id: "a", ...stuck }] })
     );
     await removeSelected(onRemove, ["a"]);
     await act(async () => buttonNamed("Retry").click());
@@ -529,10 +541,22 @@ describe("PruneWorktreesPanel × removal outcome", () => {
 
   // Declining "Remove anyway" is the user's own choice: say what was kept,
   // without dressing it as an error.
+  it("offers no Retry for a folder Git no longer recognises", async () => {
+    await removeSelected(async () => outcome({ failed: [{
+      id: "a",
+      code: "not_a_worktree",
+      lead: "Folder is no longer registered",
+      message: "Folder is no longer registered as a Git worktree, so it was left in place."
+    }] }), ["a"]);
+    expect(container.querySelector("[role='alert']")?.textContent).toContain("left in place");
+    expect(() => buttonNamed("Retry")).toThrow();
+    expect(buttonNamed("Reveal in Finder")).toBeTruthy();
+  });
+
   it("reports worktrees kept for their changes as a note, not an error", async () => {
     await removeSelected(async () => outcome({ keptDirty: ["a"] }), ["a"]);
     expect(container.querySelector("[role='alert']")).toBeNull();
-    const note = container.querySelector<HTMLElement>("[role='status'].prune__outcome");
+    const note = container.querySelector<HTMLElement>("[role='status'].maintenance__problem");
     expect(note?.textContent).toContain("alpha · fix/cache");
     expect(note?.textContent).toMatch(/uncommitted changes/i);
   });
