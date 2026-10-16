@@ -142,6 +142,13 @@ const CLONE_PROGRESS_LABELS: Record<CloneProgress["phase"], string> = {
   indexing: "Adding repository to PwrGit"
 };
 
+/** One forge instance's accounts, as a cache key. The lookup the typing
+ *  starts and the one the pick needs must spell it identically, or the pick
+ *  asks again and its answer lands after the pick. */
+function ownersInstanceKey(host: ForgeKind, hostname: string | null): string {
+  return `${host}|${hostname ?? ""}`;
+}
+
 /** One forge repository, as a string an effect can be keyed on. */
 function forgeRepoKey(repository: CloneRepository): string {
   return `${repository.host}|${repository.hostname}|${repository.nameWithOwner}`;
@@ -400,7 +407,7 @@ export function CloneRepoDialog({
     Record<string, ForgeOwner[] | "failed">
   >({});
   const ownersKey =
-    forkOwnersHost === null ? null : `${forkOwnersHost}|${forkOwnersHostname ?? ""}`;
+    forkOwnersHost === null ? null : ownersInstanceKey(forkOwnersHost, forkOwnersHostname);
   const ownersAnswer = ownersKey === null ? undefined : ownersByInstance[ownersKey];
   /** Null while loading — the pair waits for it, so it is drawn once rather
    *  than appearing and then vanishing for a repository the user owns. */
@@ -434,33 +441,35 @@ export function CloneRepoDialog({
           queryHostname !== null &&
           catalog !== null &&
           forgeCanAnswerDialog(statusFor(catalog.forges, queryHost), queryHostname)
-        ? { host: queryHost, hostname: queryHostname, key: `${queryHost}|${queryHostname}` }
+        ? { host: queryHost, hostname: queryHostname, key: ownersInstanceKey(queryHost, queryHostname) }
         : null;
   const ownersTargetKnown =
     ownersTarget !== null && ownersByInstance[ownersTarget.key] !== undefined;
   // Keyed on the instance alone, so a lookup the typing started is the one
   // the pick waits for rather than a second call for the same answer.
   const ownersTargetPicked = ownersTarget !== null && ownersTarget.key === ownersKey;
+  /** Instances asked and not yet answered. An answer is stored under its own
+   *  key, so editing the query away and back keeps it rather than asking the
+   *  forge a second time and making the pick wait on that. */
+  const ownersInFlight = useRef(new Set<string>());
   useEffect(() => {
     if (ownersTarget === null || ownersTargetKnown) return undefined;
     const { key, host: targetHost, hostname: targetHostname } = ownersTarget;
-    let active = true;
+    if (ownersInFlight.current.has(key)) return undefined;
     const timeout = window.setTimeout(() => {
+      ownersInFlight.current.add(key);
       void dispatch("repo:forkTargets", {
         host: targetHost,
         ...(targetHostname === null ? {} : { hostname: targetHostname })
       }).then((result) => {
-        if (!active) return;
+        ownersInFlight.current.delete(key);
         setOwnersByInstance((current) => ({
           ...current,
           [key]: result.ok ? result.value : "failed"
         }));
       });
     }, ownersTargetPicked ? 0 : 300);
-    return () => {
-      active = false;
-      window.clearTimeout(timeout);
-    };
+    return () => window.clearTimeout(timeout);
   }, [ownersTarget?.key, ownersTargetKnown]);
 
   const forkTargetList = useMemo(

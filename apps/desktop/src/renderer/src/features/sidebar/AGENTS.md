@@ -256,8 +256,9 @@ row is drawn in the pick's frame and only its words change later: the pair
 (accounts asked early, or `viewerCanPush: false`, which no account's own
 repository has), the pending upstream row, "Fork into" on the Clone from
 label's line, held hidden while the original is chosen, and the cards' top
-lines at chip height. Measure a change here with the layout-shift harness in
-the PR that added this (pwrdrvr/PwrGit, "Clone dialog layout shift"). Still
+lines at chip height. Measure a change here the way pwrdrvr/PwrGit#477 did (a
+Vite build of the dialog against a fake bridge with delayed answers, a
+`layout-shift` observer and a rAF sampler on the controls below). Still
 moving: a fork of a fork's radio list, which appears when the lineage lands.
 Design: `design/Clone Dialog Layout Shift - UX Review.dc.html`.
 

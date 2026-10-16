@@ -458,6 +458,52 @@ it("asks for your accounts while you type, so the pair is drawn with the pick", 
   expect(targets()).toHaveLength(1);
 });
 
+it("keeps an accounts lookup in flight when the query is edited away and back", async () => {
+  mockForge(preflight());
+  let answer!: (value: unknown) => void;
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) =>
+    channel === "repo:forkTargets"
+      ? new Promise((resolve) => { answer = resolve; })
+      : base(channel, ...rest)
+  )(dispatchMock.getMockImplementation()!));
+  await act(async () => root.render(
+    <CloneRepoDialog
+      profile={{
+        id: "p", name: "Test", email: "test@example.com", mono: "T",
+        roots: [], onboardingCompleted: true, showInMenu: true
+      }}
+      onCloned={() => undefined}
+      onReveal={() => undefined}
+      onClose={() => undefined}
+    />
+  ));
+  const input = container.querySelector<HTMLInputElement>("#clone-source")!;
+  const type = async (value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
+        .set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
+  };
+  const targets = () => dispatchMock.mock.calls.filter(([channel]) => channel === "repo:forkTargets");
+
+  await type("octo-labs/sparkline");
+  await type("");
+  await type("octo-labs/sparkline");
+  expect(targets()).toHaveLength(1);
+
+  // The answer that lands after the edits still counts for the pick.
+  await act(async () => answer(ok([
+    { login: "riverbend", kind: "user", host: "github" }
+  ])));
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>(".clone-source-row")!.click();
+  });
+  expect(container.querySelector(".clone-from")).not.toBeNull();
+  expect(targets()).toHaveLength(1);
+});
+
 it("takes the exact-name check as the answer, and asks nothing more", async () => {
   mockPick(() => ({ ...fork }), [{ login: "riverbend", kind: "user", host: "github" }]);
   await openAndPick();
