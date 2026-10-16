@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+:root {
+--rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+--rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+--rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+--rv-bad: #b94232; --rv-ok: #5fa969;
+--font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+--font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--rv-bg); }
+body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+/* ---- review chrome (house convention) ---- */
+.dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); scroll-margin-top: 16px; }
+.dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+.dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+.dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+.dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 900px; text-wrap: pretty; }
+.dv-sub b { color: var(--rv-t2); font-weight: 600; }
+.dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+.dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+.dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+.dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+.dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+.dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 860px; }
+.dv-olabel b { color: var(--rv-accb); font-weight: 600; }
+.dv-next { margin: 22px 0 0; font: 400 11px/1.5 var(--font-sans); color: var(--rv-t3); }
+.note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 824px; }
+.note b { color: var(--rv-t2); font-weight: 600; }
+.pro { color: #9ce5b3; font-weight: 600; } .con { color: #ffb0a1; font-weight: 600; }
+/* ---- pins + findings ---- */
+.pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+.pin.blue { background: #3d7be0; }
+.hl { position: relative; outline: 1px dashed rgba(255, 120, 100, 0.85); outline-offset: 3px; }
+.hl > .pin, .an > .pin { position: absolute; z-index: 2; }
+.an { position: relative; }
+.find { width: 520px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+.fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+.fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+.fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+.fitem b { color: var(--rv-t2); font-weight: 600; }
+/* ---- tables ---- */
+.tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+.tr { display: grid; grid-template-columns: 150px minmax(0, 1fr) 200px; gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+.tr.two { grid-template-columns: 190px minmax(0, 1fr); }
+.tr.tl { grid-template-columns: 70px 190px minmax(0, 1fr); }
+.tr.four { grid-template-columns: 150px 240px minmax(0, 1fr) 170px; }
+.tr.tok { grid-template-columns: 170px 300px minmax(0, 1fr); }
+.tr:last-child { border-bottom: 0; }
+.tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+.tr b { color: var(--rv-t1); font-weight: 600; }
+.tr .bad { color: #ffb0a1; }
+.tr .good { color: #9ce5b3; }
+.tr .m { font: 500 10px/1.45 var(--font-mono); color: var(--rv-t2); }
+.tr .q { color: var(--rv-t1); }
+/* ---- the app's dark tokens (tokens.css :root) ---- */
+.app {
+--bg-app: #000000; --bg-panel: #0a0a0a; --bg-input: #080808; --bg-panel-elevated: #101010; --bg-menu: #101010; --bg-panel-hover: #14110d;
+--border-faint: rgba(247, 243, 235, 0.06); --border-subtle: rgba(247, 243, 235, 0.1); --border-default: rgba(247, 243, 235, 0.14); --border-strong: rgba(247, 243, 235, 0.2);
+--text-primary: #f7f3eb; --text-secondary: #b8b0a5; --text-muted: #8c857a; --text-subtle: rgba(247, 243, 235, 0.54);
+--accent: #ff8a1f; --accent-bright: #ffb35c; --accent-on: #160a00;
+--accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+--accent-tint: color-mix(in srgb, var(--accent) 8%, transparent);
+--accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+--danger-base: #b94232; --danger-soft: rgba(185, 66, 50, 0.24); --danger-border: color-mix(in srgb, var(--danger-base) 28%, transparent); --danger-text: #ffb0a1; --danger-on: #2a0d08;
+--success-soft: rgba(74, 148, 92, 0.18); --success-text: #9ce5b3; --status-ok: #5fa969; --status-warning: #d99a3d;
+--shadow-overlay: 0 32px 80px rgba(0, 0, 0, 0.6);
+}
+.stage { position: relative; padding: 22px; border-radius: 10px; background: #000000; border: 1px solid var(--rv-line); }
+.stage.dim { background: #030303; }
+.ic { display: block; flex: none; width: 12px; height: 12px; background-color: currentColor; mask-position: center; mask-size: contain; mask-repeat: no-repeat; }
+/* ============ Maintenance dialog, true size from app.css ============ */
+.bs { position: relative; width: 820px; display: flex; flex-direction: column; overflow: visible; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+.bs.frag { width: 820px; }
+.bs-head { display: flex; align-items: flex-start; gap: 18px; padding: 18px; border-bottom: 1px solid var(--border-subtle); }
+.bs-head > div { flex: 1; min-width: 0; }
+.bs-head h2 { margin: 0; color: var(--text-primary); font: 700 14px/1.2 var(--font-sans); }
+.bs-head p { margin: 7px 0 0; color: var(--text-muted); font: 500 11px/1.45 var(--font-sans); }
+.bs-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--bg-panel-elevated); color: var(--text-secondary); font: 600 10px/1 var(--font-mono); }
+.mt-tabs { display: flex; gap: 8px; padding: 12px 18px 0; }
+.mt-tab { padding: 7px 10px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--bg-panel); color: var(--text-secondary); font: 600 12px/1 var(--font-sans); }
+.mt-tab.on { border-color: var(--accent-border); background: var(--accent-tint); color: var(--text-primary); }
+.mt-tab.dis { opacity: .45; }
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 12px 18px 0; }
+.step { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.step > div { min-width: 0; }
+.step strong { display: block; color: var(--text-secondary); font: 650 11.5px/1.2 var(--font-sans); }
+.step small { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+.num { flex: none; width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-default); background: var(--bg-input); color: var(--text-muted); font: 700 10px/1 var(--font-mono); }
+.step.on { border-color: var(--accent-border); background: var(--accent-tint); box-shadow: inset 0 -2px 0 0 var(--accent); }
+.step.on strong { color: var(--text-primary); }
+.step.on small { color: var(--accent-bright); }
+.step.on small.bad { color: var(--danger-text); }
+.step.on .num { border-color: var(--accent); background: var(--accent); color: var(--accent-on); }
+.mt-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 18px; }
+.mt-body.flush { gap: 0; padding: 0; }
+/* status card (BulkSyncStatus / prune__summary) */
+.rstatus { display: flex; flex-direction: column; gap: 9px; margin: 12px 18px 0; padding: 11px 12px 10px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.rstatus.live { border-color: var(--accent-border); }
+.rtop { display: flex; align-items: center; gap: 11px; }
+.rtop > div { flex: 1; min-width: 0; }
+.rtop strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+.rtop > div > span { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtop > div > span.mono { color: var(--text-muted); font: 500 9.5px/1.2 var(--font-mono); }
+.rtime { flex: none; color: var(--text-muted); font: 500 10px/1.2 var(--font-mono); }
+.mark { flex: none; width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--status-ok) 22%, transparent); color: var(--success-text); }
+.mark .ic { width: 9px; height: 9px; }
+.mark.bad { background: color-mix(in srgb, var(--danger-base) 24%, transparent); color: var(--danger-text); }
+.spin { flex: none; width: 15px; height: 15px; border: 2px solid var(--accent-soft); border-top-color: var(--accent); border-radius: 50%; }
+.spin.sm { width: 11px; height: 11px; border-width: 1.5px; }
+.pbar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--text-primary) 9%, transparent); }
+.pbar i { display: block; min-width: 3px; box-shadow: inset -1px 0 0 var(--bg-panel); }
+.pbar .ok { background: var(--status-ok); }
+.pbar .bad { background: var(--danger-base); }
+.pbar .fly { background: repeating-linear-gradient(135deg, var(--accent) 0 4px, color-mix(in srgb, var(--accent) 45%, transparent) 4px 8px); }
+.pbar .rest { background: transparent; box-shadow: none; }
+.plegend { display: flex; align-items: center; gap: 14px; color: var(--text-secondary); font: 500 10.5px/1 var(--font-sans); }
+.plegend b { color: var(--text-primary); font-weight: 650; }
+.plegend .dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 2px; background: var(--status-ok); }
+.plegend .dot.bad { background: var(--danger-base); }
+.plegend .dot.fly { background: var(--accent); }
+.plegend .dot.rest { background: color-mix(in srgb, var(--text-primary) 18%, transparent); }
+.plegend .r { margin-left: auto; color: var(--text-muted); }
+.plegend .r b { color: var(--accent); }
+/* rules in force */
+.applied { display: flex; flex-direction: column; gap: 5px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.applied > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+.applied em { flex: none; width: 56px; font: 700 9px/1.4 var(--font-sans); font-style: normal; letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+.applied b { color: var(--text-primary); font-weight: 600; }
+.applied .sep { color: var(--text-subtle); }
+.applied .never b { color: var(--danger-text); }
+.applied .lnk { margin-left: auto; color: var(--accent); font: 600 10.5px/1 var(--font-sans); }
+.selall { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 400 12px/1.4 var(--font-sans); }
+.box { position: relative; flex: none; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--bg-input); }
+.box.on { border-color: var(--accent); background: var(--accent); }
+.box.on::after { content: ""; position: absolute; left: 4px; top: 1px; width: 3px; height: 7px; border: solid var(--accent-on); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.box.dis { opacity: .5; }
+.selall .box { margin-top: 0; }
+/* list card + rows */
+.lcard { padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-panel); }
+.grp { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; padding-top: 8px; border-top: 1px solid var(--border-faint); font: 700 9px/1 var(--font-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--text-subtle); }
+.grp.first { margin-top: 0; padding-top: 0; border-top: 0; }
+.grp b { color: var(--text-secondary); font-family: var(--font-mono); }
+.grp b.bad { color: var(--danger-text); }
+.grp .lnk { margin-left: auto; font: 600 10.5px/1 var(--font-sans); letter-spacing: 0; text-transform: none; color: var(--accent); }
+.brow { display: flex; align-items: flex-start; gap: 9px; padding: 5px 0; }
+.brow > div { flex: 1; min-width: 0; }
+.brow strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+.brow strong .rn { font-family: var(--font-sans); font-weight: 650; }
+.brow small { display: block; margin-top: 2px; color: var(--text-muted); font: 500 10.5px/1.35 var(--font-sans); }
+.brow small i { font-style: normal; color: var(--success-text); font-weight: 600; }
+.brow small.path { font: 500 9px/1.3 var(--font-mono); color: var(--text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brow .sz { flex: none; padding-top: 1px; font: 600 10.5px/1.3 var(--font-mono); color: var(--text-secondary); }
+.brow .st { flex: none; display: inline-flex; align-items: center; gap: 6px; padding-top: 1px; font: 600 10px/1.3 var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+.brow .st.ok { color: var(--success-text); }
+.brow .st.run { color: var(--accent); }
+.brow .st .ic { width: 11px; height: 11px; }
+.brow.gone strong, .brow.gone small { opacity: .55; }
+.kchips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.kchip { display: inline-flex; align-items: baseline; gap: 4px; padding: 4px 7px; border: 1px solid var(--border-subtle); border-radius: 999px; color: var(--text-muted); font: 500 10px/1 var(--font-sans); white-space: nowrap; }
+.kchip b { color: var(--text-secondary); font: 700 10px/1 var(--font-mono); }
+.empty-done { margin: 0; padding: 2px 0 4px; color: var(--text-primary); font: 500 11.5px/1.5 var(--font-sans); }
+/* footer */
+.bs-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-subtle); }
+.bs-actions .lead { margin-right: auto; color: var(--text-muted); font: 500 10.5px/1.3 var(--font-sans); }
+.bs-actions .lead b { color: var(--text-secondary); font-weight: 600; }
+.bs-actions .lead .bad { color: var(--danger-text); font-weight: 600; }
+.btn { height: 32px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font: 600 12px/1 var(--font-sans); white-space: nowrap; }
+.btn.primary { border: 0; background: var(--accent); color: var(--accent-on); font-weight: 700; }
+.btn.danger { border: 0; background: var(--danger-text); color: var(--danger-on); font-weight: 700; }
+.btn.ghost { height: 26px; padding: 0 10px; font-size: 10.5px; }
+.btn.off { opacity: .45; }
+/* as built: the stacked notify dialog and the bare error line */
+.ndlg { width: 420px; padding: 18px; background: var(--bg-menu); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-overlay); }
+.ndlg .t { margin-bottom: 12px; color: var(--text-primary); font: 700 13px/1 var(--font-sans); }
+.ndlg .m { color: var(--text-secondary); font: 500 12.5px/1.55 var(--font-sans); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ndlg .a { display: flex; justify-content: flex-end; margin-top: 16px; }
+.ghostdlg { width: 420px; height: 120px; margin-top: -8px; border: 1px dashed var(--rv-line); border-radius: 14px; display: flex; align-items: center; justify-content: center; color: var(--rv-t3); font: 500 10.5px/1.4 var(--font-sans); text-align: center; padding: 0 30px; }
+.asbuilt-err { margin: 10px 0 0; color: var(--danger-text); font: 500 11px/1.4 var(--font-mono); }
+/* ============ Proposed: the outcome card ============ */
+.pb { margin: 12px 18px 0; border: 1px solid var(--danger-border); border-radius: 8px; background: color-mix(in srgb, var(--danger-base) 6%, transparent); }
+.pb.solo { margin: 0; }
+.pb.note { border-color: var(--border-subtle); background: var(--bg-panel); max-width: none; }
+.pb-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.pb-mark { flex: none; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--danger-soft); color: var(--danger-text); }
+.pb-mark .ic { width: 10px; height: 10px; }
+.pb.note .pb-mark { background: color-mix(in srgb, var(--text-primary) 8%, transparent); color: var(--text-secondary); }
+.pb-head > div:not(.pb-acts) { flex: 1; min-width: 0; }
+.pb-head strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+.pb-head strong code { font: 600 11px/1.25 var(--font-mono); }
+.pb-head > div > span:not(.pb-link):not(.pbtn):not(.pin) { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); }
+.pb-acts { flex: none; display: flex; align-items: center; gap: 6px; }
+.pb-link { display: inline-flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 5px; color: var(--accent); font: 600 10.5px/1 var(--font-sans); white-space: nowrap; }
+.pb-link .ic { width: 12px; height: 12px; }
+.pb-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 9px 12px 10px 40px; border-top: 1px solid var(--border-faint); }
+.pb-row.inhead { padding-top: 0; border-top: 0; }
+.pb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+.pb-name .rn { font-family: var(--font-sans); font-weight: 650; }
+.pb-left { justify-self: end; color: var(--text-secondary); font: 600 10.5px/1.3 var(--font-mono); white-space: nowrap; }
+.pb-reason { grid-column: 1 / -1; margin: 0; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); text-wrap: pretty; }
+.pb-reason b { color: var(--danger-text); font-weight: 600; }
+.pb.note .pb-reason b { color: var(--text-primary); }
+.pb-facts { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--text-subtle); font: 500 9.5px/1.3 var(--font-sans); }
+.pb-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font: 500 9.5px/1.3 var(--font-mono); user-select: text; }
+.pb-btns { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.pbtn { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 1px solid var(--border-default); border-radius: 6px; background: transparent; color: var(--text-secondary); font: 600 10.5px/1 var(--font-sans); white-space: nowrap; }
+.pbtn .ic { width: 12px; height: 12px; }
+.pbtn.hover { border-color: var(--accent-border); background: var(--bg-panel-hover); color: var(--text-primary); }
+.pbtn.busy { color: var(--accent); }
+.pb-disc { display: inline-flex; align-items: center; gap: 3px; margin-left: 4px; color: var(--text-muted); font: 600 10.5px/1 var(--font-sans); }
+.pb-disc .ic { width: 11px; height: 11px; }
+.pb-raw { grid-column: 1 / -1; margin: 4px 0 0; padding: 8px 10px; border: 1px solid var(--border-faint); border-radius: 6px; background: var(--bg-input); color: var(--text-muted); font: 500 10px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pb-rawfoot { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; color: var(--text-subtle); font: 500 10px/1.3 var(--font-sans); }
+.pb-rawfoot .pb-link { margin-left: auto; }
+/* alternatives in turn 3 */
+.lrow-bad { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 2px 9px; padding: 6px 0; }
+.lrow-bad .x { width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--danger-soft); color: var(--danger-text); }
+.lrow-bad .x .ic { width: 8px; height: 8px; }
+.rstatus.badb { border-color: var(--danger-border); }
+.frag-cap { padding: 8px 18px 0; color: var(--text-subtle); font: 500 9.5px/1.3 var(--font-mono); }
+/* icons: exact Lucide SVGs (lucide.dev), fully percent-encoded, drawn as masks in currentColor */
+          .i-alert { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27m21.73%2018-8-14a2%202%200%200%200-3.48%200l-8%2014A2%202%200%200%200%204%2021h16a2%202%200%200%200%201.73-3%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27M12%209v4%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27M12%2017h.01%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-folder { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27m6%2014%201.5-2.9A2%202%200%200%201%209.24%2010H20a2%202%200%200%201%201.94%202.5l-1.54%206a2%202%200%200%201-1.95%201.5H4a2%202%200%200%201-2-2V5a2%202%200%200%201%202-2h3.9a2%202%200%200%201%201.69.9l.81%201.2a2%202%200%200%200%201.67.9H18a2%202%200%200%201%202%202v2%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-retry { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M21%2012a9%209%200%201%201-9-9c2.52%200%204.93%201%206.74%202.74L21%208%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27M21%203v5h-5%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-log { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M15%2012h-5%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27M15%208h-5%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27M19%2017V5a2%202%200%200%200-2-2H4%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27M8%2021h12a2%202%200%200%200%202-2v-1a1%201%200%200%200-1-1H11a1%201%200%200%200-1%201v1a2%202%200%201%201-4%200V5a2%202%200%201%200-4%200v2a1%201%200%200%200%201%201h3%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-check { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M20%206%209%2017l-5-5%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-check3 { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%273%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M20%206%209%2017l-5-5%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-info { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Ccircle%20cx%3D%2712%27%20cy%3D%2712%27%20r%3D%2710%27%3E%3C%2Fcircle%3E%3Cpath%20d%3D%27M12%2016v-4%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27M12%208h.01%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-chev { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27m9%2018%206-6-6-6%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-chevd { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27m6%209%206%206%206-6%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-copy { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Crect%20width%3D%2714%27%20height%3D%2714%27%20x%3D%278%27%20y%3D%278%27%20rx%3D%272%27%20ry%3D%272%27%3E%3C%2Frect%3E%3Cpath%20d%3D%27M4%2016c-1.1%200-2-.9-2-2V4c0-1.1.9-2%202-2h10c1.1%200%202%20.9%202%202%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-x { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M18%206%206%2018%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27m6%206%2012%2012%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+          .i-x3 { mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%273%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%3Cpath%20d%3D%27M18%206%206%2018%27%3E%3C%2Fpath%3E%3Cpath%20d%3D%27m6%206%2012%2012%27%3E%3C%2Fpath%3E%3C%2Fsvg%3E"); }
+        </style>
+      </helmet>
+<!-- ============================ TURN 1 ============================ -->
+<section class="dv-turn app" id="t1" data-screen-label="Turn 1 As built">
+<div class="dv-thd">
+<a class="dv-tid" href="#t1">1</a>
+<span class="dv-tname">As built: a 34&#8239;s beachball, a raw error in a stacked dialog, then one red sentence that names nothing</span>
+</div>
+<p class="dv-sub">Repository maintenance &#8250; Combined &#8250; step 1. One finished worktree is selected and removed. Its folder holds a Go module cache, and Go makes those directories read-only. <code>git worktree remove</code> deletes part of the tree, fails on <b>Permission denied</b>, and has already unregistered the worktree by then. PwrGit falls back to a synchronous <code>rmSync</code> with retries on the main process, so the whole app stops responding, and the delete still fails. 20&#8239;MB stays on disk. Nothing is written to Help &#8250; Logs. Redrawn in the dark theme the report came from, with invented names: <code>acme-tap</code>, <code>fix/cache-installer</code>, <code>/Users/dev/.worktrees/k3x9/acme-tap</code>.</p>
+<div class="dv-opts">
+<div class="dv-opt" id="1a" data-screen-label="1a Notify dialog">
+<div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>First, after the beachball: <code>notifyDialog</code> from <code>useRepoTree.removeWorktrees</code></div>
+<div class="stage dim">
+<div class="ndlg an">
+<span class="pin" style="top:-7px;right:-7px">1</span>
+<div class="t">Some worktrees couldn&#8217;t be removed</div>
+<div class="m">&#8226; EACCES: permission denied, rmdir &#39;/Users/dev/.worktrees/k3x9/acme-tap/.local/go/pkg/mod/golang.org/x/sys@v0.21.0/unix&#39;</div>
+<div class="a"><button class="btn primary">OK</button></div>
+</div>
+<div class="ghostdlg">The maintenance dialog sits behind it, dimmed. Its row still reads 102&#8239;MB.</div>
+</div>
+<p class="note" style="max-width:466px">It is a styled in-app dialog (<code>DialogHost</code>), not an OS alert, but it behaves like one: modal, one OK, and gone once dismissed. The bullet is Node&#8217;s message verbatim. It names a folder deep inside the worktree, not the worktree, and it does not say the worktree is already unregistered.</p>
+</div>
+<div class="dv-opt" id="1b" data-screen-label="1b The panel after">
+<div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Then the panel, with the dialog dismissed. This is the report&#8217;s screenshot.</div>
+<div class="stage">
+<section class="bs">
+<div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">1 found</span></div>
+<div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab dis">Worktrees</span><span class="mt-tab dis">Local branches</span><span class="mt-tab dis">Garbage collection</span></div>
+<div class="steps">
+<div class="step on"><span class="num">1</span><div><strong>Worktrees</strong><small>review &#183; 1 finished</small></div></div>
+<div class="step"><span class="num">2</span><div><strong>Local branches</strong><small>next &#183; pauses for review</small></div></div><div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>last &#183; standard</small></div></div>
+</div>
+<div class="rstatus"><div class="rtop"><span class="mark"><i class="ic i-check3"></i></span><div><strong>Sweep finished</strong><span>12 read &#183; 0 reused &#183; 96 worktrees considered &#183; 1 finished &#183; 102 MB</span></div><span class="rtime">took 31s</span></div></div>
+<div class="asbuilt-err hl"><span class="pin" style="top:-4px;right:6px">2</span>Some worktrees were not removed. Review the remaining worktrees or continue without further pruning.</div>
+<div class="mt-body">
+<div class="applied"><div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">&#183;</span><span>finished = <b>merged PR</b> or <b>merged 14 days ago</b></span><span class="lnk">Change</span></div><div class="never"><em>Never</em><b>uncommitted changes</b><span class="sep">&#183;</span><b>main checkout</b><span class="sep">&#183;</span><b>activity unreadable</b></div></div>
+<div class="selall"><span class="box"></span>Select all 1 finished worktree</div>
+<div class="lcard">
+<div class="grp first"><span>Finished <b>1</b></span></div>
+<div class="brow hl"><span class="pin" style="top:2px;right:-30px">3</span><span class="box"></span><div><strong><span class="rn">acme-tap</span> &#183; fix/cache-installer</strong><small><i>merged PR #14</i> &#183; commit 1w &#183; touched 1w</small><small class="path">/Users/dev/.worktrees/k3x9/acme-tap</small></div><span class="sz">102 MB</span></div>
+<div class="grp"><span>Kept <b>41</b></span><span class="lnk">Show</span></div><div class="kchips"><span class="kchip"><b>41</b> touched in the last 7 days</span></div>
+</div>
+</div>
+<div class="bs-actions"><span class="lead">Nothing selected &#183; then local branches</span><button class="btn">Re-read all</button><button class="btn">Skip worktrees</button><button class="btn danger off" aria-disabled="true">Remove worktrees and continue</button></div>
+</section>
+</div>
+</div>
+<div class="dv-opt" id="1c" data-screen-label="1c Findings">
+<div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a>Findings</div>
+<div class="find">
+<div class="fitem"><span class="pin">1</span><div><h4>The real message comes first, then disappears</h4><p>The only words that say what happened appear in a modal you can only dismiss. After OK they are gone. They were never logged, so Help &#8250; Logs has nothing either.</p></div></div>
+<div class="fitem"><span class="pin">2</span><div><h4>The sentence that stays names nothing</h4><p>&#8220;Some worktrees were not removed&#8221; doesn&#8217;t say which one, why, where its folder is, how much is left, or what to do. &#8220;Continue without further pruning&#8221; points at a button that isn&#8217;t labelled that way (the footer says <b>Skip worktrees</b>).</p></div></div>
+<div class="fitem"><span class="pin">2</span><div><h4>It is styled as a stack trace and sits on the dialog&#8217;s edge</h4><p><code>.modal__error</code> is 11&#8239;px Geist Mono in <code>--danger-text</code> with no box. Its inset rule, <code>.prune &gt; .modal__error</code>, never matches: the panel is <code>.prune__panel</code> inside <code>.maintenance</code>. So it gets 10&#8239;px on top, nothing on either side, and starts at x&nbsp;=&nbsp;0. Every other block in the panel is inset 18&#8239;px.</p></div></div>
+<div class="fitem"><span class="pin">3</span><div><h4>The list says nothing happened</h4><p>No <code>worktree:removed</code> event fired, so the row stays at its old 102&#8239;MB, checkbox and all. After <b>Re-read all</b> it vanishes, because Git no longer lists it. That leaves 20&#8239;MB on disk that nothing in the app points to.</p></div></div>
+<div class="fitem"><span class="pin">4</span><div><h4>The app froze, and nothing said it was working</h4><p>While <code>rmSync</code> ran on the main process, the button only said <b>Removing&#8230;</b>. There was no worktree name, no count, no time, and no way to tell a slow delete from a hang.</p></div></div>
+<div class="fitem"><span class="pin">5</span><div><h4>A known cause, reported as a mystery</h4><p>A Go module cache is read-only on purpose. A delete that knows this can make it writable first, and one that doesn&#8217;t can at least say so: &#8220;the folder is read-only or in use&#8221;.</p></div></div>
+</div>
+</div>
+<div class="dv-opt" id="1d" data-screen-label="1d Timeline">
+<div class="dv-olabel"><a class="dv-oid" href="#1d">1d</a>What happened, in order</div>
+<div class="tbl" style="width:820px">
+<div class="tr tl head"><span>t</span><span>Where</span><span>What</span></div>
+<div class="tr tl"><span class="m">0.0s</span><b>Renderer</b><span>Confirm &#8220;Remove 1 worktree?&#8221; &#8594; OK. The footer button reads <b>Removing&#8230;</b>.</span></div>
+<div class="tr tl"><span class="m">0.1s</span><b>git worktree remove</b><span>Deletes the files it can, hits <span class="bad">EACCES</span> under <code>.local/go/pkg/mod</code>, and unregisters the worktree regardless.</span></div>
+<div class="tr tl"><span class="m">0.4s</span><b>Main, fallback</b><span>Synchronous <code>rmSync({ recursive, maxRetries })</code> on the main process. <span class="bad">Every window stops responding</span>, and the spinning cursor appears.</span></div>
+<div class="tr tl"><span class="m">34s</span><b>Main</b><span>Still <span class="bad">EACCES</span>. Returns <code>failed: [{ message }]</code>, a string with no reason or path field. Not logged.</span></div>
+<div class="tr tl"><span class="m">34s</span><b>Renderer</b><span><code>notifyDialog</code> with the raw message <a class="dv-oid" href="#1a">1a</a>. OK.</span></div>
+<div class="tr tl"><span class="m">35s</span><b>PruneWorktreesPanel</b><span>The id isn&#8217;t in <code>removedRef</code>, so it sets the generic <code>error</code> string <a class="dv-oid" href="#1b">1b</a>. The row stays listed.</span></div>
+<div class="tr tl"><span class="m">later</span><b>Re-read all</b><span>The worktree is gone from Git, and so gone from the list. <span class="bad">20&#8239;MB remains</span> at its path.</span></div>
+</div>
+</div>
+</div>
+<p class="dv-next">Try next: &#8220;show 1b at the Windows path length&#8221; &#183; &#8220;what does the sidebar row do during the freeze&#8221;</p>
+</section>
+<!-- ============================ TURN 2 ============================ -->
+<section class="dv-turn app" id="t2" data-screen-label="Turn 2 Removing">
+<div class="dv-thd">
+<a class="dv-tid" href="#t2">2</a>
+<span class="dv-tname">Removing: progress lives in the dialog, and the app keeps working</span>
+</div>
+<p class="dv-sub">The delete becomes PwrGit&#8217;s own: <code>unlink</code> and <code>rmdir</code> per entry, four at a time, off the UI path. It makes read-only folders writable before deleting them. It reports progress per worktree, so the status card that said <b>Sweep finished</b> becomes the run&#8217;s live card, the same shape as <i>Bulk Sync Progress</i> 2b. It shows which worktree, files deleted so far, and N of M. Rows stay in place and say what happened to each, instead of silently leaving.</p>
+<div class="dv-opts">
+<div class="dv-opt" id="2a" data-screen-label="2a Removing 2 of 3">
+<div class="dv-olabel"><a class="dv-oid" href="#2a">2a</a><b>Recommended.</b> Mid-run: one removed, one removing, one queued</div>
+<div class="stage">
+<section class="bs">
+<div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">1 removed</span></div>
+<div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab dis">Worktrees</span><span class="mt-tab dis">Local branches</span><span class="mt-tab dis">Garbage collection</span></div>
+<div class="steps">
+<div class="step on"><span class="num">1</span><div><strong>Worktrees</strong><small>removing &#183; 2 of 3</small></div></div>
+<div class="step"><span class="num">2</span><div><strong>Local branches</strong><small>next &#183; pauses for review</small></div></div><div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>last &#183; standard</small></div></div>
+</div>
+<div class="rstatus live">
+<div class="rtop"><span class="spin"></span><div><strong>Removing acme-tap &#183; fix/cache-installer</strong><span class="mono">18,204 files deleted &#183; worktree 2 of 3</span></div><span class="rtime">0:07</span></div>
+<div class="pbar"><i class="ok" style="flex:1 1 0"></i><i class="fly" style="flex:1 1 0"></i><i class="rest" style="flex:1 1 0"></i></div>
+<div class="plegend"><span><span class="dot"></span><b>1</b> removed</span><span><span class="dot fly"></span><b>1</b> removing</span><span><span class="dot rest"></span><b>1</b> queued</span><span class="r"><b>64 MB</b> freed so far</span></div>
+</div>
+<div class="mt-body">
+<div class="applied"><div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">&#183;</span><span>finished = <b>merged PR</b> or <b>merged 14 days ago</b></span><span class="lnk">Change</span></div><div class="never"><em>Never</em><b>uncommitted changes</b><span class="sep">&#183;</span><b>main checkout</b><span class="sep">&#183;</span><b>activity unreadable</b></div></div>
+<div class="lcard">
+<div class="grp first"><span>Finished <b>3</b></span><span class="lnk" style="color:var(--text-muted)">3 selected &#183; 286 MB</span></div>
+<div class="brow gone"><span class="box on dis"></span><div><strong><span class="rn">acme-tap</span> &#183; feat/bottle-mirror</strong><small class="path">/Users/dev/.worktrees/p2m7/acme-tap</small></div><span class="st ok"><i class="ic i-check"></i>Removed &#183; 64 MB</span></div>
+<div class="brow"><span class="box on dis"></span><div><strong><span class="rn">acme-tap</span> &#183; fix/cache-installer</strong><small class="path">/Users/dev/.worktrees/k3x9/acme-tap</small></div><span class="st run"><span class="spin sm"></span>Removing &#183; 18,204 files</span></div>
+<div class="brow"><span class="box on dis"></span><div><strong><span class="rn">orbit-cli</span> &#183; chore/bump-go</strong><small class="path">/Users/dev/.worktrees/w8ad/orbit-cli</small></div><span class="st">Queued &#183; 120 MB</span></div>
+</div>
+</div>
+<div class="bs-actions"><span class="lead">Removing 3 worktrees &#183; then local branches</span><button class="btn off" aria-disabled="true">Re-read all</button><button class="btn off" aria-disabled="true">Skip worktrees</button><button class="btn danger off" aria-disabled="true">Removing&#8230;</button></div>
+</section>
+</div>
+<p class="note">The <b>Sweep finished</b> card is replaced, not stacked. It is the run&#8217;s one status card, and it will hold the receipt in <a class="dv-oid" href="#3a">3a</a>. Rows dim and say <b>Removed</b> rather than leaving, so the list doesn&#8217;t jump under the pointer and the receipt can count them. The bar is one segment per worktree because the count is small. The legend tail counts bytes freed by completed worktrees only, never an estimate for the one in flight.</p>
+</div>
+<div class="dv-opt" id="2b" data-screen-label="2b Live copy">
+<div class="dv-olabel"><a class="dv-oid" href="#2b">2b</a>What the live card says, per phase</div>
+<div class="tbl" style="width:620px">
+<div class="tr two head"><span>Phase</span><span>Title &#183; mono line</span></div>
+<div class="tr two"><b>Starting</b><span><span class="q">Removing 3 worktrees</span> &#183; <span class="m">Starting&#8230;</span></span></div>
+<div class="tr two"><b>Deleting files</b><span><span class="q">Removing {repo} &#183; {branch}</span> &#183; <span class="m">{n} files deleted &#183; worktree {i} of {N}</span></span></div>
+<div class="tr two"><b>Unlocking read-only folders</b><span>The same line. The unlock is part of the delete and happens in under a second, so it doesn&#8217;t get a phase of its own. It is logged at debug level.</span></div>
+<div class="tr two"><b>Unregistering</b><span><span class="q">Removing {repo} &#183; {branch}</span> &#183; <span class="m">Folder deleted &#183; removing from Git</span></span></div>
+<div class="tr two"><b>Done</b><span>The card becomes the receipt (<a class="dv-oid" href="#3a">3a</a>, <a class="dv-oid" href="#4a">4a</a>).</span></div>
+<div class="tr two"><b>Elsewhere in the app</b><span>The sidebar row of the worktree being removed shows <span class="q">Removing&#8230;</span> and stops accepting clicks. Every other row, repository and window keeps working: deletion never blocks the main process.</span></div>
+</div>
+<p class="note" style="max-width:620px"><b>Counting:</b> &#8220;files deleted&#8221; counts every unlinked entry and is throttled to about 8 updates a second. A worktree&#8217;s total isn&#8217;t known up front (the sweep measured bytes, not files), so the card never shows a percentage inside one worktree. The bar moves per worktree.</p>
+</div>
+</div>
+<p class="dv-next">Try next: &#8220;add Stop after this one to <a class="dv-oid" href="#2a">2a</a>&#8221; &#183; &#8220;draw the sidebar row while it&#8217;s removing&#8221;</p>
+</section>
+<!-- ============================ TURN 3 ============================ -->
+<section class="dv-turn app" id="t3" data-screen-label="Turn 3 Partial failure">
+<div class="dv-thd">
+<a class="dv-tid" href="#t3">3</a>
+<span class="dv-tname">Partial failure: say which, why, what&#8217;s left, and what to do, inline</span>
+</div>
+<p class="dv-sub">Two of three worktrees are removed and one is not. No dialog appears. The status card becomes the receipt, and an <b>outcome card</b> takes the slot where the red sentence was, inset like everything else. It names each worktree that wasn&#8217;t removed, gives a plain-language reason, the path, and what&#8217;s left on disk, then offers <b>Reveal in Finder</b> and <b>Retry</b>. Git&#8217;s or Node&#8217;s own words go in <b>Details</b>, and every failure is in Help &#8250; Logs. Three placements follow, with <a class="dv-oid" href="#3a">3a</a> recommended.</p>
+<div class="dv-opts">
+<div class="dv-opt" id="3a" data-screen-label="3a Inline outcome card">
+<div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><b>Recommended.</b> An outcome card under the receipt, above the rules</div>
+<div class="stage">
+<section class="bs">
+<div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">2 removed</span></div>
+<div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab dis">Worktrees</span><span class="mt-tab dis">Local branches</span><span class="mt-tab dis">Garbage collection</span></div>
+<div class="steps">
+<div class="step on"><span class="num">1</span><div><strong>Worktrees</strong><small class="bad">review &#183; 1 not removed</small></div></div>
+<div class="step"><span class="num">2</span><div><strong>Local branches</strong><small>next &#183; pauses for review</small></div></div><div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>last &#183; standard</small></div></div>
+</div>
+<div class="rstatus">
+<div class="rtop"><span class="mark bad"><i class="ic i-x3"></i></span><div><strong>Removed 2 of 3 worktrees</strong><span>184 MB freed &#183; 1 wasn&#8217;t removed</span></div><span class="rtime">took 9s</span></div>
+<div class="pbar"><i class="ok" style="flex:2 1 0"></i><i class="bad" style="flex:1 1 0"></i></div>
+<div class="plegend"><span><span class="dot"></span><b>2</b> removed</span><span><span class="dot bad"></span><b>1</b> not removed</span></div>
+</div>
+<div class="pb" role="alert">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-alert"></i></span><div><strong>1 worktree wasn&#8217;t removed</strong><span>Its folder is still on disk. The other 2 were removed, and you can continue.</span></div><div class="pb-acts"><span class="pb-link"><i class="ic i-log"></i>View log</span></div></div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">acme-tap</span> &#183; fix/cache-installer</span><span class="pb-left">20 MB left</span>
+<p class="pb-reason"><b>Permission denied</b> deleting 1 folder &#8212; the folder is read-only or in use.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/k3x9/acme-tap</span><span>&#183;</span><span>no longer registered with Git</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn"><i class="ic i-retry"></i>Retry</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+</div>
+<div class="mt-body">
+<div class="applied"><div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">&#183;</span><span>finished = <b>merged PR</b> or <b>merged 14 days ago</b></span><span class="lnk">Change</span></div><div class="never"><em>Never</em><b>uncommitted changes</b><span class="sep">&#183;</span><b>main checkout</b><span class="sep">&#183;</span><b>activity unreadable</b></div></div>
+<div class="lcard">
+<p class="empty-done">2 worktrees removed &#183; 184 MB freed. Nothing else is proposed.</p>
+<div class="grp"><span>Kept <b>41</b></span><span class="lnk">Show</span></div><div class="kchips"><span class="kchip"><b>41</b> touched in the last 7 days</span></div>
+</div>
+</div>
+<div class="bs-actions"><span class="lead">2 removed &#183; <span class="bad">1 not removed</span> &#183; then local branches</span><button class="btn">Re-read all</button><button class="btn primary">Continue to local branches</button></div>
+</section>
+</div>
+<p class="note">The receipt&#8217;s mark is red whenever anything failed, as in <i>Bulk Sync Progress</i>. The step rail keeps step 1 current and puts the failure in its small line. Once nothing is left selected, the footer&#8217;s danger button gives way to <b>Continue to local branches</b>: you shouldn&#8217;t have to &#8220;skip&#8221; a step that mostly worked. <b>Retry</b> retries this row only, with no second confirm, because you already confirmed the removal. While it runs, the button reads <b>Retrying&#8230;</b> and the card&#8217;s head counts down. If it succeeds, the row leaves the card, and the card leaves when its last row does.</p>
+</div>
+<div class="dv-opt" id="3b" data-screen-label="3b In the list">
+<div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a>Alternative: a <b>Not removed</b> group at the top of the list</div>
+<div class="stage">
+<section class="bs frag">
+<div class="frag-cap">&#8230; receipt card as in <a class="dv-oid" href="#3a">3a</a> &#8230;</div>
+<div class="mt-body">
+<div class="applied"><div><em>Rules</em><span>Keep if touched in the last <b>7 days</b></span><span class="sep">&#183;</span><span>finished = <b>merged PR</b> or <b>merged 14 days ago</b></span><span class="lnk">Change</span></div><div class="never"><em>Never</em><b>uncommitted changes</b><span class="sep">&#183;</span><b>main checkout</b><span class="sep">&#183;</span><b>activity unreadable</b></div></div>
+<div class="lcard">
+<div class="grp first"><span>Not removed <b class="bad">1</b></span><span class="lnk">View log</span></div>
+<div class="lrow-bad"><span class="x"><i class="ic i-x3"></i></span><div class="brow" style="padding:0"><div><strong><span class="rn">acme-tap</span> &#183; fix/cache-installer</strong><small><span style="color:var(--danger-text);font-weight:600">Permission denied</span> deleting 1 folder &#8212; read-only or in use &#183; 20 MB left</small><small class="path">/Users/dev/.worktrees/k3x9/acme-tap</small></div></div><span class="pb-btns" style="margin:0"><span class="pbtn"><i class="ic i-folder"></i></span><span class="pbtn"><i class="ic i-retry"></i></span></span></div>
+<div class="grp"><span>Removed <b>2</b></span><span class="lnk">Show</span></div>
+<div class="grp"><span>Kept <b>41</b></span><span class="lnk">Show</span></div><div class="kchips"><span class="kchip"><b>41</b> touched in the last 7 days</span></div>
+</div>
+</div>
+</section>
+</div>
+<p class="note" style="max-width:866px"><span class="pro">For:</span> the worktree stays where you last saw it. <span class="con">Against:</span> the list scrolls, and on a sweep with forty finished worktrees the failure can sit below the fold. Icon-only buttons need tooltips to be understood. It also mixes outcomes into a list whose job is choosing.</p>
+</div>
+<div class="dv-opt" id="3c" data-screen-label="3c In the receipt">
+<div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a>Alternative: the receipt card carries the failure</div>
+<div class="stage">
+<section class="bs frag">
+<div class="rstatus badb">
+<div class="rtop"><span class="mark bad"><i class="ic i-x3"></i></span><div><strong>Removed 2 of 3 worktrees</strong><span>184 MB freed &#183; 1 wasn&#8217;t removed</span></div><span class="rtime">took 9s</span></div>
+<div class="pbar"><i class="ok" style="flex:2 1 0"></i><i class="bad" style="flex:1 1 0"></i></div>
+<div class="brow" style="padding:2px 0 0"><div><strong><span class="rn">acme-tap</span> &#183; fix/cache-installer</strong><small><span style="color:var(--danger-text);font-weight:600">Permission denied</span> deleting 1 folder &#183; 20 MB left &#183; <span style="color:var(--accent)">Reveal</span> &#183; <span style="color:var(--accent)">Retry</span></small></div></div>
+</div>
+<div class="frag-cap" style="padding-bottom:12px">&#8230; rules, list and footer as in <a class="dv-oid" href="#3a">3a</a> &#8230;</div>
+</section>
+</div>
+<p class="note" style="max-width:866px"><span class="pro">For:</span> it&#8217;s the most compact, with one card for everything that happened. <span class="con">Against:</span> the maintenance status card has a fixed 108&#8239;px height (<code>.maintenance &gt; .bulk-sync__status</code>) so the dialog doesn&#8217;t jump during a run. Three failures don&#8217;t fit, and the path and details have nowhere to go. It also turns a progress card into a place to act, which the other tabs never do.</p>
+</div>
+<div class="dv-opt" id="3d" data-screen-label="3d Details open">
+<div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a><a class="dv-oid" href="#3a">3a</a>&#8217;s card with <b>Details</b> open, and Retry hovered</div>
+<div class="stage" style="width:866px">
+<div class="pb solo">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-alert"></i></span><div><strong>1 worktree wasn&#8217;t removed</strong><span>Its folder is still on disk. The other 2 were removed, and you can continue.</span></div><div class="pb-acts"><span class="pb-link"><i class="ic i-log"></i>View log</span></div></div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">acme-tap</span> &#183; fix/cache-installer</span><span class="pb-left">20 MB left</span>
+<p class="pb-reason"><b>Permission denied</b> deleting 1 folder &#8212; the folder is read-only or in use.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/k3x9/acme-tap</span><span>&#183;</span><span>no longer registered with Git</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn hover"><i class="ic i-retry"></i>Retry</span><span class="pb-disc"><i class="ic i-chevd"></i>Details</span></div>
+<pre class="pb-raw">EACCES: permission denied, rmdir &#39;/Users/dev/.worktrees/k3x9/acme-tap/.build/cache&#39;
+owner root:wheel, mode 0755 &#8212; PwrGit runs as dev
+212 files and 9 folders left (20.4 MB). git worktree: unregistered.</pre>
+<div class="pb-rawfoot"><span>Logged 14:02:11 &#183; maintenance &#183; op 7f3c&#8230;e1</span><span class="pb-link"><i class="ic i-copy"></i>Copy details</span></div>
+</div>
+</div>
+</div>
+<p class="note" style="max-width:866px"><b>Details</b> is the only place raw text appears: the error code and syscall, the first path that failed, ownership when it&#8217;s known, and counts of what&#8217;s left. It is collapsed by default and stays open per row for the life of the card. <b>View log</b> opens Help &#8250; Logs filtered to this run&#8217;s operation id. The example cause is a root-owned build cache: the new delete already handles Go&#8217;s read-only module cache, so permission errors that remain are about ownership.</p>
+</div>
+</div>
+<p class="dv-next">Try next: &#8220;<a class="dv-oid" href="#3a">3a</a> but Retry also re-reads the list&#8221; &#183; &#8220;what if the leftover is 4&#8239;GB&#8221; &#183; &#8220;<a class="dv-oid" href="#3a">3a</a> in the light theme&#8221;</p>
+</section>
+<!-- ============================ TURN 4 ============================ -->
+<section class="dv-turn app" id="t4" data-screen-label="Turn 4 Variants">
+<div class="dv-thd">
+<a class="dv-tid" href="#t4">4</a>
+<span class="dv-tname">Variants: all failed, a single failure, and a worktree you chose to keep</span>
+</div>
+<p class="dv-sub">One card, three densities. With several failures, each row carries its own reason and actions, and the head adds <b>Retry N</b> for the ones that can be retried. A single failure on the standalone Worktrees tab folds the row into the head. A worktree kept because you declined to remove its uncommitted changes is not a failure. It gets the same anatomy in neutral ink.</p>
+<div class="dv-opts">
+<div class="dv-opt" id="4a" data-screen-label="4a All failed">
+<div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>None removed: three worktrees, three reasons</div>
+<div class="stage">
+<section class="bs">
+<div class="bs-head"><div><h2>Repository maintenance</h2><p>Clean up finished worktrees, leftover local branches and Git storage across your repositories.</p></div><span class="bs-count">0 removed</span></div>
+<div class="mt-tabs"><span class="mt-tab on">Combined</span><span class="mt-tab dis">Worktrees</span><span class="mt-tab dis">Local branches</span><span class="mt-tab dis">Garbage collection</span></div>
+<div class="steps">
+<div class="step on"><span class="num">1</span><div><strong>Worktrees</strong><small class="bad">review &#183; 3 not removed</small></div></div>
+<div class="step"><span class="num">2</span><div><strong>Local branches</strong><small>next &#183; pauses for review</small></div></div><div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>last &#183; standard</small></div></div>
+</div>
+<div class="rstatus">
+<div class="rtop"><span class="mark bad"><i class="ic i-x3"></i></span><div><strong>None of 3 worktrees were removed</strong><span>Their folders are still on disk &#183; 204 MB</span></div><span class="rtime">took 4s</span></div>
+<div class="pbar"><i class="bad" style="flex:1 1 0"></i></div>
+<div class="plegend"><span><span class="dot bad"></span><b>3</b> not removed</span></div>
+</div>
+<div class="pb" role="alert">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-alert"></i></span><div><strong>3 worktrees weren&#8217;t removed</strong><span>Nothing was deleted from two of them. You can retry, or continue without them.</span></div><div class="pb-acts"><span class="pbtn"><i class="ic i-retry"></i>Retry 2</span><span class="pb-link"><i class="ic i-log"></i>View log</span></div></div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">acme-tap</span> &#183; fix/cache-installer</span><span class="pb-left">20 MB left</span>
+<p class="pb-reason"><b>Permission denied</b> deleting 1 folder &#8212; the folder is read-only or in use.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/k3x9/acme-tap</span><span>&#183;</span><span>no longer registered with Git</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn"><i class="ic i-retry"></i>Retry</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">acme-tap</span> &#183; feat/bottle-mirror</span><span class="pb-left">64 MB left</span>
+<p class="pb-reason"><b>A file is in use</b> by another app &#8212; close it, then retry.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/p2m7/acme-tap</span><span>&#183;</span><span>untouched &#183; still a worktree</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn"><i class="ic i-retry"></i>Retry</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">orbit-cli</span> &#183; chore/bump-go</span><span class="pb-left">120 MB</span>
+<p class="pb-reason"><b>Folder is no longer a Git worktree</b>, left in place. Something else changed it after the sweep read it.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/w8ad/orbit-cli</span><span>&#183;</span><span>not deleted</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+</div>
+<div class="bs-actions"><span class="lead"><span class="bad">Nothing removed</span> &#183; then local branches</span><button class="btn">Re-read all</button><button class="btn primary">Continue to local branches</button></div>
+</section>
+</div>
+<p class="note">Rows are ordered by what you can do about them: retryable first, then the ones only you can resolve. <b>No longer a Git worktree</b> gets no Retry. PwrGit deletes only a folder it has proven is the worktree it swept, so a folder that changed underneath it is left alone and revealed. The head&#8217;s <b>Retry 2</b> counts only the rows that have a Retry. Beyond 4 rows, the card shows the first 4 and a <b>Show all N</b> line, using the group-head link style.</p>
+</div>
+<div class="dv-opt" id="4b" data-screen-label="4b Single failure, standalone">
+<div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>One failure on the standalone Worktrees tab: the row folds into the head</div>
+<div class="stage">
+<section class="bs frag">
+<div class="mt-tabs" style="padding-top:14px"><span class="mt-tab">Combined</span><span class="mt-tab on">Worktrees</span><span class="mt-tab">Local branches</span><span class="mt-tab">Garbage collection</span></div>
+<div class="rstatus">
+<div class="rtop"><span class="mark bad"><i class="ic i-x3"></i></span><div><strong>Removed 0 of 1 worktree</strong><span>20 MB still on disk</span></div><span class="rtime">took 2s</span></div>
+</div>
+<div class="pb" role="alert">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-alert"></i></span><div><strong><code>acme-tap &#183; fix/cache-installer</code> wasn&#8217;t removed</strong><span><b style="color:var(--danger-text);font-weight:600">Permission denied</b> deleting 1 folder &#8212; the folder is read-only or in use.</span></div><div class="pb-acts"><span class="pb-link"><i class="ic i-log"></i>View log</span></div></div>
+<div class="pb-row inhead">
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/k3x9/acme-tap</span><span>&#183;</span><span>20 MB left &#183; no longer registered with Git</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn"><i class="ic i-retry"></i>Retry</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+</div>
+<div class="frag-cap">&#8230; rules in force, list &#8230;</div>
+<div class="bs-actions" style="margin-top:12px"><span class="lead"><span class="bad">1 not removed</span></span><button class="btn">Close</button><button class="btn ghost">Re-read all</button><button class="btn off" aria-disabled="true">Reclaim disk space&#8230;</button><button class="btn danger off" aria-disabled="true">Remove worktrees&#8230;</button></div>
+</section>
+</div>
+<p class="note">The single-row head reads like a sentence about one thing: the name, what happened, and why. The reason moves up to the sub line, and the row keeps only facts and actions. The footer is the standalone tab&#8217;s, unchanged. There&#8217;s no Continue here, because nothing comes next.</p>
+</div>
+<div class="dv-opt" id="4c" data-screen-label="4c Kept with changes">
+<div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>Kept because you said so: a neutral note, never red</div>
+<div class="stage">
+<section class="bs frag">
+<div class="rstatus">
+<div class="rtop"><span class="mark"><i class="ic i-check3"></i></span><div><strong>Removed 2 of 3 worktrees</strong><span>184 MB freed &#183; 1 kept with uncommitted changes</span></div><span class="rtime">took 8s</span></div>
+<div class="pbar"><i class="ok" style="flex:2 1 0"></i><i class="rest" style="flex:1 1 0;background:color-mix(in srgb, var(--text-primary) 18%, transparent)"></i></div>
+<div class="plegend"><span><span class="dot"></span><b>2</b> removed</span><span><span class="dot rest"></span><b>1</b> kept</span></div>
+</div>
+<div class="pb note" role="status">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-info"></i></span><div><strong>1 worktree kept: it has uncommitted changes</strong><span>You chose to keep it when asked. It&#8217;s still in the sidebar.</span></div></div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">orbit-cli</span> &#183; chore/bump-go</span><span class="pb-left">120 MB</span>
+<p class="pb-reason"><b>3 changed files</b>, 1 untracked.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/w8ad/orbit-cli</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn">Remove anyway&#8230;</span></div>
+</div>
+</div>
+<div class="frag-cap" style="padding-bottom:12px">&#8230; rules in force, list, footer: &#8220;2 removed &#183; 1 kept &#183; then local branches&#8221; &#183; Continue to local branches &#8230;</div>
+</section>
+</div>
+<p class="note">The receipt&#8217;s mark stays green and the bar segment is neutral: nothing went wrong. <b>Remove anyway&#8230;</b> opens the existing &#8220;Uncommitted changes&#8221; confirm. That stays a dialog because it&#8217;s a question, not a report. When a run has both failures and kept worktrees, the failure card comes first and this note follows it, 8&#8239;px apart.</p>
+</div>
+</div>
+<p class="dv-next">Try next: &#8220;<a class="dv-oid" href="#4a">4a</a> with 12 failures&#8221; &#183; &#8220;drop Remove anyway from <a class="dv-oid" href="#4c">4c</a>&#8221;</p>
+</section>
+<!-- ============================ TURN 5 ============================ -->
+<section class="dv-turn app" id="t5" data-screen-label="Turn 5 Shared component">
+<div class="dv-thd">
+<a class="dv-tid" href="#t5">5</a>
+<span class="dv-tname">One outcome card for every <code>modal__error</code> in the maintenance dialog</span>
+</div>
+<p class="dv-sub">The dialog renders <code>.modal__error</code> in three places: the worktree panel (<code>PruneWorktreesPanel.tsx</code>), the Combined plan (<code>MaintenanceDialog.tsx</code>, settings save), and the branch and garbage-collection results (<code>MaintenanceDialog.tsx</code>). All three become the same <b>MaintenanceProblem</b> card. The anatomy, tokens and copy rules are below, then the card on the other two steps. <code>.modal__error</code> stays for single-field validation in small dialogs, where a line under the field is right.</p>
+<div class="dv-opts">
+<div class="dv-opt" id="5a" data-screen-label="5a Anatomy">
+<div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Anatomy</div>
+<div class="stage" style="width:800px">
+<div class="pb solo an">
+<span class="pin blue" style="top:-7px;left:-7px">1</span>
+<div class="pb-head"><span class="pb-mark an"><i class="ic i-alert"></i><span class="pin blue" style="top:-12px;left:10px">2</span></span><div><strong>1 worktree wasn&#8217;t removed<span class="pin blue" style="margin-left:7px;vertical-align:1px">3</span></strong><span>Its folder is still on disk. The other 2 were removed, and you can continue.<span class="pin blue" style="margin-left:7px;vertical-align:-2px">4</span></span></div><div class="pb-acts an"><span class="pb-link"><i class="ic i-log"></i>View log</span><span class="pin blue" style="top:-10px;right:-10px">5</span></div></div>
+<div class="pb-row an">
+<span class="pin blue" style="top:8px;left:14px">6</span>
+<span class="pb-name"><span class="rn">acme-tap</span> &#183; fix/cache-installer</span><span class="pb-left an">20 MB left<span class="pin blue" style="top:-12px;right:-12px">7</span></span>
+<p class="pb-reason an"><b>Permission denied</b> deleting 1 folder &#8212; the folder is read-only or in use.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/k3x9/acme-tap</span><span>&#183;</span><span>no longer registered with Git</span></div>
+<div class="pb-btns an"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn"><i class="ic i-retry"></i>Retry</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span><span class="pin blue" style="top:4px;left:-28px">8</span></div>
+</div>
+</div>
+</div>
+<p class="note" style="max-width:800px">Pins: 1 container &#183; 2 mark &#183; 3 headline &#183; 4 sub &#183; 5 head actions &#183; 6 row &#183; 7 what&#8217;s left &#183; 8 row actions. See <a class="dv-oid" href="#5b">5b</a>.</p>
+</div>
+<div class="dv-opt" id="5b" data-screen-label="5b Parts and tokens">
+<div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Parts and tokens (all from <code>tokens.css</code>; no new colors)</div>
+<div class="tbl" style="width:900px">
+<div class="tr tok head"><span>Part</span><span>Spec</span><span>Notes</span></div>
+<div class="tr tok"><b>1 Container</b><span class="m">border 1px var(--danger-border); radius 8px; background color-mix(in srgb, var(--danger-base) 6%, transparent); margin 12px 18px 0</span><span>The inset every panel block uses. The neutral variant (<a class="dv-oid" href="#4c">4c</a>) uses <code>--border-subtle</code> on <code>--bg-panel</code>. <code>role="alert"</code> for failures, <code>role="status"</code> for the note.</span></div>
+<div class="tr tok"><b>2 Mark</b><span class="m">18px circle; background var(--danger-soft); color var(--danger-text); Lucide triangle-alert 10px, stroke 2</span><span>Neutral variant: Lucide <code>info</code> on <code>color-mix(--text-primary 8%)</code>, ink <code>--text-secondary</code>.</span></div>
+<div class="tr tok"><b>3 Headline</b><span class="m">650 11.5px/1.25 var(--font-sans); var(--text-primary)</span><span>Same as the status card title. A single-row head can carry the name in <code>--font-mono</code> 600 11px.</span></div>
+<div class="tr tok"><b>4 Sub</b><span class="m">500 10.5px/1.35 var(--font-sans); var(--text-secondary)</span><span>What&#8217;s left, and whether you can go on.</span></div>
+<div class="tr tok"><b>5 Head actions</b><span class="m">View log: 600 10.5px; var(--accent); Lucide scroll-text 12px. Retry N: row button style</span><span>Hover uses <code>--accent-soft</code> background, as <code>.maintenance__group button</code> does.</span></div>
+<div class="tr tok"><b>6 Row</b><span class="m">padding 9px 12px 10px 40px; border-top 1px var(--border-faint). Name 600 11px var(--font-mono) var(--text-primary), repo in sans 650</span><span>The 40&#8239;px indent aligns rows under the headline. Name ellipsizes, and its tooltip carries the full text.</span></div>
+<div class="tr tok"><b>Reason</b><span class="m">500 10.5px/1.4 sans var(--text-secondary); lead phrase 600 var(--danger-text)</span><span>Wraps. Never ellipsized.</span></div>
+<div class="tr tok"><b>Facts</b><span class="m">path 500 9.5px var(--font-mono) var(--text-muted), selectable; rest 9.5px sans var(--text-subtle)</span><span>Path ellipsizes from the end, and its tooltip shows the full path, as <code>PruneRow</code> does.</span></div>
+<div class="tr tok"><b>7 What&#8217;s left</b><span class="m">600 10.5px var(--font-mono) var(--text-secondary), right column</span><span>&#8220;20 MB left&#8221; after a partial delete. A bare size when nothing was deleted (<a class="dv-oid" href="#4a">4a</a>). Omitted when unknown.</span></div>
+<div class="tr tok"><b>8 Row actions</b><span class="m">24px high; padding 0 9px; border 1px var(--border-default); radius 6px; transparent; var(--text-secondary); 600 10.5px; Lucide 12px icons (folder-open, rotate-cw)</span><span>Hover: <code>--accent-border</code> border on <code>--bg-panel-hover</code>, ink <code>--text-primary</code>. Busy: <code>Retrying&#8230;</code> in <code>--accent</code>.</span></div>
+<div class="tr tok"><b>Details</b><span class="m">toggle 600 10.5px var(--text-muted), chevron-right / chevron-down 11px. Body: 500 10px/1.55 mono var(--text-muted) on var(--bg-input), 1px var(--border-faint), radius 6px, padding 8px 10px</span><span>Footer line: &#8220;Logged {time} &#183; {area} &#183; op {id}&#8221; plus <b>Copy details</b> (Lucide copy).</span></div>
+</div>
+</div>
+<div class="dv-opt" id="5c" data-screen-label="5c Copy rules">
+<div class="dv-olabel"><a class="dv-oid" href="#5c">5c</a>Copy rules, and the reason for each failure</div>
+<div class="find" style="width:560px">
+<div class="fitem"><span class="pin blue">1</span><div><h4>Headline = count + object + what happened</h4><p>&#8220;1 worktree wasn&#8217;t removed&#8221;, &#8220;2 branches weren&#8217;t deleted&#8221;, &#8220;Garbage collection failed in 1 repository&#8221;. Sentence case, no &#8220;Error:&#8221;, no exclamation mark, no &#8220;Some&#8221;.</p></div></div>
+<div class="fitem"><span class="pin blue">2</span><div><h4>Sub = what&#8217;s left + whether you can go on</h4><p>&#8220;Its folder is still on disk. The other 2 were removed, and you can continue.&#8221; Name the next action only if it&#8217;s in the footer, and with the footer&#8217;s own label.</p></div></div>
+<div class="fitem"><span class="pin blue">3</span><div><h4>Reason = a plain lead phrase, then the cause</h4><p>Lead with what failed (&#8220;Permission denied&#8221;, &#8220;A file is in use&#8221;), then an em dash and the likely cause in everyday words. Add one instruction only when the fix is the user&#8217;s: &#8220;close it, then retry&#8221;.</p></div></div>
+<div class="fitem"><span class="pin blue">4</span><div><h4>Raw text never leads</h4><p>Error codes, syscalls, stderr and stack frames go in Details and the log, nowhere else. An unmapped error gets &#8220;Couldn&#8217;t delete the folder&#8221; plus Details, not the raw message as the reason.</p></div></div>
+<div class="fitem"><span class="pin blue">5</span><div><h4>Name things the way the list does</h4><p><code>repo &#183; branch</code> exactly as the Finished row printed it, the same path, and sizes from <code>formatBytes</code>. The user should be able to match a failure to the row they ticked.</p></div></div>
+</div>
+<div class="tbl" style="width:900px;margin-top:4px">
+<div class="tr four head"><span>Outcome</span><span>Reason (lead phrase in bold)</span><span>Facts line</span><span>Actions</span></div>
+<div class="tr four"><span class="m">EACCES / EPERM</span><span><b>Permission denied</b> deleting {n} folder(s) &#8212; the folder is read-only or in use.</span><span>path &#183; &#8220;no longer registered with Git&#8221; if unregistered</span><span>Reveal &#183; Retry</span></div>
+<div class="tr four"><span class="m">EBUSY / ETXTBSY</span><span><b>A file is in use</b> by another app &#8212; close it, then retry.</span><span>path &#183; registration state</span><span>Reveal &#183; Retry</span></div>
+<div class="tr four"><span class="m">ENOTEMPTY after retries</span><span><b>Something kept writing</b> to the folder while it was being deleted.</span><span>path</span><span>Reveal &#183; Retry</span></div>
+<div class="tr four"><span class="m">not-a-worktree</span><span><b>Folder is no longer a Git worktree</b>, left in place.</span><span>path &#183; &#8220;not deleted&#8221;</span><span>Reveal</span></div>
+<div class="tr four"><span class="m">ENOENT (already gone)</span><span class="good">Not a failure: counted as removed.</span><span>&#8212;</span><span>&#8212;</span></div>
+<div class="tr four"><span class="m">git worktree remove</span><span><b>Git couldn&#8217;t remove it</b> &#8212; {first line of Git&#8217;s message, as a reason}.</span><span>path</span><span>Reveal &#183; Retry</span></div>
+<div class="tr four"><span class="m">dirty, declined</span><span><b>{n} changed files</b>, {m} untracked. (neutral note)</span><span>path</span><span>Reveal &#183; Remove anyway&#8230;</span></div>
+<div class="tr four"><span class="m">unknown</span><span><b>Couldn&#8217;t delete the folder.</b> Details has what PwrGit saw.</span><span>path</span><span>Reveal &#183; Retry</span></div>
+</div>
+</div>
+<div class="dv-opt" id="5d" data-screen-label="5d Local branches step">
+<div class="dv-olabel"><a class="dv-oid" href="#5d">5d</a>The same card on step 2, Local branches</div>
+<div class="stage">
+<section class="bs frag">
+<div class="steps">
+<div class="step"><span class="num" style="border-color:transparent;background:var(--success-soft);color:var(--success-text)">1</span><div><strong style="color:var(--text-primary)">Worktrees</strong><small style="color:var(--success-text)">2 removed &#183; 1 not removed</small></div></div>
+<div class="step on"><span class="num">2</span><div><strong>Local branches</strong><small class="bad">review &#183; 2 not deleted</small></div></div>
+<div class="step"><span class="num">3</span><div><strong>Garbage collection</strong><small>last &#183; standard</small></div></div>
+</div>
+<div class="rstatus">
+<div class="rtop"><span class="mark bad"><i class="ic i-x3"></i></span><div><strong>Deleted 31 of 33 finished branches</strong><span>in 4 repositories &#183; every tip is on the receipt</span></div><span class="rtime">took 3s</span></div>
+</div>
+<div class="pb" role="alert">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-alert"></i></span><div><strong>2 branches weren&#8217;t deleted</strong><span>They&#8217;re unchanged. The other 31 were deleted, and you can continue.</span></div><div class="pb-acts"><span class="pb-link"><i class="ic i-log"></i>View log</span></div></div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">orbit-deploy</span> &#183; fix/tooltip-flicker</span><span class="pb-left">a1c94e2</span>
+<p class="pb-reason"><b>Its tip moved</b> after the review &#8212; a commit landed that the proof didn&#8217;t cover.</p>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-retry"></i>Review again</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+<div class="pb-row">
+<span class="pb-name"><span class="rn">orbit-deploy</span> &#183; chore/old-ci</span><span class="pb-left">5e07bb1</span>
+<p class="pb-reason"><b>Checked out in a worktree</b> &#8212; remove the worktree first, or keep the branch.</p>
+<div class="pb-facts"><span class="pb-path">/Users/dev/.worktrees/q4n1/orbit-deploy</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+</div>
+<div class="bs-actions" style="margin-top:12px"><span class="lead">31 deleted &#183; <span class="bad">2 not deleted</span> &#183; then garbage collection</span><button class="btn primary">Continue to garbage collection</button></div>
+</section>
+</div>
+<p class="note">For a branch, &#8220;what&#8217;s left&#8221; is its tip, the short SHA, so the receipt and the failure speak the same language. A moved tip isn&#8217;t retried blindly: <b>Review again</b> re-runs the proof for that branch only.</p>
+</div>
+<div class="dv-opt" id="5e" data-screen-label="5e Garbage collection step">
+<div class="dv-olabel"><a class="dv-oid" href="#5e">5e</a>On step 3, Garbage collection, and on the plan itself</div>
+<div class="stage" style="display:flex;flex-direction:column;gap:18px">
+<section class="bs frag">
+<div class="rstatus">
+<div class="rtop"><span class="mark bad"><i class="ic i-x3"></i></span><div><strong>Collected 81 of 82 repositories</strong><span>4.1 GB &#8594; 3.2 GB</span></div><span class="rtime">took 2m 14s</span></div>
+</div>
+<div class="pb" role="alert">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-alert"></i></span><div><strong>Garbage collection failed in <code>atlas-api</code></strong><span><b style="color:var(--danger-text);font-weight:600">Another Git process</b> is using this repository &#8212; its index lock is held.</span></div><div class="pb-acts"><span class="pb-link"><i class="ic i-log"></i>View log</span></div></div>
+<div class="pb-row inhead">
+<div class="pb-facts"><span class="pb-path">/Users/dev/src/atlas-api/.git/index.lock</span><span>&#183;</span><span>held since 13:48</span></div>
+<div class="pb-btns"><span class="pbtn"><i class="ic i-folder"></i>Reveal in Finder</span><span class="pbtn"><i class="ic i-retry"></i>Retry</span><span class="pb-disc"><i class="ic i-chev"></i>Details</span></div>
+</div>
+</div>
+<div class="bs-actions" style="margin-top:12px"><span class="lead">Maintenance finished &#183; <span class="bad">1 repository not collected</span></span><button class="btn primary">Done</button></div>
+</section>
+<section class="bs frag">
+<div class="frag-cap">Combined &#8250; plan (<code>setError</code> from <code>settings:update</code>)</div>
+<div class="pb" role="alert" style="margin-bottom:12px">
+<div class="pb-head"><span class="pb-mark"><i class="ic i-alert"></i></span><div><strong>Couldn&#8217;t save &#8220;Delete without asking&#8221;</strong><span>This run uses it. Next time the dialog opens, it&#8217;s back to &#8220;Let me review it&#8221;.</span></div><div class="pb-acts"><span class="pb-link"><i class="ic i-log"></i>View log</span></div></div>
+</div>
+</section>
+</div>
+<p class="note">A failure with no subject to list (a settings save, or a scan that couldn&#8217;t start) is the head alone: what didn&#8217;t happen, then what that means for you. The <code>index.lock</code> case names the lock&#8217;s age, because a lock held for an hour is a crashed process, not a busy one.</p>
+</div>
+<div class="dv-opt" id="5f" data-screen-label="5f Build list">
+<div class="dv-olabel"><a class="dv-oid" href="#5f">5f</a>What gets built</div>
+<div class="tbl" style="width:900px">
+<div class="tr two head"><span>Piece</span><span>Change</span></div>
+<div class="tr two"><b>Outcome model</b><span><code>worktree:removeMany</code> returns per-worktree <code>{ worktreeId, outcome: "removed" | "kept-dirty" | "failed", reason?: { code, phrase, cause }, path, leftBytes?, unregistered? }</code> in place of <code>failed: [{ message }]</code>. The renderer maps <code>code</code> to the copy in <a class="dv-oid" href="#5c">5c</a>.</span></div>
+<div class="tr two"><b>Progress event</b><span><code>worktree:removeProgress { operationId, worktreeId, index, total, filesDeleted, phase: "deleting" | "unregistering" }</code>, throttled to about 8 per second. It drives <a class="dv-oid" href="#2a">2a</a>&#8217;s live card and row states.</span></div>
+<div class="tr two"><b>Logging</b><span>Every failed outcome is logged at warn with the operation id, repo, branch, path, code, syscall, first failing path and left counts. <b>View log</b> opens Help &#8250; Logs filtered to that id.</span></div>
+<div class="tr two"><b>useRepoTree.removeWorktrees</b><span>No <code>notifyDialog</code> for failures when the caller renders outcomes (the maintenance panel passes <code>reportInline: true</code>). The sidebar&#8217;s single-row trash keeps a dialog, worded with the same reason copy. The dirty confirm stays a dialog.</span></div>
+<div class="tr two"><b>MaintenanceProblem</b><span>New component beside <code>MaintenanceRulesApplied</code>. Props: <code>tone: "failed" | "note"</code>, <code>title</code>, <code>detail</code>, <code>rows[]</code> (<code>name</code>, <code>left</code>, <code>reason</code>, <code>path</code>, <code>facts</code>, <code>actions</code>, <code>raw</code>), <code>headActions</code>, <code>logOperationId</code>. Classes <code>.maintenance__problem</code>, <code>__problem-head</code>, <code>__problem-row</code>, <code>__problem-raw</code>.</span></div>
+<div class="tr two"><b>PruneWorktreesPanel</b><span>The removal outcome replaces the generic <code>setError</code> string. The live card replaces <code>prune__summary</code> while removing, then becomes the receipt. Rows show Removed, Removing or Queued and stay in place until Re-read. Footer: <b>Continue to local branches</b> once nothing is selected after a removal.</span></div>
+<div class="tr two"><b>MaintenanceDialog</b><span>The plan and the result <code>.modal__error</code> become MaintenanceProblem (<a class="dv-oid" href="#5d">5d</a>, <a class="dv-oid" href="#5e">5e</a>). The step rail&#8217;s small line takes &#8220;N not removed&#8221; or &#8220;N not deleted&#8221; in <code>--danger-text</code> while that step is current.</span></div>
+<div class="tr two"><b>CSS cleanup</b><span>Delete the dead <code>.prune &gt; .modal__error</code> rule. <code>.modal__error</code> keeps its field-validation role in the small dialogs.</span></div>
+</div>
+</div>
+</div>
+<p class="dv-next">Try next: &#8220;apply 5b to Bulk Sync&#8217;s failed repo card&#8221; &#183; &#8220;light theme pass on <a class="dv-oid" href="#3a">3a</a> and <a class="dv-oid" href="#4c">4c</a>&#8221;</p>
+</section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      class Component extends DCLogic {
+        renderVals() { return {}; }
+      }
+    </script>
+  </body>
+</html>
