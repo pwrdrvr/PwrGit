@@ -105,6 +105,7 @@ first.
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `Fork While Cloning - UX Review.dc.html` | Why Clone marked a repository read-only and cloned it anyway, never asking whether your fork already existed, and why Fork&hellip; on a checkout already on disk still defaulted to cloning a second copy. Then a &ldquo;Clone from&rdquo; pair (the original, or your fork) in every state the forge can answer, and Fork&hellip;'s in-place mode, whose primary button becomes Fork in place. Interactive. |
+| `Upstream When Cloning a Fork - UX Review.dc.html` | Why cloning a repository that is already your fork left its original behind (SSH and HTTPS added no `upstream`; the GitHub CLI did, so the same pick gave two different checkouts). Three placements, with an on-by-default option row recommended; that row opted out, for a fork of a fork (parent or root), with the GitHub CLI's own `upstream` reused, and when only the remote fails; and the build list. Interactive. |
 | `Fork Tracking Repair - UX Review.dc.html` | A review of #379's tracking repair, which explained a branch left pulling from and pushing to the original only in Git's words (&ldquo;Track origin/main&rdquo;). Three ways to draw where the branch pulls from and pushes to, now and after, with 2b's Now/After strips recommended; the same dialog opened from Pull and from Remotes; the receipt; and the chooser for a checkout holding more than one fork you can push to. Interactive. |
 | `Fork Route Graphic - UX Review.dc.html` | Where else the Now/After route from Fork Tracking Repair earns its place: a survey of every surface that says where a branch pulls from and pushes to, with a verdict on each. Then the ones that ship: Fork&hellip;'s plan drawn as Now and After strips, Publish naming each remote by repository and offering Fork&hellip; before a refused push, the Remotes card's route in the healthy case too, and a one-line route under each Pull menu choice. Interactive. |
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
@@ -381,6 +382,14 @@ from. The repository names are the reported ones (`huntharo/diskhound`, a fork
 of `tzarebczan/diskhound`), and so are the SHAs and counts in turns 1 and 2b.
 The diverged fork in **2c** and **3b** is invented: `3c1a9e0` and its two
 commits exist only in the artboard.
+
+`Upstream When Cloning a Fork - UX Review.dc.html` was written here and pushed
+up through the `claude-design` MCP, in the same change that builds what it
+draws. The project copy was verified at the same 43,238 bytes. Its styles are
+`Fork While Cloning`'s, plus the option row and remote list. Turn **1** is as
+built, turn **2** places the choice, turn **3** draws 2a in each state, **4a**
+is a live `DCLogic` prototype, and turn **5** is the build list. Its names are
+contrived (`octo-labs/sparkline`, `riverbend`, `lumen-co`).
 
 `Fork While Cloning - UX Review.dc.html` was written here and pushed up through
 the `claude-design` MCP, in the same change that builds what it draws. The

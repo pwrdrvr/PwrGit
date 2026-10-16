@@ -1,4 +1,5 @@
 import {
+  canonicalForgeHostname,
   err,
   forgeCloneUrls,
   forgeRemoteUrlLike,
@@ -140,6 +141,66 @@ export function forkRemoteUrl(
   }
   const urls = forgeCloneUrls(hostname, nameWithOwner);
   return protocol === "ssh" ? urls.sshUrl : urls.httpsUrl;
+}
+
+/**
+ * Keep a fork's original as a remote on a checkout just cloned from the fork.
+ *
+ * Reads the remotes before adding anything, because `gh repo clone` adds
+ * `upstream` for a fork on its own: a remote already pointing at the original
+ * is reported with `existing: true` and nothing is added. Otherwise the
+ * original goes in under `planUpstreamRemote`'s name — `upstream`, or a
+ * suffix when something else holds it — written the way `origin` is, so a
+ * checkout cloned over HTTPS does not start needing an SSH key to fetch.
+ * `fallback` is the protocol for a checkout whose `origin` is not a forge
+ * URL to copy.
+ */
+export async function keepForkOriginal(
+  git: GitExec,
+  cwd: string,
+  original: { hostname: string; nameWithOwner: string },
+  fallback: "ssh" | "https",
+  hosts: ForgeHostMap = {}
+): Promise<Result<{ name: string; existing: boolean }>> {
+  if (
+    !isSafeForgeHostname(original.hostname) ||
+    !isSafeProjectPath(original.nameWithOwner)
+  ) {
+    return err({
+      kind: "validation",
+      code: "invalid_repository",
+      message: `Not a usable upstream: ${original.nameWithOwner}`
+    });
+  }
+  const remotes = await readCheckoutRemotes(git, cwd);
+  if (!remotes.ok) return remotes;
+  // Spelled the way `parseForgeRemote` spells a remote's host; the match is
+  // exact, so `GitHub.com` here would miss the `upstream` gh just wrote.
+  const hostname =
+    canonicalForgeHostname(original.hostname) ?? original.hostname.toLowerCase();
+  const planned = planUpstreamRemote(
+    remotes.value,
+    { hostname, nameWithOwner: original.nameWithOwner },
+    hosts
+  );
+  if (planned.existing) return ok(planned);
+  // Only a forge URL is a shape to copy; a local path or a mirror on a NAS
+  // says nothing about how the forge is reached.
+  const origin = remotes.value.find(
+    (remote) =>
+      remote.name === "origin" && parseForgeRemote(remote.url, hosts) !== null
+  );
+  const url = forkRemoteUrl(
+    origin === undefined ? fallback : remoteProtocol(origin.url),
+    hostname,
+    original.nameWithOwner,
+    origin?.url
+  );
+  const args = ["remote", "add", planned.name, url];
+  const added = await git(args, cwd);
+  if (!added.ok) return added;
+  const checked = requireExit0(added.value, args);
+  return checked.ok ? ok(planned) : checked;
 }
 
 /** Add a discovered fork parent to a checkout cloned from the fork itself.

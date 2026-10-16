@@ -24,7 +24,6 @@ import type { ProfileService } from "../profiles/profile-service";
 import type { ForgeRepoRegistry } from "../forge/repo-provider";
 import type { ForgeStatusService } from "../forge/status";
 import type { GitExec } from "./dugite";
-import { requireExit0 } from "./dugite";
 import {
   CloneService,
   normalizeRepositoryPath,
@@ -35,6 +34,7 @@ import {
 } from "./clone-service";
 import {
   applyForkRemotes,
+  keepForkOriginal,
   forkRemoteUrl,
   planUpstreamRemote,
   readCheckoutRemotes,
@@ -754,8 +754,7 @@ export class ForkService {
         destination,
         input.upstream,
         input.protocol,
-        fork.hostname,
-        signal
+        fork.hostname
       );
       if (operationWasCanceled(signal)) {
         return this.canceledCheckout(signal, fork, destination);
@@ -840,12 +839,15 @@ export class ForkService {
     });
   }
 
+  /** `gh repo clone` already adds `upstream` for a fork; a bare
+   *  `git remote add upstream` then failed every fork cloned with the CLI.
+   *  `keepForkOriginal` keeps the CLI's remote when it points at the same
+   *  original, and otherwise picks a name nothing holds. */
   private async addUpstream(
     destination: string,
     upstream: string,
     protocol: CloneProtocol,
-    hostname: string,
-    signal?: AbortSignal
+    hostname: string
   ): Promise<Result<true>> {
     const slug = normalizeRepositoryPath(upstream);
     if (slug === null) {
@@ -855,21 +857,14 @@ export class ForkService {
         message: `Not a usable upstream: ${upstream}`
       });
     }
-    // SSH for the `cli` protocol too: the CLI cloned `origin`, but `upstream`
-    // is only ever fetched by plain Git, which has no forge CLI to defer to.
-    const url =
-      protocol === "https"
-        ? `https://${hostname}/${slug}.git`
-        : `git@${hostname}:${slug}.git`;
-    const added = await this.git(
-      ["remote", "add", UPSTREAM_REMOTE, url],
+    const kept = await keepForkOriginal(
+      this.git,
       destination,
-      signal === undefined ? undefined : { signal }
+      { hostname, nameWithOwner: slug },
+      protocol === "https" ? "https" : "ssh",
+      this.hosts()
     );
-    if (!added.ok) return added;
-    const checked = requireExit0(added.value, ["remote", "add"]);
-    if (!checked.ok) return checked;
-    return ok(true);
+    return kept.ok ? ok(true) : kept;
   }
 
   private canceled(

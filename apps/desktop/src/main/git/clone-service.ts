@@ -26,7 +26,9 @@ import {
   type CloneProgress,
   type CloneProtocol,
   type CloneRepository,
+  type ClonedRepo,
   type ForgeHost,
+  type ForgeHostMap,
   type ForgeOwner,
   type ForgeStatus,
   type Err,
@@ -43,6 +45,7 @@ import type {
 } from "../forge/repo-provider";
 import type { ForgeStatusService } from "../forge/status";
 import { requireExit0, type GitExec } from "./dugite";
+import { keepForkOriginal } from "./fork-remotes";
 import type { RepoIndexer } from "./repo-indexer";
 
 /** How many repositories one search asks the forge for. A search result the
@@ -434,7 +437,10 @@ export class CloneService {
     private readonly indexer: RepoIndexer,
     private readonly profiles: ProfileService,
     private readonly forges: ForgeRepoRegistry,
-    private readonly forgeStatus: ForgeStatusService
+    private readonly forgeStatus: ForgeStatusService,
+    /** `ForgeHosts.overrides()`, so a fork's original is recognised among the
+     *  remotes a forge CLI already wrote — on a self-managed instance too. */
+    private readonly hosts: () => ForgeHostMap = () => ({})
   ) {}
 
   /**
@@ -709,10 +715,12 @@ export class CloneService {
       parentPath: string;
       host?: ForgeHost;
       hostname?: string;
+      /** A fork's parent or network root, kept as a remote beside `origin`. */
+      upstream?: string | null;
     },
     onProgress: (progress: CloneProgress) => void = () => undefined,
     signal?: AbortSignal
-  ): Promise<Result<Repo>> {
+  ): Promise<Result<ClonedRepo>> {
     const profile = this.profiles.get(input.profileId);
     if (profile === null) {
       return err({
@@ -770,6 +778,23 @@ export class CloneService {
     if (!resolved.ok) return resolved;
     const { parentPath, destination } = resolved.value;
 
+    // Asked before anything is transferred, so a refusal leaves nothing on
+    // disk. The renderer only offers what the forge said; this re-asks rather
+    // than writing a remote at any slug a renderer sends.
+    const upstreamSlug = input.upstream ?? null;
+    let upstream: string | null = null;
+    if (upstreamSlug !== null) {
+      const related = await this.forkOriginal(
+        input.profileId,
+        nameWithOwner,
+        upstreamSlug,
+        local === null ? host : null,
+        hostname
+      );
+      if (!related.ok) return related;
+      upstream = related.value;
+    }
+
     if (operationWasCanceled(signal)) {
       return err(cancellationError(signal, "Clone canceled."));
     }
@@ -810,6 +835,24 @@ export class CloneService {
       });
     }
 
+    // A finished transfer is not thrown away over a remote: the checkout is
+    // still indexed and returned as a success that says what it lacks, and
+    // Refs → Remotes offers the fork parent from there.
+    let upstreamFailure: string | null = null;
+    if (upstream !== null) {
+      onProgress({ phase: "adding_upstream", percent: null });
+      const kept = await keepForkOriginal(
+        this.git,
+        destination,
+        { hostname, nameWithOwner: upstream },
+        input.protocol === "https" ? "https" : "ssh",
+        this.hosts()
+      );
+      if (!kept.ok) {
+        upstreamFailure = `Cloned to ${destination}, but couldn't add ${upstream} as a remote: ${kept.error.message.replace(/\.?\s*$/, ".")} Add it from Refs → Remotes.`;
+      }
+    }
+
     onProgress({ phase: "indexing", percent: null });
     const indexed = await this.indexer.indexRepoAt(input.profileId, destination);
     if (!indexed.ok) {
@@ -822,8 +865,49 @@ export class CloneService {
     this.rememberDestination(input.profileId, parentPath);
     return ok({
       ...indexed.value,
-      path: canonicalExistingPath(indexed.value.path)
+      path: canonicalExistingPath(indexed.value.path),
+      ...(upstreamFailure === null ? {} : { upstreamFailure })
     });
+  }
+
+  /**
+   * The forge's own spelling of `upstream`, once it is confirmed to be the
+   * parent or the network root of the repository being cloned — the same
+   * check `ForkService` makes before it writes one.
+   */
+  private async forkOriginal(
+    profileId: string,
+    nameWithOwner: string,
+    upstream: string,
+    host: ForgeHost | null,
+    hostname: string
+  ): Promise<Result<string>> {
+    const slug = normalizeRepositoryPath(upstream);
+    if (host === null || slug === null) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: `Not a usable upstream: ${upstream}`
+      });
+    }
+    const source = await this.checkSource(profileId, nameWithOwner, host, hostname);
+    if (!source.ok) {
+      return err({
+        ...source.error,
+        message: `Couldn't confirm ${nameWithOwner} is a fork of ${slug}. ${source.error.message}`
+      });
+    }
+    const match = [source.value.parent, source.value.root].find(
+      (candidate) => candidate?.nameWithOwner.toLowerCase() === slug.toLowerCase()
+    );
+    if (match === undefined) {
+      return err({
+        kind: "validation",
+        code: "invalid_repository",
+        message: `${slug} is not one of the repositories ${nameWithOwner} was forked from.`
+      });
+    }
+    return ok(match.nameWithOwner);
   }
 
   /** Shared by clone and fork: run the transfer itself and normalize failure.

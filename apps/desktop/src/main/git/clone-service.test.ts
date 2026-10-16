@@ -1098,6 +1098,170 @@ describe("CloneService", () => {
     );
   });
 
+  describe("cloning a fork keeps its original as upstream", () => {
+    /** `riverbend/sparkline` forks `lumen-co/sparkline`, which forks
+     *  `octo-labs/sparkline`. Only the view of the fork carries lineage. */
+    const forkView = (nameWithOwner: string): unknown =>
+      nameWithOwner === "riverbend/sparkline"
+        ? {
+            full_name: "riverbend/sparkline",
+            name: "sparkline",
+            visibility: "public",
+            parent: { full_name: "lumen-co/sparkline" },
+            source: { full_name: "octo-labs/sparkline" }
+          }
+        : undefined;
+
+    /** A real clone from a local source, then `origin` re-pointed at the URL
+     *  the requested protocol would have written — the remote the service
+     *  copies its upstream's shape from. */
+    function setup(failRemoteAdd = false): {
+      root: string;
+      git: GitExec;
+      calls: string[][];
+      service: (gh?: (args: string[]) => Promise<string>) => CloneService;
+      profileId: string;
+    } {
+      const root = temporaryRoot();
+      const source = join(root, "source");
+      initRepo(source);
+      const calls: string[][] = [];
+      const cloneGit: GitExec = async (args, cwd, options) => {
+        calls.push([...args]);
+        if (failRemoteAdd && args[0] === "remote" && args[1] === "add") {
+          return ok({ stdout: "", stderr: "error: could not lock config file .git/config", exitCode: 255 });
+        }
+        if (args[0] === "clone") {
+          const destination = args.at(-1)!;
+          const url = args.at(-2)!;
+          const cloned = await systemGit(["clone", "--", source, destination], cwd, options);
+          git(destination, "remote", "set-url", "origin", url);
+          return cloned;
+        }
+        return systemGit(args, cwd, options);
+      };
+      const db = openDatabase(":memory:");
+      const profiles = new ProfileService(db);
+      const profile = profiles.create({
+        name: "Personal",
+        email: "test@pwrgit.com",
+        roots: [root]
+      });
+      const indexer = new RepoIndexer(db, cloneGit);
+      return {
+        root,
+        git: cloneGit,
+        calls,
+        profileId: profile.id,
+        service: (gh = fakeGh({ view: forkView })) =>
+          new CloneService(db, cloneGit, indexer, profiles, githubOnly(gh), fakeForgeStatus())
+      };
+    }
+
+    function remoteUrl(path: string, name: string): string {
+      return execFileSync("git", ["remote", "get-url", name], {
+        cwd: path,
+        encoding: "utf8"
+      }).trim();
+    }
+
+    it("adds the chosen original after the transfer, in origin's protocol", async () => {
+      const { root, service, profileId } = setup();
+      const phases: CloneProgress["phase"][] = [];
+
+      const result = await service().clone(
+        {
+          profileId,
+          nameWithOwner: "riverbend/sparkline",
+          protocol: "ssh",
+          parentPath: root,
+          upstream: "octo-labs/sparkline"
+        },
+        (progress) => phases.push(progress.phase)
+      );
+
+      expect(result.ok).toBe(true);
+      const checkout = join(root, "sparkline");
+      expect(remoteUrl(checkout, "upstream")).toBe("git@github.com:octo-labs/sparkline.git");
+      // After the transfer, before the index — so the sidebar's first read of
+      // the new repository already sees both remotes.
+      expect(phases.indexOf("adding_upstream")).toBeGreaterThan(-1);
+      expect(phases.indexOf("adding_upstream")).toBeLessThan(phases.indexOf("indexing"));
+    });
+
+    it("keeps and indexes the checkout when only the remote fails, and says so", async () => {
+      const { root, service, profileId } = setup(true);
+
+      const result = await service().clone({
+        profileId,
+        nameWithOwner: "riverbend/sparkline",
+        protocol: "ssh",
+        parentPath: root,
+        upstream: "octo-labs/sparkline"
+      });
+
+      // A success: the handler announces it, refreshes identity, and the
+      // dialog can show the checkout instead of retrying into its folder.
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.path).toBe(join(root, "sparkline"));
+      expect(result.value.upstreamFailure).toMatch(
+        /^Cloned to .*sparkline, but couldn't add octo-labs\/sparkline as a remote: .*could not lock config file.*\. Add it from Refs → Remotes\.$/
+      );
+    });
+
+    it("refuses a repository the source was not forked from, before transferring anything", async () => {
+      const { root, service, profileId, calls } = setup();
+
+      const result = await service().clone({
+        profileId,
+        nameWithOwner: "riverbend/sparkline",
+        protocol: "ssh",
+        parentPath: root,
+        upstream: "mallory/sparkline"
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.message).toContain("mallory/sparkline is not one of");
+      expect(calls.filter((args) => args[0] === "clone")).toEqual([]);
+      expect(existsSync(join(root, "sparkline"))).toBe(false);
+    });
+
+    it("keeps the upstream gh repo clone added instead of adding a second", async () => {
+      const { root, service, profileId } = setup();
+      const source = join(root, "source");
+      const base = fakeGh({ view: forkView });
+      // What `gh repo clone` does for a fork: HTTPS origin, and the parent
+      // as `upstream`.
+      const gh = async (args: string[]): Promise<string> => {
+        if (args[0] === "repo" && args[1] === "clone") {
+          const destination = args[3]!;
+          execFileSync("git", ["clone", "--", source, destination], { stdio: "ignore" });
+          git(destination, "remote", "set-url", "origin", "https://github.com/riverbend/sparkline.git");
+          git(destination, "remote", "add", "upstream", "https://github.com/lumen-co/sparkline.git");
+          return "";
+        }
+        return base(args);
+      };
+
+      const result = await service(gh).clone({
+        profileId,
+        nameWithOwner: "riverbend/sparkline",
+        protocol: "cli",
+        parentPath: root,
+        upstream: "lumen-co/sparkline"
+      });
+
+      expect(result.ok).toBe(true);
+      const checkout = join(root, "sparkline");
+      expect(
+        execFileSync("git", ["remote"], { cwd: checkout, encoding: "utf8" }).trim().split("\n")
+      ).toEqual(["origin", "upstream"]);
+      expect(remoteUrl(checkout, "upstream")).toBe("https://github.com/lumen-co/sparkline.git");
+    });
+  });
+
   it("points a CLI clone at the remote's own instance, not the SaaS one", async () => {
     const root = temporaryRoot();
     const db = openDatabase(":memory:");
