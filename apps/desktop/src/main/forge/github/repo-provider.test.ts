@@ -71,6 +71,22 @@ describe("parseGhSearchRepos", () => {
     ).toBeUndefined();
   });
 
+  it("says whether a row is a fork, and leaves an unreported answer absent", () => {
+    // The Clone dialog draws the upstream row at the pick from this; a
+    // missing field is "not asked", which must not read as "not a fork".
+    const [fork, source, unasked] = parseGhSearchRepos(
+      JSON.stringify([
+        { fullName: "riverbend/sparkline", isFork: true },
+        { fullName: "octo-labs/sparkline", isFork: false },
+        { fullName: "acme/api" }
+      ])
+    );
+    expect(fork?.isFork).toBe(true);
+    expect(source?.isFork).toBe(false);
+    expect(unasked).not.toHaveProperty("isFork");
+    expect(SEARCH_JSON_FIELDS.split(",")).toContain("isFork");
+  });
+
   it("drops rows with no fullName, and survives bad JSON shapes", () => {
     // `nameWithOwner` is `gh repo list`'s key, not search's — a parser that
     // accepted both would quietly return nothing if the field were renamed.

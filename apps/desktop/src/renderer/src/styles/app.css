@@ -3884,6 +3884,11 @@ a.forge-chip:focus-visible {
 .fork-option__target {
   color: var(--accent);
 }
+/* The Clone dialog's upstream row, drawn at the pick before the forge has
+   named the parent. A colour change only: the slug replaces it in place. */
+.fork-option__target.is-pending {
+  color: var(--text-subtle);
+}
 
 /* Shown only when the source is itself a fork — see needsUpstreamChoice. */
 .fork-upstream {
@@ -4712,11 +4717,14 @@ a.forge-chip:focus-visible {
   outline-offset: 1px;
   scroll-margin: 4px;
 }
+/* As tall as a `.clone-chip`: the original's push chip arrives with
+   preflight, and the line must not grow and drop the slug under it. */
 .clone-from__top {
   display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
+  min-height: 19px;
 }
 .clone-from__top strong {
   flex: 1;
@@ -4750,17 +4758,32 @@ a.forge-chip:focus-visible {
   font: 500 9.5px/1.35 var(--font-sans);
   overflow-wrap: anywhere;
 }
+/* Always as tall as the account pills, so the line is the same height
+   whether or not they have arrived — the accounts can land after the pick. */
+.clone-from__label {
+  min-height: 17px;
+  align-items: center;
+}
+/* "Fork into", on the Clone from label's line — the way the Repository
+   label carries the forge toggle — so choosing the fork, or preflight
+   switching to it after the pick, adds no row above Clone with. */
 .clone-from__into {
-  display: flex;
+  flex: none;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-top: 7px;
+  margin-left: auto;
   color: var(--text-subtle);
   font: 500 9.5px/1 var(--font-mono);
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Not forking: hidden, holding its place on the line. */
+.clone-from__into.is-held {
+  visibility: hidden;
 }
 .clone-from__into .fork-hosts {
   margin-left: 0;
-  flex-wrap: wrap;
 }
 .clone-destination-row {
   min-height: 32px;

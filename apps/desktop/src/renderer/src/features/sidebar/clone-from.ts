@@ -64,7 +64,10 @@ export function forkCardState(input: {
  * forking your own repository into your own account is something no forge
  * will do, and offering it into one of your orgs from a Clone dialog is a
  * question nobody asked. Waits for the accounts, so the pair is drawn once
- * and does not appear and then vanish under the pointer.
+ * and does not appear and then vanish under the pointer — unless the forge
+ * already said you cannot push to it. Every account can push to its own
+ * repositories, so that one is not yours, and the pair can be drawn at the
+ * pick instead of moving the sections below it when the accounts land.
  */
 export function offersCloneFrom(input: {
   source: CloneRepository | null;
@@ -73,7 +76,8 @@ export function offersCloneFrom(input: {
 }): boolean {
   const { source, owners } = input;
   if (source === null || source.localPath !== undefined) return false;
-  if (source.host === "other" || owners === null) return false;
+  if (source.host === "other") return false;
+  if (owners === null) return source.viewerCanPush === false;
   const owner = source.owner.toLowerCase();
   if (owners.some((o) => o.kind === "user" && o.login.toLowerCase() === owner)) {
     return false;
