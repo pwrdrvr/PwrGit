@@ -1,6 +1,7 @@
 import { err, ok } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { execGit } from "./dugite";
@@ -77,18 +78,32 @@ export function registerWorktreeLifecycleHandlers(
     const affectedRepos = new Set<string>();
     const affectedProfiles = new Set<string>();
 
-    // Remove sequentially — concurrent `git worktree remove` in one repo would
-    // race on .git/worktrees. Dozens of removes is still fast.
+    // Every outcome reaches the log. The renderer may show a failure small, or
+    // only as "not removed" — the Logs window must still say which and why.
+    const fail = (id: string, path: string | null, message: string): void => {
+      failed.push({ id, message });
+      logMain("error", "worktree", `could not remove ${path ?? id}:`, message);
+    };
+    const started = Date.now();
+    logMain(
+      "info",
+      "worktree",
+      `removing ${req.worktreeIds.length} worktree${req.worktreeIds.length === 1 ? "" : "s"}${req.force === true ? " (forced)" : ""}`
+    );
+
+    // One worktree at a time — concurrent `git worktree remove` in one repo
+    // would race on .git/worktrees. Each folder's own delete is parallel
+    // (`deleteTree`, four at once) and never blocks the main process.
     const releases: (() => void)[] = [];
     try {
       for (const id of req.worktreeIds) {
         const wt = stmt.get(id) as Row | undefined;
         if (wt === undefined) {
-          failed.push({ id, message: "worktree not found" });
+          fail(id, null, "worktree not found");
           continue;
         }
         if (wt.is_primary === 1) {
-          failed.push({ id, message: "Can't remove the primary worktree" });
+          fail(id, wt.path, "Can't remove the primary worktree");
           continue;
         }
         // Windows can't delete a directory that is any process's cwd, and a
@@ -97,10 +112,24 @@ export function registerWorktreeLifecycleHandlers(
         // ones) before removing it. Held until the batch's indexer refresh
         // drops the DB rows, so no probe spawns git in a deleted directory.
         releases.push(await state.lockForRemoval(id));
+        const began = Date.now();
+        let itemsDeleted = 0;
         const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
-          force: req.force ?? false
+          force: req.force ?? false,
+          onProgress: (progress) => {
+            itemsDeleted = progress.itemsDeleted;
+            emitEvent("worktree:removeProgress", {
+              worktreeId: id,
+              itemsDeleted: progress.itemsDeleted
+            });
+          }
         });
         if (res.ok) {
+          logMain(
+            "info",
+            "worktree",
+            `removed ${wt.path} (${itemsDeleted} items, ${((Date.now() - began) / 1000).toFixed(1)}s)`
+          );
           removed.push(id);
           affectedRepos.add(wt.repo_id);
           affectedProfiles.add(wt.profile_id);
@@ -109,8 +138,13 @@ export function registerWorktreeLifecycleHandlers(
           emitEvent("worktree:removed", { worktreeId: id });
         } else if (res.error.code === "dirty") {
           dirty.push(id);
+          logMain(
+            "warn",
+            "worktree",
+            `kept ${wt.path}: it has uncommitted or untracked changes`
+          );
         } else {
-          failed.push({ id, message: res.error.message });
+          fail(id, wt.path, res.error.message);
           // Git disowned this path but its directory survives: the row is a
           // fossil, so drop it and let `repo:changed` reload the tree. Not a
           // `worktree:removed` — nothing was removed, and that event ticks the
@@ -132,6 +166,14 @@ export function registerWorktreeLifecycleHandlers(
     for (const profileId of affectedProfiles) {
       emitEvent("repo:changed", { profileId });
     }
+    logMain(
+      failed.length > 0 ? "warn" : "info",
+      "worktree",
+      `removed ${removed.length} of ${req.worktreeIds.length} worktree${req.worktreeIds.length === 1 ? "" : "s"}` +
+        `${dirty.length > 0 ? `, ${dirty.length} kept for changes` : ""}` +
+        `${failed.length > 0 ? `, ${failed.length} failed` : ""}` +
+        ` (${((Date.now() - started) / 1000).toFixed(1)}s)`
+    );
     return ok({ removed, dirty, failed });
   });
 

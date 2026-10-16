@@ -351,10 +351,10 @@ describe("worktreeRemove", () => {
     const res = await worktreeRemove(disowningGit(gone, calls), root, gone);
 
     expect(res.ok).toBe(true);
-    // Git only says "not a working tree" for a path it no longer lists, so
-    // there is no metadata to prune — and `worktree prune` is repo-wide: it
-    // would also unregister worktrees on a volume that is merely unmounted.
-    expect(calls).toEqual([["worktree", "remove", gone]]);
+    // Git no longer lists the path, so there is no metadata to prune — and
+    // `worktree prune` is repo-wide: it would also unregister worktrees on a
+    // volume that is merely unmounted. Reading the list is the only call.
+    expect(calls).toEqual([["worktree", "list", "--porcelain"]]);
   });
 
   // A directory git no longer recognises may hold work from somewhere else

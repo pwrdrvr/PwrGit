@@ -6,7 +6,9 @@ import {
   type PruneScanSummary
 } from "@pwrgit/shared";
 import { confirmDialog } from "../shell/dialogs";
+import { revealLabel, revealPath } from "../shell/reveal";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { currentPlatform } from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
 import {
@@ -65,9 +67,13 @@ export function PruneWorktreesPanel({
   /**
    * Bulk removal — `useRepoTree.removeWorktrees`, already confirmed here.
    * Reusing it keeps one removal path: it streams `worktree:removed`, prunes
-   * the sidebar rows live, and owns the dirty/force retry.
+   * the sidebar rows live, and owns the dirty/force retry. It reports what
+   * became of each id, and this panel shows that inline.
    */
-  onRemove: (worktreeIds: string[]) => Promise<void>;
+  onRemove: (
+    worktreeIds: string[],
+    options?: { force?: boolean }
+  ) => Promise<RemoveWorktreesOutcome>;
   onClose: () => void;
   onBusyChange?: (busy: boolean) => void;
   onCandidateCount?: (count: number) => void;
@@ -103,6 +109,17 @@ export function PruneWorktreesPanel({
   const reclaimedRef = useRef(false);
   /** The reclaim panel is mid-`git clean`; see `busy` below. */
   const [reclaiming, setReclaiming] = useState(false);
+  /** What the last removal could not do, shown in place of the list's end. */
+  const [failures, setFailures] = useState<
+    { candidate: PruneCandidate; message: string }[]
+  >([]);
+  const [keptDirty, setKeptDirty] = useState<PruneCandidate[]>([]);
+  /** The delete in flight: which worktree, and how far its folder has gone. */
+  const [removing, setRemoving] = useState<{
+    ids: string[];
+    current: string | null;
+    itemsDeleted: number;
+  } | null>(null);
 
   const runSweep = useCallback(
     (force: boolean): void => {
@@ -115,6 +132,8 @@ export function PruneWorktreesPanel({
       setRemoved(new Set());
       removedRef.current.clear();
       setError(null);
+      setFailures([]);
+      setKeptDirty([]);
       setCancelling(false);
       setSweep({
         completedRepos: 0,
@@ -190,6 +209,16 @@ export function PruneWorktreesPanel({
     return subscribe("worktree:removed", ({ worktreeId }) => {
       removedRef.current.add(worktreeId);
       setRemoved((previous) => new Set(previous).add(worktreeId));
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribe("worktree:removeProgress", ({ worktreeId, itemsDeleted }) => {
+      setRemoving((previous) =>
+        previous === null || !previous.ids.includes(worktreeId)
+          ? previous
+          : { ...previous, current: worktreeId, itemsDeleted }
+      );
     });
   }, []);
 
@@ -271,6 +300,39 @@ export function PruneWorktreesPanel({
     );
   };
 
+  /**
+   * Run a removal and keep what it reports. `force` is only for Retry: those
+   * worktrees were already confirmed, and what is left of them is PwrGit's
+   * own half-finished delete, which Git reads as uncommitted changes.
+   */
+  const runRemoval = async (ids: string[], force: boolean): Promise<void> => {
+    setStage({ kind: "removing" });
+    setError(null);
+    setFailures([]);
+    setKeptDirty([]);
+    setRemoving({ ids, current: ids[0] ?? null, itemsDeleted: 0 });
+    try {
+      const result = await (force ? onRemove(ids, { force: true }) : onRemove(ids));
+      for (const id of result.removed) removedRef.current.add(id);
+      setRemoved((previous) => new Set([...previous, ...result.removed]));
+      setSelected(new Set());
+      const byId = new Map(swept.map((candidate) => [candidate.worktreeId, candidate]));
+      setFailures(result.failed.flatMap(({ id, message }) => {
+        const candidate = byId.get(id);
+        return candidate === undefined ? [] : [{ candidate, message }];
+      }));
+      setKeptDirty(result.keptDirty.flatMap((id) => byId.get(id) ?? []));
+      if (onContinue !== undefined && ids.every((id) => removedRef.current.has(id))) {
+        continueWithRemoved();
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRemoving(null);
+      setStage({ kind: "review" });
+    }
+  };
+
   const remove = async (): Promise<void> => {
     const picked = candidates.filter((candidate) =>
       selected.has(candidate.worktreeId)
@@ -283,23 +345,7 @@ export function PruneWorktreesPanel({
       danger: true
     });
     if (!go) return;
-    const ids = picked.map((candidate) => candidate.worktreeId);
-    setStage({ kind: "removing" });
-    try {
-      await onRemove(ids);
-      setSelected(new Set());
-      if (onContinue !== undefined) {
-        if (ids.every((id) => removedRef.current.has(id))) {
-          continueWithRemoved();
-        } else {
-          setError("Some worktrees were not removed. Review the remaining worktrees or continue without further pruning.");
-        }
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setStage({ kind: "review" });
-    }
+    await runRemoval(picked.map((candidate) => candidate.worktreeId), false);
   };
 
   const busy =
@@ -424,7 +470,33 @@ export function PruneWorktreesPanel({
                 </div><time>took {Math.max(0, Math.round((Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)) / 1000))}s</time>
               </div>
             )}
-            {error !== null && <div className="modal__error">{error}</div>}
+            {stage.kind === "removing" && removing !== null && (
+              <RemovalActivity removing={removing} candidates={swept} />
+            )}
+            {error !== null && <div className="modal__error" role="alert">{error}</div>}
+            {stage.kind === "review" && failures.length > 0 && (
+              <RemovalFailures
+                failures={failures}
+                removedCount={removedTotals.count}
+                onRetry={() => void runRemoval(
+                  failures.map(({ candidate }) => candidate.worktreeId),
+                  true
+                )}
+              />
+            )}
+            {stage.kind === "review" && keptDirty.length > 0 && (
+              <div className="prune__outcome is-kept" role="status">
+                <strong>
+                  Kept {keptDirty.length} with uncommitted changes
+                </strong>
+                <span>
+                  {keptDirty.map((c) => `${c.repoName} · ${c.branch}`).join(", ")}
+                  {" — you chose to keep "}
+                  {keptDirty.length === 1 ? "it" : "them"}. Nothing in{" "}
+                  {keptDirty.length === 1 ? "it was" : "them was"} deleted.
+                </span>
+              </div>
+            )}
             {summary !== null && stage.kind === "review" && <MaintenanceRulesApplied kind="worktrees" protectRecent={protectRecent} protectionDays={protectionDays}
               onChange={() => { if (step) onChangeRules?.(); else { setSummary(null); setStage({ kind: "idle" }); setSelected(new Set()); } }} />}
 
@@ -585,5 +657,85 @@ function PruneRow({
       <span className="prune__row-size">{candidate.sizeBytes === null ? "size unknown" : `${candidate.sizePartial === true ? "≥ " : ""}${formatBytes(candidate.sizeBytes)}`}</span>
       {tip.tooltipNode}
     </label>
+  );
+}
+
+const label = (candidate: PruneCandidate): string =>
+  `${candidate.repoName} · ${candidate.branch}`;
+
+function RemovalActivity({
+  removing,
+  candidates
+}: {
+  removing: { ids: string[]; current: string | null; itemsDeleted: number };
+  candidates: PruneCandidate[];
+}) {
+  const current = candidates.find((c) => c.worktreeId === removing.current);
+  const index = removing.current === null ? 0 : removing.ids.indexOf(removing.current);
+  return (
+    <div className="prune__activity" role="status" aria-live="polite" aria-atomic="true">
+      <span className="prune__spinner" aria-hidden="true" />
+      <div className="prune__activity-copy">
+        <strong>{current === undefined ? "Removing…" : `Removing ${label(current)}`}</strong>
+        <span>
+          {removing.itemsDeleted.toLocaleString()} files and folders deleted
+          {removing.ids.length > 1 ? ` · worktree ${Math.max(0, index) + 1} of ${removing.ids.length}` : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What a removal could not do, worktree by worktree. Main's message already
+ * names the entry that stopped the delete and what was left; the card adds the
+ * folder itself and the two ways forward. It replaces a one-line "Some
+ * worktrees were not removed", which named neither the worktree nor the reason.
+ */
+function RemovalFailures({
+  failures,
+  removedCount,
+  onRetry
+}: {
+  failures: { candidate: PruneCandidate; message: string }[];
+  removedCount: number;
+  onRetry: () => void;
+}) {
+  const platform = currentPlatform();
+  const count = failures.length;
+  return (
+    <section className="prune__outcome is-failed" role="alert">
+      <header className="prune__outcome-head">
+        <svg className="prune__outcome-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" x2="12" y1="8" y2="12" />
+          <line x1="12" x2="12.01" y1="16" y2="16" />
+        </svg>
+        <strong>
+          {count === 1 ? "1 worktree wasn’t removed" : `${count} worktrees weren’t removed`}
+        </strong>
+        {removedCount > 0 && <span>{removedCount} removed</span>}
+      </header>
+      <ul className="prune__outcome-list">
+        {failures.map(({ candidate, message }) => (
+          <li key={candidate.worktreeId}>
+            <strong>{label(candidate)}</strong>
+            <p>{message}</p>
+            <small className="selectable">{candidate.path}</small>
+            <button type="button" className="prune__ghost" onClick={() => revealPath(candidate.path)}>
+              {revealLabel(platform)}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <footer className="prune__outcome-actions">
+        <button type="button" className="prune__ghost" onClick={() => void dispatch("logs:openWindow", undefined)}>
+          View log
+        </button>
+        <button type="button" className="modal__create" onClick={onRetry}>
+          Retry
+        </button>
+      </footer>
+    </section>
   );
 }

@@ -27,7 +27,12 @@ vi.mock("../../lib/platform", async (importOriginal) => ({
 }));
 
 
+import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
+
+const outcome = (
+  partial: Partial<RemoveWorktreesOutcome> = {}
+): RemoveWorktreesOutcome => ({ removed: [], keptDirty: [], failed: [], ...partial });
 
 function candidate(
   partial: Partial<PruneCandidate> & { worktreeId: string }
@@ -115,8 +120,13 @@ afterEach(async () => {
   confirmDialog.mockReset();
 });
 
+type OnRemove = (
+  ids: string[],
+  options?: { force?: boolean }
+) => Promise<RemoveWorktreesOutcome>;
+
 async function render(
-  onRemove: (ids: string[]) => Promise<void> = async () => undefined
+  onRemove: OnRemove = async (ids) => outcome({ removed: ids })
 ): Promise<void> {
   await act(async () => {
     root.render(
@@ -153,7 +163,7 @@ describe("PruneWorktreesPanel", () => {
       candidate({ worktreeId: "recent", lastTouchedAt: "2026-09-10T00:00:00Z" }),
       candidate({ worktreeId: "unknown", activityComplete: false })
     ]) });
-    const onRemove = vi.fn().mockResolvedValue(undefined);
+    const onRemove = vi.fn(async (ids: string[]) => outcome({ removed: ids }));
     await render(onRemove);
     expect(rows()).toHaveLength(1);
     expect(container.textContent).toContain("Kept 2");
@@ -294,7 +304,7 @@ describe("PruneWorktreesPanel", () => {
       ok: true,
       value: summary([candidate({ worktreeId: "a" })])
     });
-    const onRemove = vi.fn(async () => undefined);
+    const onRemove = vi.fn(async (ids: string[]) => outcome({ removed: ids }));
     await render(onRemove);
     await act(async () => rows()[0]?.querySelector("input")?.click());
 
@@ -445,6 +455,102 @@ describe("PruneWorktreesPanel", () => {
     expect(dispatch).toHaveBeenCalledWith("prune:cancelScan", { operationId });
     // Re-create so afterEach's unmount stays valid.
     root = createRoot(container);
+  });
+});
+
+describe("PruneWorktreesPanel × removal outcome", () => {
+  const stuck =
+    "Could not delete .local/go/pkg/mod: permission denied (EACCES). 1906 items were deleted before it stopped; the rest of /w/a is still on disk and still a worktree.";
+
+  async function removeSelected(
+    onRemove: OnRemove,
+    ids = ["a", "b"]
+  ): Promise<void> {
+    dispatch.mockImplementation(async (command: string) =>
+      command === "prune:scan"
+        ? {
+            ok: true,
+            value: summary([
+              candidate({ worktreeId: "a", branch: "fix/cache" }),
+              candidate({ worktreeId: "b", branch: "feat/done" })
+            ])
+          }
+        : { ok: true, value: null }
+    );
+    await render(onRemove);
+    for (const row of rows()) {
+      const id = row.textContent?.includes("fix/cache") ? "a" : "b";
+      if (ids.includes(id)) await act(async () => row.querySelector("input")?.click());
+    }
+    await act(async () => dangerButton()?.click());
+  }
+
+  // The 2026-10-16 report: one worktree failed, and the panel said only
+  // "Some worktrees were not removed" — no which, no why, no path.
+  it("names the worktree it could not remove, why, and where it is", async () => {
+    await removeSelected(async () => {
+      handlers.get("worktree:removed")?.({ worktreeId: "b" });
+      return outcome({ removed: ["b"], failed: [{ id: "a", message: stuck }] });
+    });
+
+    const card = container.querySelector<HTMLElement>("[role='alert']");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("alpha · fix/cache");
+    expect(card?.textContent).toContain("permission denied");
+    expect(card?.textContent).toContain("/w/a");
+    expect(container.textContent).not.toContain("Some worktrees were not removed");
+    // The failed worktree is still on the list; the removed one is not.
+    expect(rows().map((row) => row.textContent)).toEqual([
+      expect.stringContaining("fix/cache")
+    ]);
+  });
+
+  it("reveals the folder that was left behind", async () => {
+    await removeSelected(async () =>
+      outcome({ failed: [{ id: "a", message: stuck }] })
+    , ["a"]);
+    await act(async () => buttonNamed("Reveal in Finder").click());
+    expect(dispatch).toHaveBeenCalledWith("shell:revealPath", { path: "/w/a" });
+  });
+
+  // The user already confirmed removing it; what is left is PwrGit's own
+  // half-finished delete, which reads as "uncommitted changes" to Git.
+  it("retries only the failed worktrees, forced", async () => {
+    const onRemove = vi.fn<OnRemove>(async (ids, options) =>
+      options?.force === true
+        ? outcome({ removed: ids })
+        : outcome({ failed: [{ id: "a", message: stuck }] })
+    );
+    await removeSelected(onRemove, ["a"]);
+    await act(async () => buttonNamed("Retry").click());
+    expect(onRemove).toHaveBeenLastCalledWith(["a"], { force: true });
+    expect(container.querySelector("[role='alert']")).toBeNull();
+  });
+
+  // Declining "Remove anyway" is the user's own choice: say what was kept,
+  // without dressing it as an error.
+  it("reports worktrees kept for their changes as a note, not an error", async () => {
+    await removeSelected(async () => outcome({ keptDirty: ["a"] }), ["a"]);
+    expect(container.querySelector("[role='alert']")).toBeNull();
+    const note = container.querySelector<HTMLElement>("[role='status'].prune__outcome");
+    expect(note?.textContent).toContain("alpha · fix/cache");
+    expect(note?.textContent).toMatch(/uncommitted changes/i);
+  });
+
+  it("shows the delete moving while it runs", async () => {
+    let finish!: (value: RemoveWorktreesOutcome) => void;
+    await removeSelected(
+      () => new Promise<RemoveWorktreesOutcome>((done) => { finish = done; }),
+      ["a"]
+    );
+    await act(async () => {
+      handlers.get("worktree:removeProgress")?.({ worktreeId: "a", itemsDeleted: 1204 });
+    });
+    const activity = container.querySelector<HTMLElement>(".prune__activity");
+    expect(activity?.textContent).toContain("alpha · fix/cache");
+    expect(activity?.textContent).toContain("1,204");
+    await act(async () => finish(outcome({ removed: ["a"] })));
+    expect(container.querySelector(".prune__activity")).toBeNull();
   });
 });
 

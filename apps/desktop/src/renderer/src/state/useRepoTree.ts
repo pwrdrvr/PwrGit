@@ -20,6 +20,25 @@ export type RemoveWorktreesOptions = {
    * trains people to click through both.
    */
   confirmed?: boolean;
+  /**
+   * Remove without the uncommitted-changes check. Only for a retry of
+   * worktrees the user already chose to remove, whose earlier attempt stopped
+   * partway — Git now reads PwrGit's own half-finished delete as changes.
+   */
+  force?: boolean;
+  /**
+   * Show failures in a notice dialog (the default). A caller that renders the
+   * outcome itself — the maintenance dialog does, inline — passes false.
+   */
+  reportFailures?: boolean;
+};
+
+/** What became of each worktree asked for; every id lands in exactly one. */
+export type RemoveWorktreesOutcome = {
+  removed: string[];
+  /** Had changes, and the user chose to keep them (or was never asked). */
+  keptDirty: string[];
+  failed: { id: string; message: string }[];
 };
 
 /**
@@ -53,7 +72,7 @@ export type UseRepoTree = {
   removeWorktrees: (
     worktreeIds: string[],
     options?: RemoveWorktreesOptions
-  ) => Promise<void>;
+  ) => Promise<RemoveWorktreesOutcome>;
   persistWorktreeOrder: (repoId: string, orderedIds: string[]) => void;
   persistRepoOrder: (orderedRepoIds: string[]) => void;
   computeRepoState: (repoId: string) => void;
@@ -299,8 +318,9 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   const removeWorktrees = useCallback(async (
     worktreeIds: string[],
     options: RemoveWorktreesOptions = {}
-  ) => {
-    if (worktreeIds.length === 0) return;
+  ): Promise<RemoveWorktreesOutcome> => {
+    const outcome: RemoveWorktreesOutcome = { removed: [], keptDirty: [], failed: [] };
+    if (worktreeIds.length === 0) return outcome;
     // Removing >1 is a bulk destructive action → confirm up front. A single
     // removal (trash icon / context menu) goes straight to the attempt and
     // only prompts if that worktree is dirty, matching the prior behaviour.
@@ -312,8 +332,9 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
         confirmLabel: `Remove ${worktreeIds.length}`,
         danger: true
       });
-      if (!go) return;
+      if (!go) return outcome;
     }
+    const report = options.reportFailures !== false;
 
     // Show the progress indicator for the whole flow (both passes); each
     // worktree:removed event ticks `done` forward.
@@ -321,17 +342,21 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     try {
       const first = await dispatch("worktree:removeMany", {
         worktreeIds,
-        force: false
+        force: options.force === true
       });
       if (!first.ok) {
-        await notifyDialog({
-          title: "Couldn't remove",
-          message: first.error.message
-        });
-        return;
+        outcome.failed = worktreeIds.map((id) => ({ id, message: first.error.message }));
+        if (report) {
+          await notifyDialog({
+            title: "Couldn't remove",
+            message: first.error.message
+          });
+        }
+        return outcome;
       }
       const { dirty } = first.value;
-      const failures = [...first.value.failed];
+      outcome.removed.push(...first.value.removed);
+      outcome.failed.push(...first.value.failed);
 
       if (dirty.length > 0) {
         const have = dirty.length === 1 ? "worktree has" : "worktrees have";
@@ -342,21 +367,34 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
           confirmLabel: "Remove anyway",
           danger: true
         });
-        if (force) {
+        if (!force) {
+          outcome.keptDirty.push(...dirty);
+        } else {
           const forced = await dispatch("worktree:removeMany", {
             worktreeIds: dirty,
             force: true
           });
-          if (forced.ok) failures.push(...forced.value.failed);
-          else
-            await notifyDialog({
-              title: "Couldn't remove",
-              message: forced.error.message
-            });
+          if (forced.ok) {
+            outcome.removed.push(...forced.value.removed);
+            outcome.failed.push(...forced.value.failed);
+            // A forced pass never reports dirty; keep the count honest anyway.
+            outcome.keptDirty.push(...forced.value.dirty);
+          } else {
+            outcome.failed.push(
+              ...dirty.map((id) => ({ id, message: forced.error.message }))
+            );
+            if (report) {
+              await notifyDialog({
+                title: "Couldn't remove",
+                message: forced.error.message
+              });
+            }
+          }
         }
       }
 
-      if (failures.length > 0) {
+      if (report && outcome.failed.length > 0) {
+        const failures = outcome.failed;
         const shown = failures
           .slice(0, 6)
           .map((f) => `• ${f.message}`)
@@ -368,6 +406,7 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
           message: `${shown}${more}`
         });
       }
+      return outcome;
     } finally {
       setRemovalProgress(null);
     }
