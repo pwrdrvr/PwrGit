@@ -334,6 +334,9 @@ there:
   macOS, `<userData>/logs` elsewhere — buffered in `src/main/logs.ts` and shown
   by Help › Logs. `src/main/process-ids.ts` puts the main, GPU, renderer and
   utility pids in that log so a pasted log names its own processes.
+  `src/main/event-loop-stalls.ts` warns `(process) main event loop blocked
+  for Nms` when main was held ≥2 s — grep for it before reading a log gap as
+  idle time.
 - `logMain` delegates to scoped `electron-log` loggers (as in PwrSnap/PwrAgnt).
   It owns console/file output and 2 MiB rotation (`main.old.log`); a file hook
   feeds the Logs window buffer. Info and above go to the terminal; debug also

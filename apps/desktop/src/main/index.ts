@@ -7,6 +7,7 @@ import {
   dialog,
   nativeImage,
   nativeTheme,
+  powerMonitor,
   protocol,
   safeStorage,
   shell,
@@ -127,6 +128,7 @@ import {
   createRendererErrorLog,
   sanitizeRendererErrorReport
 } from "./renderer-errors";
+import { watchEventLoopStalls } from "./event-loop-stalls";
 import { watchProcessIds } from "./process-ids";
 import { watchSystemShutdown } from "./system-shutdown";
 import { ensureMacKeychainAccess } from "./mac-keychain-access";
@@ -392,6 +394,13 @@ if (!gotSingleInstanceLock) {
     // processes without a trip to Activity Monitor or Task Manager.
     logMain("info", "app", `PwrGit ${app.getVersion()} starting pid=${process.pid}`);
     watchProcessIds();
+    // Started once the log file is open, so a stall during the rest of startup
+    // lands in main.log. Sleep stops the clock the heartbeat reads on some
+    // platforms and not others; pausing across it keeps a closed lid from
+    // reading as a blocked main thread.
+    const eventLoopStalls = watchEventLoopStalls();
+    powerMonitor.on("suspend", () => eventLoopStalls.pause());
+    powerMonitor.on("resume", () => eventLoopStalls.resume());
     installDevelopmentDockIcon();
     installWindowDefaults();
     bus.register("logs:read", () => ok(readLogSnapshot()));
