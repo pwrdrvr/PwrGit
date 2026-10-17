@@ -1,4 +1,4 @@
-import { err, ok, type Profile } from "@pwrgit/shared";
+import { err, ok, rootOverlapMessage, type Profile } from "@pwrgit/shared";
 import type { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
 import type { ProfileService } from "../profiles/profile-service";
@@ -59,9 +59,13 @@ export function registerRepoHandlers(
     return ok(repos);
   };
 
-  bus.register("profile:setRoots", (req) =>
-    rescanAfter(req.profileId, () => profiles.setRoots(req.profileId, req.roots))
-  );
+  bus.register("profile:setRoots", (req) => {
+    const overlap = profiles.addedRootOverlaps(req.profileId, req.roots)[0];
+    if (overlap !== undefined) {
+      return err({ kind: "validation", code: "root_overlap", message: rootOverlapMessage(overlap) });
+    }
+    return rescanAfter(req.profileId, () => profiles.setRoots(req.profileId, req.roots));
+  });
 
   bus.register("repo:setPin", (req) => {
     indexer.setRepoPinned(req.repoId, req.pinned);

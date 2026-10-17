@@ -58,6 +58,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Node.js and dependencies
+        timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@8876dbf3c524c8a765543dae3ae5b55d7b5ecfb3 # v1.6.0
         with:
           node-version: 24.x
@@ -208,7 +209,7 @@ jobs:
             apps/desktop/release-stage/dist/*.zip
             apps/desktop/release-stage/dist/*.blockmap
             apps/desktop/release-stage/dist/latest-mac.yml
-          retention-days: 30
+          retention-days: 90
 
   linux-build:
     name: Package and validate Linux (${{ matrix.arch }})
@@ -253,6 +254,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools cpio xvfb libgtk-3-0 libnss3 libgbm1 libasound2t64 libsecret-1-0 python3-gi gir1.2-gtk-3.0 hicolor-icon-theme
 
       - name: Install Node.js and dependencies
+        timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@8876dbf3c524c8a765543dae3ae5b55d7b5ecfb3 # v1.6.0
         with:
           node-version: 24.x
@@ -340,6 +342,7 @@ jobs:
       # on Windows and activates the pnpm version pinned in package.json's
       # `packageManager` field via Corepack.
       - name: Install Node.js and dependencies
+        timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@8876dbf3c524c8a765543dae3ae5b55d7b5ecfb3 # v1.6.0
         with:
           node-version: 24.x
@@ -494,7 +497,7 @@ jobs:
             apps/desktop/release-stage/dist/PwrGit.Setup*.exe
             apps/desktop/release-stage/dist/latest.yml
             apps/desktop/release-stage/dist/SHA256SUMS
-          retention-days: 7
+          retention-days: 90
 
   publish-release-assets:
     name: Create release and publish platform assets

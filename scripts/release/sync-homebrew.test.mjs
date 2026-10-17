@@ -25,8 +25,8 @@ test("dispatches the tap's main workflow with a write token and verifies publica
   expect(writes).toEqual([{ endpoint: "repos/pwrdrvr/homebrew-tap/actions/workflows/bump-pwrgit.yml/dispatches", body: { ref: "main", inputs: { version: "0.29.0" } }, token: "test-token" }]);
   expect(calls.filter((call) => !call.body).every((call) => call.token === undefined)).toBe(true);
 });
-test("reports exact credential and setup dependencies without opening PRs", async () => {
-  await expect(syncHomebrew("0.29.0", { ...source(), dispatchToken: "" })).rejects.toThrow("HOMEBREW_TAP_DISPATCH_TOKEN");
+test("reports setup dependencies and a bounded schedule wait without opening PRs", async () => {
+  await expect(syncHomebrew("0.29.0", { ...source(), dispatchToken: "", pause: async () => {}, attempts: 1 })).rejects.toThrow("actions/runs/123");
   await expect(syncHomebrew("0.29.0", { ...source({ installed: false }), dispatchToken: "test-token" })).rejects.toThrow("not installed/active");
 });
 test("refuses stale targets and reports failed tap runs after a bounded wait", async () => {
@@ -45,5 +45,5 @@ test("does not confuse earlier failed runs with this dispatch and stops waiting 
     if (endpoint.includes("/runs?")) response.workflow_runs[0].created_at = "2026-01-01T00:00:00Z";
     return response;
   };
-  await expect(syncHomebrew("0.29.0", { api: oldRun, dispatchToken: "test-token", pause: async () => {}, attempts: 2 })).rejects.toThrow("not on tap main after 20 minutes");
+  await expect(syncHomebrew("0.29.0", { api: oldRun, dispatchToken: "test-token", pause: async () => {}, attempts: 2 })).rejects.toThrow("not on tap main after 1 minutes");
 });

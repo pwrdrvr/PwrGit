@@ -57,6 +57,7 @@ describe.skipIf(process.platform === "win32")("benchmark regressions", () => {
       setInterval(() => {}, 1000);
     `;
     let processes = [];
+    const cleanupErrors = [];
     try {
       const result = await runBenchmarkCommand("/usr/bin/time", [process.platform === "darwin" ? "-l" : "-p", process.execPath, "-e", command], {
         env: { ...process.env, CI: "true" }, timeoutMs: 3000,
@@ -75,9 +76,10 @@ describe.skipIf(process.platform === "win32")("benchmark regressions", () => {
       // Retain cleanup if a regression leaves fixture processes alive.
       if (!processes.length && existsSync(identities)) processes = JSON.parse(readFileSync(identities, "utf8"));
       for (const { pid, startedAt } of processes) {
-        if (startedAt && processStartedAt(pid) === startedAt) { try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
+        if (startedAt && processStartedAt(pid) === startedAt) { try { process.kill(pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") cleanupErrors.push(error); } }
       }
       rmSync(directory, { recursive: true, force: true });
     }
+    expect(cleanupErrors).toEqual([]);
   });
 });

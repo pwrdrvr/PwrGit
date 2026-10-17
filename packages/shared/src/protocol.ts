@@ -11,6 +11,7 @@
 // graph, and rebase entries.
 
 import type { ForgeHostMap } from "./forge-remote";
+import type { ContributionIdentity, ContributionSnapshot } from "./contributions";
 import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
@@ -93,6 +94,7 @@ import type {
   RemoteResetPreview,
   RemoteResetSnapshot,
   Repo,
+  ClonedRepo,
   RepoId,
   RepoRefs,
   RemoteEndpoint,
@@ -113,6 +115,8 @@ import type {
 } from "./types";
 import type {
   CommitIdentityInspection,
+  FolderIdentityReport,
+  FolderSyncPlan,
   MachineGitIdentity
 } from "./commit-identity";
 import type { ImagePreview, ImageRevision } from "./image";
@@ -694,6 +698,12 @@ export type GeneralSettings = {
    * PwrGit", and the Settings card keeps reporting the state either way.
    */
   gitIdentityReminder: boolean;
+  /**
+   * Settings › Profiles › By folder: PwrGit keeps an `includeIf` per profile
+   * root in the global Git config. Set only by `identity:setFolderSync`,
+   * which writes the config, never by `settings:update`.
+   */
+  gitIdentityByFolder: boolean;
 };
 
 export type ExperimentalSettings = {
@@ -783,7 +793,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   branchCleanupPrProof: DEFAULT_BRANCH_CLEANUP_OPTIONS.prProof,
   maintenanceBranchMode: "review",
   branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays,
-  gitIdentityReminder: true
+  gitIdentityReminder: true,
+  gitIdentityByFolder: false
 };
 
 export const EXPERIMENTAL_DEFAULTS: ExperimentalSettings = {
@@ -828,6 +839,20 @@ export type AppSettingsPatch = {
 };
 
 export interface Commands {
+  "contribution:verify": {
+    req: { profileId: string; host: string; startDate: string; endDate: string; timezone: string };
+    res: { identity: ContributionIdentity; snapshot: ContributionSnapshot | null };
+  };
+  "contribution:read": {
+    req: { profileId: string; host: string; viewerId: string; startDate: string; endDate: string; timezone: string };
+    res: ContributionSnapshot | null;
+  };
+  "contribution:sync": {
+    req: { profileId: string; host: string; viewerId: string; startDate: string; endDate: string; timezone: string; refresh: boolean };
+    res: ContributionSnapshot;
+  };
+  "contribution:cancel": { req: Commands["contribution:read"]["req"]; res: null };
+  "contribution:clear": { req: Commands["contribution:read"]["req"]; res: null };
   "navigation:record": { req: { profileId: string; selectedWorktreeId: string | null; visits?: Record<string, number> }; res: null };
   /** Liveness probe — proves the command-bus round-trip end to end. */
   ping: { req: void; res: string };
@@ -915,6 +940,36 @@ export interface Commands {
   "identity:writeGlobal": {
     req: { name: string; email: string };
     res: MachineGitIdentity;
+  };
+  /**
+   * What Git outside PwrGit records in each profile's indexed repositories,
+   * asked of Git per repository. `profileId` narrows the answer to one
+   * profile (the profile popup); omitted, every profile (Settings).
+   */
+  "identity:folders": {
+    req: { profileId?: ProfileId };
+    res: FolderIdentityReport;
+  };
+  /** The files and lines "Match Git to each profile" would write (on) or
+   *  remove (off). Reads only. */
+  "identity:folderPlan": {
+    req: { enabled: boolean };
+    res: FolderSyncPlan;
+  };
+  /**
+   * Switch "Match Git to each profile" and apply it: write PwrGit's
+   * `includeIf` per profile root and one include file per profile, or remove
+   * them all. The answer is re-read from Git afterwards.
+   */
+  "identity:setFolderSync": {
+    req: { enabled: boolean };
+    res: FolderIdentityReport;
+  };
+  /** Unset a repository's own `user.email` (and `user.name` when its profile
+   *  sets one) from its local config, so the profile's folder identity wins. */
+  "identity:clearRepoOverride": {
+    req: { repoId: string };
+    res: FolderIdentityReport;
   };
 
   // Repos & discovery (U6)
@@ -1035,8 +1090,13 @@ export interface Commands {
       host?: ForgeHost;
       /** The forge's hostname, so a self-hosted instance clones from itself. */
       hostname?: string;
+      /** When the source is a fork: its parent or network root, kept as a
+       *  remote beside `origin` (`upstream` unless that name is taken). Main
+       *  re-asks the forge and refuses a repository the source was not forked
+       *  from. Absent or null adds nothing. */
+      upstream?: string | null;
     };
-    res: Repo;
+    res: ClonedRepo;
   };
   /** Cancel an in-flight clone and remove any checkout it only partly made. */
   "repo:cancelClone": {

@@ -5,6 +5,7 @@ import {
   aiFeatureNavChildren,
   aiProviderNavChild,
   paneScrollForRoute,
+  profilesNavChildren,
   SETTINGS_NAV_GROUPS,
   type PaneRoute
 } from "./settings-nav";
@@ -120,5 +121,46 @@ describe("paneScrollForRoute", () => {
 
   it("does nothing when the route did not move", () => {
     expect(paneScrollForRoute(route("about", null, 3), route("about", null, 3))).toBe("none");
+  });
+});
+
+describe("profilesNavChildren", () => {
+  it("lists every Profiles card, and warns on By folder when its chip does", () => {
+    expect(profilesNavChildren(null).map((child) => child.sectionId)).toEqual([
+      "git-identity",
+      "git-folders",
+      "list",
+      "hidden"
+    ]);
+    const byFolder = profilesNavChildren(null, {
+      enabled: false,
+      globalFile: "/home/rowan/.gitconfig",
+      machine: { kind: "missing", message: "x" },
+      profiles: [
+        {
+          profileId: "work",
+          name: "Work",
+          mono: "W",
+          email: "rowan@northwind.example",
+          authorName: null,
+          roots: ["/home/rowan/Work"],
+          overlaps: [],
+          includeFile: "/home/rowan/.gitconfig-pwrgit-work",
+          repos: [
+            {
+              repoId: "r",
+              name: "api",
+              path: "/home/rowan/Work/api",
+              email: "rowan@vale.example",
+              authorName: null,
+              source: "global",
+              origin: "/home/rowan/.gitconfig",
+              matches: false
+            }
+          ]
+        }
+      ]
+    })[1];
+    expect(byFolder).toMatchObject({ label: "By folder", dot: "warn", stateLabel: "By folder: 1 repo differs" });
   });
 });

@@ -3,6 +3,10 @@ import type { CloneRepository, ForgeOwner, ForkPreflight } from "@pwrgit/shared"
 import {
   canPushOriginal,
   cloneFromDefault,
+  cloneLineageSource,
+  cloneUpstream,
+  cloneUpstreamChoiceDetail,
+  cloneUpstreamChoices,
   forkCardDetail,
   forkCardPill,
   forkCardState,
@@ -88,12 +92,33 @@ describe("forkCardState", () => {
 });
 
 describe("offersCloneFrom", () => {
+  it.each([null, owners])("never offers forks for read-only Artifacts repositories with accounts %s", (accounts) => {
+    expect(offersCloneFrom({
+      source: { ...source, host: "artifacts", viewerCanPush: false },
+      owners: accounts,
+      preflight: null
+    })).toBe(false);
+  });
+
   it("offers the pair for a forge repository someone else owns", () => {
     expect(offersCloneFrom({ source, owners, preflight: null })).toBe(true);
   });
 
   it("waits for the accounts, so the pair never appears and then vanishes", () => {
-    expect(offersCloneFrom({ source, owners: null, preflight: null })).toBe(false);
+    const { viewerCanPush: _unasked, ...searchRow } = source;
+    expect(offersCloneFrom({ source: searchRow, owners: null, preflight: null })).toBe(false);
+    expect(
+      offersCloneFrom({ source: { ...source, viewerCanPush: true }, owners: null, preflight: null })
+    ).toBe(false);
+  });
+
+  it("draws the pair before the accounts land when the forge refused pushes", () => {
+    // Every account can push to its own repositories, so this one is not
+    // yours. Waiting for the accounts here only moved Clone with and Check
+    // out to down when they landed after the pick.
+    expect(
+      offersCloneFrom({ source: { ...source, viewerCanPush: false }, owners: null, preflight: null })
+    ).toBe(true);
   });
 
   it("skips a repository the signed-in user owns", () => {
@@ -189,5 +214,65 @@ describe("card copy", () => {
       "Created on GitHub first. octo-labs/sparkline is kept as upstream."
     );
     expect(originalCardDetail(false)).toBe("You can read it. Pushes will be refused.");
+  });
+});
+
+describe("upstream for a clone of a fork", () => {
+  const parent = { nameWithOwner: "octo-labs/sparkline", url: "https://github.com/octo-labs/sparkline" };
+  const root = { nameWithOwner: "acme/sparkline", url: "https://github.com/acme/sparkline" };
+  const yourFork: CloneRepository = { ...fork, parent };
+  const forkOfAFork: CloneRepository = {
+    ...fork,
+    parent: { nameWithOwner: "lumen-co/sparkline", url: "https://github.com/lumen-co/sparkline" },
+    root
+  };
+
+  it("offers nothing for a repository that is not a fork", () => {
+    expect(cloneUpstreamChoices(null)).toEqual([]);
+    expect(cloneUpstreamChoices(source)).toEqual([]);
+    expect(cloneUpstream([], true, null)).toBeNull();
+  });
+
+  it("offers the parent alone, and adds it unless the user opts out", () => {
+    const choices = cloneUpstreamChoices(yourFork);
+    expect(choices).toEqual([parent]);
+    expect(cloneUpstream(choices, true, null)).toBe("octo-labs/sparkline");
+    expect(cloneUpstream(choices, false, null)).toBeNull();
+  });
+
+  it("puts the parent before the network root, and never lists one twice", () => {
+    const choices = cloneUpstreamChoices(forkOfAFork);
+    expect(choices.map((choice) => choice.nameWithOwner)).toEqual([
+      "lumen-co/sparkline",
+      "acme/sparkline"
+    ]);
+    expect([0, 1].map(cloneUpstreamChoiceDetail)).toEqual([
+      "the repository you forked",
+      "root of the fork network"
+    ]);
+    expect(
+      cloneUpstreamChoices({ ...yourFork, root: { ...parent, nameWithOwner: "Octo-Labs/Sparkline" } })
+    ).toEqual([parent]);
+  });
+
+  it("honours a pick only while it is still one of the choices", () => {
+    const choices = cloneUpstreamChoices(forkOfAFork);
+    expect(cloneUpstream(choices, true, "ACME/sparkline")).toBe("acme/sparkline");
+    // A pick left over from another source never reaches main.
+    expect(cloneUpstream(choices, true, "octo-labs/sparkline")).toBe("lumen-co/sparkline");
+  });
+
+  it("reads lineage only from an answer that names a parent", () => {
+    // A search row has no lineage at all; that is "not asked", not "not a fork".
+    const searchRow: CloneRepository = { ...fork };
+    expect(cloneLineageSource(searchRow, null, null)).toBeNull();
+    expect(cloneLineageSource(searchRow, null, yourFork)).toBe(yourFork);
+    const preflight: ForkPreflight = {
+      source: forkOfAFork,
+      target: { owner: "lumen-co", name: "sparkline", nameWithOwner: "lumen-co/sparkline" },
+      upstreamChoices: []
+    };
+    expect(cloneLineageSource(searchRow, preflight, yourFork)).toBe(forkOfAFork);
+    expect(cloneLineageSource(yourFork, null, null)).toBe(yourFork);
   });
 });

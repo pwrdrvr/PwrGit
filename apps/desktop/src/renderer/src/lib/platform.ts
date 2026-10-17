@@ -3,7 +3,8 @@ import { localMachineNoun } from "@pwrgit/shared";
 /** Renderer platform helpers. The preload bridge is authoritative: Chromium's
  *  navigator fields can be reduced or report compatibility values. */
 export function currentPlatform(): string {
-  return typeof window === "undefined" ? "linux" : window.pwrgit.platform;
+  // A window without the bridge is a unit test rendering a component alone.
+  return typeof window === "undefined" ? "linux" : (window.pwrgit?.platform ?? "linux");
 }
 
 export function isMacPlatform(platform: string = currentPlatform()): boolean {

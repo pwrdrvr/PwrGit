@@ -4,6 +4,7 @@ import {
   forgeProductOrAssumed,
   type CloneRepository,
   type ForgeOwner,
+  type ForgeRepoRef,
   type ForkPreflight
 } from "@pwrgit/shared";
 
@@ -64,7 +65,10 @@ export function forkCardState(input: {
  * forking your own repository into your own account is something no forge
  * will do, and offering it into one of your orgs from a Clone dialog is a
  * question nobody asked. Waits for the accounts, so the pair is drawn once
- * and does not appear and then vanish under the pointer.
+ * and does not appear and then vanish under the pointer — unless the forge
+ * already said you cannot push to it. Every account can push to its own
+ * repositories, so that one is not yours, and the pair can be drawn at the
+ * pick instead of moving the sections below it when the accounts land.
  */
 export function offersCloneFrom(input: {
   source: CloneRepository | null;
@@ -73,7 +77,8 @@ export function offersCloneFrom(input: {
 }): boolean {
   const { source, owners } = input;
   if (source === null || source.localPath !== undefined) return false;
-  if (source.host === "other" || owners === null || forgeProductFor(source.host)?.capabilities.repositoryApi === false) return false;
+  if (source.host === "other" || forgeProductFor(source.host)?.capabilities.repositoryApi === false) return false;
+  if (owners === null) return source.viewerCanPush === false;
   const owner = source.owner.toLowerCase();
   if (owners.some((o) => o.kind === "user" && o.login.toLowerCase() === owner)) {
     return false;
@@ -183,4 +188,72 @@ export function originalCardDetail(canPush: boolean | undefined): string {
   if (canPush === false) return "You can read it. Pushes will be refused.";
   if (canPush === true) return "You can push here.";
   return "Clone it as it is.";
+}
+
+/**
+ * Where the dialog reads the picked repository's fork lineage from.
+ *
+ * A search row carries no `parent` (`gh search repos` has no lineage), so an
+ * absent parent there means "not asked", not "not a fork". Preflight's source
+ * and the exact-name check both read the repository itself, so either one
+ * that names a parent is the answer; the pick only counts when it does too.
+ */
+export function cloneLineageSource(
+  picked: CloneRepository | null,
+  preflight: ForkPreflight | null,
+  lookedUp: CloneRepository | null
+): CloneRepository | null {
+  for (const candidate of [preflight?.source, lookedUp, picked]) {
+    if (candidate?.parent !== undefined) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The repositories a clone of a fork can keep as `upstream`: the parent
+ * first, then the network root when that is a different repository. Empty
+ * for a source that is not a fork.
+ *
+ * Parent first, where Fork… puts the root first: there the user picked an
+ * intermediate fork to fork, and the root is the usual answer. Here they
+ * already forked that intermediate fork, which is a vote for it — and it is
+ * what `gh repo clone` adds. Drawn in
+ * design/Upstream When Cloning a Fork - UX Review.dc.html, 3b.
+ */
+export function cloneUpstreamChoices(
+  source: CloneRepository | null
+): ForgeRepoRef[] {
+  if (source?.parent === undefined) return [];
+  const choices = [source.parent];
+  const root = source.root;
+  if (
+    root !== undefined &&
+    root.nameWithOwner.toLowerCase() !== source.parent.nameWithOwner.toLowerCase()
+  ) {
+    choices.push(root);
+  }
+  return choices;
+}
+
+/** What the radio row under each choice says about it. */
+export function cloneUpstreamChoiceDetail(index: number): string {
+  return index === 0 ? "the repository you forked" : "root of the fork network";
+}
+
+/**
+ * The slug `repo:clone` is asked to keep as `upstream`, or null for none.
+ * A pick that is no longer among the choices (another source was picked)
+ * falls back to the first, rather than sending a repository this source was
+ * not forked from.
+ */
+export function cloneUpstream(
+  choices: ForgeRepoRef[],
+  keep: boolean,
+  pick: string | null
+): string | null {
+  if (!keep || choices.length === 0) return null;
+  const picked = choices.find(
+    (choice) => choice.nameWithOwner.toLowerCase() === pick?.toLowerCase()
+  );
+  return (picked ?? choices[0]!).nameWithOwner;
 }

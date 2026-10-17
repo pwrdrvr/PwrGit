@@ -1,0 +1,555 @@
+.contributions {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px 32px 48px;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font: 13px var(--font-sans);
+}
+.contributions h1 {
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  margin: 4px 0 6px;
+}
+.contributions h1:focus {
+  outline: none;
+}
+.contributions h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.contributions p {
+  margin: 6px 0;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.contributions__header,
+.contributions__plot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.contributions__eyebrow {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.contributions button,
+.contributions input,
+.contributions select {
+  font: inherit;
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  min-height: 32px;
+  padding: 6px 10px;
+}
+.contributions button {
+  cursor: pointer;
+}
+.contributions button:hover {
+  background: var(--bg-panel-hover);
+}
+.contributions button:focus-visible,
+.contributions input:focus-visible,
+.contributions select:focus-visible,
+.contributions summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.contributions button[aria-disabled="true"],
+.contributions button:disabled,
+.contributions input:disabled,
+.contributions select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.contributions button[aria-busy="true"] {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+.contributions button.contributions__primary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+.contributions .refresh-glyph {
+  flex: 0 0 auto;
+}
+.contributions__controls,
+.contributions__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 22px 0 16px;
+}
+.contributions label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.contributions select {
+  max-width: 290px;
+}
+.contributions__controls input:not([type="date"]) {
+  width: 185px;
+}
+.contributions__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.contributions__identity button {
+  margin-left: 8px;
+}
+.contributions__coverage {
+  margin: 18px 0;
+  padding: 12px 16px;
+  background: var(--bg-panel);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+}
+.contributions__coverage p {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.contributions__coverage strong {
+  color: var(--text-primary);
+}
+.contributions .contributions__error {
+  color: var(--danger-text);
+}
+.contributions__empty {
+  margin: 48px auto;
+  padding: 32px;
+  max-width: 600px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.contributions .contributions__empty button {
+  margin-top: 14px;
+}
+.contributions__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+.contributions__stats > div {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.contributions__stats span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.contributions__stats strong {
+  font: 600 30px var(--font-mono);
+}
+.contributions__stats small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.contributions__plot {
+  padding: 20px;
+  margin: 18px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.contributions__plot-header p {
+  font-size: 12px;
+}
+.contributions__exports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.contributions__chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 18px 0 4px;
+  font-family: var(--font-mono);
+}
+.contributions__chart rect {
+  cursor: pointer;
+}
+.contributions__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  padding: 0;
+  margin: 8px 0 18px;
+  list-style: none;
+}
+.contributions__legend li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.contributions__legend li > span:first-child {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.contributions summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 8px 0;
+}
+.contributions__table-scroll {
+  max-height: 360px;
+  overflow: auto;
+}
+.contributions table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.contributions caption {
+  text-align: left;
+  color: var(--text-secondary);
+  padding: 12px 0;
+}
+.contributions th,
+.contributions td {
+  text-align: right;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 9px 10px;
+}
+.contributions th:first-child,
+.contributions td:first-child {
+  text-align: left;
+}
+.contributions th {
+  font-weight: 500;
+}
+.contributions td {
+  font-family: var(--font-mono);
+}
+.contributions th button {
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 24px;
+  text-align: left;
+}
+.contributions__totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 26px;
+}
+.contributions__totals section {
+  min-width: 0;
+  max-height: 400px;
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.contributions__notice {
+  margin-top: 28px;
+  font-size: 12px;
+}
+.contributions__notice button {
+  margin-top: 12px;
+}
+/* The title-strip entry point: an icon chip like the history chevrons
+   (.history-nav__chip), quiet at rest, accent while the screen is open. */
+.contributions-nav {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  width: 28px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 12px 0 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    color 80ms ease,
+    background 80ms ease;
+}
+.contributions-nav:hover {
+  color: var(--text-primary);
+  background: var(--bg-row-active);
+}
+.contributions-nav[aria-pressed="true"] {
+  color: var(--accent);
+}
+.contributions-nav:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+@media (max-width: 900px) {
+  .contributions {
+    padding: 20px;
+  }
+  .contributions__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .contributions__plot-header {
+    align-items: start;
+    flex-direction: column;
+  }
+  .contributions__totals {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Share image dialog. The picture itself is drawn in share-image.ts with
+   literal colors, because it leaves the app; only the chrome around it
+   follows the theme. */
+.modal.contributions-share {
+  width: min(1240px, 94vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.contributions-share__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 12px 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.contributions .contributions-share__header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.contributions button.contributions-share__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: var(--text-secondary);
+}
+.contributions-share__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  min-height: 0;
+  overflow: auto;
+}
+.contributions-share__preview {
+  margin: 0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-subtle);
+}
+.contributions-share__preview figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font: 500 10.5px var(--font-mono);
+  color: var(--text-muted);
+}
+.contributions-share__preview img {
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px var(--border-default);
+}
+.contributions-share__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 18px;
+}
+.contributions .contributions-share__controls h3 {
+  margin: 0 0 8px;
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.contributions .contributions-share__controls p {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.contributions-share__heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.contributions .contributions-share__heading button {
+  min-height: 0;
+  padding: 0 0 0 10px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+}
+.contributions .contributions-share__heading button:hover {
+  background: none;
+  color: var(--accent-bright);
+}
+.contributions-share__segments {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-input);
+}
+.contributions .contributions-share__segment {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+}
+.contributions-share__segment input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.contributions-share__segment span {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.contributions-share__segment:has(input:checked) span {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.contributions-share__segment:has(input:focus-visible) span {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.contributions-share__owners {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.contributions-share__owners li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+}
+.contributions-share__owners li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+.contributions-share__owners .contributions-share__segments {
+  flex: none;
+}
+.contributions-share__owners .contributions-share__segment span {
+  height: 20px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+.contributions-share__owner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.contributions-share__owner strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 11.5px var(--font-mono);
+}
+.contributions-share__owner small {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.contributions .contributions-share__check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.contributions .contributions-share__check input {
+  min-height: 0;
+  margin: 0;
+}
+.contributions-share__footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 12px 20px;
+  border-top: 1px solid var(--border-subtle);
+}
+.contributions .contributions-share__footer p {
+  flex: 1;
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.contributions .contributions-share__footer p strong {
+  color: var(--text-secondary);
+}
+.contributions .contributions-share__footer .contributions-share__error {
+  color: var(--danger-text);
+}
+/* Announced, not shown: the Copy button's own label already says Copied. */
+.contributions-share__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (max-width: 860px) {
+  .contributions-share__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .contributions-share__preview {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+}

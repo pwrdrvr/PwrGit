@@ -41,7 +41,7 @@ export const AI_FEATURE_SECTIONS = ["availability", "default-agents", "guidance"
 /** Profiles' sections, in the order the pane reads. Git's own identity
  *  leads: it is what every profile's identity overrides, and where the launch
  *  notice sends people. */
-export const PROFILES_SECTIONS = ["git-identity", "list", "hidden"] as const;
+export const PROFILES_SECTIONS = ["git-identity", "git-folders", "list", "hidden"] as const;
 
 /**
  * Places within a page, keyed by the page that owns them.

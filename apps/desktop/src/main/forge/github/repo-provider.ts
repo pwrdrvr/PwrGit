@@ -25,10 +25,12 @@ const HOSTNAME = "github.com";
 
 /** `gh search repos` is a different command with a different vocabulary: the
  *  slug is `fullName`, there is no `sshUrl`, and there is no `parent` — the
- *  search index does not carry fork lineage. Both gaps are filled in when a
- *  row is picked and `viewRepo` reads the repository properly. */
+ *  search index says whether a row is a fork (`isFork`) but not of what. Both
+ *  gaps are filled in when a row is picked and `viewRepo` reads the repository
+ *  properly; `isFork` lets the Clone dialog draw the upstream row at the pick
+ *  instead of when that read lands. */
 export const SEARCH_JSON_FIELDS =
-  "name,fullName,description,visibility,isPrivate,updatedAt,url";
+  "name,fullName,description,visibility,isPrivate,isFork,updatedAt,url";
 
 type GhRunner = (args: string[], options?: GhRunOptions) => Promise<string>;
 
@@ -117,6 +119,7 @@ export function parseGhSearchRepoJson(
   };
   const description = text(row["description"]);
   if (description !== undefined) repository.description = description;
+  if (typeof row["isFork"] === "boolean") repository.isFork = row["isFork"];
   const updatedAt = text(row["updatedAt"]);
   if (updatedAt !== undefined) repository.updatedAt = updatedAt;
   return repository;

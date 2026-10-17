@@ -16,10 +16,12 @@
 import {
   SETTINGS_PAGE_SUBS,
   type AiFeaturesSettingsSub,
+  type FolderIdentityReport,
   type MachineGitIdentity,
   type SettingsPage
 } from "@pwrgit/shared";
 import type { AiProviderStatus, AiProviderTone } from "./ai-provider-status";
+import { folderCardChip } from "../identity/folder-view";
 
 export type SettingsNavChild = {
   label: string;
@@ -71,7 +73,10 @@ export function aiFeatureNavChildren(): SettingsNavChild[] {
  * identity of its own, so the condition stays findable after the launch
  * notice was dismissed; nothing at all while unprobed or fine.
  */
-export function profilesNavChildren(machine: MachineGitIdentity | null): SettingsNavChild[] {
+export function profilesNavChildren(
+  machine: MachineGitIdentity | null,
+  folders: FolderIdentityReport | null = null
+): SettingsNavChild[] {
   const git: SettingsNavChild = { label: "Git identity", sectionId: "git-identity" };
   if (machine !== null && machine.outside.kind !== "configured") {
     const guessed = machine.outside.kind === "guessed";
@@ -81,8 +86,17 @@ export function profilesNavChildren(machine: MachineGitIdentity | null): Setting
       ? "Git identity: Git is guessing your email"
       : "Git identity: not set outside PwrGit";
   }
+  // Warns exactly when the By folder card's chip does, in its words. Like
+  // "Git identity", a settled state carries no dot.
+  const byFolder: SettingsNavChild = { label: "By folder", sectionId: "git-folders" };
+  const chip = folderCardChip(folders);
+  if (chip.kind === "warn") {
+    byFolder.dot = "warn";
+    byFolder.stateLabel = `By folder: ${chip.label}`;
+  }
   return [
     git,
+    byFolder,
     { label: "Profile list", sectionId: "list" },
     { label: "Hidden repos", sectionId: "hidden" }
   ];

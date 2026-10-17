@@ -105,6 +105,8 @@ first.
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `Fork While Cloning - UX Review.dc.html` | Why Clone marked a repository read-only and cloned it anyway, never asking whether your fork already existed, and why Fork&hellip; on a checkout already on disk still defaulted to cloning a second copy. Then a &ldquo;Clone from&rdquo; pair (the original, or your fork) in every state the forge can answer, and Fork&hellip;'s in-place mode, whose primary button becomes Fork in place. Interactive. |
+| `Upstream When Cloning a Fork - UX Review.dc.html` | Why cloning a repository that is already your fork left its original behind (SSH and HTTPS added no `upstream`; the GitHub CLI did, so the same pick gave two different checkouts). Three placements, with an on-by-default option row recommended; that row opted out, for a fork of a fork (parent or root), with the GitHub CLI's own `upstream` reused, and when only the remote fails; and the build list. Interactive. |
+| `Clone Dialog Layout Shift - UX Review.dc.html` | Why Clone with, Check out to and the Clone button jumped 66&ndash;171&nbsp;px a second after a repository was picked: the "Clone from" pair waited on an account lookup the pick started, a search row could not say it was a fork, and preflight could switch the default to your fork and add "Fork into". Four fixes weighed (a fixed slot, rows below Check out to, holding the sections, knowing the shape at the pick) with the last recommended, drawn state by state, and a before/after table of nine measured scenarios. |
 | `Fork Tracking Repair - UX Review.dc.html` | A review of #379's tracking repair, which explained a branch left pulling from and pushing to the original only in Git's words (&ldquo;Track origin/main&rdquo;). Three ways to draw where the branch pulls from and pushes to, now and after, with 2b's Now/After strips recommended; the same dialog opened from Pull and from Remotes; the receipt; and the chooser for a checkout holding more than one fork you can push to. Interactive. |
 | `Fork Route Graphic - UX Review.dc.html` | Where else the Now/After route from Fork Tracking Repair earns its place: a survey of every surface that says where a branch pulls from and pushes to, with a verdict on each. Then the ones that ship: Fork&hellip;'s plan drawn as Now and After strips, Publish naming each remote by repository and offering Fork&hellip; before a refused push, the Remotes card's route in the healthy case too, and a one-line route under each Pull menu choice. Interactive. |
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
@@ -117,6 +119,7 @@ first.
 | `Worktree Chip Glyphs - UX Review.dc.html` | Why the worktree holder chip's `⌂` and `⑂` looked wrong: neither character is in a bundled face, so an OS fallback font drew them, and the sidebar's PR chip drew `⌂` for every worktree. Then the four ways to draw primary vs linked worktree (house plus the palette's 3a mark recommended), and where it lands: one branch, worktree, checkout and repository drawing on every surface. Written here and pushed up; every specimen is live SVG and contrived names, no captures. |
 | `Remove and Hide Repository - UX Review.dc.html` | Two ways to get a repository out of the way. Hide: the row menu with and without hint lines, the state after a hide (no confirmation; an Undo toast), and where a hidden repository is still counted. Remove: the guided review dialog &mdash; what moves to the Trash and what the remote keeps, a verdict per checkout (safe, at risk, blocked), Push first / Keep / Discard, the partial removal that keeps the main checkout, the name gate, progress and the result states &mdash; then three places to find hidden repositories (a sidebar footer list, a Settings card, an exact-name &#8984;K row) and the map of every surface that excludes them. Written here and pushed up; everything invented. Interactive. |
 | `Commit Identity and Signing - UX Review.dc.html` | Who a commit is recorded as, and whether it is signed. Why the rail's `as …` line names the profile rather than what Git will write: `author.email` and inherited `GIT_AUTHOR_*` beat PwrGit's `-c user.email`. Why "no identity" fails on Linux but makes up `user@host.local` on macOS. Then the footer as a quiet button with an identity-details popover answering three questions, a sticky launch notice for a machine with no Git identity, Settings › Profiles cards that preview every `git config` write, a commit-signing nudge built on the forge verdict PwrGit already fetches, and a state contract with open decisions. Sections 1&ndash;4 are built (pwrdrvr/PwrGit#448); the signing nudges, card and badge in section 5 are not. Interactive. |
+| `Git Identity by Folder - UX Review.dc.html` | Round 2 of commit identity: Git's identity per profile folder. What isolated-`HOME` probes showed about `includeIf "gitdir/i:…"` (an included file reports scope `global` and names itself; a `[user]` written after the include wins; a repo's own `user.email` beats it; worktrees follow their main repo). Why overlapping profile roots are refused. Then the profile popup's "Git outside PwrGit" row in six states, the Settings › Profiles › By folder card off and on, the previewed writes (turn on, remove a repo override, the profile editor's overlap refusal and sync disclosure), a live prototype, and the command contract. Built in the PR that adds it. Interactive. |
 | `README Header.dc.html` | The repository landing page — download and link chips, the composition on both GitHub surfaces, and what was and was not taken from DockDoor. Reference header for the Pwr family. |
 | `PwrGit Icon.dc.html` | App icon, size ladder, tray templates, DMG background. |
 | `support.js` | Generated `dc-runtime` bundle every `.dc.html` loads. |
@@ -128,6 +131,7 @@ first.
 | `assets/forges-before.png` | Shipped-app capture of Settings › Forges, from a Playwright scenario against contrived `gh`/`glab` stubs. |
 | `assets/branch-switch-{sidebar,browser}-{before,after}.png` | Shipped-app captures of the sidebar ref sections and the refs browser, from one Playwright scenario on a contrived repository, run against the renderer before and after the change. |
 | `assets/dirty-switch-prompt.png` | Shipped-app capture of the uncommitted-changes prompt, from the same contrived scenario. |
+| `assets/clone-layout-shift-other-fork-search.png` | Harness render, not an app capture: the real `CloneRepoDialog` built against a fake bridge with delayed forge answers, before and after, 0.3&nbsp;s and 2.6&nbsp;s after picking someone else's fork from search. Contrived names. |
 
 ### History and leftovers
 
@@ -381,6 +385,24 @@ of `tzarebczan/diskhound`), and so are the SHAs and counts in turns 1 and 2b.
 The diverged fork in **2c** and **3b** is invented: `3c1a9e0` and its two
 commits exist only in the artboard.
 
+`Upstream When Cloning a Fork - UX Review.dc.html` was written here and pushed
+up through the `claude-design` MCP, in the same change that builds what it
+draws. The project copy was verified at the same 43,238 bytes. Its styles are
+`Fork While Cloning`'s, plus the option row and remote list. Turn **1** is as
+built, turn **2** places the choice, turn **3** draws 2a in each state, **4a**
+is a live `DCLogic` prototype, and turn **5** is the build list. Its names are
+contrived (`octo-labs/sparkline`, `riverbend`, `lumen-co`).
+
+`Clone Dialog Layout Shift - UX Review.dc.html` and its one asset were written
+here and pushed up with `DesignSync` (`localPath`, so the PNG never passed
+through a tool call), in the same change that builds what it draws; the project
+copy was verified at the same 50,644 bytes. Its styles are `Upstream When
+Cloning a Fork`'s, plus frame pairs and the measurement table. Turn **1** is as
+built, turn **2** weighs four fixes, turn **3** draws 2d by state, and turn
+**4** is measured. It is static: the defect is motion, so each state is drawn as
+the pick's frame beside the answered one. Names are contrived, as in its two
+sibling artboards.
+
 `Fork While Cloning - UX Review.dc.html` was written here and pushed up through
 the `claude-design` MCP, in the same change that builds what it draws. The
 project copy was verified at the same 47,623 bytes. It answers two asks. Clone
@@ -549,6 +571,15 @@ fixtures with `GIT_CONFIG_NOSYSTEM=1`, on Git 2.56 under macOS. Its identities
 It carries no `assets/`. Card **2c** is a live `DCLogic` prototype of all ten
 identity states. Its turn 6 records decisions that are still open: enforce or
 explain, and writing global config versus KTD4.
+
+`Git Identity by Folder - UX Review.dc.html` was written here and pushed up
+on 2026-10-10 through the MCP's `write_files`, then replaced locally by the
+served copy with lines 4&ndash;6 stripped, so the repo holds the project's
+59,904 bytes (sha256 `301785192f13…`). Its CSS starts from the round-1 artboard's,
+pruned to the rules it uses. Every probe it quotes ran against an isolated
+`HOME` with `GIT_CONFIG_NOSYSTEM=1`, on Git 2.56 under macOS. Its identities
+(`rowan@vale.example`, `rowan@northwind.example`) and repositories are
+invented. It carries no `assets/`. Card **5a** is a live `DCLogic` prototype.
 
 ## Deliberately NOT copied in
 

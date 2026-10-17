@@ -20,45 +20,35 @@ winget settings --enable LocalManifestFiles
 if ($LASTEXITCODE -ne 0) { throw 'Could not enable local manifest installation' }
 winget source update --name winget
 if ($LASTEXITCODE -ne 0) { throw 'WinGet source refresh failed' }
-# For initial registration there is no previous indexed package to upgrade.
-# Once registered, test the indexed older version before installing the new one.
-if ($status.winget.version -and $status.winget.version -ne $status.version) {
-  winget install --id PwrDrvr.PwrGit --exact --source winget --version $status.winget.version --scope user --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
-  if ($LASTEXITCODE -ne 0) { throw 'Previous package is not installable from the public index; investigate propagation' }
-}
-# WinGet checks for an existing SHA-256-named installer under its temp package
-# directory before downloading. Seed that directory with the bytes just verified,
-# preserving the real manifest URL, switches, hash checks and install behavior.
-# Source: microsoft/winget-cli DownloadFlow.cpp CheckForExistingInstaller and
-# Manifest.cpp GetPathPart. Packaged clients use TEMP/WinGet; unpackaged clients
-# add defaultState. Seed both so repair/client packaging cannot cause a refetch.
-$hash = $installer.digest.Substring(7)
-foreach ($root in @((Join-Path $env:TEMP 'WinGet'), (Join-Path $env:TEMP 'WinGet/defaultState'))) {
-  $packageCache = Join-Path $root "PwrDrvr.PwrGit.$($status.version)"
-  New-Item -ItemType Directory -Path $packageCache -Force | Out-Null
-  Copy-Item -LiteralPath $download -Destination (Join-Path $packageCache $hash) -Force
-}
-$installLog = Join-Path $Directory 'winget-install.log'
-$installStarted = Get-Date
-winget install --manifest $manifest --scope user --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --verbose-logs
-$installExitCode = $LASTEXITCODE
-# --log is an installer log, not WinGet's diagnostic log. Packaged and
-# unpackaged clients use these separate diagnostic locations.
-$diagnosticRoots = @(
-  (Join-Path $env:LOCALAPPDATA 'Packages/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe/LocalState/DiagOutputDir'),
-  (Join-Path $env:TEMP 'WinGet/defaultState')
-)
-$diagnosticLogs = @(foreach ($root in $diagnosticRoots) {
-  if (Test-Path -LiteralPath $root) {
-    Get-ChildItem -LiteralPath $root -Filter 'WinGet-*.log' -File | Where-Object LastWriteTime -GE $installStarted
+# Validate production manifests, then install copies whose only URL is a
+# loopback mirror of the hash-verified Actions artifact bytes. Never let
+# WinGet fall back to public release URLs, including the previous version.
+$ready = Join-Path $Directory 'winget-loopback-ready.json'
+$mirrorScript = Join-Path $PSScriptRoot 'winget-loopback.mjs'
+$mirror = Start-Process node -ArgumentList @("`"$mirrorScript`"", 'serve', "`"$Directory`"", "`"$ready`"") -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $Directory 'winget-mirror.log') -RedirectStandardError (Join-Path $Directory 'winget-mirror-error.log')
+try {
+  $deadline = (Get-Date).AddSeconds(15)
+  while (-not (Test-Path -LiteralPath $ready)) {
+    if ($mirror.HasExited -or (Get-Date) -gt $deadline) { throw 'Verified installer mirror did not start' }
+    Start-Sleep -Milliseconds 100
   }
-})
-$diagnosticLog = $diagnosticLogs | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $diagnosticLog) { throw 'WinGet install diagnostic log is missing' }
-Copy-Item -LiteralPath $diagnosticLog.FullName -Destination $installLog -Force
-if ($installExitCode -ne 0) { throw 'WinGet install/upgrade failed' }
-if (-not (Select-String -LiteralPath $installLog -SimpleMatch 'Existing installer file hash matches. Will use existing installer.' -Quiet)) {
-  throw 'WinGet did not reuse the verified installer; inspect client cache behavior before recording successful validation'
+  if ($status.winget.version -and $status.winget.version -ne $status.version) {
+    $previous = Join-Path $Directory "manifests/p/PwrDrvr/PwrGit/$($status.winget.version)"
+    winget validate --manifest $previous
+    if ($LASTEXITCODE -ne 0) { throw 'Previous production manifest validation failed' }
+    $previousLocal = Join-Path $Directory "installation/manifests/p/PwrDrvr/PwrGit/$($status.winget.version)"
+    winget install --manifest $previousLocal --scope user --silent --accept-source-agreements --accept-package-agreements --disable-interactivity
+    if ($LASTEXITCODE -ne 0) { throw 'Previous verified package install failed' }
+  }
+  $localManifest = Join-Path $Directory "installation/manifests/p/PwrDrvr/PwrGit/$($status.version)"
+  winget validate --manifest $localManifest
+  if ($LASTEXITCODE -ne 0) { throw 'Installation-only manifest validation failed' }
+  winget install --manifest $localManifest --scope user --silent --accept-package-agreements --accept-source-agreements --disable-interactivity --verbose-logs
+  if ($LASTEXITCODE -ne 0) { throw 'WinGet install/upgrade failed' }
+} finally {
+  Stop-Process -Id $mirror.Id -ErrorAction SilentlyContinue
+  Get-Content (Join-Path $Directory 'winget-mirror.log')
+  Get-Content (Join-Path $Directory 'winget-mirror-error.log')
 }
 $entries = @(Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*' | Where-Object DisplayName -EQ PwrGit)
 if ($entries.Count -ne 1 -or $entries[0].DisplayVersion -ne $status.version -or $entries[0].Publisher -ne 'PwrDrvr LLC') {

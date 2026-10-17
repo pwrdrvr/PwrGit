@@ -330,12 +330,33 @@ approval for exactly one explicit `unsigned: true` apply. "Is it signed" comes
 from the commit's `gpgsig` header (`git log --pretty=raw`), never `%G?`, which
 reports an SSH signature as `N` without `gpg.ssh.allowedSignersFile`.
 
-`identity:writeGlobal` is the only identity config PwrGit ever writes, and only
-from the Settings dialog that previewed it. `git config --global` picks the file
-(`GIT_CONFIG_GLOBAL`, else `~/.gitconfig` if present, else the XDG file);
-`globalConfigFile` reproduces that choice for the preview. Tests isolate
+PwrGit writes identity config in exactly two places, each first from a
+Settings dialog that previewed it: `identity:writeGlobal` (`user.name` /
+`user.email`) and `identity:setFolderSync` (below). `git config --global` picks
+the file (`GIT_CONFIG_GLOBAL`, else `~/.gitconfig` if present, else the XDG
+file); `globalConfigFile` reproduces that choice for the preview. Tests isolate
 `HOME`, `XDG_CONFIG_HOME` and `GIT_CONFIG_NOSYSTEM`, or the dev machine's own
 identity leaks into every assertion.
+
+`folder-identity.ts` is Settings › Profiles › By folder: an
+`[includeIf "gitdir/i:<root>/"]` per profile root, each pointing at
+`<global dir>/.gitconfig-pwrgit-<profile id>`. That file name is the only mark
+of ownership; every other include is the user's and is only read. Three
+things are easy to undo:
+
+- **Order is the whole mechanism.** An include overrides only what comes
+  before it, and `git config --global user.email` on a file without `[user]`
+  appends one after the includes, which silently wins. So a sync removes
+  PwrGit's entries and re-appends them last, and `planIsApplied` checks the
+  order as well as the content.
+- **A folder cannot be asked.** `gitdir:` matches a repository's `.git`, so
+  `git -C <root> config` outside a repo ignores the include. The report asks
+  every indexed repository (`mapLimit`, six at a time).
+- **Once the switch is on, profile edits rewrite the includes without another
+  preview.** That is the opt-in the dialog discloses, and the profile editor
+  says so while it is on. The rewrite runs from `observeEvent("profile:changed")`
+  in `index.ts`, debounced, serialized with the switch, and skipped when the
+  config already matches. Nothing else may write these entries.
 
 ## A scan that found nothing is not proof anything was deleted
 
@@ -590,6 +611,21 @@ reason — two instances can host the same slug.
 
 `apps/desktop/src/main/forge/AGENTS.md` has the whole rule, including why a
 hostname is never evidence of which forge runs on it.
+
+## A fresh clone of a fork keeps its original through `keepForkOriginal`
+
+`repo:clone` (with `upstream`) and `repo:fork` both add the fork's original
+after the transfer, through one helper in `fork-remotes.ts`. Two rules:
+
+- **Read the remotes first.** `gh repo clone` of a fork writes `upstream`
+  itself; a bare `git remote add upstream` then failed every fork cloned with
+  the CLI. A remote already pointing at the original is kept; a different
+  repository under that name pushes the original to `upstream-2`.
+- **Main re-asks the forge before transferring.** `CloneService` refuses a
+  slug that is not the source's `parent` or `root`, so a renderer cannot
+  have a remote written at any slug. If only the remote fails, the clone is
+  still a success (`ClonedRepo.upstreamFailure`): an error would leave the
+  dialog offering a retry into the folder it just made.
 
 ## Forking a checkout in place: add `upstream` first, then re-point `origin`
 

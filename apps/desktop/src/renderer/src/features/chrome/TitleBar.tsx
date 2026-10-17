@@ -40,6 +40,8 @@ export function TitleBar({
   history,
   changeRequest,
   onRevealBranchWorktree,
+  onOpenContributions,
+  contributionsOpen = false,
   platform = currentPlatform()
 }: {
   repo: Repo | null;
@@ -54,6 +56,8 @@ export function TitleBar({
   /** Go to the worktree already holding a branch the picker could not check
    *  out. The strip has no worktree list of its own, so the owner resolves it. */
   onRevealBranchWorktree: (branch: string) => void;
+  onOpenContributions?: () => void;
+  contributionsOpen?: boolean;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -148,6 +152,35 @@ export function TitleBar({
         )}
 
         <div className="titlebar__spacer" />
+        {onOpenContributions && (
+          <button
+            type="button"
+            className="contributions-nav"
+            data-contributions-nav
+            aria-label="Contributions"
+            aria-pressed={contributionsOpen}
+            onClick={onOpenContributions}
+            {...hoverTooltip(tip, "Contributions")}
+          >
+            {/* Lucide chart-column, drawn like the history chevrons. */}
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+              <path d="M18 17V9" />
+              <path d="M13 17V5" />
+              <path d="M8 17v-3" />
+            </svg>
+          </button>
+        )}
 
         {/* Linux frameless windows get neither traffic lights nor a Windows
             controls overlay — nobody draws min/max/close but us. */}

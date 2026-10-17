@@ -62,6 +62,36 @@ The download's rejection is byte-identical to a network failure's, so
 `auto-updater.ts` remembers that *it* asked (`activeDownload.canceled`) rather
 than sniffing the error. Keep that flag the discriminator.
 
+## A newer release replaces a downloaded one
+
+A downloaded update does not end the check. Main still reads the feed, and
+when the selected track has a release newer than the held download it
+downloads that release and moves the Restart offer to it. Before this, someone
+who left the app open across two releases restarted into the older build and
+was offered the newer one straight away. So the status can go `downloaded` →
+`available` → `downloading` → `downloaded` for a higher version. The toast's
+dismissal is per version, so the newer `downloaded` raises it again.
+
+Main decides what can be installed while that runs (`supersedingDownload` in
+[auto-updater.ts](../../../../main/auto-updater.ts)). The renderer only
+follows the status:
+
+- **macOS** reports the newer build as ready only once Squirrel.Mac has staged
+  it. Until then `quitAndInstall` still installs the older build. If the newer
+  download fails or is canceled, or staging fails or times out, the older
+  offer comes back.
+- **Windows/Linux** drop the older offer as soon as the newer download starts,
+  because electron-updater deletes the older installer at that point. A
+  failure does not bring it back. electron-updater has one pending cache for
+  every track, so this holds for a download on *any* track: a beta build
+  downloaded before switching to stable is gone once a stable download
+  starts, and switching back to beta does not re-offer it. Install-on-quit
+  stays off until that download lands or fails.
+
+A held download is kept when the feed has nothing newer, when either version
+does not parse, and when the feed read fails. A deferred automatic check still
+answers `skipped`, so a click that joins it re-runs and reads the feed.
+
 ## The dev fake is the only way to see any of this
 
 Real auto-update runs in packaged builds only, so `simulateDevUpdateCheck`

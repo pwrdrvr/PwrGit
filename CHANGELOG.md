@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.38.0 - 2026-10-13
+
+- Contributions - Added local PR activity analytics for your existing GitHub account, including enabled Enterprise hosts. Explore daily, weekly, or monthly charts by organization and repository, distinguish PRs you merged from your own PRs, and drill into exact records. GitLab and GitCafe are not yet supported for Contributions.
+- Contribution history - Added authored creation, merge, and historical backlog views with adjustable dates and timezone, exact tables, and local CSV/JSON exports. Collection can be canceled and resumed; profile-scoped checkpoints and visible coverage warnings keep incomplete or inaccessible history from appearing complete.
+- Share images - Added a previewable Contributions image you can copy or save, with per-organization name masking and a totals-only option. Organization names start masked; choose what to reveal before sharing. Analytics and exports stay local, using your existing forge authentication without a new account or hosted analytics service.
+- Updates - Fixed Windows and Linux offering a downloaded update whose installer was removed by a download on another track. Switching tracks no longer restores a stale Restart offer or attempts to install the missing file on quit.
+
+## v0.37.0 - 2026-10-11
+
+- Updates - Fixed downloaded updates getting stuck on an older release. PwrGit now checks for newer releases on the selected track and replaces the pending update, so you don't need two successive restarts to catch up. On macOS, the newer Restart offer waits until the replacement is staged and ready to install.
+
+## v0.36.0 - 2026-10-11
+
+- Commit identity - Added opt-in Match Git to each profile in Settings → Profiles → By folder, so Terminal and coding-agent commits use the profile identity for repositories under its folders. Preview the exact Git configuration changes before enabling or disabling synchronization; PwrGit preserves hand-written includes.
+- Identity diagnostics - Added profile-menu and per-repository reports showing whether Git's actual identity matches the profile. Find repositories with local email overrides and review their removal before applying it; profile edits keep folder-based identity rules in sync when enabled.
+- Profiles - Prevented adding folders that overlap another profile's roots, avoiding conflicting identity rules and repositories moving between profiles. Existing overlaps are reported so you can resolve them.
+
 ## v0.35.0 - 2026-10-08
 
 - Repositories - Added Hide repository per profile, with Undo and ways to unhide from the sidebar, Settings, or search. Hidden repositories leave that profile's navigation, bulk sync, maintenance, and agent catalog without changing files on disk.
