@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forgeLabel,
+  forgeProductFor,
   forgeProductOrAssumed,
   isForgeKind,
   type CloneDestination,
@@ -214,11 +215,14 @@ export function ForkRepoDialog({
   // Only forges whose CLI is actually usable are offered — a host toggle that
   // leads straight to "install the CLI" is a dead end presented as a choice.
   const usableHosts = forges
-    .filter((status) => forgeCanAnswerAnywhere(status))
+    .filter((status) => status.capabilities.repositoryApi !== false && forgeCanAnswerAnywhere(status))
     .map((status) => status.kind);
 
   useEffect(() => {
     if (usableHosts.length === 0 || usableHosts.includes(host)) return;
+    // Keep an unsupported seed long enough to explain why this checkout
+    // cannot be forked, rather than silently switching to another product.
+    if (forgeProductFor(selectedSource?.host)?.capabilities.repositoryApi === false) return;
     setHost(usableHosts[0]!);
     // And drop a selection that belonged to the forge we just left. Before the
     // dialog could be seeded this effect had nothing to contradict — it only
@@ -253,7 +257,7 @@ export function ForkRepoDialog({
     selectedSource?.hostname ??
     (ownersHost === "other" ? null : defaultHostname(ownersHost));
   useEffect(() => {
-    if (ownersHost === "other") {
+    if (ownersHost === "other" || forgeProductFor(ownersHost)?.capabilities.repositoryApi === false) {
       setForkOwners([]);
       return;
     }
@@ -281,6 +285,10 @@ export function ForkRepoDialog({
     () => exactRepository(sourceQuery, host, forgeHosts),
     [sourceQuery, host, forgeHosts]
   );
+  const sourceHost = selectedSource?.host ?? host;
+  const queriedHost = selectedSource?.host ?? exact?.host ?? host;
+  const repositoryApiSupported = forgeProductFor(queriedHost)?.capabilities.repositoryApi !== false;
+  const unsupportedMessage = `${forgeProductOrAssumed(queriedHost).label} does not support forks in PwrGit. Clone its HTTPS Git remote instead.`;
 
   // Debounced, and only on what was typed. The catalog this replaced listed
   // every known owner's repositories when the dialog opened — one CLI round
@@ -296,6 +304,7 @@ export function ForkRepoDialog({
     // come from, and `exactRepository` then listed an `unknown`-visibility
     // duplicate of it beneath the real one.
     enabled:
+      repositoryApiSupported &&
       usableHosts.includes(host) &&
       (selectedSource === null || sourceQuery !== selectedSource.nameWithOwner)
   });
@@ -344,6 +353,13 @@ export function ForkRepoDialog({
     if (selectedSource === null) {
       setPreflight(null);
       setCheckoutPreflight(null);
+      setCheckError(null);
+      return;
+    }
+    if (!repositoryApiSupported) {
+      setPreflight(null);
+      setCheckoutPreflight(null);
+      setChecking(false);
       setCheckError(null);
       return;
     }
@@ -433,6 +449,8 @@ export function ForkRepoDialog({
     preflightHost,
     preflightHostname,
     preflightTargetName,
+    repositoryApiSupported,
+    unsupportedMessage,
     targetOwner?.login,
     profile.id,
     inPlaceMode,
@@ -454,10 +472,10 @@ export function ForkRepoDialog({
     // what may be forked into, so anything else would offer a fork that cannot
     // be created.
     const rows = rankCloneRepositories(
-      repositoriesOnHost(search.repositories, host),
+      repositoriesOnHost(search.repositories, host).filter((repository) => forgeProductFor(repository.host)?.capabilities.repositoryApi !== false),
       sourceQuery
     );
-    if (exact !== null && !rows.some((r) => r.nameWithOwner === exact.nameWithOwner)) {
+    if (exact !== null && forgeProductFor(exact.host)?.capabilities.repositoryApi !== false && !rows.some((r) => r.nameWithOwner === exact.nameWithOwner)) {
       rows.unshift({
         name: exact.nameWithOwner.slice(exact.nameWithOwner.lastIndexOf("/") + 1),
         owner: exact.nameWithOwner.slice(0, exact.nameWithOwner.lastIndexOf("/")),
@@ -493,7 +511,6 @@ export function ForkRepoDialog({
       ? forkInPlaceAction(checkoutPreflight)
       : cloneAction;
   const nameProblem = forkNameProblem(forkName, preflight);
-  const sourceHost = selectedSource?.host ?? host;
   const forgeStatus = statusFor(forges, sourceHost);
   const cliLabel = cliProtocolLabel(sourceHost);
   // Read from the forge's reported capability, not a hardcoded host name.
@@ -533,6 +550,7 @@ export function ForkRepoDialog({
   const submitInPlace = async (): Promise<void> => {
     if (
       inPlace === undefined ||
+      !repositoryApiSupported ||
       checkoutPreflight === null ||
       busy ||
       action.kind === "blocked" ||
@@ -567,6 +585,7 @@ export function ForkRepoDialog({
   };
 
   const submit = async (): Promise<void> => {
+    if (!repositoryApiSupported) return;
     if (action.kind === "reveal_existing") {
       onReveal(action.path);
       return;
@@ -628,6 +647,7 @@ export function ForkRepoDialog({
 
   const submitDisabled =
     busy ||
+    !repositoryApiSupported ||
     selectedSource === null ||
     action.kind === "blocked" ||
     (inPlaceMode
@@ -780,7 +800,7 @@ export function ForkRepoDialog({
                     catalogError === null ? "" : " clone-empty--error"
                   }`}
                 >
-                  {sourceEmptyMessage({
+                  {!repositoryApiSupported ? unsupportedMessage : sourceEmptyMessage({
                     catalogLoaded: catalog !== null,
                     catalogError,
                     status: forgeStatus,

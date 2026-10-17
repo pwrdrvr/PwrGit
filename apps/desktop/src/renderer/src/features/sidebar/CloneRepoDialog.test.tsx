@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ok, type CloneRepository, type ForkPreflight } from "@pwrgit/shared";
+import { err, forgeProduct, ok, type CloneRepository, type ForkPreflight } from "@pwrgit/shared";
 
 const dispatchMock = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/pwrgit", () => ({
@@ -97,7 +97,7 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-async function openAndPick(onReveal = vi.fn()): Promise<void> {
+async function openAndPick(onReveal = vi.fn(), query = "octo-labs/sparkline"): Promise<void> {
   await act(async () => root.render(
     <CloneRepoDialog
       profile={{
@@ -113,7 +113,7 @@ async function openAndPick(onReveal = vi.fn()): Promise<void> {
   const input = container.querySelector<HTMLInputElement>("#clone-source")!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
-      .set!.call(input, "octo-labs/sparkline");
+      .set!.call(input, query);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   // The exact-slug check is debounced 300ms.
@@ -129,6 +129,36 @@ const card = (title: string): HTMLButtonElement =>
   [...container.querySelectorAll<HTMLButtonElement>(".clone-from__card")].find(
     (b) => b.querySelector("strong")?.textContent === title
   )!;
+
+it("keeps a picked Artifacts account, offers HTTPS only and never asks a forge search/fork API", async () => {
+  mockForge(preflight()); const base = dispatchMock.getMockImplementation()!;
+  const hostname = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+  const remote = `https://${hostname}/git/default/demo.git`;
+  dispatchMock.mockImplementation((channel: string, ...args: unknown[]) => {
+    if (channel === "forge:hosts") return Promise.resolve(ok({ overrides: { [hostname]: "artifacts" } }));
+    if (channel === "repo:cloneCatalog") return Promise.resolve(ok({ owners: [], forges: ["github", "artifacts"].map((kind) => {
+      const product = forgeProduct(kind as "github" | "artifacts");
+      return { kind, cli: product.cli, installed: true, loggedIn: true, capabilities: product.capabilities,
+        hosts: [{ host: product.saasHost || hostname, enabled: true, loggedIn: true }] };
+    }) }));
+    if (channel === "repo:checkCloneSource") return Promise.resolve(err({ kind: "remote", code: "unsupported_host", message: "Clone directly with HTTPS" }));
+    return base(channel, ...args);
+  });
+  await openAndPick(vi.fn(), remote);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+  expect(container.querySelector<HTMLInputElement>("#clone-source")?.value).toBe(remote);
+  expect(container.querySelectorAll(".clone-protocol")).toHaveLength(1);
+  expect(container.querySelector(".clone-protocol")?.textContent).toContain("HTTPS");
+  expect(container.querySelector(".clone-from")).toBeNull();
+  const channels = dispatchMock.mock.calls.map(([channel]) => channel);
+  expect(channels).not.toContain("repo:searchCloneSources");
+  expect(channels).not.toContain("repo:forkTargets"); expect(channels).not.toContain("repo:forkPreflight");
+  for (const [channel, args] of dispatchMock.mock.calls) {
+    if (channel === "repo:checkCloneSource") expect(args).toMatchObject({ host: "artifacts", hostname, nameWithOwner: "default/demo" });
+  }
+  await act(async () => submit().click());
+  expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({ host: "artifacts", hostname, nameWithOwner: "default/demo", protocol: "https" }));
+});
 
 it("defaults to cloning your fork when you can't push and it already exists", async () => {
   mockForge(preflight(fork));

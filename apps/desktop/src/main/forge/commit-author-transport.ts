@@ -18,6 +18,7 @@ export class ForgeCommitAuthorIdentityTransport
     overrides: Partial<Record<ForgeKind, CommitAuthorIdentityTransport>> = {}
   ) {
     this.byKind = {
+      artifacts: overrides.artifacts ?? { fetchCommit: async () => ({}) },
       github: overrides.github ?? new GhCliCommitAuthorIdentityTransport(),
       gitlab: overrides.gitlab ?? new GlabCliCommitAuthorIdentityTransport(),
       gitcafe: overrides.gitcafe ?? { fetchCommit: async () => ({}) }

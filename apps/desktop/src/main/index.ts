@@ -48,8 +48,12 @@ import {
 import { CommandBus, type CommandContext } from "./command-bus";
 import { registerClipboardHandlers } from "./clipboard-handlers";
 import { registerDialogHandlers } from "./dialog-handlers";
+import { ArtifactsCredentials } from "./forge/artifacts/credentials";
+import { createArtifactsGitAuthentication } from "./forge/artifacts/git-auth";
+import { registerArtifactsAccountHandlers, registerArtifactsCredentialHandlers } from "./forge/artifacts/handlers";
+import { artifactsWrangler, wranglerClient } from "./forge/artifacts/wrangler";
 import { registerGitRuntimeHandlers } from "./git/runtime-status";
-import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit } from "./git/dugite";
+import { configureBundledGit, configureBundledGitConfig, configureGitAuthentication, execGit, useInstalledGit } from "./git/dugite";
 import { openExternalUrlFromMenu } from "./external-links";
 import { registerBranchHandlers } from "./git/branch-handlers";
 import { registerBulkSyncHandlers } from "./git/bulk-sync-handlers";
@@ -574,9 +578,34 @@ if (!gotSingleInstanceLock) {
     // cover every host `overrides()` can resolve — otherwise the probe never
     // reports a host the dialogs can name, and the forge-wide fallback answers
     // in its place.
+    const artifactsCredentials = new ArtifactsCredentials(
+      join(app.getPath("userData"), "artifacts-credentials.enc"), safeStorage
+    );
+    const artifactsAccounts = fixtureServices?.artifacts ?? artifactsWrangler;
+    configureGitAuthentication(createArtifactsGitAuthentication(
+      artifactsCredentials, execGit, () => forgeHosts.overrides(), async (remote, scope) => {
+        const hostname = new URL(remote).hostname;
+        if (!forgeHosts.isEnabled(hostname).enabled) return err({ kind: "remote", code: "forge_host_off", message: "Enable this Cloudflare account in Settings → Forges before using it." });
+        if (!(await artifactsAccounts.hasAccount(hostname))) return ok(null);
+        try { return ok(await artifactsAccounts.token(remote, scope)); }
+        catch (cause) { return err({ kind: "remote", code: "artifacts_token_failed", message: wranglerClient.errorMessage(cause) }); }
+      }
+    ));
     const forgeStatus =
       fixtureServices?.status ??
-      new ForgeStatusService({ hosts: () => forgeHosts.statusTargets() });
+      new ForgeStatusService({
+        hosts: () => forgeHosts.statusTargets(),
+        repoTokenAvailable: async (host) => artifactsCredentials.hasToken(host) || await artifactsAccounts.hasAccount(host)
+      });
+    registerArtifactsCredentialHandlers(bus, artifactsCredentials, (hostname) => {
+      const existing = settings.get().forges?.hosts ?? {};
+      settings.update({ forges: { hosts: { ...existing, [hostname]: { ...existing[hostname], kind: "artifacts", enabled: true } } } });
+      emitEvent("settings:changed", settingsSnapshot(settings, diagnosticsOutputRoot, appVersion));
+    }, async () => { await forgeStatus.list({ force: true }); });
+    registerArtifactsAccountHandlers(bus, artifactsAccounts,
+      (hostname) => forgeHosts.kindFor(hostname) !== null && forgeHosts.isEnabled(hostname).enabled,
+      async () => { await forgeHostDirectory.refresh({ force: true }); await forgeStatus.list({ force: true }); }
+    );
     // Primed in the background: blocking boot on two CLI spawns would delay the
     // first window for a feature that degrades to the two SaaS hosts meanwhile.
     // The first probe can therefore run before this lands; `reprobe` below is
