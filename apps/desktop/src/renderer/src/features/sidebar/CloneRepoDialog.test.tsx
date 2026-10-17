@@ -162,12 +162,19 @@ it("keeps the original as the default when no fork exists, and forks on request"
   expect(card("The original").getAttribute("aria-pressed")).toBe("true");
   expect(card("Your fork").textContent).toContain("will be created");
   expect(submit().textContent).toBe("Clone repository");
-  // The account row belongs to the fork, so it waits for it to be chosen.
-  expect(container.querySelector(".clone-from__into")).toBeNull();
+  // The account row belongs to the fork, so it waits for it to be chosen —
+  // hidden, but holding its line, so a switch to the fork moves nothing.
+  const into = (): HTMLElement => container.querySelector(".clone-from__into")!;
+  expect(into().classList.contains("is-held")).toBe(true);
+  expect(into().getAttribute("aria-hidden")).toBe("true");
+  expect(into().hasAttribute("inert")).toBe(true);
 
   await act(async () => card("Your fork").click());
   expect(submit().textContent).toBe("Fork & clone");
-  expect(container.querySelector(".clone-from__into")?.textContent).toContain("lumen-co");
+  expect(into().classList.contains("is-held")).toBe(false);
+  expect(into().hasAttribute("aria-hidden")).toBe(false);
+  expect(into().hasAttribute("inert")).toBe(false);
+  expect(into().textContent).toContain("lumen-co");
 
   await act(async () => card("The original").click());
   await act(async () => submit().click());
@@ -365,6 +372,136 @@ it("reads the lineage once more for a search row, and waits for it before clonin
   expect(dispatchMock).toHaveBeenCalledWith("repo:clone", expect.objectContaining({
     upstream: "octo-labs/sparkline"
   }));
+});
+
+/** The search row `fork` comes back as, with the exact-name check refused so
+ *  the search row is the one picked; the lineage lookup waits for `lookup`. */
+function mockSearchPick(row: CloneRepository): { lookups: () => number; answer: (value: unknown) => void } {
+  mockForge(preflight());
+  let lookup: (value: unknown) => void = () => undefined;
+  let checks = 0;
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) => {
+    if (channel === "repo:checkCloneSource") {
+      return checks++ === 0
+        ? Promise.resolve({ ok: false, error: { kind: "remote", code: "repository_not_found", message: "not found" } })
+        : new Promise((resolve) => { lookup = resolve; });
+    }
+    if (channel === "repo:searchCloneSources") return Promise.resolve(ok([row]));
+    if (channel === "repo:forkTargets") {
+      return Promise.resolve(ok([{ login: "riverbend", kind: "user", host: "github" }]));
+    }
+    return base(channel, ...rest);
+  })(dispatchMock.getMockImplementation()!));
+  return { lookups: () => checks - 1, answer: (value) => lookup(value) };
+}
+
+it("draws the upstream row at the pick when the search row says it is a fork", async () => {
+  // Inserting it when the lineage landed pushed Clone with and Check out to
+  // down 66px about a second after the pick. Now the answer fills it in.
+  const search = mockSearchPick({ ...fork, isFork: true });
+  await openAndPick();
+
+  const row = container.querySelector(".fork-option");
+  expect(row?.textContent).toContain("Add upstream → checking…");
+  expect(upstreamOption()?.checked).toBe(true);
+  // Still not known: Clone waits rather than sending no upstream.
+  expect(submit().disabled).toBe(true);
+
+  await act(async () => search.answer(ok(yourFork)));
+  expect(container.querySelector(".fork-option")).toBe(row);
+  expect(row?.textContent).toContain("Add upstream → octo-labs/sparkline");
+  expect(row?.querySelector(".is-pending")).toBeNull();
+  expect(submit().disabled).toBe(false);
+});
+
+it("asks nothing more about a search row that says it is not a fork", async () => {
+  const search = mockSearchPick({ ...fork, isFork: false });
+  await openAndPick();
+
+  expect(search.lookups()).toBe(0);
+  expect(upstreamOption()).toBeNull();
+  expect(submit().disabled).toBe(false);
+});
+
+it("asks for your accounts while you type, so the pair is drawn with the pick", async () => {
+  mockForge(preflight());
+  await act(async () => root.render(
+    <CloneRepoDialog
+      profile={{
+        id: "p", name: "Test", email: "test@example.com", mono: "T",
+        roots: [], onboardingCompleted: true, showInMenu: true
+      }}
+      onCloned={() => undefined}
+      onReveal={() => undefined}
+      onClose={() => undefined}
+    />
+  ));
+  const targets = () => dispatchMock.mock.calls.filter(([channel]) => channel === "repo:forkTargets");
+  // Never on open.
+  expect(targets()).toHaveLength(0);
+
+  const input = container.querySelector<HTMLInputElement>("#clone-source")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
+      .set!.call(input, "octo-labs/sparkline");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
+  expect(targets()).toEqual([["repo:forkTargets", { host: "github", hostname: "github.com" }]]);
+
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>(".clone-source-row")!.click();
+  });
+  // The pick reuses that answer: the pair is there in the same frame, and the
+  // forge was not asked again.
+  expect(container.querySelector(".clone-from")).not.toBeNull();
+  expect(targets()).toHaveLength(1);
+});
+
+it("keeps an accounts lookup in flight when the query is edited away and back", async () => {
+  mockForge(preflight());
+  let answer!: (value: unknown) => void;
+  dispatchMock.mockImplementation(((base) => (channel: string, ...rest: unknown[]) =>
+    channel === "repo:forkTargets"
+      ? new Promise((resolve) => { answer = resolve; })
+      : base(channel, ...rest)
+  )(dispatchMock.getMockImplementation()!));
+  await act(async () => root.render(
+    <CloneRepoDialog
+      profile={{
+        id: "p", name: "Test", email: "test@example.com", mono: "T",
+        roots: [], onboardingCompleted: true, showInMenu: true
+      }}
+      onCloned={() => undefined}
+      onReveal={() => undefined}
+      onClose={() => undefined}
+    />
+  ));
+  const input = container.querySelector<HTMLInputElement>("#clone-source")!;
+  const type = async (value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!
+        .set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
+  };
+  const targets = () => dispatchMock.mock.calls.filter(([channel]) => channel === "repo:forkTargets");
+
+  await type("octo-labs/sparkline");
+  await type("");
+  await type("octo-labs/sparkline");
+  expect(targets()).toHaveLength(1);
+
+  // The answer that lands after the edits still counts for the pick.
+  await act(async () => answer(ok([
+    { login: "riverbend", kind: "user", host: "github" }
+  ])));
+  await act(async () => {
+    container.querySelector<HTMLButtonElement>(".clone-source-row")!.click();
+  });
+  expect(container.querySelector(".clone-from")).not.toBeNull();
+  expect(targets()).toHaveLength(1);
 });
 
 it("takes the exact-name check as the answer, and asks nothing more", async () => {

@@ -97,7 +97,20 @@ describe("offersCloneFrom", () => {
   });
 
   it("waits for the accounts, so the pair never appears and then vanishes", () => {
-    expect(offersCloneFrom({ source, owners: null, preflight: null })).toBe(false);
+    const { viewerCanPush: _unasked, ...searchRow } = source;
+    expect(offersCloneFrom({ source: searchRow, owners: null, preflight: null })).toBe(false);
+    expect(
+      offersCloneFrom({ source: { ...source, viewerCanPush: true }, owners: null, preflight: null })
+    ).toBe(false);
+  });
+
+  it("draws the pair before the accounts land when the forge refused pushes", () => {
+    // Every account can push to its own repositories, so this one is not
+    // yours. Waiting for the accounts here only moved Clone with and Check
+    // out to down when they landed after the pick.
+    expect(
+      offersCloneFrom({ source: { ...source, viewerCanPush: false }, owners: null, preflight: null })
+    ).toBe(true);
   });
 
   it("skips a repository the signed-in user owns", () => {

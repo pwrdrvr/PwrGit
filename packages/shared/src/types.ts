@@ -1342,6 +1342,11 @@ export type CloneRepository = {
   viewerCanPush?: boolean;
   /** Immediate parent when this repository is a fork; absent on a source. */
   parent?: ForgeRepoRef;
+  /** Whether the forge says this repository is a fork, on a row that cannot
+   *  name its `parent` — a GitHub search row. It tells the Clone dialog what
+   *  shape the pick will have before the lineage arrives. Absent is "not
+   *  asked", never `false`. */
+  isFork?: boolean;
   /** Fork-network root, when it differs from `parent`. */
   root?: ForgeRepoRef;
   sshUrl: string;
