@@ -7,6 +7,7 @@ vi.mock("electron", () => ({
 // The bus logs every failed Result; these tests fail commands on purpose.
 vi.mock("../logs", () => ({ logMain: vi.fn() }));
 
+import { ChatGptAuth } from "./chatgpt-auth";
 import { CommandBus } from "../command-bus";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
@@ -70,13 +71,15 @@ function fixture() {
   } satisfies Deps;
   const onChanged = vi.fn<(snapshot: AiProviderSettingsSnapshot) => void>();
   const bus = new CommandBus();
+  const chatGpt = new ChatGptAuth({ hostId: () => "urn:uuid:fixture", read: (id) => id === work.id ? { clientId: "oaiapp_fixture", subject: "fixture", label: "Fixture", welcomed: true, credential: { clientId: "oaiapp_fixture", subject: "fixture", label: "Fixture", accessToken: "access-secret-fixture", refreshToken: "refresh-secret-fixture", idToken: "id-secret-fixture", scopes: ["chatgpt.tokens.use.direct"], expiresAt: Date.now() + 3600000 } } : undefined, write: () => {} }, async () => {});
   registerAiProviderHandlers(bus, {
+    chatGpt,
     service: new AiProviderService(deps),
     store,
     profiles,
     onChanged
   });
-  return { bus, db, deps, onChanged, store, work };
+  return { bus, db, deps, onChanged, store, work, chatGpt };
 }
 
 describe("aiProviders handlers", () => {
@@ -230,4 +233,18 @@ describe("aiProviders handlers", () => {
       error: { code: "codex_unavailable" }
     });
   });
+});
+
+it("exposes ChatGPT labels and booleans only; never returns exception diagnostics or starts OAuth on read", async () => {
+  const { bus, work, chatGpt } = fixture();
+  const login = vi.spyOn(chatGpt, "signIn");
+  const result = await bus.dispatch("aiProviders:chatGptStatus", { profileId: work.id });
+  expect(result).toEqual({ ok: true, value: { connected: true, planUsage: true, label: "Fixture", welcome: false } });
+  expect(JSON.stringify(result)).not.toMatch(/secret-fixture|clientId|subject|idToken|accessToken|refreshToken/);
+  expect(login).not.toHaveBeenCalled();
+  login.mockRejectedValue(new Error("https://auth.openai.com? id_token_hint=id-secret-fixture access-secret-fixture"));
+  const failure = await bus.dispatch("aiProviders:chatGptSignIn", { profileId: work.id });
+  expect(failure.ok).toBe(false);
+  expect(JSON.stringify(failure)).not.toMatch(/secret-fixture|id_token_hint|cause/);
+  expect(await bus.dispatch("aiProviders:chatGptSignIn", { profileId: "ghost" })).toMatchObject({ ok: false, error: { code: "unknown_profile" } });
 });
