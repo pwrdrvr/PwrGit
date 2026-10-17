@@ -1,6 +1,13 @@
 import { IterableQueueMapperSimple } from "@shutterstock/p-map-iterable";
 
 /**
+ * The streaming mapper itself, for a caller whose input is an async source
+ * rather than a list (`delete-tree.ts`). Re-exported from here so this module
+ * stays the app's one door to the dependency.
+ */
+export { IterableMapper } from "@shutterstock/p-map-iterable";
+
+/**
  * Run `fn` over `items` with bounded concurrency + backpressure via
  * @shutterstock/p-map-iterable (the parallelism control the sibling apps use),
  * so a large fan-out (e.g. 156 worktrees × git calls) never spawns an
