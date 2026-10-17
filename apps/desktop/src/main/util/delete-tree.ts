@@ -1,12 +1,11 @@
+import { IterableMapper } from "@shutterstock/p-map-iterable";
 import * as FSP from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { IterableMapper } from "./map-limit";
 import { delay } from "./timing";
 
 /**
  * Delete a directory tree one entry at a time, four at once, without ever
- * blocking the main process — ported from DiskHound's `permanentlyDeleteOnDisk`, on the same
- * p-map-iterable mapper (through `map-limit.ts`).
+ * blocking the main process — ported from DiskHound's `permanentlyDeleteOnDisk`.
  *
  * Why not `rm -r`: `fs.rmSync` blocks the event loop for the whole walk, and
  * with `maxRetries` it also *sleeps* on the main thread between attempts — the
