@@ -7,6 +7,7 @@ import {
   type CloneProgress,
   type CloneProtocol,
   type CloneRepository,
+  type ClonedRepo,
   type ForgeHost,
   type ForgeKind,
   type ForgeOwner,
@@ -53,6 +54,10 @@ import {
 import {
   canPushOriginal,
   cloneFromDefault,
+  cloneLineageSource,
+  cloneUpstream,
+  cloneUpstreamChoiceDetail,
+  cloneUpstreamChoices,
   forkCardDetail,
   forkCardPill,
   forkCardState,
@@ -133,8 +138,21 @@ const CLONE_PROGRESS_LABELS: Record<CloneProgress["phase"], string> = {
   receiving: "Receiving objects",
   resolving: "Resolving deltas",
   checking_out: "Checking out files",
+  adding_upstream: "Adding upstream remote",
   indexing: "Adding repository to PwrGit"
 };
+
+/** One forge instance's accounts, as a cache key. The lookup the typing
+ *  starts and the one the pick needs must spell it identically, or the pick
+ *  asks again and its answer lands after the pick. */
+function ownersInstanceKey(host: ForgeKind, hostname: string | null): string {
+  return `${host}|${hostname ?? ""}`;
+}
+
+/** One forge repository, as a string an effect can be keyed on. */
+function forgeRepoKey(repository: CloneRepository): string {
+  return `${repository.host}|${repository.hostname}|${repository.nameWithOwner}`;
+}
 
 export function CloneRepoDialog({
   profile,
@@ -178,6 +196,10 @@ export function CloneRepoDialog({
     string | null
   >(null);
   const [busy, setBusy] = useState(false);
+  /** Cloned, but the fork's original could not be added as a remote. The
+   *  checkout exists, so the button shows it instead of offering a retry
+   *  that would fail on the folder it just made. */
+  const [clonedRepo, setClonedRepo] = useState<ClonedRepo | null>(null);
   const [canceling, setCanceling] = useState(false);
   // Typed as the fork's progress, which is a superset: when "Clone from" is
   // your fork the same panel follows `repo:fork`, whose phases include every
@@ -385,7 +407,7 @@ export function CloneRepoDialog({
     Record<string, ForgeOwner[] | "failed">
   >({});
   const ownersKey =
-    forkOwnersHost === null ? null : `${forkOwnersHost}|${forkOwnersHostname ?? ""}`;
+    forkOwnersHost === null ? null : ownersInstanceKey(forkOwnersHost, forkOwnersHostname);
   const ownersAnswer = ownersKey === null ? undefined : ownersByInstance[ownersKey];
   /** Null while loading — the pair waits for it, so it is drawn once rather
    *  than appearing and then vanishing for a repository the user owns. */
@@ -397,26 +419,58 @@ export function CloneRepoDialog({
   /** The user's own choice; null follows `cloneFromDefault`. */
   const [cloneFromPick, setCloneFromPick] = useState<CloneFrom | null>(null);
 
-  const ownersKnown = ownersAnswer !== undefined;
+  // Asked once the box is asking that forge anything, not when a row is
+  // picked. Whether the pick is yours decides whether the pair is drawn, and
+  // an answer that landed after the pick pushed Clone with and Check out to
+  // ~100px down under a user who had already moved on to them. Still one call
+  // per instance for the dialog's life, and still never on open.
+  const queryHost: ForgeKind | null =
+    localSourcePath !== null || sourceQuery.trim() === ""
+      ? null
+      : exactHost === null
+        ? host
+        : isForgeKind(exactHost)
+          ? exactHost
+          : null;
+  const queryHostname =
+    queryHost === null ? null : (exactHostname ?? defaultHostname(queryHost));
+  const ownersTarget: { host: ForgeKind; hostname: string | null; key: string } | null =
+    forkOwnersHost !== null && ownersKey !== null
+      ? { host: forkOwnersHost, hostname: forkOwnersHostname, key: ownersKey }
+      : queryHost !== null &&
+          queryHostname !== null &&
+          catalog !== null &&
+          forgeCanAnswerDialog(statusFor(catalog.forges, queryHost), queryHostname)
+        ? { host: queryHost, hostname: queryHostname, key: ownersInstanceKey(queryHost, queryHostname) }
+        : null;
+  const ownersTargetKnown =
+    ownersTarget !== null && ownersByInstance[ownersTarget.key] !== undefined;
+  // Keyed on the instance alone, so a lookup the typing started is the one
+  // the pick waits for rather than a second call for the same answer.
+  const ownersTargetPicked = ownersTarget !== null && ownersTarget.key === ownersKey;
+  /** Instances asked and not yet answered. An answer is stored under its own
+   *  key, so editing the query away and back keeps it rather than asking the
+   *  forge a second time and making the pick wait on that. */
+  const ownersInFlight = useRef(new Set<string>());
   useEffect(() => {
-    if (forkOwnersHost === null || ownersKey === null || ownersKnown) {
-      return undefined;
-    }
-    let active = true;
-    void dispatch("repo:forkTargets", {
-      host: forkOwnersHost,
-      ...(forkOwnersHostname === null ? {} : { hostname: forkOwnersHostname })
-    }).then((result) => {
-      if (!active) return;
-      setOwnersByInstance((current) => ({
-        ...current,
-        [ownersKey]: result.ok ? result.value : "failed"
-      }));
-    });
-    return () => {
-      active = false;
-    };
-  }, [ownersKey, ownersKnown]);
+    if (ownersTarget === null || ownersTargetKnown) return undefined;
+    const { key, host: targetHost, hostname: targetHostname } = ownersTarget;
+    if (ownersInFlight.current.has(key)) return undefined;
+    const timeout = window.setTimeout(() => {
+      ownersInFlight.current.add(key);
+      void dispatch("repo:forkTargets", {
+        host: targetHost,
+        ...(targetHostname === null ? {} : { hostname: targetHostname })
+      }).then((result) => {
+        ownersInFlight.current.delete(key);
+        setOwnersByInstance((current) => ({
+          ...current,
+          [key]: result.ok ? result.value : "failed"
+        }));
+      });
+    }, ownersTargetPicked ? 0 : 300);
+    return () => window.clearTimeout(timeout);
+  }, [ownersTarget?.key, ownersTargetKnown]);
 
   const forkTargetList = useMemo(
     () => (forkOwners === null ? null : forkTargets(forkOwners, forgeSource)),
@@ -442,10 +496,7 @@ export function CloneRepoDialog({
 
   // Keyed on strings, for the reason ForkRepoDialog's preflight is: the
   // source object is replaced by every pick, the slug it names is not.
-  const forkSourceKey =
-    forgeSource === null
-      ? null
-      : `${forgeSource.host}|${forgeSource.hostname}|${forgeSource.nameWithOwner}`;
+  const forkSourceKey = forgeSource === null ? null : forgeRepoKey(forgeSource);
   const forkTargetLogin = forkTarget?.login ?? null;
   const forkOwnersLoaded = forkOwners !== null;
   useEffect(() => {
@@ -494,6 +545,83 @@ export function CloneRepoDialog({
   const forking = cloneFrom === "fork";
   const forkStep = forkAction(forkPreflight);
   const forkUpstream = defaultUpstream(forkPreflight);
+
+  // ── Upstream, when the picked repository is itself a fork ───────────────
+  // Drawn in design/Upstream When Cloning a Fork - UX Review.dc.html, 2a and
+  // 3. A search row carries no lineage. The exact-name check and preflight
+  // both read the repository itself, and either answers; your own fork gets
+  // no preflight when there is no other account to fork into, so it is read
+  // once more for exactly that case — never per keystroke.
+  const [lineageAnswer, setLineageAnswer] = useState<{
+    key: string;
+    repository: CloneRepository | null;
+  } | null>(null);
+  const lineageAnswered = lineageAnswer !== null && lineageAnswer.key === forkSourceKey;
+  const pickNamesParent = forgeSource?.parent !== undefined;
+  // A GitHub search row says whether it is a fork, not of what. That is
+  // enough to draw the upstream row at the pick and fill in its target when
+  // the lineage lands, instead of inserting the row ~1s later; and a row that
+  // says it is not a fork needs no lookup at all.
+  const pickSaysFork = pickNamesParent || forgeSource?.isFork === true;
+  const pickSaysNotFork = !pickNamesParent && forgeSource?.isFork === false;
+  // Preflight about the repository picked now, never one left from the last pick.
+  const pickPreflight =
+    forkPreflight !== null &&
+    forgeSource !== null &&
+    forkPreflight.source.nameWithOwner.toLowerCase() ===
+      forgeSource.nameWithOwner.toLowerCase()
+      ? forkPreflight
+      : null;
+  const preflightWillAnswer =
+    forkOwners === null ||
+    (forkTargetLogin !== null && ownersAnswer !== "failed" && forkCheckError === null);
+  useEffect(() => {
+    if (
+      forgeSource === null ||
+      forkSourceKey === null ||
+      pickNamesParent ||
+      pickSaysNotFork ||
+      lineageAnswered ||
+      preflightWillAnswer
+    ) {
+      return undefined;
+    }
+    const key = forkSourceKey;
+    let active = true;
+    void dispatch("repo:checkCloneSource", {
+      profileId: profile.id,
+      nameWithOwner: forgeSource.nameWithOwner,
+      host: forgeSource.host,
+      hostname: forgeSource.hostname
+    }).then((result) => {
+      // A failure settles it too: the dialog stops waiting and adds nothing.
+      if (active) setLineageAnswer({ key, repository: result.ok ? result.value : null });
+    });
+    return () => {
+      active = false;
+    };
+  }, [forkSourceKey, pickNamesParent, pickSaysNotFork, lineageAnswered, preflightWillAnswer, profile.id]);
+  const [keepUpstream, setKeepUpstream] = useState(true);
+  const [upstreamPick, setUpstreamPick] = useState<string | null>(null);
+  const lineageSource = cloneLineageSource(
+    forgeSource,
+    pickPreflight,
+    lineageAnswered ? lineageAnswer.repository : null
+  );
+  /** Whether the dialog knows if the pick is a fork. Clone waits for it, or a
+   *  quick Enter would clone a fork without the upstream that defaults on. */
+  const lineageKnown =
+    forgeSource === null ||
+    lineageSource !== null ||
+    pickSaysNotFork ||
+    lineageAnswered ||
+    pickPreflight !== null;
+  // The fork card adds the original itself, and a reveal clones nothing.
+  const upstreamChoices = forking ? [] : cloneUpstreamChoices(lineageSource);
+  /** A fork whose parent is not known yet: the row is drawn, waiting for its
+   *  target, so the answer lands inside it instead of above Clone with. */
+  const upstreamPending = !forking && pickSaysFork && !lineageKnown;
+  const cloneUpstreamSlug = cloneUpstream(upstreamChoices, keepUpstream, upstreamPick);
   /** What `origin` will be: the picked repository, or the fork. Null while
    *  the fork's name is still being looked up. Every surface that names the
    *  new checkout reads this — the protocol cards, "Will create", and the
@@ -559,8 +687,14 @@ export function CloneRepoDialog({
       void checked.then((result) => {
         if (!active) return;
         setChecking(false);
-        if (result.ok) setCheckedRepository(result.value);
-        else if (FORGE_UNASKED_CODES.has(result.error.code)) {
+        if (result.ok) {
+          setCheckedRepository(result.value);
+          // The forge's own read of the repository: whether it is a fork is
+          // answered, and the lineage lookup need not ask again.
+          if (result.value.localPath === undefined) {
+            setLineageAnswer({ key: forgeRepoKey(result.value), repository: result.value });
+          }
+        } else if (FORGE_UNASKED_CODES.has(result.error.code)) {
           // Built from the already-parsed `ExactRepository`, never re-parsed
           // from the query: `chooseRepository` rewrites `sourceQuery` to the
           // bare slug, and a slug has lost which instance it came from — a
@@ -645,6 +779,7 @@ export function CloneRepoDialog({
   const chooseRepository = (repository: CloneRepository): void => {
     setSelectedRepository(repository);
     setCloneFromPick(null);
+    setUpstreamPick(null);
     setPicked({
       host: repository.host,
       hostname: repository.hostname,
@@ -659,7 +794,12 @@ export function CloneRepoDialog({
     selectedDestination ?? destinationResults[destinationSelection] ?? null;
 
   const submit = async (destination = activeDestination): Promise<void> => {
+    if (clonedRepo !== null) {
+      onCloned(clonedRepo);
+      return;
+    }
     if (selectedRepository === null || busy) return;
+    if (!forking && !lineageKnown) return;
     if (revealing && forkStep.kind === "reveal_existing") {
       onReveal(forkStep.path);
       return;
@@ -706,12 +846,21 @@ export function CloneRepoDialog({
             protocol,
             parentPath: destination.path,
             host: selectedRepository.host,
-            hostname: selectedRepository.hostname
+            hostname: selectedRepository.hostname,
+            ...(cloneUpstreamSlug === null ? {} : { upstream: cloneUpstreamSlug })
           });
     activeCloneIdRef.current = null;
     setBusy(false);
     setCanceling(false);
-    if (result.ok) onCloned(result.value);
+    // Only `repo:clone` answers with this; a fork's failure stays an error.
+    const cloned: ClonedRepo | null = result.ok ? result.value : null;
+    if (cloned?.upstreamFailure !== undefined) {
+      // Cloned and indexed; only the remote is missing. Say so here, and
+      // let the button take the user to the checkout rather than retry.
+      setCloneProgress(null);
+      setClonedRepo(cloned);
+      setSubmitError(cloned.upstreamFailure);
+    } else if (result.ok) onCloned(result.value);
     else {
       setCloneProgress(null);
       setSubmitError(result.error.message);
@@ -739,14 +888,18 @@ export function CloneRepoDialog({
       ? FORK_PROGRESS_LABELS[phase]
       : CLONE_PROGRESS_LABELS[phase as CloneProgress["phase"]];
   const submitDisabled =
-    busy ||
-    selectedRepository === null ||
-    (revealing
-      ? false
-      : activeDestination === null ||
-        originRepository === null ||
-        (forking && (forkTarget === null || forkStep.kind === "blocked")));
-  const submitLabel = busy
+    clonedRepo === null &&
+    (busy ||
+      selectedRepository === null ||
+      (revealing
+        ? false
+        : activeDestination === null ||
+          originRepository === null ||
+          (!forking && !lineageKnown) ||
+          (forking && (forkTarget === null || forkStep.kind === "blocked"))));
+  const submitLabel = clonedRepo !== null
+    ? "Show repository"
+    : busy
     ? operation === "fork"
       ? `${FORK_PROGRESS_LABELS[cloneProgress?.phase ?? "starting"]}${
           typeof cloneProgress?.percent === "number"
@@ -931,18 +1084,55 @@ export function CloneRepoDialog({
 
           {offerPair && selectedRepository !== null && (
             <section className="clone-section">
-              <div className="clone-label" id="clone-from-label">
-                Clone from
-                <span className="clone-label__hint">
+              <div className="clone-label clone-from__label">
+                <span id="clone-from-label">Clone from</span>
+                <span className="clone-label__hint" id="clone-from-hint">
                   origin is the one you pick
                 </span>
+                {/* Only where there is a choice to make, and only once it is
+                    the fork being cloned. Renaming stays in Fork…, where the
+                    name field and its collision check live. It sits on the
+                    label's line, which it fits, and keeps its place hidden
+                    while the original is chosen: preflight can switch the
+                    default to an existing fork ~1s after the pick, and a row
+                    appearing under the cards then moved everything below. */}
+                {forkTargetList !== null && forkTargetList.length > 1 && (
+                  <span
+                    className={`clone-from__into${forking ? "" : " is-held"}`}
+                    aria-hidden={forking ? undefined : true}
+                    inert={!forking}
+                  >
+                    <span id="clone-fork-into">Fork into</span>
+                    <span
+                      className="fork-hosts"
+                      role="group"
+                      aria-labelledby="clone-fork-into"
+                    >
+                      {forkTargetList.map((owner) => (
+                        <button
+                          type="button"
+                          key={owner.login}
+                          className={`fork-host${
+                            forkTarget?.login === owner.login ? " is-active" : ""
+                          }`}
+                          aria-pressed={forkTarget?.login === owner.login}
+                          disabled={busy}
+                          {...hoverTooltip(tip, ownerKindLabel(owner))}
+                          onClick={() => setForkTargetPick(owner)}
+                        >
+                          {owner.login}
+                        </button>
+                      ))}
+                    </span>
+                  </span>
+                )}
               </div>
               {/* Two cards that show both answers, the way the protocol cards
                   below do — never one toggle that swaps its own label. */}
               <div
                 className="clone-from"
                 role="group"
-                aria-labelledby="clone-from-label"
+                aria-labelledby="clone-from-label clone-from-hint"
               >
                 <button
                   type="button"
@@ -1006,35 +1196,79 @@ export function CloneRepoDialog({
                   </small>
                 </button>
               </div>
-              {/* Only where there is a choice to make, and only once it is the
-                  fork being cloned. Renaming stays in Fork…, where the name
-                  field and its collision check live. */}
-              {forking && forkTargetList !== null && forkTargetList.length > 1 && (
-                <div className="clone-from__into">
-                  <span id="clone-fork-into">Fork into</span>
-                  <span
-                    className="fork-hosts"
-                    role="group"
-                    aria-labelledby="clone-fork-into"
-                  >
-                    {forkTargetList.map((owner) => (
-                      <button
-                        type="button"
-                        key={owner.login}
-                        className={`fork-host${
-                          forkTarget?.login === owner.login ? " is-active" : ""
-                        }`}
-                        aria-pressed={forkTarget?.login === owner.login}
-                        disabled={busy}
-                        {...hoverTooltip(tip, ownerKindLabel(owner))}
-                        onClick={() => setForkTargetPick(owner)}
-                      >
-                        {owner.login}
-                      </button>
-                    ))}
+            </section>
+          )}
+
+          {((upstreamChoices.length > 0 && lineageSource !== null) || upstreamPending) && (
+            <section className="clone-section">
+              <div className="fork-options">
+                <label className={`fork-option${keepUpstream ? " is-on" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={keepUpstream}
+                    disabled={busy}
+                    onChange={(event) => setKeepUpstream(event.target.checked)}
+                  />
+                  <span>
+                    <strong>
+                      Add <code>upstream</code>
+                      {upstreamPending ? (
+                        <>
+                          {" → "}
+                          {/* Same element and line box as the slug it
+                              stands in for, so the answer changes words,
+                              not the row's height. */}
+                          <code className="fork-option__target is-pending">
+                            checking…
+                          </code>
+                        </>
+                      ) : upstreamChoices.length === 1 && (
+                        <>
+                          {" → "}
+                          <code className="fork-option__target">
+                            {upstreamChoices[0]!.nameWithOwner}
+                          </code>
+                        </>
+                      )}
+                    </strong>
+                    <small>
+                      {upstreamPending || upstreamChoices.length === 1
+                        ? "The repository this one was forked from. "
+                        : ""}
+                      Fetch and rebase on it without leaving PwrGit.{" "}
+                      <code>origin</code> stays your fork.
+                    </small>
                   </span>
-                </div>
-              )}
+                </label>
+                {keepUpstream && upstreamChoices.length > 1 && (
+                  <div className="fork-upstream">
+                    <div className="fork-upstream__lead">
+                      {lineageSource?.parent?.nameWithOwner} is itself a fork — which
+                      repository should <code>upstream</code> point at?
+                    </div>
+                    {upstreamChoices.map((choice, index) => (
+                      <label
+                        key={choice.nameWithOwner}
+                        className={`fork-upstream__row${
+                          cloneUpstreamSlug === choice.nameWithOwner ? " is-on" : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="clone-upstream"
+                          checked={cloneUpstreamSlug === choice.nameWithOwner}
+                          disabled={busy}
+                          onChange={() => setUpstreamPick(choice.nameWithOwner)}
+                        />
+                        <span>
+                          <strong>{choice.nameWithOwner}</strong>
+                          <small>{cloneUpstreamChoiceDetail(index)}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
             </section>
           )}
 
@@ -1251,6 +1485,9 @@ export function CloneRepoDialog({
                   </strong>
                   {forking && forkUpstream !== null && (
                     <> · upstream {forkUpstream}</>
+                  )}
+                  {!forking && cloneUpstreamSlug !== null && (
+                    <> · upstream {cloneUpstreamSlug}</>
                   )}
                 </div>
               )}

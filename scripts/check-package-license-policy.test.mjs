@@ -168,4 +168,30 @@ describe("first-party name policy", () => {
       expect.stringContaining("README.md:1"),
     ]);
   });
+
+  // Naming a published package is fine wherever it is used; naming the
+  // vendor any other way is what the policy keeps out.
+  it("allows the public dependency's package name in any file, and nothing else", () => {
+    const root = createValidRoot();
+    runGit(root, ["init", "--quiet"]);
+    const vendor = ["shutter", "stock"].join("");
+    const source = join(root, "apps", "desktop", "src", "main", "util", "new-user.ts");
+    mkdirSync(dirname(source), { recursive: true });
+    write(
+      source,
+      `// Streams through @${vendor}/p-map-iterable's IterableMapper.\nimport { IterableMapper } from "@${vendor}/p-map-iterable";\n`,
+    );
+    runGit(root, ["add", "."]);
+    expect(checkFirstPartyNamePolicy(root)).toEqual([]);
+
+    write(source, `// Ported from the ${vendor} fix for PR 123.\n`);
+    expect(checkFirstPartyNamePolicy(root)).toEqual([
+      expect.stringContaining("new-user.ts:1"),
+    ]);
+    // A line that names the package does not excuse a second, bare mention.
+    write(source, `import "@${vendor}/p-map-iterable"; // per ${vendor} PR 123\n`);
+    expect(checkFirstPartyNamePolicy(root)).toEqual([
+      expect.stringContaining("new-user.ts:1"),
+    ]);
+  });
 });

@@ -94,6 +94,7 @@ import type {
   RemoteResetPreview,
   RemoteResetSnapshot,
   Repo,
+  ClonedRepo,
   RepoId,
   RepoRefs,
   RemoteEndpoint,
@@ -1088,8 +1089,13 @@ export interface Commands {
       host?: ForgeHost;
       /** The forge's hostname, so a self-hosted instance clones from itself. */
       hostname?: string;
+      /** When the source is a fork: its parent or network root, kept as a
+       *  remote beside `origin` (`upstream` unless that name is taken). Main
+       *  re-asks the forge and refuses a repository the source was not forked
+       *  from. Absent or null adds nothing. */
+      upstream?: string | null;
     };
-    res: Repo;
+    res: ClonedRepo;
   };
   /** Cancel an in-flight clone and remove any checkout it only partly made. */
   "repo:cancelClone": {
@@ -1498,8 +1504,19 @@ export interface Commands {
       removed: string[];
       /** Skipped because they have uncommitted changes (retry with force). */
       dirty: string[];
-      /** Other failures (e.g. primary worktree, not found). */
-      failed: { id: string; message: string }[];
+      /**
+       * Other failures (e.g. primary worktree, a delete that stopped). Every
+       * one is also in the app log. `message` is a sentence for people and
+       * opens with `lead` when there is one (the dialog bolds it); `detail` is
+       * what Node or Git actually said; `code` is PwrGitError's.
+       */
+      failed: {
+        id: string;
+        message: string;
+        code?: string;
+        lead?: string;
+        detail?: string;
+      }[];
     };
   };
   "worktree:setOrder": {
@@ -2486,6 +2503,11 @@ export interface Events {
   "maintenance:progress": MaintenanceProgress;
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
+  /**
+   * A worktree's folder is being deleted: entries removed so far. Throttled
+   * in main to a few per second; a `worktree:removed` follows on success.
+   */
+  "worktree:removeProgress": { worktreeId: string; itemsDeleted: number };
   /** Per-repository progress for the pruner's profile-wide sweep. */
   "prune:scanProgress": PruneScanProgress;
   /** Per-worktree progress while ignored files are being deleted. */

@@ -105,6 +105,8 @@ first.
 | `Multi-Stash Rail - UX Review.dc.html` | The right rail's Stashes tab at its real widths &mdash; the third tab that pushed the collapse button off the rail, the pull-recovery chip that was always ellipsized away, the clipped stat column, the options for fitting the tab strip into 280&nbsp;px, and the behaviour fixes behind them. Interactive. |
 | `Fork From Here - UX Review.dc.html` | Why the sidebar's Fork&hellip; opened on an empty search for a checkout you cannot push to, and why nothing else offered to fork it &mdash; a forge lookup never made for a repository added mid-session, and fork verbs that waited on its answer. Then the entry points that no longer wait: the repo row's kebab and right-click menu, the origin row's fork button, the worktree header's &#8942; item, and a seeded Fork&hellip; dialog with a Fork in place bridge. Interactive. |
 | `Fork While Cloning - UX Review.dc.html` | Why Clone marked a repository read-only and cloned it anyway, never asking whether your fork already existed, and why Fork&hellip; on a checkout already on disk still defaulted to cloning a second copy. Then a &ldquo;Clone from&rdquo; pair (the original, or your fork) in every state the forge can answer, and Fork&hellip;'s in-place mode, whose primary button becomes Fork in place. Interactive. |
+| `Upstream When Cloning a Fork - UX Review.dc.html` | Why cloning a repository that is already your fork left its original behind (SSH and HTTPS added no `upstream`; the GitHub CLI did, so the same pick gave two different checkouts). Three placements, with an on-by-default option row recommended; that row opted out, for a fork of a fork (parent or root), with the GitHub CLI's own `upstream` reused, and when only the remote fails; and the build list. Interactive. |
+| `Clone Dialog Layout Shift - UX Review.dc.html` | Why Clone with, Check out to and the Clone button jumped 66&ndash;171&nbsp;px a second after a repository was picked: the "Clone from" pair waited on an account lookup the pick started, a search row could not say it was a fork, and preflight could switch the default to your fork and add "Fork into". Four fixes weighed (a fixed slot, rows below Check out to, holding the sections, knowing the shape at the pick) with the last recommended, drawn state by state, and a before/after table of nine measured scenarios. |
 | `Fork Tracking Repair - UX Review.dc.html` | A review of #379's tracking repair, which explained a branch left pulling from and pushing to the original only in Git's words (&ldquo;Track origin/main&rdquo;). Three ways to draw where the branch pulls from and pushes to, now and after, with 2b's Now/After strips recommended; the same dialog opened from Pull and from Remotes; the receipt; and the chooser for a checkout holding more than one fork you can push to. Interactive. |
 | `Fork Route Graphic - UX Review.dc.html` | Where else the Now/After route from Fork Tracking Repair earns its place: a survey of every surface that says where a branch pulls from and pushes to, with a verdict on each. Then the ones that ship: Fork&hellip;'s plan drawn as Now and After strips, Publish naming each remote by repository and offering Fork&hellip; before a refused push, the Remotes card's route in the healthy case too, and a one-line route under each Pull menu choice. Interactive. |
 | `Bulk Sync Progress - UX Review.dc.html` | Why the Try pull all / Fetch all repos dialog, which knows its repository count before the first Git command, showed progress only as a fraction in a corner and three chips in scheduler words; three places a determinate bar could live; the recommended one through a whole run, from the first repository to the receipt; and the rules it was built by. Interactive. |
@@ -112,6 +114,7 @@ first.
 | `Finished Branches - UX Review.dc.html` | Why the sidebar's `↑2` and `225 gone` could not be clicked, why garbage collection and `fetch --prune` never remove a gone branch, and why Maintenance › Local branches declined every squash merge. Then the counts as filter chips, a status filter in the refs browser, the evidence rules (a merged PR whose final head *is* the local tip), the redrawn review with an age guard, and garbage collection's hand-off to it. Interactive. |
 | `Worktree List Cap - UX Review.dc.html` | Why Other worktrees is the one sidebar list with no cap, and why its Recent order puts already-merged work on top; a slice of six in-flight rows with a Finished count and View all into a new Worktrees tab of the refs browser; the "finished" predicate (landed, clean, nothing unshipped); ghost rows for a selection outside the six, reusing Back Forward Navigation's rules; and the gone-versus-PR-chip precedence, with a gone transition forcing a PR refresh. Interactive. |
 | `Maintenance Combined - UX Review.dc.html` | Repository maintenance's Combined tab: why a run could not say which step it was on, why the branch review listed all 82 repositories, and why it stopped showing the rules it had applied. Then one anatomy for all four tabs, the plan as numbered step cards that become a step rail during the run, a rules-in-force strip above every review, cards only for repositories that propose something, a per-step receipt, and the Worktrees tab brought in line with its siblings. Written here and pushed up; all data is invented. |
+| `Removal Errors - UX Review.dc.html` | How Repository maintenance reports a worktree it could not remove. Why a removal froze the app for 34&nbsp;s and then said only &ldquo;Some worktrees were not removed&rdquo;: a synchronous `rmSync` fallback on the main process, a raw `EACCES` in a stacked dialog, and a `.modal__error` line whose inset rule never matched. Then live removal progress in the dialog; an inline outcome card that names each worktree, the reason in plain words, its path and what is left on disk, with Reveal, Retry, Details and View log (three placements, **3a** recommended); the all-failed, single-failure and kept-with-changes variants; and the shared card's anatomy, tokens, copy rules and reason table, applied to the Local branches and Garbage collection steps. Dark theme; everything invented. |
 | `Git Discovery - UX Review.dc.html` | Git features PwrGit runs or could use but never mentions &mdash; hooks, `.git/info/exclude` and the global excludes file, and fifteen more &mdash; and one discovery system for all of them: a receipt only when Git has acted, one explain popover, a per-repo Repository setup sheet reached from a hooks chip beside LFS, and Settings &rsaquo; Git defaults that show the `git config` line they write. The rejected-commit panel, the hook map, the three-destination Ignore&hellip; dialog, and an ignore-rule path tester. A proposal; nothing in it is built. Interactive. |
 | `Back Forward Navigation - UX Review.dc.html` | Back/Forward for PwrGit. Why one double&#8209;click on a PR row lost your place: there is no history, and the reveal forces the 190&#8209;row Other worktrees disclosure open and saves it open. Then PwrAgnt's `.history-nav` pair in the title bar, with a right&#8209;click list of places; what an entry is (a worktree selection, with the open commit and a sidebar anchor riding on it); Back restoring the row you acted from; and ghost rows that show a capped&#8209;away worktree or ref without opening its list, anchored so nothing moves under the pointer. Written here and pushed up; light theme; PR numbers and branch names follow the PwrAgnt sidebar screenshot that prompted it, the rest is invented. Interactive. |
 | `Worktree Chip Glyphs - UX Review.dc.html` | Why the worktree holder chip's `⌂` and `⑂` looked wrong: neither character is in a bundled face, so an OS fallback font drew them, and the sidebar's PR chip drew `⌂` for every worktree. Then the four ways to draw primary vs linked worktree (house plus the palette's 3a mark recommended), and where it lands: one branch, worktree, checkout and repository drawing on every surface. Written here and pushed up; every specimen is live SVG and contrived names, no captures. |
@@ -129,6 +132,7 @@ first.
 | `assets/forges-before.png` | Shipped-app capture of Settings › Forges, from a Playwright scenario against contrived `gh`/`glab` stubs. |
 | `assets/branch-switch-{sidebar,browser}-{before,after}.png` | Shipped-app captures of the sidebar ref sections and the refs browser, from one Playwright scenario on a contrived repository, run against the renderer before and after the change. |
 | `assets/dirty-switch-prompt.png` | Shipped-app capture of the uncommitted-changes prompt, from the same contrived scenario. |
+| `assets/clone-layout-shift-other-fork-search.png` | Harness render, not an app capture: the real `CloneRepoDialog` built against a fake bridge with delayed forge answers, before and after, 0.3&nbsp;s and 2.6&nbsp;s after picking someone else's fork from search. Contrived names. |
 
 ### History and leftovers
 
@@ -382,6 +386,24 @@ of `tzarebczan/diskhound`), and so are the SHAs and counts in turns 1 and 2b.
 The diverged fork in **2c** and **3b** is invented: `3c1a9e0` and its two
 commits exist only in the artboard.
 
+`Upstream When Cloning a Fork - UX Review.dc.html` was written here and pushed
+up through the `claude-design` MCP, in the same change that builds what it
+draws. The project copy was verified at the same 43,238 bytes. Its styles are
+`Fork While Cloning`'s, plus the option row and remote list. Turn **1** is as
+built, turn **2** places the choice, turn **3** draws 2a in each state, **4a**
+is a live `DCLogic` prototype, and turn **5** is the build list. Its names are
+contrived (`octo-labs/sparkline`, `riverbend`, `lumen-co`).
+
+`Clone Dialog Layout Shift - UX Review.dc.html` and its one asset were written
+here and pushed up with `DesignSync` (`localPath`, so the PNG never passed
+through a tool call), in the same change that builds what it draws; the project
+copy was verified at the same 50,644 bytes. Its styles are `Upstream When
+Cloning a Fork`'s, plus frame pairs and the measurement table. Turn **1** is as
+built, turn **2** weighs four fixes, turn **3** draws 2d by state, and turn
+**4** is measured. It is static: the defect is motion, so each state is drawn as
+the pick's frame beside the answered one. Names are contrived, as in its two
+sibling artboards.
+
 `Fork While Cloning - UX Review.dc.html` was written here and pushed up through
 the `claude-design` MCP, in the same change that builds what it draws. The
 project copy was verified at the same 47,623 bytes. It answers two asks. Clone
@@ -559,6 +581,23 @@ pruned to the rules it uses. Every probe it quotes ran against an isolated
 `HOME` with `GIT_CONFIG_NOSYSTEM=1`, on Git 2.56 under macOS. Its identities
 (`rowan@vale.example`, `rowan@northwind.example`) and repositories are
 invented. It carries no `assets/`. Card **5a** is a live `DCLogic` prototype.
+
+`Removal Errors - UX Review.dc.html` was written in the `claude-design` MCP's
+`write_files` on 2026-10-16, then mirrored down from the served copy with lines
+4&ndash;6 stripped; the project lists it at the repo's 83,718 bytes. Its design
+round is in the project's chat panel as "Removal errors — say which worktree,
+why, and what's left". It answers a report from a removal that hit a
+read-only Go module cache: the app stopped responding while a synchronous
+fallback delete retried, then showed one generic red line flush against the
+dialog edge, and logged nothing. The report's screenshot held real paths, so it
+is described in the thread rather than uploaded, and turn **1** redraws it with
+invented names (`acme-tap`, `fix/cache-installer`,
+`/Users/dev/.worktrees/k3x9/acme-tap`). Turn **2** is live removal progress,
+turn **3** the inline outcome card in three placements with **3a**
+recommended, turn **4** its variants, and turn **5** the shared component and
+build list. Its icons are exact Lucide SVGs drawn as fully percent-encoded CSS
+masks, as in `Fork Sync`. It is drawn in the dark theme the report came from.
+It carries no `assets/`.
 
 ## Deliberately NOT copied in
 

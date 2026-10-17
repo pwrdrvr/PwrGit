@@ -7,6 +7,7 @@ import {
   addForkParentRemote,
   applyForkRemotes,
   forkRemoteUrl,
+  keepForkOriginal,
   planUpstreamRemote,
   readCheckoutRemotes,
   remoteProtocol,
@@ -168,6 +169,98 @@ describe("readCheckoutRemotes", () => {
       { name: "mirror", url: "https://example.com/m.git" },
       { name: "origin", url: "git@github.com:desktop/dugite.git" }
     ]);
+  });
+});
+
+describe("keepForkOriginal", () => {
+  const original = { hostname: "github.com", nameWithOwner: "octo-labs/sparkline" };
+  const remotesOf = async (path: string) => {
+    const read = await readCheckoutRemotes(systemGit, path);
+    if (!read.ok) throw new Error(read.error.message);
+    return read.value;
+  };
+
+  it("adds the original as upstream, written the way origin is", async () => {
+    const https = repoWithOrigin("https://github.com/riverbend/sparkline.git");
+    expect(await keepForkOriginal(systemGit, https, original, "ssh")).toEqual({
+      ok: true,
+      value: { name: "upstream", existing: false }
+    });
+    // origin is HTTPS, so the SSH fallback is not what decides it: a checkout
+    // cloned over HTTPS must not start needing a key to fetch the original.
+    expect(config(https, "remote.upstream.url")).toBe(
+      "https://github.com/octo-labs/sparkline.git"
+    );
+
+    const ssh = repoWithOrigin("git@github.com:riverbend/sparkline.git");
+    await keepForkOriginal(systemGit, ssh, original, "https");
+    expect(config(ssh, "remote.upstream.url")).toBe(
+      "git@github.com:octo-labs/sparkline.git"
+    );
+  });
+
+  it("keeps the upstream a forge CLI already added, and adds nothing", async () => {
+    // What `gh repo clone` leaves for a fork: an HTTPS upstream on the parent.
+    const path = repoWithOrigin("https://github.com/riverbend/sparkline.git");
+    execFileSync("git", ["remote", "add", "upstream", "https://github.com/octo-labs/sparkline.git"], {
+      cwd: path,
+      stdio: "ignore"
+    });
+
+    // Spelled differently from the remote on purpose: the match is the
+    // forge's canonical host and a case-blind slug, not the string.
+    expect(
+      await keepForkOriginal(
+        systemGit,
+        path,
+        { hostname: "GitHub.com", nameWithOwner: "Octo-Labs/Sparkline" },
+        "ssh"
+      )
+    ).toEqual({ ok: true, value: { name: "upstream", existing: true } });
+    expect((await remotesOf(path)).map((remote) => remote.name)).toEqual([
+      "origin",
+      "upstream"
+    ]);
+  });
+
+  it("takes a free name when upstream points at a different repository", async () => {
+    // A fork of a fork, cloned with gh: gh added the parent, and the user
+    // asked for the network root.
+    const path = repoWithOrigin("git@github.com:riverbend/sparkline.git");
+    execFileSync("git", ["remote", "add", "upstream", "git@github.com:lumen-co/sparkline.git"], {
+      cwd: path,
+      stdio: "ignore"
+    });
+
+    expect(await keepForkOriginal(systemGit, path, original, "ssh")).toEqual({
+      ok: true,
+      value: { name: "upstream-2", existing: false }
+    });
+    expect(config(path, "remote.upstream.url")).toBe(
+      "git@github.com:lumen-co/sparkline.git"
+    );
+    expect(config(path, "remote.upstream-2.url")).toBe(
+      "git@github.com:octo-labs/sparkline.git"
+    );
+  });
+
+  it("refuses a slug that cannot be a remote address, and runs no git", async () => {
+    const calls: string[][] = [];
+    const recording: GitExec = async (args, cwd, options) => {
+      calls.push(args);
+      return systemGit(args, cwd, options);
+    };
+    const path = repoWithOrigin("git@github.com:riverbend/sparkline.git");
+
+    const result = await keepForkOriginal(
+      recording,
+      path,
+      { hostname: "github.com", nameWithOwner: "-oProxyCommand=x/y" },
+      "ssh"
+    );
+
+    expect(result.ok).toBe(false);
+    expect(calls).toEqual([]);
   });
 });
 

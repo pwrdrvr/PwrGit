@@ -220,14 +220,47 @@ shared "which worktree holds this" chip.
 
 Clone's "Clone from" pair (the original, or your fork) runs `repo:forkPreflight`
 once per pick, after `repo:forkTargets` — the same answer `ForkRepoDialog`
-reads. The default, the pill and the submit label come from `clone-from.ts` and
-`forkAction`, not from JSX, and are unit-tested there. Two rules worth keeping:
+reads. `repo:forkTargets` is asked 300ms after the source box starts asking
+a forge anything (once per instance, never on open), so the accounts are
+known by the time a row can be picked. The default, the pill and the submit
+label come from `clone-from.ts` and `forkAction`, not from JSX, and are
+unit-tested there. Two rules worth keeping:
 
 - **Creating a repository is never a default.** Your fork is preselected only
   when you can't push to the original *and* the fork already exists.
 - **`originRepository` is the one source of "what origin will be".** The
   protocol cards, "Will create" and the SSH recovery card all read it, so
   choosing the fork can't leave one of them describing the source.
+
+A repository that is **itself a fork** gets an "Add `upstream`" row (on by
+default; parent first, root second for a fork of a fork) and `repo:clone`
+carries the slug. Where the lineage comes from:
+
+- **A search row has no `parent`**, so its absence means "not asked".
+  `cloneLineageSource` takes preflight's source, then a one-off
+  `repo:checkCloneSource`, then the pick — and only one that names a parent.
+- **Your own fork gets no preflight** when you have no other account to fork
+  into, which is exactly when the lookup runs. Don't key it per keystroke.
+  A successful exact-name check is already the answer.
+- **Clone waits for the answer** (`lineageKnown`). The row is on by default,
+  and a quick Enter before the forge replied would clone a fork without it.
+- **GitHub search rows carry `isFork`** (no parent). `true` draws the row at
+  the pick with its target reading `checking…`; `false` skips the lookup.
+
+Design: `design/Upstream When Cloning a Fork - UX Review.dc.html`.
+
+**Nothing below the source may move after the pick.** The forge answers
+0.6–2s after a click, by which time focus is in Check out to; rows inserted
+then moved it, Clone with and the footer ~100px. So every forge-dependent
+row is drawn in the pick's frame and only its words change later: the pair
+(accounts asked early, or `viewerCanPush: false`, which no account's own
+repository has), the pending upstream row, "Fork into" on the Clone from
+label's line, held hidden while the original is chosen, and the cards' top
+lines at chip height. Measure a change here the way pwrdrvr/PwrGit#477 did (a
+Vite build of the dialog against a fake bridge with delayed answers, a
+`layout-shift` observer and a rAF sampler on the controls below). Still
+moving: a fork of a fork's radio list, which appears when the lineage lands.
+Design: `design/Clone Dialog Layout Shift - UX Review.dc.html`.
 
 Fork… opened from a checkout (`inPlace`) forks it **in place** while the source
 is still that checkout: it asks `repo:forkCheckoutPreflight`, submits
