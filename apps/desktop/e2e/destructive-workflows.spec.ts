@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
@@ -468,6 +469,91 @@ test("removing from the pruner confirms the count, deletes the checkout, and kee
   );
   expect(box.git(repo.path, "cat-file", "-t", branchTip)).toBe("commit");
   expect(box.git(repo.path, "worktree", "list")).not.toContain(worktreePath);
+});
+
+// The 2026-10-16 report. A worktree holding a Go module cache (0555
+// directories) beachballed the app for ~34s and then failed with only "Some
+// worktrees were not removed". Now the read-only cache is emptied, and a
+// folder that truly cannot be deleted (an immutable file, macOS) is named in
+// the dialog with its reason and path, still registered so Retry can finish.
+test.describe("removing a worktree whose folder resists", () => {
+  test.skip(process.platform === "win32", "read-only modes and chflags are POSIX/macOS");
+
+  test("removes a read-only module cache, and names the one it could not delete", async ({}, testInfo) => {
+    sandbox = createGitSandbox();
+    const box = sandbox;
+    const { repo, worktreePath: goCache } = makeFinishedWorktree(box, "acme-tap");
+    writeFileSync(join(repo.path, ".git", "info", "exclude"), ".local/\n");
+    const mod = join(goCache, ".local", "go", "pkg", "mod", "example.test", "yaml@v4.0.0");
+    mkdirSync(join(mod, "cmd"), { recursive: true });
+    for (let i = 0; i < 40; i += 1) writeFileSync(join(mod, "cmd", `f${i}.go`), "package cmd\n");
+    for (const dir of [join(mod, "cmd"), mod, join(mod, "..")]) chmodSync(dir, 0o555);
+
+    const stuckOnDisk = process.platform === "darwin";
+    const stuck = repo.addWorktree("fix/cache-installer");
+    box.commitEmptyAt(stuck, "cache installer", 1_735_689_600);
+    box.git(repo.path, "merge", "--no-ff", "-m", "merge fix/cache-installer", "fix/cache-installer");
+    const immutable = join(stuck, ".local", "cache", "installer.bin");
+    mkdirSync(join(stuck, ".local", "cache"), { recursive: true });
+    writeFileSync(immutable, "x".repeat(2048));
+    if (stuckOnDisk) execFileSync("chflags", ["uchg", immutable]);
+
+    try {
+      handle = await launchApp();
+      const { window } = handle;
+      await addRootUnexpanded(window, handle, box);
+      await expect(repoGroup(window, repo.name)).toBeVisible({ timeout: 20_000 });
+
+      await window.getByRole("button", { name: "Repository maintenance…", exact: true }).click();
+      await window.getByRole("button", { name: "Worktrees", exact: true }).click();
+      const dialog = window.getByRole("dialog", { name: "Repository maintenance" });
+      await dialog.getByLabel("Keep worktrees touched in the last").uncheck();
+      await dialog.getByRole("button", { name: "Find finished worktrees", exact: true }).click();
+      await expect(dialog.locator(".prune__row")).toHaveCount(2, { timeout: 40_000 });
+      await dialog.locator(".prune__select input").click();
+      await dialog.getByRole("button", { name: /Remove 2 worktrees/ }).click();
+      await expect(confirmDialogButton(window)).toHaveText("Remove 2");
+      await confirmDialogButton(window).click();
+
+      // The read-only cache no longer stops anything.
+      await expect.poll(() => existsSync(goCache), { timeout: 40_000 }).toBe(false);
+      expect(box.git(repo.path, "worktree", "list")).not.toContain(goCache);
+
+      if (!stuckOnDisk) {
+        await expect.poll(() => existsSync(stuck), { timeout: 40_000 }).toBe(false);
+        return;
+      }
+      const card = dialog.getByRole("alert");
+      await expect(card).toContainText("1 worktree wasn’t removed", { timeout: 40_000 });
+      await expect(card).toContainText("The other 1 was removed");
+      await expect(card).toContainText("acme-tap · fix/cache-installer");
+      await expect(card.locator("b")).toHaveText("Permission denied");
+      await expect(card).toContainText(stuck);
+      // No second, native-looking notice stacked on top of the dialog.
+      await expect(window.locator(".modal--dialog")).toHaveCount(0);
+      await card.getByRole("button", { name: "Details" }).click();
+      await expect(card.locator(".maintenance__problem-raw")).toContainText("EPERM");
+      await dialog.screenshot({
+        animations: "disabled",
+        path: testInfo.outputPath("removal-failure.png")
+      });
+      // Still a worktree, `.git` link deleted last, so Retry can finish it.
+      expect(existsSync(join(stuck, ".git"))).toBe(true);
+      expect(box.git(repo.path, "worktree", "list")).toContain(stuck);
+
+      execFileSync("chflags", ["nouchg", immutable]);
+      await card.getByRole("button", { name: "Retry" }).click();
+      await expect(dialog.getByRole("alert")).toHaveCount(0, { timeout: 40_000 });
+      await expect.poll(() => existsSync(stuck), { timeout: 40_000 }).toBe(false);
+      expect(box.git(repo.path, "worktree", "list")).not.toContain(stuck);
+    } finally {
+      if (stuckOnDisk && existsSync(immutable)) execFileSync("chflags", ["nouchg", immutable]);
+      // So the sandbox can be cleaned up if the app never got to them.
+      for (const dir of [join(mod, ".."), mod, join(mod, "cmd")]) {
+        if (existsSync(dir)) chmodSync(dir, 0o755);
+      }
+    }
+  });
 });
 
 test("the pruner never offers a dirty or unmerged worktree", async () => {

@@ -21,7 +21,10 @@ import type {
 } from "@pwrgit/shared";
 import { announce, mountLiveRegion, movedMessage } from "../../lib/announce";
 import type { ReadState } from "../../state/readState";
-import type { RemoveWorktreesOptions } from "../../state/useRepoTree";
+import type {
+  RemoveWorktreesOptions,
+  RemoveWorktreesOutcome
+} from "../../state/useRepoTree";
 import { copyText } from "../../lib/copyText";
 import {
   currentPlatform,
@@ -235,7 +238,7 @@ export function Sidebar({
   onRemoveWorktrees: (
     worktreeIds: string[],
     options?: RemoveWorktreesOptions
-  ) => Promise<void>;
+  ) => Promise<RemoveWorktreesOutcome>;
   onCreateWorktree: (
     repoId: string,
     branch: string,
@@ -1495,7 +1498,14 @@ export function Sidebar({
           profileId={activeProfile.id}
           platform={platform}
           onClose={() => setMaintenance(null)}
-          onRemoveWorktrees={(ids) => onRemoveWorktrees(ids, { confirmed: true })}
+          onRemoveWorktrees={(ids, options) =>
+            // The dialog renders the outcome inline, so no second notice.
+            onRemoveWorktrees(ids, {
+              confirmed: true,
+              reportFailures: false,
+              ...(options?.force === true ? { force: true } : {})
+            })
+          }
           {...(maintenance.worktrees === true
             ? { initialTab: "worktrees" as const }
             : maintenance.repo === undefined

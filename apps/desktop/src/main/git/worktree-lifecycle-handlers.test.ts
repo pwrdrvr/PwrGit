@@ -1,8 +1,10 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   writeFileSync
 } from "node:fs";
@@ -11,6 +13,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { CommandBus } from "../command-bus";
 import { emitEvent } from "../ipc";
+import { logMain } from "../logs";
 import { openDatabase, type DB } from "../persistence/db";
 import { ProfileService } from "../profiles/profile-service";
 import { SettingsService } from "../settings/settings-service";
@@ -25,13 +28,28 @@ import { createSystemGit } from "./test-support/system-git";
 // IPC; neither exists under vitest. Route execGit through the test's recording
 // system-git exec and stub the event emitter.
 const hoisted = vi.hoisted(() => ({
-  execGit: null as unknown as (args: string[], cwd: string) => Promise<unknown>
+  execGit: null as unknown as (args: string[], cwd: string) => Promise<unknown>,
+  /** Swapped per test to make a folder deletion fail; null = the real one. */
+  deleteTree: null as null | ((path: string) => Promise<never>)
 }));
 
 vi.mock("../ipc", () => ({
   registerIpc: vi.fn(),
   emitEvent: vi.fn()
 }));
+
+vi.mock("../logs", () => ({ logMain: vi.fn() }));
+
+vi.mock("../util/delete-tree", async (importActual) => {
+  const actual = await importActual<typeof import("../util/delete-tree")>();
+  return {
+    ...actual,
+    deleteTree: (...args: Parameters<typeof actual.deleteTree>) =>
+      hoisted.deleteTree === null
+        ? actual.deleteTree(...args)
+        : hoisted.deleteTree(args[0])
+  };
+});
 
 vi.mock("./dugite", async (importActual) => {
   const actual = await importActual<typeof import("./dugite")>();
@@ -264,6 +282,211 @@ describe("worktree:removeMany × pruned worktree", () => {
     expect(vi.mocked(emitEvent)).toHaveBeenCalledWith("worktree:removed", {
       worktreeId: wt.id
     });
+  });
+});
+
+/** Every logMain call, flattened to one string per call for matching. */
+const logged = (level: string): string[] =>
+  vi
+    .mocked(logMain)
+    .mock.calls.filter((call) => call[0] === level)
+    .map((call) => call.slice(1).map(String).join(" "));
+
+/** Make every directory under `dir` (and `dir`) writable again, for cleanup. */
+function unlockTree(dir: string): void {
+  if (!existsSync(dir)) return;
+  chmodSync(dir, 0o755);
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) unlockTree(join(dir, entry.name));
+  }
+}
+
+describe("worktree:removeMany × what it deletes and what it reports", () => {
+  async function addIndexedWorktree(
+    branch: string
+  ): Promise<{ id: string; path: string }> {
+    const path = join(root, `wt-${branch}`);
+    await worktreeAdd(systemGit, repoPath, path, branch, { newBranch: true });
+    await indexer.refreshRepoWorktrees(repoId);
+    const wt = indexer
+      .listRepos(profileId)[0]
+      ?.worktrees.find((w) => w.branch === branch);
+    if (wt === undefined) throw new Error("worktree not indexed");
+    return { id: wt.id, path: wt.path };
+  }
+  const rowExists = (id: string): boolean =>
+    indexer.listRepos(profileId)[0]?.worktrees.some((w) => w.id === id) ??
+    false;
+  const registered = (path: string): boolean =>
+    execFileSync("git", ["worktree", "list", "--porcelain"], {
+      cwd: repoPath,
+      encoding: "utf8"
+    })
+      .split(/\r?\n/)
+      .includes(`worktree ${path}`);
+
+  // The 2026-10-16 beachball. Go writes its module cache read-only (0555
+  // directories), and a worktree that ran `go` with GOPATH inside it holds
+  // one, ignored. `git worktree remove` deleted half of it, hit "Permission
+  // denied", unregistered the worktree anyway, and the fallback rmSync then
+  // blocked the main process for ~34s retrying a delete it could never
+  // finish. Removal has to finish the job, and never stall the event loop.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "removes a worktree holding a read-only module cache without stalling the app",
+    async () => {
+      writeFileSync(join(repoPath, ".git", "info", "exclude"), ".local/\n");
+      const wt = await addIndexedWorktree("gocache");
+      const mod = join(wt.path, ".local", "go", "pkg", "mod", "example.com");
+      const dirs: string[] = [];
+      for (let m = 0; m < 6; m += 1) {
+        const dir = join(mod, `mod${m}@v1.0.0`, "internal");
+        mkdirSync(dir, { recursive: true });
+        for (let f = 0; f < 60; f += 1) {
+          writeFileSync(join(dir, `f${f}.go`), "package internal\n");
+        }
+        dirs.push(dir, join(dir, ".."));
+      }
+      // Deepest first, the way Go leaves them.
+      for (const dir of dirs) chmodSync(dir, 0o555);
+      vi.mocked(emitEvent).mockClear();
+      vi.mocked(logMain).mockClear();
+
+      let last = performance.now();
+      let worstGap = 0;
+      const ticker = setInterval(() => {
+        const now = performance.now();
+        worstGap = Math.max(worstGap, now - last);
+        last = now;
+      }, 10);
+      try {
+        const res = await bus.dispatch("worktree:removeMany", {
+          worktreeIds: [wt.id]
+        });
+        expect(res.ok).toBe(true);
+        if (res.ok) {
+          expect(res.value).toEqual({ removed: [wt.id], dirty: [], failed: [] });
+        }
+        expect(existsSync(wt.path)).toBe(false);
+        expect(registered(wt.path)).toBe(false);
+        expect(rowExists(wt.id)).toBe(false);
+        // A synchronous delete shows up here as one enormous gap.
+        expect(worstGap).toBeLessThan(1_000);
+        // Progress is streamed so the dialog can show the delete moving.
+        expect(vi.mocked(emitEvent)).toHaveBeenCalledWith(
+          "worktree:removeProgress",
+          expect.objectContaining({ worktreeId: wt.id })
+        );
+        const progress = vi
+          .mocked(emitEvent)
+          .mock.calls.filter(([name]) => name === "worktree:removeProgress")
+          .map(([, payload]) => (payload as { itemsDeleted: number }).itemsDeleted);
+        expect(Math.max(...progress)).toBeGreaterThanOrEqual(6 * 60);
+      } finally {
+        clearInterval(ticker);
+        unlockTree(wt.path);
+        rmSync(join(repoPath, ".git", "info", "exclude"), { force: true });
+      }
+    },
+    90_000
+  );
+
+  // A delete that stops partway must not leave an unregistered folder nobody
+  // can see — the 20 MB the user was left with. The worktree stays in Git
+  // and in the sidebar, the reason names the file that stopped it, and the
+  // failure reaches the log, where the old path wrote nothing at all.
+  it("keeps a worktree it could not delete registered, and logs why", async () => {
+    const wt = await addIndexedWorktree("stuck");
+    const { DeleteTreeError } = await import("../util/delete-tree");
+    hoisted.deleteTree = async (path) => {
+      const cause = Object.assign(new Error("EACCES: permission denied"), {
+        code: "EACCES"
+      });
+      throw new DeleteTreeError(path, join(path, "cache", "locked"), cause, 12);
+    };
+    vi.mocked(emitEvent).mockClear();
+    vi.mocked(logMain).mockClear();
+    try {
+      const res = await bus.dispatch("worktree:removeMany", {
+        worktreeIds: [wt.id]
+      });
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
+      expect(res.value.removed).toEqual([]);
+      expect(res.value.failed).toHaveLength(1);
+      const message = res.value.failed[0]?.message ?? "";
+      expect(message).toMatch(/permission denied/i);
+      expect(message).toContain(join("cache", "locked"));
+      expect(existsSync(wt.path)).toBe(true);
+      expect(registered(wt.path)).toBe(true);
+      expect(rowExists(wt.id)).toBe(true);
+      expect(vi.mocked(emitEvent)).not.toHaveBeenCalledWith("worktree:removed", {
+        worktreeId: wt.id
+      });
+      expect(logged("error").some((line) => line.includes(wt.path))).toBe(true);
+    } finally {
+      hoisted.deleteTree = null;
+    }
+  });
+
+  it("logs a folder Git no longer recognises", async () => {
+    const wt = await addIndexedWorktree("disowned");
+    rmSync(join(wt.path, ".git"), { force: true });
+    git(repoPath, ["worktree", "prune"]);
+    vi.mocked(logMain).mockClear();
+
+    const res = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id]
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value.failed).toHaveLength(1);
+    expect(logged("error").some((line) => line.includes(wt.path))).toBe(true);
+  });
+
+  // Declining "Remove anyway" is a choice, not a failure — but the log should
+  // still say which worktrees were kept and why.
+  it("deletes nothing from a worktree with uncommitted changes, and logs the skip", async () => {
+    const wt = await addIndexedWorktree("dirty");
+    writeFileSync(join(wt.path, "scratch.txt"), "unsaved\n");
+    vi.mocked(logMain).mockClear();
+
+    const res = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id]
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value).toEqual({ removed: [], dirty: [wt.id], failed: [] });
+    expect(existsSync(join(wt.path, "scratch.txt"))).toBe(true);
+    expect(existsSync(join(wt.path, "a.txt"))).toBe(true);
+    expect(logged("warn").some((line) => line.includes(wt.path))).toBe(true);
+
+    const forced = await bus.dispatch("worktree:removeMany", {
+      worktreeIds: [wt.id],
+      force: true
+    });
+    expect(forced.ok).toBe(true);
+    if (forced.ok) expect(forced.value.removed).toEqual([wt.id]);
+    expect(existsSync(wt.path)).toBe(false);
+  });
+
+  it("refuses a locked worktree before deleting anything", async () => {
+    const wt = await addIndexedWorktree("locked");
+    git(repoPath, ["worktree", "lock", wt.path]);
+    try {
+      const res = await bus.dispatch("worktree:removeMany", {
+        worktreeIds: [wt.id],
+        force: true
+      });
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.value.removed).toEqual([]);
+        expect(res.value.failed[0]?.message).toMatch(/locked/i);
+      }
+      expect(existsSync(join(wt.path, "a.txt"))).toBe(true);
+      expect(registered(wt.path)).toBe(true);
+    } finally {
+      git(repoPath, ["worktree", "unlock", wt.path]);
+    }
   });
 });
 

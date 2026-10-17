@@ -114,6 +114,7 @@ first.
 | `Finished Branches - UX Review.dc.html` | Why the sidebar's `↑2` and `225 gone` could not be clicked, why garbage collection and `fetch --prune` never remove a gone branch, and why Maintenance › Local branches declined every squash merge. Then the counts as filter chips, a status filter in the refs browser, the evidence rules (a merged PR whose final head *is* the local tip), the redrawn review with an age guard, and garbage collection's hand-off to it. Interactive. |
 | `Worktree List Cap - UX Review.dc.html` | Why Other worktrees is the one sidebar list with no cap, and why its Recent order puts already-merged work on top; a slice of six in-flight rows with a Finished count and View all into a new Worktrees tab of the refs browser; the "finished" predicate (landed, clean, nothing unshipped); ghost rows for a selection outside the six, reusing Back Forward Navigation's rules; and the gone-versus-PR-chip precedence, with a gone transition forcing a PR refresh. Interactive. |
 | `Maintenance Combined - UX Review.dc.html` | Repository maintenance's Combined tab: why a run could not say which step it was on, why the branch review listed all 82 repositories, and why it stopped showing the rules it had applied. Then one anatomy for all four tabs, the plan as numbered step cards that become a step rail during the run, a rules-in-force strip above every review, cards only for repositories that propose something, a per-step receipt, and the Worktrees tab brought in line with its siblings. Written here and pushed up; all data is invented. |
+| `Removal Errors - UX Review.dc.html` | How Repository maintenance reports a worktree it could not remove. Why a removal froze the app for 34&nbsp;s and then said only &ldquo;Some worktrees were not removed&rdquo;: a synchronous `rmSync` fallback on the main process, a raw `EACCES` in a stacked dialog, and a `.modal__error` line whose inset rule never matched. Then live removal progress in the dialog; an inline outcome card that names each worktree, the reason in plain words, its path and what is left on disk, with Reveal, Retry, Details and View log (three placements, **3a** recommended); the all-failed, single-failure and kept-with-changes variants; and the shared card's anatomy, tokens, copy rules and reason table, applied to the Local branches and Garbage collection steps. Dark theme; everything invented. |
 | `Git Discovery - UX Review.dc.html` | Git features PwrGit runs or could use but never mentions &mdash; hooks, `.git/info/exclude` and the global excludes file, and fifteen more &mdash; and one discovery system for all of them: a receipt only when Git has acted, one explain popover, a per-repo Repository setup sheet reached from a hooks chip beside LFS, and Settings &rsaquo; Git defaults that show the `git config` line they write. The rejected-commit panel, the hook map, the three-destination Ignore&hellip; dialog, and an ignore-rule path tester. A proposal; nothing in it is built. Interactive. |
 | `Back Forward Navigation - UX Review.dc.html` | Back/Forward for PwrGit. Why one double&#8209;click on a PR row lost your place: there is no history, and the reveal forces the 190&#8209;row Other worktrees disclosure open and saves it open. Then PwrAgnt's `.history-nav` pair in the title bar, with a right&#8209;click list of places; what an entry is (a worktree selection, with the open commit and a sidebar anchor riding on it); Back restoring the row you acted from; and ghost rows that show a capped&#8209;away worktree or ref without opening its list, anchored so nothing moves under the pointer. Written here and pushed up; light theme; PR numbers and branch names follow the PwrAgnt sidebar screenshot that prompted it, the rest is invented. Interactive. |
 | `Worktree Chip Glyphs - UX Review.dc.html` | Why the worktree holder chip's `⌂` and `⑂` looked wrong: neither character is in a bundled face, so an OS fallback font drew them, and the sidebar's PR chip drew `⌂` for every worktree. Then the four ways to draw primary vs linked worktree (house plus the palette's 3a mark recommended), and where it lands: one branch, worktree, checkout and repository drawing on every surface. Written here and pushed up; every specimen is live SVG and contrived names, no captures. |
@@ -580,6 +581,23 @@ pruned to the rules it uses. Every probe it quotes ran against an isolated
 `HOME` with `GIT_CONFIG_NOSYSTEM=1`, on Git 2.56 under macOS. Its identities
 (`rowan@vale.example`, `rowan@northwind.example`) and repositories are
 invented. It carries no `assets/`. Card **5a** is a live `DCLogic` prototype.
+
+`Removal Errors - UX Review.dc.html` was written in the `claude-design` MCP's
+`write_files` on 2026-10-16, then mirrored down from the served copy with lines
+4&ndash;6 stripped; the project lists it at the repo's 83,718 bytes. Its design
+round is in the project's chat panel as "Removal errors — say which worktree,
+why, and what's left". It answers a report from a removal that hit a
+read-only Go module cache: the app stopped responding while a synchronous
+fallback delete retried, then showed one generic red line flush against the
+dialog edge, and logged nothing. The report's screenshot held real paths, so it
+is described in the thread rather than uploaded, and turn **1** redraws it with
+invented names (`acme-tap`, `fix/cache-installer`,
+`/Users/dev/.worktrees/k3x9/acme-tap`). Turn **2** is live removal progress,
+turn **3** the inline outcome card in three placements with **3a**
+recommended, turn **4** its variants, and turn **5** the shared component and
+build list. Its icons are exact Lucide SVGs drawn as fully percent-encoded CSS
+masks, as in `Fork Sync`. It is drawn in the dark theme the report came from.
+It carries no `assets/`.
 
 ## Deliberately NOT copied in
 

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
 import {
   formatBytes,
   STALE_AGE_DAYS,
@@ -6,7 +13,9 @@ import {
   type PruneScanSummary
 } from "@pwrgit/shared";
 import { confirmDialog } from "../shell/dialogs";
+import { revealLabel, revealPath } from "../shell/reveal";
 import { dispatch, subscribe } from "../../lib/pwrgit";
+import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { currentPlatform } from "../../lib/platform";
 import { relativeAge } from "../../lib/relativeAge";
 import {
@@ -65,9 +74,13 @@ export function PruneWorktreesPanel({
   /**
    * Bulk removal — `useRepoTree.removeWorktrees`, already confirmed here.
    * Reusing it keeps one removal path: it streams `worktree:removed`, prunes
-   * the sidebar rows live, and owns the dirty/force retry.
+   * the sidebar rows live, and owns the dirty/force retry. It reports what
+   * became of each id, and this panel shows that inline.
    */
-  onRemove: (worktreeIds: string[]) => Promise<void>;
+  onRemove: (
+    worktreeIds: string[],
+    options?: { force?: boolean }
+  ) => Promise<RemoveWorktreesOutcome>;
   onClose: () => void;
   onBusyChange?: (busy: boolean) => void;
   onCandidateCount?: (count: number) => void;
@@ -103,6 +116,17 @@ export function PruneWorktreesPanel({
   const reclaimedRef = useRef(false);
   /** The reclaim panel is mid-`git clean`; see `busy` below. */
   const [reclaiming, setReclaiming] = useState(false);
+  /** What the last removal could not do, shown in place of the list's end. */
+  const [failures, setFailures] = useState<RemovalFailure[]>([]);
+  /** How many the last run removed, for the outcome card's second line. */
+  const [removedThisRun, setRemovedThisRun] = useState(0);
+  const [keptDirty, setKeptDirty] = useState<PruneCandidate[]>([]);
+  /** The delete in flight: which worktree, and how far its folder has gone. */
+  const [removing, setRemoving] = useState<{
+    ids: string[];
+    current: string | null;
+    itemsDeleted: number;
+  } | null>(null);
 
   const runSweep = useCallback(
     (force: boolean): void => {
@@ -115,6 +139,8 @@ export function PruneWorktreesPanel({
       setRemoved(new Set());
       removedRef.current.clear();
       setError(null);
+      setFailures([]);
+      setKeptDirty([]);
       setCancelling(false);
       setSweep({
         completedRepos: 0,
@@ -190,6 +216,16 @@ export function PruneWorktreesPanel({
     return subscribe("worktree:removed", ({ worktreeId }) => {
       removedRef.current.add(worktreeId);
       setRemoved((previous) => new Set(previous).add(worktreeId));
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribe("worktree:removeProgress", ({ worktreeId, itemsDeleted }) => {
+      setRemoving((previous) =>
+        previous === null || !previous.ids.includes(worktreeId)
+          ? previous
+          : { ...previous, current: worktreeId, itemsDeleted }
+      );
     });
   }, []);
 
@@ -271,6 +307,40 @@ export function PruneWorktreesPanel({
     );
   };
 
+  /**
+   * Run a removal and keep what it reports. `force` is only for Retry: those
+   * worktrees were already confirmed, and what is left of them is PwrGit's
+   * own half-finished delete, which Git reads as uncommitted changes.
+   */
+  const runRemoval = async (ids: string[], force: boolean): Promise<void> => {
+    setStage({ kind: "removing" });
+    setError(null);
+    setFailures([]);
+    setKeptDirty([]);
+    setRemoving({ ids, current: ids[0] ?? null, itemsDeleted: 0 });
+    try {
+      const result = await (force ? onRemove(ids, { force: true }) : onRemove(ids));
+      for (const id of result.removed) removedRef.current.add(id);
+      setRemoved((previous) => new Set([...previous, ...result.removed]));
+      setSelected(new Set());
+      const byId = new Map(swept.map((candidate) => [candidate.worktreeId, candidate]));
+      setFailures(result.failed.flatMap((failure) => {
+        const candidate = byId.get(failure.id);
+        return candidate === undefined ? [] : [{ ...failure, candidate }];
+      }));
+      setRemovedThisRun(result.removed.length);
+      setKeptDirty(result.keptDirty.flatMap((id) => byId.get(id) ?? []));
+      if (onContinue !== undefined && ids.every((id) => removedRef.current.has(id))) {
+        continueWithRemoved();
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setRemoving(null);
+      setStage({ kind: "review" });
+    }
+  };
+
   const remove = async (): Promise<void> => {
     const picked = candidates.filter((candidate) =>
       selected.has(candidate.worktreeId)
@@ -283,23 +353,7 @@ export function PruneWorktreesPanel({
       danger: true
     });
     if (!go) return;
-    const ids = picked.map((candidate) => candidate.worktreeId);
-    setStage({ kind: "removing" });
-    try {
-      await onRemove(ids);
-      setSelected(new Set());
-      if (onContinue !== undefined) {
-        if (ids.every((id) => removedRef.current.has(id))) {
-          continueWithRemoved();
-        } else {
-          setError("Some worktrees were not removed. Review the remaining worktrees or continue without further pruning.");
-        }
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setStage({ kind: "review" });
-    }
+    await runRemoval(picked.map((candidate) => candidate.worktreeId), false);
   };
 
   const busy =
@@ -424,7 +478,21 @@ export function PruneWorktreesPanel({
                 </div><time>took {Math.max(0, Math.round((Date.parse(summary.finishedAt) - Date.parse(summary.startedAt)) / 1000))}s</time>
               </div>
             )}
-            {error !== null && <div className="modal__error">{error}</div>}
+            {stage.kind === "removing" && removing !== null && (
+              <RemovalActivity removing={removing} candidates={swept} />
+            )}
+            {error !== null && <div className="modal__error" role="alert">{error}</div>}
+            {stage.kind === "review" && failures.length > 0 && (
+              <RemovalFailures
+                failures={failures}
+                removedCount={removedThisRun}
+                canContinue={onContinue !== undefined}
+                onRetry={(ids) => void runRemoval(ids, true)}
+              />
+            )}
+            {stage.kind === "review" && keptDirty.length > 0 && (
+              <KeptForChanges kept={keptDirty} />
+            )}
             {summary !== null && stage.kind === "review" && <MaintenanceRulesApplied kind="worktrees" protectRecent={protectRecent} protectionDays={protectionDays}
               onChange={() => { if (step) onChangeRules?.(); else { setSummary(null); setStage({ kind: "idle" }); setSelected(new Set()); } }} />}
 
@@ -585,5 +653,211 @@ function PruneRow({
       <span className="prune__row-size">{candidate.sizeBytes === null ? "size unknown" : `${candidate.sizePartial === true ? "≥ " : ""}${formatBytes(candidate.sizeBytes)}`}</span>
       {tip.tooltipNode}
     </label>
+  );
+}
+
+const label = (candidate: PruneCandidate): string =>
+  `${candidate.repoName} · ${candidate.branch}`;
+
+type RemovalFailure = RemoveWorktreesOutcome["failed"][number] & {
+  candidate: PruneCandidate;
+};
+
+/** Lucide icons, exact paths, drawn with currentColor. */
+function Icon({ name }: { name: "alert" | "info" | "log" | "folder" | "retry" | "chev" | "chevd" }) {
+  const paths: Record<typeof name, ReactNode> = {
+    alert: <><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></>,
+    info: <><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></>,
+    log: <><path d="M15 12h-5" /><path d="M15 8h-5" /><path d="M19 17V5a2 2 0 0 0-2-2H4" /><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3" /></>,
+    folder: <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />,
+    retry: <><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></>,
+    chev: <path d="m9 18 6-6-6-6" />,
+    chevd: <path d="m6 9 6 6 6-6" />
+  };
+  return (
+    <svg className="maintenance__problem-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {paths[name]}
+    </svg>
+  );
+}
+
+function RemovalActivity({
+  removing,
+  candidates
+}: {
+  removing: { ids: string[]; current: string | null; itemsDeleted: number };
+  candidates: PruneCandidate[];
+}) {
+  const current = candidates.find((c) => c.worktreeId === removing.current);
+  const index = removing.current === null ? 0 : removing.ids.indexOf(removing.current);
+  return (
+    <div className="prune__activity" role="status" aria-live="polite" aria-atomic="true">
+      <span className="prune__spinner" aria-hidden="true" />
+      <div className="prune__activity-copy">
+        <strong>
+          {current === undefined
+            ? `Removing ${removing.ids.length} worktree${removing.ids.length === 1 ? "" : "s"}`
+            : `Removing ${label(current)}`}
+        </strong>
+        <span>
+          {removing.itemsDeleted.toLocaleString()} files deleted
+          {removing.ids.length > 1
+            ? ` · worktree ${Math.max(0, index) + 1} of ${removing.ids.length}`
+            : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The sentence, with the lead phrase main chose set in bold. */
+function Reason({ message, lead }: { message: string; lead: string | undefined }) {
+  if (lead === undefined || !message.startsWith(lead)) return <p>{message}</p>;
+  return (
+    <p>
+      <b>{lead}</b>
+      {message.slice(lead.length)}
+    </p>
+  );
+}
+
+function ProblemRow({
+  failure,
+  onRetry
+}: {
+  failure: RemovalFailure;
+  onRetry: (() => void) | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const tip = useViewportTooltip();
+  const { candidate } = failure;
+  return (
+    <li className="maintenance__problem-row">
+      <strong>
+        <span>{candidate.repoName}</span> · {candidate.branch}
+      </strong>
+      <Reason message={failure.message} lead={failure.lead} />
+      <small className="selectable" {...hoverTooltip(tip, candidate.path)}>
+        {candidate.path}
+      </small>
+      <div className="maintenance__problem-actions">
+        <button type="button" onClick={() => revealPath(candidate.path)}>
+          <Icon name="folder" />
+          {revealLabel(currentPlatform())}
+        </button>
+        {onRetry !== null && (
+          <button type="button" onClick={onRetry}>
+            <Icon name="retry" />
+            Retry
+          </button>
+        )}
+        {failure.detail !== undefined && (
+          <button
+            type="button"
+            className="maintenance__problem-toggle"
+            aria-expanded={open}
+            onClick={() => setOpen((was) => !was)}
+          >
+            <Icon name={open ? "chevd" : "chev"} />
+            Details
+          </button>
+        )}
+      </div>
+      {open && failure.detail !== undefined && (
+        <pre className="maintenance__problem-raw selectable">{failure.detail}</pre>
+      )}
+      {tip.tooltipNode}
+    </li>
+  );
+}
+
+/**
+ * What a removal could not do, worktree by worktree — the shared outcome card
+ * from the "Removal Errors" design board (3a). It replaces a one-line "Some
+ * worktrees were not removed" that named neither the worktree nor the reason,
+ * and a notice dialog stacked on top of this one. The headline counts, the
+ * second line says what is left and whether you can go on, and Node's or
+ * Git's own words sit behind Details and in the log.
+ */
+function RemovalFailures({
+  failures,
+  removedCount,
+  canContinue,
+  onRetry
+}: {
+  failures: RemovalFailure[];
+  removedCount: number;
+  canContinue: boolean;
+  onRetry: (ids: string[]) => void;
+}) {
+  const count = failures.length;
+  const one = count === 1;
+  // Retrying a folder Git has disowned, or a lock, would only fail again.
+  const retryable = (failure: RemovalFailure): boolean =>
+    failure.code !== "not_a_worktree" && failure.code !== "locked";
+  const sub = removedCount > 0
+    ? `${one ? "Its folder is" : "Their folders are"} still on disk. The other ${removedCount} ${removedCount === 1 ? "was" : "were"} removed${canContinue ? ", and you can continue" : ""}.`
+    : `Nothing was removed. You can retry${canContinue ? `, or continue without ${one ? "it" : "them"}` : ""}.`;
+  return (
+    <section className="maintenance__problem" role="alert">
+      <div className="maintenance__problem-head">
+        <span className="maintenance__problem-mark"><Icon name="alert" /></span>
+        <div>
+          <strong>{one ? "1 worktree wasn’t removed" : `${count} worktrees weren’t removed`}</strong>
+          <span>{sub}</span>
+        </div>
+        <button
+          type="button"
+          className="maintenance__problem-log"
+          onClick={() => void dispatch("logs:openWindow", undefined)}
+        >
+          <Icon name="log" />
+          View log
+        </button>
+      </div>
+      <ul>
+        {failures.map((failure) => (
+          <ProblemRow
+            key={failure.candidate.worktreeId}
+            failure={failure}
+            onRetry={retryable(failure) ? () => onRetry([failure.candidate.worktreeId]) : null}
+          />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Declining "Remove anyway" is a choice, so this is a note, not an error. */
+function KeptForChanges({ kept }: { kept: PruneCandidate[] }) {
+  const one = kept.length === 1;
+  return (
+    <section className="maintenance__problem is-note" role="status">
+      <div className="maintenance__problem-head">
+        <span className="maintenance__problem-mark"><Icon name="info" /></span>
+        <div>
+          <strong>
+            {one ? "1 worktree kept: it has uncommitted changes" : `${kept.length} worktrees kept: they have uncommitted changes`}
+          </strong>
+          <span>
+            You chose to keep {one ? "it" : "them"} when asked. Nothing in {one ? "it was" : "them was"} deleted, and {one ? "it’s" : "they’re"} still in the sidebar.
+          </span>
+        </div>
+      </div>
+      <ul>
+        {kept.map((candidate) => (
+          <li className="maintenance__problem-row" key={candidate.worktreeId}>
+            <strong><span>{candidate.repoName}</span> · {candidate.branch}</strong>
+            <small className="selectable">{candidate.path}</small>
+            <div className="maintenance__problem-actions">
+              <button type="button" onClick={() => revealPath(candidate.path)}>
+                <Icon name="folder" />
+                {revealLabel(currentPlatform())}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

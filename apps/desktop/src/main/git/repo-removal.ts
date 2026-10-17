@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import {
   err,
@@ -14,6 +13,7 @@ import {
   type Result
 } from "@pwrgit/shared";
 import type { DB } from "../persistence/db";
+import { deleteTree } from "../util/delete-tree";
 import { directorySize, type DirSizeResult } from "../util/dir-size";
 import { mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
@@ -497,9 +497,9 @@ export async function executeRepoRemoval(
   };
   const removeFolder = async (step: RemovalStep): Promise<void> => {
     if (step.kind === "delete") {
-      await (deps.remove ?? ((path) => rm(path, { recursive: true, force: false })))(
-        step.path
-      );
+      // Not `rm -r`: a Go module cache's read-only folders stop it with
+      // EACCES. `deleteTree` empties them, without blocking main.
+      await (deps.remove ?? ((path) => deleteTree(path)))(step.path);
     } else {
       await deps.trash(step.path);
     }

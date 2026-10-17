@@ -7113,7 +7113,6 @@ button.agent-menu__item:hover {
   flex: 0 0 auto;
   color: var(--accent-bright);
 }
-.prune > .modal__error,
 .prune__select {
   margin: 12px 18px 0;
 }
@@ -19991,6 +19990,109 @@ button.agent-auth-node:focus-visible,
 .prune__summary > .bulk-sync__mark { width: 16px; height: 16px; }
 .prune__summary time { color: var(--text-muted); font: 500 10px var(--font-mono); }
 .prune__panel > .maintenance__applied { flex: 0 0 auto; margin: 12px 18px 0; }
+/* A removal's outcome — the "Removal Errors" board's shared card (3a). It
+   sits in the panel's own column under the receipt, never as a bare mono line
+   flush to the dialog edge. Danger for what failed; `.is-note` for what the
+   user chose to keep. */
+.prune__panel > .modal__error { flex: 0 0 auto; margin: 12px 18px 0; }
+.maintenance__problem {
+  flex: 0 0 auto;
+  margin: 12px 18px 0;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger-base) 6%, transparent);
+}
+.maintenance__problem.is-note { border-color: var(--border-subtle); background: var(--bg-panel); }
+.maintenance__problem-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
+.maintenance__problem-head > div { flex: 1; min-width: 0; }
+.maintenance__problem-head > div > strong { display: block; color: var(--text-primary); font: 650 11.5px/1.25 var(--font-sans); }
+.maintenance__problem-head > div > span { display: block; margin-top: 3px; color: var(--text-secondary); font: 500 10.5px/1.35 var(--font-sans); }
+.maintenance__problem-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.maintenance__problem-mark {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.maintenance__problem-mark .maintenance__problem-icon { width: 10px; height: 10px; }
+.maintenance__problem.is-note .maintenance__problem-mark {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-secondary);
+}
+.maintenance__problem-log {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.maintenance__problem-log:hover { background: var(--accent-soft); }
+.maintenance__problem > ul { margin: 0; padding: 0; list-style: none; }
+.maintenance__problem-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px 10px 40px;
+  border-top: 1px solid var(--border-faint);
+}
+.maintenance__problem-row > strong { color: var(--text-primary); font: 600 11px/1.3 var(--font-mono); }
+.maintenance__problem-row > strong > span { font: 650 11px/1.3 var(--font-sans); }
+.maintenance__problem-row > p { margin: 0; color: var(--text-secondary); font: 500 10.5px/1.4 var(--font-sans); }
+.maintenance__problem-row > p b { color: var(--danger-text); font-weight: 600; }
+.maintenance__problem-row > small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 9.5px/1.3 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.maintenance__problem-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 5px; }
+.maintenance__problem-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 600 10.5px/1 var(--font-sans);
+  cursor: pointer;
+}
+.maintenance__problem-actions button:hover { border-color: var(--accent-border); background: var(--bg-panel-hover); color: var(--text-primary); }
+.maintenance__problem-actions .maintenance__problem-toggle { padding: 0 4px; border-color: transparent; color: var(--text-muted); }
+.maintenance__problem-actions .maintenance__problem-toggle .maintenance__problem-icon { width: 11px; height: 11px; }
+.maintenance__problem-raw {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font: 500 10px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .prune__select { justify-content: flex-start; padding: 0; border: 0; background: transparent; }
 .prune__select label { color: var(--text-primary); font: 400 12px/1.4 var(--font-sans); }
 .prune__rows { gap: 8px; }

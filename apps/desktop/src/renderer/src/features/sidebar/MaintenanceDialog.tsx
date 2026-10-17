@@ -17,6 +17,7 @@ import {
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { displayPath } from "../../lib/platform";
 import { useModal } from "../../lib/useModal";
+import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { MaintenancePlanForm, MaintenanceSteps, MaintenanceRulesApplied, type MaintenancePlan, type StepKey, type StepResult } from "./MaintenancePlan";
 import { PruneWorktreesPanel } from "./PruneWorktreesPanel";
 import { BulkSyncStatus, StatusMark } from "./BulkSyncStatus";
@@ -106,7 +107,10 @@ export function MaintenanceDialog({
   profileId: string;
   platform: string;
   onClose: () => void;
-  onRemoveWorktrees: (ids: string[]) => Promise<void>;
+  onRemoveWorktrees: (
+    ids: string[],
+    options?: { force?: boolean }
+  ) => Promise<RemoveWorktreesOutcome>;
   initialTab?: "combined" | "gc" | "branches" | "worktrees";
   /** Review one repository only — the refs browser's "Clean up finished
    *  branches…" opens the dialog on the repository it was showing. */

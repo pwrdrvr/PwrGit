@@ -18,6 +18,7 @@ vi.mock("../../lib/platform", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/platform")>()),
   currentPlatform: () => "linux"
 }));
+import type { RemoveWorktreesOutcome } from "../../state/useRepoTree";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 
 const repo: MaintenanceRepo = {
@@ -95,7 +96,7 @@ beforeEach(async () => {
   await act(async () =>
     root.render(
       <StrictMode>
-        <MaintenanceDialog initialTab="gc" onRemoveWorktrees={async () => undefined} profileId="one" platform="linux" onClose={onClose} />
+        <MaintenanceDialog initialTab="gc" onRemoveWorktrees={async () => ({ removed: [], keptDirty: [], failed: [] })} profileId="one" platform="linux" onClose={onClose} />
       </StrictMode>
     )
   );
@@ -536,7 +537,7 @@ describe("maintenance dialog opened from a repository's branch list", () => {
     await act(async () =>
       root.render(
         <MaintenanceDialog
-          onRemoveWorktrees={async () => undefined}
+          onRemoveWorktrees={async () => ({ removed: [], keptDirty: [], failed: [] })}
           profileId="one"
           platform="linux"
           onClose={onClose}
@@ -600,11 +601,12 @@ describe("combined maintenance workflow", () => {
         activityComplete: true, lastActivityAt: "2026-08-01T00:00:00Z", lastTouchedAt: "2026-08-01T00:00:00Z" }] }]
   };
   const actions = () => runCalls().map(([, req]) => req.action.kind);
-  let remove: ReturnType<typeof vi.fn<(ids: string[]) => Promise<void>>>;
+  let remove: ReturnType<typeof vi.fn<(ids: string[]) => Promise<RemoveWorktreesOutcome>>>;
   async function open(savedMode: "review" | "auto" = "review") {
     events.clear();
     remove = vi.fn(async (ids: string[]) => {
       ids.forEach((worktreeId) => events.get("worktree:removed")?.({ worktreeId }));
+      return { removed: ids, keptDirty: [], failed: [] };
     });
     subscribe.mockImplementation((name: string, handler: (event: unknown) => void) => {
       events.set(name, handler);
@@ -661,6 +663,7 @@ describe("combined maintenance workflow", () => {
     remove.mockImplementation(async (ids) => {
       await new Promise<void>((resolve) => { finish = resolve; });
       ids.forEach((worktreeId) => events.get("worktree:removed")?.({ worktreeId }));
+      return { removed: ids, keptDirty: [], failed: [] };
     });
     await click("Start");
     await act(async () => container.querySelector<HTMLInputElement>(".prune__row input")!.click());
@@ -690,14 +693,23 @@ describe("combined maintenance workflow", () => {
     await click("Delete 1 branch and continue");
     expect(container.querySelector(".maintenance__step.is-on small")?.textContent).toMatch(/^deleting /);
   });
-  it("stays on worktree review if a requested removal did not succeed", async () => {
+  it("stays on worktree review, naming what failed, if a requested removal did not succeed", async () => {
     await open();
-    remove.mockResolvedValue(undefined);
+    remove.mockResolvedValue({ removed: [], keptDirty: [], failed: [{
+      id: "finished-wt",
+      message: "Could not delete cache: permission denied (EACCES). 3 items were deleted before it stopped; the rest of /fixtures/finished is still on disk and still a worktree."
+    }] });
     await click("Start");
     await act(async () => container.querySelector<HTMLInputElement>(".prune__row input")!.click());
     await click("Remove 1 worktree and continue");
     expect(actions()).toEqual([]);
-    expect(container.textContent).toContain("Some worktrees were not removed");
+    const card = container.querySelector<HTMLElement>("[role='alert']");
+    expect(card?.textContent).toContain("example · finished");
+    expect(card?.textContent).toContain("permission denied");
+    expect(card?.textContent).toContain("/fixtures/finished");
+    expect(container.textContent).not.toContain("Some worktrees were not removed");
+    // Continuing is still the user's call.
+    expect(button("Skip worktrees").disabled).toBe(false);
   });
   it("restores Auto, enforces an age guard, and sequences scan → removal → GC", async () => {
     await open("auto");

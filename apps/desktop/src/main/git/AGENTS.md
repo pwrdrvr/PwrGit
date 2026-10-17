@@ -462,8 +462,9 @@ every few directories, and symlinks never followed (a pnpm store outside the
 tree is not this worktree's bytes).
 
 **Removal is `worktree:removeMany`, not a second path.** That command already
-removes in bulk, streams `worktree:removed`, prunes the sidebar rows live and
-owns the dirty/force retry. The pruner passes `{ confirmed: true }` to
+removes in bulk, streams `worktree:removed` (and `worktree:removeProgress`
+while a folder is deleted), prunes the sidebar rows live, logs every outcome,
+and owns the dirty/force retry. The pruner passes `{ confirmed: true }` to
 `useRepoTree.removeWorktrees` because its own confirm names the repos, the
 reasons and the bytes; two confirms in a row train people to click through
 both.
@@ -739,6 +740,33 @@ repository; a `change_request` row's `entity_id` is its `repo_open_pr` id
 show (clone's "already cloned", fork's "Reveal checkout") passes
 `listRepos(id, { includeHidden: true })`. `hidden-repos.test.ts` covers both
 profiles.
+
+## Removing a worktree: PwrGit deletes the folder, then Git drops the record
+
+`worktreeRemove` (git-service.ts) does not let `git worktree remove` delete the
+checkout. It checks what Git checks (main worktree, lock, and unless forced the
+same `status --porcelain --ignore-submodules=none` Git runs), deletes the folder
+with `util/delete-tree.ts`, and only then runs `git worktree remove --force` on
+the now-missing path, which drops one admin entry. Three reasons, all from the
+2026-10-16 beachball:
+
+- **Git's delete stops at a read-only directory and unregisters anyway.** Go
+  writes its module cache 0555. Git failed with "Permission denied" partway,
+  deleted the worktree's record regardless, and left a folder no list shows.
+  `deleteTree` adds the owner's rwx to a real directory before emptying it.
+- **Never delete synchronously in main.** The old fallback was `rmSync` with
+  `maxRetries`, which also *sleeps* on the main thread between attempts: 34s of
+  spinning beachball. `deleteTree` streams unlink/rmdir through p-map-iterable,
+  four at once, and reports progress. Keep anything recursive off `*Sync`.
+- **A delete that stops partway keeps the worktree registered.** The `.git`
+  link goes last (`deleteLast`), so Git still recognises what is left and a
+  forced retry finishes it. The renderer's Retry passes `force` for exactly
+  that reason: Git now reads PwrGit's half-finished delete as changes.
+
+Anything `worktreeRemove` does not check itself (submodules, a missing `.git`
+link, a `prunable` entry) is handed to `git worktree remove` unchanged. The
+lifecycle handler tests pin all of this against real Git, including an
+event-loop stall assertion that the old path failed at 33s.
 
 ## Removing a repository never prunes
 

@@ -122,7 +122,7 @@ mode worth designing against.
 
 | Script | Checks |
 |---|---|
-| `check-package-license-policy.mjs` | OUR five workspace `package.json` files declare MIT, plus `LICENSE` and the electron-builder attribution. **Never looks at a dependency.** |
+| `check-package-license-policy.mjs` | OUR five workspace `package.json` files declare MIT, plus `LICENSE` and the electron-builder attribution. **Never looks at a dependency.** It also keeps former-employer names out of tracked files — a name failure there is not a license failure. A public package's npm name (`@scope/pkg`) may appear anywhere; only the bare vendor name is flagged. |
 | `check-third-party-license-allowlist.mjs` | Every license the notice discloses is on an explicit allowlist. This is the gate. |
 | `generate-third-party-licenses.mjs` | Transcribes the tree into `THIRD_PARTY_LICENSES`. **Judges nothing.** |
 

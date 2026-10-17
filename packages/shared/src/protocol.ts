@@ -1504,8 +1504,19 @@ export interface Commands {
       removed: string[];
       /** Skipped because they have uncommitted changes (retry with force). */
       dirty: string[];
-      /** Other failures (e.g. primary worktree, not found). */
-      failed: { id: string; message: string }[];
+      /**
+       * Other failures (e.g. primary worktree, a delete that stopped). Every
+       * one is also in the app log. `message` is a sentence for people and
+       * opens with `lead` when there is one (the dialog bolds it); `detail` is
+       * what Node or Git actually said; `code` is PwrGitError's.
+       */
+      failed: {
+        id: string;
+        message: string;
+        code?: string;
+        lead?: string;
+        detail?: string;
+      }[];
     };
   };
   "worktree:setOrder": {
@@ -2492,6 +2503,11 @@ export interface Events {
   "maintenance:progress": MaintenanceProgress;
   /** A worktree finished being removed (streamed during a batch remove). */
   "worktree:removed": { worktreeId: string };
+  /**
+   * A worktree's folder is being deleted: entries removed so far. Throttled
+   * in main to a few per second; a `worktree:removed` follows on success.
+   */
+  "worktree:removeProgress": { worktreeId: string; itemsDeleted: number };
   /** Per-repository progress for the pruner's profile-wide sweep. */
   "prune:scanProgress": PruneScanProgress;
   /** Per-worktree progress while ignored files are being deleted. */
