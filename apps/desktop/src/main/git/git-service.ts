@@ -2,10 +2,10 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
-  realpathSync,
   rmSync,
   statSync
 } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -1141,14 +1141,26 @@ export async function worktreeAdd(
   return ok(undefined);
 }
 
-/** Same entry as `git worktree list` printed, or the same place on disk. */
-function sameWorktreePath(listed: string, wanted: string): boolean {
-  if (listed === wanted) return true;
-  try {
-    return realpathSync.native(listed) === realpathSync.native(wanted);
-  } catch {
-    return false;
+/**
+ * Which listed worktree is `wanted`: the spelling Git printed, else the same
+ * place on disk. The fallback resolves asynchronously — a listed path on an
+ * unmounted or slow volume must not stall the main process — and resolves
+ * `wanted` once rather than per entry.
+ */
+async function findListedWorktree(
+  listed: WorktreeInfo[],
+  wanted: string
+): Promise<number> {
+  const exact = listed.findIndex((w) => w.path === wanted);
+  if (exact !== -1) return exact;
+  const real = await realpath(wanted).catch(() => null);
+  if (real === null) return -1;
+  const direct = listed.findIndex((w) => w.path === real);
+  if (direct !== -1) return direct;
+  for (const [index, w] of listed.entries()) {
+    if ((await realpath(w.path).catch(() => null)) === real) return index;
   }
+  return -1;
 }
 
 /** The worktree's `.git` link names its admin directory under the repo's. */
@@ -1182,16 +1194,22 @@ const DELETE_REASONS: Record<string, [string, string]> = {
 /** Say what stopped a delete in words, and keep the errno for Details. */
 export function describeDeleteFailure(
   worktreePath: string,
-  cause: unknown
+  cause: unknown,
+  /** False once Git has already dropped its record: Retry cannot help. */
+  stillRegistered = true
 ): WorktreeRemoveError {
+  const code = stillRegistered ? "delete_failed" : "not_a_worktree";
+  const left = stillRegistered
+    ? `The rest of ${worktreePath} is still on disk and still a worktree, so removing it again picks up where this left off.`
+    : `The rest of ${worktreePath} is still on disk, and Git no longer lists it as a worktree; delete it yourself if it is no longer needed.`;
   if (!(cause instanceof DeleteTreeError)) {
     const raw = cause instanceof Error ? cause.message : String(cause);
     return {
       kind: "repo",
-      code: "delete_failed",
+      code,
       lead: "Couldn’t delete the folder",
       message: "Couldn’t delete the folder. Details has what PwrGit saw.",
-      detail: `${worktreePath}: ${raw}`
+      detail: `${worktreePath}: ${raw}\n${left}`
     };
   }
   const [lead, rest] = (cause.code === undefined
@@ -1203,10 +1221,10 @@ export function describeDeleteFailure(
   const items = cause.itemsDeleted === 1 ? "1 item was" : `${cause.itemsDeleted} items were`;
   return {
     kind: "repo",
-    code: "delete_failed",
+    code,
     lead,
     message: `${lead} deleting ${what} — ${rest}.`,
-    detail: `${why}\n${items} deleted before it stopped. The rest of ${worktreePath} is still on disk and still a worktree, so removing it again picks up where this left off.`
+    detail: `${why}\n${items} deleted before it stopped. ${left}`
   };
 }
 
@@ -1234,17 +1252,16 @@ async function gitWorktreeRemove(
     if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
     // A retry can find the record already gone: the failed attempt dropped
-    // Git's metadata before its file deletion hit the lock.
+    // Git's metadata before its file deletion hit the lock. Finish the delete
+    // Git started — asynchronously, never `rmSync` on main — so the folder is
+    // not left behind with nothing listing it.
     if (attempt > 1 && /is not a working tree/i.test(message)) {
-      return existsSync(worktreePath)
-        ? err({
-            kind: "repo",
-            code: "worktree_remove_failed",
-            lead: "Folder is no longer registered",
-            message: "Folder is no longer registered as a Git worktree, but part of it is still on disk.",
-            detail: message
-          })
-        : ok(undefined);
+      try {
+        await deleteTree(worktreePath);
+        return ok(undefined);
+      } catch (cause) {
+        return err(describeDeleteFailure(worktreePath, cause, false));
+      }
     }
     const transient = /permission denied|device or resource busy|ebusy|eperm/i.test(
       message
@@ -1278,6 +1295,13 @@ async function gitWorktreeRemove(
 
 export type WorktreeRemoveOptions = {
   force: boolean;
+  /**
+   * `git worktree list` for this repository, when the caller already has it —
+   * a bulk removal lists each repository once instead of once per worktree.
+   * Only used to find this worktree's entry, so a list taken earlier in the
+   * same batch is fine.
+   */
+  listed?: WorktreeInfo[];
   /** Streamed while the folder is deleted, throttled to a few per second. */
   onProgress?: (progress: DeleteTreeProgress) => void;
 };
@@ -1308,12 +1332,14 @@ export async function worktreeRemove(
   worktreePath: string,
   options: WorktreeRemoveOptions = { force: false }
 ): Promise<Result<void, WorktreeRemoveError>> {
-  const listed = await listWorktrees(git, repoPath);
-  if (!listed.ok) return listed;
-  const index = listed.value.findIndex((w) =>
-    sameWorktreePath(w.path, worktreePath)
-  );
-  const entry = listed.value[index];
+  let worktrees = options.listed;
+  if (worktrees === undefined) {
+    const listed = await listWorktrees(git, repoPath);
+    if (!listed.ok) return listed;
+    worktrees = listed.value;
+  }
+  const index = await findListedWorktree(worktrees, worktreePath);
+  const entry = worktrees[index];
   if (entry === undefined) {
     // Git no longer lists it: another tool deleted the checkout and pruned it
     // (or git pruned on its own) before PwrGit re-indexed. Do NOT `worktree

@@ -17,7 +17,7 @@ import {
   worktreeRemove
 } from "./git-service";
 import type { GitExec } from "./dugite";
-import { mkdtempSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -355,6 +355,35 @@ describe("worktreeRemove", () => {
     // `worktree prune` is repo-wide: it would also unregister worktrees on a
     // volume that is merely unmounted. Reading the list is the only call.
     expect(calls).toEqual([["worktree", "list", "--porcelain"]]);
+  });
+
+  // Git's own delete (the delegated path: submodules, a prunable entry) can
+  // stop on a lock after it has already dropped the record. The retry then
+  // reads "not a working tree"; finish the delete instead of leaving a folder
+  // nothing lists.
+  it("finishes a delete Git abandoned after unregistering the worktree", async () => {
+    const half = join(root, "half");
+    mkdirSync(join(half, "left"), { recursive: true });
+    writeFileSync(join(half, "left", "file.txt"), "x");
+    let removes = 0;
+    const git: GitExec = async (args) => {
+      if (args[1] === "list") {
+        return ok({
+          stdout: `worktree ${root}\nHEAD abc\nbranch refs/heads/main\n\nworktree ${half}\nHEAD abc\nbranch refs/heads/half\nprunable gitdir file points to non-existent location\n\n`,
+          stderr: "",
+          exitCode: 0
+        });
+      }
+      removes += 1;
+      return removes === 1
+        ? ok({ stdout: "", stderr: `error: failed to delete '${half}': Permission denied\n`, exitCode: 255 })
+        : notAWorkingTree(half);
+    };
+
+    const res = await worktreeRemove(git, root, half);
+
+    expect(res.ok).toBe(true);
+    expect(existsSync(half)).toBe(false);
   });
 
   // A directory git no longer recognises may hold work from somewhere else

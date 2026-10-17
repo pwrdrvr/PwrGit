@@ -88,6 +88,9 @@ export type UseRepoTree = {
 /** Repos for the active profile, kept in sync with `repo:changed`. */
 export function useRepoTree(activeProfileId: string | null): UseRepoTree {
   const [repos, setRepos] = useState<Repo[]>([]);
+  /** For callbacks that must name a worktree without re-binding per render. */
+  const reposRef = useRef(repos);
+  reposRef.current = repos;
   const [loadState, setLoadState] =
     useState<ReadState>(LOADING_READ_STATE);
   const mountedRef = useRef(false);
@@ -396,9 +399,19 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
 
       if (report && outcome.failed.length > 0) {
         const failures = outcome.failed;
+        // Messages no longer carry the path (the maintenance card shows it
+        // beside them), so this notice names each worktree itself.
+        const names = new Map(
+          reposRef.current.flatMap((repo) =>
+            repo.worktrees.map((w) => [w.id, `${repo.name} · ${w.branch || w.path}`] as const)
+          )
+        );
         const shown = failures
           .slice(0, 6)
-          .map((f) => `• ${f.message}`)
+          .map((f) => {
+            const name = names.get(f.id);
+            return name === undefined ? `• ${f.message}` : `• ${name}: ${f.message}`;
+          })
           .join("\n");
         const more =
           failures.length > 6 ? `\n…and ${failures.length - 6} more` : "";

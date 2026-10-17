@@ -26,8 +26,10 @@ import { delay } from "./timing";
 const PREFETCH_OPTIONS = { concurrency: 1, maxUnread: 100 };
 const MAPPER_OPTIONS = { concurrency: 4, maxUnread: 100 };
 const PROGRESS_MS = 150;
-/** Windows holds fresh files briefly (antivirus, a probe's cwd); retry those. */
-const MAX_ATTEMPTS = 8;
+/** Windows holds fresh files briefly (antivirus, a probe's cwd); retry those.
+ *  Ten attempts at 100ms × attempt is ~4.5s — the budget `git worktree
+ *  remove` was given for the same locks before this replaced it. */
+const MAX_ATTEMPTS = 10;
 const RETRYABLE = new Set(["EBUSY", "EMFILE", "ENFILE", "ENOTEMPTY"]);
 
 export type DeleteTreeProgress = {
@@ -67,23 +69,34 @@ function errorCode(error: unknown): string | undefined {
 
 const isMissing = (error: unknown): boolean => errorCode(error) === "ENOENT";
 
-/** Add the owner's rwx to a real directory; false if that did not happen. */
-async function makeWritable(path: string): Promise<boolean> {
+/**
+ * Add the owner's rwx to a real directory; false if that did not happen.
+ * `stat` is the caller's own lstat when it has one, so the walk pays one
+ * lstat per directory, not two.
+ */
+async function makeWritable(
+  path: string,
+  stat?: { mode: number; isDirectory(): boolean }
+): Promise<boolean> {
   try {
-    const stat = await FSP.lstat(path);
-    if (!stat.isDirectory()) return false;
-    if ((stat.mode & 0o700) === 0o700) return false;
-    await FSP.chmod(path, (stat.mode & 0o7777) | 0o700);
+    const seen = stat ?? (await FSP.lstat(path));
+    if (!seen.isDirectory()) return false;
+    if ((seen.mode & 0o700) === 0o700) return false;
+    await FSP.chmod(path, (seen.mode & 0o7777) | 0o700);
     return true;
   } catch {
     return false;
   }
 }
 
+/**
+ * `parent` is the directory holding `path` inside the tree being deleted, or
+ * null for the root itself: the root's parent is not ours to chmod.
+ */
 async function removeEntry(
   path: string,
   directory: boolean,
-  parent: string
+  parent: string | null
 ): Promise<void> {
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -107,7 +120,7 @@ async function removeEntry(
             if (fixError !== error) throw fixError;
             // Locked rather than read-only: fall through to the backoff.
           }
-        } else if (!(await makeWritable(parent))) {
+        } else if (parent === null || !(await makeWritable(parent))) {
           // The walk already opened `parent` writable; a refusal now is a
           // flag (uchg), ownership or a sandbox, and retrying cannot fix it.
           throw error;
@@ -171,7 +184,7 @@ export async function deleteTree(
       // junction: removing one removes the link, not what it points at.
       const stat = await FSP.lstat(path);
       if (stat.isSymbolicLink() || !stat.isDirectory()) return "file";
-      if (process.platform !== "win32") await makeWritable(path);
+      if (process.platform !== "win32") await makeWritable(path, stat);
       return {
         path,
         handle: await FSP.opendir(path, { bufferSize: 32 }),
@@ -287,7 +300,7 @@ export async function deleteTree(
         await removeEntry(
           entry.path,
           entry.directory,
-          entry.parent?.path ?? resolve(root, "..")
+          entry.parent?.path ?? null
         );
         return entry;
       } catch (error) {

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync
 } from "node:fs";
@@ -162,5 +163,20 @@ describe("deleteTree", () => {
     file("target/src/a.txt");
     await deleteTree(join(root, "target"), undefined, { deleteLast: [".git"] });
     expect(existsSync(join(root, "target"))).toBe(false);
+  });
+
+  // Only directories being deleted are ever chmodded. A root whose parent is
+  // read-only fails, and the parent keeps its mode.
+  it.skipIf(!posixOwner)("never chmods the root's own parent", async () => {
+    file("locked-parent/target/a.txt");
+    const parent = join(root, "locked-parent");
+    chmodSync(parent, 0o555);
+    const failure = await deleteTree(join(parent, "target")).then(
+      () => null,
+      (cause: unknown) => cause
+    );
+    expect(failure).toBeInstanceOf(DeleteTreeError);
+    expect((failure as DeleteTreeError).relativePath).toBe("");
+    expect(statSync(parent).mode & 0o777).toBe(0o555);
   });
 });

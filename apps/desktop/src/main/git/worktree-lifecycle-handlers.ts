@@ -6,8 +6,10 @@ import type { DB } from "../persistence/db";
 import type { SettingsService } from "../settings/settings-service";
 import { execGit } from "./dugite";
 import {
+  listWorktrees,
   worktreeAdd,
   worktreeRemove,
+  type WorktreeInfo,
   type WorktreeRemoveError
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
@@ -117,6 +119,8 @@ export function registerWorktreeLifecycleHandlers(
     // would race on .git/worktrees. Each folder's own delete is parallel
     // (`deleteTree`, four at once) and never blocks the main process.
     const releases: (() => void)[] = [];
+    // One `git worktree list` per repository, not per worktree.
+    const listings = new Map<string, WorktreeInfo[] | undefined>();
     try {
       for (const id of req.worktreeIds) {
         const wt = stmt.get(id) as Row | undefined;
@@ -136,8 +140,14 @@ export function registerWorktreeLifecycleHandlers(
         releases.push(await state.lockForRemoval(id));
         const began = Date.now();
         let itemsDeleted = 0;
+        if (!listings.has(wt.repo_path)) {
+          const listed = await listWorktrees(execGit, wt.repo_path);
+          listings.set(wt.repo_path, listed.ok ? listed.value : undefined);
+        }
+        const listed = listings.get(wt.repo_path);
         const res = await worktreeRemove(execGit, wt.repo_path, wt.path, {
           force: req.force ?? false,
+          ...(listed === undefined ? {} : { listed }),
           onProgress: (progress) => {
             itemsDeleted = progress.itemsDeleted;
             emitEvent("worktree:removeProgress", {
