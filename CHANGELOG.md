@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.39.0 - 2026-10-19
+
+- Forks - Added an option, enabled by default, to keep a fork’s original repository as an `upstream` remote when cloning. For forks of forks, choose the parent or network root. Existing remotes are reused, fixing failures when the GitHub CLI already created `upstream`.
+- Clone dialog - Reduced layout shifts while account and fork details load, keeping the destination field and Clone button steadier after selecting a repository.
+- Worktree removal - Fixed app freezes when deleting large worktrees or read-only caches, including Go module caches. Removal now runs asynchronously with live progress.
+- Removal recovery - Added clearer per-worktree outcomes with the failure reason, path, Details, Reveal, Retry, and log access. Partially completed deletions remain recoverable instead of silently disappearing from the worktree list.
+- Minor - Updated the MCP SDK and supporting dependencies.
+
 ## v0.38.0 - 2026-10-13
 
 - Contributions - Added local PR activity analytics for your existing GitHub account, including enabled Enterprise hosts. Explore daily, weekly, or monthly charts by organization and repository, distinguish PRs you merged from your own PRs, and drill into exact records. GitLab and GitCafe are not yet supported for Contributions.
