@@ -334,7 +334,10 @@ export function registerMaintenanceHandlers(
                   const collected = await collectGarbage(
                     git,
                     repo.path,
-                    action.mode
+                    action.mode,
+                    () => report(
+                      "Rebuilding a stale commit-graph cache before retrying collection…"
+                    )
                   );
                   report("Measuring object storage after collection…");
                   const afterBytes = await objectStorageBytes(git, repo.path);

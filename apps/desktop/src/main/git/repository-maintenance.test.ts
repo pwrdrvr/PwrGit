@@ -169,6 +169,69 @@ describe("repository maintenance with real Git", () => {
     );
   });
 
+  it.each(["single", "split"])(
+    "recovers repacking from a stale %s commit-graph without changing refs or dirty files",
+    async (layout) => {
+      const { repo } = fixture();
+      const graphArgs = layout === "split" ? ["--split=no-merge"] : [];
+      git(repo, "commit-graph", "write", "--reachable", ...graphArgs);
+      git(repo, "checkout", "-b", "obsolete");
+      git(repo, "commit", "--allow-empty", "-m", "Obsolete parent");
+      const missing = git(repo, "rev-parse", "HEAD");
+      git(repo, "commit", "--allow-empty", "-m", "Obsolete child");
+      git(repo, "commit-graph", "write", "--reachable", ...graphArgs);
+      git(repo, "checkout", "main");
+      git(repo, "branch", "-D", "obsolete");
+      git(repo, "reflog", "expire", "--expire=all", "--all");
+      // Leave the unreachable child and cached ancestry behind, matching a
+      // repository whose old objects disappeared before its cache was rebuilt.
+      rmSync(
+        join(repo, ".git", "objects", missing.slice(0, 2), missing.slice(2))
+      );
+      const failed = await systemGit(garbageCollectionArgs("standard"), repo);
+      expect(failed).toMatchObject({
+        ok: true,
+        value: { stderr: expect.stringContaining(`unable to read ${missing}`) }
+      });
+      expect(failed.ok && failed.value.exitCode).not.toBe(0);
+
+      const refs = git(repo, "show-ref");
+      writeFileSync(join(repo, "tracked.txt"), "local edits\n");
+      writeFileSync(join(repo, "untracked.txt"), "also keep me\n");
+      const status = git(repo, "status", "--porcelain");
+      let repairs = 0;
+      const collected = await collectGarbage(systemGit, repo, "standard", () => {
+        repairs++;
+      });
+      expect(collected).toEqual({
+        ok: true,
+        value: undefined
+      });
+      expect(repairs).toBe(1);
+      expect(git(repo, "commit-graph", "verify")).toBe("");
+      expect(git(repo, "show-ref")).toBe(refs);
+      expect(git(repo, "status", "--porcelain")).toBe(status);
+      expect(git(repo, "config", "--local", "--list")).not.toContain(
+        "core.commitgraph=false"
+      );
+    }
+  );
+
+  it.each(["HEAD", "HEAD:tracked.txt"])(
+    "still refuses collection when the live object %s is missing",
+    async (revision) => {
+      const { repo } = fixture();
+      git(repo, "commit-graph", "write", "--reachable");
+      const refs = git(repo, "for-each-ref", "--format=%(refname) %(objectname)");
+      const missing = git(repo, "rev-parse", revision);
+      rmSync(
+        join(repo, ".git", "objects", missing.slice(0, 2), missing.slice(2))
+      );
+      expect((await collectGarbage(systemGit, repo, "standard")).ok).toBe(false);
+      expect(git(repo, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refs);
+    }
+  );
+
   it("resolves linked worktrees to the same object store and refuses missing checkout metadata", async () => {
     const { root, repo } = fixture();
     const worktree = join(root, "linked");
