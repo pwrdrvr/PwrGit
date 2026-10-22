@@ -105,6 +105,24 @@ describe("GitHub backoff", () => {
     expect(result.get("feature")).toMatchObject({ number: 7 });
   });
 
+  it.each([51, 101])("stops subsequent chunks after a page failure among %i branches", async (count) => {
+    const branches = Array.from({ length: count }, (_, i) => `b${i}`);
+    const offset = count === 101 ? 50 : 0;
+    if (offset > 0) {
+      client.mockResolvedValueOnce({ repository: { a0: { nodes: [prNode(9)] } } });
+    }
+    client.mockResolvedValueOnce({ repository: {
+      a0: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "next" } },
+      a1: { nodes: [prNode(7)], pageInfo: { hasNextPage: false, endCursor: null } }
+    } }).mockRejectedValue(httpError(404));
+    const result = await fetchPrsForRepo("t", REPO, "o", "r", branches);
+    expect(result.get(`b${offset + 1}`)).toMatchObject({ number: 7 });
+    if (offset > 0) expect(result.get("b0")).toMatchObject({ number: 9 });
+    expect(result.has(`b${offset}`)).toBe(false);
+    expect(result.has(`b${offset + 50}`)).toBe(false);
+    expect(client).toHaveBeenCalledTimes(offset > 0 ? 3 : 2);
+  });
+
   it("pages past same-name fork PRs to find the newest matching source", async () => {
     const foreign = { ...prNode(99), isCrossRepository: true,
       repository: { nameWithOwner: "o/r" }, headRepository: { nameWithOwner: "other/r" } };

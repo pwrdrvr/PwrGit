@@ -41,6 +41,24 @@ describe("automatic branch PR source identity", () => {
     expect(parsed.get("main")).toMatchObject({ number: 20 });
   });
 
+  it.each([null, { nameWithOwner: "new-owner/renamed" }])(
+    "accepts a proven same-repository PR after a rename, including deleted heads (%j)", (headRepository) => {
+      const parsed = parsePrResponse(["main"], {
+        repository: { a0: { nodes: [node({
+          isCrossRepository: false,
+          repository: { nameWithOwner: "new-owner/renamed" }, headRepository
+        })] } }
+      }, ["old-owner/original"]);
+      expect(parsed.get("main")).toMatchObject({ number: 14495, repoPath: "new-owner/renamed" });
+    }
+  );
+
+  it("still rejects foreign heads when the queried repository has been renamed", () => {
+    expect(parsePrResponse(["main"], {
+      repository: { a0: { nodes: [node({ repository: { nameWithOwner: "new-owner/renamed" } })] } }
+    }, ["old-owner/original"]).get("main")).toBeNull();
+  });
+
   it("allows a configured fork contribution but declines an unavailable or unproven source", () => {
     const data = { repository: { a0: { nodes: [node()] } } };
     expect(parsePrResponse(["main"], data, ["openai/codex", "unrelated/codex"]).get("main"))

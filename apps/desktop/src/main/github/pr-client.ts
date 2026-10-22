@@ -262,7 +262,8 @@ export async function fetchPrsForRepo(
     async (chunk) => {
       return await newestPrsForSources(token, repo, owner, name, chunk, sourceRepoPaths);
     },
-    (_chunk, found) => found
+    (_chunk, result) => result.found,
+    (result) => result.failed
   );
 }
 
@@ -278,7 +279,7 @@ async function newestPrsForSources(
   name: string,
   branches: string[],
   sourceRepoPaths: readonly string[]
-): Promise<Map<string, PrSummary | null>> {
+): Promise<{ found: Map<string, PrSummary | null>; failed: boolean }> {
   const found = new Map<string, PrSummary | null>();
   let remaining = branches;
   let after = new Map<string, string>();
@@ -289,9 +290,10 @@ async function newestPrsForSources(
     try {
       data = await runQuery(token, repo, query, variables);
     } catch (error) {
-      // As with chunks, keep completed branches when a later page fails.
+      // Keep completed branches, and tell the outer walk to stop too: a
+      // refusal must not spend another request budget on subsequent chunks.
       if (found.size === 0) throw error;
-      return found;
+      return { found, failed: true };
     }
     const parsed = parsePrResponse(remaining, data, sourceRepoPaths);
     const cursors = branchPrCursors(remaining, data);
@@ -311,7 +313,7 @@ async function newestPrsForSources(
     after = next;
     remaining = [...next.keys()];
   }
-  return found;
+  return { found, failed: false };
 }
 
 /** Fetch the best PR associated with each exact commit in batched GraphQL calls. */

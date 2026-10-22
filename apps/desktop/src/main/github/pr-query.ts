@@ -132,10 +132,12 @@ export function parsePrResponse(
   branches.forEach((branch, i) => {
     const node = repo[`a${i}`]?.nodes?.find((candidate) => {
       if (candidate == null) return false;
-      // A deleted same-repository head retains isCrossRepository=false and
-      // the base repository's identity. An unavailable fork proves nothing.
-      const source = candidate.headRepository?.nameWithOwner ??
-        (candidate.isCrossRepository === false ? candidate.repository?.nameWithOwner : undefined);
+      // This connection belongs to the queried repository. GitHub's explicit
+      // same-repository proof survives a rename/transfer and deleted heads,
+      // even when the configured URL still uses the old repository path.
+      if (candidate.isCrossRepository === false) return true;
+      // A fork still needs a configured source; an unavailable fork proves nothing.
+      const source = candidate.headRepository?.nameWithOwner;
       return typeof source === "string" && sources.has(source.trim().toLowerCase());
     });
     const fork = node == null ? undefined : forkPath(node);
