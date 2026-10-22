@@ -512,10 +512,11 @@ export async function executeRepoRemoval(
     for (const [index, step] of steps.entries()) {
       if (step.isPrimary) continue;
       update(index, { status: "running" });
+      // Drain probes before taking their queue: a poll queued behind this
+      // removal cannot finish until we release it. Keep probes blocked until
+      // the refresh below has dropped the row.
+      releases.push(await deps.lockForRemoval(step.worktreeId));
       const outcome = await deps.runWorktree(step.worktreeId, async () => {
-        // Held until the refresh below has dropped the row, so no probe
-        // spawns Git into a folder that is already in the Trash.
-        releases.push(await deps.lockForRemoval(step.worktreeId));
         if (step.kind !== "forget") {
           try {
             await removeFolder(step);
@@ -550,9 +551,9 @@ export async function executeRepoRemoval(
       });
     } else if (primaryStep !== undefined) {
       update(primaryIndex, { status: "running" });
+      releases.push(await deps.lockForRemoval(primaryStep.worktreeId));
       const outcome = await deps.runWorktree(primaryStep.worktreeId, () =>
         deps.runRepository(review.repoId, async () => {
-          releases.push(await deps.lockForRemoval(primaryStep.worktreeId));
           try {
             await removeFolder(primaryStep);
             return { ok: true as const };

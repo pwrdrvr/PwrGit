@@ -31,6 +31,8 @@ import {
   type RemovalExecuteDeps
 } from "./repo-removal";
 import { createSystemGit } from "./test-support/system-git";
+import { WorktreeOperationQueue } from "./worktree-operation-queue";
+import { WorktreeStateService } from "./worktree-state";
 
 const systemGit: GitExec = createSystemGit();
 
@@ -350,6 +352,37 @@ describe("reviewRepoRemoval", () => {
 });
 
 describe("executeRepoRemoval", () => {
+  it.each([false, true])("does not deadlock with a status probe queued behind removal (linked: %s)", async (linked) => {
+    const f = await fixture(({ repo, root }) => {
+      if (linked) pushedWorktree(repo, root, "done");
+    });
+    const operations = new WorktreeOperationQueue();
+    const stateGit = vi.fn(systemGit);
+    const state = new WorktreeStateService(f.db, stateGit, operations);
+    const probes: ReturnType<WorktreeStateService["compute"]>[] = [];
+    const { deps, trashed } = executeDeps(f, {
+      lockForRemoval: (id) => state.lockForRemoval(id),
+      runWorktree: (id, op) => {
+        const removal = operations.run(id, op);
+        // A renderer poll can arrive after removal takes its queue slot.
+        // Draining that poll from inside the slot waits on removal itself.
+        probes.push(state.compute(id));
+        return removal;
+      },
+      runRepository: (id, op) => operations.runRepository(id, op)
+    });
+
+    const result = await executeRepoRemoval(deps, {
+      repoId: f.repoId,
+      decisions: { checkouts: {}, branches: {} }
+    });
+
+    expect(result.ok && result.value.outcome).toBe("removed");
+    expect(trashed).toEqual(linked ? [f.wt("done"), f.repo] : [f.repo]);
+    expect(await Promise.all(probes)).toEqual(linked ? [null, null] : [null]);
+    expect(stateGit).not.toHaveBeenCalled();
+  });
+
   it("moves every worktree, then the main checkout, to the Trash and forgets the repository", async () => {
     const f = await fixture(({ repo, root }) => {
       pushedWorktree(repo, root, "one");
