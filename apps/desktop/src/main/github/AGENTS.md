@@ -33,6 +33,10 @@ claims `origin`'s host, the CLI isn't logged in, or the network fails.
   aliased `pullRequests(headRefName: $bN)` — so 100 branches ≈ 2 requests, not
   100. Matching by `headRefName` (not the live ref) still finds PRs whose branch
   was deleted after a squash/merge.
+  Branch candidates carry source-repository identity and match only `origin`
+  or a configured fetch remote on the same GitHub instance. Page past foreign
+  heads; an unfinished walk is omitted, never negative-cached. Exact-commit
+  association remains independent and may legitimately return upstream PRs.
 - **Backoff**: `pr-client.ts` wraps `@octokit/graphql` (ESM — named import is
   fine) with Retry-After / rate-limit-reset respect + exponential backoff
   (ghcrawl's semantics, without the `bottleneck`-based octokit plugins that a

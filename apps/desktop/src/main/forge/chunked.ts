@@ -20,12 +20,15 @@
  * would spend the whole retry budget again per chunk for an answer that cannot
  * change. Only a first chunk failing rethrows, because "nothing resolved" is
  * what callers must never read as "no change request anywhere".
+ * `stopAfterChunk` lets a paginated fetch preserve completed keys from a
+ * partially failed chunk while stopping the outer walk at that failure.
  */
 export async function fetchInChunks<K, V, Raw>(
   keys: readonly K[],
   size: number,
   fetchChunk: (chunk: K[]) => Promise<Raw>,
-  parseChunk: (chunk: K[], raw: Raw) => Iterable<readonly [K, V]>
+  parseChunk: (chunk: K[], raw: Raw) => Iterable<readonly [K, V]>,
+  stopAfterChunk?: (raw: Raw) => boolean
 ): Promise<Map<K, V>> {
   const result = new Map<K, V>();
   for (let i = 0; i < keys.length; i += size) {
@@ -38,6 +41,7 @@ export async function fetchInChunks<K, V, Raw>(
       return result;
     }
     for (const [key, value] of parseChunk(chunk, raw)) result.set(key, value);
+    if (stopAfterChunk?.(raw) === true) break;
   }
   return result;
 }

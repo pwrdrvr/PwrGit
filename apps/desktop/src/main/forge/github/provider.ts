@@ -11,27 +11,29 @@ import { githubOwnerAndName } from "../resolve";
 import {
   stampForge,
   stampOpenList,
-  type ForgeProvider,
+  type TokenForgeProvider,
   type ForgeRepo
 } from "../types";
 
 /**
  * GitHub as a `ForgeProvider`.
  *
- * A thin adapter over the existing batched GraphQL client: the only real work
- * is splitting `ForgeRepo.path` back into the owner/name pair that GitHub's
- * GraphQL arguments require. Behavior is unchanged from before the abstraction.
+ * Splits `ForgeRepo.path` for GraphQL and limits source candidates to this
+ * GitHub instance; a same-named repository on another host proves nothing.
  */
-export const githubProvider: ForgeProvider = {
+export const githubProvider: TokenForgeProvider = {
   kind: "github",
 
   getToken: async (host) => getGitHubToken(host),
 
-  fetchPrsForBranches: async (token, repo, branches) => {
+  fetchPrsForBranches: async (token, repo, branches, sourceRepos = [repo]) => {
     const parts = githubOwnerAndName(repo);
     if (parts === null) return emptyFor(branches);
     return stampForge(
-      await fetchPrsForRepo(token, repo, parts.owner, parts.name, branches),
+      await fetchPrsForRepo(token, repo, parts.owner, parts.name, branches,
+        sourceRepos.filter((source) => source.kind === repo.kind &&
+          source.host.toLowerCase() === repo.host.toLowerCase() && source.port === repo.port)
+          .map((source) => source.path)),
       repo
     );
   },

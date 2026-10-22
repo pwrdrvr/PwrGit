@@ -12,6 +12,7 @@ vi.mock("@octokit/graphql", async (importOriginal) => {
 
 import { GraphqlResponseError } from "@octokit/graphql";
 import { fetchPrsForRepo } from "./pr-client";
+import { githubProvider } from "../forge/github/provider";
 
 const REPO = { host: "github.com" };
 
@@ -40,13 +41,14 @@ function graphqlError(
   );
 }
 
-function prNode(number: number): unknown {
+function prNode(number: number) {
   return {
     number,
     title: `PR ${number}`,
     url: `https://github.com/o/r/pull/${number}`,
     state: "OPEN",
-    isDraft: false
+    isDraft: false,
+    isCrossRepository: false, repository: { nameWithOwner: "o/r" }
   };
 }
 
@@ -59,6 +61,87 @@ afterEach(() => {
 });
 
 describe("GitHub backoff", () => {
+  it("admits a configured fork only on the queried GitHub instance", async () => {
+    const repo = { kind: "github" as const, host: "github.com", path: "o/r" };
+    const source = { ...repo, path: "contributor/r" };
+    client.mockResolvedValue({ repository: { a0: { nodes: [{ ...prNode(7),
+      isCrossRepository: true, headRepository: { nameWithOwner: source.path }
+    }] } } });
+    for (const candidate of [source, { ...source, host: "ghe.example.com" }, { ...source, port: 8443 }]) {
+      const parsed = await githubProvider.fetchPrsForBranches("t", repo, ["feature"], [repo, candidate]);
+      if (candidate === source) expect(parsed.get("feature"))
+        .toMatchObject({ number: 7, headRepoPath: source.path, repoPath: "o/r" });
+      else expect(parsed.get("feature")).toBeNull();
+    }
+  });
+
+  it.each(["cap", "repeated cursor", "missing cursor", "page failure"])(
+    "keeps a partial branch walk inconclusive at a %s", async (reason) => {
+      const page = (cursor: string | null) => ({ repository: {
+        a0: { nodes: [], pageInfo: { hasNextPage: true, endCursor: cursor } }
+      } });
+      let calls = 0;
+      client.mockImplementation(async () => {
+        calls += 1;
+        if (reason === "page failure" && calls > 1) throw httpError(404);
+        return page(reason === "missing cursor" ? null : reason === "repeated cursor" ? "repeat" : `${calls}`);
+      });
+      if (reason === "page failure") {
+        await expect(fetchPrsForRepo("t", REPO, "o", "r", ["main"])).rejects.toThrow();
+      } else {
+        expect((await fetchPrsForRepo("t", REPO, "o", "r", ["main"])).has("main")).toBe(false);
+      }
+      expect(client.mock.calls.length).toBeLessThanOrEqual(10);
+    }
+  );
+
+  it("retains completed branches if another branch's later page fails", async () => {
+    client.mockResolvedValueOnce({ repository: {
+      a0: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "next" } },
+      a1: { nodes: [prNode(7)], pageInfo: { hasNextPage: false, endCursor: null } }
+    } }).mockRejectedValueOnce(httpError(404));
+    const result = await fetchPrsForRepo("t", REPO, "o", "r", ["main", "feature"]);
+    expect(result.has("main")).toBe(false);
+    expect(result.get("feature")).toMatchObject({ number: 7 });
+  });
+
+  it.each([51, 101])("stops subsequent chunks after a page failure among %i branches", async (count) => {
+    const branches = Array.from({ length: count }, (_, i) => `b${i}`);
+    const offset = count === 101 ? 50 : 0;
+    if (offset > 0) {
+      client.mockResolvedValueOnce({ repository: { a0: { nodes: [prNode(9)] } } });
+    }
+    client.mockResolvedValueOnce({ repository: {
+      a0: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "next" } },
+      a1: { nodes: [prNode(7)], pageInfo: { hasNextPage: false, endCursor: null } }
+    } }).mockRejectedValue(httpError(404));
+    const result = await fetchPrsForRepo("t", REPO, "o", "r", branches);
+    expect(result.get(`b${offset + 1}`)).toMatchObject({ number: 7 });
+    if (offset > 0) expect(result.get("b0")).toMatchObject({ number: 9 });
+    expect(result.has(`b${offset}`)).toBe(false);
+    expect(result.has(`b${offset + 50}`)).toBe(false);
+    expect(client).toHaveBeenCalledTimes(offset > 0 ? 3 : 2);
+  });
+
+  it("pages past same-name fork PRs to find the newest matching source", async () => {
+    const foreign = { ...prNode(99), isCrossRepository: true,
+      repository: { nameWithOwner: "o/r" }, headRepository: { nameWithOwner: "other/r" } };
+    const own = { ...prNode(7), isCrossRepository: false,
+      repository: { nameWithOwner: "o/r" }, headRepository: null };
+    client.mockResolvedValueOnce({ repository: {
+      a0: { nodes: [foreign], pageInfo: { hasNextPage: true, endCursor: "next" } },
+      a1: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }
+    } }).mockResolvedValueOnce({ repository: {
+      a0: { nodes: [own], pageInfo: { hasNextPage: false, endCursor: null } }
+    } });
+    const result = await fetchPrsForRepo("t", REPO, "o", "r", ["main", "none"]);
+    expect(result.get("main")).toMatchObject({ number: 7 });
+    expect(result.get("none")).toBeNull();
+    expect(client).toHaveBeenCalledTimes(2);
+    expect(client.mock.calls[1]?.[1]).toMatchObject({ b0: "main", after0: "next" });
+    expect(client.mock.calls[1]?.[1]).not.toHaveProperty("b1");
+  });
+
   it("does not retry a 404", async () => {
     client.mockRejectedValue(httpError(404));
 
