@@ -10,6 +10,52 @@ import {
   parsePrNumberResponse
 } from "./pr-query";
 
+describe("automatic branch PR source identity", () => {
+  const node = (extra: Record<string, unknown> = {}) => ({
+    number: 14495, title: "Unrelated fork", url: "https://github.com/openai/codex/pull/14495",
+    state: "MERGED", isDraft: false, headRefName: "main",
+    repository: { nameWithOwner: "openai/codex" },
+    isCrossRepository: true, headRepository: { nameWithOwner: "unrelated/codex" },
+    ...extra
+  });
+
+  it("requests source identity and a page of candidates instead of one name-only match", () => {
+    const { query } = buildPrQuery("openai", "codex", ["main"]);
+    expect(query).toContain("isCrossRepository headRepository { nameWithOwner }");
+    expect(query).toContain("pageInfo { hasNextPage endCursor }");
+    expect(query).not.toContain("first: 1,");
+  });
+
+  it.each(["OPEN", "MERGED", "CLOSED"])("rejects an unrelated fork's %s main PR", (state) => {
+    expect(parsePrResponse(["main"], {
+      repository: { a0: { nodes: [node({ state })] } }
+    }, ["openai/codex"]).get("main")).toBeNull();
+  });
+
+  it("finds our older PR behind a same-name fork and preserves deleted same-repo heads", () => {
+    const parsed = parsePrResponse(["main"], {
+      repository: { a0: { nodes: [node(), node({
+        number: 20, isCrossRepository: false, headRepository: null
+      })] } }
+    }, ["OPENAI/CODEX"]);
+    expect(parsed.get("main")).toMatchObject({ number: 20 });
+  });
+
+  it("allows a configured fork contribution but declines an unavailable or unproven source", () => {
+    const data = { repository: { a0: { nodes: [node()] } } };
+    expect(parsePrResponse(["main"], data, ["openai/codex", "unrelated/codex"]).get("main"))
+      .toMatchObject({ number: 14495, headRepoPath: "unrelated/codex" });
+    for (const extra of [
+      { headRepository: null },
+      { headRepository: null, isCrossRepository: undefined }
+    ]) {
+      expect(parsePrResponse(["main"], {
+        repository: { a0: { nodes: [node(extra)] } }
+      }, ["openai/codex"]).get("main")).toBeNull();
+    }
+  });
+});
+
 describe("commit PR GraphQL query", () => {
   it("uses variables for exact commit SHAs in one aliased request", () => {
     const hashes = [
@@ -148,12 +194,13 @@ describe("check rollups", () => {
     const node = {
       number: 29, title: "Fixture", url: "https://example.test/29", state: "OPEN", isDraft: true,
       mergeable: "CONFLICTING",
+      isCrossRepository: false, repository: { nameWithOwner: "o/r" },
       commits: { totalCount: 3, nodes: [{ commit: { statusCheckRollup: {
         state, contexts: { checkRunCountsByState: runs, statusContextCountsByState: contexts }
       } } }] }
     };
     for (const summary of [
-      parsePrResponse(["feature"], { repository: { a0: { nodes: [node] } } }).get("feature"),
+      parsePrResponse(["feature"], { repository: { a0: { nodes: [node] } } }, ["o/r"]).get("feature"),
       parseCommitPrResponse(["sha"], { repository: { c0: { associatedPullRequests: { nodes: [node] } } } }).get("sha"),
       parsePrNumberResponse([29], { repository: { n0: node } }).get(29)
     ]) expect(summary).toMatchObject({ checkState, checksStillRunning, mergeState: "conflicting", commitCount: 3 });
@@ -178,6 +225,7 @@ describe("open pull request list", () => {
     state: "OPEN",
     isDraft: false,
     headRefName: "feature",
+    isCrossRepository: false, repository: { nameWithOwner: "octo/orbit" },
     ...extra
   });
 
@@ -258,6 +306,7 @@ describe("head commit", () => {
     state: "MERGED",
     isDraft: false,
     headRefName: "feature",
+    isCrossRepository: false, repository: { nameWithOwner: "octo/orbit" },
     ...extra
   });
 
@@ -278,7 +327,7 @@ describe("head commit", () => {
     expect(
       parsePrResponse(["feature"], {
         repository: { a0: { nodes: [node({ headRefOid: HEAD })] } }
-      }).get("feature")
+      }, ["octo/orbit"]).get("feature")
     ).toMatchObject({ headOid: HEAD });
     expect(
       parseCommitPrResponse([HEAD], {
@@ -304,7 +353,7 @@ describe("head commit", () => {
       expect(
         parsePrResponse(["feature"], {
           repository: { a0: { nodes: [node(extra)] } }
-        }).get("feature")
+        }, ["octo/orbit"]).get("feature")
       ).not.toHaveProperty("headOid");
     }
   });

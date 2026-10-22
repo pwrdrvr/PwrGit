@@ -4,6 +4,7 @@ import type { GitExec } from "../git/dugite";
 import type { DB } from "../persistence/db";
 import { resolveForge, type ResolvedForge } from "../forge/providers";
 import { PR_DETAIL_COLUMNS, prSummaryFromRow } from "../forge/pr-row";
+import { parseRemoteRows } from "../git/remote-list";
 
 const REPO_REFRESH_TTL_MS = 10 * 60_000;
 const SCHEDULED_BRANCH_REFRESH_TTL_MS = 60_000;
@@ -523,9 +524,23 @@ export class PrService {
 
     let prs: Map<string, PrSummary | null>;
     try {
+      const sourceRepos = [forge.repo];
+      // A configured fork can legitimately contribute a same-named branch to
+      // origin. PR metadata alone must never enlarge this local allowlist.
+      const remotes = await this.git(["remote", "-v"], repo.path);
+      if (!remotes.ok || remotes.value.exitCode !== 0) {
+        this.recordFailure(repoId, scope, generation);
+        return empty;
+      }
+      for (const remote of parseRemoteRows(remotes.value.stdout)) {
+        if (remote.direction !== "fetch") continue;
+        const source = this.resolveForge(remote.url)?.repo;
+        if (source !== undefined) sourceRepos.push(source);
+      }
       prs = await connection.fetchPrsForBranches(
         forge.repo,
-        branches
+        branches,
+        sourceRepos
       );
     } catch {
       // Best-effort; keep whatever's cached — but remember the attempt, or

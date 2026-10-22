@@ -26,9 +26,8 @@ const PR_NODE_FIELDS = `number title url state isDraft mergeable headRefName bas
       createdAt mergedAt closedAt`;
 const PR_FIELDS = `nodes { ${PR_NODE_FIELDS} }`;
 /**
- * Where a PR's head lives. Read by the open list and by a lookup by number —
- * the two reads that locate a head in the checkout, where a fork's `main` must
- * not be mistaken for ours.
+ * Where a PR's head lives. Every name-based lookup needs this identity:
+ * an unrelated fork's `main` must not be mistaken for ours.
  */
 const PR_ORIGIN_FIELDS = "isCrossRepository headRepository { nameWithOwner }";
 
@@ -39,6 +38,8 @@ type PrNode = {
   state: string;
   isDraft: boolean;
   repository?: { nameWithOwner?: string | null } | null;
+  isCrossRepository?: boolean | null;
+  headRepository?: { nameWithOwner?: string | null } | null;
   mergeable?: string | null;
   headRefName?: string | null;
   baseRefName?: string | null;
@@ -59,6 +60,8 @@ type PrNode = {
   closedAt?: string | null;
 };
 
+const BRANCH_PR_PAGE_SIZE = 10;
+
 /**
  * One GraphQL query asking for many branches at once: an aliased
  * `pullRequests(headRefName: $bN)` field per branch. Branch names are passed as
@@ -69,7 +72,8 @@ type PrNode = {
 export function buildPrQuery(
   owner: string,
   repo: string,
-  branches: string[]
+  branches: string[],
+  after: ReadonlyMap<string, string> = new Map()
 ): { query: string; variables: Record<string, string> } {
   const variables: Record<string, string> = { owner, name: repo };
   const decls = ["$owner: String!", "$name: String!"];
@@ -77,10 +81,17 @@ export function buildPrQuery(
   branches.forEach((branch, i) => {
     variables[`b${i}`] = branch;
     decls.push(`$b${i}: String!`);
+    const cursor = after.get(branch);
+    if (cursor !== undefined) {
+      variables[`after${i}`] = cursor;
+      decls.push(`$after${i}: String!`);
+    }
     aliases.push(
-      `a${i}: pullRequests(headRefName: $b${i}, first: 1, ` +
+      `a${i}: pullRequests(headRefName: $b${i}, first: ${BRANCH_PR_PAGE_SIZE}, ` +
+        (cursor === undefined ? "" : `after: $after${i}, `) +
         `orderBy: { field: CREATED_AT, direction: DESC }, ` +
-        `states: [OPEN, MERGED, CLOSED]) { ${PR_FIELDS} }`
+        `states: [OPEN, MERGED, CLOSED]) { nodes { ${PR_NODE_FIELDS} ${PR_ORIGIN_FIELDS} } ` +
+        `pageInfo { hasNextPage endCursor } }`
     );
   });
   const query = `query (${decls.join(", ")}) {
@@ -110,17 +121,40 @@ export function repositoryResolved(data: unknown): boolean {
 /** Map a GraphQL response back to branch → PrSummary (null = no PR found). */
 export function parsePrResponse(
   branches: string[],
-  data: unknown
+  data: unknown,
+  sourceRepoPaths: readonly string[]
 ): Map<string, PrSummary | null> {
   const repo =
-    (data as { repository?: Record<string, { nodes?: PrNode[] }> } | null)
+    (data as { repository?: Record<string, { nodes?: (PrNode | null)[] }> } | null)
       ?.repository ?? {};
   const out = new Map<string, PrSummary | null>();
+  const sources = new Set(sourceRepoPaths.map((path) => path.toLowerCase()));
   branches.forEach((branch, i) => {
-    const node = repo[`a${i}`]?.nodes?.[0];
-    out.set(branch, node ? toSummary(node) : null);
+    const node = repo[`a${i}`]?.nodes?.find((candidate) => {
+      if (candidate == null) return false;
+      // A deleted same-repository head retains isCrossRepository=false and
+      // the base repository's identity. An unavailable fork proves nothing.
+      const source = candidate.headRepository?.nameWithOwner ??
+        (candidate.isCrossRepository === false ? candidate.repository?.nameWithOwner : undefined);
+      return typeof source === "string" && sources.has(source.trim().toLowerCase());
+    });
+    const fork = node == null ? undefined : forkPath(node);
+    out.set(branch, node ? { ...toSummary(node), ...(fork === undefined ? {} : { headRepoPath: fork }) } : null);
   });
   return out;
+}
+
+/** Cursors for unmatched branches only; a cursor is not a negative answer. */
+export function branchPrCursors(branches: string[], data: unknown): Map<string, string | null> {
+  const repository = (data as { repository?: Record<string, {
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }
+  }> } | null)?.repository;
+  const cursors = new Map<string, string | null>();
+  branches.forEach((branch, i) => {
+    const page = repository?.[`a${i}`]?.pageInfo;
+    if (page?.hasNextPage === true) cursors.set(branch, page.endCursor ?? null);
+  });
+  return cursors;
 }
 
 function toSummary(node: PrNode): PrSummary {
