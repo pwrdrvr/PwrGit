@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.40.0 - 2026-10-22
+
+- Repository removal - Fixed removal getting stuck at Running before reaching the Trash when a background status check arrives at the same time. Linked worktrees and the main checkout now drain status checks before entering the removal queue.
+- Maintenance - Added recovery when garbage collection fails because a stale commit-graph cache references objects that are already gone. PwrGit verifies and rebuilds the invalid cache, reports progress, and retries collection once with the original retention settings. Missing live objects still report an error rather than being silently discarded.
+- Diagnostics - Added warnings to the app log when the main process stalls for two seconds or longer, including how long it was blocked. Repeated stalls are summarized to avoid flooding the log, and system sleep is excluded.
+- Minor - Updated Electron to 44.7.0, Express, Zod, and supporting development dependencies.
+
 ## v0.39.0 - 2026-10-19
 
 - Forks - Added an option, enabled by default, to keep a fork’s original repository as an `upstream` remote when cloning. For forks of forks, choose the parent or network root. Existing remotes are reused, fixing failures when the GitHub CLI already created `upstream`.
