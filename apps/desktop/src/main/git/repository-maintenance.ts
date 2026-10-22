@@ -93,9 +93,36 @@ export function garbageCollectionArgs(mode: GarbageCollectionMode): string[] {
 export async function collectGarbage(
   git: GitExec,
   cwd: string,
-  mode: GarbageCollectionMode
+  mode: GarbageCollectionMode,
+  onRepair?: () => void
 ): Promise<Result<void>> {
-  const result = await output(git, cwd, garbageCollectionArgs(mode));
+  const args = garbageCollectionArgs(mode);
+  let result = await output(git, cwd, args);
+  if (
+    !result.ok &&
+    /(?:unable to read|could not read) [0-9a-f]{40}(?:[0-9a-f]{24})?\b/i.test(
+      result.error.message
+    )
+  ) {
+    // A stale commit-graph can make cruft repacking traverse commits whose
+    // objects are already gone. Rebuild only this derived cache after Git
+    // confirms it is invalid; never drop refs, reflogs or worktree records.
+    const verified = await git(["commit-graph", "verify"], cwd);
+    if (verified.ok && verified.value.exitCode === 1) {
+      onRepair?.();
+      const rebuilt = await output(git, cwd, [
+        "commit-graph",
+        "write",
+        "--reachable"
+      ]);
+      if (!rebuilt.ok) return rebuilt;
+      const checked = await output(git, cwd, ["commit-graph", "verify"]);
+      if (!checked.ok) return checked;
+      // One retry, with the same mode and retention settings. Missing live
+      // objects still fail normally and require recovery from another copy.
+      result = await output(git, cwd, args);
+    }
+  }
   return result.ok ? ok(undefined) : result;
 }
 
