@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.41.0 - 2026-10-23
+
+- Security - Updated Electron to 44.9.3 to block compromised eMudhra intermediate certificate keys in Chromium and Node.js network connections, mitigating TLS server impersonation when network traffic is intercepted ([GHSA-jr5w-w6x2-84p9](https://github.com/electron/electron/security/advisories/GHSA-jr5w-w6x2-84p9)). Local and CI tooling now use the Node.js 24.22.1 security release.
+- Pull requests - Fixed automatic branch matching attaching an unrelated fork's pull request just because its branch has the same name. Matches now verify the source repository against your configured remotes, preserve same-repository matches after a rename or transfer, and avoid treating incomplete searches as proof that no request exists.
+
 ## v0.40.0 - 2026-10-22
 
 - Repository removal - Fixed removal getting stuck at Running before reaching the Trash when a background status check arrives at the same time. Linked worktrees and the main checkout now drain status checks before entering the removal queue.
