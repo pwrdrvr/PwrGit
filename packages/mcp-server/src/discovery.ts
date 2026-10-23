@@ -298,7 +298,7 @@ async function matchRepository(
 
 export async function findRepositoryCheckouts(options: {
   repository: string;
-  provider?: "github" | "gitlab" | "gitcafe";
+  provider?: "github" | "gitlab" | "gitcafe" | "artifacts";
   roots?: readonly string[];
   maxDepth?: number;
   maxResults?: number;

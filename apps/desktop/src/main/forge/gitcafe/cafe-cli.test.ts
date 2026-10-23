@@ -164,6 +164,7 @@ describe("GitCafe CLI", () => {
   });
   it("enumerates GitCafe without exposing the token", async () => {
     const hosts = await discoverForgeHosts({
+      wrangler: async () => { throw new Error("not installed"); },
       gh: async () => "{}",
       glabAuthStatus: async () => "",
       cafe: async () =>

@@ -54,6 +54,8 @@ const SHARED_NOT_FOUND_PATTERN =
   /(?:\bhttp\s*404\b|\bstatus(?:\s+code)?\s*:?[ \t]*404\b|\b404\s+(?:project\s+)?not found\b)/i;
 
 export type CliRunOptions = {
+  /** Isolate CLIs that discover project configuration from their working directory. */
+  cwd?: string;
   timeoutMs?: number;
   /** Receive sanitized stderr chunks while retaining only a bounded tail. */
   onStderr?: (chunk: string) => void;
@@ -279,6 +281,7 @@ export function createCliClient(spec: CliSpec): CliClient {
       const env = environmentWith(options.env);
       const invocation = spec.invocation?.(env) ?? { binary: spec.binary, prefix: [] };
       const child = spawn(invocation.binary, [...invocation.prefix, ...args], {
+        ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
         env,
         stdio: ["ignore", "pipe", "pipe"],
         // On POSIX this starts a new session without the GUI's inherited

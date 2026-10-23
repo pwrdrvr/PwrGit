@@ -9,6 +9,12 @@ import {
 } from "./remote-info";
 
 describe("remoteWire", () => {
+  it("opens only a known Artifacts account's dashboard", () => {
+    const hostname = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+    const remote = `https://${hostname}/git/default/demo.git`;
+    expect(remoteWebUrl(remote)).toBeNull();
+    expect(remoteWebUrl(remote, { [hostname]: "artifacts" })).toBe("https://dash.cloudflare.com/");
+  });
   it("reads the wire off the URL rather than guessing it", () => {
     expect(remoteWire("git@github.com:desktop/dugite.git")).toBe("SSH");
     expect(remoteWire("ssh://git@github.com:22/desktop/dugite.git")).toBe("SSH");

@@ -1,6 +1,7 @@
 export * from "./result";
 export * from "./git-discovery";
 export * from "./types";
+export * from "./artifacts";
 export * from "./forge-host-name";
 export * from "./forge-product";
 export * from "./change-request-query";

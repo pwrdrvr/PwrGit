@@ -192,9 +192,7 @@ test("menu opens the Settings window; panes render and settings persist", async 
   // Forges: one section per product, consuming main's fixture-backed status
   // and hosts through the normal IPC path.
   await settings.locator(".settings-nav__button", { hasText: "Forges" }).click();
-  // Driven from the product list rather than a pair written here, so this is
-  // the assertion that a third registry entry gets a section in the running
-  // app — not just in the unit test that renders the pane.
+  // Every registered product gets its own section in the running app.
   for (const kind of FORGE_KINDS) {
     const product = forgeProduct(kind);
     const section = settings.locator(`section[aria-label='${product.label}']`);
@@ -202,6 +200,22 @@ test("menu opens the Settings window; panes render and settings persist", async 
     // The chip is the product's own state, so it can never again read
     // "Connected" for one forge while naming another's hosts.
     const chip = section.locator(".settings-card__chip").first();
+    if (product.authentication === "repo-token") {
+      await expect(chip).toHaveText("Add token");
+      await expect(
+        section.getByRole("textbox", { name: "Artifacts repository remote" })
+      ).toBeVisible();
+      await expect(
+        section.getByLabel("Artifacts repository token", { exact: true })
+      ).toHaveAttribute("type", "password");
+      await expect(
+        section.getByRole("button", { name: "Save repo token" })
+      ).toBeDisabled();
+      await expect(section).toContainText(
+        "Saved tokens are not verified against Cloudflare."
+      );
+      continue;
+    }
     await expect(chip).toHaveText(/Connected|Signed out|Off|Not installed/);
     // Each product owns its own way in, which is what a shared empty state
     // could not offer. WHICH way in depends on the product's state, and both

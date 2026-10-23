@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { ok, type CloneCatalog } from "@pwrgit/shared";
+import { forgeCapabilities, ok, type CloneCatalog } from "@pwrgit/shared";
 
 const dispatchMock = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/pwrgit", () => ({
@@ -10,6 +10,54 @@ vi.mock("../../lib/pwrgit", () => ({
   subscribe: () => () => undefined
 }));
 import { ForkRepoDialog } from "./ForkRepoDialog";
+
+it.each(["empty", "seeded", "in-place", "pasted"])("excludes Artifacts from fork APIs for an %s source", async (mode) => {
+  vi.useFakeTimers();
+  const hostname = "0123456789abcdef0123456789abcdef.artifacts.cloudflare.net";
+  const source = {
+    name: "demo", owner: "default", nameWithOwner: "default/demo",
+    visibility: "unknown" as const, host: "artifacts" as const, hostname,
+    sshUrl: "", httpsUrl: `https://${hostname}/git/default/demo.git`, localPaths: []
+  };
+  dispatchMock.mockImplementation((channel: string) => {
+    if (channel === "repo:cloneCatalog") return Promise.resolve(ok({ owners: [], forges: [
+      { kind: "github", cli: "gh", installed: true, loggedIn: true, capabilities: forgeCapabilities("github"), hosts: [{ host: "github.com", enabled: true, loggedIn: true }] },
+      { kind: "gitlab", cli: "glab", installed: true, loggedIn: true, capabilities: forgeCapabilities("gitlab"), hosts: [{ host: "gitlab.com", enabled: true, loggedIn: true }] },
+      { kind: "artifacts", cli: "", installed: true, loggedIn: true, capabilities: forgeCapabilities("artifacts"), hosts: [{ host: hostname, enabled: true, loggedIn: true }] }
+    ] }));
+    if (channel === "forge:hosts") return Promise.resolve(ok({ overrides: { [hostname]: "artifacts" } }));
+    return Promise.resolve(ok([]));
+  });
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ForkRepoDialog
+      profile={{ id: "p", name: "Test", email: "test@example.com", mono: "T", roots: [], onboardingCompleted: true, showInMenu: true }}
+      {...(mode === "seeded" || mode === "in-place" ? { initialSource: source } : {})}
+      {...(mode === "in-place" ? { inPlace: { repoId: "r1", repoName: "demo" } } : {})}
+      onForked={() => undefined} onReveal={() => undefined} onClose={() => undefined}
+    />));
+    if (mode === "pasted") await act(async () => {
+      const input = container.querySelector<HTMLInputElement>("#fork-source")!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, source.httpsUrl);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => vi.advanceTimersByTime(300));
+    expect([...container.querySelectorAll(".fork-host")].map((button) => button.textContent)).toEqual(["GitHub", "GitLab"]);
+    expect(dispatchMock.mock.calls.some(([channel, payload]) =>
+      ["repo:forkTargets", "repo:searchCloneSources", "repo:forkPreflight", "repo:forkCheckoutPreflight"].includes(channel) &&
+      (payload?.host === "artifacts" || channel === "repo:forkCheckoutPreflight")
+    )).toBe(false);
+    if (mode !== "empty") {
+      expect(container.textContent).toContain("Cloudflare Artifacts does not support forks in PwrGit");
+      expect(container.querySelector<HTMLButtonElement>(".clone-dialog__submit")!.disabled).toBe(true);
+      expect(container.querySelectorAll(".clone-source-row")).toHaveLength(0);
+      expect(dispatchMock.mock.calls.some(([channel]) => channel === "repo:searchCloneSources")).toBe(false);
+    }
+  } finally {
+    await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); vi.resetAllMocks();
+  }
+});
 
 it("preserves a search typed before the catalog chooses the usable forge", async () => {
   vi.useFakeTimers();

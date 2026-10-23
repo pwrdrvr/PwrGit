@@ -3,7 +3,8 @@ import type { ForgeKind } from "./types";
 export const CONTRIBUTION_CAPABILITIES: Readonly<Record<ForgeKind, boolean>> = {
   github: true,
   gitlab: false,
-  gitcafe: false
+  gitcafe: false,
+  artifacts: false
 };
 /** Local, read-only metadata. No PR titles, bodies, credentials or review data. */
 export type ContributionIdentity = { id: string; login: string; host: string };
