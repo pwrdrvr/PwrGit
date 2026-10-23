@@ -43,6 +43,9 @@ minimumReleaseAge: 10080
 # Versions allowed past the gate. `name` exempts a package outright; the
 # `name@version` form exempts one reviewed release and nothing else — prefer it.
 minimumReleaseAgeExclude:
+  # GHSA-jr5w-w6x2-84p9 eMudhra fix; published 2026-10-21T03:31:39.419Z.
+  - "electron@44.9.3"
+
   # The @pwrdrvr/agent-kit packages are PwrDrvr's own, freshly published, and
   # pinned — exempt them outright so PwrGit can consume new versions
   # immediately.

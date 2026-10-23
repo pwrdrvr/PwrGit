@@ -111,7 +111,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
           lookup-only: "true"
 
   windows-install-deps:
@@ -126,7 +126,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
           lookup-only: "true"
 
   typecheck:
@@ -145,7 +145,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       # One aggregate step on purpose: `pnpm lint` chains the checks
       # cheapest-first (colors, licenses, boundaries, typecheck), so a new
@@ -166,7 +166,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       - name: Build
         run: pnpm run build
@@ -183,7 +183,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       # A fresh `pnpm i` already leaves better-sqlite3 ready for both runtimes
       # (see the root AGENTS.md), so this exits immediately. It earns its
@@ -226,7 +226,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       - name: Run desktop Electron E2E specs
         # No `playwright install-deps` step: `ubuntu-latest` ships
@@ -265,7 +265,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
           lookup-only: "true"
 
   macos-e2e:
@@ -292,7 +292,7 @@ jobs:
         uses: pwrdrvr/configure-nodejs@v1
         timeout-minutes: 10
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       - name: Clear leftover Electron state from previous jobs
         shell: bash
@@ -417,7 +417,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       # Deliberately NOT `pnpm lint`. This job exists to catch Windows-specific
       # breakage, and most of the lint chain is platform-independent static
@@ -474,7 +474,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       - name: Run desktop Electron E2E specs (Windows)
         # windows-latest provides an interactive desktop session, so (unlike
