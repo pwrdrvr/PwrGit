@@ -41,7 +41,7 @@ jobs:
       - name: Install Node.js and dependencies
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       # The capture drives the BUILT app (out/main/index.js); the script's
       # pretest:docs-shots hook builds it, exactly as pretest:e2e does for the

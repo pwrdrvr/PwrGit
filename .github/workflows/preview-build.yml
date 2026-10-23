@@ -31,7 +31,7 @@ jobs:
         timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       - name: Compute preview version
         id: version
@@ -96,7 +96,7 @@ jobs:
         timeout-minutes: 10
         uses: pwrdrvr/configure-nodejs@v1
         with:
-          node-version: 24.x
+          node-version: 24.22.1
 
       # windows-latest defaults to pwsh; force bash for the version-stamp steps
       # so they stay identical to the macOS preview job above.
