@@ -987,8 +987,9 @@ export type WorktreeInfo = {
   detached: boolean;
   bare: boolean;
   /** Git still lists it, but its directory (or its `.git` link) is gone —
-   *  the entry `git worktree prune` would drop. Never pruned here: an
-   *  unmounted volume reads the same way and comes back. */
+   *  the entry `git worktree prune` would drop. Never pruned repo-wide: an
+   *  unmounted volume reads the same way and comes back. The indexer drops
+   *  such entries one at a time instead (vanished-worktrees.ts). */
   prunable: boolean;
   /** `git worktree lock`ed, typically because it lives on removable media. */
   locked: boolean;

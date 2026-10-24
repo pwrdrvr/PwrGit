@@ -225,6 +225,9 @@ export class WorktreeStateService {
   ) {}
 
   private repoPathMissing: ((repoId: string) => void) | null = null;
+  private worktreePathMissing:
+    | ((worktreeId: string, repoId: string) => void)
+    | null = null;
   private upstreamGone: ((change: UpstreamGoneChange) => void) | null = null;
   private forkSource: ForkSourceProbe | null = null;
 
@@ -241,6 +244,17 @@ export class WorktreeStateService {
    */
   onRepoPathMissing(listener: (repoId: string) => void): void {
     this.repoPathMissing = listener;
+  }
+
+  /**
+   * Hear about a probe that finds a LINKED worktree's checkout gone. The
+   * row is flagged either way; the listener is how a repo re-index hears
+   * that git's record may now be one to drop (vanished-worktrees.ts).
+   */
+  onWorktreePathMissing(
+    listener: (worktreeId: string, repoId: string) => void
+  ): void {
+    this.worktreePathMissing = listener;
   }
 
   /**
@@ -282,16 +296,18 @@ export class WorktreeStateService {
   /**
    * The probe found no checkout behind the row. Flag it; `rowToState` reads
    * the counts as zero while the flag is set, and the stored snapshot is kept
-   * so a remounted volume resumes from it. Not pruned: a volume that is
-   * merely unmounted reads the same way, and the next successful probe
-   * clears the flag. A row that never had a snapshot gets a blank one — the
-   * refresher announces a flip by comparing snapshots, and null-to-null is
-   * not a change it can see.
+   * so a remounted volume resumes from it. The row itself is not dropped
+   * here: a linked worktree's listener re-indexes the repo, which drops it
+   * unless the folder may come back (vanished-worktrees.ts), and the next
+   * successful probe clears the flag. A row that never had a snapshot gets a
+   * blank one — the refresher announces a flip by comparing snapshots, and
+   * null-to-null is not a change it can see.
    */
   private markMissing(wt: WorktreeRow): WorktreeState | null {
     // A background rescan may already have pruned this row while Git ran.
     if (this.worktreeRow(wt.id) === null) return null;
     if (wt.is_primary === 1) this.repoPathMissing?.(wt.repo_id);
+    else this.worktreePathMissing?.(wt.id, wt.repo_id);
     this.db.transaction(() => {
       this.db
         .prepare("UPDATE worktrees SET missing = 1 WHERE id = ?")

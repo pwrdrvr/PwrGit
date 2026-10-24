@@ -395,14 +395,38 @@ Three things follow that are easy to undo by accident:
   fix: macOS denies a non-FDA app `~/Documents` and friends, and one EACCES
   would disable pruning for good.
 
-## A worktree whose directory is gone stays a row, flagged `missing`
+## A worktree whose directory is gone is dropped, unless it may come back
 
 Agents delete their checkouts without `git worktree remove` (Codex cleans up
 `~/.codex/worktrees/…`), and git keeps listing the entry with a `prunable`
-line. `worktrees.missing` (0027) records that so the sidebar can say
-"directory missing" and every per-worktree handler can refuse with one typed
-`worktree_missing` error (`worktree-liveness.ts`) instead of git's raw
-"cannot change to '<path>'". Three things to keep straight:
+line. That entry is worse than a stale row: git refuses to check its branch
+out anywhere else ("already used by worktree at …"). So every index pass
+(`vanished-worktrees.ts`, called from all three `listWorktrees` sites in the
+indexer) runs `git worktree remove --force <path>` for each such entry, one
+entry at a time, and the row goes with it. A probe that finds a linked
+checkout gone asks for that re-index (`onWorktreePathMissing`, once per
+worktree per ten minutes), so the row leaves within one poll.
+
+What stays, flagged `worktrees.missing` (0027):
+
+- **A locked worktree.** `git worktree lock` is git's "do not touch", and the
+  usual reason is removable media.
+- **A folder on a volume that is not attached.** An unmounted drive reads
+  exactly like a deleted folder to git. `onDetachedVolume` breaks the tie:
+  under `/Volumes`, `/media`, `/run/media` or `/mnt`, a path with no mount
+  point between the container and it (a device id differing from its
+  parent's) is waiting for its drive; on Windows, a drive root that does not
+  exist. Anywhere else the disk is fixed and a missing folder was deleted.
+- **A folder that exists but lost its `.git` link.** Its files are still
+  there; git would refuse to remove it anyway.
+- **A detached HEAD no ref contains.** Git's record is the last thing
+  pointing at those commits; dropping it is the user's call (Remove).
+- **Anything git declined to remove**, logged.
+
+Never `git worktree prune`: it is repo-wide and would also drop the entries
+above. For the kept rows, `missing` lets the sidebar say "directory missing"
+and every per-worktree handler refuse with one typed `worktree_missing` error
+(`worktree-liveness.ts`) instead of git's raw "cannot change to '<path>'":
 
 - **Two sources set it, and they must agree.** The indexer reads git's
   `prunable` line; the state probe stats the checkout before it spawns git.
@@ -414,11 +438,9 @@ line. `worktrees.missing` (0027) records that so the sidebar can say
   time. The probe must not trust `git status`'s exit code instead: run from a
   nested worktree whose link is gone, git resolves the *parent* repo and
   succeeds with that checkout's branch and dirt.
-- **Never prune.** An unmounted volume reads exactly like a deleted directory,
-  and `git worktree prune` is repo-wide; a remounted checkout must clear the
-  flag by itself (the next successful probe or re-index does). Remove stays
-  available on a missing row — git removes a prunable entry cleanly — and
-  removal is deliberately not guarded.
+- **A remounted checkout clears the flag by itself** (the next successful
+  probe or re-index does). Remove stays available on a missing row — git
+  removes a prunable entry cleanly — and removal is deliberately not guarded.
 - **The guard reads only the flag, in the lookup.** Handlers that resolve a
   worktree through a per-file closure (`pathOf`, `rowOf`, `worktreeOf`) get
   the refusal from that closure, so a new handler cannot reach git without

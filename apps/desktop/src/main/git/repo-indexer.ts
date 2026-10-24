@@ -46,6 +46,7 @@ import {
 } from "./git-service";
 import { SEARCH_ROW_REPO_SQL, visibleRepoSql } from "./hidden-repos";
 import { claimWorktreeOwnership } from "./repo-ownership";
+import { forgetVanishedWorktrees } from "./vanished-worktrees";
 import { checkoutExists } from "./worktree-liveness";
 import { forkSourceFromRow } from "./worktree-state";
 
@@ -380,13 +381,22 @@ export class RepoIndexer {
       const primary = listed.value[0];
       if (primary === undefined || primary.bare) return;
       if (canonical.has(primary.path)) return;
-      canonical.set(primary.path, {
+      // Claim the repo before awaiting, so a second directory of the same
+      // repo cannot also run its removals.
+      const entry = {
         path: primary.path,
-        worktrees: listed.value
-          .filter((w) => !w.bare)
-          .map((w, i) => worktreeShape(w, i === 0)),
+        worktrees: [] as Worktree[],
         indexedBranches: listedBranches.ok ? listedBranches.value : null
-      });
+      };
+      canonical.set(primary.path, entry);
+      const kept = await forgetVanishedWorktrees(
+        this.git,
+        primary.path,
+        listed.value
+      );
+      entry.worktrees = kept
+        .filter((w) => !w.bare)
+        .map((w, i) => worktreeShape(w, i === 0));
     });
     signal?.throwIfAborted();
 
@@ -455,7 +465,9 @@ export class RepoIndexer {
         message: `No git worktree found at ${path}`
       });
     }
-    const worktrees = listed.value
+    const worktrees = (
+      await forgetVanishedWorktrees(this.git, primary.path, listed.value)
+    )
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w, i === 0));
 
@@ -781,7 +793,9 @@ export class RepoIndexer {
         ownerPath: primary.path
       });
     }
-    const worktrees = listed.value
+    const worktrees = (
+      await forgetVanishedWorktrees(this.git, repo.path, listed.value)
+    )
       .filter((w) => !w.bare)
       .map((w, i) => worktreeShape(w, i === 0));
     const releasedBranches: string[] = [];
