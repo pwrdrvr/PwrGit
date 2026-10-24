@@ -47,9 +47,9 @@ export function builtInAcpAgentDisplayName(id: string): string {
   return isBuiltInAcpAgentId(id) ? BUILT_IN_ACP_AGENT_DISPLAY_NAMES[id] : id;
 }
 
-/** Every provider, in the order Settings lists them: Codex first, then the ACP
+/** Every provider, in the order Settings lists them: Codex, ChatGPT, then the ACP
  *  agents. Also the `sub` allowlist for Settings → AI Providers. */
-export const AI_PROVIDER_IDS = ["codex", ...BUILT_IN_ACP_AGENT_IDS] as const;
+export const AI_PROVIDER_IDS = ["codex", "chatgpt", ...BUILT_IN_ACP_AGENT_IDS] as const;
 
 export type AiProviderId = (typeof AI_PROVIDER_IDS)[number];
 
@@ -61,7 +61,7 @@ export function isAiProviderId(value: unknown): value is AiProviderId {
 }
 
 export function aiProviderDisplayName(id: AiProviderId): string {
-  return id === "codex" ? "Codex" : builtInAcpAgentDisplayName(id);
+  return id === "chatgpt" ? "Sign in with ChatGPT" : id === "codex" ? "Codex" : builtInAcpAgentDisplayName(id);
 }
 
 // ---- Jobs -----------------------------------------------------------------
@@ -105,7 +105,7 @@ export type AiJobDetails = {
 /** Both jobs run with no tools, in a scratch workspace outside every
  *  repository; an ACP agent can't be held to that. */
 const NO_TOOLS_ACP_REASON =
-  "ACP agents can't be held to the no-tools boundary this job runs under, so it runs on Codex.";
+  "ACP agents can't be held to the no-tools boundary this job runs under. Choose Codex or Sign in with ChatGPT.";
 
 export const AI_JOBS: Readonly<Record<AiJobId, AiJobDetails>> = {
   commitMessage: {
@@ -305,6 +305,7 @@ export function effectiveJobProvider(
 ): AiProviderId {
   const provider = settings.jobs[jobId]?.provider;
   if (provider === undefined || provider === "codex") return "codex";
+  if (provider === "chatgpt") return "chatgpt";
   if (!AI_JOBS[jobId].acp) return "codex";
   return settings.acp.enabledAgentIds.includes(provider) ? provider : "codex";
 }
@@ -322,7 +323,7 @@ export function jobProviders(settings: AiProviderSettings): AiProviderId[] {
  *  caller never probes — or spawns — a CLI nothing would use. */
 export function acpJobProviders(settings: AiProviderSettings): BuiltInAcpAgentId[] {
   return jobProviders(settings).filter(
-    (provider): provider is BuiltInAcpAgentId => provider !== "codex"
+    (provider): provider is BuiltInAcpAgentId => isBuiltInAcpAgentId(provider)
   );
 }
 
@@ -461,3 +462,5 @@ export type AcpAgentModelList = {
   agentId: BuiltInAcpAgentId;
   models: AcpAgentModelOption[];
 };
+
+export type ChatGptConnection = { connected: boolean; planUsage: boolean; label: string; welcome: boolean };
