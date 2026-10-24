@@ -102,6 +102,7 @@ import { createForkSourceProbe } from "./git/fork-source-probe";
 import { VisibleWorktreeRefresher } from "./git/visible-refresh";
 import { registerWorktreeLifecycleHandlers } from "./git/worktree-lifecycle-handlers";
 import { createMissingRepoRescan } from "./git/missing-repo-rescan";
+import { createVanishedWorktreeRefresh } from "./git/vanished-worktrees";
 import { WorktreeStateService } from "./git/worktree-state";
 import {
   GITHUB_AVATAR_THUMBNAIL_PROTOCOL_SCHEME,
@@ -859,6 +860,34 @@ if (!gotSingleInstanceLock) {
           }
           return started;
         }
+      })
+    );
+
+    // A linked worktree's folder was deleted: re-index its repo so git's
+    // stale record and the row go now, not at the next refresh
+    // (vanished-worktrees.ts says which ones stay).
+    stateService.onWorktreePathMissing(
+      createVanishedWorktreeRefresh({
+        refresh: (repoId) =>
+          indexer
+            .refreshRepoWorktrees(repoId, { refreshBranches: false })
+            .then((res) => {
+              if (!res.ok) throw new Error(res.error.message);
+              const refresh = res.value;
+              if (refresh.outcome === "deindexed") {
+                emitEvent("repo:changed", { profileId: refresh.profileId });
+              } else if (refresh.removed > 0) {
+                emitEvent("repo:changed", { profileId: refresh.repo.profileId });
+              }
+            })
+            .catch((cause) => {
+              logMain(
+                "warn",
+                "worktree",
+                "re-index after a worktree folder vanished failed:",
+                cause
+              );
+            })
       })
     );
 

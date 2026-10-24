@@ -987,8 +987,9 @@ export type WorktreeInfo = {
   detached: boolean;
   bare: boolean;
   /** Git still lists it, but its directory (or its `.git` link) is gone —
-   *  the entry `git worktree prune` would drop. Never pruned here: an
-   *  unmounted volume reads the same way and comes back. */
+   *  the entry `git worktree prune` would drop. Never pruned repo-wide: an
+   *  unmounted volume reads the same way and comes back. The indexer drops
+   *  such entries one at a time instead (vanished-worktrees.ts). */
   prunable: boolean;
   /** `git worktree lock`ed, typically because it lives on removable media. */
   locked: boolean;
@@ -1251,6 +1252,11 @@ async function gitWorktreeRemove(
     if (!raw.ok) return raw;
     if (raw.value.exitCode === 0) return ok(undefined);
     const message = raw.value.stderr.trim();
+    // Nothing on disk and nothing in git: an index pass forgot this entry
+    // after the caller listed it (vanished-worktrees.ts). Already removed.
+    if (/is not a working tree/i.test(message) && !existsSync(worktreePath)) {
+      return ok(undefined);
+    }
     // A retry can find the record already gone: the failed attempt dropped
     // Git's metadata before its file deletion hit the lock. Finish the delete
     // Git started — asynchronously, never `rmSync` on main — so the folder is
