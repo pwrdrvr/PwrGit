@@ -258,14 +258,15 @@ describe("worktree:removeMany × pruned worktree", () => {
   });
 
   // The deleted-but-NOT-pruned case: git still lists the entry (`prunable`),
-  // the index flags the row missing, and every other action refuses. The one
-  // action it must keep is the way out — git removes a prunable entry without
-  // complaint, and the probe lock it takes must not spawn git in the deleted
-  // directory either.
+  // the state probe flags the row missing, and every other action refuses.
+  // The next re-index drops such a row by itself, but until it runs (and for
+  // ones it keeps: locked, on a detached volume) Remove is the way out — git
+  // removes a prunable entry without complaint, and the probe lock it takes
+  // must not spawn git in the deleted directory either.
   it("removes a worktree the index has flagged missing", async () => {
     const wt = await addIndexedWorktree("gone");
     rmRetrying(wt.path);
-    await indexer.refreshRepoWorktrees(repoId);
+    await state.compute(wt.id);
     expect(
       indexer.listRepos(profileId)[0]?.worktrees.find((w) => w.id === wt.id)
     ).toMatchObject({ missing: true });

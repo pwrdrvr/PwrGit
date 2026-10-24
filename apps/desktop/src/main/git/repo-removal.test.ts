@@ -277,9 +277,11 @@ describe("reviewRepoRemoval", () => {
       } catch {
         // The conflict is the point: the rebase stops half way.
       }
-      const gone = pushedWorktree(repo, root, "gone");
-      rmSync(gone, { recursive: true, force: true });
+      pushedWorktree(repo, root, "gone");
     });
+    // Deleted after indexing: an index pass drops an unlocked worktree whose
+    // folder is gone, so the review meets one only before the next pass.
+    rmSync(f.wt("gone"), { recursive: true, force: true });
     const r = await review(f);
     expect(byBranch(r, "feat/locked")).toMatchObject({ locked: true });
     expect(checkoutVerdict(byBranch(r, "feat/locked"))).toBe("blocked");
@@ -296,8 +298,8 @@ describe("reviewRepoRemoval", () => {
       const gone = pushedWorktree(repo, root, "gone");
       commit(gone, "b.txt", "one\n", "only here");
       commit(gone, "c.txt", "two\n", "also only here");
-      rmSync(gone, { recursive: true, force: true });
     });
+    rmSync(f.wt("gone"), { recursive: true, force: true });
     const r = await review(f);
     expect(byBranch(r, "feat/gone")).toMatchObject({ missing: true, unpushed: 2 });
     // Its branch is a checkout's, not a loose one: it is not listed twice.
@@ -439,10 +441,10 @@ describe("executeRepoRemoval", () => {
 
   it("clears a missing worktree's record without touching the Trash", async () => {
     const f = await fixture(({ repo, root }) => {
-      const gone = pushedWorktree(repo, root, "gone");
-      rmSync(gone, { recursive: true, force: true });
+      pushedWorktree(repo, root, "gone");
       pushedWorktree(repo, root, "keep");
     });
+    rmSync(f.wt("gone"), { recursive: true, force: true });
     const r = await review(f);
     const decisions: RemovalDecisions = {
       checkouts: {
