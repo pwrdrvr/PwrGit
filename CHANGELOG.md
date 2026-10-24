@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.42.0 - 2026-10-24
+
+- Worktrees - Fixed deleted linked worktrees lingering in the sidebar as "directory missing" and preventing their branches from being checked out elsewhere. PwrGit now removes the stale Git registration and sidebar entry when it detects that a worktree folder has disappeared, including after coding-agent cleanup.
+- Worktree safety - Kept missing entries when a worktree is locked, its drive is disconnected, its folder still exists, or its detached HEAD contains commits not reachable from a branch, remote-tracking ref, or tag. Entries Git refuses to remove stay visible for recovery.
+
 ## v0.41.0 - 2026-10-23
 
 - Security - Updated Electron to 44.9.3 to block compromised eMudhra intermediate certificate keys in Chromium and Node.js network connections, mitigating TLS server impersonation when network traffic is intercepted ([GHSA-jr5w-w6x2-84p9](https://github.com/electron/electron/security/advisories/GHSA-jr5w-w6x2-84p9)). Local and CI tooling now use the Node.js 24.22.1 security release.
