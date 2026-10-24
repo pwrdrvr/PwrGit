@@ -86,15 +86,19 @@ export async function forgetVanishedWorktrees(
   repoPath: string,
   listed: WorktreeInfo[],
   fs: VolumeFs = nodeVolumeFs,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  now: () => number = Date.now
 ): Promise<WorktreeInfo[]> {
   const kept: WorktreeInfo[] = [];
   for (const [index, w] of listed.entries()) {
+    const key = `${repoPath}\n${w.path}`;
+    const declinedAt = declined.get(key);
     if (
       index === 0 ||
       w.bare ||
       !w.prunable ||
       w.locked ||
+      (declinedAt !== undefined && now() - declinedAt < DECLINED_RETRY_MS) ||
       (await fs.exists(w.path)) ||
       (await onDetachedVolume(w.path, platform, fs)) ||
       (w.detached && !(await headIsReachable(git, repoPath, w.head)))
@@ -103,20 +107,25 @@ export async function forgetVanishedWorktrees(
       continue;
     }
     const raw = await git(["worktree", "remove", "--force", w.path], repoPath);
-    if (raw.ok && raw.value.exitCode === 0) {
+    const stderr = raw.ok ? raw.value.stderr.trim() : raw.error.message;
+    // Another index pass of this repo forgot it first: gone either way.
+    if ((raw.ok && raw.value.exitCode === 0) || /is not a working tree/i.test(stderr)) {
+      declined.delete(key);
       logMain("info", "worktree", `forgot ${w.path}: its folder is gone`);
       continue;
     }
-    logMain(
-      "warn",
-      "worktree",
-      `could not forget ${w.path}, whose folder is gone:`,
-      raw.ok ? raw.value.stderr.trim() : raw.error.message
-    );
+    // Every refresh of the repo lands here; ask git again only after a while,
+    // so a refusal costs one spawn and one log line per window, not per pass.
+    declined.set(key, now());
+    logMain("warn", "worktree", `could not forget ${w.path}, whose folder is gone:`, stderr);
     kept.push(w);
   }
   return kept;
 }
+
+/** Entries git refused to remove, by `<repo>\n<path>`, with when it refused. */
+const declined = new Map<string, number>();
+const DECLINED_RETRY_MS = 10 * 60_000;
 
 /** Whether some branch, remote-tracking ref or tag contains a commit. */
 async function headIsReachable(
@@ -138,23 +147,47 @@ async function headIsReachable(
  * record and the row; a worktree it keeps (a detached volume, a lock) stays
  * flagged, and the 15s poll would otherwise re-index its repo every time it
  * looked.
+ *
+ * One re-index per repo at a time: several worktrees of one repo usually go
+ * together (an agent cleaning up), and concurrent passes would race on the
+ * same `git worktree remove`. An ask that lands while its repo is being
+ * re-indexed queues one more pass, since the running one may have listed
+ * the worktrees before this folder went.
  */
 export function createVanishedWorktreeRefresh({
   refresh,
   now = Date.now,
   cooldownMs = VANISHED_WORKTREE_REFRESH_COOLDOWN_MS
 }: {
-  refresh: (repoId: string) => void;
+  refresh: (repoId: string) => Promise<void>;
   now?: () => number;
   cooldownMs?: number;
 }): (worktreeId: string, repoId: string) => void {
   const asked = new Map<string, number>();
+  /** Repos being re-indexed, and whether another pass was asked for. */
+  const running = new Map<string, { again: boolean }>();
+  const run = (repoId: string): void => {
+    const state = { again: false };
+    running.set(repoId, state);
+    void refresh(repoId)
+      .catch(() => {})
+      .finally(() => {
+        running.delete(repoId);
+        if (state.again) run(repoId);
+      });
+  };
   return (worktreeId, repoId) => {
     const at = now();
     const last = asked.get(worktreeId);
     if (last !== undefined && at - last < cooldownMs) return;
+    // Forget expired asks so a long session does not keep every id ever seen.
+    for (const [id, when] of asked) {
+      if (at - when >= cooldownMs) asked.delete(id);
+    }
     asked.set(worktreeId, at);
-    refresh(repoId);
+    const inFlight = running.get(repoId);
+    if (inFlight !== undefined) inFlight.again = true;
+    else run(repoId);
   };
 }
 

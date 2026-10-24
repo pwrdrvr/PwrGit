@@ -283,6 +283,8 @@ describe("WorktreeStateService (system git)", () => {
     const isolated = new WorktreeStateService(isolatedDb, systemGit);
     const repoGone = vi.fn();
     isolated.onRepoPathMissing(repoGone);
+    const worktreeGone = vi.fn();
+    isolated.onWorktreePathMissing(worktreeGone);
 
     const healthy = await isolated.compute(row.id);
     expect(healthy).toMatchObject({ dirty: 1 });
@@ -290,8 +292,10 @@ describe("WorktreeStateService (system git)", () => {
 
     rmSync(linked, { recursive: true, force: true });
     const gone = await isolated.compute(row.id);
-    // A linked worktree going is that row's news, not the repository's.
+    // A linked worktree going is that row's news, not the repository's — and
+    // the cue for the re-index that drops it (vanished-worktrees.ts).
     expect(repoGone).not.toHaveBeenCalled();
+    expect(worktreeGone).toHaveBeenCalledWith(row.id, added.value.id);
     // Not the cached snapshot: the checkout is gone, so nothing is dirty.
     expect(gone).toMatchObject({ missing: true, dirty: 0, ahead: 0, behind: 0 });
     expect(isolated.getCached(row.id)).toMatchObject({ missing: true });

@@ -119,30 +119,69 @@ describe("forgetVanishedWorktrees", () => {
     expect(git).toHaveBeenCalledWith(["worktree", "remove", "--force", "/r/on-main"], "/r/main");
   });
 
-  it("keeps an entry git declined to remove", async () => {
+  it("keeps an entry git declined to remove, and asks again only after a while", async () => {
+    let clock = 0;
     const git = vi.fn<GitExec>(async () =>
       ok({ stdout: "", stderr: "fatal: nope", exitCode: 128 })
     );
-    const listed = [entry("/r/main"), entry("/r/gone", { prunable: true })];
+    const listed = [entry("/r/main"), entry("/r/declined", { prunable: true })];
+    const pass = () =>
+      forgetVanishedWorktrees(git, "/r/main", listed, fs, "darwin", () => clock);
+    expect((await pass()).map((w) => w.path)).toEqual(["/r/main", "/r/declined"]);
+    expect(git).toHaveBeenCalledOnce();
+    // Every refresh of the repo re-lists it: no spawn, no log line, per pass.
+    clock += 60_000;
+    expect((await pass()).map((w) => w.path)).toEqual(["/r/main", "/r/declined"]);
+    expect(git).toHaveBeenCalledOnce();
+    clock += 10 * 60_000;
+    await pass();
+    expect(git).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts an entry another pass already forgot as forgotten", async () => {
+    const git = vi.fn<GitExec>(async () =>
+      ok({ stdout: "", stderr: "fatal: '/r/raced' is not a working tree", exitCode: 128 })
+    );
+    const listed = [entry("/r/main"), entry("/r/raced", { prunable: true })];
     const kept = await forgetVanishedWorktrees(git, "/r/main", listed, fs, "darwin");
-    expect(kept.map((w) => w.path)).toEqual(["/r/main", "/r/gone"]);
+    expect(kept.map((w) => w.path)).toEqual(["/r/main"]);
   });
 });
 
 describe("createVanishedWorktreeRefresh", () => {
-  it("re-indexes once per worktree per cooldown", () => {
+  it("re-indexes once per worktree per cooldown", async () => {
     let clock = 0;
-    const refresh = vi.fn();
+    const refresh = vi.fn(async () => {});
     const onMissing = createVanishedWorktreeRefresh({ refresh, now: () => clock });
-    onMissing("wt1", "repo");
-    onMissing("wt2", "repo");
+    onMissing("wt1", "repo-a");
+    onMissing("wt2", "repo-b");
     expect(refresh).toHaveBeenCalledTimes(2);
+    // Let both passes finish, so the next ask is judged by the cooldown alone.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     // A kept row (detached volume, lock) is found missing on every poll.
     clock += 15_000;
-    onMissing("wt1", "repo");
+    onMissing("wt1", "repo-a");
     expect(refresh).toHaveBeenCalledTimes(2);
     clock += VANISHED_WORKTREE_REFRESH_COOLDOWN_MS;
-    onMissing("wt1", "repo");
+    onMissing("wt1", "repo-a");
     expect(refresh).toHaveBeenCalledTimes(3);
+  });
+
+  it("runs one re-index per repo at a time, and one more pass if asked meanwhile", async () => {
+    const finish: (() => void)[] = [];
+    const refresh = vi.fn(
+      () => new Promise<void>((resolve) => finish.push(resolve))
+    );
+    const onMissing = createVanishedWorktreeRefresh({ refresh, now: () => 0 });
+    onMissing("wt1", "repo");
+    onMissing("wt2", "repo");
+    onMissing("wt3", "repo");
+    expect(refresh).toHaveBeenCalledOnce();
+    finish.shift()?.();
+    // The two asks that landed mid-pass share a single follow-up pass.
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    finish.shift()?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(refresh).toHaveBeenCalledTimes(2);
   });
 });

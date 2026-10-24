@@ -868,8 +868,8 @@ if (!gotSingleInstanceLock) {
     // (vanished-worktrees.ts says which ones stay).
     stateService.onWorktreePathMissing(
       createVanishedWorktreeRefresh({
-        refresh: (repoId) => {
-          void indexer
+        refresh: (repoId) =>
+          indexer
             .refreshRepoWorktrees(repoId, { refreshBranches: false })
             .then((res) => {
               if (!res.ok) throw new Error(res.error.message);
@@ -887,8 +887,7 @@ if (!gotSingleInstanceLock) {
                 "re-index after a worktree folder vanished failed:",
                 cause
               );
-            });
-        }
+            })
       })
     );
 

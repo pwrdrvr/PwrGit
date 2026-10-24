@@ -405,7 +405,10 @@ out anywhere else ("already used by worktree at …"). So every index pass
 indexer) runs `git worktree remove --force <path>` for each such entry, one
 entry at a time, and the row goes with it. A probe that finds a linked
 checkout gone asks for that re-index (`onWorktreePathMissing`, once per
-worktree per ten minutes), so the row leaves within one poll.
+worktree per ten minutes, one pass per repo at a time), so the row leaves
+within one poll. Passes still overlap (a rescan, a user refresh), so "is not a
+working tree" from the remove means another pass got there first — treated
+as done, here and in `gitWorktreeRemove`.
 
 What stays, flagged `worktrees.missing` (0027):
 
@@ -421,7 +424,13 @@ What stays, flagged `worktrees.missing` (0027):
   there; git would refuse to remove it anyway.
 - **A detached HEAD no ref contains.** Git's record is the last thing
   pointing at those commits; dropping it is the user's call (Remove).
-- **Anything git declined to remove**, logged.
+- **Anything git declined to remove**, logged, and not asked again for ten
+  minutes — every refresh of the repo re-lists it.
+
+One case it gets wrong: a folder **moved by hand** (`mv`, not `git worktree
+move`) reads as gone at its old path, and dropping the record orphans the
+moved checkout, because `git worktree repair` needs that record. Accepted for
+now — agents delete far more often than people move.
 
 Never `git worktree prune`: it is repo-wide and would also drop the entries
 above. For the kept rows, `missing` lets the sidebar say "directory missing"
