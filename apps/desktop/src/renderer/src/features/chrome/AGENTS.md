@@ -65,7 +65,9 @@ Design: `design/Back Forward Navigation - UX Review.dc.html`.
 
 `.titlebar-jump` opens the ⌘F palette from the strip's right end, before
 Contributions. It is rigid, and `useStepLadder` drops its key cap and then its
-label while any crumb (`.titlebar__repo`, `.titlebar__pathchip`,
-`.titlebar__cr-title`) is cut short: the crumbs say where you are, the field is
-decoration once you know the chord. Its name is spelled on the button, since
+label while the strip is out of room — the spacer at its floor — and a crumb
+(`.titlebar__repo`, `.titlebar__pathchip`, `.titlebar__cr-title`) is cut
+short: the crumbs say where you are, the field is decoration once you know the
+chord. A cut crumb alone is not enough, because a change request's title stops
+at `.titlebar__cr`'s cap at any width. Its name is spelled on the button, since
 what is drawn changes. Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 3a.

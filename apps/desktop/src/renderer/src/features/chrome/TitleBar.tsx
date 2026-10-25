@@ -21,6 +21,36 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 
+/** Steps the jump field takes while the crumbs are cut short, in order. */
+export const JUMP_FIT_STEPS = [
+  "titlebar--jump-no-kbd",
+  "titlebar--jump-icon"
+] as const;
+
+/**
+ * Whether the strip has room for the jump field as drawn. It does while the
+ * spacer between the crumbs and the field is wider than its floor — then
+ * nothing is being squeezed, even if a crumb is clipped by its own cap (a
+ * change request's title stops at `.titlebar__cr`'s max-width at any window
+ * width). Only with the spacer at its floor does a cut crumb mean the field is
+ * taking the crumbs' room.
+ */
+function stripHasRoom(strip: HTMLElement | null): boolean {
+  if (strip === null) return true;
+  const spacer = strip.querySelector<HTMLElement>(".titlebar__spacer");
+  if (spacer !== null) {
+    const floor = parseFloat(getComputedStyle(spacer).minWidth) || 0;
+    if (spacer.getBoundingClientRect().width > floor + 0.5) return true;
+  }
+  const crumbs = strip.querySelectorAll<HTMLElement>(
+    ".titlebar__repo, .titlebar__pathchip, .titlebar__cr-title"
+  );
+  for (const el of crumbs) {
+    if (el.scrollWidth > el.clientWidth + 0.5) return false;
+  }
+  return true;
+}
+
 /**
  * The window's top strip: wordmark, then the selected worktree's identity as a
  * breadcrumb, then the jump field.
@@ -41,25 +71,6 @@ import {
  * Renders the wordmark alone when nothing is selected, so the strip never
  * collapses or shifts height between the empty and selected states.
  */
-/** Steps the jump field takes while the crumbs are cut short, in order. */
-export const JUMP_FIT_STEPS = [
-  "titlebar--jump-no-kbd",
-  "titlebar--jump-icon"
-] as const;
-
-/** True while no crumb is ellipsized. Each of these clips its own overflow,
- *  so a cut one reads wider than it is drawn. */
-function crumbsWhole(strip: HTMLElement | null): boolean {
-  if (strip === null) return true;
-  const cut = strip.querySelectorAll<HTMLElement>(
-    ".titlebar__repo, .titlebar__pathchip, .titlebar__cr-title"
-  );
-  for (const el of cut) {
-    if (el.scrollWidth > el.clientWidth + 0.5) return false;
-  }
-  return true;
-}
-
 export function TitleBar({
   repo,
   worktree,
@@ -97,10 +108,11 @@ export function TitleBar({
   const [switching, setSwitching] = useState(false);
   const stripRef = useRef<HTMLDivElement>(null);
   // The crumbs say where you are; the field is decoration once you know ⌘F.
-  // So the field gives way first — key cap, then label — while any crumb is
-  // cut short, and only then do the crumbs shrink (3a). Measured, never a
+  // So the field gives way first — key cap, then label — while the strip is
+  // out of room and a crumb is cut short, and only then do the crumbs shrink
+  // (3a). Measured, never a
   // window-width breakpoint.
-  useStepLadder(stripRef, () => crumbsWhole(stripRef.current), JUMP_FIT_STEPS);
+  useStepLadder(stripRef, () => stripHasRoom(stripRef.current), JUMP_FIT_STEPS);
 
   return (
     <>

@@ -24,7 +24,7 @@ test("the toolbar is one row and stays put above a long scrolling repo list", as
 
   handle = await launchApp();
   const { app, window } = handle;
-  const toolbar = window.getByRole("toolbar", { name: "Repositories" });
+  const toolbar = window.getByRole("group", { name: "Repositories", exact: true });
   const add = toolbar.getByRole("button", { name: "Add repositories" });
 
   // Day one: the empty list carries Add folders, and Clone stays discoverable

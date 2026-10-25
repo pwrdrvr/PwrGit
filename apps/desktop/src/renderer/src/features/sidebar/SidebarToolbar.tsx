@@ -91,7 +91,10 @@ export function SidebarToolbar({
     <div
       ref={rowRef}
       className="sidebar-toolbar"
-      role="toolbar"
+      /* A group, not a toolbar: role="toolbar" promises one Tab stop and
+         arrow keys between the buttons, and these are four ordinary Tab
+         stops. */
+      role="group"
       aria-label="Repositories"
     >
       <button
