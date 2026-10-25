@@ -180,6 +180,13 @@ export function restoreSidebarAnchor(anchor: SidebarAnchor): void {
   pin = { ...anchor, until: Date.now() + KEEP_MS * 2, restore: true, found: false };
 }
 
+/** The reader scrolled the list some other way — the repository index's
+ *  jump. Like a wheel, it ends any hold, or the hold would pull the old row
+ *  straight back on the next frame. */
+export function releaseSidebarAnchor(): void {
+  pin = null;
+}
+
 /** Whether a hold is in force and has its row, so the caller's own reveal
  *  scroll must stand down rather than undo it. */
 export function sidebarAnchorHeld(now: number = Date.now()): boolean {

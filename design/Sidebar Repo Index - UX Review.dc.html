@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="./support.js"></script>
+  </head>
+  <body>
+    <x-dc>
+      <helmet data-dc-atomics>
+        <meta name="design_doc_mode" content="canvas" />
+        <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&amp;family=Geist+Mono:wght@400..700&amp;display=swap" rel="stylesheet" />
+        <style>
+          :root {
+            --rv-bg: #050505; --rv-line: rgba(247, 243, 235, 0.1);
+            --rv-t1: #f7f3eb; --rv-t2: #b8b0a5; --rv-t3: #8c857a; --rv-tsub: rgba(247, 243, 235, 0.54);
+            --rv-acc: #ff8a1f; --rv-accb: #ffb35c; --rv-accon: #160a00;
+            --rv-bad: #b94232; --rv-ok: #5fa969;
+            --font-sans: "Geist", "SF Pro Text", "Inter", system-ui, sans-serif;
+            --font-mono: "Geist Mono", "SF Mono", "JetBrains Mono", Consolas, monospace;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          html { background: var(--rv-bg); }
+          body { margin: 0; background: var(--rv-bg); font-family: var(--font-sans); }
+          a { color: var(--rv-accb); text-decoration: none; } a:hover { color: var(--rv-acc); }
+
+          /* ---- review chrome (house convention) ---- */
+          .dv-turn { padding: 40px 44px 32px; background: var(--rv-bg); border-bottom: 1px solid var(--rv-line); }
+          .dv-thd { display: flex; align-items: baseline; gap: 10px; margin: 0 0 6px; }
+          .dv-tid { font: 600 10px var(--font-mono); padding: 3px 7px; background: var(--rv-t1); color: var(--rv-bg); border-radius: 4px; text-decoration: none; }
+          .dv-tname { font: 600 13px/1.2 var(--font-sans); color: var(--rv-t1); }
+          .dv-sub { margin: 0 0 22px; font: 400 11.5px/1.5 var(--font-sans); color: var(--rv-t3); max-width: 880px; text-wrap: pretty; }
+          .dv-sub b { color: var(--rv-t2); font-weight: 600; }
+          .dv-sub code, .note code, .fitem code, .tr code { font: 500 10px/1.4 var(--font-mono); color: var(--rv-t2); }
+          .dv-opts { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+          .dv-opt { flex: none; display: flex; flex-direction: column; gap: 9px; scroll-margin-top: 16px; }
+          .dv-oid { font: 600 10.5px var(--font-mono); padding: 3px 7px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t1); border-radius: 5px; text-decoration: none; }
+          .dv-opt:target .dv-oid { background: var(--rv-acc); color: var(--rv-accon); }
+          .dv-olabel { display: flex; align-items: baseline; gap: 8px; font: 400 11px/1.3 var(--font-sans); color: var(--rv-tsub); max-width: 760px; }
+          .dv-next { margin: 22px 0 0; font: 12px/1.5 var(--font-sans); color: var(--rv-t3); }
+          .note { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 360px; }
+          .note b { color: var(--rv-t2); font-weight: 600; }
+          .rec { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--rv-acc); color: var(--rv-accon); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+          .rej { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: rgba(185, 66, 50, 0.24); color: #ffb0a1; font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+          .alt { display: inline-flex; align-items: center; height: 17px; padding: 0 6px; border-radius: 999px; background: rgba(247, 243, 235, 0.08); color: var(--rv-t2); font: 700 8.5px/1 var(--font-sans); letter-spacing: 0.06em; text-transform: uppercase; }
+
+          .pin { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 15px; height: 15px; border-radius: 999px; background: var(--rv-bad); color: #fff; font: 700 9px/1 var(--font-mono); }
+          .pin.ok { background: var(--rv-ok); color: #050505; }
+          .pin.q { background: var(--rv-t3); color: #050505; }
+          .find { width: 470px; display: flex; flex-direction: column; gap: 14px; padding: 16px; border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; }
+          .fitem { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 9px; align-items: start; }
+          .fitem h4 { margin: 0 0 3px; font: 650 11.5px/1.3 var(--font-sans); color: var(--rv-t1); }
+          .fitem p { margin: 0; font: 400 10.5px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; }
+          .fitem b { color: var(--rv-t2); font-weight: 600; }
+
+          .tbl { border: 1px solid var(--rv-line); border-radius: 9px; background: #0a0a0a; overflow: hidden; }
+          .tr { display: grid; grid-template-columns: 170px 210px minmax(0, 1fr) 84px; gap: 12px; align-items: start; padding: 8px 12px; border-bottom: 1px solid var(--rv-line); font: 500 10.5px/1.45 var(--font-sans); color: var(--rv-t2); }
+          .tr.three { grid-template-columns: 210px 120px minmax(0, 1fr); }
+          .tr.ladder { grid-template-columns: 96px 110px 120px minmax(0, 1fr); }
+          .tr:last-child { border-bottom: 0; }
+          .tr.head { font: 600 9.5px/1.3 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--rv-t3); background: rgba(247, 243, 235, 0.03); }
+          .tr b { color: var(--rv-t1); font-weight: 600; }
+          .tr a { font-size: 9.5px; }
+          .verdict { display: inline-flex; justify-self: start; padding: 2px 6px; border-radius: 999px; font: 700 8.5px/1.35 var(--font-sans); letter-spacing: 0.05em; text-transform: uppercase; }
+          .verdict.keep { background: rgba(95, 169, 105, 0.16); color: #9ce5b3; }
+          .verdict.chg { background: rgba(255, 138, 31, 0.12); color: var(--rv-accb); }
+          .verdict.q { background: rgba(247, 243, 235, 0.06); color: var(--rv-t3); }
+          .verdict.no { background: rgba(185, 66, 50, 0.24); color: #ffb0a1; }
+
+          /* ============================================================
+             Light theme scope: the app's own token names, from tokens.css
+             :root[data-theme="light"]
+             ============================================================ */
+          .th-light {
+            --bg-sidebar: #f7f4ef; --bg-panel: #fdfcfa; --bg-app: #ffffff;
+            --bg-panel-hover: #f4f0e8; --bg-hover-strong: #ebe5da; --bg-row-active: #fff5e9; --bg-active-strong: #ffe8cf;
+            --border-faint: rgba(0, 0, 0, 0.05); --border-subtle: rgba(0, 0, 0, 0.08); --border-default: rgba(0, 0, 0, 0.12); --border-strong: rgba(0, 0, 0, 0.18);
+            --text-primary: #1a1612; --text-secondary: #524a40; --text-muted: #736c64; --text-subtle: rgba(26, 22, 18, 0.68);
+            --accent: #b74c00; --accent-bright: #994c00; --accent-on: #ffffff;
+            --accent-border: color-mix(in srgb, var(--accent) 42%, transparent);
+            --focus-ring: var(--accent);
+            --sidebar-title-size: 13px;
+            --sidebar-eyebrow-size: calc(var(--sidebar-title-size) - 3px);
+            --sidebar-repo-row-height: calc(var(--sidebar-title-size) * 1.25 + 10px);
+            --sidebar-group-head-height: 28px;
+            color: var(--text-primary);
+          }
+
+          /* ---- sidebar specimen, true size from styles/app.css ----
+             .repo-row: min-height calc(13px * 1.25 + 10px) = 26.25px, padding 4px 8px 4px 12px,
+             600 13px name. .sidebar__list: padding 0 8px. Section heads: eyebrow 10px caps. */
+          .sb { position: relative; display: flex; flex-direction: column; height: 460px; overflow: hidden; border: 1px solid var(--rv-line); border-radius: 9px; background: var(--bg-sidebar); font-family: var(--font-sans); }
+          .sb.short { height: 360px; }
+          .sb-lens { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-bottom: 1px solid var(--border-subtle); }
+          .sb-lens .chip { width: 26px; height: 20px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-panel); }
+          .sb-lens .chip.on { border-color: var(--accent); background: var(--bg-row-active); }
+          .sb-lens .cnt { margin-left: auto; font: 600 10px var(--font-mono); color: var(--text-muted); }
+          .sb-lens .keb { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; color: var(--text-muted); font: 700 12px/1 var(--font-sans); }
+          .sb-body { flex: 1; min-height: 0; display: flex; }
+          .sb-list { flex: 1; min-width: 0; padding: 0 8px; overflow: hidden; position: relative; }
+          .sb-foot { flex: none; height: 30px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; padding: 0 12px; font: 500 10.5px var(--font-sans); color: var(--text-muted); }
+
+          .grp { display: flex; align-items: center; gap: 7px; height: var(--sidebar-group-head-height); padding: 0 8px; box-shadow: 0 1px 0 var(--border-subtle); background: var(--bg-sidebar); }
+          .grp span { font: 700 var(--sidebar-eyebrow-size)/1 var(--font-sans); color: var(--text-muted); letter-spacing: 0.07em; text-transform: uppercase; }
+          .grp em { margin-left: auto; font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono); color: var(--text-subtle); font-style: normal; }
+          .rr { position: relative; display: flex; align-items: center; gap: 8px; min-height: var(--sidebar-repo-row-height); padding: 4px 8px 4px 12px; border: 1px solid transparent; border-radius: 8px; background: var(--bg-sidebar); }
+          .rr.stuck { box-shadow: 0 1px 0 var(--border-subtle); }
+          .rr .chev { position: absolute; left: 3px; width: 0; height: 0; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; border-left: 4.5px solid var(--text-muted); }
+          .rr.open .chev { transform: rotate(90deg); }
+          .rr .nm { flex: 1; min-width: 0; font: 600 13px/1.25 var(--font-sans); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .rr.sel .nm { color: var(--accent); }
+          .rr .meta { flex: none; font: 500 10.5px/1 var(--font-mono); color: var(--text-muted); }
+          .rr .star { flex: none; width: 9px; height: 9px; background: var(--accent); clip-path: polygon(50% 0, 62% 35%, 100% 38%, 70% 60%, 80% 100%, 50% 77%, 20% 100%, 30% 60%, 0 38%, 38% 35%); }
+          .rr.target { border-color: var(--accent); }
+          .sec { display: flex; align-items: center; gap: 7px; min-height: 24px; margin: 0 0 1px 6px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--border-faint); position: relative; }
+          .sec::before { content: ""; position: absolute; left: 1px; width: 0; height: 0; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 4px solid var(--text-muted); }
+          .sec.open::before { transform: rotate(90deg); }
+          .sec b { font: 700 var(--sidebar-eyebrow-size)/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-secondary); }
+          .sec em { font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono); font-style: normal; color: var(--text-muted); }
+          .sec i { margin-left: auto; font: 600 9.5px/1 var(--font-mono); font-style: normal; color: var(--accent); }
+          .wt { display: flex; align-items: center; gap: 6px; min-height: 24px; margin: 0 0 1px 14px; padding: 0 6px; border: 1px solid transparent; border-radius: 6px; font: 500 11.5px/1.2 var(--font-mono); color: var(--text-secondary); white-space: nowrap; overflow: hidden; }
+          .wt.sel { border-color: var(--accent); background: var(--bg-row-active); color: var(--text-primary); }
+          .wt em { margin-left: auto; font-style: normal; font-size: 10px; color: var(--text-muted); }
+          .spacer { border: 1px dashed var(--border-default); border-radius: 6px; margin: 4px 2px; display: grid; place-items: center; font: 500 9.5px var(--font-mono); color: var(--text-muted); }
+
+          /* ---- the index column (option 2a / the build) ----
+             font: 500 calc(title − 1px)/1.25 sans = 12px. Item padding 4px 8px 4px 11px.
+             min-width calc(7ch + 19px) in the index's own font: 76px measured in the built sidebar. */
+          .rix { flex: none; display: flex; flex-direction: column; padding: 4px 0 12px; border-right: 1px solid var(--border-subtle); overflow: hidden; font: 500 12px/1.25 var(--font-sans); }
+          .rix-g { padding: 9px 8px 3px 11px; font: 700 9px/1 var(--font-sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .rix-i { position: relative; display: block; padding: 4px 8px 4px 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 0 6px 6px 0; }
+          .rix-i::before { content: ""; position: absolute; left: 3px; top: 2px; bottom: 2px; width: 2px; border-radius: 2px; background: transparent; }
+          .rix-i.view::before { background: var(--border-strong); top: 0; bottom: 0; border-radius: 0; }
+          .rix-i.cur { color: var(--text-primary); background: var(--bg-hover-strong); }
+          .rix-i.cur::before { background: var(--accent); top: 0; bottom: 0; border-radius: 0; }
+          .rix-i.sel { color: var(--accent); }
+          .rix-i.hov { background: var(--bg-panel-hover); }
+          .rix-i.focus { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+          /* ---- alternative specimens ---- */
+          .crumb { flex: none; display: flex; align-items: center; gap: 6px; height: 30px; margin: 4px 8px 2px; padding: 0 8px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-panel); font: 600 12px var(--font-sans); color: var(--text-primary); }
+          .crumb .dd { margin-left: auto; color: var(--text-muted); font-size: 10px; }
+          .crumb-menu { position: absolute; left: 8px; right: 8px; top: 70px; z-index: 9; padding: 4px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--bg-app); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18); }
+          .crumb-menu input { display: block; width: 100%; height: 24px; margin: 0 0 4px; padding: 0 8px; border: 1px solid var(--border-default); border-radius: 5px; font: 500 11px var(--font-sans); color: var(--text-muted); background: var(--bg-panel); }
+          .crumb-menu div { padding: 4px 8px; border-radius: 5px; font: 500 12px var(--font-sans); color: var(--text-secondary); }
+          .crumb-menu div.on { background: var(--bg-hover-strong); color: var(--text-primary); }
+          .mono-rail { flex: none; width: 36px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; border-right: 1px solid var(--border-subtle); }
+          .mono-rail span { width: 26px; height: 22px; border-radius: 6px; display: grid; place-items: center; font: 700 10px var(--font-mono); color: var(--text-secondary); background: var(--bg-panel); border: 1px solid var(--border-subtle); }
+          .mono-rail span.cur { border-color: var(--accent); color: var(--accent); }
+          .scrub { position: absolute; right: 2px; top: 6px; bottom: 6px; width: 8px; border-radius: 4px; background: var(--border-faint); }
+          .scrub i { position: absolute; left: 1px; right: 1px; border-radius: 2px; background: var(--border-strong); }
+          .scrub i.cur { background: var(--accent); }
+          .scrub-tip { position: absolute; right: 14px; padding: 3px 7px; border-radius: 5px; background: var(--text-primary); color: var(--bg-app); font: 600 10.5px var(--font-sans); white-space: nowrap; }
+          .ptr { position: absolute; z-index: 12; width: 13px; height: 18px; pointer-events: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+          .wcap { font: 600 9.5px/1 var(--font-mono); color: var(--rv-tsub); }
+          .cap-row { display: flex; gap: 22px; align-items: flex-start; }
+          .cap-col { display: flex; flex-direction: column; gap: 7px; }
+
+          /* ---- block-height strip (turn 1) ---- */
+          .strip { display: flex; gap: 22px; align-items: flex-end; }
+          .strip-col { display: flex; flex-direction: column; gap: 6px; width: 132px; }
+          .strip-box { display: flex; flex-direction: column; border: 1px solid var(--rv-line); border-radius: 7px; overflow: hidden; background: #0a0a0a; }
+          .strip-box div { display: flex; align-items: center; padding: 0 7px; border-bottom: 1px solid rgba(247, 243, 235, 0.06); font: 500 9.5px var(--font-mono); color: var(--rv-t3); overflow: hidden; }
+          .strip-box div.open { background: rgba(247, 243, 235, 0.06); color: var(--rv-t2); }
+          .strip-box div.tg { background: rgba(255, 138, 31, 0.16); color: var(--rv-accb); }
+          .strip-cap { font: 500 10px/1.4 var(--font-sans); color: var(--rv-t3); }
+          .strip-cap b { color: var(--rv-t1); font: 600 10.5px var(--font-mono); }
+
+          /* ---- live prototype ---- */
+          .proto { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid rgba(255, 138, 31, 0.42); border-radius: 9px; background: #0a0a0a; }
+          .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+          .seg { display: inline-flex; padding: 2px; border: 1px solid var(--rv-line); border-radius: 7px; background: #050505; }
+          .seg button { appearance: none; border: 0; padding: 4px 9px; border-radius: 5px; background: transparent; color: var(--rv-t3); font: 600 9.5px/1 var(--font-mono); cursor: pointer; }
+          .seg button.on { background: var(--rv-acc); color: var(--rv-accon); }
+          .btn { appearance: none; padding: 5px 10px; border: 1px solid rgba(247, 243, 235, 0.14); border-radius: 7px; background: #101010; color: var(--rv-t2); font: 600 9.5px/1 var(--font-mono); cursor: pointer; }
+          .btn:hover { border-color: rgba(255, 138, 31, 0.42); color: var(--rv-t1); }
+          .readout { padding: 7px 10px; border-radius: 7px; background: rgba(247, 243, 235, 0.05); color: var(--rv-t2); font: 500 10px/1.5 var(--font-mono); }
+          .hint { margin: 0; font: 400 10px/1.5 var(--font-sans); color: var(--rv-t3); text-wrap: pretty; max-width: 470px; }
+          .pv .sb { height: 440px; }
+          .pv .rix { overflow-y: auto; scrollbar-width: thin; width: max-content; min-width: calc(7ch + 19px); }
+          .pv .rix.off { display: none; }
+          .pv .rix-i { appearance: none; border: 0; background: transparent; width: 100%; text-align: left; font: inherit; cursor: pointer; }
+          .pv .rix-i:hover { background: var(--bg-panel-hover); }
+          .pv .rix-i.cur { background: var(--bg-hover-strong); }
+          .pv .rix-i:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+          .pv .sb-list { overflow-y: auto; }
+          .pv .rr { position: sticky; top: 0; z-index: 3; cursor: pointer; }
+          .pv .rr:hover { background: var(--bg-panel-hover); }
+          .pv .probe { position: absolute; visibility: hidden; font: 500 12px/1.25 var(--font-sans); min-width: calc(7ch + 19px); }
+        </style>
+      </helmet>
+
+      <!-- ================================ TURN 1 ================================ -->
+      <section class="dv-turn" id="t1">
+        <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Findings: the list keeps everything you opened, so the distance to any repository is whatever you opened above it</span></div>
+        <p class="dv-sub">The operator, on the sidebar: <b>&#8220;It's great because I can scroll through and find what I want and expand/collapse the sections I want and don't have to wait for a sub&#8209;list to load or lose my expand/collapse status as I switch between repos. But it sucks because it's too much non&#8209;deterministic scroll length to find a specific repo.&#8221;</b> Both halves are the same property: per&#8209;repo expand state persists, and a repository's position in the scroll is the sum of every block above it. Specimens are drawn at shipped size from <code>styles/app.css</code> in the light theme; every repository name is invented.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="1a" data-screen-label="1a Block heights">
+            <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a>Same profile, same target, three sessions: <code>kestrel-mobile</code> is 260px, 690px or 1,180px down</div>
+            <div class="strip">
+              <div class="strip-col">
+                <div class="strip-box">
+                  <div style="height:26px">atlas-api</div><div style="height:26px">beacon-web</div><div style="height:26px">cinder</div><div style="height:26px">delta-svc</div><div style="height:26px">echo-ui</div><div style="height:26px">foxtrot-cli</div><div style="height:26px">gamma-worker</div><div style="height:26px">harbor</div><div style="height:26px">iris-docs</div><div style="height:26px">juniper-infra</div><div class="tg" style="height:26px">kestrel-mobile</div>
+                </div>
+                <div class="strip-cap">Nothing open<br /><b>260px</b> to the target</div>
+              </div>
+              <div class="strip-col">
+                <div class="strip-box">
+                  <div class="open" style="height:150px;align-items:flex-start;padding-top:6px">atlas-api &#9662;<br />5 sections</div><div style="height:26px">beacon-web</div><div class="open" style="height:150px;align-items:flex-start;padding-top:6px">cinder &#9662;</div><div style="height:26px">delta-svc</div><div class="open" style="height:150px;align-items:flex-start;padding-top:6px">echo-ui &#9662;</div><div style="height:26px">foxtrot-cli</div><div style="height:26px">gamma-worker</div><div style="height:26px">harbor</div><div style="height:26px">iris-docs</div><div style="height:26px">juniper-infra</div><div class="tg" style="height:26px">kestrel-mobile</div>
+                </div>
+                <div class="strip-cap">Three repos open<br /><b>690px</b> to the target</div>
+              </div>
+              <div class="strip-col">
+                <div class="strip-box">
+                  <div class="open" style="height:330px;align-items:flex-start;padding-top:6px">atlas-api &#9662;<br />Worktrees open<br />6 rows + ghost</div><div style="height:26px">beacon-web</div><div class="open" style="height:150px;align-items:flex-start;padding-top:6px">cinder &#9662;</div><div style="height:26px">delta-svc</div><div class="open" style="height:300px;align-items:flex-start;padding-top:6px">echo-ui &#9662;<br />Branches open</div><div style="height:26px">foxtrot-cli</div><div class="open" style="height:150px;align-items:flex-start;padding-top:6px">gamma-worker &#9662;</div><div style="height:26px">harbor</div><div style="height:26px">iris-docs</div><div style="height:26px">juniper-infra</div><div class="tg" style="height:26px">kestrel-mobile</div>
+                </div>
+                <div class="strip-cap">An afternoon later<br /><b>1,180px</b> to the target</div>
+              </div>
+            </div>
+            <p class="note" style="max-width:450px">Collapsed, a repository is one 26px row. Open with its five section heads closed it is about 150px; with Worktrees open (six rows, a ghost, the Finished line) about 330px. The sticky header tells you which block you are <b>inside</b>; nothing on screen tells you where any other block is.</p>
+          </div>
+
+          <div class="dv-opt" id="1b" data-screen-label="1b Findings">
+            <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a>Four findings</div>
+            <div class="find">
+              <div class="fitem"><span class="pin">1</span><div><h4>The scroll distance is a function of history, not of the list</h4><p>The repository order is stable (the lens and the folder groups decide it), but the pixels between you and a repository depend on what you opened earlier. So scroll memory never forms: the same flick lands somewhere different every day.</p></div></div>
+              <div class="fitem"><span class="pin">2</span><div><h4>The sticky header answers &#8220;where am I&#8221;, never &#8220;where is X&#8221;</h4><p><code>.repo-row</code> is <code>position: sticky</code>, so the block you are in stays named. Every other repository is either off screen or a 26px row between two tall blocks. With 26 to 60 repositories that is most of them.</p></div></div>
+              <div class="fitem"><span class="pin q">3</span><div><h4>&#8984;F is the &#8220;I know the name&#8221; path, and it changes the selection</h4><p>Jump to repo&#8230; is deterministic, but a pick selects a worktree, which moves the main pane and records a focus visit. That is right when you are going somewhere. It is the wrong tool for &#8220;show me what's in harbor's branches&#8221; while the graph stays where it is.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>The cure must not collapse anything</h4><p>Collapse&#8209;all, or a one&#8209;open accordion, makes the distances small by deleting the state the operator values. NN/g says the same about desktop accordions: let several stay open. The fix is a map beside the list, not a smaller list.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;measure the block heights at the 15px title notch&#8221; &#183; &#8220;what does the strip look like grouped by folder?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 2 ================================ -->
+      <section class="dv-turn" id="t2">
+        <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname">Prior art: who keeps many expanded sections in one scroll, and how they navigate it</span></div>
+        <p class="dv-sub">None of the multi&#8209;repo Git clients (Fork, Tower, GitKraken, Sublime Merge, GitHub Desktop, SourceTree) put many expanded repositories in one scrolling tree. They split it into a repository manager or switcher, plus one repository per tab or window, with a fuzzy quick&#8209;open. PwrGit's single tree is the unusual part, and it is the part the operator likes. So the useful precedents come from long documents and code trees.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="2p" data-screen-label="2p Prior art">
+            <div class="dv-olabel"><a class="dv-oid" href="#2p">2p</a>What each pattern does, and what carries over</div>
+            <div class="tbl" style="width:980px">
+              <div class="tr head"><span>Pattern</span><span>Where</span><span>What carries over / what doesn't</span><span>Fit</span></div>
+              <div class="tr"><span><b>&#8220;On this page&#8221; TOC with scroll&#8209;spy</b></span><span>MDN, Stripe docs; Bootstrap ScrollSpy (rewritten in v5.2 around one activation line, #36431)</span><span>A column of section names beside long, uneven content, highlighting the section you are in, and jumping on click. Uneven section heights are exactly our case. <code>aria-current</code> inside a labelled <code>nav</code>. The highlight must be the section whose header crossed the top line, not &#8220;the most visible&#8221;, which flickers on tall sections.</span><span><span class="verdict keep">Core</span></span></div>
+              <div class="tr"><span><b>Sticky scroll + click&#8209;to&#8209;jump</b></span><span>VS Code 1.85 tree sticky scroll</span><span>Ancestors pin to the top; clicking a pinned one reveals it. We already pin the repo header. It tells you where you are and nothing about distant siblings.</span><span><span class="verdict q">Have it</span></span></div>
+              <div class="tr"><span><b>Breadcrumb sibling dropdown</b></span><span>VS Code breadcrumbs (&#8679;&#8984;.), Outline &#8220;follow cursor&#8221;</span><span>A &#8220;current repo &#9662;&#8221; control listing siblings with type&#8209;to&#8209;filter. Costs no width and works at the 240px floor. It takes a click to see the map, so it is a switcher, not a glanceable overview.</span><span><span class="verdict chg">Alt</span></span></div>
+              <div class="tr"><span><b>Icon rail beside a list</b></span><span>Discord / Slack server rail; Outlook's favourites rail</span><span>A 36&ndash;44px rail is cheap. But these rails <i>replace</i> the list beside them (one server at a time), and initials don't separate repositories that share a prefix: atlas&#8209;api / atlas&#8209;web, or a whole family named Pwr&#8230;.</span><span><span class="verdict chg">Step&#8209;down?</span></span></div>
+              <div class="tr"><span><b>A&#8211;Z section index</b></span><span>iOS <code>sectionIndexTitles</code>, Android fast&#8209;scroll</span><span>Letters assume an alphabetical list with even spread. Our order is the lens's, not A&#8211;Z, and Apple's HIG warns against an index beside trailing row controls (we have pin and kebab).</span><span><span class="verdict no">No</span></span></div>
+              <div class="tr"><span><b>Minimap / proportional scrubber</b></span><span>VS Code, Sublime</span><span>Shows where the big blocks are, at a glance. Unreadable at sidebar scale; no names, so no deterministic jump to a named repository.</span><span><span class="verdict no">No</span></span></div>
+              <div class="tr"><span><b>Follow / reveal active</b></span><span>JetBrains &#8220;Always select opened file&#8221;, &#8220;Select opened file&#8221;</span><span>Keep the map in sync with the thing you are on. That is the scroll&#8209;spy half of the TOC; the reveal half we already have (&#8984;F, You are here).</span><span><span class="verdict keep">Core</span></span></div>
+              <div class="tr"><span><b>Single&#8209;open accordion / collapse all</b></span><span>NN/g, &#8220;Accordions on desktop&#8221;</span><span>NN/g: allow several open; auto&#8209;collapse stops people combining information. Collapse&#8209;all is a blunt reset of the state the operator values.</span><span><span class="verdict no">No</span></span></div>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;how does Fork 2.71's per&#8209;window workspace compare?&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 3 ================================ -->
+      <section class="dv-turn" id="t3">
+        <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname">Five ways to navigate it, each at the ~320px default and the 240px floor</span></div>
+        <p class="dv-sub">Same contrived profile, scrolled into the middle of <code>echo-ui</code>. Each option keeps every repository's expand state; they differ in how much of the map is visible without a click, and what they cost the tree in width.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="3a" data-screen-label="3a Name index">
+            <div class="dv-olabel"><a class="dv-oid" href="#3a">3a</a><span class="rec">Recommended</span>A name&#8209;only index column beside the tree, with scroll&#8209;spy</div>
+            <div class="cap-row th-light">
+              <div class="cap-col"><span class="wcap">430px &#183; index at its natural width</span>
+                <div class="sb" style="width:430px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span><span class="keb">&#8942;</span></div>
+                  <div class="sb-body">
+                    <div class="rix" style="width:107px">
+                      <div class="rix-g">Code</div>
+                      <div class="rix-i">atlas-api</div><div class="rix-i sel">beacon-web</div><div class="rix-i">cinder</div><div class="rix-i">delta-svc</div><div class="rix-i cur">echo-ui</div><div class="rix-i view">foxtrot-cli</div><div class="rix-i view">gamma-worker</div><div class="rix-i">harbor</div>
+                      <div class="rix-g">OSS</div>
+                      <div class="rix-i">iris-docs</div><div class="rix-i">juniper-infra</div><div class="rix-i">kestrel-mobile</div><div class="rix-i">lumen-sdk</div><div class="rix-i">meridian</div><div class="rix-i">nova-ops</div>
+                    </div>
+                    <div class="sb-list">
+                      <div class="grp"><span>Code</span><em>8</em></div>
+                      <div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span><span class="meta">9 wts</span><span class="star"></span></div>
+                      <div class="sec"><b>Pull requests</b><em>3</em></div>
+                      <div class="sec open"><b>Branches</b><em>42</em><i>2 ahead</i></div>
+                      <div class="wt">main<em>today</em></div><div class="wt">feat/theme-tokens<em>2d</em></div><div class="wt">fix/scroll-clamp<em>4d</em></div><div class="wt">chore/deps<em>1w</em></div>
+                      <div class="sec"><b>Tags</b><em>18</em></div>
+                      <div class="sec"><b>Remotes</b><em>2</em></div>
+                      <div class="rr"><span class="chev"></span><span class="nm">foxtrot-cli</span><span class="meta">2 wts</span></div>
+                      <div class="rr open"><span class="chev"></span><span class="nm">gamma-worker</span><span class="meta">4 wts</span><span class="star"></span></div>
+                      <div class="sec open"><b>Worktrees</b><em>4</em></div>
+                      <div class="wt">main<em>1h</em></div><div class="wt">feat/queue-retry<em>3h</em></div>
+                    </div>
+                  </div>
+                  <div class="sb-foot">AI features</div>
+                </div>
+              </div>
+              <div class="cap-col"><span class="wcap">320px &#183; index takes 80px, names past ~9 chars ellipsize</span>
+                <div class="sb" style="width:320px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span><span class="keb">&#8942;</span></div>
+                  <div class="sb-body">
+                    <div class="rix" style="width:80px">
+                      <div class="rix-g">Code</div>
+                      <div class="rix-i">atlas-api</div><div class="rix-i sel">beacon-web</div><div class="rix-i">cinder</div><div class="rix-i">delta-svc</div><div class="rix-i cur">echo-ui</div><div class="rix-i view">foxtrot-cli</div><div class="rix-i view">gamma-worker</div><div class="rix-i">harbor</div>
+                      <div class="rix-g">OSS</div>
+                      <div class="rix-i">iris-docs</div><div class="rix-i">juniper-infra</div><div class="rix-i">kestrel-mobile</div><div class="rix-i">lumen-sdk</div><div class="rix-i">meridian</div><div class="rix-i">nova-ops</div>
+                    </div>
+                    <div class="sb-list">
+                      <div class="grp"><span>Code</span><em>8</em></div>
+                      <div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span><span class="meta">9 wts</span><span class="star"></span></div>
+                      <div class="sec"><b>Pull requests</b><em>3</em></div>
+                      <div class="sec open"><b>Branches</b><em>42</em><i>2 ahead</i></div>
+                      <div class="wt">main<em>today</em></div><div class="wt">feat/theme-tokens<em>2d</em></div><div class="wt">fix/scroll-clamp<em>4d</em></div><div class="wt">chore/deps<em>1w</em></div>
+                      <div class="sec"><b>Tags</b><em>18</em></div>
+                      <div class="sec"><b>Remotes</b><em>2</em></div>
+                      <div class="rr"><span class="chev"></span><span class="nm">foxtrot-cli</span><span class="meta">2 wts</span></div>
+                      <div class="rr open"><span class="chev"></span><span class="nm">gamma-worker</span><span class="meta">4 wts</span></div>
+                      <div class="sec open"><b>Worktrees</b><em>4</em></div>
+                      <div class="wt">main<em>1h</em></div><div class="wt">feat/queue-retry<em>3h</em></div>
+                    </div>
+                  </div>
+                  <div class="sb-foot">AI features</div>
+                </div>
+              </div>
+              <div class="cap-col"><span class="wcap">240px &#183; no room: index hidden, &#8984;F remains</span>
+                <div class="sb" style="width:240px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span><span class="keb">&#8942;</span></div>
+                  <div class="sb-body">
+                    <div class="sb-list">
+                      <div class="grp"><span>Code</span><em>8</em></div>
+                      <div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span><span class="meta">9 wts</span><span class="star"></span></div>
+                      <div class="sec"><b>Pull requests</b><em>3</em></div>
+                      <div class="sec open"><b>Branches</b><em>42</em><i>2 ahead</i></div>
+                      <div class="wt">main<em>today</em></div><div class="wt">feat/theme-tokens<em>2d</em></div><div class="wt">fix/scroll-clamp<em>4d</em></div><div class="wt">chore/deps<em>1w</em></div>
+                      <div class="sec"><b>Tags</b><em>18</em></div>
+                      <div class="sec"><b>Remotes</b><em>2</em></div>
+                      <div class="rr"><span class="chev"></span><span class="nm">foxtrot-cli</span><span class="meta">2 wts</span></div>
+                      <div class="rr open"><span class="chev"></span><span class="nm">gamma-worker</span><span class="meta">4 wts</span></div>
+                    </div>
+                  </div>
+                  <div class="sb-foot">AI features</div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:1000px">The whole map is visible without a click, in the lens's order and under the same folder labels. <b>Accent rail + tint</b>: the repository whose header is stuck at the top (scroll&#8209;spy). <b>Grey rail</b>: the others visible in the tree right now, so the column doubles as a minimap of what you are looking at. <b>Accent name</b>: the repository holding the selection. A click puts that repository's header at the top of the tree and opens it; nothing else opens, closes or is selected. It costs the tree its width beyond the 240px floor, and steps out entirely below a measured fit (turn 4a).</p>
+          </div>
+
+          <div class="dv-opt" id="3b" data-screen-label="3b Current repo dropdown">
+            <div class="dv-olabel"><a class="dv-oid" href="#3b">3b</a><span class="alt">Alternative</span>A &#8220;current repo &#9662;&#8221; bar with a filterable jump menu</div>
+            <div class="cap-row th-light">
+              <div class="cap-col"><span class="wcap">320px &#183; menu open</span>
+                <div class="sb short" style="width:320px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span><span class="keb">&#8942;</span></div>
+                  <div class="crumb">echo-ui<span class="dd">&#9662; 5 of 14</span></div>
+                  <div class="crumb-menu"><input value="" placeholder="Filter repositories" /><div>delta-svc</div><div class="on">echo-ui</div><div>foxtrot-cli</div><div>gamma-worker</div><div>harbor</div></div>
+                  <div class="sb-body"><div class="sb-list">
+                    <div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span><span class="meta">9 wts</span></div>
+                    <div class="sec open"><b>Branches</b><em>42</em></div><div class="wt">main<em>today</em></div><div class="wt">feat/theme-tokens<em>2d</em></div><div class="wt">fix/scroll-clamp<em>4d</em></div><div class="wt">chore/deps<em>1w</em></div><div class="sec"><b>Tags</b><em>18</em></div>
+                  </div></div>
+                </div>
+              </div>
+              <div class="cap-col"><span class="wcap">240px &#183; fits</span>
+                <div class="sb short" style="width:240px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span></div>
+                  <div class="crumb">echo-ui<span class="dd">&#9662; 5 of 14</span></div>
+                  <div class="sb-body"><div class="sb-list">
+                    <div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span><span class="meta">9 wts</span></div>
+                    <div class="sec open"><b>Branches</b><em>42</em></div><div class="wt">main<em>today</em></div><div class="wt">feat/theme-tokens<em>2d</em></div><div class="wt">fix/scroll-clamp<em>4d</em></div><div class="wt">chore/deps<em>1w</em></div><div class="sec"><b>Tags</b><em>18</em></div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:580px">Works at every width and costs one row. But the map is behind a click, which makes it a second &#8984;F with a different result; and it adds a 30px bar <i>above</i> the list in a block the action&#8209;stack redesign is already rearranging. Worth keeping in mind for the 240px fallback if the operator ever asks for one.</p>
+          </div>
+
+          <div class="dv-opt" id="3c" data-screen-label="3c Initials rail">
+            <div class="dv-olabel"><a class="dv-oid" href="#3c">3c</a><span class="alt">Considered</span>Initials rail (Discord)</div>
+            <div class="cap-row th-light">
+              <div class="cap-col"><span class="wcap">320px</span>
+                <div class="sb short" style="width:320px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span></div>
+                  <div class="sb-body">
+                    <div class="mono-rail"><span>AA</span><span>BW</span><span>CI</span><span>DS</span><span class="cur">EU</span><span>FC</span><span>GW</span><span>HA</span><span>ID</span><span>JI</span></div>
+                    <div class="sb-list"><div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span><span class="meta">9 wts</span></div><div class="sec open"><b>Branches</b><em>42</em></div><div class="wt">main<em>today</em></div><div class="wt">feat/theme-tokens<em>2d</em></div><div class="wt">fix/scroll-clamp<em>4d</em></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:320px">36px instead of 80, so it would fit at 280px. But the operator asked for <b>names</b>, and initials collide the moment a profile has a naming family (atlas&#8209;api / atlas&#8209;web, PwrGit / PwrGuard). A tooltip per tile turns a glance into a hover hunt.</p>
+          </div>
+
+          <div class="dv-opt" id="3d" data-screen-label="3d Focus mode">
+            <div class="dv-olabel"><a class="dv-oid" href="#3d">3d</a><span class="rej">Rejected</span>Focus mode: jump collapses the others</div>
+            <div class="find" style="width:320px">
+              <div class="fitem"><span class="pin">&#215;</span><div><h4>Deterministic, by deleting the state</h4><p>Picking a repository opens it and closes the rest, so it is always near the top. It is the one thing the operator said he values about the list today, so it is out, as an automatic behaviour or a mode. An explicit &#8220;collapse others&#8221; on the repo menu could come later.</p></div></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="3e" data-screen-label="3e Scrubber">
+            <div class="dv-olabel"><a class="dv-oid" href="#3e">3e</a><span class="rej">Rejected</span>Proportional scrubber on the edge</div>
+            <div class="cap-row th-light">
+              <div class="cap-col"><span class="wcap">240px &#183; hovering a tick</span>
+                <div class="sb short" style="width:240px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span></div>
+                  <div class="sb-body"><div class="sb-list" style="padding-right:14px"><div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span></div><div class="sec open"><b>Branches</b><em>42</em></div><div class="wt">main</div><div class="wt">feat/theme-tokens</div>
+                    <div class="scrub"><i style="top:2%;height:14%"></i><i style="top:17%;height:2%"></i><i style="top:20%;height:8%"></i><i style="top:29%;height:2%"></i><i class="cur" style="top:32%;height:16%"></i><i style="top:49%;height:2%"></i><i style="top:52%;height:8%"></i><i style="top:61%;height:2%"></i><i style="top:64%;height:2%"></i><i style="top:67%;height:2%"></i><i style="top:70%;height:2%"></i></div>
+                    <span class="scrub-tip" style="top:118px">gamma-worker</span>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:300px">Shows where the tall blocks are, and fits the floor. A 26px repository becomes a 2px tick; with 40 of them, aiming is guesswork and the name only appears after you aim.</p>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw 3b as the below&#8209;fit fallback for 3a&#8221; &#183; &#8220;put 3c's rail at 280&ndash;307px as a middle step&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 4 ================================ -->
+      <section class="dv-turn" id="t4">
+        <div class="dv-thd"><a class="dv-tid" href="#t4">4</a><span class="dv-tname">3a in detail: the fit ladder, the jump, and the rules</span></div>
+        <p class="dv-sub">The tree is designed to work at 240px; that is the sidebar's own floor (<code>useColumnResize(&#8230;, 320, 240, 520)</code>). The index only ever spends width the tree does not need, so the tree never drops below the width it is already built for.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="4a" data-screen-label="4a Fit ladder">
+            <div class="dv-olabel"><a class="dv-oid" href="#4a">4a</a>The fit ladder: measured, not a breakpoint</div>
+            <div class="tbl" style="width:720px">
+              <div class="tr ladder head"><span>Sidebar</span><span>Index</span><span>Names</span><span>Rule</span></div>
+              <div class="tr ladder"><span><b>&#8805; 240 + natural</b></span><span>its natural width</span><span>whole</span><span><code>width: max-content</code>: the longest name in the lens plus the item's padding. At 430px with these names that is 107px; the tree keeps 322px.</span></div>
+              <div class="tr ladder"><span><b>240 + min &#8230; 240 + natural</b></span><span>sidebar &#8722; 240</span><span>ellipsize</span><span>Every pixel past the floor. The full name is on a hover card, drawn only for a name that is actually cut. At the 320px default: 80px.</span></div>
+              <div class="tr ladder"><span><b>&lt; 240 + min</b></span><span>hidden</span><span>&#8212;</span><span><code>min</code> is <code>calc(7ch + 19px)</code> in the index's own 12px font, measured from a hidden probe that carries the same rule: 76px in the built sidebar, so it appears at 316px. Below that, the Display options item says why it is off.</span></div>
+              <div class="tr ladder"><span><b>Any</b></span><span>hidden</span><span>&#8212;</span><span>Fewer than two repositories in the lens, or turned off in Display options (remembered).</span></div>
+            </div>
+            <p class="note" style="max-width:720px">Seven characters is the shortest truncation that still tells a family apart (<code>kestrel</code>, <code>juniper</code>, <code>PwrSuit&#8230;</code>). Everything follows the type axis: the font is <code>calc(--sidebar-title-size &#8722; 1px)</code>, so <code>ch</code>, the natural width and the fit all move with it. The tree's narrow&#8209;width rules (the 260px ghost&#8209;tag step) now ask the tree's own column, so they fire on the tree's width rather than the sidebar's.</p>
+          </div>
+
+          <div class="dv-opt" id="4b" data-screen-label="4b Jump">
+            <div class="dv-olabel"><a class="dv-oid" href="#4b">4b</a>Jump to <code>kestrel-mobile</code>, collapsed and near the end</div>
+            <div class="cap-row th-light">
+              <div class="cap-col"><span class="wcap">Before &#183; pointer on the index</span>
+                <div class="sb short" style="width:320px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span><span class="keb">&#8942;</span></div>
+                  <div class="sb-body">
+                    <div class="rix" style="width:80px">
+                      <div class="rix-g">Code</div><div class="rix-i">atlas-api</div><div class="rix-i sel">beacon-web</div><div class="rix-i">cinder</div><div class="rix-i">delta-svc</div><div class="rix-i cur">echo-ui</div><div class="rix-i view">foxtrot-cli</div><div class="rix-i">gamma-worker</div><div class="rix-i">harbor</div><div class="rix-g">OSS</div><div class="rix-i">iris-docs</div><div class="rix-i">juniper-infra</div><div class="rix-i hov">kestrel-mobile</div>
+                    </div>
+                    <div class="sb-list">
+                      <div class="grp"><span>Code</span><em>8</em></div>
+                      <div class="rr open stuck"><span class="chev"></span><span class="nm">echo-ui</span><span class="meta">9 wts</span></div>
+                      <div class="sec open"><b>Branches</b><em>42</em></div><div class="wt">main<em>today</em></div><div class="wt">feat/theme-tokens<em>2d</em></div><div class="wt">fix/scroll-clamp<em>4d</em></div><div class="sec"><b>Tags</b><em>18</em></div><div class="sec"><b>Remotes</b><em>2</em></div>
+                      <div class="rr"><span class="chev"></span><span class="nm">foxtrot-cli</span><span class="meta">2 wts</span></div>
+                    </div>
+                  </div>
+                  <svg class="ptr" style="left:58px; top:322px;" viewBox="0 0 12 16" fill="none"><path d="M1 1l9.2 7.6-4.3.5 2.5 4.8-2 1-2.4-4.7-3 2.6z" fill="#1a1612" stroke="#ffffff" stroke-width="1"/></svg>
+                </div>
+              </div>
+              <div class="cap-col"><span class="wcap">After &#183; same frame, header at the top, open</span>
+                <div class="sb short" style="width:320px">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span><span class="keb">&#8942;</span></div>
+                  <div class="sb-body">
+                    <div class="rix" style="width:80px">
+                      <div class="rix-g">Code</div><div class="rix-i">atlas-api</div><div class="rix-i sel">beacon-web</div><div class="rix-i">cinder</div><div class="rix-i">delta-svc</div><div class="rix-i">echo-ui</div><div class="rix-i">foxtrot-cli</div><div class="rix-i">gamma-worker</div><div class="rix-i">harbor</div><div class="rix-g">OSS</div><div class="rix-i">iris-docs</div><div class="rix-i">juniper-infra</div><div class="rix-i cur">kestrel-mobile</div>
+                    </div>
+                    <div class="sb-list">
+                      <div class="grp"><span>OSS</span><em>6</em></div>
+                      <div class="rr open target"><span class="chev"></span><span class="nm">kestrel-mobile</span><span class="meta">3 wts</span></div>
+                      <div class="sec"><b>Worktrees</b><em>3</em></div><div class="sec"><b>Pull requests</b><em>1</em></div><div class="sec"><b>Branches</b><em>12</em></div><div class="sec"><b>Tags</b><em>4</em></div><div class="sec"><b>Remotes</b><em>1</em></div>
+                      <div class="rr"><span class="chev"></span><span class="nm">lumen-sdk</span><span class="meta">1 wt</span></div><div class="rr"><span class="chev"></span><span class="nm">meridian</span><span class="meta">2 wts</span></div><div class="rr"><span class="chev"></span><span class="nm">nova-ops</span><span class="meta">1 wt</span></div>
+                      <div class="spacer" style="height:46px">end-of-list room, removed once off screen</div>
+                    </div>
+                  </div>
+                  <svg class="ptr" style="left:58px; top:322px;" viewBox="0 0 12 16" fill="none"><path d="M1 1l9.2 7.6-4.3.5 2.5 4.8-2 1-2.4-4.7-3 2.6z" fill="#1a1612" stroke="#ffffff" stroke-width="1"/></svg>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:660px">The index did not move under the pointer: the click lands on the item that now carries the accent. A repository near the end cannot reach the top on its own, so the list grows a blank tail of exactly the missing height. It goes away the first time it is scrolled out of view, which moves nothing visible. Under a folder group the header lands just below the sticky folder label, which stays.</p>
+          </div>
+
+          <div class="dv-opt" id="4c" data-screen-label="4c Rules">
+            <div class="dv-olabel"><a class="dv-oid" href="#4c">4c</a>What a jump does, and what it leaves alone</div>
+            <div class="tbl" style="width:820px">
+              <div class="tr three head"><span>Event</span><span>Behaviour</span><span>Why</span></div>
+              <div class="tr three"><span>Click or Enter on an index item</span><span><span class="verdict chg">Opens + scrolls</span></span><span>Header to the top of the scrollport, instantly (long distances smooth&#8209;scrolled are slow and sweep the highlight through every repo in between). The repository opens if it was closed, with the lazy badge fill a manual expand does.</span></div>
+              <div class="tr three"><span>Any other repository's expand state</span><span><span class="verdict keep">Untouched</span></span><span>Finding 1b.4. The index is a map, not a mode.</span></div>
+              <div class="tr three"><span>Selection / main pane</span><span><span class="verdict keep">Untouched</span></span><span>Unlike a repo&#8209;row click, a jump selects nothing: browsing harbor's branches must not move the graph, record a focus visit or re&#8209;rank Focused.</span></div>
+              <div class="tr three"><span>A row hold in progress (<code>sidebar-anchor.ts</code>)</span><span><span class="verdict chg">Released</span></span><span>A jump is the reader driving, like a wheel. The hold would pull the old row back.</span></div>
+              <div class="tr three"><span>Hover hold on the Focused order</span><span><span class="verdict keep">Covers the index</span></span><span>The hold now spans index and tree, so the index never re&#8209;sorts under a pointer moving from one to the other.</span></div>
+              <div class="tr three"><span>Scrolling the tree</span><span><span class="verdict chg">Spy follows</span></span><span>Current = the first repository block whose bottom is below the sticky line (the stuck header). The index scrolls to keep it in view, except while the pointer or focus is in the index.</span></div>
+              <div class="tr three"><span>Tab after a jump</span><span><span class="verdict chg">Lands on it</span></span><span>The tree's roving tab stop moves to the jumped repository, so Tab goes from the index straight to its header.</span></div>
+            </div>
+          </div>
+
+          <div class="dv-opt" id="4d" data-screen-label="4d Keyboard and a11y">
+            <div class="dv-olabel"><a class="dv-oid" href="#4d">4d</a>Keyboard and accessibility</div>
+            <div class="find">
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>A labelled nav, not part of the tree</h4><p><code>nav aria-label="Repository index"</code>, a list per folder group named by the folder, buttons inside. The tree stays <code>role="tree"</code> owning only treeitems and groups. The spy item carries <code>aria-current="location"</code>; each button <code>aria-controls</code> the tree.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>One tab stop, arrows inside</h4><p>&#8593;/&#8595; walk the names, Home/End jump to the ends, typing a few letters moves to the next name that starts with them, Enter or Space jumps. Tab order: lens, index, tree.</p></div></div>
+              <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>The house focus ring</h4><p><code>outline: 2px solid var(--focus-ring)</code>, inset like the tree's rows because the items sit flush. The current marker is a 2px accent rail plus a tint, so it survives forced colours and reads at 3:1 without the tint.</p></div></div>
+              <div class="fitem"><span class="pin q">?</span><div><h4>Open question for the operator</h4><p>At the 320px default the tree drops to its 240px design width while the index is on. It is on by default; Display options &#8594; Repo index turns it off. Default off would hide the feature from the people it is for.</p></div></div>
+            </div>
+          </div>
+
+        </div>
+        <p class="dv-next">Try next: &#8220;draw 4b grouped, landing under the OSS label&#8221; &#183; &#8220;show the Display options menu with the index off for width&#8221;</p>
+      </section>
+
+      <!-- ================================ TURN 5 ================================ -->
+      <section class="dv-turn" id="t5">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">Live: scroll the tree, click a name, change the width</span></div>
+        <p class="dv-sub">Fourteen invented repositories, three of them open. Scroll the tree and the index follows. Click a name in the index: its header goes to the top, it opens, and nothing else changes. Click a header in the tree to close or open it, exactly as today. Switch the width to watch the ladder in 4a.</p>
+        <div class="dv-opts">
+          <div class="dv-opt" id="5a" data-screen-label="5a Prototype">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>Prototype of 3a</div>
+            <div class="proto pv">
+              <div class="ctl">
+                <span class="seg">
+                  <button class="{{w430}}" onClick="{{set430}}">430px</button>
+                  <button class="{{w320}}" onClick="{{set320}}">320px</button>
+                  <button class="{{w300}}" onClick="{{set300}}">300px</button>
+                  <button class="{{w240}}" onClick="{{set240}}">240px</button>
+                </span>
+                <button class="btn" onClick="{{reset}}">Reset</button>
+              </div>
+              <div class="th-light" style="position:relative">
+                <span class="probe" ref="{{probeRef}}">x</span>
+                <div class="sb" style="{{sbStyle}}">
+                  <div class="sb-lens"><span class="chip"></span><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="cnt">14</span><span class="keb">&#8942;</span></div>
+                  <div class="sb-body">
+                    <nav class="rix {{rixCls}}" style="{{rixStyle}}" ref="{{rixRef}}" aria-label="Repository index" onPointerEnter="{{rixEnter}}" onPointerLeave="{{rixLeave}}">
+                      <sc-for list="{{items}}" as="it" hint-placeholder-count="14">
+                        <button type="button" class="rix-i {{it.cls}}" data-ix="{{it.id}}" onClick="{{it.jump}}">{{it.name}}</button>
+                      </sc-for>
+                    </nav>
+                    <div class="sb-list" ref="{{listRef}}">
+                      <sc-for list="{{blocks}}" as="b" hint-placeholder-count="14">
+                        <div class="blk" data-blk="{{b.id}}">
+                          <div class="rr {{b.cls}}" onClick="{{b.toggle}}"><span class="chev"></span><span class="nm">{{b.name}}</span><span class="meta">{{b.meta}}</span></div>
+                          <sc-if value="{{b.open}}" hint-placeholder-val="{{ false }}">
+                            <sc-for list="{{b.rows}}" as="row" hint-placeholder-count="5">
+                              <div class="{{row.cls}}"><b>{{row.a}}</b><em>{{row.b}}</em></div>
+                            </sc-for>
+                          </sc-if>
+                        </div>
+                      </sc-for>
+                      <div ref="{{spacerRef}}" style="height:0px"></div>
+                    </div>
+                  </div>
+                  <div class="sb-foot">AI features</div>
+                </div>
+              </div>
+              <div class="readout">{{readout}}</div>
+              <p class="hint">{{hint}}</p>
+            </div>
+          </div>
+        </div>
+        <p class="dv-next">Try next: &#8220;add folder groups to 5a&#8221; &#183; &#8220;add keyboard walking to 5a&#8217;s index&#8221;</p>
+      </section>
+    </x-dc>
+    <script
+      type="text/x-dc"
+      data-dc-script
+      data-props='{}'
+    >
+      const REPOS = [
+        { id: "atlas-api", wts: 12, open: true, wtOpen: true },
+        { id: "beacon-web", wts: 3 },
+        { id: "cinder", wts: 5, open: true },
+        { id: "delta-svc", wts: 2 },
+        { id: "echo-ui", wts: 9, open: true, brOpen: true },
+        { id: "foxtrot-cli", wts: 2 },
+        { id: "gamma-worker", wts: 4 },
+        { id: "harbor", wts: 1 },
+        { id: "iris-docs", wts: 2 },
+        { id: "juniper-infra", wts: 6 },
+        { id: "kestrel-mobile", wts: 3 },
+        { id: "lumen-sdk", wts: 1 },
+        { id: "meridian", wts: 2 },
+        { id: "nova-ops", wts: 1 }
+      ];
+      const FLOOR = 240;
+
+      class Component extends DCLogic {
+        constructor(props) {
+          super(props);
+          this.listRef = React.createRef();
+          this.rixRef = React.createRef();
+          this.spacerRef = React.createRef();
+          this.probeRef = React.createRef();
+          this.minW = 69;
+          this.overIndex = false;
+          this.pendingJump = null;
+          this.frame = 0;
+          this.state = this.fresh();
+        }
+        fresh() {
+          const open = {};
+          for (const r of REPOS) { if (r.open) open[r.id] = true; }
+          return { width: 320, open: open, cur: REPOS[0].id, view: [], jumped: null };
+        }
+        componentDidMount() {
+          const probe = this.probeRef.current;
+          if (probe) this.minW = Math.round(parseFloat(getComputedStyle(probe).minWidth) || 69);
+          this.onScroll = () => {
+            if (this.frame) return;
+            this.frame = requestAnimationFrame(() => { this.frame = 0; this.spy(); this.trimSpacer(); });
+          };
+          const list = this.listRef.current;
+          if (list) list.addEventListener("scroll", this.onScroll, { passive: true });
+          this.spy();
+        }
+        componentWillUnmount() {
+          const list = this.listRef.current;
+          if (list) list.removeEventListener("scroll", this.onScroll);
+          cancelAnimationFrame(this.frame);
+        }
+        componentDidUpdate() {
+          if (this.pendingJump !== null) { const id = this.pendingJump; this.pendingJump = null; this.scrollToTop(id); }
+          this.follow();
+        }
+        blocks() {
+          const list = this.listRef.current;
+          if (!list) return [];
+          const top = list.getBoundingClientRect().top;
+          return Array.from(list.querySelectorAll("[data-blk]")).map((el) => {
+            const r = el.getBoundingClientRect();
+            return { id: el.getAttribute("data-blk"), top: r.top - top, bottom: r.bottom - top };
+          });
+        }
+        /** Current = first block whose bottom is below the sticky line; in view = blocks between it and the bottom edge. */
+        spy() {
+          const list = this.listRef.current;
+          if (!list) return;
+          const h = list.clientHeight;
+          const probe = 1;
+          const bs = this.blocks();
+          const cur = (bs.find((b) => b.bottom > probe) || bs[0] || { id: null }).id;
+          const view = bs.filter((b) => b.bottom > probe && b.top < h).map((b) => b.id);
+          if (cur !== this.state.cur || view.join() !== this.state.view.join()) this.setState({ cur: cur, view: view });
+        }
+        trimSpacer() {
+          const list = this.listRef.current, sp = this.spacerRef.current;
+          if (!list || !sp || sp.offsetHeight === 0) return;
+          if (sp.getBoundingClientRect().top >= list.getBoundingClientRect().bottom) sp.style.height = "0px";
+        }
+        scrollToTop(id) {
+          const list = this.listRef.current, sp = this.spacerRef.current;
+          if (!list || !sp) return;
+          const el = list.querySelector('[data-blk="' + id + '"]');
+          if (!el) return;
+          const target = list.scrollTop + el.getBoundingClientRect().top - list.getBoundingClientRect().top;
+          const max = list.scrollHeight - list.clientHeight;
+          if (target > max) sp.style.height = (sp.offsetHeight + target - max) + "px";
+          list.scrollTop = target;
+          this.spy();
+        }
+        follow() {
+          const rix = this.rixRef.current;
+          if (!rix || this.overIndex) return;
+          const it = rix.querySelector('[data-ix="' + this.state.cur + '"]');
+          if (!it) return;
+          const r = rix.getBoundingClientRect(), i = it.getBoundingClientRect();
+          if (i.top < r.top) rix.scrollTop += i.top - r.top - 4;
+          else if (i.bottom > r.bottom) rix.scrollTop += i.bottom - r.bottom + 4;
+        }
+        jump(id) {
+          if (!this.state.open[id]) {
+            this.pendingJump = id;
+            this.setState({ open: Object.assign({}, this.state.open, { [id]: true }), jumped: id });
+          } else {
+            this.setState({ jumped: id });
+            this.scrollToTop(id);
+          }
+        }
+        toggle(id) {
+          const open = Object.assign({}, this.state.open);
+          if (open[id]) delete open[id]; else open[id] = true;
+          this.setState({ open: open });
+          requestAnimationFrame(() => this.spy());
+        }
+        rowsFor(r) {
+          const rows = [];
+          rows.push({ cls: "sec" + (r.wtOpen ? " open" : ""), a: "Worktrees", b: String(r.wts) });
+          if (r.wtOpen) { for (let i = 0; i < Math.min(6, r.wts); i++) rows.push({ cls: "wt", a: i === 0 ? "main" : "feat/task-" + (i * 7 + 3), b: (i + 1) + "d" }); }
+          rows.push({ cls: "sec", a: "Pull requests", b: String((r.wts % 4) + 1) });
+          rows.push({ cls: "sec" + (r.brOpen ? " open" : ""), a: "Branches", b: String(r.wts * 5 + 2) });
+          if (r.brOpen) { for (let i = 0; i < 6; i++) rows.push({ cls: "wt", a: ["main", "feat/theme-tokens", "fix/scroll-clamp", "chore/deps", "spike/wasm", "docs/readme"][i], b: (i * 2 + 1) + "d" }); }
+          rows.push({ cls: "sec", a: "Tags", b: String(r.wts * 2) });
+          rows.push({ cls: "sec", a: "Remotes", b: "1" });
+          return rows;
+        }
+        renderVals() {
+          const s = this.state;
+          const budget = s.width - FLOOR;
+          const show = budget >= this.minW;
+          const items = REPOS.map((r) => {
+            const cls = [];
+            if (r.id === s.cur) cls.push("cur");
+            else if (s.view.indexOf(r.id) !== -1) cls.push("view");
+            return { id: r.id, name: r.id, cls: cls.join(" "), jump: () => this.jump(r.id) };
+          });
+          const blocks = REPOS.map((r) => ({
+            id: r.id,
+            name: r.id,
+            meta: r.wts + (r.wts === 1 ? " wt" : " wts"),
+            open: Boolean(s.open[r.id]),
+            cls: (s.open[r.id] ? "open" : "") + (r.id === s.jumped ? " target" : ""),
+            rows: s.open[r.id] ? this.rowsFor(r) : [],
+            toggle: () => this.toggle(r.id)
+          }));
+          const setW = (w) => () => { this.setState({ width: w }); requestAnimationFrame(() => this.spy()); };
+          const fit = !show ? "hidden (needs " + (FLOOR + this.minW) + "px)" : "max " + budget + "px";
+          return {
+            items: items,
+            blocks: blocks,
+            listRef: this.listRef,
+            rixRef: this.rixRef,
+            spacerRef: this.spacerRef,
+            probeRef: this.probeRef,
+            sbStyle: "width:" + s.width + "px",
+            rixStyle: "max-width:" + Math.max(0, budget) + "px",
+            rixCls: show ? "" : "off",
+            rixEnter: () => { this.overIndex = true; },
+            rixLeave: () => { this.overIndex = false; this.follow(); },
+            w430: s.width === 430 ? "on" : "", w320: s.width === 320 ? "on" : "", w300: s.width === 300 ? "on" : "", w240: s.width === 240 ? "on" : "",
+            set430: setW(430), set320: setW(320), set300: setW(300), set240: setW(240),
+            reset: () => {
+              const sp = this.spacerRef.current; if (sp) sp.style.height = "0px";
+              const list = this.listRef.current; if (list) list.scrollTop = 0;
+              this.setState(this.fresh());
+              requestAnimationFrame(() => this.spy());
+            },
+            readout: "current " + (s.cur || "none") + "  ·  in view " + s.view.length + "  ·  index " + fit + "  ·  min " + this.minW + "px",
+            hint: show
+              ? "Click kestrel-mobile in the index: it opens and its header goes to the top, with a blank tail so it can. Scroll back up past the end and the tail goes. Click atlas-api's header in the tree to close it: the index does not move."
+              : "Below 240 + min the index steps out entirely; the tree keeps the full width it is designed for. Jump to repo (⌘F) is the path at this width."
+          };
+        }
+      }
+    </script>
+  </body>
+</html>

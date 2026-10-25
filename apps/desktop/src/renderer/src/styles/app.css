@@ -997,11 +997,138 @@ textarea,
   }
 }
 
+/* The list area: the repository index (when it fits) beside the tree's
+   column. Both are flex children so the footer below keeps its place. */
+.sidebar__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* The tree's own size container. Unpadded and unbordered, so with the index
+   hidden its content box is exactly .pane--sidebar's and every narrow-width
+   rule inside the tree fires at the same sidebar width it always did; with
+   the index shown they follow the tree's real width instead. */
+.sidebar__tree-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
 .sidebar__list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 16px;
+}
+/* Room a jump adds at the end so a repository near the bottom can reach the
+   top (Sidebar's scrollRepoToTop). Zero tall until a jump needs it. */
+.sidebar__jump-room {
+  height: 0;
+}
+
+/* ---- Repository index (RepoIndex.tsx) ----
+   Sized to its longest name, capped at the sidebar's width past the tree's
+   floor (--repo-index-max, written by Sidebar), and never narrower than its
+   shortest useful truncation. Design: Sidebar Repo Index - UX Review, 3a/4a.
+   The font is set on the column itself so `ch` measures the index's text,
+   not the 16px body; the probe carries the same font and min-width and is
+   what Sidebar measures to decide whether the column fits at all. */
+.repo-index,
+.repo-index__probe {
+  font: 500 calc(var(--sidebar-title-size) - 1px) / 1.25 var(--font-sans);
+  min-width: calc(7ch + 19px);
+}
+.repo-index__probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.repo-index {
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: var(--repo-index-max, 0px);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 2px 0 16px;
+  border-right: 1px solid var(--border-subtle);
+}
+.repo-index__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.repo-index__label {
+  padding: 9px 8px 3px 11px;
+  font: 700 calc(var(--sidebar-eyebrow-size) - 1px) / 1 var(--font-sans);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.repo-index__item {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 4px 8px 4px 11px;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  scroll-margin-block: 4px;
+}
+/* The rail: grey for every repository on screen in the tree, accent for the
+   one whose header is stuck at the top. Drawn as a bar rather than a tint
+   alone so the current marker survives forced colours and reads at 3:1. */
+.repo-index__item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+}
+.repo-index__item:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.repo-index__item.is-in-view::before {
+  background: var(--border-strong);
+}
+.repo-index__item.is-current {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.repo-index__item.is-current::before {
+  background: var(--accent);
+}
+.repo-index__item.is-selected {
+  color: var(--accent);
+}
+/* Inset, like the tree's rows: the items sit flush, so an outside ring would
+   be painted over by the neighbour. */
+.repo-index__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+:root[data-density="compact"] .repo-index__item {
+  padding-block: 3px;
 }
 /* ---------------------------------------------------------------------------
    Density axis — `data-density="compact"` on <html> (Settings → Appearance).

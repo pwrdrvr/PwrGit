@@ -329,6 +329,47 @@ and while one holds its row the "reveal the selection" scroll stands down.
 A row someone can jump *from* needs a stable `data-nav-anchor`. A ghost
 keeps `data-wt-id`, so reveals and anchors find it like the real row.
 
+## The repository index is a map beside the tree, not part of it
+
+`RepoIndex.tsx` draws every repository in the lens, by name, in a column to
+the left of `.sidebar__list`, under the same folder labels. The rules are in
+`repo-index.ts`, and they are unit-tested there.
+
+- **It spends only the width past the tree's floor.** The tree is built for
+  the sidebar's 240px minimum (`SIDEBAR_MIN_WIDTH`, shared with App's
+  resize). The index is `max-content` wide, capped at the sidebar width
+  minus that floor (`--repo-index-max`, written straight onto the aside so
+  dragging the edge re-renders nothing). It hides once that cap is below the
+  probe's measured `calc(7ch + 19px)` in the index's own font. Don't replace
+  that with a breakpoint: the probe moves with the text-size axis.
+- **`.sidebar__tree-pane` is the tree's size container.** It has no padding
+  and no border, so with the index hidden it measures exactly what
+  `.pane--sidebar` does. Narrow-width rules inside the tree (the 260px ghost
+  tag) follow the tree's own width when the index takes some of it.
+- **A jump opens and scrolls. It never selects.** `jumpToRepo` releases any
+  anchor hold (`releaseSidebarAnchor`), expands the repository like a manual
+  expand (`onExpandRepo`), and puts its `.repo-block` at the top of the
+  readable area: under the sticky folder heading when grouped. Measure the
+  block, not the sticky `.repo-row`, which reports where it is stuck. A
+  repository near the end gets `.sidebar__jump-room`, a blank tail of exactly
+  the missing height. The tail is dropped once it scrolls out of view.
+- **Scroll-spy names the block whose header is stuck**, not the most visible
+  one. `spyRepos` takes the first block whose bottom is below the line. The
+  index keeps that item in view, except while the pointer or focus is in the
+  index. The spy state lives in `RepoIndex`, so a scroll re-renders the
+  column and not the sidebar.
+- **The hover hold spans index and tree** (`held.containerProps` is on
+  `.sidebar__body`), so Focused cannot re-sort under a pointer moving from
+  one to the other.
+- **Accessibility.** It is a `nav` named "Repository index", with a list per
+  folder and a button per repository, outside `role="tree"`. The spy item has
+  `aria-current="location"`. It has one roving tab stop: ↑/↓, Home/End,
+  typeahead, and Enter or Space to jump. Display options → Repo index turns
+  it off (`pwrgit.repoIndex`). That kebab is now always drawn, and its hint
+  says why an enabled index isn't showing.
+
+Design: `design/Sidebar Repo Index - UX Review.dc.html`, 3a and turn 4.
+
 ## Hide and Remove live on the repo row's menu
 
 Hide asks nothing and offers Undo on its toast; Remove opens
