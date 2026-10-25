@@ -1000,6 +1000,7 @@ textarea,
 /* The list area: the repository index (when it fits) beside the tree's
    column. Both are flex children so the footer below keeps its place. */
 .sidebar__body {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1092,9 +1093,13 @@ textarea,
   cursor: pointer;
   scroll-margin-block: 4px;
 }
-/* The rail: grey for every repository on screen in the tree, accent for the
-   one whose header is stuck at the top. Drawn as a bar rather than a tint
-   alone so the current marker survives forced colours and reads at 3:1. */
+/* Two markers that must never look alike. The SELECTION is drawn the way its
+   collapsed tree row draws it — accent name on the strong hover tint — so a
+   repository reads as selected in both columns at once. WHERE YOU ARE in the
+   scroll is only a rail: grey for every repository on screen, accent for the
+   one whose header is stuck at the top. A tint on the scroll marker read as
+   a second selection beside the real one. The rail is a bar, not a colour
+   alone, so it survives forced colours and reads at 3:1. */
 .repo-index__item::before {
   content: "";
   position: absolute;
@@ -1112,13 +1117,13 @@ textarea,
   background: var(--border-strong);
 }
 .repo-index__item.is-current {
-  background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
 .repo-index__item.is-current::before {
   background: var(--accent);
 }
 .repo-index__item.is-selected {
+  background: var(--bg-hover-strong);
   color: var(--accent);
 }
 /* Inset, like the tree's rows: the items sit flush, so an outside ring would

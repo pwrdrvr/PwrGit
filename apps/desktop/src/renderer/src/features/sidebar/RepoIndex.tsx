@@ -5,16 +5,21 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject
 } from "react";
+import { PaneResizer } from "../shell/PaneResizer";
 import {
   truncatedTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import {
+  clampRepoIndexWidth,
+  readRepoIndexWidth,
   sameSpy,
   spyRepos,
   typeaheadIndex,
+  writeRepoIndexWidth,
   type RepoBlockBox,
   type RepoSpy
 } from "./repo-index";
@@ -84,6 +89,67 @@ export function RepoIndex({
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const pointerInside = useRef(false);
   const typed = useRef<{ query: string; at: number }>({ query: "", at: 0 });
+
+  // ---- Width: natural until dragged ----
+  // The grip is the shell's own PaneResizer. Its bounds are read back from
+  // the column's computed min-width (the 7ch probe rule) and max-width (the
+  // sidebar's width past the tree's floor), so a drag can never push the
+  // tree below the width it is built for. Double-click returns to natural.
+  const [dragged, setDragged] = useState<number | null>(readRepoIndexWidth);
+  const [box, setBox] = useState({ width: 0, min: 0, max: 0 });
+  const readBox = useCallback((): { width: number; min: number; max: number } => {
+    const nav = navRef.current;
+    if (nav === null) return { width: 0, min: 0, max: 0 };
+    const style = getComputedStyle(nav);
+    const min = parseFloat(style.minWidth) || 0;
+    const max = parseFloat(style.maxWidth);
+    return {
+      width: nav.getBoundingClientRect().width,
+      min,
+      max: Number.isFinite(max) ? max : min
+    };
+  }, []);
+  const syncBox = useCallback((): void => {
+    const next = readBox();
+    setBox((prev) =>
+      prev.width === next.width && prev.min === next.min && prev.max === next.max
+        ? prev
+        : next
+    );
+  }, [readBox]);
+  useLayoutEffect(syncBox, [syncBox, dragged]);
+  useEffect(() => {
+    const nav = navRef.current;
+    if (nav === null || typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(syncBox);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [syncBox]);
+  const setWidth = (raw: number | null): void => {
+    const { min, max } = readBox();
+    const next = raw === null ? null : clampRepoIndexWidth(raw, min, max);
+    setDragged(next);
+    writeRepoIndexWidth(next);
+  };
+  const onResizeStart = (event: ReactPointerEvent): void => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const { width: startWidth, min, max } = readBox();
+    let last = startWidth;
+    const onMove = (move: PointerEvent): void => {
+      last = clampRepoIndexWidth(startWidth + move.clientX - startX, min, max);
+      setDragged(last);
+    };
+    const onUp = (): void => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.body.classList.remove("is-col-resizing");
+      writeRepoIndexWidth(last);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.body.classList.add("is-col-resizing");
+  };
 
   const entries = groups.flatMap((group) => group.entries);
   const ids = entries.map((entry) => entry.id);
@@ -198,10 +264,12 @@ export function RepoIndex({
   const inView = new Set(spy.inView);
 
   return (
+    <>
     <nav
       ref={navRef}
       className="repo-index"
       aria-label="Repository index"
+      {...(dragged === null ? {} : { style: { width: dragged } })}
       onKeyDown={onKeyDown}
       onPointerEnter={() => {
         pointerInside.current = true;
@@ -254,6 +322,18 @@ export function RepoIndex({
       ))}
       {tip.tooltipNode}
     </nav>
+    <PaneResizer
+      side="left"
+      offset={box.width}
+      width={box.width}
+      min={Math.round(box.min)}
+      max={Math.round(box.max)}
+      onPointerDown={onResizeStart}
+      onNudge={(delta) => setWidth(readBox().width + delta)}
+      onReset={() => setWidth(null)}
+      ariaLabel="Resize repository index"
+    />
+    </>
   );
 }
 

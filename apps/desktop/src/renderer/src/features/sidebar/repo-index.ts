@@ -15,6 +15,8 @@ export const SIDEBAR_MAX_WIDTH = 520;
 
 /** Remembered on/off. On unless turned off. */
 export const REPO_INDEX_KEY = "pwrgit.repoIndex";
+/** The width the reader dragged the index to; absent means its natural width. */
+export const REPO_INDEX_WIDTH_KEY = "pwrgit.repoIndexWidth";
 
 export type RepoIndexFit =
   | { shown: true; maxWidth: number }
@@ -154,6 +156,36 @@ export function readRepoIndexEnabled(): boolean {
 export function writeRepoIndexEnabled(enabled: boolean): void {
   try {
     window.localStorage.setItem(REPO_INDEX_KEY, enabled ? "1" : "0");
+  } catch {
+    // ignore private-mode/quota failures
+  }
+}
+
+/**
+ * A dragged index width, kept inside what the sidebar can give it right now:
+ * no narrower than the shortest useful truncation, no wider than the width
+ * past the tree's floor. Rounded, because it is persisted and announced.
+ */
+export function clampRepoIndexWidth(raw: number, min: number, max: number): number {
+  return Math.round(Math.max(min, Math.min(max, raw)));
+}
+
+/** The remembered width, or null for "as wide as the longest name". */
+export function readRepoIndexWidth(): number | null {
+  try {
+    const raw = window.localStorage.getItem(REPO_INDEX_WIDTH_KEY);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeRepoIndexWidth(width: number | null): void {
+  try {
+    if (width === null) window.localStorage.removeItem(REPO_INDEX_WIDTH_KEY);
+    else window.localStorage.setItem(REPO_INDEX_WIDTH_KEY, String(Math.round(width)));
   } catch {
     // ignore private-mode/quota failures
   }

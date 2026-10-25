@@ -563,17 +563,22 @@ export function Sidebar({
     });
   };
   const jumpToRepo = (repoId: string): void => {
-    if (!filteredIds.includes(repoId)) return;
+    const repo = filtered.find((r) => r.id === repoId);
+    if (repo === undefined) return;
     releaseSidebarAnchor();
     // Tab from the index lands on the repository just jumped to.
     setFocusedRepoId(repoId);
+    // A name in the index selects the way its tree row does: the selection
+    // moves to the repository's primary worktree unless it is already in
+    // that repository. A jump that only scrolled left the old repository
+    // drawn selected beside the one just picked, which read as two
+    // selections at once.
+    selectPrimaryUnlessHeld(repo);
     if (expanded.has(repoId)) {
       scrollRepoToTop(repoId);
       return;
     }
-    // Opening is a manual expand without the selection a row click makes:
-    // a jump is for looking, and must not move the main pane or re-rank
-    // Focused. The scroll waits for the opened block to render.
+    // The scroll waits for the opened block to render.
     pendingJumpRef.current = repoId;
     setExpanded((prev) => new Set(prev).add(repoId));
     onExpandRepo(repoId);
@@ -1014,13 +1019,18 @@ export function Sidebar({
     // Compute this repo's worktree badges lazily on first look — state isn't
     // computed for every repo up front.
     if (willExpand) onExpandRepo(repo.id);
-    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
-    if (!hasSelection && repo.worktrees.length > 0) {
-      const primary =
-        repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
-      if (primary !== undefined) onSelectWorktree(repo, primary);
-    }
+    selectPrimaryUnlessHeld(repo);
   };
+
+  /** A repo row click, or a name in the index: select the repository's
+   *  primary worktree, unless the selection is already one of its own. */
+  function selectPrimaryUnlessHeld(repo: Repo): void {
+    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
+    if (hasSelection || repo.worktrees.length === 0) return;
+    const primary =
+      repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
+    if (primary !== undefined) onSelectWorktree(repo, primary);
+  }
 
   // Plain click selects one (and drives the main pane). ⌘/Ctrl-click toggles a
   // row in the batch set; Shift-click extends a range from the anchor. Both

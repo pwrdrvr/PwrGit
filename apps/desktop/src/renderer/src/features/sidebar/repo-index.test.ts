@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  clampRepoIndexWidth,
   jumpScrollPlan,
+  readRepoIndexWidth,
+  REPO_INDEX_WIDTH_KEY,
+  writeRepoIndexWidth,
   repoIndexFit,
   repoIndexMenuHint,
   sameSpy,
@@ -205,5 +210,26 @@ describe("typeaheadIndex", () => {
     expect(typeaheadIndex(names, 0, "D")).toBe(4);
     expect(typeaheadIndex(names, 0, "z")).toBe(-1);
     expect(typeaheadIndex([], 0, "a")).toBe(-1);
+  });
+});
+
+describe("the dragged index width", () => {
+  afterEach(() => window.localStorage.clear());
+
+  it("stays between the shortest useful truncation and the tree's floor", () => {
+    expect(clampRepoIndexWidth(40, 76, 190)).toBe(76);
+    expect(clampRepoIndexWidth(120.4, 76, 190)).toBe(120);
+    expect(clampRepoIndexWidth(400, 76, 190)).toBe(190);
+  });
+
+  it("is remembered, and forgetting it means natural width", () => {
+    expect(readRepoIndexWidth()).toBeNull();
+    writeRepoIndexWidth(96.6);
+    expect(window.localStorage.getItem(REPO_INDEX_WIDTH_KEY)).toBe("97");
+    expect(readRepoIndexWidth()).toBe(97);
+    writeRepoIndexWidth(null);
+    expect(readRepoIndexWidth()).toBeNull();
+    window.localStorage.setItem(REPO_INDEX_WIDTH_KEY, "wide");
+    expect(readRepoIndexWidth()).toBeNull();
   });
 });

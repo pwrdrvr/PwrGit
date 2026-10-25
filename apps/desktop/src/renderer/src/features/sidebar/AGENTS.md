@@ -346,13 +346,26 @@ the left of `.sidebar__list`, under the same folder labels. The rules are in
   and no border, so with the index hidden it measures exactly what
   `.pane--sidebar` does. Narrow-width rules inside the tree (the 260px ghost
   tag) follow the tree's own width when the index takes some of it.
-- **A jump opens and scrolls. It never selects.** `jumpToRepo` releases any
-  anchor hold (`releaseSidebarAnchor`), expands the repository like a manual
-  expand (`onExpandRepo`), and puts its `.repo-block` at the top of the
-  readable area: under the sticky folder heading when grouped. Measure the
-  block, not the sticky `.repo-row`, which reports where it is stuck. A
+- **A name selects the way its row does, then scrolls.** `jumpToRepo` and
+  the repo row's click share `selectPrimaryUnlessHeld`: the primary worktree,
+  unless the selection is already in that repository. The first build only
+  opened and scrolled. The old repository then stayed drawn as selected
+  beside the one just picked, and that read as two selections at once.
+  It also releases any anchor hold (`releaseSidebarAnchor`), expands like a
+  manual expand (`onExpandRepo`), and puts the `.repo-block` at the top of
+  the readable area: under the sticky folder heading when grouped. Measure
+  the block, not the sticky `.repo-row`, which reports where it is stuck. A
   repository near the end gets `.sidebar__jump-room`, a blank tail of exactly
   the missing height. The tail is dropped once it scrolls out of view.
+- **Only the selection gets a tint.** `.is-selected` is the collapsed tree
+  row's look: accent name on `--bg-hover-strong`. The scroll position
+  (`.is-current`, `.is-in-view`) is a rail and nothing else. A tint on both
+  is the two-selections bug again.
+- **The width is natural until dragged.** The grip is the shell's
+  `PaneResizer` (drag, arrow keys, double-click for natural width), saved as
+  `pwrgit.repoIndexWidth`. Its bounds are read back from the column's own
+  computed `min-width` and `max-width`, so a drag cannot cross the probe's
+  minimum or the tree's floor.
 - **Scroll-spy names the block whose header is stuck**, not the most visible
   one. `spyRepos` takes the first block whose bottom is below the line. The
   index keeps that item in view, except while the pointer or focus is in the

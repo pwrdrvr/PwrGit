@@ -85,6 +85,8 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();
+  window.localStorage.clear();
+  document.head.querySelector("style[data-test]")?.remove();
 });
 
 function render(onJump: (id: string) => void = () => undefined): HTMLElement {
@@ -188,5 +190,37 @@ describe("RepoIndex", () => {
       );
     });
     expect(document.activeElement).toBe(item(nav, "delta-svc"));
+  });
+
+  it("has a resize grip that stays inside its bounds and resets to natural", () => {
+    // The bounds are the column's computed min-width and max-width.
+    const style = document.createElement("style");
+    style.dataset["test"] = "";
+    style.textContent = ".repo-index { min-width: 70px; max-width: 200px; }";
+    document.head.append(style);
+    const nav = render();
+    nav.getBoundingClientRect = () => ({ ...rect(0, 300), width: 100, right: 100 });
+    const grip = nav.parentElement!.querySelector<HTMLElement>('[role="separator"]')!;
+    expect(grip.getAttribute("aria-label")).toBe("Resize repository index");
+    expect(nav.contains(grip)).toBe(false);
+
+    const press = (key: string): void => {
+      act(() => {
+        grip.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      });
+    };
+    press("ArrowRight");
+    expect(nav.style.width).toBe("116px");
+    expect(window.localStorage.getItem("pwrgit.repoIndexWidth")).toBe("116");
+
+    nav.getBoundingClientRect = () => ({ ...rect(0, 300), width: 80, right: 80 });
+    press("ArrowLeft");
+    expect(nav.style.width).toBe("70px");
+
+    act(() => {
+      grip.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    });
+    expect(nav.style.width).toBe("");
+    expect(window.localStorage.getItem("pwrgit.repoIndexWidth")).toBeNull();
   });
 });

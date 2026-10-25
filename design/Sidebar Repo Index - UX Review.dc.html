@@ -131,9 +131,11 @@
           .rix-i { position: relative; display: block; padding: 4px 8px 4px 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 0 6px 6px 0; }
           .rix-i::before { content: ""; position: absolute; left: 3px; top: 2px; bottom: 2px; width: 2px; border-radius: 2px; background: transparent; }
           .rix-i.view::before { background: var(--border-strong); top: 0; bottom: 0; border-radius: 0; }
-          .rix-i.cur { color: var(--text-primary); background: var(--bg-hover-strong); }
+          .rix-i.cur { color: var(--text-primary); }
           .rix-i.cur::before { background: var(--accent); top: 0; bottom: 0; border-radius: 0; }
-          .rix-i.sel { color: var(--accent); }
+          .rix-i.sel { color: var(--accent); background: var(--bg-hover-strong); }
+          .rix-i.cur.old-tint { background: var(--bg-hover-strong); }
+          .grip { position: absolute; top: 10px; bottom: 10px; width: 1px; background: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent); }
           .rix-i.hov { background: var(--bg-panel-hover); }
           .rix-i.focus { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
@@ -181,7 +183,6 @@
           .pv .rix.off { display: none; }
           .pv .rix-i { appearance: none; border: 0; background: transparent; width: 100%; text-align: left; font: inherit; cursor: pointer; }
           .pv .rix-i:hover { background: var(--bg-panel-hover); }
-          .pv .rix-i.cur { background: var(--bg-hover-strong); }
           .pv .rix-i:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
           .pv .sb-list { overflow-y: auto; }
           .pv .rr { position: sticky; top: 0; z-index: 3; cursor: pointer; }
@@ -226,7 +227,7 @@
             <div class="find">
               <div class="fitem"><span class="pin">1</span><div><h4>The scroll distance is a function of history, not of the list</h4><p>The repository order is stable (the lens and the folder groups decide it), but the pixels between you and a repository depend on what you opened earlier. So scroll memory never forms: the same flick lands somewhere different every day.</p></div></div>
               <div class="fitem"><span class="pin">2</span><div><h4>The sticky header answers &#8220;where am I&#8221;, never &#8220;where is X&#8221;</h4><p><code>.repo-row</code> is <code>position: sticky</code>, so the block you are in stays named. Every other repository is either off screen or a 26px row between two tall blocks. With 26 to 60 repositories that is most of them.</p></div></div>
-              <div class="fitem"><span class="pin q">3</span><div><h4>&#8984;F is the &#8220;I know the name&#8221; path, and it changes the selection</h4><p>Jump to repo&#8230; is deterministic, but a pick selects a worktree, which moves the main pane and records a focus visit. That is right when you are going somewhere. It is the wrong tool for &#8220;show me what's in harbor's branches&#8221; while the graph stays where it is.</p></div></div>
+              <div class="fitem"><span class="pin q">3</span><div><h4>&#8984;F is the &#8220;I know the name&#8221; path</h4><p>Jump to repo&#8230; is deterministic, but only once you have recalled and typed a name, in a palette that covers the list. Scanning for &#8220;the one under juniper&#8221; needs the names on screen, beside the tree.</p></div></div>
               <div class="fitem"><span class="pin ok">&#10003;</span><div><h4>The cure must not collapse anything</h4><p>Collapse&#8209;all, or a one&#8209;open accordion, makes the distances small by deleting the state the operator values. NN/g says the same about desktop accordions: let several stay open. The fix is a map beside the list, not a smaller list.</p></div></div>
             </div>
           </div>
@@ -341,7 +342,7 @@
                 </div>
               </div>
             </div>
-            <p class="note" style="max-width:1000px">The whole map is visible without a click, in the lens's order and under the same folder labels. <b>Accent rail + tint</b>: the repository whose header is stuck at the top (scroll&#8209;spy). <b>Grey rail</b>: the others visible in the tree right now, so the column doubles as a minimap of what you are looking at. <b>Accent name</b>: the repository holding the selection. A click puts that repository's header at the top of the tree and opens it; nothing else opens, closes or is selected. It costs the tree its width beyond the 240px floor, and steps out entirely below a measured fit (turn 4a).</p>
+            <p class="note" style="max-width:1000px">The whole map is visible without a click, in the lens's order and under the same folder labels. <b>Accent rail + tint</b>: the repository whose header is stuck at the top (scroll&#8209;spy). <b>Grey rail</b>: the others visible in the tree right now, so the column doubles as a minimap of what you are looking at. <b>Accent name</b>: the repository holding the selection. A click selects the repository the way its tree row does, puts its header at the top of the tree and opens it; no other repository opens or closes (turn 6 explains why it selects). It costs the tree its width beyond the 240px floor, and steps out entirely below a measured fit (turn 4a).</p>
           </div>
 
           <div class="dv-opt" id="3b" data-screen-label="3b Current repo dropdown">
@@ -481,10 +482,11 @@
               <div class="tr three head"><span>Event</span><span>Behaviour</span><span>Why</span></div>
               <div class="tr three"><span>Click or Enter on an index item</span><span><span class="verdict chg">Opens + scrolls</span></span><span>Header to the top of the scrollport, instantly (long distances smooth&#8209;scrolled are slow and sweep the highlight through every repo in between). The repository opens if it was closed, with the lazy badge fill a manual expand does.</span></div>
               <div class="tr three"><span>Any other repository's expand state</span><span><span class="verdict keep">Untouched</span></span><span>Finding 1b.4. The index is a map, not a mode.</span></div>
-              <div class="tr three"><span>Selection / main pane</span><span><span class="verdict keep">Untouched</span></span><span>Unlike a repo&#8209;row click, a jump selects nothing: browsing harbor's branches must not move the graph, record a focus visit or re&#8209;rank Focused.</span></div>
+              <div class="tr three"><span>Selection / main pane</span><span><span class="verdict chg">Like the row</span></span><span>The repository's primary worktree is selected, unless the selection is already in it: exactly what clicking its tree row does. Revised after use, turn 6; this row first said &#8220;untouched&#8221;.</span></div>
               <div class="tr three"><span>A row hold in progress (<code>sidebar-anchor.ts</code>)</span><span><span class="verdict chg">Released</span></span><span>A jump is the reader driving, like a wheel. The hold would pull the old row back.</span></div>
               <div class="tr three"><span>Hover hold on the Focused order</span><span><span class="verdict keep">Covers the index</span></span><span>The hold now spans index and tree, so the index never re&#8209;sorts under a pointer moving from one to the other.</span></div>
               <div class="tr three"><span>Scrolling the tree</span><span><span class="verdict chg">Spy follows</span></span><span>Current = the first repository block whose bottom is below the sticky line (the stuck header). The index scrolls to keep it in view, except while the pointer or focus is in the index.</span></div>
+              <div class="tr three"><span>Dragging the grip between the columns</span><span><span class="verdict chg">Resizes</span></span><span>The shell's own pane resizer: drag, &#8592;/&#8594;, double&#8209;click for natural width. Clamped to the 7ch minimum and the tree's floor; remembered. Added after use, turn 6.</span></div>
               <div class="tr three"><span>Tab after a jump</span><span><span class="verdict chg">Lands on it</span></span><span>The tree's roving tab stop moves to the jumped repository, so Tab goes from the index straight to its header.</span></div>
             </div>
           </div>
@@ -553,6 +555,60 @@
           </div>
         </div>
         <p class="dv-next">Try next: &#8220;add folder groups to 5a&#8221; &#183; &#8220;add keyboard walking to 5a&#8217;s index&#8221;</p>
+      </section>
+      <!-- ================================ TURN 6 ================================ -->
+      <section class="dv-turn" id="t6">
+        <div class="dv-thd"><a class="dv-tid" href="#t6">6</a><span class="dv-tname">After use: a jump that didn&#8217;t select looked like two selections, and the column wanted a grip</span></div>
+        <p class="dv-sub">The operator, on the first build: <b>&#8220;I just clicked codex-app-server-protocol&#8230; and it didn't select it in the same way as openclaw&#8230; Now it looks like I have two repos selected?&#8221;</b> and <b>&#8220;no resize grip between the lists&#8230; the user can handle some truncation in the jump list&#8230; so they might want to make it narrower.&#8221;</b> Two fixes, both shipped in the same PR.</p>
+        <div class="dv-opts">
+
+          <div class="dv-opt" id="6a" data-screen-label="6a Two selections">
+            <div class="dv-olabel"><a class="dv-oid" href="#6a">6a</a>One click, two tinted names &#8594; one selection, one rail</div>
+            <div class="cap-row th-light">
+              <div class="cap-col"><span class="wcap">First build &#183; after clicking juniper-infra</span>
+                <div class="sb short" style="width:150px;height:184px">
+                  <div class="sb-body"><div class="rix" style="width:148px;border-right:0">
+                    <div class="rix-g">OSS</div><div class="rix-i">iris-docs</div><div class="rix-i cur old-tint">juniper-infra</div><div class="rix-i view">kestrel-mobile</div><div class="rix-i view">lumen-sdk</div><div class="rix-i sel" style="background:var(--bg-hover-strong)">meridian</div><div class="rix-i">nova-ops</div>
+                  </div></div>
+                </div>
+              </div>
+              <div class="cap-col"><span class="wcap">Shipped &#183; same click</span>
+                <div class="sb short" style="width:150px;height:184px">
+                  <div class="sb-body"><div class="rix" style="width:148px;border-right:0">
+                    <div class="rix-g">OSS</div><div class="rix-i">iris-docs</div><div class="rix-i cur sel">juniper-infra</div><div class="rix-i view">kestrel-mobile</div><div class="rix-i view">lumen-sdk</div><div class="rix-i">meridian</div><div class="rix-i">nova-ops</div>
+                  </div></div>
+                </div>
+              </div>
+              <div class="cap-col"><span class="wcap">Shipped &#183; then scrolled down</span>
+                <div class="sb short" style="width:150px;height:184px">
+                  <div class="sb-body"><div class="rix" style="width:148px;border-right:0">
+                    <div class="rix-g">OSS</div><div class="rix-i">iris-docs</div><div class="rix-i sel">juniper-infra</div><div class="rix-i cur">kestrel-mobile</div><div class="rix-i view">lumen-sdk</div><div class="rix-i view">meridian</div><div class="rix-i">nova-ops</div>
+                  </div></div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:560px">Turn 4c had decided a jump should only look, not select. In use, the repository still holding the selection kept its accent name and the strong tint in both columns, while the one just clicked took the index&#8217;s own tint. That was two tinted rows, which reads as two selections. Now <b>a name selects the way its row does</b>, and <b>only the selection is ever tinted</b>, exactly as its collapsed tree row is. Where you are in the scroll is a rail and nothing else, so scrolling away leaves one tinted name and one accent rail, never two of a kind.</p>
+          </div>
+
+          <div class="dv-opt" id="6b" data-screen-label="6b Grip">
+            <div class="dv-olabel"><a class="dv-oid" href="#6b">6b</a>A grip between the columns</div>
+            <div class="cap-row th-light">
+              <div class="cap-col"><span class="wcap">320px &#183; dragged to the 76px minimum</span>
+                <div class="sb short" style="width:320px;height:184px">
+                  <div class="sb-body">
+                    <div class="rix" style="width:76px">
+                      <div class="rix-g">OSS</div><div class="rix-i">iris-docs</div><div class="rix-i cur sel">juniper-infra</div><div class="rix-i view">kestrel-mobile</div><div class="rix-i view">lumen-sdk</div><div class="rix-i">meridian</div>
+                    </div>
+                    <span class="grip" style="left:76px"></span>
+                    <div class="sb-list"><div class="grp"><span>OSS</span><em>6</em></div><div class="rr open"><span class="chev"></span><span class="nm sel" style="color:var(--accent)">juniper-infra</span><span class="meta">2 wts</span></div><div class="sec"><b>Worktrees</b><em>2</em></div><div class="sec"><b>Branches</b><em>6</em></div><div class="sec"><b>Tags</b><em>9</em></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="note" style="max-width:420px">The shell&#8217;s own <code>PaneResizer</code>, the one on the sidebar&#8217;s edge: drag, &#8592;/&#8594; in 16px steps, double&#8209;click to go back to the natural width. The width is remembered. It is clamped live to the column&#8217;s computed <code>min-width</code> (the 7ch probe) and <code>max-width</code> (the sidebar past the tree&#8217;s floor), so it can never squeeze the tree, and a narrower sidebar still caps it.</p>
+          </div>
+
+        </div>
       </section>
     </x-dc>
     <script
