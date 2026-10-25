@@ -28,13 +28,9 @@ import type {
 import { copyText } from "../../lib/copyText";
 import {
   currentPlatform,
-  hasPrimaryModifier,
-  shortcutLabel
+  hasPrimaryModifier
 } from "../../lib/platform";
-import { CloneGlyph } from "../../lib/CloneGlyph";
 import { PlusGlyph } from "../../lib/PlusGlyph";
-import { PullGlyph } from "../../lib/PullGlyph";
-import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -54,6 +50,7 @@ import { LensFilter } from "./LensFilter";
 import { NewWorktreeModal } from "./NewWorktreeModal";
 import { ProfileChip } from "./ProfileChip";
 import { RepoRow } from "./RepoRow";
+import { SidebarToolbar } from "./SidebarToolbar";
 import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import {
   applySidebarAnchor,
@@ -144,48 +141,6 @@ type NewWorktreeState = {
   changeRequest?: OpenChangeRequest;
 };
 
-/** Lucide `trash-2`, at the size the sidebar's bulk-action buttons use. */
-function PruneGlyph() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5" />
-    </svg>
-  );
-}
-
-/** Lucide `git-fork`, at the size the sidebar's ghost buttons use. */
-function ForkGlyph() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="18" r="3" />
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="18" cy="6" r="3" />
-      <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" />
-      <path d="M12 12v3" />
-    </svg>
-  );
-}
-
 export function Sidebar({
   profiles,
   activeProfile,
@@ -214,7 +169,6 @@ export function Sidebar({
   onForkCheckout,
   onOpenRepoSetup,
   onAddFolder,
-  onOpenSearch,
   onExpandRepo,
   onNewProfile,
   onManageProfile,
@@ -264,7 +218,6 @@ export function Sidebar({
   onForkCheckout: (repo: Repo) => void;
   onOpenRepoSetup?: (repo: Repo) => void;
   onAddFolder: () => void;
-  onOpenSearch: () => void;
   onExpandRepo: (repoId: string) => void;
   onNewProfile: () => void;
   onManageProfile: () => void;
@@ -1163,165 +1116,22 @@ export function Sidebar({
         )}
       </div>
 
-      <div className="sidebar__search">
-        <button className="jump-btn" onClick={onOpenSearch}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <span className="jump-btn__label">Jump to repo…</span>
-          {/* Find is advertised; the K chord stays as a silent alias. */}
-          <span
-            className="kbd"
-            {...hoverTooltip(
-              tip,
-              `${shortcutLabel({ key: "F" }, platform)} or ${shortcutLabel(
-                { key: "K" },
-                platform
-              )}`
-            )}
-          >
-            {shortcutLabel({ key: "F" }, platform)}
-          </span>
-        </button>
-        {/* Add folders is the prerequisite for everything else — Clone is
-            disabled until a root exists — so it sits beside Clone rather than
-            at the bottom of the list, where it was the quietest control on a
-            first-run sidebar whose only working action it was. */}
-        <div className="sidebar__actions">
-          <button
-            className="add-folder"
-            onClick={onAddFolder}
-            disabled={activeProfile === null}
-            /* The reason goes in the NAME as well as the card: a disabled
-               button still announces its name, and AT reads that over a card.
-               Chromium does still fire hover on a disabled control, so the
-               pointer gets the sentence the old `title` gave it.
-               The visible label is repeated VERBATIM, ellipsis and all, because
-               an aria-label replaces the button's contents rather than adding
-               to them: drop a character and the name no longer contains the
-               label the user can see, which is SC 2.5.3 and which is what
-               voice control ("click Add folders") matches on. */
-            aria-label={
-              activeProfile === null
-                ? "Add folders… — unavailable, load or create a profile first"
-                : undefined
-            }
-            {...hoverTooltip(
-              tip,
-              activeProfile === null
-                ? "Load or create a profile before adding folders"
-                : undefined
-            )}
-          >
-            <PlusGlyph /> Add folders…
-          </button>
-          {/* Clone and fork share their own row beneath Add folders. Three
-              labels do not fit one row at the 240px width floor — the sizing
-              note above was tuned for two — and both of these bring a
-              repository in, so they read as peers. */}
-          <div className="clone-repo-row">
-            <button
-              className="clone-repo"
-              onClick={onCloneRepo}
-              disabled={
-                activeProfile === null || activeProfile.roots.length === 0
-              }
-              /* The unavailable reason is the NAME as well as the card — a
-                 disabled button announces its name, and AT reads that over any
-                 card. The card carries whichever sentence applies. The visible
-                 label is repeated verbatim; see .add-folder above for why. */
-              aria-label={
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Clone… — unavailable, add a repo folder before cloning"
-                  : undefined
-              }
-              {...hoverTooltip(
-                tip,
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Add a repo folder before cloning"
-                  : "Clone a repository from GitHub or GitLab"
-              )}
-            >
-              <CloneGlyph /> Clone…
-            </button>
-            <button
-              className="fork-repo"
-              onClick={() => void openFork()}
-              disabled={
-                activeProfile === null || activeProfile.roots.length === 0
-              }
-              /* See .clone-repo above. */
-              aria-label={
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Fork… — unavailable, add a repo folder before forking"
-                  : undefined
-              }
-              {...hoverTooltip(
-                tip,
-                activeProfile !== null && activeProfile.roots.length === 0
-                  ? "Add a repo folder before forking"
-                  : "Fork a repository, then check out your copy"
-              )}
-            >
-              <ForkGlyph /> Fork…
-            </button>
-          </div>
-          <div className="bulk-sync-actions" aria-label="Synchronize repositories">
-            {/* "Fetch all repos", not "Fetch all": the Remotes heading in
-                every RepoRow carries a button of the same name that fetches
-                all remotes of ONE repo. Same words, two blast radii — so the
-                wider one states its scope.
-
-                The glyphs are the worktree toolbar's own Fetch and Pull marks,
-                so each bulk action reads as the same verb as the single one.
-                They used to be `↻` / `↓` text, kept on the reasoning that
-                --font-sans resolves U+21BB. It only ever did through the OS
-                font: the bundled Geist Sans has no U+21BB, so once Geist
-                actually loaded, the arrow drew in a different face from its
-                label. Neither button animates; each opens BulkSyncDialog,
-                which owns the progress. */}
-            <button
-              className="bulk-sync-action"
-              disabled={activeProfile === null || repos.length === 0}
-              {...hoverTooltip(tip, "Fetch and prune stale remote-tracking references in every repository; local branches are kept")}
-              onClick={() => setBulkSyncMode("fetch")}
-            >
-              <RefreshGlyph size={12} />
-              <span className="bulk-sync-action__label">Fetch all repos</span>
-            </button>
-            <button
-              className="bulk-sync-action"
-              disabled={activeProfile === null || repos.length === 0}
-              {...hoverTooltip(tip, "Fast-forward only clean, safe tracked worktrees")}
-              onClick={() => setBulkSyncMode("soft-pull")}
-            >
-              <PullGlyph size={12} />
-              <span className="bulk-sync-action__label">Try pull all</span>
-            </button>
-          </div>
-          <div className="prune-actions" aria-label="Maintain repositories">
-            <button className="bulk-sync-action" disabled={activeProfile === null}
-              {...hoverTooltip(tip, "Collect Git garbage, prune finished worktrees, and review leftover local branches")}
-              onClick={() => setMaintenance({})}>
-              <PruneGlyph /><span className="bulk-sync-action__label">Repository maintenance…</span>
-            </button>
-          </div>
-          {activeProfile !== null && activeProfile.roots.length === 0 && (
-            <span className="sidebar__actions-hint">
-              Add a repo folder to enable clone and fork.
-            </span>
-          )}
-        </div>
-      </div>
+      {/* One row of profile-wide actions. The jump field that used to lead
+          this block lives in the title strip now (TitleBar's .titlebar-jump);
+          Add folders, Clone and Fork sit behind Add ▾, and on a profile with
+          no folder yet the empty list carries Add folders itself. Design:
+          design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3. */}
+      <SidebarToolbar
+        hasProfile={activeProfile !== null}
+        rootCount={activeProfile?.roots.length ?? 0}
+        repoCount={repos.length}
+        onAddFolder={onAddFolder}
+        onClone={onCloneRepo}
+        onFork={() => void openFork()}
+        onFetchAll={() => setBulkSyncMode("fetch")}
+        onPullAll={() => setBulkSyncMode("soft-pull")}
+        onMaintenance={() => setMaintenance({})}
+      />
 
       <div className="sidebar__lens">
         <LensFilter
@@ -1445,11 +1255,49 @@ export function Sidebar({
 
         {filtered.length === 0 && (
           <div className="sidebar__empty">
-            {repoLoadState.status === "loading"
-              ? "Scanning…"
-              : repoLoadState.status === "error"
-                ? "The last repository list is still shown above, if one was available."
-                : LENS_EMPTY_COPY[lens]}
+            <p className="sidebar__empty-text">
+              {repoLoadState.status === "loading"
+                ? "Scanning…"
+                : repoLoadState.status === "error"
+                  ? "The last repository list is still shown above, if one was available."
+                  : LENS_EMPTY_COPY[lens]}
+            </p>
+            {/* Day one. Add folders is the prerequisite for everything else
+                and, with no folder yet, the only action that works — so while
+                the profile has none, the empty list carries it rather than
+                leaving it inside Add ▾. Disabled, with its reason in the name
+                and the card, while no profile has loaded. */}
+            {(activeProfile === null || activeProfile.roots.length === 0) && (
+              <div className="sidebar__start">
+                <button
+                  type="button"
+                  className="sidebar__start-add"
+                  onClick={onAddFolder}
+                  disabled={activeProfile === null}
+                  /* The visible label is repeated verbatim, ellipsis and all:
+                     an aria-label replaces the button's contents, so dropping
+                     a character would break SC 2.5.3 and voice control. */
+                  aria-label={
+                    activeProfile === null
+                      ? "Add folders… — unavailable, load or create a profile first"
+                      : undefined
+                  }
+                  {...hoverTooltip(
+                    tip,
+                    activeProfile === null
+                      ? "Load or create a profile before adding folders"
+                      : undefined
+                  )}
+                >
+                  <PlusGlyph /> Add folders…
+                </button>
+                {activeProfile !== null && (
+                  <span className="sidebar__start-hint">
+                    Clone and Fork, under Add, open once a folder exists.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -963,6 +963,7 @@ export function App() {
   return (
     <div className="app">
       <TitleBar
+        onOpenSearch={() => setOverlayOpen(true)}
         contributionsOpen={contributionsOpen}
         {...(activeProfile ? { onOpenContributions: () => setContributionsOpen(open => !open) } : {})}
         repo={contributionsOpen ? null : shownChangeRequest === null ? selectedRepo : changeRequestRepo}
@@ -1052,7 +1053,6 @@ export function App() {
           onForkCheckout={openForkCheckout}
           onOpenRepoSetup={setSetupRepo}
           onAddFolder={() => void addFolders()}
-          onOpenSearch={() => setOverlayOpen(true)}
           onNewProfile={() => setProfileModal({ mode: "create" })}
           onManageProfile={() =>
             activeProfile !== null &&

@@ -10,7 +10,8 @@ import {
   expandRepoGroup,
   expandWorktrees,
   lensChip,
-  repoGroup
+  repoGroup,
+  clickAddFolders
 } from "./fixtures/steps";
 
 // Real Electron app + real git repos in a throwaway dir, driven through the UI.
@@ -42,7 +43,7 @@ test("collapses unpinned Worktrees by default and remembers an explicit choice",
   const { window } = handle;
 
   await handle.setPickDirectory(sandbox.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   const group = await expandRepoGroup(window, "collapsed-by-default");
   const toggle = window
@@ -102,7 +103,7 @@ test("scans a folder and lists a repo with its worktrees", async () => {
   // actions must still stay out of the way until the user asks for them.
   await restRow.click();
   await expect(restRow).toHaveClass(/is-selected/);
-  await window.getByRole("button", { name: /Add folders/i }).hover();
+  await window.getByRole("button", { name: "Fetch all repos" }).hover();
   await expect(menu).toHaveCSS("opacity", "0");
 
   // Re-hover inside the retry: boot-time repo refreshes can re-render the row

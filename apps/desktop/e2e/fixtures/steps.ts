@@ -160,6 +160,32 @@ export async function expandRepoGroup(
 export const lensChip = (window: Page, lens: string): Locator =>
   window.getByRole("tab", { name: new RegExp(`^${lens}\\b`) });
 
+/**
+ * Add folders, wherever it is drawn. A profile with no folder carries the
+ * button in its empty list; once one exists it lives under the sidebar
+ * toolbar's Add menu (design/Sidebar Header Toolbar - UX Review.dc.html, 3d).
+ * Waits for the profile first: until it loads, the empty-list button is drawn
+ * disabled and may then leave if the profile turns out to have folders.
+ */
+export async function clickAddFolders(window: Page): Promise<void> {
+  await window.locator(".profile-chip").first().waitFor();
+  const start = window.locator(".sidebar__start-add");
+  if (await start.isVisible()) {
+    await start.click();
+    return;
+  }
+  await openAddMenuItem(window, "Add folders…");
+}
+
+/** Pick one entry of the sidebar toolbar's Add menu: Add folders, Clone or Fork. */
+export async function openAddMenuItem(
+  window: Page,
+  item: "Add folders…" | "Clone…" | "Fork…"
+): Promise<void> {
+  await window.getByRole("button", { name: "Add repositories" }).click();
+  await window.getByRole("menuitem", { name: item }).click();
+}
+
 export async function addRootAndExpand(
   window: Page,
   app: AppHandle,
@@ -167,7 +193,7 @@ export async function addRootAndExpand(
   repoName: string
 ): Promise<void> {
   await app.setPickDirectory(box.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
   await expandRepoGroup(window, repoName);
   await expandWorktrees(window, repoName);
