@@ -548,7 +548,7 @@ order. Its branch names, folders and PR numbers are invented. It carries no
 
 `Sidebar Repo Index - UX Review.dc.html` was written here and pushed up through
 `DesignSync` `write_files` from `localPath`, alongside the change that builds
-its option 3a. Turn **1** is the diagnosis, turn **2** the prior art, turn
+its option 3a ([#494](https://github.com/pwrdrvr/PwrGit/pull/494)). Turn **1** is the diagnosis, turn **2** the prior art, turn
 **3** five options drawn at the sidebar's real widths, turn **4** the
 recommended index in detail (the measured fit ladder, the jump, the rules,
 keyboard and accessibility), and **5a** a live `DCLogic` prototype: scroll the
