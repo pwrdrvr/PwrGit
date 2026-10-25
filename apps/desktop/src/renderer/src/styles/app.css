@@ -335,6 +335,65 @@ textarea,
   min-width: 12px;
 }
 
+/* The ⌘F palette's field, at the strip's right end in the drag region that
+   used to be empty. It moved here from the top of the sidebar because the
+   palette searches far more than the sidebar's list.
+
+   Rigid, so the crumbs absorb any shortage; TitleBar's ladder then steps the
+   field down (key cap, then label) while a crumb is cut short. Design:
+   design/Sidebar Header Toolbar - UX Review.dc.html, 3a. */
+.titlebar-jump {
+  -webkit-app-region: no-drag;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 236px;
+  height: 26px;
+  margin-right: 8px;
+  padding: 0 6px 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font: 500 12px/1 var(--font-sans);
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+.titlebar-jump:hover {
+  border-color: var(--accent-border);
+  color: var(--text-secondary);
+}
+.titlebar-jump > svg {
+  flex: 0 0 auto;
+}
+.titlebar-jump__label {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+.titlebar-jump__kbd.kbd {
+  padding: 2px 4px;
+  font-size: 9.5px;
+}
+.titlebar--jump-no-kbd .titlebar-jump {
+  width: auto;
+  padding-right: 10px;
+}
+.titlebar--jump-no-kbd .titlebar-jump__kbd {
+  display: none;
+}
+/* Still a field-shaped button — same border, same hover — and still named
+   "Jump to repo…", so the square is recognisably the same control. */
+.titlebar--jump-icon .titlebar-jump {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.titlebar--jump-icon .titlebar-jump__label {
+  display: none;
+}
+
 /* Back / Forward: PwrAgnt's .history-nav, at the leading edge of the crumbs
    it moves between. Never shrinks or steps down: a control reached for
    mid-task must not vanish at some widths, and at the 940px minimum window
@@ -747,37 +806,95 @@ textarea,
 
 /* ---- Sidebar: search, lens, repo/worktree list ---- */
 
-.sidebar__search {
-  padding: 10px 12px 8px;
-}
-.jump-btn {
-  width: 100%;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-default);
-  border-radius: 8px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: border-color 140ms ease;
-}
-.jump-btn:hover {
-  border-color: var(--accent-border);
-}
-.jump-btn__label {
-  flex: 1;
-  text-align: left;
-  font: 500 12px/1 var(--font-sans);
-}
 .kbd {
   font: 600 10px/1 var(--font-mono);
   color: var(--text-subtle);
   border: 1px solid var(--border-default);
   border-radius: 4px;
   padding: 3px 5px;
+}
+
+/* ---- Sidebar: the one row of profile-wide actions ----
+
+   Add ▾ (Add folders, Clone, Fork), Fetch all, Pull all, and the maintenance
+   wrench, in one tier of `.wt-btn`-shaped buttons. It replaced five rows in
+   four styles. design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3b.
+
+   Narrow widths step down by measured fit (SidebarToolbar's useFitLadder), so
+   everything the steps act on is rigid: a shrinkable button never overflows,
+   and the row would read as fitting while its label ellipsized. */
+.sidebar-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.sidebar-toolbar__btn {
+  flex: 0 0 auto;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  font: 600 11px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease,
+    background 120ms ease;
+}
+/* A glyph that declares no `flex` inherits `0 1 auto` and gives up width to
+   the label beside it. */
+.sidebar-toolbar__btn > svg {
+  flex: 0 0 auto;
+}
+/* Add's caret: quieter than the + it follows, and tucked against the word. */
+.sidebar-toolbar__add > svg:last-child {
+  margin-left: -2px;
+  color: var(--text-muted);
+}
+/* Fetch all and Pull all divide whatever the row has spare. Grow, never
+   shrink — see the note above. */
+.sidebar-toolbar__sync {
+  flex-grow: 1;
+}
+.sidebar-toolbar__icon {
+  width: 30px;
+  padding: 0;
+}
+.sidebar-toolbar__btn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+.sidebar-toolbar__add[aria-expanded="true"] {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.sidebar-toolbar__btn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+/* Step 1: Add's word goes; the + and the caret still say "add, more inside". */
+.sidebar-toolbar--add-icon .sidebar-toolbar__add {
+  padding: 0 7px;
+}
+.sidebar-toolbar--add-icon .sidebar-toolbar__add .sidebar-toolbar__label {
+  display: none;
+}
+/* Step 2: Fetch and Pull lose their words together — a labelled Fetch beside
+   a bare arrow reads as two tiers — and the four buttons share the row
+   equally, like the lens chips under them. The accessible names are spelled
+   on the buttons, so nothing is lost to a screen reader. */
+.sidebar-toolbar--icons .sidebar-toolbar__label {
+  display: none;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__btn {
+  flex: 1 1 0;
+  min-width: 30px;
+  padding: 0;
 }
 
 .sidebar__lens {
@@ -1034,6 +1151,45 @@ textarea,
   text-align: center;
   color: var(--text-subtle);
   font: 500 12px/1.5 var(--font-sans);
+}
+.sidebar__empty-text {
+  margin: 0;
+}
+/* Day one: the empty list carries Add folders while the profile has none. */
+.sidebar__start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sidebar__start-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  background: var(--bg-panel-elevated);
+  color: var(--text-primary);
+  font: 600 11.5px/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sidebar__start-add > svg {
+  flex: 0 0 auto;
+}
+.sidebar__start-add:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.sidebar__start-add:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+.sidebar__start-hint {
+  color: var(--text-subtle);
+  font: 500 10px/1.35 var(--font-sans);
 }
 
 .sidebar__read-status,
@@ -1554,12 +1710,10 @@ a.forge-chip:focus-visible {
 .ref-section__chip:focus-visible,
 .ref-remote__main:focus-visible,
 .new-wt:focus-visible,
-.add-folder:focus-visible,
-.clone-repo:focus-visible,
-.fork-repo:focus-visible,
-.bulk-sync-action:focus-visible,
+.sidebar-toolbar__btn:focus-visible,
+.sidebar__start-add:focus-visible,
 .prune__ghost:focus-visible,
-.jump-btn:focus-visible {
+.titlebar-jump:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
@@ -2821,17 +2975,8 @@ a.forge-chip:focus-visible {
   flex: 0 0 auto;
 }
 
-/* Four ghost buttons that share a shape but not a parent, so this rule hands
-   out no margin: spacing belongs to whatever each one sits in. `.new-wt` and
-   `.add-folder` space themselves because their parents are plain blocks;
-   `.clone-repo`/`.fork-repo` declare nothing, because `.sidebar__actions`
-   separates its rows with `gap`. A margin on a flex child does not collapse
-   into that gap, it adds to it — which is how the seam under Add folders drew
-   at 16px in a block whose every other seam was 8px. */
-.new-wt,
-.clone-repo,
-.fork-repo,
-.add-folder {
+/* The dashed "add one" ghost button under a repo's worktrees. */
+.new-wt {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -2844,9 +2989,7 @@ a.forge-chip:focus-visible {
   color: var(--text-muted);
   font: 500 11px/1 var(--font-sans);
   cursor: pointer;
-}
-/* `.wt-section__body` is a plain block, so this one spaces itself. */
-.new-wt {
+  /* `.wt-section__body` is a plain block, so this one spaces itself. */
   margin-top: 4px;
 }
 /* ---- Other worktrees past the cap ----
@@ -2930,101 +3073,6 @@ a.forge-chip:focus-visible {
 .wt-view-all {
   padding: 0 8px;
 }
-.clone-repo,
-.fork-repo {
-  height: 32px;
-  /* Was an accent-bordered, accent-filled bar. Cloning is a secondary action
-     — the sidebar's primary job is picking among repos you already have — and
-     PwrAgnt's theme doc rules out large accent panels outright. Solid-bordered
-     ghost: still clearly a button, no longer competing with the selected row
-     two elements below it. */
-  border-style: solid;
-  border-color: var(--border-default);
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.clone-repo:hover:not(:disabled),
-.fork-repo:hover:not(:disabled),
-.add-folder:hover {
-  border-color: var(--accent);
-  color: var(--text-primary);
-}
-.clone-repo:disabled,
-.fork-repo:disabled,
-.add-folder:disabled {
-  opacity: 0.42;
-  cursor: default;
-}
-.add-folder {
-  height: 32px;
-  /* Load-bearing, unlike the margins its siblings in `.sidebar__actions` do
-     NOT carry: this is the first row, and `.sidebar__search` above it is a
-     plain block with no `gap` to separate them. Removing it closes the seam
-     under the jump field rather than evening it out. */
-  margin-top: 8px;
-}
-/* The bring-a-repo-in actions, under the jump field. Add folders is the
-   prerequisite — Clone and Fork stay disabled until a root exists — so it
-   leads on its own row and is the solid-bordered one. It used to be a dashed
-   whisper at the very bottom of the list, which on a first-run sidebar made
-   the only working control the quietest thing on screen.
-
-   This wraps: Clone and Fork take the second row (`.clone-repo-row`), because
-   three labels do not fit one row at the 240px resize floor. */
-.sidebar__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 8px;
-}
-.sidebar__actions .add-folder,
-.sidebar__actions .clone-repo,
-.sidebar__actions .fork-repo {
-  /* Both labels are single-line. `flex-basis: auto` (not 0) is what keeps that
-     true: an even 0-basis split hands each button half the row, and at the
-     240px resize floor half is ~104px against the ~117px "Add folders…"
-     needs, so it wrapped to two lines inside a fixed 32px box. Sizing from
-     content and sharing only the surplus fits both at every supported width.
-     That 117px was measured while the label led with a 13px text `+`; the
-     mark is <PlusGlyph /> now, so re-measure rather than trusting it. */
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-}
-.sidebar__actions .add-folder {
-  border-style: solid;
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.sidebar__actions .clone-repo,
-.sidebar__actions .fork-repo {
-  flex-grow: 0;
-  border-style: dashed;
-  background: transparent;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-/* Once there is somewhere to clone INTO, the two are peers. */
-.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo,
-.sidebar__actions:has(.clone-repo:not(:disabled)) .fork-repo {
-  flex-grow: 1;
-}
-.sidebar__actions:has(.clone-repo:not(:disabled)) .clone-repo,
-.sidebar__actions:has(.clone-repo:not(:disabled)) .fork-repo {
-  border-style: solid;
-  background: var(--bg-panel-elevated);
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.sidebar__actions-hint {
-  flex: 1 1 100%;
-  padding: 0 2px;
-  color: var(--text-subtle);
-  font: 500 9.5px/1.3 var(--font-sans);
-}
-
 /* ---- Repo switcher overlay (⌘K) ---- */
 
 .overlay-backdrop {
@@ -3636,83 +3684,10 @@ a.forge-chip:focus-visible {
 
 /* ---- Fork dialog ---- */
 
-/* Clone and Fork take a full row of their own. Three labels cannot share one
-   row at the 240px resize floor (see .sidebar__actions' sizing note, tuned
-   when there were two), and wrapping mid-label inside a fixed-height ghost
-   button is the failure it warns about. */
-.clone-repo-row {
-  flex: 1 1 100%;
-  display: flex;
-  gap: 6px;
-}
-.clone-repo-row .clone-repo,
-.clone-repo-row .fork-repo {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.bulk-sync-actions {
-  flex: 1 1 100%;
-  display: flex;
-  gap: 6px;
-}
-/* One row, one button — see the note at its call site in Sidebar.tsx. It keeps
-   the same ghost treatment as the bulk-sync pair above it because it has the
-   same blast radius (every repository in the profile), and inherits their
-   focus ring from the shared `.bulk-sync-action` class. */
-.prune-actions {
-  flex: 1 1 100%;
-  display: flex;
-}
-/* Flex, so the glyph is centred against the label rather than sitting on its
-   baseline: an inline SVG's bottom edge lands ON the baseline, which hung all
-   three marks 2px above the text's optical centre. The label keeps the
-   truncation the button used to own — `text-overflow` needs a block container,
-   so it moves to `__label` rather than staying here doing nothing. */
-.bulk-sync-action {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 30px;
-  padding: 0 7px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border-subtle);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-muted);
-  font: 600 10.5px/1 var(--font-sans);
-  cursor: pointer;
-}
-.bulk-sync-action__label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* Same `flex: 0 0 auto` as `.overlay-result > svg`, and for the same reason:
-   a glyph that declares no `flex` inherits `0 1 auto` and gives up space to
-   the label beside it. Measured at the 240px resize floor, where the row's
-   buttons are 107px wide: "Prune worktrees…" drew its 12px mark at 9.86px.
-   Shrink belongs to `__label`, which says so and is built to ellipsize.
-   These five share the guard but not a rule, so it is spelled once here. */
-.bulk-sync-action > svg,
-.new-wt > svg,
-.clone-repo > svg,
-.fork-repo > svg,
-.add-folder > svg {
+/* A glyph in a flex button declares no `flex`, so it would inherit `0 1 auto`
+   and give up width to the label beside it. Shrink belongs to the label. */
+.new-wt > svg {
   flex: 0 0 auto;
-}
-.bulk-sync-action:hover:not(:disabled) {
-  border-color: var(--accent-border);
-  background: var(--bg-panel-elevated);
-  color: var(--text-primary);
-}
-.bulk-sync-action:disabled {
-  opacity: 0.42;
-  cursor: default;
 }
 
 .fork-name-wrap {
@@ -7623,7 +7598,7 @@ button.agent-menu__item:hover {
 }
 /* A button is `display: block` with centred contents, so a glyph and a label
    inside one baseline-align against a raw text space. Every other glyph+label
-   control here is flex with a real gap (`.graph-locate` 6px, `.jump-btn` 8px);
+   control here is flex with a real gap (`.graph-locate` 6px, `.titlebar-jump` 7px);
    this modifier is that, so an icon action does not arrive with its own
    spacing. */
 .refs-row-action--icon {

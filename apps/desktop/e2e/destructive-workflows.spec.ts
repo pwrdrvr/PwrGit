@@ -9,7 +9,7 @@ import {
   type RemoteTestRepo,
   type TestRepo
 } from "./fixtures/git-sandbox";
-import { addRootAndExpand, lensChip, repoGroup } from "./fixtures/steps";
+import { addRootAndExpand, lensChip, repoGroup, clickAddFolders } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -311,7 +311,7 @@ async function addRootUnexpanded(
   box: GitSandbox
 ): Promise<void> {
   await app.setPickDirectory(box.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
+  await clickAddFolders(window);
   await lensChip(window, "All").click();
 }
 

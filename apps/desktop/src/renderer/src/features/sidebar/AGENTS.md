@@ -132,6 +132,26 @@ Two consequences here:
   ordering live in `searchAll` — see "Main cannot tell which profile is asking"
   in `src/main/AGENTS.md`.
 
+## The sidebar's actions are one toolbar row; search is in the title strip
+
+`SidebarToolbar` is Add ▾ (Add folders, Clone, Fork through `ContextMenu`),
+Fetch all, Pull all, and the maintenance wrench. The jump field moved to the
+title strip (`TitleBar`'s `.titlebar-jump`, `onOpenSearch`). Rules:
+
+- **Names outlive labels.** The visible labels are short ("Fetch all") and
+  step out at narrow widths, so every button spells its accessible name —
+  "Fetch all repos", "Try pull all", "Repository maintenance…", "Add
+  repositories" — and each contains its visible label (SC 2.5.3). E2E finds
+  them by those names; don't rename one without the specs.
+- **A disabled menu entry explains itself** with `hint`, from
+  `addMenuReasons`, rather than leaving the menu.
+- **Day one lives in the empty list.** While the profile has no folder,
+  `.sidebar__start` draws Add folders in `.sidebar__empty`, outside the
+  `role="tree"` wrapper. E2E reaches Add folders through `clickAddFolders`
+  (`e2e/fixtures/steps.ts`), which handles both places.
+
+Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3.
+
 ## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.

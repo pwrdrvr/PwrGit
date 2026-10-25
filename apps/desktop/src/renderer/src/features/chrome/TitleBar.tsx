@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ChangeRequestEntry, Repo, Worktree } from "@pwrgit/shared";
 import { PrChip } from "../sidebar/PrChip";
-import { currentPlatform, pathLeaf, pathTail } from "../../lib/platform";
+import {
+  currentPlatform,
+  pathLeaf,
+  pathTail,
+  shortcutLabel
+} from "../../lib/platform";
+import { SearchGlyph } from "../../lib/SearchGlyph";
+import { useStepLadder } from "../../lib/useFitLadder";
 import { CopyTarget } from "../shell/CopyTarget";
 import { BranchSwitcher } from "../graph/BranchSwitcher";
 import { AppMenuBar } from "./AppMenuBar";
@@ -16,9 +23,9 @@ import {
 
 /**
  * The window's top strip: wordmark, then the selected worktree's identity as a
- * breadcrumb.
+ * breadcrumb, then the jump field.
  *
- *   [●●●]  ⑂ PwrGit  ‹ ›  repo › ●branch ▾  [path chip]        …drag…
+ *   [●●●]  ⑂ PwrGit  ‹ ›  repo › ●branch ▾  [path chip]   …drag…   [⌕ Jump to repo… ⌘F]
  *
  * Pwr-family house chrome, specified in ./AGENTS.md. PwrSnap runs the same
  * full-width bar. (PwrAgnt's `AppTitleBar` is win32-only; on macOS it keeps
@@ -34,6 +41,25 @@ import {
  * Renders the wordmark alone when nothing is selected, so the strip never
  * collapses or shifts height between the empty and selected states.
  */
+/** Steps the jump field takes while the crumbs are cut short, in order. */
+export const JUMP_FIT_STEPS = [
+  "titlebar--jump-no-kbd",
+  "titlebar--jump-icon"
+] as const;
+
+/** True while no crumb is ellipsized. Each of these clips its own overflow,
+ *  so a cut one reads wider than it is drawn. */
+function crumbsWhole(strip: HTMLElement | null): boolean {
+  if (strip === null) return true;
+  const cut = strip.querySelectorAll<HTMLElement>(
+    ".titlebar__repo, .titlebar__pathchip, .titlebar__cr-title"
+  );
+  for (const el of cut) {
+    if (el.scrollWidth > el.clientWidth + 0.5) return false;
+  }
+  return true;
+}
+
 export function TitleBar({
   repo,
   worktree,
@@ -42,6 +68,7 @@ export function TitleBar({
   onRevealBranchWorktree,
   onOpenContributions,
   contributionsOpen = false,
+  onOpenSearch,
   platform = currentPlatform()
 }: {
   repo: Repo | null;
@@ -58,15 +85,26 @@ export function TitleBar({
   onRevealBranchWorktree: (branch: string) => void;
   onOpenContributions?: () => void;
   contributionsOpen?: boolean;
+  /** Open the ⌘F palette. It searches repositories, branches, pull requests,
+   *  commits and files — not a filter on the sidebar's list — so its field
+   *  lives in window chrome (design/Sidebar Header Toolbar - UX Review.dc.html,
+   *  2b and 3a). Omitted, the strip draws no field. */
+  onOpenSearch?: () => void;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
   const tip = useViewportTooltip();
   const [switching, setSwitching] = useState(false);
+  const stripRef = useRef<HTMLDivElement>(null);
+  // The crumbs say where you are; the field is decoration once you know ⌘F.
+  // So the field gives way first — key cap, then label — while any crumb is
+  // cut short, and only then do the crumbs shrink (3a). Measured, never a
+  // window-width breakpoint.
+  useStepLadder(stripRef, () => crumbsWhole(stripRef.current), JUMP_FIT_STEPS);
 
   return (
     <>
-      <div className="titlebar">
+      <div className="titlebar" ref={stripRef}>
         {/* macOS-only traffic-light reservation; CSS gives it width there
             and nowhere else. */}
         <div className="titlebar__gutter" />
@@ -152,6 +190,30 @@ export function TitleBar({
         )}
 
         <div className="titlebar__spacer" />
+        {onOpenSearch !== undefined && (
+          <button
+            type="button"
+            className="titlebar-jump"
+            /* The label and key cap step out at narrow widths, so the name is
+               spelled here rather than read from what happens to be drawn. */
+            aria-label="Jump to repo…"
+            {...hoverTooltip(
+              tip,
+              `Jump to a repository, branch, commit or file (${shortcutLabel(
+                { key: "F" },
+                platform
+              )} or ${shortcutLabel({ key: "K" }, platform)})`
+            )}
+            onClick={onOpenSearch}
+          >
+            <SearchGlyph size={13} />
+            <span className="titlebar-jump__label">Jump to repo…</span>
+            {/* Find is advertised; the K chord stays as a silent alias. */}
+            <span className="kbd titlebar-jump__kbd" aria-hidden="true">
+              {shortcutLabel({ key: "F" }, platform)}
+            </span>
+          </button>
+        )}
         {onOpenContributions && (
           <button
             type="button"

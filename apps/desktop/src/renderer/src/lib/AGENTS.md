@@ -97,8 +97,10 @@ The shape is **`<visible label, character for character> — unavailable,
 
 It also goes in `aria-label`, and that half is not optional: a disabled button
 still announces its name, and AT reads the name over any card. So
-`.clone-repo` with no repo folder is named "Clone — unavailable, add a repo
-folder before cloning" *and* carries the plain sentence on its card.
+the sidebar's day-one Add folders button, before a profile has loaded, is
+named "Add folders… — unavailable, load or create a profile first" *and*
+carries the plain sentence on its card. (A disabled `ContextMenu` entry has no
+card; it shows the reason as its `hint` line instead.)
 
 ### What is not a tooltip
 

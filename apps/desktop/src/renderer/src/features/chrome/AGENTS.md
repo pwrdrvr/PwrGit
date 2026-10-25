@@ -60,3 +60,12 @@ PwrAgnt and keyed by worktree. Rules that are easy to break:
   and stand down while an `aria-modal` dialog is open.
 
 Design: `design/Back Forward Navigation - UX Review.dc.html`.
+
+## The jump field
+
+`.titlebar-jump` opens the ⌘F palette from the strip's right end, before
+Contributions. It is rigid, and `useStepLadder` drops its key cap and then its
+label while any crumb (`.titlebar__repo`, `.titlebar__pathchip`,
+`.titlebar__cr-title`) is cut short: the crumbs say where you are, the field is
+decoration once you know the chord. Its name is spelled on the button, since
+what is drawn changes. Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 3a.

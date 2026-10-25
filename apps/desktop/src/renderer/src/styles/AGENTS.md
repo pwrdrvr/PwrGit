@@ -15,15 +15,15 @@ fixed-height rows could not express. So don't add a font-size to a
 Sidebar rows are `min-height` + padding, never `height`. A fixed height cannot
 grow with the type axis — the text clips instead. Same rule for any new row.
 
-## Spacing inside `.sidebar__actions` belongs to the container
+## The sidebar toolbar steps down by fit, so its buttons are rigid
 
-That block and the rows nested in it (`.clone-repo-row`, `.bulk-sync-actions`)
-separate their children with `gap`, so the children declare no `margin-top`: a
-margin on a flex child does not collapse into a gap, it adds to it, and the
-seam draws double. The shared ghost-button rule (`.new-wt`, `.clone-repo`,
-`.fork-repo`, `.add-folder`) hands out no margin for the same reason — those
-four sit in four different parents. `.new-wt` and `.add-folder` set their own,
-because theirs are plain blocks with no gap to inherit.
+`.sidebar-toolbar` (Add ▾, Fetch all, Pull all, the maintenance wrench) is one
+row, and `SidebarToolbar`'s `useFitLadder` drops Add's word and then Fetch and
+Pull's words while the last button would overflow. That test only works if
+nothing shrinks: Fetch and Pull grow into spare room (`flex-grow: 1`) but keep
+`flex-shrink: 0`, or the row reads as fitting while a label ellipsizes. The
+title strip's `.titlebar-jump` is rigid for the same reason, and steps while a
+crumb is cut short. Design: `design/Sidebar Header Toolbar - UX Review.dc.html`.
 
 ## PwrGit deliberately has no centre-column cap
 
@@ -258,8 +258,8 @@ glyph becomes a flex item, inherits `0 1 auto`, and gives up width to the label
 (measured: a 12px mark drawn at 9.86px at the 240px sidebar floor). And
 `text-overflow` needs a block container, so a button that used to ellipsize its
 own text stops doing anything once its text is one of two flex items; the
-truncation moves to a `__label` span. `.bulk-sync-action` is the worked
-example.
+truncation moves to a `__label` span. `.sidebar-toolbar__btn > svg` is the
+glyph half of the rule in use.
 
 ## Theme selection uses one light attribute
 

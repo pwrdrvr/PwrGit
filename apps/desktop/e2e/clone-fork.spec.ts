@@ -8,7 +8,7 @@ import {
   type ForgeFixtureHandle
 } from "./fixtures/forge-fixture";
 import { createGitSandbox, type GitSandbox } from "./fixtures/git-sandbox";
-import { lensChip } from "./fixtures/steps";
+import { lensChip, clickAddFolders, openAddMenuItem } from "./fixtures/steps";
 
 let sandbox: GitSandbox | null = null;
 let handle: AppHandle | null = null;
@@ -24,9 +24,12 @@ test.afterEach(async () => {
 
 async function addRoot(window: Page, app: AppHandle, box: GitSandbox) {
   await app.setPickDirectory(box.reposDir);
-  await window.getByRole("button", { name: /Add folders/i }).click();
-  await expect(window.locator(".clone-repo")).toBeEnabled();
-  await expect(window.locator(".fork-repo")).toBeEnabled();
+  await clickAddFolders(window);
+  // With a folder in place, Clone and Fork come alive in the Add menu.
+  await window.getByRole("button", { name: "Add repositories" }).click();
+  await expect(window.getByRole("menuitem", { name: "Clone…" })).toBeEnabled();
+  await expect(window.getByRole("menuitem", { name: "Fork…" })).toBeEnabled();
+  await window.keyboard.press("Escape");
   await lensChip(window, "All").click();
 }
 
@@ -120,7 +123,7 @@ test("local clone selects a nested destination, indexes and reveals it, and reje
   await addRoot(window, handle, sandbox);
   await recordProgress(window, "repo:cloneProgress");
 
-  await window.locator(".clone-repo").click();
+  await openAddMenuItem(window, "Clone…");
   let dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, source);
   await chooseDestination(dialog, nestedDestination, "clone");
@@ -138,7 +141,7 @@ test("local clone selects a nested destination, indexes and reveals it, and reje
 
   // Repeating the exact destination is rejected before Git runs and leaves
   // the indexed checkout selected rather than creating a second row.
-  await window.locator(".clone-repo").click();
+  await openAddMenuItem(window, "Clone…");
   dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, source);
   await chooseDestination(dialog, nestedDestination, "clone");
@@ -159,7 +162,7 @@ test("clone uses the visibly selected default destination without a click", asyn
   const { window } = handle;
   await addRoot(window, handle, sandbox);
 
-  await window.locator(".clone-repo").click();
+  await openAddMenuItem(window, "Clone…");
   const dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, source);
 
@@ -220,7 +223,7 @@ for (const host of ["github", "gitlab"] as const) {
     await addRoot(window, handle, sandbox);
     await recordProgress(window, "repo:forkProgress");
 
-    await window.locator(".fork-repo").click();
+    await openAddMenuItem(window, "Fork…");
     const dialog = window.getByRole("dialog", { name: "Fork a repository" });
     // The catalog can switch the default GitHub host to GitLab and clear the
     // source input. Its fixture account appears only after that host's targets
@@ -333,7 +336,7 @@ test("clone can fork first and checks out the fork with the original as upstream
   const { window } = handle;
   await addRoot(window, handle, sandbox);
 
-  await window.locator(".clone-repo").click();
+  await openAddMenuItem(window, "Clone…");
   const dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, sourceSlug);
   // "Clone from" — the original, or your fork (design/Fork While Cloning).
@@ -400,7 +403,7 @@ test("canceling a forge clone removes its partial checkout and can retry", async
   const { window } = handle;
   await addRoot(window, handle, sandbox);
 
-  await window.locator(".clone-repo").click();
+  await openAddMenuItem(window, "Clone…");
   const dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, source);
   await dialog.locator(".clone-protocol", { hasText: "GitHub CLI" }).click();
@@ -439,7 +442,7 @@ test("forge authentication and provider failures remain retryable", async () => 
   const { window } = handle;
   await addRoot(window, handle, sandbox);
 
-  await window.locator(".clone-repo").click();
+  await openAddMenuItem(window, "Clone…");
   const dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, source);
   await dialog.locator(".clone-protocol", { hasText: "GitHub CLI" }).click();
@@ -479,7 +482,7 @@ test("SSH host verification offers a safe command and an explicit CLI retry", as
     process.env.GIT_SSH_COMMAND = 'echo "Host key verification failed." >&2; exit 1 #';
     process.env.GIT_SSH_VARIANT = "ssh";
   });
-  await window.locator(".clone-repo").click();
+  await openAddMenuItem(window, "Clone…");
   const dialog = window.getByRole("dialog", { name: "Clone a repository" });
   await chooseCloneSource(dialog, source);
   await chooseDestination(dialog, sandbox.reposDir, "clone");
