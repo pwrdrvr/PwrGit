@@ -483,10 +483,10 @@ export function Sidebar({
     const spacer = spacerRef.current;
     if (list === null || spacer === null) return;
     const place = (): number | null => {
-      let row: HTMLElement | null = null;
-      for (const el of list.querySelectorAll<HTMLElement>(".repo-row[data-repo-id]")) {
-        if (el.dataset["repoId"] === repoId) row = el;
-      }
+      const row =
+        [...list.querySelectorAll<HTMLElement>(".repo-row[data-repo-id]")].find(
+          (el) => el.dataset["repoId"] === repoId
+        ) ?? null;
       if (row === null) return null;
       // The block, not the sticky header: a stuck header reports where it is
       // stuck, not where its repository starts.
@@ -525,8 +525,11 @@ export function Sidebar({
     // moves to the repository's primary worktree unless it is already in
     // that repository. A jump that only scrolled left the old repository
     // drawn selected beside the one just picked, which read as two
-    // selections at once.
-    selectPrimaryUnlessHeld(repo);
+    // selections at once. The jump owns the scroll, so the selection's own
+    // reveal stands down: it would pull a primary row drawn below the fold
+    // into view and move the repository off the top.
+    const selected = selectPrimaryUnlessHeld(repo);
+    if (selected !== null) lastRevealedRef.current = selected;
     if (expanded.has(repoId)) {
       scrollRepoToTop(repoId);
       return;
@@ -739,12 +742,9 @@ export function Sidebar({
       minWidth: probe.getBoundingClientRect().width
     });
     if (fit.shown) aside.style.setProperty("--repo-index-max", `${fit.maxWidth}px`);
-    setIndexFit((prev) =>
-      prev.shown === fit.shown &&
-      (prev.shown || fit.shown || prev.reason === fit.reason)
-        ? prev
-        : fit
-    );
+    // Only shown/hidden and the reason matter here; maxWidth is the CSS var.
+    const key = (f: RepoIndexFit): string => (f.shown ? "shown" : f.reason);
+    setIndexFit((prev) => (key(prev) === key(fit) ? prev : fit));
   }, []);
   useLayoutEffect(measureIndexFit, [
     measureIndexFit,
@@ -768,19 +768,21 @@ export function Sidebar({
   const canGroup = roots.length > 1;
   const grouped = groupByFolder && canGroup;
   const groups = grouped ? groupReposByRoot(filtered, roots) : [];
-  const indexGroups: RepoIndexGroup[] = (
-    grouped
-      ? groups.map((g) => ({ key: g.root || "__other", label: g.label, repos: g.repos }))
-      : [{ key: "__all", label: null, repos: filtered }]
-  ).map(({ key, label, repos: groupRepos }) => ({
-    key,
-    label,
-    entries: groupRepos.map((repo) => ({
-      id: repo.id,
-      name: repo.name,
-      containsSelection: repo.worktrees.some((w) => w.id === selectedWorktreeId)
-    }))
-  }));
+  // Built only while the column is drawn: it scans every worktree.
+  const indexSource = grouped
+    ? groups.map((g) => ({ key: g.root || "__other", label: g.label, repos: g.repos }))
+    : [{ key: "__all", label: null, repos: filtered }];
+  const indexGroups: RepoIndexGroup[] = !indexFit.shown
+    ? []
+    : indexSource.map(({ key, label, repos: groupRepos }) => ({
+        key,
+        label,
+        entries: groupRepos.map((repo) => ({
+          id: repo.id,
+          name: repo.name,
+          containsSelection: repo.worktrees.some((w) => w.id === selectedWorktreeId)
+        }))
+      }));
 
   // Which folder group each repo renders under, so a drag can be kept inside
   // its own group. Dragging across groups would reorder the flat list while the
@@ -977,12 +979,14 @@ export function Sidebar({
 
   /** A repo row click, or a name in the index: select the repository's
    *  primary worktree, unless the selection is already one of its own. */
-  function selectPrimaryUnlessHeld(repo: Repo): void {
+  function selectPrimaryUnlessHeld(repo: Repo): string | null {
     const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
-    if (hasSelection || repo.worktrees.length === 0) return;
+    if (hasSelection) return null;
     const primary =
       repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
-    if (primary !== undefined) onSelectWorktree(repo, primary);
+    if (primary === undefined) return null;
+    onSelectWorktree(repo, primary);
+    return primary.id;
   }
 
   // Plain click selects one (and drives the main pane). ⌘/Ctrl-click toggles a

@@ -223,4 +223,39 @@ describe("RepoIndex", () => {
     expect(nav.style.width).toBe("");
     expect(window.localStorage.getItem("pwrgit.repoIndexWidth")).toBeNull();
   });
+
+  it("saves a width only when the grip is dragged, and lets go on a cancel", () => {
+    const style = document.createElement("style");
+    style.dataset["test"] = "";
+    style.textContent = ".repo-index { min-width: 70px; max-width: 200px; }";
+    document.head.append(style);
+    const nav = render();
+    nav.getBoundingClientRect = () => ({ ...rect(0, 300), width: 100, right: 100 });
+    const grip = nav.parentElement!.querySelector<HTMLElement>('[role="separator"]')!;
+    const fire = (target: EventTarget, type: string, clientX = 0): void => {
+      act(() => {
+        target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX }));
+      });
+    };
+
+    // A press alone keeps the natural width; it does not pin it.
+    fire(grip, "pointerdown", 100);
+    fire(document, "pointerup", 100);
+    expect(nav.style.width).toBe("");
+    expect(window.localStorage.getItem("pwrgit.repoIndexWidth")).toBeNull();
+
+    fire(grip, "pointerdown", 100);
+    fire(document, "pointermove", 130);
+    fire(document, "pointerup", 130);
+    expect(nav.style.width).toBe("130px");
+    expect(window.localStorage.getItem("pwrgit.repoIndexWidth")).toBe("130");
+
+    // A cancelled drag ends like a release: no stuck cursor, no live listener.
+    fire(grip, "pointerdown", 100);
+    expect(document.body.classList.contains("is-col-resizing")).toBe(true);
+    fire(document, "pointercancel", 100);
+    expect(document.body.classList.contains("is-col-resizing")).toBe(false);
+    fire(document, "pointermove", 160);
+    expect(nav.style.width).toBe("130px");
+  });
 });

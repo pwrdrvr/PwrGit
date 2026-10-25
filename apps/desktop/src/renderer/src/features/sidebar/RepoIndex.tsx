@@ -123,6 +123,9 @@ export function RepoIndex({
     if (nav === null || typeof ResizeObserver !== "function") return undefined;
     const observer = new ResizeObserver(syncBox);
     observer.observe(nav);
+    // The sidebar's width moves the cap (max-width) without always moving
+    // the column, so watch the row it sits in too.
+    if (nav.parentElement !== null) observer.observe(nav.parentElement);
     return () => observer.disconnect();
   }, [syncBox]);
   const setWidth = (raw: number | null): void => {
@@ -135,7 +138,9 @@ export function RepoIndex({
     event.preventDefault();
     const startX = event.clientX;
     const { width: startWidth, min, max } = readBox();
-    let last = startWidth;
+    // Null until the pointer moves: a press alone (or the first half of a
+    // double-click) must not save the natural width as a dragged one.
+    let last: number | null = null;
     const onMove = (move: PointerEvent): void => {
       last = clampRepoIndexWidth(startWidth + move.clientX - startX, min, max);
       setDragged(last);
@@ -143,11 +148,13 @@ export function RepoIndex({
     const onUp = (): void => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
       document.body.classList.remove("is-col-resizing");
-      writeRepoIndexWidth(last);
+      if (last !== null) writeRepoIndexWidth(last);
     };
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
     document.body.classList.add("is-col-resizing");
   };
 
