@@ -15,7 +15,7 @@ test.afterEach(async () => {
   sandbox = null;
 });
 
-test("clone action stays visible above a long scrolling repo list", async () => {
+test("the toolbar is one row and stays put above a long scrolling repo list", async () => {
   sandbox = createGitSandbox();
   const repo = sandbox.makeRepo("clone-action-fixture");
   for (let index = 0; index < 20; index += 1) {
@@ -24,30 +24,30 @@ test("clone action stays visible above a long scrolling repo list", async () => 
 
   handle = await launchApp();
   const { app, window } = handle;
-  const clone = window.locator(".clone-repo");
+  const toolbar = window.getByRole("group", { name: "Repositories", exact: true });
+  const add = toolbar.getByRole("button", { name: "Add repositories" });
 
-  // The capability is discoverable even before setup, with its prerequisite
-  // made explicit rather than hiding the action entirely.
-  await expect(clone).toBeVisible();
-  await expect(clone).toBeDisabled();
-  // By accessible name, not `title`: a disabled button still announces its
-  // name, and AT reads that over the hover card the pointer gets. The old
-  // `title` reached neither a screen reader nor the keyboard.
-  //
-  // The ellipsis is load-bearing. `aria-label` REPLACES the button's contents,
-  // so the name has to open with the visible label character for character
-  // ("Clone…") or the button has been renamed out from under everything that
-  // looks it up by name — SC 2.5.3, voice control, and every `getByRole({
-  // name })` in this suite.
-  await expect(clone).toHaveAccessibleName(
-    "Clone… — unavailable, add a repo folder before cloning"
-  );
+  // Day one: the empty list carries Add folders, and Clone stays discoverable
+  // in the Add menu with its prerequisite spelled out rather than hidden.
+  await expect(toolbar).toBeVisible();
   await expect(
-    window.getByText("Add a repo folder to enable clone and fork.")
+    window.locator(".sidebar__start").getByRole("button", { name: "Add folders…" })
+  ).toBeEnabled();
+  await expect(
+    window.getByText("Clone and Fork, under Add, open once a folder exists.")
   ).toBeVisible();
-  await expect(clone).toBeInViewport();
+  await add.click();
+  const clone = window.getByRole("menuitem", { name: /^Clone…/ });
+  await expect(clone).toBeDisabled();
+  // The reason is the menu's own hint line, so it is part of the item's
+  // name as well as on screen.
+  await expect(clone).toContainText("Add a repo folder before cloning");
+  await window.keyboard.press("Escape");
+  await expect(window.getByRole("menu")).toHaveCount(0);
 
   await addRootAndExpand(window, handle, sandbox, repo.name);
+  // The day-one card leaves once a folder exists.
+  await expect(window.locator(".sidebar__start")).toHaveCount(0);
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.setSize(1360, 620);
   });
@@ -57,44 +57,42 @@ test("clone action stays visible above a long scrolling repo list", async () => 
     )
     .toBeLessThanOrEqual(620);
 
-  await expect(clone).toBeEnabled();
-  await expect(clone).toBeInViewport();
+  // One row: Add, Fetch all, Pull all and the wrench share a top edge and a
+  // height, and the row is no taller than one button plus its padding. This is
+  // what replaced five rows in four styles (design/Sidebar Header Toolbar -
+  // UX Review.dc.html, 2b).
+  const geometry = await window.evaluate(() => {
+    const row = document.querySelector(".sidebar-toolbar");
+    if (row === null) throw new Error("missing .sidebar-toolbar");
+    const buttons = [...row.querySelectorAll("button")].map((button) =>
+      button.getBoundingClientRect()
+    );
+    return {
+      count: buttons.length,
+      tops: [...new Set(buttons.map((box) => Math.round(box.top)))],
+      heights: [...new Set(buttons.map((box) => Math.round(box.height)))],
+      rowHeight: Math.round(row.getBoundingClientRect().height)
+    };
+  });
+  expect(geometry.count).toBe(4);
+  expect(geometry.tops).toHaveLength(1);
+  expect(geometry.heights).toHaveLength(1);
+  expect(geometry.rowHeight).toBeLessThanOrEqual(
+    (geometry.heights[0] ?? 0) + 24
+  );
 
-  // One rhythm down the action block: `.sidebar__actions` spaces its rows with
-  // `gap` and no child adds a margin of its own, because a margin on a flex
-  // child does not collapse into the gap — it adds to it. That is what drew the
-  // Clone row 16px under "Add folders…" while every neighbouring seam was 8px.
-  // Asserted as equality rather than a pinned 8, so retuning the gap is free.
-  const [underJump, underAddFolders, underCloneRow, underBulkSync] =
-    await window.evaluate(() => {
-      const box = (selector: string): DOMRect => {
-        const element = document.querySelector(selector);
-        if (element === null) throw new Error(`missing ${selector}`);
-        return element.getBoundingClientRect();
-      };
-      return [
-        box(".add-folder").top - box(".jump-btn").bottom,
-        box(".clone-repo").top - box(".add-folder").bottom,
-        box(".bulk-sync-action").top - box(".clone-repo").bottom,
-        // The pruner's own row is the block's last child, so it is the seam a
-        // future margin would most easily be added to unnoticed — the three
-        // above it are measured and it was not.
-        box(".prune-actions").top - box(".bulk-sync-actions").bottom
-      ].map((seam) => Math.round(seam));
-    });
-  expect(underAddFolders).toBe(underJump);
-  expect(underCloneRow).toBe(underJump);
-  expect(underBulkSync).toBe(underJump);
-
-  const beforeScroll = await clone.boundingBox();
+  await expect(add).toBeInViewport();
+  const beforeScroll = await add.boundingBox();
   await window.locator(".sidebar__list").evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
-  await expect(clone).toBeInViewport();
-  const afterScroll = await clone.boundingBox();
+  await expect(add).toBeInViewport();
+  const afterScroll = await add.boundingBox();
   expect(afterScroll?.y).toBe(beforeScroll?.y);
 
-  await clone.click();
+  await add.click();
+  await expect(window.getByRole("menuitem", { name: "Clone…" })).toBeEnabled();
+  await window.getByRole("menuitem", { name: "Clone…" }).click();
   await expect(
     window.getByRole("dialog", { name: "Clone a repository" })
   ).toBeVisible();

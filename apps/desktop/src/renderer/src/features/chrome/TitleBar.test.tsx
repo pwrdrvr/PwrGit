@@ -159,3 +159,39 @@ describe("TitleBar history", () => {
   });
 });
 
+
+describe("TitleBar jump field", () => {
+  it("draws the palette's field after the crumbs and before Contributions", () => {
+    const markup = renderToStaticMarkup(
+      <TitleBar
+        {...chrome}
+        repo={repo}
+        worktree={worktree}
+        platform="darwin"
+        onOpenSearch={() => {}}
+        onOpenContributions={() => {}}
+      />
+    );
+    const field = markup.indexOf('class="titlebar-jump"');
+    expect(field).toBeGreaterThan(markup.indexOf("titlebar__pathchip"));
+    expect(field).toBeLessThan(markup.indexOf("contributions-nav"));
+    // Named on the button, because the label and key cap step out when the
+    // strip is narrow and the name must not go with them.
+    expect(markup).toContain('aria-label="Jump to repo…"');
+    expect(markup).toContain("⌘F");
+  });
+
+  it("spells the key cap for the platform", () => {
+    const markup = renderToStaticMarkup(
+      <TitleBar {...chrome} repo={null} worktree={null} platform="win32" onOpenSearch={() => {}} />
+    );
+    expect(markup).toContain("Ctrl+F");
+  });
+
+  it("draws no field when nothing can open the palette", () => {
+    const markup = renderToStaticMarkup(
+      <TitleBar {...chrome} repo={null} worktree={null} platform="darwin" />
+    );
+    expect(markup).not.toContain("titlebar-jump");
+  });
+});

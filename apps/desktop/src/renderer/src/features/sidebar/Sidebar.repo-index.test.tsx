@@ -117,7 +117,6 @@ function render(selected: string, onSelect: (repo: Repo, w: Worktree) => void): 
         onForkRepo={noop}
         onForkCheckout={noop}
         onAddFolder={noop}
-        onOpenSearch={noop}
         onExpandRepo={noop}
         onNewProfile={noop}
         onManageProfile={noop}
