@@ -122,7 +122,7 @@ export function RepoIndex({
       resize?.disconnect();
     };
   }, [listRef, measure, treeId]);
-  // And after every render of the index itself: the lens or the groups changed.
+  // And when the lens or the folder groups change what is listed.
   useLayoutEffect(measure, [measure, idsKey]);
 
   // Keep the current repository in view in the index — but never while the
