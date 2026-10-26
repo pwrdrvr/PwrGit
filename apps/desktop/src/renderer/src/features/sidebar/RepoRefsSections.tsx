@@ -39,6 +39,13 @@ import { ForgeChip } from "./ForgeChip";
 import { remoteUrlLines, remoteWebUrl, remoteWhere } from "./remote-info";
 import { SectionChevron } from "./SectionChevron";
 import {
+  foldChips,
+  SectionGlyph,
+  steppedTooltip,
+  useRefitSections,
+  type FoldableChip
+} from "./section-fit";
+import {
   RepoChangeRequestSection,
   type CreateWorktreeFromRef
 } from "./RepoChangeRequestSection";
@@ -73,6 +80,9 @@ const NO_REFS: RepoRefs = {
 
 /** How many branches the collapsed slice shows before "View all …". */
 const BRANCH_SLICE = 6;
+
+/** Which Branches count folds into the +N chip first (`section-fit.tsx`). */
+const FOLD_RANK = { ahead: 1, behind: 2, gone: 3 } as const;
 
 /**
  * The 82px-wide sidebar spelling of a branch's tracking state.
@@ -160,6 +170,9 @@ export function RepoRefsSections({
    *  marks beside these rows moved off (`lib/AGENTS.md`), and two tooltip
    *  styles in one 320px column is the part a user actually notices. */
   const tip = useViewportTooltip();
+  // Counts land on this component's own state, after the repository row
+  // has rendered; the block's heading ladder has to hear about it.
+  useRefitSections();
   /**
    * Show known forges even when their integration is switched off.
    *
@@ -394,6 +407,9 @@ export function RepoRefsSections({
   ): ReactElement => (
     <button
       className={`ref-section__chip is-${status}`}
+      // Fold order when the block runs out of room: gone first (finished
+      // work), then behind, and ahead last, the one that says push.
+      data-rank={FOLD_RANK[status]}
       aria-label={`Show ${description}`}
       {...hoverTooltip(tip, `${description} — show them`)}
       onClick={(event) => {
@@ -406,6 +422,40 @@ export function RepoRefsSections({
   );
   const plural = (n: number, noun: string): string =>
     `${n} ${noun}${n === 1 ? "" : "es"}`;
+  /**
+   * What the +N chip can hold: the counts on screen, in their order. Each
+   * fold step draws its own chip (`foldChips`), and the block's step decides
+   * which one shows. A click opens the refs browser on Branches, unfiltered,
+   * since one chip can hold more than one status.
+   */
+  const foldable: FoldableChip[] = [
+    ...(counts.ahead > 0
+      ? [{ rank: FOLD_RANK.ahead, text: `${counts.ahead} ahead` }]
+      : []),
+    ...(counts.behind > 0
+      ? [{ rank: FOLD_RANK.behind, text: `${counts.behind} behind` }]
+      : []),
+    ...(counts.gone > 0
+      ? [{ rank: FOLD_RANK.gone, text: `${counts.gone} gone` }]
+      : [])
+  ];
+  const moreChip = (step: 1 | 2 | 3, folded: string[]): ReactElement => (
+    <button
+      key={step}
+      className="ref-section__chip is-more"
+      data-fold={step}
+      // Contains the visible "+2" (SC 2.5.3), then what it stands for.
+      aria-label={`+${folded.length} more: ${folded.join(", ")}. Show branches`}
+      {...hoverTooltip(tip, `${folded.join(" · ")} — show branches`)}
+      onClick={(event) => {
+        event.stopPropagation();
+        tip.hide();
+        setBrowser("branches");
+      }}
+    >
+      +{folded.length}
+    </button>
+  );
 
   /**
    * "Make this branch the one I am working on", by the cheapest safe route: a
@@ -558,12 +608,18 @@ export function RepoRefsSections({
           <button
             className="ref-section__head"
             aria-expanded={openSections.has("branches")}
+            {...steppedTooltip(
+              tip,
+              `Branches · ${loading ? "…" : (branchCount ?? 0)}`
+            )}
             onClick={(event) => {
               event.stopPropagation();
+              tip.hide();
               toggleSection("branches");
             }}
           >
             <SectionChevron open={openSections.has("branches")} />
+            <SectionGlyph kind="branches" />
             <span className="ref-section__label">Branches</span>
             <span className="ref-section__count">
               {loading ? "…" : (branchCount ?? 0)}
@@ -604,6 +660,9 @@ export function RepoRefsSections({
                     `${counts.gone} gone`,
                     `${plural(counts.gone, "branch")} whose remote branch was deleted`
                   )}
+                {foldChips(foldable).map(({ step, folded }) =>
+                  moreChip(step, folded)
+                )}
               </span>
             )}
           {/* The pair, readable without expanding hundreds of rows — and the
@@ -771,20 +830,27 @@ export function RepoRefsSections({
       </div>
 
       <div className="ref-section">
-        <button
-          className="ref-section__head"
-          aria-expanded={openSections.has("tags")}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleSection("tags");
-          }}
-        >
-          <SectionChevron open={openSections.has("tags")} />
-          <span className="ref-section__label">Tags</span>
-          <span className="ref-section__count">
-            {loading ? "…" : (tagCount ?? 0)}
-          </span>
-        </button>
+        {/* A heading row like the others, so the block's fit test and the
+            row's own clip reach it too. */}
+        <div className="ref-section__head-wrap">
+          <button
+            className="ref-section__head"
+            aria-expanded={openSections.has("tags")}
+            {...steppedTooltip(tip, `Tags · ${loading ? "…" : (tagCount ?? 0)}`)}
+            onClick={(event) => {
+              event.stopPropagation();
+              tip.hide();
+              toggleSection("tags");
+            }}
+          >
+            <SectionChevron open={openSections.has("tags")} />
+            <SectionGlyph kind="tags" />
+            <span className="ref-section__label">Tags</span>
+            <span className="ref-section__count">
+              {loading ? "…" : (tagCount ?? 0)}
+            </span>
+          </button>
+        </div>
         {openSections.has("tags") && (
           <div className="ref-section__body">
             {refs?.previewTags.map((tag) => (
@@ -882,12 +948,18 @@ export function RepoRefsSections({
           <button
             className="ref-section__head"
             aria-expanded={openSections.has("remotes")}
+            {...steppedTooltip(
+              tip,
+              `Remotes · ${loading ? "…" : (remoteCount ?? 0)}`
+            )}
             onClick={(event) => {
               event.stopPropagation();
+              tip.hide();
               toggleSection("remotes");
             }}
           >
             <SectionChevron open={openSections.has("remotes")} />
+            <SectionGlyph kind="remotes" />
             <span className="ref-section__label">Remotes</span>
             <span className="ref-section__count">
               {loading ? "…" : (remoteCount ?? 0)}

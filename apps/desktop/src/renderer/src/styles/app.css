@@ -1743,13 +1743,42 @@ a.forge-chip:focus-visible {
 .repo-row__name.is-active {
   color: var(--accent);
 }
-.repo-row__wtcount {
+.repo-row__wtcount,
+.repo-row__wtglyph {
   /* Chip tier: a count is a qualifier, so it tracks the notch one step under
      the name beside it. It was the one sidebar count already at 11px, so "md"
      leaves it exactly where it was. */
   font: 500 var(--sidebar-chip-size)/1 var(--font-mono);
   color: var(--text-subtle);
   flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* The repository row's two steps (RepoRow's `useStepLadder`), taken while
+   the name would otherwise be cut: the forge and visibility marks leave,
+   then "279 wts" becomes the worktree mark and 279. The fork mark that
+   carries an upstream pull is `.badge--source`, an action, and stays; so do
+   the star and the kebab. Everything here is rigid, or the name would read
+   as whole while a mark ellipsized. Design: Sidebar Section Headings, 3d. */
+.repo-row__wtglyph {
+  display: none;
+  align-items: center;
+  gap: 3px;
+}
+.repo-row__wtglyph > svg {
+  flex: 0 0 auto;
+}
+.repo-row > .forge-chip {
+  flex: 0 0 auto;
+}
+.repo-row.rr-no-marks > .forge-chip,
+.repo-row.rr-no-marks > .repo-mark {
+  display: none;
+}
+.repo-row.rr-short-count > .repo-row__wtcount {
+  display: none;
+}
+.repo-row.rr-short-count > .repo-row__wtglyph {
+  display: inline-flex;
 }
 
 .pin {
@@ -1921,6 +1950,10 @@ a.forge-chip:focus-visible {
   margin-top: 0;
   padding: 7px 6px 6px 4px;
   border-bottom: 1px solid var(--border-subtle);
+  /* A heading row like `.ref-section__head-wrap`: past the ladder's last
+     step it clips at its own edge, keeping the focus rings. */
+  overflow: clip;
+  overflow-clip-margin: 3px;
 }
 .wt-section__elevated {
   padding-top: 3px;
@@ -1940,7 +1973,9 @@ a.forge-chip:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-width: 0;
+  /* Rigid, like everything a heading step acts on: a toggle that shrank
+     would read as fitting while its label wrapped. */
+  flex: 0 0 auto;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1951,6 +1986,7 @@ a.forge-chip:focus-visible {
   padding-top: 3px;
 }
 .wt-section__label {
+  white-space: nowrap;
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans);
   color: var(--text-subtle);
   letter-spacing: 0.08em;
@@ -1961,6 +1997,7 @@ a.forge-chip:focus-visible {
    the eyebrow line taller. */
 .sort-cycle {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 4px;
   height: 24px;
@@ -1975,6 +2012,7 @@ a.forge-chip:focus-visible {
 }
 .wt-refresh {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   width: 24px;
@@ -2004,9 +2042,10 @@ a.forge-chip:focus-visible {
   border-top: 1px solid var(--border-subtle);
 }
 /* Nothing in a section heading shrinks under its own text, wraps, or paints
-   over a neighbour. Counts that don't fit leave whole (.ref-section__chips);
-   past that the row clips at its own edge. The clip margin keeps the 2px+1px
-   focus rings. Design: Sidebar Section Headings - UX Review, 5a step 1. */
+   over a neighbour. When a heading runs out of room its repository block
+   steps down (`.repo-sections`, below); past the last step the row clips at
+   its own edge. The clip margin keeps the 2px+1px focus rings. Design:
+   Sidebar Section Headings - UX Review, 2c and 3. */
 .ref-section__head-wrap {
   display: flex;
   align-items: center;
@@ -2074,31 +2113,14 @@ a.forge-chip:focus-visible {
    inside it (a button cannot nest in a button). At rest they read as the
    counts they were; hover and focus take .ref-mini-action's accent, so each
    announces itself as a control. */
-/* One line of whole chips. A chip that doesn't fit wraps onto a second
-   line the fixed height hides, so it leaves whole instead of being cut
-   ("43 gone" read "43"); the least urgent comes last and leaves first. The
-   row gap keeps a wrapped chip's ring and border clear of the clip margin. */
+/* One line of whole chips, rigid: a chip that doesn't fit is folded into
+   +N by the block's ladder, never cut ("43 gone" once read "43"). */
 .ref-section__chips {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 8px 2px;
-  flex: 0 1 auto;
-  min-width: 0;
-  height: calc(var(--sidebar-eyebrow-size) + 10px);
-  overflow: clip;
-  overflow-clip-margin: 3px;
+  gap: 2px;
+  flex: 0 0 auto;
   margin-right: 4px;
-}
-/* An empty first item, so even the first chip can wrap away whole: a line
-   always keeps its first item, which would otherwise be cut at the edge. */
-.ref-section__chips::before {
-  content: "";
-  display: flex;
-  align-items: center;
-  /* Full height, so the line it holds is the whole visible line and a
-     wrapped chip lands below the clip. */
-  height: 100%;
 }
 .ref-section__chip {
   display: inline-flex;
@@ -2120,6 +2142,14 @@ a.forge-chip:focus-visible {
    when it read "Missing". */
 .ref-section__chip.is-gone {
   color: var(--text-subtle);
+}
+/* What the ladder folded, one chip per fold step; only the deepest step's
+   shows. Bordered so it reads as "more" rather than as one more count, and
+   the quiet tier: it can hold "gone", which is not a warning. */
+.ref-section__chip.is-more {
+  display: none;
+  color: var(--text-subtle);
+  border-color: var(--border-default);
 }
 .ref-section__chip:hover {
   color: var(--accent-bright);
@@ -2269,32 +2299,70 @@ a.forge-chip:focus-visible {
    (number, title, age, the one verb); line 2 is where it lives here (a tag,
    then the head branch, then the base when it is not the default). The verb
    sits in the same right-hand column as every other ref row's mini action. */
-/* "Pull requests" becomes "PRs" when its own row is narrow, so the failing
-   count beside it keeps its room. Keyed to the heading row, not the sidebar.
-   The full noun stays in the button's name, visually hidden, so the name
-   still contains the visible "PRs" (SC 2.5.3). */
-.ref-cr-section > .ref-section__head-wrap {
-  container: ref-head / inline-size;
-}
+/* "PRs" (or "MRs") is drawn only at the block's `fit-short` step. */
 .ref-section__label-short {
   display: none;
   /* "PRs", not the eyebrow's "PRS", which reads as a word. */
   text-transform: none;
 }
-@container ref-head (width < 264px) {
-  .ref-section__label-full {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
-  .ref-section__label-short {
-    display: inline;
-  }
+
+/* ---- The section headings' ladder (RepoRow's `.repo-sections`) ----
+
+   One repository block steps all of its headings together, by what fits
+   (`section-fit.tsx`): no width in here is a breakpoint, so the steps follow
+   the tree's width, the text-size axis and every count. Cumulative:
+
+   fit-short   "Pull requests" becomes "PRs".
+   fit-glyphs  every label becomes its glyph beside its count.
+   fit-fold-k  gone, then behind, then ahead fold into a +N chip.
+
+   A label that leaves the screen stays in its button's name, visually
+   hidden, so the name keeps the words (and contains the visible "PRs",
+   SC 2.5.3). Its hover card says it instead. Design: Sidebar Section
+   Headings - UX Review, 3a. */
+.ref-section__glyph {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--text-subtle);
+}
+/* The mark tracks the eyebrow it replaces, 12px at the default notch. */
+.ref-section__glyph > svg {
+  width: calc(var(--sidebar-eyebrow-size) + 2px);
+  height: calc(var(--sidebar-eyebrow-size) + 2px);
+}
+.repo-sections.fit-short .ref-section__label-full,
+.repo-sections.fit-glyphs .ref-section__label,
+.repo-sections.fit-glyphs .wt-section__toggle > .wt-section__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.repo-sections.fit-short .ref-section__label-short {
+  display: inline;
+}
+.repo-sections.fit-glyphs .ref-section__label-short {
+  display: none;
+}
+.repo-sections.fit-glyphs .ref-section__glyph {
+  display: inline-flex;
+}
+/* Each count chip carries its fold rank: 3 (gone) folds first, 1 (ahead)
+   last, because it is the one that says something needs pushing. */
+.repo-sections.fit-fold-1 .ref-section__chip[data-rank="3"],
+.repo-sections.fit-fold-2 .ref-section__chip[data-rank="2"],
+.repo-sections.fit-fold-3 .ref-section__chip[data-rank="1"] {
+  display: none;
+}
+.repo-sections.fit-fold-1:not(.fit-fold-2) .ref-section__chip[data-fold="1"],
+.repo-sections.fit-fold-2:not(.fit-fold-3) .ref-section__chip[data-fold="2"],
+.repo-sections.fit-fold-3 .ref-section__chip[data-fold="3"] {
+  display: inline-flex;
 }
 .ref-section__chip.is-failing {
   color: var(--danger-text);

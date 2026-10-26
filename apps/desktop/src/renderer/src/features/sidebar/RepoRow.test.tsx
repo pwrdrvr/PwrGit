@@ -307,3 +307,27 @@ describe("RepoRow's actions menu", () => {
     );
   });
 });
+
+// Sidebar Section Headings, 3a and 3d: one ladder per repository block, and
+// the row's own count in both of the forms its steps swap between.
+describe("RepoRow's section headings", () => {
+  it("wraps every heading the block draws in one .repo-sections", async () => {
+    await render(null);
+    const sections = container.querySelector(".repo-sections");
+    expect(sections?.querySelector(".wt-section__head")).not.toBeNull();
+    expect(sections?.querySelectorAll(".ref-section__head-wrap").length).toBeGreaterThanOrEqual(3);
+    // The worktree heading draws its glyph and keeps its words in its name.
+    const toggle = sections?.querySelector(".wt-section__toggle");
+    expect(toggle?.querySelector(".ref-section__glyph svg")).not.toBeNull();
+    expect(toggle?.textContent).toContain("Worktrees");
+  });
+
+  it("draws the worktree count in words and as the glyph form", async () => {
+    await render(null);
+    expect(container.querySelector(".repo-row__wtcount")?.textContent).toBe("11 wts");
+    const glyph = container.querySelector(".repo-row__wtglyph");
+    expect(glyph?.getAttribute("aria-hidden")).toBe("true");
+    expect(glyph?.textContent).toBe("11");
+    expect(glyph?.querySelector("svg")).not.toBeNull();
+  });
+});

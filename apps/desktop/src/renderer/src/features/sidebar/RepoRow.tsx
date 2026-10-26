@@ -28,6 +28,7 @@ import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
+  isCutShort,
   truncatedTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
@@ -61,6 +62,16 @@ import { useListReorder } from "./useListReorder";
 import { PinIcon, WorktreeRow } from "./WorktreeRow";
 import { PinnedBranchRow, pinnedBranchRowId } from "./PinnedBranchRow";
 import { RepoRefsSections, type RefsBrowserRequest } from "./RepoRefsSections";
+import { useStepLadder } from "../../lib/useFitLadder";
+import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
+import {
+  headingsFit,
+  REPO_ROW_FIT_STEPS,
+  RefitSectionsProvider,
+  SECTION_FIT_STEPS,
+  SectionGlyph,
+  steppedTooltip
+} from "./section-fit";
 import type { CreateWorktreeFromRef } from "./RepoChangeRequestSection";
 import { useChangeRequestSelection } from "../change-request/change-request-selection";
 
@@ -260,6 +271,28 @@ export function RepoRow({
   } | null>(null);
   const kebabRef = useRef<HTMLButtonElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const sectionsRef = useRef<HTMLDivElement>(null);
+  const blockRef = useRef<HTMLDivElement>(null);
+  // The row gives up its marks, then its count's word, before the name is
+  // cut (Sidebar Section Headings, 3d). The star and the kebab never step.
+  // Whole is measured at subpixel precision, as the name's hover card is.
+  useStepLadder(
+    rowRef,
+    () => nameRef.current === null || !isCutShort(nameRef.current),
+    REPO_ROW_FIT_STEPS
+  );
+  // One ladder for every heading in this block, measured on the width the
+  // tree gives it: a quiet repository keeps its words where a busy one steps
+  // down (3a). The sections re-render on their own state and call `refit`.
+  // It watches the block, which is always mounted: the sections come and go
+  // with the disclosure, and the observer is attached only once.
+  const refitSections = useStepLadder(
+    sectionsRef,
+    () => headingsFit(sectionsRef.current),
+    SECTION_FIT_STEPS,
+    () => blockRef.current
+  );
   /** "Manage remotes…", Finished and View all ask `RepoRefsSections` to open
    *  its browser, which needs refs only that component loads — so the ask is
    *  held here until it mounts and has them. */
@@ -744,7 +777,7 @@ export function RepoRow({
     .join(", ");
 
   return (
-    <div className="repo-block" role="presentation">
+    <div className="repo-block" role="presentation" ref={blockRef}>
       <div
         ref={rowRef}
         className={`repo-row${activeCollapsed ? " is-active" : ""}${
@@ -838,6 +871,7 @@ export function RepoRow({
             and only then does it get a card, since one echoing a name that
             fits is noise. */}
         <span
+          ref={nameRef}
           className={`repo-row__name${containsSelection ? " is-active" : ""}`}
           {...truncatedTooltip(tip, repo.name)}
         >
@@ -878,6 +912,15 @@ export function RepoRow({
         {wtCount > 0 && (
           <span className="repo-row__wtcount">
             {wtCount} {wtCount === 1 ? "wt" : "wts"}
+          </span>
+        )}
+        {/* The same count at `rr-short-count`, where the word gives way to
+            the worktree mark. The row's name and description carry it in
+            words either way, so neither form is read out. */}
+        {wtCount > 0 && (
+          <span className="repo-row__wtglyph" aria-hidden="true">
+            <WorktreeGlyph size={11} />
+            {wtCount}
           </span>
         )}
         {/* Rendered only when it says something. A repo with no linked
@@ -1055,157 +1098,167 @@ export function RepoRow({
             </div>
           )}
 
-          <div className="wt-section__head">
-            <button
-              className="wt-section__toggle"
-              aria-expanded={worktreesOpen}
-              onClick={(event) => {
-                event.stopPropagation();
-                setWorktreesOpen((open) => !open);
-              }}
-            >
-              <span className={`ref-section__chev${worktreesOpen ? " is-open" : ""}`} />
-              <span className="wt-section__label">{worktreesLabel}</span>
-              <span className="ref-section__count">{remaining.length}</span>
-            </button>
-            <span style={{ flex: 1 }} />
-            {/* Deliberately the SAME glyph as Fetch in the repo toolbar. The
-                two used to differ by an arc — one arrowhead there, two here —
-                to mark "network" against "re-read local". At 13px, 400px
-                apart, one per panel, nobody decoded that; what actually
-                separates them is this button living under the Worktrees
-                heading, where it can only read as "re-list these", and saying
-                so in its accessible name. Placement was carrying the
-                distinction on its own, so the glyphs converged. */}
-            <button
-              type="button"
-              className="wt-refresh"
-              aria-label={`Refresh worktrees for ${repo.name}`}
-              aria-busy={refreshing}
-              /* `disabled` (not `aria-disabled`) used to be set here the
-                 instant the button was activated. Chromium blurs an element
-                 the moment it becomes disabled, so activating this from the
-                 keyboard threw focus back to <body> and the user lost their
-                 place in the sidebar mid-refresh (SC 2.4.3). aria-disabled
-                 conveys the same state without removing the element from the
-                 focus order; the click handler below is what makes it inert. */
-              aria-disabled={refreshing}
-              {...hoverTooltip(tip, REFRESH_WORKTREES_TOOLTIP)}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (refreshing) return;
-                tip.hide();
-                onRefreshWorktrees();
-              }}
-            >
-              <RefreshGlyph />
-            </button>
-            {/* The visible text is the current VALUE ("Recent"), which on its
-                own named this button "Recent" — a name that says nothing about
-                what activating it does (SC 4.1.2). The label states the action
-                and still contains the visible string, so it also satisfies
-                SC 2.5.3 Label in Name for speech input. */}
-            <button
-              className="sort-cycle"
-              onClick={(e) => {
-                e.stopPropagation();
-                onCycleSort();
-              }}
-              aria-label={`${
-                SORT_LABEL[customOrder !== undefined ? "custom" : sort]
-              } — cycle worktree sort order`}
-              {...hoverTooltip(tip, "Cycle worktree sort")}
-            >
-              {SORT_LABEL[customOrder !== undefined ? "custom" : sort]}
-            </button>
-          </div>
-
-          {worktreesOpen && (
-            <div className="wt-section__body">
-              {shownOther.map((worktree) => renderWorktree(worktree))}
-              {ghostWorktree !== undefined && !ghostAbove && (
-                <>
-                  {/* aria-hidden like .wt-subhead: only treeitems belong in
-                      this group. The ghost's own tag carries the word. */}
-                  <div className="wt-ghost-sep" aria-hidden="true">
-                    visiting
-                  </div>
-                  {renderWorktree(ghostWorktree, ghostTag)}
-                </>
-              )}
-              {otherSlice.finished.length > 0 && (
+          {/* Every section heading this repository draws, under one ladder
+              (`refitSections`). A plain box, like `.wt-section__body`: the
+              treeitems inside still belong to the group above. */}
+          <div className="repo-sections" ref={sectionsRef}>
+            <RefitSectionsProvider value={refitSections}>
+              <div className="wt-section__head">
                 <button
-                  type="button"
-                  className="wt-finished"
-                  // Contains the visible "Finished N review…" (SC 2.5.3).
-                  aria-label={`Finished ${otherSlice.finished.length}, review…`}
-                  {...hoverTooltip(
-                    tip,
-                    "Clean, and done with: its PR merged or closed, its upstream gone, or already in the default branch"
-                  )}
+                  className="wt-section__toggle"
+                  aria-expanded={worktreesOpen}
+                  {...steppedTooltip(tip, `${worktreesLabel} · ${remaining.length}`)}
                   onClick={(event) => {
                     event.stopPropagation();
                     tip.hide();
-                    openWorktreeBrowser("finished");
+                    setWorktreesOpen((open) => !open);
                   }}
                 >
-                  <span>Finished</span>
-                  <span className="wt-finished__count">
-                    {otherSlice.finished.length}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <span>review…</span>
+                  <span className={`ref-section__chev${worktreesOpen ? " is-open" : ""}`} />
+                  <SectionGlyph kind="worktrees" />
+                  <span className="wt-section__label">{worktreesLabel}</span>
+                  <span className="ref-section__count">{remaining.length}</span>
                 </button>
-              )}
-              {hiddenOtherCount > 0 && (
+                <span style={{ flex: 1 }} />
+                {/* Deliberately the SAME glyph as Fetch in the repo toolbar. The
+                    two used to differ by an arc — one arrowhead there, two here —
+                    to mark "network" against "re-read local". At 13px, 400px
+                    apart, one per panel, nobody decoded that; what actually
+                    separates them is this button living under the Worktrees
+                    heading, where it can only read as "re-list these", and saying
+                    so in its accessible name. Placement was carrying the
+                    distinction on its own, so the glyphs converged. */}
                 <button
                   type="button"
-                  className="ref-view-all wt-view-all"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openWorktreeBrowser("all");
+                  className="wt-refresh"
+                  aria-label={`Refresh worktrees for ${repo.name}`}
+                  aria-busy={refreshing}
+                  /* `disabled` (not `aria-disabled`) used to be set here the
+                     instant the button was activated. Chromium blurs an element
+                     the moment it becomes disabled, so activating this from the
+                     keyboard threw focus back to <body> and the user lost their
+                     place in the sidebar mid-refresh (SC 2.4.3). aria-disabled
+                     conveys the same state without removing the element from the
+                     focus order; the click handler below is what makes it inert. */
+                  aria-disabled={refreshing}
+                  {...hoverTooltip(tip, REFRESH_WORKTREES_TOOLTIP)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (refreshing) return;
+                    tip.hide();
+                    onRefreshWorktrees();
                   }}
                 >
-                  {/* The repo's linked count, which is the All the tab
-                      lands on — pinned rows included. */}
-                  View all {wtCount} worktrees…
+                  <RefreshGlyph />
                 </button>
+                {/* The visible text is the current VALUE ("Recent"), which on its
+                    own named this button "Recent" — a name that says nothing about
+                    what activating it does (SC 4.1.2). The label states the action
+                    and still contains the visible string, so it also satisfies
+                    SC 2.5.3 Label in Name for speech input. */}
+                <button
+                  className="sort-cycle"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCycleSort();
+                  }}
+                  aria-label={`${
+                    SORT_LABEL[customOrder !== undefined ? "custom" : sort]
+                  } — cycle worktree sort order`}
+                  {...hoverTooltip(tip, "Cycle worktree sort")}
+                >
+                  {SORT_LABEL[customOrder !== undefined ? "custom" : sort]}
+                </button>
+              </div>
+
+              {worktreesOpen && (
+                <div className="wt-section__body">
+                  {shownOther.map((worktree) => renderWorktree(worktree))}
+                  {ghostWorktree !== undefined && !ghostAbove && (
+                    <>
+                      {/* aria-hidden like .wt-subhead: only treeitems belong in
+                          this group. The ghost's own tag carries the word. */}
+                      <div className="wt-ghost-sep" aria-hidden="true">
+                        visiting
+                      </div>
+                      {renderWorktree(ghostWorktree, ghostTag)}
+                    </>
+                  )}
+                  {otherSlice.finished.length > 0 && (
+                    <button
+                      type="button"
+                      className="wt-finished"
+                      // Contains the visible "Finished N review…" (SC 2.5.3).
+                      aria-label={`Finished ${otherSlice.finished.length}, review…`}
+                      {...hoverTooltip(
+                        tip,
+                        "Clean, and done with: its PR merged or closed, its upstream gone, or already in the default branch"
+                      )}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        tip.hide();
+                        openWorktreeBrowser("finished");
+                      }}
+                    >
+                      <span>Finished</span>
+                      <span className="wt-finished__count">
+                        {otherSlice.finished.length}
+                      </span>
+                      <span style={{ flex: 1 }} />
+                      <span>review…</span>
+                    </button>
+                  )}
+                  {hiddenOtherCount > 0 && (
+                    <button
+                      type="button"
+                      className="ref-view-all wt-view-all"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openWorktreeBrowser("all");
+                      }}
+                    >
+                      {/* The repo's linked count, which is the All the tab
+                          lands on — pinned rows included. */}
+                      View all {wtCount} worktrees…
+                    </button>
+                  )}
+
+                  <button
+                    className="new-wt"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNewWorktree();
+                    }}
+                  >
+                    <PlusGlyph /> New worktree
+                  </button>
+                </div>
               )}
 
-              <button
-                className="new-wt"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNewWorktree();
-                }}
-              >
-                <PlusGlyph /> New worktree
-              </button>
-            </div>
-          )}
-
-          <RepoRefsSections
-            onLocateTag={onLocateTag}
-            onFork={onForkRepo}
-            onCleanUpBranches={onCleanUpBranches}
-            browserRequest={refsBrowserRequest}
-            onBrowserRequestHandled={clearRefsBrowserRequest}
-            repo={repo}
-            now={now}
-            // Only when the working target lives in THIS repo. That is what
-            // keeps the current-branch marker unique across the window while
-            // "occupied" stays per-repo.
-            focusedWorktree={
-              repo.worktrees.find((w) => w.id === selectedWorktreeId) ?? null
-            }
-            // Revealing selects the row; one outside the six ghosts in
-            // rather than opening the disclosure (3c).
-            onRevealWorktree={onRevealWorktree}
-            onPruneWorktrees={onPruneWorktrees}
-            onRemoveWorktree={onRemoveWorktree}
-            onCreateWorktree={onCreateWorktreeFromRef}
-            onBranches={keepRefBranches}
-          />
+              <RepoRefsSections
+                onLocateTag={onLocateTag}
+                onFork={onForkRepo}
+                onCleanUpBranches={onCleanUpBranches}
+                browserRequest={refsBrowserRequest}
+                onBrowserRequestHandled={clearRefsBrowserRequest}
+                repo={repo}
+                now={now}
+                // Only when the working target lives in THIS repo. That is what
+                // keeps the current-branch marker unique across the window while
+                // "occupied" stays per-repo.
+                focusedWorktree={
+                  repo.worktrees.find((w) => w.id === selectedWorktreeId) ?? null
+                }
+                // Revealing selects the row; one outside the six ghosts in
+                // rather than opening the disclosure (3c).
+                onRevealWorktree={onRevealWorktree}
+                onPruneWorktrees={onPruneWorktrees}
+                onRemoveWorktree={onRemoveWorktree}
+                onCreateWorktree={onCreateWorktreeFromRef}
+                onBranches={keepRefBranches}
+              />
+            </RefitSectionsProvider>
+          </div>
         </div>
       )}
       {tip.tooltipNode}
