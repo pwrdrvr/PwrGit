@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DESCENDANT_ENV, ownerRunning } from "./lib/tool-processes.mjs";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -333,7 +333,12 @@ describe("shared resource lease", () => {
       a.child.kill("SIGSTOP");
       if (!journaled) {
         // Emulate a crash before a polling observation reached the ledger.
-        await writeFile(`${f.lockPath}.owner.json`, JSON.stringify({ ...owner, descendantGroups: [] }));
+        // The bridge still watches this file: a truncate/write can expose
+        // invalid JSON and make it drain the orphan before our simulated
+        // crash. Publish atomically, as the real owner's writeOwner does.
+        const replacement = `${f.lockPath}.owner-replacement.json`;
+        await writeFile(replacement, JSON.stringify({ ...owner, descendantGroups: [] }));
+        await rename(replacement, `${f.lockPath}.owner.json`);
       }
       process.kill(-owner.groupPid, "SIGKILL");
       a.child.kill("SIGKILL");
