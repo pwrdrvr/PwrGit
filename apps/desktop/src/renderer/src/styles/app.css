@@ -1114,11 +1114,143 @@ textarea,
   }
 }
 
+/* The list area: the repository index (when it fits) beside the tree's
+   column. Both are flex children so the footer below keeps its place. */
+.sidebar__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* The tree's own size container. Unpadded and unbordered, so with the index
+   hidden its content box is exactly .pane--sidebar's and every narrow-width
+   rule inside the tree fires at the same sidebar width it always did; with
+   the index shown they follow the tree's real width instead. */
+.sidebar__tree-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
 .sidebar__list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 16px;
+}
+/* Room a jump adds at the end so a repository near the bottom can reach the
+   top (Sidebar's scrollRepoToTop). Zero tall until a jump needs it. */
+.sidebar__jump-room {
+  height: 0;
+}
+
+/* ---- Repository index (RepoIndex.tsx) ----
+   Sized to its longest name, capped at the sidebar's width past the tree's
+   floor (--repo-index-max, written by Sidebar), and never narrower than its
+   shortest useful truncation. Design: Sidebar Repo Index - UX Review, 3a/4a.
+   The font is set on the column itself so `ch` measures the index's text,
+   not the 16px body; the probe carries the same font and min-width and is
+   what Sidebar measures to decide whether the column fits at all. */
+.repo-index,
+.repo-index__probe {
+  font: 500 calc(var(--sidebar-title-size) - 1px) / 1.25 var(--font-sans);
+  min-width: calc(7ch + 19px);
+}
+.repo-index__probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+.repo-index {
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: var(--repo-index-max, 0px);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 2px 0 16px;
+  border-right: 1px solid var(--border-subtle);
+}
+.repo-index__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.repo-index__label {
+  padding: 9px 8px 3px 11px;
+  font: 700 calc(var(--sidebar-eyebrow-size) - 1px) / 1 var(--font-sans);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.repo-index__item {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 4px 8px 4px 11px;
+  border: 0;
+  border-radius: 0 6px 6px 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  scroll-margin-block: 4px;
+}
+/* Two markers that must never look alike. The SELECTION is drawn the way its
+   collapsed tree row draws it — accent name on the strong hover tint — so a
+   repository reads as selected in both columns at once. WHERE YOU ARE in the
+   scroll is only a rail: grey for every repository on screen, accent for the
+   one whose header is stuck at the top. A tint on the scroll marker read as
+   a second selection beside the real one. The rail is a bar, not a colour
+   alone, so it survives forced colours and reads at 3:1. */
+.repo-index__item::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+}
+.repo-index__item:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.repo-index__item.is-in-view::before {
+  background: var(--border-strong);
+}
+.repo-index__item.is-current {
+  color: var(--text-primary);
+}
+.repo-index__item.is-current::before {
+  background: var(--accent);
+}
+.repo-index__item.is-selected {
+  background: var(--bg-hover-strong);
+  color: var(--accent);
+}
+/* Inset, like the tree's rows: the items sit flush, so an outside ring would
+   be painted over by the neighbour. */
+.repo-index__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+:root[data-density="compact"] .repo-index__item {
+  padding-block: 3px;
 }
 /* ---------------------------------------------------------------------------
    Density axis — `data-density="compact"` on <html> (Settings → Appearance).
@@ -1871,10 +2003,16 @@ a.forge-chip:focus-visible {
 .ref-section {
   border-top: 1px solid var(--border-subtle);
 }
+/* Nothing in a section heading shrinks under its own text, wraps, or paints
+   over a neighbour. Counts that don't fit leave whole (.ref-section__chips);
+   past that the row clips at its own edge. The clip margin keeps the 2px+1px
+   focus rings. Design: Sidebar Section Headings - UX Review, 5a step 1. */
 .ref-section__head-wrap {
   display: flex;
   align-items: center;
   gap: 4px;
+  overflow: clip;
+  overflow-clip-margin: 3px;
 }
 .ref-section__head {
   display: flex;
@@ -1888,6 +2026,16 @@ a.forge-chip:focus-visible {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  /* A button centres its text, which drew a wrapped label as two centred
+     lines; the labels no longer wrap, but start-align regardless. */
+  text-align: start;
+}
+/* Inside a heading row the disclosure still takes the spare width (its hit
+   area is the whole line) but never less than its own label and total: it
+   used to shrink under them and the counts drew on top. */
+.ref-section__head-wrap > .ref-section__head {
+  flex: 1 0 auto;
+  width: auto;
 }
 .ref-section__head:hover,
 .ref-remote__main:hover {
@@ -1910,12 +2058,14 @@ a.forge-chip:focus-visible {
   transform: rotate(90deg);
 }
 .ref-section__label {
+  white-space: nowrap;
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-sans);
   color: var(--text-subtle);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .ref-section__count {
+  white-space: nowrap;
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
   color: var(--text-subtle);
 }
@@ -1924,12 +2074,31 @@ a.forge-chip:focus-visible {
    inside it (a button cannot nest in a button). At rest they read as the
    counts they were; hover and focus take .ref-mini-action's accent, so each
    announces itself as a control. */
+/* One line of whole chips. A chip that doesn't fit wraps onto a second
+   line the fixed height hides, so it leaves whole instead of being cut
+   ("43 gone" read "43"); the least urgent comes last and leaves first. The
+   row gap keeps a wrapped chip's ring and border clear of the clip margin. */
 .ref-section__chips {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
+  gap: 8px 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: calc(var(--sidebar-eyebrow-size) + 10px);
+  overflow: clip;
+  overflow-clip-margin: 3px;
   margin-right: 4px;
+}
+/* An empty first item, so even the first chip can wrap away whole: a line
+   always keeps its first item, which would otherwise be cut at the edge. */
+.ref-section__chips::before {
+  content: "";
+  display: flex;
+  align-items: center;
+  /* Full height, so the line it holds is the whole visible line and a
+     wrapped chip lands below the clip. */
+  height: 100%;
 }
 .ref-section__chip {
   display: inline-flex;
@@ -2100,6 +2269,33 @@ a.forge-chip:focus-visible {
    (number, title, age, the one verb); line 2 is where it lives here (a tag,
    then the head branch, then the base when it is not the default). The verb
    sits in the same right-hand column as every other ref row's mini action. */
+/* "Pull requests" becomes "PRs" when its own row is narrow, so the failing
+   count beside it keeps its room. Keyed to the heading row, not the sidebar.
+   The full noun stays in the button's name, visually hidden, so the name
+   still contains the visible "PRs" (SC 2.5.3). */
+.ref-cr-section > .ref-section__head-wrap {
+  container: ref-head / inline-size;
+}
+.ref-section__label-short {
+  display: none;
+  /* "PRs", not the eyebrow's "PRS", which reads as a word. */
+  text-transform: none;
+}
+@container ref-head (width < 264px) {
+  .ref-section__label-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .ref-section__label-short {
+    display: inline;
+  }
+}
 .ref-section__chip.is-failing {
   color: var(--danger-text);
 }
@@ -2365,9 +2561,8 @@ a.forge-chip:focus-visible {
   flex: 1 1 0;
   min-width: 0;
   height: 31px;
-  /* The wrap's gap already separates it from the counts; every pixel here is
-     one "on main" keeps at the default 320px sidebar. */
-  padding: 0 6px 0 0;
+  /* No padding of its own: the text carries its edge margin, so once the
+     text has left, this collapses to nothing and the counts get the room. */
   overflow: hidden;
   /* It ellipsizes down to about six characters ("on m…"), then leaves whole
      rather than draw "o…": below that the text wraps past the zero-width
@@ -2395,6 +2590,7 @@ a.forge-chip:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 31px;
+  margin-right: 6px;
 }
 /* The disclosure gives up the full width it takes elsewhere so the counts can
    sit right after the total; the strip still lights as one. */
@@ -2414,17 +2610,14 @@ a.forge-chip:focus-visible {
 .ref-section__head-wrap--on:has(> .ref-section__on:hover) > .ref-section__head {
   color: var(--text-primary);
 }
-/* Last resort at the narrowest sidebar with every count showing: clip at the
-   heading's edge rather than run past it. */
 .ref-section__head-wrap--on > .ref-section__chips {
-  flex-shrink: 1;
-  min-width: 0;
   margin-right: 0;
-  overflow: hidden;
 }
 .ref-section__head-wrap--on > .ref-section__chips::before {
   content: "·";
-  margin-right: 3px;
+  /* 3px to the first chip with the chips' 2px column gap. It is also the
+     line's first item, so a chip that doesn't fit leaves whole. */
+  margin-right: 1px;
   color: var(--text-subtle);
   font: 600 var(--sidebar-eyebrow-size)/1 var(--font-mono);
 }

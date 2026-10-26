@@ -64,6 +64,11 @@ import {
   type PendingRepoReveal
 } from "./features/sidebar/search-reveal";
 import { Sidebar } from "./features/sidebar/Sidebar";
+import {
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH
+} from "./features/sidebar/repo-index";
 import { requestSidebarReveal } from "./features/sidebar/sidebar-reveal";
 import {
   restoreSidebarAnchor,
@@ -90,7 +95,13 @@ import { useWorktreeState } from "./state/useWorktreeState";
 
 export function App() {
   const [contributionsOpen, setContributionsOpen] = useState(false);
-  const sidebar = useColumnResize("pwrgit.sidebarWidth", 320, 240, 520, "left");
+  const sidebar = useColumnResize(
+    "pwrgit.sidebarWidth",
+    SIDEBAR_DEFAULT_WIDTH,
+    SIDEBAR_MIN_WIDTH,
+    SIDEBAR_MAX_WIDTH,
+    "left"
+  );
   const rail = useColumnResize("pwrgit.railWidth", 344, 280, 560, "right");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const showRail = useCallback(() => setRailCollapsed(false), []);

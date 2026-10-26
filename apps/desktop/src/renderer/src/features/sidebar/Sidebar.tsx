@@ -55,9 +55,20 @@ import { settleSidebarReveal, useSidebarReveal } from "./sidebar-reveal";
 import {
   applySidebarAnchor,
   keepSidebarAnchorForSelection,
+  releaseSidebarAnchor,
   sidebarAnchorHeld,
   trackSidebarAnchors
 } from "./sidebar-anchor";
+import { RepoIndex, stickyLineOf, type RepoIndexGroup } from "./RepoIndex";
+import {
+  jumpScrollPlan,
+  readRepoIndexEnabled,
+  repoIndexFit,
+  repoIndexMenuHint,
+  spacerIsOffscreen,
+  writeRepoIndexEnabled,
+  type RepoIndexFit
+} from "./repo-index";
 import { BulkSyncDialog } from "./BulkSyncDialog";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 import { HiddenReposButton } from "./HiddenReposButton";
@@ -349,6 +360,7 @@ export function Sidebar({
       // ignore private-mode/quota failures
     }
   }, [groupByFolder]);
+  const [repoIndexEnabled, setRepoIndexEnabled] = useState(readRepoIndexEnabled);
 
   // Seed the drag order from persisted custom_order for repos not yet
   // reordered this session.
@@ -458,6 +470,99 @@ export function Sidebar({
   useLayoutEffect(() => {
     applySidebarAnchor(listRef.current);
   });
+
+  // ---- Repository index (RepoIndex.tsx, repo-index.ts) ----
+  // A jump puts a repository's block at the top of the readable area and
+  // opens it. A repository near the end cannot get there on its own, so the
+  // list grows a blank tail of exactly the missing height; the tail is dropped
+  // once it scrolls out of view, which moves nothing on screen.
+  const spacerRef = useRef<HTMLDivElement>(null);
+  const pendingJumpRef = useRef<string | null>(null);
+  const scrollRepoToTop = (repoId: string): void => {
+    const list = listRef.current;
+    const spacer = spacerRef.current;
+    if (list === null || spacer === null) return;
+    const place = (): number | null => {
+      const row =
+        [...list.querySelectorAll<HTMLElement>(".repo-row[data-repo-id]")].find(
+          (el) => el.dataset["repoId"] === repoId
+        ) ?? null;
+      if (row === null) return null;
+      // The block, not the sticky header: a stuck header reports where it is
+      // stuck, not where its repository starts.
+      const block = row.closest<HTMLElement>(".repo-block") ?? row;
+      const group = block.closest(".repo-group");
+      const plan = jumpScrollPlan({
+        scrollTop: list.scrollTop,
+        blockTop:
+          block.getBoundingClientRect().top - list.getBoundingClientRect().top,
+        line: group === null ? 0 : stickyLineOf(group as HTMLElement),
+        scrollHeight: list.scrollHeight,
+        clientHeight: list.clientHeight,
+        spacerHeight: spacer.offsetHeight
+      });
+      if (plan.spacerHeight !== spacer.offsetHeight) {
+        spacer.style.height = `${plan.spacerHeight}px`;
+      }
+      list.scrollTop = plan.scrollTop;
+      return list.scrollTop;
+    };
+    const landed = place();
+    if (landed === null) return;
+    // One more look a frame later — a font or a lazily drawn section above can
+    // still settle — unless the reader has scrolled since.
+    window.requestAnimationFrame(() => {
+      if (list.scrollTop === landed) place();
+    });
+  };
+  const jumpToRepo = (repoId: string): void => {
+    const repo = filtered.find((r) => r.id === repoId);
+    if (repo === undefined) return;
+    releaseSidebarAnchor();
+    // Tab from the index lands on the repository just jumped to.
+    setFocusedRepoId(repoId);
+    // A name in the index selects the way its tree row does: the selection
+    // moves to the repository's primary worktree unless it is already in
+    // that repository. A jump that only scrolled left the old repository
+    // drawn selected beside the one just picked, which read as two
+    // selections at once. The jump owns the scroll, so the selection's own
+    // reveal stands down: it would pull a primary row drawn below the fold
+    // into view and move the repository off the top.
+    const selected = selectPrimaryUnlessHeld(repo);
+    if (selected !== null) lastRevealedRef.current = selected;
+    if (expanded.has(repoId)) {
+      scrollRepoToTop(repoId);
+      return;
+    }
+    // The scroll waits for the opened block to render.
+    pendingJumpRef.current = repoId;
+    setExpanded((prev) => new Set(prev).add(repoId));
+    onExpandRepo(repoId);
+  };
+  useLayoutEffect(() => {
+    const id = pendingJumpRef.current;
+    if (id === null) return;
+    pendingJumpRef.current = null;
+    scrollRepoToTop(id);
+  });
+  useEffect(() => {
+    const list = listRef.current;
+    if (list === null) return undefined;
+    const onScroll = (): void => {
+      const spacer = spacerRef.current;
+      if (spacer === null || spacer.offsetHeight === 0) return;
+      if (
+        spacerIsOffscreen(
+          spacer.getBoundingClientRect().top,
+          list.getBoundingClientRect().bottom
+        )
+      ) {
+        spacer.style.height = "";
+      }
+    };
+    list.addEventListener("scroll", onScroll, { passive: true });
+    return () => list.removeEventListener("scroll", onScroll);
+  }, []);
 
   // A plain row click seeds the batch (shift-range) set — but selection can
   // also move WITHOUT a row click (⌘F/⌘K pick, expanding a repo auto-selects
@@ -614,10 +719,70 @@ export function Sidebar({
   };
   const filteredIds = filtered.map((repo) => repo.id);
 
+  // Whether the index fits: the sidebar's width past the tree's floor, against
+  // the measured width of the index's shortest useful truncation (the probe,
+  // which carries the index's own font and min-width). Only the shown/hidden
+  // answer is React state; the width cap is written straight to a custom
+  // property, so dragging the sidebar's edge re-renders nothing.
+  const asideRef = useRef<HTMLElement>(null);
+  const indexProbeRef = useRef<HTMLSpanElement>(null);
+  const fitInputs = useRef({ enabled: repoIndexEnabled, repoCount: filtered.length });
+  fitInputs.current = { enabled: repoIndexEnabled, repoCount: filtered.length };
+  const [indexFit, setIndexFit] = useState<RepoIndexFit>({
+    shown: false,
+    reason: "narrow"
+  });
+  const measureIndexFit = useCallback((): void => {
+    const aside = asideRef.current;
+    const probe = indexProbeRef.current;
+    if (aside === null || probe === null) return;
+    const fit = repoIndexFit({
+      ...fitInputs.current,
+      sidebarWidth: aside.getBoundingClientRect().width,
+      minWidth: probe.getBoundingClientRect().width
+    });
+    if (fit.shown) aside.style.setProperty("--repo-index-max", `${fit.maxWidth}px`);
+    // Only shown/hidden and the reason matter here; maxWidth is the CSS var.
+    const key = (f: RepoIndexFit): string => (f.shown ? "shown" : f.reason);
+    setIndexFit((prev) => (key(prev) === key(fit) ? prev : fit));
+  }, []);
+  useLayoutEffect(measureIndexFit, [
+    measureIndexFit,
+    repoIndexEnabled,
+    filtered.length
+  ]);
+  useEffect(() => {
+    const aside = asideRef.current;
+    const probe = indexProbeRef.current;
+    if (aside === null || probe === null || typeof ResizeObserver !== "function") {
+      return undefined;
+    }
+    // The probe resizes with the text-size axis, the aside with its edge.
+    const observer = new ResizeObserver(measureIndexFit);
+    observer.observe(aside);
+    observer.observe(probe);
+    return () => observer.disconnect();
+  }, [measureIndexFit]);
+
   const roots = activeProfile?.roots ?? [];
   const canGroup = roots.length > 1;
   const grouped = groupByFolder && canGroup;
   const groups = grouped ? groupReposByRoot(filtered, roots) : [];
+  // Built only while the column is drawn: it scans every worktree.
+  const indexSource = grouped
+    ? groups.map((g) => ({ key: g.root || "__other", label: g.label, repos: g.repos }))
+    : [{ key: "__all", label: null, repos: filtered }];
+  const indexGroups: RepoIndexGroup[] = !indexFit.shown
+    ? []
+    : indexSource.map(({ key, label, repos: groupRepos }) => ({
+        key,
+        label,
+        entries: groupRepos.map((repo) => ({
+          id: repo.id,
+          name: repo.name,
+          containsSelection: repo.worktrees.some((w) => w.id === selectedWorktreeId)
+        }))
+      }));
 
   // Which folder group each repo renders under, so a drag can be kept inside
   // its own group. Dragging across groups would reorder the flat list while the
@@ -809,13 +974,20 @@ export function Sidebar({
     // Compute this repo's worktree badges lazily on first look — state isn't
     // computed for every repo up front.
     if (willExpand) onExpandRepo(repo.id);
-    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
-    if (!hasSelection && repo.worktrees.length > 0) {
-      const primary =
-        repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
-      if (primary !== undefined) onSelectWorktree(repo, primary);
-    }
+    selectPrimaryUnlessHeld(repo);
   };
+
+  /** A repo row click, or a name in the index: select the repository's
+   *  primary worktree, unless the selection is already one of its own. */
+  function selectPrimaryUnlessHeld(repo: Repo): string | null {
+    const hasSelection = repo.worktrees.some((w) => w.id === selectedWorktreeId);
+    if (hasSelection) return null;
+    const primary =
+      repo.worktrees.find((w) => w.isPrimary) ?? repo.worktrees[0];
+    if (primary === undefined) return null;
+    onSelectWorktree(repo, primary);
+    return primary.id;
+  }
 
   // Plain click selects one (and drives the main pane). ⌘/Ctrl-click toggles a
   // row in the batch set; Shift-click extends a range from the anchor. Both
@@ -1080,7 +1252,7 @@ export function Sidebar({
   };
 
   return (
-    <aside className="pane pane--sidebar" data-testid="sidebar">
+    <aside ref={asideRef} className="pane pane--sidebar" data-testid="sidebar">
       <div className="sidebar__profile">
         {profileLoadState.status === "error" ? (
           <ReadError
@@ -1140,34 +1312,33 @@ export function Sidebar({
           onChange={chooseLens}
           controlsId={REPO_TREE_ID}
         />
-        {canGroup && (
-          <button
-            ref={optionsTriggerRef}
-            type="button"
-            className="sidebar-options"
-            aria-label="Sidebar display options"
-            aria-haspopup="menu"
-            aria-expanded={options !== null}
-            {...hoverTooltip(tip, "Sidebar display options")}
-            onClick={(event) => {
-              const rect = event.currentTarget.getBoundingClientRect();
-              setOptions((current) =>
-                current === null
-                  ? {
-                      x: Math.max(8, rect.right - 190),
-                      y: rect.bottom + 4
-                    }
-                  : null
-              );
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="12" cy="5" r="2" />
-              <circle cx="12" cy="12" r="2" />
-              <circle cx="12" cy="19" r="2" />
-            </svg>
-          </button>
-        )}
+        {/* Always drawn: Repo index lives here even with one folder. */}
+        <button
+          ref={optionsTriggerRef}
+          type="button"
+          className="sidebar-options"
+          aria-label="Sidebar display options"
+          aria-haspopup="menu"
+          aria-expanded={options !== null}
+          {...hoverTooltip(tip, "Sidebar display options")}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            setOptions((current) =>
+              current === null
+                ? {
+                    x: Math.max(8, rect.right - 190),
+                    y: rect.bottom + 4
+                  }
+                : null
+            );
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="2" />
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="12" cy="19" r="2" />
+          </svg>
+        </button>
       </div>
 
       {showFocusNote && (
@@ -1207,99 +1378,119 @@ export function Sidebar({
           that button now lives up in .sidebar__actions, but the empty state
           still needs to sit outside the tree. The wrapper below owns only rows
           and folder groups. It is a plain static block, so it changes no layout
-          and the rows still stick to .sidebar__list's scrollport. */}
-      <div className="sidebar__list" ref={listRef}>
-        {repoLoadState.status === "error" && (
-          <ReadError
-            compact
-            title="Repositories couldn’t be loaded"
-            message={repoLoadState.message}
-            onRetry={onRetryRepos}
+          and the rows still stick to .sidebar__list's scrollport.
+
+          The repository index sits beside the scrollport, not in it, so it
+          stays put while the tree scrolls; it is a separate nav, never part of
+          the tree. The hover hold spans both, so the index cannot re-sort
+          under a pointer crossing from one to the other. .sidebar__tree-pane
+          is the tree's own size container: its narrow-width rules follow the
+          tree's width, which the index takes from. */}
+      <span ref={indexProbeRef} className="repo-index__probe" aria-hidden="true" />
+      <div className="sidebar__body" {...held.containerProps}>
+        {indexFit.shown && (
+          <RepoIndex
+            groups={indexGroups}
+            listRef={listRef}
+            treeId={REPO_TREE_ID}
+            onJump={jumpToRepo}
           />
         )}
-        <div
-          className="sidebar__tree"
-          id={REPO_TREE_ID}
-          role="tree"
-          aria-label="Repositories"
-          {...held.containerProps}
-        >
-          {grouped
-            ? groups.map((g) => (
-                // A `tree` may own `group`s of treeitems, so the folder buckets
-                // are groups rather than bare divs — otherwise the repo rows
-                // are treeitems with no owning structure. The visual heading is
-                // then decorative, but its count has to survive into the
-                // group's name or screen-reader users simply lose it.
-                <div
-                  className="repo-group"
-                  key={g.root || "__other"}
-                  role="group"
-                  aria-label={`${g.label} (${g.repos.length} ${
-                    g.repos.length === 1 ? "repo" : "repos"
-                  })`}
-                >
-                  <div
-                    className="repo-group__head"
-                    {...hoverTooltip(tip, g.root || "Not under any added folder")}
-                    aria-hidden="true"
-                  >
-                    <span className="repo-group__label">{g.label}</span>
-                    <span className="repo-group__count">{g.repos.length}</span>
-                  </div>
-                  {g.repos.map(renderRepo)}
-                </div>
-              ))
-            : filtered.map(renderRepo)}
-        </div>
+        <div className="sidebar__tree-pane">
+          <div className="sidebar__list" ref={listRef}>
+            {repoLoadState.status === "error" && (
+              <ReadError
+                compact
+                title="Repositories couldn’t be loaded"
+                message={repoLoadState.message}
+                onRetry={onRetryRepos}
+              />
+            )}
+            <div
+              className="sidebar__tree"
+              id={REPO_TREE_ID}
+              role="tree"
+              aria-label="Repositories"
+            >
+              {grouped
+                ? groups.map((g) => (
+                    // A `tree` may own `group`s of treeitems, so the folder buckets
+                    // are groups rather than bare divs — otherwise the repo rows
+                    // are treeitems with no owning structure. The visual heading is
+                    // then decorative, but its count has to survive into the
+                    // group's name or screen-reader users simply lose it.
+                    <div
+                      className="repo-group"
+                      key={g.root || "__other"}
+                      role="group"
+                      aria-label={`${g.label} (${g.repos.length} ${
+                        g.repos.length === 1 ? "repo" : "repos"
+                      })`}
+                    >
+                      <div
+                        className="repo-group__head"
+                        {...hoverTooltip(tip, g.root || "Not under any added folder")}
+                        aria-hidden="true"
+                      >
+                        <span className="repo-group__label">{g.label}</span>
+                        <span className="repo-group__count">{g.repos.length}</span>
+                      </div>
+                      {g.repos.map(renderRepo)}
+                    </div>
+                  ))
+                : filtered.map(renderRepo)}
+            </div>
 
-        {filtered.length === 0 && (
-          <div className="sidebar__empty">
-            <p className="sidebar__empty-text">
-              {repoLoadState.status === "loading"
-                ? "Scanning…"
-                : repoLoadState.status === "error"
-                  ? "The last repository list is still shown above, if one was available."
-                  : LENS_EMPTY_COPY[lens]}
-            </p>
-            {/* Day one. Add folders is the prerequisite for everything else
-                and, with no folder yet, the only action that works — so while
-                the profile has none, the empty list carries it rather than
-                leaving it inside Add ▾. Disabled, with its reason in the name
-                and the card, while no profile has loaded. */}
-            {(activeProfile === null || activeProfile.roots.length === 0) && (
-              <div className="sidebar__start">
-                <button
-                  type="button"
-                  className="sidebar__start-add"
-                  onClick={onAddFolder}
-                  disabled={activeProfile === null}
-                  /* The visible label is repeated verbatim, ellipsis and all:
-                     an aria-label replaces the button's contents, so dropping
-                     a character would break SC 2.5.3 and voice control. */
-                  aria-label={
-                    activeProfile === null
-                      ? "Add folders… — unavailable, load or create a profile first"
-                      : undefined
-                  }
-                  {...hoverTooltip(
-                    tip,
-                    activeProfile === null
-                      ? "Load or create a profile before adding folders"
-                      : undefined
-                  )}
-                >
-                  <PlusGlyph /> Add folders…
-                </button>
-                {activeProfile !== null && (
-                  <span className="sidebar__start-hint">
-                    Clone and Fork, under Add, open once a folder exists.
-                  </span>
+            {filtered.length === 0 && (
+              <div className="sidebar__empty">
+                <p className="sidebar__empty-text">
+                  {repoLoadState.status === "loading"
+                    ? "Scanning…"
+                    : repoLoadState.status === "error"
+                      ? "The last repository list is still shown above, if one was available."
+                      : LENS_EMPTY_COPY[lens]}
+                </p>
+                {/* Day one. Add folders is the prerequisite for everything else
+                    and, with no folder yet, the only action that works — so while
+                    the profile has none, the empty list carries it rather than
+                    leaving it inside Add ▾. Disabled, with its reason in the name
+                    and the card, while no profile has loaded. */}
+                {(activeProfile === null || activeProfile.roots.length === 0) && (
+                  <div className="sidebar__start">
+                    <button
+                      type="button"
+                      className="sidebar__start-add"
+                      onClick={onAddFolder}
+                      disabled={activeProfile === null}
+                      /* The visible label is repeated verbatim, ellipsis and all:
+                         an aria-label replaces the button's contents, so dropping
+                         a character would break SC 2.5.3 and voice control. */
+                      aria-label={
+                        activeProfile === null
+                          ? "Add folders… — unavailable, load or create a profile first"
+                          : undefined
+                      }
+                      {...hoverTooltip(
+                        tip,
+                        activeProfile === null
+                          ? "Load or create a profile before adding folders"
+                          : undefined
+                      )}
+                    >
+                      <PlusGlyph /> Add folders…
+                    </button>
+                    {activeProfile !== null && (
+                      <span className="sidebar__start-hint">
+                        Clone and Fork, under Add, open once a folder exists.
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             )}
+            <div ref={spacerRef} className="sidebar__jump-room" aria-hidden="true" />
           </div>
-        )}
+        </div>
       </div>
 
       {/* The profile's AI switch, under the list rather than in it: the tree
@@ -1395,11 +1586,28 @@ export function Sidebar({
           label="Sidebar display options"
           triggerRef={optionsTriggerRef}
           items={[
+            ...(canGroup
+              ? [
+                  {
+                    type: "item" as const,
+                    label: "Group by folder",
+                    checked: groupByFolder,
+                    onSelect: () => setGroupByFolder((value) => !value)
+                  }
+                ]
+              : []),
             {
               type: "item",
-              label: "Group by folder",
-              checked: groupByFolder,
-              onSelect: () => setGroupByFolder((value) => !value)
+              label: "Repo index",
+              checked: repoIndexEnabled,
+              ...(repoIndexEnabled && repoIndexMenuHint(indexFit) !== undefined
+                ? { hint: repoIndexMenuHint(indexFit) as string }
+                : {}),
+              onSelect: () =>
+                setRepoIndexEnabled((value) => {
+                  writeRepoIndexEnabled(!value);
+                  return !value;
+                })
             }
           ]}
           onClose={() => setOptions(null)}

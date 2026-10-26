@@ -349,6 +349,86 @@ and while one holds its row the "reveal the selection" scroll stands down.
 A row someone can jump *from* needs a stable `data-nav-anchor`. A ghost
 keeps `data-wt-id`, so reveals and anchors find it like the real row.
 
+## Section headings never overlap, wrap, or cut a count
+
+The Worktrees / PRs / Branches / Tags / Remotes headings live in section rows
+that can be 190px wide (the 240px floor, or 320px with the repository index).
+`app.css` holds them to four rules:
+
+- **The disclosure never shrinks under its label and total**
+  (`.ref-section__head-wrap > .ref-section__head` is `flex: 1 0 auto`).
+  It used to, and the count chips drew over "Branches 533".
+- **Labels and counts never wrap**, and the head is start-aligned. A button
+  centres its text, so "Pull requests" used to break into two centred lines.
+- **A count chip that doesn't fit leaves whole.** `.ref-section__chips` is
+  one fixed-height wrapping line led by a full-height `::before`, so a chip
+  that doesn't fit drops to a hidden second line. Chip order is priority
+  order: the last chip (gone) leaves first. Never clip a chip mid-text: the
+  old `overflow: hidden` turned "43 gone" into "43".
+- **"Pull requests" becomes "PRs"** below 264px of its own row
+  (`@container ref-head`). The full noun stays in the button's name,
+  visually hidden, so the name still contains the visible "PRs".
+
+The row clips at its own edge (`overflow: clip` plus a 3px clip margin for
+the focus rings) as a last resort. The measured per-repository ladder that
+replaces the hidden chips with glyph labels and a +N chip is designed in
+`design/Sidebar Section Headings - UX Review.dc.html` (2c, turn 3) and is
+not built yet.
+
+## The repository index is a map beside the tree, not part of it
+
+`RepoIndex.tsx` draws every repository in the lens, by name, in a column to
+the left of `.sidebar__list`, under the same folder labels. The rules are in
+`repo-index.ts`, and they are unit-tested there.
+
+- **It spends only the width past the tree's floor.** The tree is built for
+  the sidebar's 240px minimum (`SIDEBAR_MIN_WIDTH`, shared with App's
+  resize). The index is `max-content` wide, capped at the sidebar width
+  minus that floor (`--repo-index-max`, written straight onto the aside so
+  dragging the edge re-renders nothing). It hides once that cap is below the
+  probe's measured `calc(7ch + 19px)` in the index's own font. Don't replace
+  that with a breakpoint: the probe moves with the text-size axis.
+- **`.sidebar__tree-pane` is the tree's size container.** It has no padding
+  and no border, so with the index hidden it measures exactly what
+  `.pane--sidebar` does. Narrow-width rules inside the tree (the 260px ghost
+  tag) follow the tree's own width when the index takes some of it.
+- **A name selects the way its row does, then scrolls.** `jumpToRepo` and
+  the repo row's click share `selectPrimaryUnlessHeld`: the primary worktree,
+  unless the selection is already in that repository. The first build only
+  opened and scrolled. The old repository then stayed drawn as selected
+  beside the one just picked, and that read as two selections at once.
+  It also releases any anchor hold (`releaseSidebarAnchor`), expands like a
+  manual expand (`onExpandRepo`), and puts the `.repo-block` at the top of
+  the readable area: under the sticky folder heading when grouped. Measure
+  the block, not the sticky `.repo-row`, which reports where it is stuck. A
+  repository near the end gets `.sidebar__jump-room`, a blank tail of exactly
+  the missing height. The tail is dropped once it scrolls out of view.
+- **Only the selection gets a tint.** `.is-selected` is the collapsed tree
+  row's look: accent name on `--bg-hover-strong`. The scroll position
+  (`.is-current`, `.is-in-view`) is a rail and nothing else. A tint on both
+  is the two-selections bug again.
+- **The width is natural until dragged.** The grip is the shell's
+  `PaneResizer` (drag, arrow keys, double-click for natural width), saved as
+  `pwrgit.repoIndexWidth`. Its bounds are read back from the column's own
+  computed `min-width` and `max-width`, so a drag cannot cross the probe's
+  minimum or the tree's floor.
+- **Scroll-spy names the block whose header is stuck**, not the most visible
+  one. `spyRepos` takes the first block whose bottom is below the line. The
+  index keeps that item in view, except while the pointer or focus is in the
+  index. The spy state lives in `RepoIndex`, so a scroll re-renders the
+  column and not the sidebar.
+- **The hover hold spans index and tree** (`held.containerProps` is on
+  `.sidebar__body`), so Focused cannot re-sort under a pointer moving from
+  one to the other.
+- **Accessibility.** It is a `nav` named "Repository index", with a list per
+  folder and a button per repository, outside `role="tree"`. The spy item has
+  `aria-current="location"`. It has one roving tab stop: ↑/↓, Home/End,
+  typeahead, and Enter or Space to jump. Display options → Repo index turns
+  it off (`pwrgit.repoIndex`). That kebab is now always drawn, and its hint
+  says why an enabled index isn't showing.
+
+Design: `design/Sidebar Repo Index - UX Review.dc.html`, 3a and turn 4.
+
 ## Hide and Remove live on the repo row's menu
 
 Hide asks nothing and offers Undo on its toast; Remove opens
