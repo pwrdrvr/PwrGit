@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.44.0 - 2026-10-26
+
+- Sidebar headings - Improved narrow layouts with headings that adapt to each repository's actual content. Labels shorten to PRs or MRs, then icons, only when needed; quieter repositories keep their words. Totals, failing-request counts, refresh controls, and the worktree sort control stay available, with accessible names and hover descriptions preserved.
+- Branch counts - Added a +N button that groups ahead, behind, and gone counts when the sidebar runs out of room, instead of silently dropping them. Hover to read the grouped counts or click to open the branch browser.
+- Repository names - Gave names more room before truncating by hiding secondary forge and visibility marks and compacting the worktree count first. Stars and upstream pull-request badges remain visible.
+
 ## v0.43.0 - 2026-10-26
 
 - Repository navigation - Added a name-only repository index beside the sidebar tree. Click or use the keyboard to select and jump to a repository without collapsing the others; position markers show which repositories are in view. Resize the index with its grip, or turn it off in Display options. It is enabled by default when there are multiple repositories and enough sidebar width.
