@@ -28,6 +28,7 @@ import { PlusGlyph } from "../../lib/PlusGlyph";
 import { RefreshGlyph } from "../../lib/RefreshGlyph";
 import {
   hoverTooltip,
+  isCutShort,
   truncatedTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
@@ -65,7 +66,6 @@ import { useStepLadder } from "../../lib/useFitLadder";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import {
   headingsFit,
-  labelIsWhole,
   REPO_ROW_FIT_STEPS,
   RefitSectionsProvider,
   SECTION_FIT_STEPS,
@@ -273,16 +273,25 @@ export function RepoRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLSpanElement>(null);
   const sectionsRef = useRef<HTMLDivElement>(null);
+  const blockRef = useRef<HTMLDivElement>(null);
   // The row gives up its marks, then its count's word, before the name is
   // cut (Sidebar Section Headings, 3d). The star and the kebab never step.
-  useStepLadder(rowRef, () => labelIsWhole(nameRef.current), REPO_ROW_FIT_STEPS);
+  // Whole is measured at subpixel precision, as the name's hover card is.
+  useStepLadder(
+    rowRef,
+    () => nameRef.current === null || !isCutShort(nameRef.current),
+    REPO_ROW_FIT_STEPS
+  );
   // One ladder for every heading in this block, measured on the width the
   // tree gives it: a quiet repository keeps its words where a busy one steps
   // down (3a). The sections re-render on their own state and call `refit`.
+  // It watches the block, which is always mounted: the sections come and go
+  // with the disclosure, and the observer is attached only once.
   const refitSections = useStepLadder(
     sectionsRef,
     () => headingsFit(sectionsRef.current),
-    SECTION_FIT_STEPS
+    SECTION_FIT_STEPS,
+    () => blockRef.current
   );
   /** "Manage remotes…", Finished and View all ask `RepoRefsSections` to open
    *  its browser, which needs refs only that component loads — so the ask is
@@ -768,7 +777,7 @@ export function RepoRow({
     .join(", ");
 
   return (
-    <div className="repo-block" role="presentation">
+    <div className="repo-block" role="presentation" ref={blockRef}>
       <div
         ref={rowRef}
         className={`repo-row${activeCollapsed ? " is-active" : ""}${

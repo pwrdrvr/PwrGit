@@ -61,7 +61,9 @@ export function useFitLadder(
  * Returns a stable re-fit, for content the hook cannot see change: a child
  * component that re-renders on its own state (the sidebar's section
  * headings, whose counts land after the repository row has rendered) calls it
- * from its own layout effect.
+ * from its own layout effect. Calls coalesce into one fit in a microtask,
+ * still before paint, and none at all when the hook's own layout effect fits
+ * after them in the same commit (children's effects run first).
  */
 export function useStepLadder(
   rowRef: RefObject<HTMLElement | null>,
@@ -71,8 +73,10 @@ export function useStepLadder(
   observe: () => Element | null = () => rowRef.current
 ): () => void {
   const key = steps.join(" ");
+  const pending = useRef(false);
 
   const fit = (): void => {
+    pending.current = false;
     const row = rowRef.current;
     if (row === null) return;
     const classes = key === "" ? [] : key.split(" ");
@@ -91,7 +95,13 @@ export function useStepLadder(
   // wrapper is what callers hold.
   const latest = useRef(fit);
   latest.current = fit;
-  const refit = useCallback(() => latest.current(), []);
+  const refit = useCallback(() => {
+    if (pending.current) return;
+    pending.current = true;
+    queueMicrotask(() => {
+      if (pending.current) latest.current();
+    });
+  }, []);
 
   useEffect(() => {
     const watched = observe();

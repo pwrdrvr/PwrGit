@@ -7,6 +7,9 @@ const { app, BrowserWindow } = require("electron");
 // No Dock icon or menu bar, and so no activation: the harness never takes
 // focus from whatever the developer is doing.
 if (process.platform === "darwin") app.setActivationPolicy("accessory");
+// The same gate as the app's main (e2e/AGENTS.md): before ready, or it does
+// nothing.
+if (process.env.PWRGIT_E2E_DISABLE_GPU === "1") app.disableHardwareAcceleration();
 
 app.whenReady().then(() => {
   const win = new BrowserWindow({

@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { createRoot } from "react-dom/client";
 import { ok } from "@pwrgit/shared";
 import "../../../src/renderer/src/styles/app.css";
@@ -55,7 +55,21 @@ for (const entry of Object.values(HARNESS_REPOS)) {
 
 const noop = (): void => undefined;
 
-function Tree({ entry, row, tree }: { entry: HarnessRepo; row: number; tree: number }) {
+/** Scenes drawn collapsed, set from outside through `__harness.setExpanded`. */
+let setCollapsed: Dispatch<SetStateAction<ReadonlySet<string>>> | null = null;
+const sceneKey = (repo: string, row: number): string => `${repo}@${row}`;
+
+function Tree({
+  entry,
+  row,
+  tree,
+  expanded
+}: {
+  entry: HarnessRepo;
+  row: number;
+  tree: number;
+  expanded: boolean;
+}) {
   return (
     <div className="harness-scene" data-repo={entry.repo.id} data-row={row}>
       <div className="harness-caption">
@@ -68,7 +82,7 @@ function Tree({ entry, row, tree }: { entry: HarnessRepo; row: number; tree: num
               <div className="sidebar__tree" role="tree" aria-label="Repositories">
                 <RepoRow
                   repo={entry.repo}
-                  expanded
+                  expanded={expanded}
                   containsSelection={entry.selectedWorktreeId !== null}
                   selectedWorktreeId={entry.selectedWorktreeId}
                   selectedIds={new Set()}
@@ -119,6 +133,10 @@ function Tree({ entry, row, tree }: { entry: HarnessRepo; row: number; tree: num
 }
 
 function Harness({ inset }: { inset: number }) {
+  const [collapsed, setCollapsedState] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    setCollapsed = setCollapsedState;
+  }, []);
   const repos = (new URLSearchParams(location.search).get("repos") ?? "atlas,beacon,cinder")
     .split(",")
     .filter((key): key is RepoKey => key in HARNESS_REPOS);
@@ -129,7 +147,13 @@ function Harness({ inset }: { inset: number }) {
       <div className="harness-grid" style={{ gridTemplateColumns: `repeat(${ROWS.length}, max-content)` }}>
         {repos.flatMap((key) =>
           ROWS.map((row) => (
-            <Tree key={`${key}-${row}`} entry={HARNESS_REPOS[key]} row={row} tree={row + inset} />
+            <Tree
+              key={`${key}-${row}`}
+              entry={HARNESS_REPOS[key]}
+              row={row}
+              tree={row + inset}
+              expanded={!collapsed.has(sceneKey(HARNESS_REPOS[key].repo.id, row))}
+            />
           ))
         )}
       </div>
@@ -150,7 +174,10 @@ export type SceneReport = {
 };
 
 function report(): SceneReport[] {
-  return [...document.querySelectorAll<HTMLElement>(".harness-scene")].map((scene) => {
+  // A collapsed scene has no headings to report.
+  return [...document.querySelectorAll<HTMLElement>(".harness-scene")]
+    .filter((scene) => scene.querySelector(".repo-sections") !== null)
+    .map((scene) => {
     const sections = scene.querySelector<HTMLElement>(".repo-sections")!;
     const row = scene.querySelector<HTMLElement>(".repo-row")!;
     const problems = [
@@ -229,6 +256,15 @@ const harness = {
     await settled();
   })(),
   report,
+  /** Collapse or expand one scene's repository. */
+  setExpanded(repo: string, row: number, expanded: boolean): void {
+    setCollapsed?.((current) => {
+      const next = new Set(current);
+      if (expanded) next.delete(sceneKey(repo, row));
+      else next.add(sceneKey(repo, row));
+      return next;
+    });
+  },
   /** Resize one scene's tree in place, to exercise the ResizeObserver. */
   resize(repo: string, row: number, tree: number): void {
     const aside = document.querySelector<HTMLElement>(

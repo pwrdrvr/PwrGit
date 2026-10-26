@@ -9,6 +9,7 @@ import {
   type ElectronApplication,
   type Page
 } from "@playwright/test";
+import { cleanEnv } from "./fixtures/electron-app";
 import { buildHarness } from "./harness/build";
 import type { SceneReport } from "./harness/section-headings/main";
 
@@ -34,26 +35,24 @@ let app: ElectronApplication;
 let page: Page;
 let scenes: SceneReport[];
 
-function env(extra: Record<string, string>): Record<string, string> {
-  const vars: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) vars[key] = value;
-  }
-  // A parent Pwr app's Electron overrides would launch a sibling's binary.
-  delete vars["ELECTRON_RUN_AS_NODE"];
-  delete vars["ELECTRON_EXEC_PATH"];
-  delete vars["ELECTRON_CLI_ARGS"];
-  delete vars["ELECTRON_MAJOR_VER"];
-  return { ...vars, ...extra };
-}
-
 test.beforeAll(async () => {
   test.setTimeout(120_000);
   out = mkdtempSync(join(tmpdir(), "pwrgit-headings-"));
   const html = await buildHarness("section-headings", join(out, "dist"));
   app = await electron.launch({
-    args: [MAIN],
-    env: env({ PWRGIT_HARNESS_HTML: html, PWRGIT_HARNESS_WIDTH: "1240", PWRGIT_HARNESS_HEIGHT: "1100" })
+    args: [
+      // As `launchApp` does: hardware codecs leak VideoToolbox clients in the
+      // Tart guests even with the GPU off (e2e/AGENTS.md).
+      "--disable-accelerated-video-decode",
+      "--disable-accelerated-video-encode",
+      ...(process.env["PWRGIT_E2E_DISABLE_GPU"] === "1" ? ["--disable-gpu"] : []),
+      MAIN
+    ],
+    env: cleanEnv({
+      PWRGIT_HARNESS_HTML: html,
+      PWRGIT_HARNESS_WIDTH: "1240",
+      PWRGIT_HARNESS_HEIGHT: "1100"
+    })
   });
   page = await app.firstWindow();
   await page.waitForFunction(() => "__harness" in window);
@@ -129,9 +128,7 @@ test("labels that leave the screen stay in the headings' names", () => {
     for (const word of ["Worktrees", "Branches", "Tags", "Remotes"]) {
       expect(names, `${s.repo} @ ${s.row}`).toContain(word);
     }
-    if (s.repo !== "cinder" || s.names.some((n) => n.includes("PRs"))) {
-      expect(names).toContain("Pull requests");
-    }
+    expect(names, `${s.repo} @ ${s.row}`).toContain("Pull requests");
   }
 });
 
@@ -154,4 +151,29 @@ test("a block re-steps when its tree is resized in place", async () => {
     .toBeGreaterThan(before);
   const after = (await readScenes()).find((s) => s.repo === "atlas" && s.row === 270)!;
   expect(after.problems).toEqual([]);
+});
+
+// The sections unmount with the disclosure. A block expanded after its row
+// mounted must still hear its tree being resized.
+test("a block re-expanded after mount still re-steps on resize", async () => {
+  type Api = {
+    setExpanded: (r: string, w: number, open: boolean) => void;
+    resize: (r: string, w: number, t: number) => void;
+  };
+  await page.evaluate(() =>
+    (window as unknown as { __harness: Api }).__harness.setExpanded("atlas", 194, false)
+  );
+  await expect(page.locator('.harness-scene[data-repo="atlas"][data-row="194"] .repo-sections')).toHaveCount(0);
+  await page.evaluate(() =>
+    (window as unknown as { __harness: Api }).__harness.setExpanded("atlas", 194, true)
+  );
+  await expect(page.locator('.harness-scene[data-repo="atlas"][data-row="194"] .repo-sections')).toHaveCount(1);
+  const narrow = (await readScenes()).find((s) => s.repo === "atlas" && s.row === 194)!;
+  expect(depth(narrow)).toBeGreaterThan(0);
+  await page.evaluate(() =>
+    (window as unknown as { __harness: Api }).__harness.resize("atlas", 194, 520)
+  );
+  await expect
+    .poll(async () => depth((await readScenes()).find((s) => s.repo === "atlas" && s.row === 194)!))
+    .toBe(0);
 });

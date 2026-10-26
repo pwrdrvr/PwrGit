@@ -1,17 +1,10 @@
-import {
-  createContext,
-  useContext,
-  useLayoutEffect,
-  type FocusEvent as ReactFocusEvent,
-  type MouseEvent as ReactMouseEvent,
-  type ReactElement
-} from "react";
+import { createContext, useContext, useLayoutEffect, type ReactElement } from "react";
 import { BranchGlyph } from "../../lib/BranchGlyph";
 import { ChangeRequestGlyph } from "../../lib/ChangeRequestGlyph";
 import { RemoteGlyph } from "../../lib/RemoteGlyph";
 import { TagGlyph } from "../../lib/TagGlyph";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
-import { hoverTooltip, type ViewportTooltip } from "../../lib/useViewportTooltip";
+import { gatedTooltip, type ViewportTooltip } from "../../lib/useViewportTooltip";
 
 /**
  * The section headings' ladder, one per repository block (`.repo-sections`
@@ -77,30 +70,6 @@ export function headingsFit(block: HTMLElement | null): boolean {
 }
 
 /**
- * Whether a single-line, ellipsizing label is drawn whole.
- *
- * Not `scrollWidth > clientWidth`: both are whole pixels, and Chromium
- * ellipsizes text that is 0.3px too wide while both read the same. The text
- * range's own rect is fractional, and it keeps its laid-out width while the
- * box paints an ellipsis over the end, so it sees what they round away.
- */
-export function labelIsWhole(el: HTMLElement | null): boolean {
-  if (el === null) return true;
-  const range = document.createRange();
-  range.selectNodeContents(el);
-  // jsdom implements Range without layout.
-  if (typeof range.getBoundingClientRect !== "function") return true;
-  const style = getComputedStyle(el);
-  const content =
-    el.getBoundingClientRect().width -
-    (parseFloat(style.paddingLeft) || 0) -
-    (parseFloat(style.paddingRight) || 0) -
-    (parseFloat(style.borderLeftWidth) || 0) -
-    (parseFloat(style.borderRightWidth) || 0);
-  return range.getBoundingClientRect().width <= content + 0.01;
-}
-
-/**
  * The block's re-fit, for the sections that re-render on their own state:
  * `RepoChangeRequestSection` and `RepoRefsSections` hold their lists and
  * counts themselves, so "533" can land after `RepoRow` last rendered.
@@ -108,7 +77,8 @@ export function labelIsWhole(el: HTMLElement | null): boolean {
 const RefitSections = createContext<() => void>(() => {});
 export const RefitSectionsProvider = RefitSections.Provider;
 
-/** Ask the repository block to re-fit after every render of the caller. */
+/** Ask the repository block to re-fit after every render of the caller.
+ *  Coalesced with the block's own fit (`useStepLadder`). */
 export function useRefitSections(): void {
   const refit = useContext(RefitSections);
   useLayoutEffect(() => refit());
@@ -148,20 +118,8 @@ export function steppedTooltip(
   tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
   text: string,
   step: (typeof SECTION_FIT_STEPS)[number] = "fit-glyphs"
-): ReturnType<typeof hoverTooltip> {
-  const handlers = hoverTooltip(tip, text);
-  const ifStepped =
-    <E extends ReactMouseEvent<HTMLElement> | ReactFocusEvent<HTMLElement>>(
-      open: (event: E) => void
-    ) =>
-    (event: E): void => {
-      if (event.currentTarget.closest(`.${step}`) !== null) open(event);
-    };
-  return {
-    ...handlers,
-    onMouseEnter: ifStepped(handlers.onMouseEnter),
-    onFocus: ifStepped(handlers.onFocus)
-  };
+): ReturnType<typeof gatedTooltip> {
+  return gatedTooltip(tip, text, (trigger) => trigger.closest(`.${step}`) !== null);
 }
 
 /** One Branches count chip, ranked by how late it folds: 3 (gone) first. */

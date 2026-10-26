@@ -376,7 +376,9 @@ repository block steps them down by what fits, never by a breakpoint:
 - **The sections re-render on their own state** (refs and the PR list land
   after `RepoRow` rendered), so `RepoRefsSections` and
   `RepoChangeRequestSection` call `useRefitSections()`. A new section with
-  its own data must too.
+  its own data must too. The ladder observes `.repo-block`, not
+  `.repo-sections`: the sections unmount with the disclosure, and an
+  observer attached at mount would watch a detached node after a re-expand.
 - **Words leave the screen, not the name.** A stepped-away label is visually
   hidden inside its button, so the name still says "Branches 533" and
   contains the visible "PRs" (SC 2.5.3); `steppedTooltip` shows
@@ -389,7 +391,7 @@ repository block steps them down by what fits, never by a breakpoint:
   unfiltered, since it can hold more than one status.
 
 The repository row has its own ladder, with "the name is whole"
-(`labelIsWhole`, a text range against the box, not `scrollWidth`) as the
+(`isCutShort`, a text range against the box, not `scrollWidth`) as the
 test: `rr-no-marks` (forge chip and `.repo-mark`s leave; the fork mark that
 carries an upstream pull is `.badge--source`, an action, and stays), then
 `rr-short-count` ("279 wts" → worktree glyph + 279). Only then does the name

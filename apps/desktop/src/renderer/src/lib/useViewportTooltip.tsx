@@ -158,7 +158,7 @@ export function hoverTooltip(
  * then. Measured on every enter rather than observed, because the answer moves
  * with the pane width and the text-size notch and is only ever asked here.
  */
-function isCutShort(el: HTMLElement): boolean {
+export function isCutShort(el: HTMLElement): boolean {
   if (el.scrollWidth > el.clientWidth) return true;
   // Both of those are whole pixels, but the ellipsis is decided at subpixel
   // precision: text 0.3px too wide is cut short while both read 120. The text
@@ -181,18 +181,30 @@ export function truncatedTooltip(
   tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
   text: string
 ): ReturnType<typeof hoverTooltip> {
-  const handlers = hoverTooltip(tip, text);
-  const ifTruncated =
+  return gatedTooltip(tip, text, isCutShort);
+}
+
+/**
+ * `hoverTooltip` that opens only while `when(trigger)` holds, asked on each
+ * enter and focus. Leaving and blurring always close.
+ */
+export function gatedTooltip(
+  tip: Pick<ViewportTooltip, "show" | "hide" | "hideFrom">,
+  content: ReactNode,
+  when: (trigger: HTMLElement) => boolean
+): ReturnType<typeof hoverTooltip> {
+  const handlers = hoverTooltip(tip, content);
+  const gated =
     <E extends ReactMouseEvent<HTMLElement> | ReactFocusEvent<HTMLElement>>(
       open: (event: E) => void
     ) =>
     (event: E): void => {
-      if (isCutShort(event.currentTarget)) open(event);
+      if (when(event.currentTarget)) open(event);
     };
   return {
     ...handlers,
-    onMouseEnter: ifTruncated(handlers.onMouseEnter),
-    onFocus: ifTruncated(handlers.onFocus)
+    onMouseEnter: gated(handlers.onMouseEnter),
+    onFocus: gated(handlers.onFocus)
   };
 }
 
