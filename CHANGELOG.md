@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.43.0 - 2026-10-26
+
+- Repository navigation - Added a name-only repository index beside the sidebar tree. Click or use the keyboard to select and jump to a repository without collapsing the others; position markers show which repositories are in view. Resize the index with its grip, or turn it off in Display options. It is enabled by default when there are multiple repositories and enough sidebar width.
+- Sidebar - Consolidated Add folders, Clone, Fork, Fetch all, Pull all, and Repository maintenance into one compact toolbar, leaving more vertical room for repositories. Jump to repo now lives in the title bar, with the existing keyboard shortcuts unchanged. Narrow layouts automatically shorten labels while retaining accessible names and tooltips.
+- Narrow layouts - Fixed overlapping branch counts and wrapping pull-request headings in the sidebar. Request headings use short labels when needed, and count chips that do not fit disappear whole instead of being clipped mid-text.
+
 ## v0.42.0 - 2026-10-24
 
 - Worktrees - Fixed deleted linked worktrees lingering in the sidebar as "directory missing" and preventing their branches from being checked out elsewhere. PwrGit now removes the stale Git registration and sidebar entry when it detects that a worktree folder has disappeared, including after coding-agent cleanup.
