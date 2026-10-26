@@ -140,6 +140,18 @@ procedure, not manual deletion or repeated launch attempts. Record the tested
 commit and collected results, leave artifacts outside Git, and stop only an
 idle guest that the authorized workflow owns.
 
+## Harness pages
+
+`e2e/harness/<name>/` is a page that mounts real renderer components against
+a fake preload bridge with contrived data, for layout the jsdom tests cannot
+see. `harness/build.ts` Vite-builds it and `harness/electron-main.cjs` loads
+it in a window that is never shown (and, on macOS, takes no Dock icon or
+focus), so a spec like `section-headings.spec.ts` runs with the other E2E in
+CI and is safe on a developer's machine: it is not the app, and needs no
+`out/`. Load every font a check reads before mounting, or the first
+measurement is in a fallback face. `PWRGIT_HARNESS_SHOTS=<dir>` writes that
+spec's grid as a PNG, which is how a PR's before/after shots are made.
+
 ## How a test is isolated
 
 - **Release network**: every `launchApp` starts through `fixtures/bootstrap.cjs`,

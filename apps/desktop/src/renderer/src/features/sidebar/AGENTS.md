@@ -29,8 +29,8 @@ Only four glyphs exist for five kinds: `isWorktreelessBranch()` sends both
 `local_branch` and `remote_branch` to `BranchGlyph`, so those two rows are the
 identical drawing and only the label and `__meta` tell them apart. The fifth,
 `change_request` (an open PR whose head is not in the checkout), draws
-`ChangeRequestIcon` and says the forge's own noun — "Pull request" or "Merge
-request" — through `changeRequestLabel`, never a hard-coded word. Options for
+`ChangeRequestGlyph` (`lib/`) and says the forge's own noun — "Pull
+request" or "Merge request" — through `changeRequestLabel`, never a hard-coded word. Options for
 giving the remote its own mark are in
 [design/Palette Kind Glyphs - UX Review.dc.html](../../../../../../../design/Palette%20Kind%20Glyphs%20-%20UX%20Review.dc.html),
 turn 4. Legibility rules for a mark this small: "A 15px glyph separates by
@@ -352,28 +352,53 @@ keeps `data-wt-id`, so reveals and anchors find it like the real row.
 ## Section headings never overlap, wrap, or cut a count
 
 The Worktrees / PRs / Branches / Tags / Remotes headings live in section rows
-that can be 190px wide (the 240px floor, or 320px with the repository index).
-`app.css` holds them to four rules:
+that can be 170px wide (a narrow sidebar with the repository index). Each
+repository block steps them down by what fits, never by a breakpoint:
+`RepoRow` wraps every heading it draws in `.repo-sections` and runs
+`useStepLadder` on it (`section-fit.tsx`; the CSS for each step is in
+`app.css`). Design: `design/Sidebar Section Headings - UX Review.dc.html`,
+2c and turn 3.
 
-- **The disclosure never shrinks under its label and total**
-  (`.ref-section__head-wrap > .ref-section__head` is `flex: 1 0 auto`).
-  It used to, and the count chips drew over "Branches 533".
-- **Labels and counts never wrap**, and the head is start-aligned. A button
-  centres its text, so "Pull requests" used to break into two centred lines.
-- **A count chip that doesn't fit leaves whole.** `.ref-section__chips` is
-  one fixed-height wrapping line led by a full-height `::before`, so a chip
-  that doesn't fit drops to a hidden second line. Chip order is priority
-  order: the last chip (gone) leaves first. Never clip a chip mid-text: the
-  old `overflow: hidden` turned "43 gone" into "43".
-- **"Pull requests" becomes "PRs"** below 264px of its own row
-  (`@container ref-head`). The full noun stays in the button's name,
-  visually hidden, so the name still contains the visible "PRs".
+- **Steps, cumulative:** `fit-short` ("Pull requests" → "PRs"),
+  `fit-glyphs` (every label → its glyph beside its count), then
+  `fit-fold-1..3` (gone, then behind, then ahead fold into a +N chip). The
+  totals, "N failing", the refresh buttons and Recent never step; past the
+  last step a row clips at its own edge.
+- **Per repository block, not per tree** (operator's call): a quiet
+  repository keeps its words at the width where a busy one has folded.
+- **The fit test is "every heading row's items end inside its box"**
+  (`headingsFit`, over `.ref-section__head-wrap` and the Worktrees
+  `.wt-section__head`). A new heading needs one of those classes, or the
+  ladder cannot see it.
+- **Everything a step acts on is rigid** (`flex: 0 0 auto`): the disclosure,
+  every chip, ⟳ and Recent. A shrinkable item never overflows, so the block
+  would read as fitting while it ellipsized. Only "on main" is leftover.
+- **The sections re-render on their own state** (refs and the PR list land
+  after `RepoRow` rendered), so `RepoRefsSections` and
+  `RepoChangeRequestSection` call `useRefitSections()`. A new section with
+  its own data must too.
+- **Words leave the screen, not the name.** A stepped-away label is visually
+  hidden inside its button, so the name still says "Branches 533" and
+  contains the visible "PRs" (SC 2.5.3); `steppedTooltip` shows
+  "Branches · 533" on hover only once the step is taken. The glyphs are the
+  shared marks: `WorktreeGlyph`, `ChangeRequestGlyph`, `BranchGlyph`,
+  `TagGlyph` and `RemoteGlyph` (Lucide's cloud).
+- **+N is one chip per fold step** (`foldChips`), each holding what its step
+  folded; CSS shows only the deepest step's. Its card and name list the
+  folded counts, and a click opens the refs browser on Branches,
+  unfiltered, since it can hold more than one status.
 
-The row clips at its own edge (`overflow: clip` plus a 3px clip margin for
-the focus rings) as a last resort. The measured per-repository ladder that
-replaces the hidden chips with glyph labels and a +N chip is designed in
-`design/Sidebar Section Headings - UX Review.dc.html` (2c, turn 3) and is
-not built yet.
+The repository row has its own ladder, with "the name is whole"
+(`labelIsWhole`, a text range against the box, not `scrollWidth`) as the
+test: `rr-no-marks` (forge chip and `.repo-mark`s leave; the fork mark that
+carries an upstream pull is `.badge--source`, an action, and stays), then
+`rr-short-count` ("279 wts" → worktree glyph + 279). Only then does the name
+ellipsize. The star and kebab never step.
+
+`e2e/section-headings.spec.ts` measures all of it in a Vite build of the
+real `RepoRow` at section rows of 270, 222, 194 and 170px, in a hidden
+Electron window (`e2e/AGENTS.md`, "Harness pages"). Run it after touching
+heading markup or CSS; jsdom has no layout and cannot.
 
 ## The repository index is a map beside the tree, not part of it
 

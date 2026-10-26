@@ -309,9 +309,11 @@ Two consequences when adding or changing one of these marks:
 
 **One noun, one drawing, on every surface.** A branch is `BranchGlyph`
 (Lucide `git-branch`, the graph chip's mark), a linked worktree is
-`WorktreeGlyph`, the primary checkout is `CheckoutGlyph`'s house, and a
-repository is the palette's folder. The sidebar, the refs browser, the graph
-and the ⌘K palette each had drawn their own until
+`WorktreeGlyph`, the primary checkout is `CheckoutGlyph`'s house, a pull
+or merge request is `ChangeRequestGlyph`, a remote is `RemoteGlyph` (a
+cloud, checked at 15px beside the others for the sidebar's section
+headings), and a repository is the palette's folder. The sidebar, the refs
+browser, the graph and the ⌘K palette each had drawn their own until
 [design/Worktree Chip Glyphs - UX Review.dc.html](../../../../../../design/Worktree%20Chip%20Glyphs%20-%20UX%20Review.dc.html)
 (2c) folded them together. Reach for these before drawing a variant.
 

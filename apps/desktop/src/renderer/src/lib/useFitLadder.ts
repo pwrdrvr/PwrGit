@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type RefObject
+} from "react";
 
 /**
  * Step a row down by what fits, instead of by fixed breakpoints.
@@ -51,6 +57,11 @@ export function useFitLadder(
  * last control ends inside the box; a row whose one shrinkable item absorbs
  * any shortfall never overflows, so it asks instead whether that item is
  * still whole (a sidebar row's branch name, turn 3e).
+ *
+ * Returns a stable re-fit, for content the hook cannot see change: a child
+ * component that re-renders on its own state (the sidebar's section
+ * headings, whose counts land after the repository row has rendered) calls it
+ * from its own layout effect.
  */
 export function useStepLadder(
   rowRef: RefObject<HTMLElement | null>,
@@ -58,7 +69,7 @@ export function useStepLadder(
   steps: readonly string[],
   /** What to watch for width changes, when the stepped element is rigid. */
   observe: () => Element | null = () => rowRef.current
-): void {
+): () => void {
   const key = steps.join(" ");
 
   const fit = (): void => {
@@ -76,14 +87,31 @@ export function useStepLadder(
   // change what fits without changing the row's width.
   useLayoutEffect(fit);
 
+  // The latest `fit` closes over this render's `fits` and steps; the stable
+  // wrapper is what callers hold.
+  const latest = useRef(fit);
+  latest.current = fit;
+  const refit = useCallback(() => latest.current(), []);
+
   useEffect(() => {
     const watched = observe();
     if (watched === null || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => fit());
     observer.observe(watched);
-    return () => observer.disconnect();
+    // A face that loads after the first fit changes every width without
+    // changing the row's: the ladder would keep a step measured in the
+    // fallback font.
+    const fonts = typeof document === "undefined" ? undefined : document.fonts;
+    const refit = (): void => fit();
+    fonts?.addEventListener?.("loadingdone", refit);
+    return () => {
+      observer.disconnect();
+      fonts?.removeEventListener?.("loadingdone", refit);
+    };
     // `fit` and `observe` read refs; re-observing on every render would
     // churn the observer for nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowRef, key]);
+
+  return refit;
 }
