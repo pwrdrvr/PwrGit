@@ -167,7 +167,7 @@ export function RepoChangeRequestSection({
   // A checkout on GitHub with a GitLab mirror lists both kinds; the heading
   // names both only then.
   const mixed = new Set(shown.remotes.map((remote) => remote.forge)).size > 1;
-  const { plural, noun } = changeRequestWords(shown, forge);
+  const { plural, short, noun } = changeRequestWords(shown, forge);
   // The lens appears only with two or more remotes that have something open,
   // and a remembered remote that no longer has any reads as All.
   const lensOptions = lensRemotes(shown, repo.identity?.parent?.nameWithOwner);
@@ -474,7 +474,10 @@ export function RepoChangeRequestSection({
           }}
         >
           <SectionChevron open={open} />
-          <span className="ref-section__label">{plural}</span>
+          <span className="ref-section__label">
+            <span className="ref-section__label-full">{plural}</span>
+            <span className="ref-section__label-short">{short}</span>
+          </span>
           <span className="ref-section__count">
             {loading ? "…" : unlisted ? "–" : visible.length}
           </span>

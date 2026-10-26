@@ -349,6 +349,32 @@ and while one holds its row the "reveal the selection" scroll stands down.
 A row someone can jump *from* needs a stable `data-nav-anchor`. A ghost
 keeps `data-wt-id`, so reveals and anchors find it like the real row.
 
+## Section headings never overlap, wrap, or cut a count
+
+The Worktrees / PRs / Branches / Tags / Remotes headings live in section rows
+that can be 190px wide (the 240px floor, or 320px with the repository index).
+`app.css` holds them to four rules:
+
+- **The disclosure never shrinks under its label and total**
+  (`.ref-section__head-wrap > .ref-section__head` is `flex: 1 0 auto`).
+  It used to, and the count chips drew over "Branches 533".
+- **Labels and counts never wrap**, and the head is start-aligned. A button
+  centres its text, so "Pull requests" used to break into two centred lines.
+- **A count chip that doesn't fit leaves whole.** `.ref-section__chips` is
+  one fixed-height wrapping line led by a full-height `::before`, so a chip
+  that doesn't fit drops to a hidden second line. Chip order is priority
+  order: the last chip (gone) leaves first. Never clip a chip mid-text: the
+  old `overflow: hidden` turned "43 gone" into "43".
+- **"Pull requests" becomes "PRs"** below 264px of its own row
+  (`@container ref-head`). The full noun stays in the button's name,
+  visually hidden, so the name still contains the visible "PRs".
+
+The row clips at its own edge (`overflow: clip` plus a 3px clip margin for
+the focus rings) as a last resort. The measured per-repository ladder that
+replaces the hidden chips with glyph labels and a +N chip is designed in
+`design/Sidebar Section Headings - UX Review.dc.html` (2c, turn 3) and is
+not built yet.
+
 ## The repository index is a map beside the tree, not part of it
 
 `RepoIndex.tsx` draws every repository in the lens, by name, in a column to
