@@ -803,6 +803,9 @@ Worktree sharing through `pwrgit-share` is opt-in; unavailable sharing falls
 back to a normal Git checkout. It uses reflinks, never hardlinks. Size UI must
 not promise freed bytes: shared extents may still belong to another checkout.
 See the [worktree sharing design](../../../../../docs/plans/2026-10-27-worktree-share.md).
+On macOS, set `PWRGIT_SHARE_REAL_BINARY` to an absolute built CLI path and run
+`pnpm test apps/desktop/src/main/git/worktree-share.real-cli.test.ts` for the
+opt-in handler-to-binary tests; ordinary tests use the fake executable.
 
 ## Removing a repository never prunes
 

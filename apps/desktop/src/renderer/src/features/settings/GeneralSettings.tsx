@@ -170,8 +170,8 @@ export function GeneralSettings(props: {
           />
           <SettingsField
             label="Seed Cargo dependency builds"
-            sub="Also share unchanged dependency builds. Build outputs that are not safe to reuse are compiled again."
-            help="Requires source sharing. Workspace and path dependency builds are compiled again."
+            sub="Share unchanged dependency builds when the CLI can verify safe reuse. Build outputs that are not safe to reuse are compiled again."
+            help="Requires source sharing. pwrgit-share 0.1.0 skips all Cargo seeding because safe reuse is not yet proven."
             control={
               <SettingsSwitch
                 checked={props.snapshot.worktreeReflink === "on" && props.snapshot.worktreeSeedCargoTarget === "on"}

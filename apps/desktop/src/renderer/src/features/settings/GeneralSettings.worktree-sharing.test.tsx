@@ -79,7 +79,8 @@ describe("worktree sharing settings", () => {
     await render("off");
     expect(container.textContent).toContain("Supported filesystems share unchanged source files");
     expect(container.textContent).toContain("Other filesystems keep today’s normal Git checkout");
-    expect(container.textContent).toContain("share unchanged dependency builds");
+    expect(container.textContent).toContain("Share unchanged dependency builds when the CLI can verify safe reuse");
+    expect(container.textContent).toContain("pwrgit-share 0.1.0 skips all Cargo seeding because safe reuse is not yet proven");
     expect(container.textContent).toContain("Build outputs that are not safe to reuse are compiled again");
     expect(container.textContent).not.toMatch(/freeing|\d+\s*GB/i);
   });

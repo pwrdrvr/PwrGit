@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { err, ok, type Result } from "@pwrgit/shared";
@@ -54,6 +54,14 @@ export async function worktreeAddWithSharing(
   // Let Git report a collision. Never give an external command an existing
   // destination that a later rollback might mistake for this attempt's files.
   if (existed || registeredBefore) return normalAdd();
+
+  // Git creates missing parent directories; pwrgit-share probes an existing
+  // parent before registering the checkout. Match Git's first-create behavior.
+  try {
+    await mkdir(dirname(worktreePath), { recursive: true });
+  } catch {
+    return normalAdd();
+  }
 
   const args = [
     "worktree", "add", "--json", "--donor", repoPath,
