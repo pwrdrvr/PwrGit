@@ -621,77 +621,147 @@ describe("local contribution checkpoints", () => {
     async (priorPage, legacy) => {
       const provider = base();
       const overlap = { ...repo, id: "OVERLAP", path: "sample-org/overlap" };
-      const external = { ...repo, id: "EXTERNAL", path: "other-org/external", owner: "other-org", ownerId: "O2" };
+      const external = {
+        ...repo,
+        id: "EXTERNAL",
+        path: "other-org/external",
+        owner: "other-org",
+        ownerId: "O2"
+      };
       const added = { ...repo, id: "ADDED", path: "sample-org/added" };
       let authorized = false;
       const inventoryCursors: (string | null)[] = [];
       provider.repositories = async (_identity, cursor) => {
         inventoryCursors.push(cursor);
-        if (!authorized && (!priorPage || cursor)) throw new ContributionSsoError();
+        if (!authorized && (!priorPage || cursor))
+          throw new ContributionSsoError();
         return cursor
           ? { ...page([overlap, added]), totalCount: 3 }
           : { ...page([repo], "NEXT", true), totalCount: 3 };
       };
-      provider.authored = async () => page([overlap, external].map((item): ContributionRecord => ({
-        ...row(`AUTHORED_${item.id}`), repo: item, author: identity.id, mergedAt: null,
-        lifecycle: {
-          createdAt: "2025-01-01T00:00:00Z", updatedAt: "2025-02-01T00:00:00Z",
-          closedAt: "2025-02-01T00:00:00Z", state: "CLOSED", events: [], complete: false, cursor: null
-        }
-      })));
-      const pulls = vi.fn<ContributionProvider["pulls"]>(async (_identity, item) => ({
-        ...page([{ ...row(`MERGED_${item.id}`), repo: item }]),
-        oldestUpdatedAt: "2026-05-01T00:00:00Z"
-      }));
+      provider.authored = async () =>
+        page(
+          [overlap, external].map(
+            (item): ContributionRecord => ({
+              ...row(`AUTHORED_${item.id}`),
+              repo: item,
+              author: identity.id,
+              mergedAt: null,
+              lifecycle: {
+                createdAt: "2025-01-01T00:00:00Z",
+                updatedAt: "2025-02-01T00:00:00Z",
+                closedAt: "2025-02-01T00:00:00Z",
+                state: "CLOSED",
+                events: [],
+                complete: false,
+                cursor: null
+              }
+            })
+          )
+        );
+      const pulls = vi.fn<ContributionProvider["pulls"]>(
+        async (_identity, item) => ({
+          ...page([{ ...row(`MERGED_${item.id}`), repo: item }]),
+          oldestUpdatedAt: "2026-05-01T00:00:00Z"
+        })
+      );
       provider.pulls = pulls;
       const { db, service } = setup(provider);
       await service.start(scope, false);
       await service.settled();
       const partial = service.read(scope)!;
       expect(partial).toMatchObject({
-        status: "partial", accessibleComplete: true, inventoryComplete: false,
+        status: "partial",
+        accessibleComplete: true,
+        inventoryComplete: false,
         inventoryReceived: priorPage ? 1 : 0
       });
-      expect(partial.repos.find((item) => item.id === overlap.id)?.source).toBe("authored_inventory");
+      expect(partial.repos.find((item) => item.id === overlap.id)?.source).toBe(
+        "authored_inventory"
+      );
       expect(partial.repoIndex).toBe(partial.repos.length);
       expect(pulls).toHaveBeenCalledTimes(priorPage ? 1 : 0);
       if (legacy) {
-        const stored = db.prepare("SELECT snapshot FROM contribution_snapshots WHERE profile_id=?").get(scope.profileId) as { snapshot: string };
+        const stored = db
+          .prepare(
+            "SELECT snapshot FROM contribution_snapshots WHERE profile_id=?"
+          )
+          .get(scope.profileId) as { snapshot: string };
         const checkpoint = JSON.parse(stored.snapshot);
         delete checkpoint.inventorySeen;
-        db.prepare("UPDATE contribution_snapshots SET snapshot=? WHERE profile_id=?").run(JSON.stringify(checkpoint), scope.profileId);
+        db.prepare(
+          "UPDATE contribution_snapshots SET snapshot=? WHERE profile_id=?"
+        ).run(JSON.stringify(checkpoint), scope.profileId);
       }
       authorized = true;
-      const restarted = new ContributionService(db, hosts, () => provider, async () => {});
+      const restarted = new ContributionService(
+        db,
+        hosts,
+        () => provider,
+        async () => {}
+      );
       await restarted.start(scope, false);
       await restarted.settled();
       const complete = restarted.read(scope)!;
-      expect(complete).toMatchObject({ status: "complete", inventoryReceived: 3, inventoryComplete: true });
+      expect(complete).toMatchObject({
+        status: "complete",
+        inventoryReceived: 3,
+        inventoryComplete: true
+      });
       expect(complete.inventorySeen).toEqual([repo.id, overlap.id, added.id]);
-      expect(complete.repos.find((item) => item.id === overlap.id)?.source).toBe("affiliated");
-      expect(complete.repos.find((item) => item.id === external.id)?.source).toBe("authored_inventory");
-      expect(complete.records.some((item) => item.id === `MERGED_${overlap.id}` && item.author === "U2")).toBe(true);
-      expect(complete.records.find((item) => item.id === `AUTHORED_${overlap.id}`)?.repo.source).toBe("affiliated");
-      expect(pulls.mock.calls.map(([, item]) => item.id)).toEqual(priorPage ? [repo.id, overlap.id, added.id] : [overlap.id, repo.id, added.id]);
-      expect(inventoryCursors).toEqual(priorPage ? [null, "NEXT", "NEXT"] : [null, null, "NEXT"]);
+      expect(
+        complete.repos.find((item) => item.id === overlap.id)?.source
+      ).toBe("affiliated");
+      expect(
+        complete.repos.find((item) => item.id === external.id)?.source
+      ).toBe("authored_inventory");
+      expect(
+        complete.records.some(
+          (item) => item.id === `MERGED_${overlap.id}` && item.author === "U2"
+        )
+      ).toBe(true);
+      expect(
+        complete.records.find((item) => item.id === `AUTHORED_${overlap.id}`)
+          ?.repo.source
+      ).toBe("affiliated");
+      expect(pulls.mock.calls.map(([, item]) => item.id)).toEqual(
+        priorPage
+          ? [repo.id, overlap.id, added.id]
+          : [overlap.id, repo.id, added.id]
+      );
+      expect(inventoryCursors).toEqual(
+        priorPage ? [null, "NEXT", "NEXT"] : [null, null, "NEXT"]
+      );
       expect(complete.window).toEqual(partial.window);
       expect(complete.startedAt).toBe(partial.startedAt);
       expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
     }
   );
-  it.each([false, true])("still rejects repeated inventory IDs (same page=%s)", async (samePage) => {
-    const provider = base();
-    provider.repositories = async (_identity, cursor) => samePage
-      ? { ...page([repo, repo]), totalCount: 2 }
-      : { ...page([repo], cursor ? null : "NEXT", !cursor), totalCount: 2 };
-    const { service } = setup(provider);
-    await service.start(scope, false);
-    await service.settled();
-    expect(service.read(scope)).toMatchObject({
-      status: "partial", inventoryComplete: false, inventoryReceived: samePage ? 0 : 1,
-      issues: [{ message: expect.stringContaining("Repository inventory repeated a node ID") }]
-    });
-  });
+  it.each([false, true])(
+    "still rejects repeated inventory IDs (same page=%s)",
+    async (samePage) => {
+      const provider = base();
+      provider.repositories = async (_identity, cursor) =>
+        samePage
+          ? { ...page([repo, repo]), totalCount: 2 }
+          : { ...page([repo], cursor ? null : "NEXT", !cursor), totalCount: 2 };
+      const { service } = setup(provider);
+      await service.start(scope, false);
+      await service.settled();
+      expect(service.read(scope)).toMatchObject({
+        status: "partial",
+        inventoryComplete: false,
+        inventoryReceived: samePage ? 0 : 1,
+        issues: [
+          {
+            message: expect.stringContaining(
+              "Repository inventory repeated a node ID"
+            )
+          }
+        ]
+      });
+    }
+  );
   it("enumerates authored external/personal activity directly, retains old closed stock, and avoids unrelated external PR walks", async () => {
     const provider = base();
     let externalWalks = 0;

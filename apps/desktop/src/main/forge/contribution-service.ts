@@ -131,6 +131,12 @@ export class ContributionService {
     const repos = new Map(stored.repos.map((repo) => [repo.id, repo]));
     const snapshot: ContributionSnapshot = {
       ...stored,
+      // Older checkpoints distinguish authored discoveries by their source.
+      inventorySeen:
+        stored.inventorySeen ??
+        stored.repos
+          .filter((repo) => repo.source !== "authored_inventory")
+          .map((repo) => repo.id),
       records: stored.records.map(({ repoId, ...record }) => {
         const repo = repos.get(repoId);
         if (!repo)
@@ -241,6 +247,7 @@ export class ContributionService {
       inventoryComplete: false,
       inventoryExpected: null,
       inventoryReceived: 0,
+      inventorySeen: [],
       organizationsComplete: false,
       repoCursor: null,
       orgCursor: null,
@@ -344,10 +351,11 @@ export class ContributionService {
         (org) => org.login?.toLowerCase() === repo.owner.toLowerCase()
       );
     const skipRepo = () => {
-      snapshot.repoRetry ??= {
-        index: snapshot.repoIndex,
-        cursor: snapshot.prCursor
-      };
+      if (!snapshot.repoRetry || snapshot.repoIndex < snapshot.repoRetry.index)
+        snapshot.repoRetry = {
+          index: snapshot.repoIndex,
+          cursor: snapshot.prCursor
+        };
       snapshot.blockedRepoIds ??= [];
       const id = snapshot.repos[snapshot.repoIndex]!.id;
       if (!snapshot.blockedRepoIds.includes(id))
@@ -395,12 +403,20 @@ export class ContributionService {
               "Repository inventory count changed or was unavailable. Refresh to rediscover coverage."
             );
           const repos = new Map(snapshot.repos.map((repo) => [repo.id, repo]));
+          const seen = new Set(snapshot.inventorySeen);
+          const positions = new Map(
+            snapshot.repos.map((repo, index) => [repo.id, index])
+          );
+          let nextRepoIndex = snapshot.repoIndex;
           for (const repo of page.nodes) {
-            if (repos.has(repo.id))
+            if (seen.has(repo.id))
               throw new Error(
                 "Repository inventory repeated a node ID. Refresh to rediscover coverage."
               );
-            repos.set(repo.id, repo);
+            seen.add(repo.id);
+            if (repos.get(repo.id)?.source === "authored_inventory")
+              nextRepoIndex = Math.min(nextRepoIndex, positions.get(repo.id)!);
+            repos.set(repo.id, { ...repo, source: "affiliated" });
           }
           if (repos.size > REPO_CAP)
             throw new Error(
@@ -413,6 +429,7 @@ export class ContributionService {
           );
           const received = snapshot.inventoryReceived + page.nodes.length;
           if (
+            seen.size !== received ||
             received > page.totalCount ||
             (!page.more && received !== page.totalCount)
           )
@@ -421,7 +438,22 @@ export class ContributionService {
             );
           snapshot.inventoryExpected = page.totalCount;
           snapshot.inventoryReceived = received;
+          snapshot.inventorySeen = [...seen];
           snapshot.repos = [...repos.values()];
+          snapshot.records = snapshot.records.map((record) => ({
+            ...record,
+            repo: repos.get(record.repo.id)!
+          }));
+          // Authored-only entries may already have been passed without a merger
+          // scan. Promotion must revisit them, preserving repository order.
+          if (nextRepoIndex < snapshot.repoIndex) {
+            snapshot.repoIndex = nextRepoIndex;
+            snapshot.prCursor = null;
+            if (snapshot.blockedRepoIds)
+              snapshot.blockedRepoIds = snapshot.blockedRepoIds.filter(
+                (id) => positions.get(id)! < nextRepoIndex
+              );
+          }
           snapshot.repoCursor = cursor;
           snapshot.inventoryComplete = !page.more;
           snapshot.pages++;

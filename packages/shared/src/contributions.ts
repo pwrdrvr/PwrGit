@@ -70,6 +70,8 @@ export type ContributionSnapshot = {
   inventoryComplete: boolean;
   inventoryExpected: number | null;
   inventoryReceived: number;
+  /** IDs confirmed by repository inventory, independent of authored discoveries. */
+  inventorySeen?: string[];
   repoCursor: string | null;
   orgCursor: string | null;
   organizationsComplete: boolean;
