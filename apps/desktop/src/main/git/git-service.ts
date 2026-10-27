@@ -1133,13 +1133,18 @@ export async function worktreeAdd(
   const raw = await git(args, repoPath);
   if (!raw.ok) return raw;
   if (raw.value.exitCode !== 0) {
-    const message = raw.value.stderr.trim();
-    const code = /already exists|already checked out|already used/i.test(message)
-      ? "already_exists"
-      : "worktree_add_failed";
-    return err({ kind: "repo", code, message: message || "worktree add failed" });
+    return err(worktreeAddError(raw.value.stderr));
   }
   return ok(undefined);
+}
+
+/** Shared by Git's add and the optional pwrgit-share create path. */
+export function worktreeAddError(stderr: string): PwrGitError {
+  const message = stderr.trim();
+  const code = /already exists|already checked out|already used/i.test(message)
+    ? "already_exists"
+    : "worktree_add_failed";
+  return { kind: "repo", code, message: message || "worktree add failed" };
 }
 
 /**

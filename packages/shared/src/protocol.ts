@@ -811,6 +811,10 @@ export const DIAGNOSTICS_DEFAULTS: DiagnosticsSettings = {
 };
 
 export type AppSettingsSnapshot = {
+  worktreeReflink: "off" | "on";
+  worktreeSeedCargoTarget: "off" | "on";
+  /** Executable override; empty uses pwrgit-share on PATH. */
+  worktreeShareCommand?: string;
   general: GeneralSettings;
   experimental: ExperimentalSettings;
   diagnostics: DiagnosticsSettings;
@@ -824,6 +828,9 @@ export type AppSettingsSnapshot = {
 };
 
 export type AppSettingsPatch = {
+  worktreeReflink?: "off" | "on";
+  worktreeSeedCargoTarget?: "off" | "on";
+  worktreeShareCommand?: string;
   general?: Partial<GeneralSettings>;
   experimental?: Partial<ExperimentalSettings>;
   diagnostics?: Partial<DiagnosticsSettings>;

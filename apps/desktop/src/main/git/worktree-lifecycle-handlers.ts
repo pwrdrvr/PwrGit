@@ -7,13 +7,13 @@ import type { SettingsService } from "../settings/settings-service";
 import { execGit } from "./dugite";
 import {
   listWorktrees,
-  worktreeAdd,
   worktreeRemove,
   type WorktreeInfo,
   type WorktreeRemoveError
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
 import { worktreePathFor } from "./worktree-paths";
+import { worktreeAddWithSharing } from "./worktree-share";
 import type { WorktreeStateService } from "./worktree-state";
 
 export function registerWorktreeLifecycleHandlers(
@@ -40,16 +40,16 @@ export function registerWorktreeLifecycleHandlers(
     return ok({ path: worktreePathFor(settings, repo.name, req.branch) });
   });
 
-  bus.register("worktree:create", async (req) => {
+  bus.register("worktree:create", async (req, ctx) => {
     const repo = repoRow(req.repoId);
     if (repo === undefined) {
       return err({ kind: "repo", code: "not_found", message: "repo not found" });
     }
     const wtPath = worktreePathFor(settings, repo.name, req.branch);
-    const added = await worktreeAdd(execGit, repo.path, wtPath, req.branch, {
+    const added = await worktreeAddWithSharing(execGit, repo.path, wtPath, req.branch, {
       newBranch: req.newBranch,
       ...(req.startPoint === undefined ? {} : { startPoint: req.startPoint })
-    });
+    }, settings.get(), (message) => logMain("info", "worktree", message), ctx.signal);
     if (!added.ok) return added;
     await indexer.refreshRepoWorktrees(repo.id);
     emitEvent("repo:changed", { profileId: repo.profile_id });

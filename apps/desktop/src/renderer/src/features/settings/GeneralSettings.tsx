@@ -2,6 +2,7 @@ import { GitRuntimeSettings } from "./GitRuntimeSettings";
 import type {
   AppearanceTheme,
   AppSettingsSnapshot,
+  AppSettingsPatch,
   SidebarDensity,
   SidebarTextSize
 } from "@pwrgit/shared";
@@ -49,6 +50,7 @@ export function GeneralSettings(props: {
   onSearchAllProfilesChange: (enabled: boolean) => void;
   onSidebarTextSizeChange: (size: SidebarTextSize) => void;
   onSidebarDensityChange: (density: SidebarDensity) => void;
+  onWorktreeSharingChange: (patch: AppSettingsPatch) => void;
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
@@ -144,6 +146,65 @@ export function GeneralSettings(props: {
       </SettingsSection>
 
       <GitRuntimeSettings />
+
+      <SettingsSection
+        eyebrow="Worktrees"
+        title="Worktree sharing"
+        description="Share unchanged files when creating a worktree on a supported filesystem."
+        chip={props.snapshot.worktreeReflink === "on" ? "On" : "Off"}
+        chipKind="default"
+      >
+        <div className="settings-fields">
+          <SettingsField
+            label="Share source files"
+            sub="Supported filesystems share unchanged source files. Other filesystems keep today’s normal Git checkout."
+            help="Requires pwrgit-share installed on PATH or the executable path below. Off by default."
+            control={
+              <SettingsSwitch
+                checked={props.snapshot.worktreeReflink === "on"}
+                disabled={props.saving}
+                label="Share source files"
+                onChange={(enabled) => props.onWorktreeSharingChange({ worktreeReflink: enabled ? "on" : "off" })}
+              />
+            }
+          />
+          <SettingsField
+            label="Seed Cargo dependency builds"
+            sub="Also share unchanged dependency builds. Build outputs that are not safe to reuse are compiled again."
+            help="Requires source sharing. Workspace and path dependency builds are compiled again."
+            control={
+              <SettingsSwitch
+                checked={props.snapshot.worktreeReflink === "on" && props.snapshot.worktreeSeedCargoTarget === "on"}
+                disabled={props.saving || props.snapshot.worktreeReflink !== "on"}
+                label="Seed Cargo dependency builds"
+                onChange={(enabled) => props.onWorktreeSharingChange({ worktreeSeedCargoTarget: enabled ? "on" : "off" })}
+              />
+            }
+          />
+          <SettingsField
+            label="pwrgit-share executable"
+            sub="Optional executable path. Leave empty to find pwrgit-share on PATH."
+            help="Saved when you leave the field."
+            control={
+              <input
+                key={props.snapshot.worktreeShareCommand ?? ""}
+                aria-label="pwrgit-share executable"
+                className="settings-input"
+                defaultValue={props.snapshot.worktreeShareCommand ?? ""}
+                disabled={props.saving}
+                spellCheck={false}
+                type="text"
+                onBlur={(event) => {
+                  const value = event.currentTarget.value.trim();
+                  if (value !== (props.snapshot.worktreeShareCommand ?? "")) {
+                    props.onWorktreeSharingChange({ worktreeShareCommand: value });
+                  }
+                }}
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
 
       <SettingsSection
         eyebrow="Search"

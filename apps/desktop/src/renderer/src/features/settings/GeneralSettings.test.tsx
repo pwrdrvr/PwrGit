@@ -18,6 +18,7 @@ function render(platform: string): string {
       onSearchAllProfilesChange={() => undefined}
       onSidebarTextSizeChange={() => undefined}
       onSidebarDensityChange={() => undefined}
+      onWorktreeSharingChange={() => undefined}
       platform={platform}
     />
   );
