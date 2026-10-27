@@ -1,0 +1,34 @@
+name: pwrgit-share
+on:
+  pull_request:
+    paths:
+      - 'tools/pwrgit-share/**'
+      - '.github/workflows/pwrgit-share.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: tools/pwrgit-share
+    env:
+      # Neither crate builds nor fixture builds consult the runner's Cargo home.
+      CARGO_HOME: ${{ runner.temp }}/pwrgit-share-cargo
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned stable toolchain
+        run: rustup toolchain install 1.94.1 --profile minimal --component rustfmt --component clippy
+      - run: cargo fmt --check
+      - run: cargo test --locked -- --nocapture
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo build --locked --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwrgit-share-${{ matrix.os }}
+          path: tools/pwrgit-share/target/release/pwrgit-share
