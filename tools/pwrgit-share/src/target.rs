@@ -38,7 +38,13 @@ impl DonorLocks {
                         walk(root, &p, locks)?;
                     }
                 }
-            } else if path.file_name() == Some(std::ffi::OsStr::new(".cargo-lock")) {
+            } else if path.file_name().is_some_and(|name| {
+                [".cargo-lock", ".cargo-build-lock", ".cargo-artifact-lock"]
+                    .iter()
+                    .any(|candidate| name == *candidate)
+            }) {
+                // Cargo 1.96+ keeps the legacy lock shared and holds the
+                // separate build/artifact locks exclusively. Check all three.
                 regular(root, path.strip_prefix(root).unwrap())?;
                 let mut open = fs::OpenOptions::new();
                 open.read(true);
@@ -150,11 +156,35 @@ fn seed_impl(
         report.reason = Some("layout-unknown".into());
         return Ok(report);
     };
+    let mut current_cmd = Command::new("rustc");
+    current_cmd.current_dir(donor).arg("-vV");
+    if let Some(home) = home {
+        current_cmd.env("CARGO_HOME", home);
+    }
+    let current = output(&mut current_cmd, 1)?;
+    let current = String::from_utf8_lossy(&current.stdout);
+    let commit = current
+        .lines()
+        .find_map(|s| s.strip_prefix("commit-hash: "))
+        .unwrap_or("");
+    let host = current
+        .lines()
+        .find_map(|s| s.strip_prefix("host: "))
+        .ok_or_else(|| Error::new(1, "rustc did not report a host target"))?;
     // --offline prevents index updates and artifact fetching. No config is
     // written. CARGO_HOME, if set by the caller, is inherited unchanged.
+    // Limit metadata to this host so an offline macOS cache need not contain
+    // manifests for Windows/Linux-only dependencies.
     let mut cmd = Command::new("cargo");
-    cmd.current_dir(donor)
-        .args(["metadata", "--offline", "--locked", "--format-version", "1"]);
+    cmd.current_dir(donor).args([
+        "metadata",
+        "--offline",
+        "--locked",
+        "--filter-platform",
+        host,
+        "--format-version",
+        "1",
+    ]);
     if let Some(home) = home {
         cmd.env("CARGO_HOME", home);
     }
@@ -179,17 +209,6 @@ fn seed_impl(
             report.skip("path-dep", 1);
         }
     }
-    let mut current_cmd = Command::new("rustc");
-    current_cmd.current_dir(donor).arg("-vV");
-    if let Some(home) = home {
-        current_cmd.env("CARGO_HOME", home);
-    }
-    let current = output(&mut current_cmd, 1)?;
-    let current = String::from_utf8_lossy(&current.stdout);
-    let commit = current
-        .lines()
-        .find_map(|s| s.strip_prefix("commit-hash: "))
-        .unwrap_or("");
     let info = from.join(".rustc_info.json");
     let toolchain = regular(&from, Path::new(".rustc_info.json"))
         .ok()

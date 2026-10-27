@@ -456,7 +456,20 @@ fn unproven_cargo_and_mismatched_toolchain_return_zero_without_target() {
     let bin = f.0.join("fake-cargo");
     fs::create_dir(&bin).unwrap();
     let meta = serde_json::json!({"workspace_members":["fixture"],"packages":[{"id":"fixture","name":"fixture","source":null},{"id":"dep","name":"dep","source":"registry+fixture"}]});
-    fs::write(bin.join("cargo"),format!("#!/bin/sh\ncase \"$1\" in --version) echo 'cargo 9.99.9 (unproven)';; metadata) echo '{}';; *) exit 1;; esac\n",meta)).unwrap();
+    fs::write(
+        bin.join("cargo"),
+        format!(
+            r#"#!/bin/sh
+case "$1" in
+  --version) echo 'cargo 9.99.9 (unproven)';;
+  metadata) case "$*" in *--filter-platform*) echo '{}';; *) exit 91;; esac;;
+  *) exit 1;;
+esac
+"#,
+            meta
+        ),
+    )
+    .unwrap();
     fs::set_permissions(bin.join("cargo"), fs::Permissions::from_mode(0o755)).unwrap();
     let dest = f.0.join("unproven");
     let invoke = || {
@@ -497,5 +510,50 @@ fn unproven_cargo_and_mismatched_toolchain_return_zero_without_target() {
     assert!(!dest.exists());
     if probe(&f.0).unwrap().cow != "none" {
         assert_eq!(v["reason"], "toolchain-mismatch");
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn newer_cargo_exclusive_locks_are_checked_with_legacy_shared_lock() {
+    use std::os::fd::AsRawFd;
+    for name in [".cargo-build-lock", ".cargo-artifact-lock"] {
+        let f = Fixture::new();
+        let donor = f.repo();
+        fs::create_dir_all(donor.join("target/debug")).unwrap();
+        let legacy = fs::File::create(donor.join("target/debug/.cargo-lock")).unwrap();
+        assert_eq!(
+            unsafe { libc::flock(legacy.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) },
+            0
+        );
+        let current = fs::File::create(donor.join("target/debug").join(name)).unwrap();
+        assert_eq!(
+            unsafe { libc::flock(current.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        let dest = f.0.join("newer-cargo");
+        let o = cli(
+            &donor,
+            &[
+                "worktree",
+                "add",
+                "--seed-target",
+                "-b",
+                "newer-cargo",
+                dest.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+        assert_eq!(
+            o.status.code(),
+            Some(3),
+            "{name}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        assert!(!dest.exists());
+        assert!(
+            !String::from_utf8_lossy(&git(&donor, &["worktree", "list", "--porcelain"]).stdout)
+                .contains(dest.to_str().unwrap())
+        );
     }
 }
