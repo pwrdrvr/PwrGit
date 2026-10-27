@@ -17,11 +17,10 @@ jobs:
     defaults:
       run:
         working-directory: tools/pwrgit-share
-    env:
-      # Neither crate builds nor fixture builds consult the runner's Cargo home.
-      CARGO_HOME: ${{ runner.temp }}/pwrgit-share-cargo
     steps:
       - uses: actions/checkout@v4
+      - name: Isolate Cargo home
+        run: echo "CARGO_HOME=${RUNNER_TEMP}/pwrgit-share-cargo" >> "$GITHUB_ENV"
       - name: Install pinned stable toolchain
         run: rustup toolchain install 1.94.1 --profile minimal --component rustfmt --component clippy
       - run: cargo fmt --check
