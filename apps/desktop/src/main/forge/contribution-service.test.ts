@@ -4,7 +4,7 @@ import {
   ContributionService,
   type ContributionScope
 } from "./contribution-service";
-import type { ContributionProvider } from "./github/contribution-provider";
+import { GitHubContributionProvider, type ContributionProvider } from "./github/contribution-provider";
 import type { ContributionRepo, ContributionRecord } from "@pwrgit/shared";
 
 const identity = { id: "U1", login: "sample-user", host: "github.com" };
@@ -186,6 +186,76 @@ describe("local contribution checkpoints", () => {
     expect(complete.issues).toEqual([]);
     expect(cursors).toEqual([null, "PAGE_2", "PAGE_3", "PAGE_3"]);
     expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+  });
+  it("finishes accessible activity after a blocked authored page and retries the gap after restart", async () => {
+    const provider = base();
+    let authorized = false;
+    const cursors: (string | null)[] = [];
+    provider.authored = async (_identity, cursor) => {
+      cursors.push(cursor);
+      const index = cursor ? 2 : 1;
+      const nodes: ContributionRecord[] = [{
+        ...row(`A${index}`), author: identity.id, mergedAt: null,
+        lifecycle: {
+          createdAt: "2025-01-01T00:00:00Z", updatedAt: "2025-02-01T00:00:00Z",
+          closedAt: "2025-02-01T00:00:00Z", state: "CLOSED", events: [], complete: false, cursor: null
+        }
+      }];
+      if (!cursor && authorized) nodes.push({ ...nodes[0]!, id: "RECOVERED" });
+      return {
+        ...page(nodes, cursor ? null : "NEXT", !cursor), totalCount: 3,
+        ...(!cursor && !authorized ? { skipped: 1, blockedOrganizations: [{ id: "42", login: "blocked-org" }] } : {})
+      };
+    };
+    provider.pulls = vi.fn(provider.pulls);
+    const { db, service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    const partial = service.read(scope)!;
+    expect(partial).toMatchObject({
+      status: "partial", accessibleComplete: true, repoIndex: 1,
+      authoredInventory: { received: 2, skipped: 1, exhausted: true, complete: false },
+      blockedOrganizations: [{ id: "42", login: "blocked-org" }]
+    });
+    expect(partial.records.map((record) => record.id)).toEqual(["A1", "A2", "P1"]);
+    expect(provider.pulls).toHaveBeenCalledTimes(1);
+    authorized = true;
+    const restarted = new ContributionService(db, hosts, () => provider, async () => {});
+    await restarted.start(scope, false);
+    await restarted.settled();
+    const complete = restarted.read(scope)!;
+    expect(complete.status).toBe("complete");
+    expect(complete.authoredInventory).toMatchObject({ received: 3, skipped: 0, complete: true });
+    expect(complete.records.some((record) => record.id === "RECOVERED")).toBe(true);
+    expect(complete.blockedOrganizations).toEqual([]);
+    expect(complete.window).toEqual(partial.window);
+    expect(cursors).toEqual([null, "NEXT", null, "NEXT"]);
+    expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+  });
+  it("skips the rest of an SSO-blocked organization and continues other repositories", async () => {
+    const provider = base();
+    const blocked = { ...repo, id: "BLOCKED", owner: "blocked-org", ownerId: "O42", path: "blocked-org/one" };
+    provider.repositories = async () => page([blocked, { ...blocked, id: "BLOCKED2", path: "blocked-org/two" }, repo]);
+    const calls: string[] = [];
+    const denied = new GitHubContributionProvider(identity.host, async () => JSON.stringify({
+      data: { viewer: identity, rateLimit: { remaining: 4000, resetAt: "2026-10-28T00:00:00Z" }, node: null },
+      errors: [{ type: "FORBIDDEN", extensions: { saml_failure: true }, message: "SAML enforcement" }]
+    }));
+    provider.pulls = async (viewer, item, cursor, signal) => {
+      calls.push(item.id);
+      if (item.owner === "blocked-org") return denied.pulls(viewer, item, cursor, signal);
+      return { ...page([row("ACCESSIBLE")]), oldestUpdatedAt: "2026-05-01T00:00:00Z" };
+    };
+    const { service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    expect(calls).toEqual(["BLOCKED", repo.id]);
+    expect(service.read(scope)).toMatchObject({
+      status: "partial", accessibleComplete: true, repoIndex: 3,
+      blockedRepoIds: ["BLOCKED", "BLOCKED2"],
+      blockedOrganizations: [{ login: "blocked-org" }],
+      records: [{ id: "ACCESSIBLE" }]
+    });
   });
   it("retains readable partial checkpoints when a host is disabled, while refusing new network reads", async () => {
     let enabled = true;
