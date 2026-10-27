@@ -72,9 +72,12 @@ def self_test():
         assert hash_file(donor) == original
         assert after['cloneId'] != a['cloneId'] and after['privateBytes'] > 0, after
         assert all(x.stat().st_nlink == 1 for x in (donor, clone, ordinary))
+        assert len({(x.stat().st_dev, x.stat().st_ino) for x in (donor, clone, ordinary)}) == 3
         return dict(clone=a, ordinaryCopy=c, cloneAfterWrite=after, passed=True)
 
 def audit(donor, recipient, control):
+    if len({p.resolve() for p in (donor, recipient, control)}) != 3:
+        raise ValueError('donor, recipient, and control must be distinct directories')
     paths = subprocess.check_output(['git', '-C', str(donor), 'ls-files', '--stage', '-z']).split(b'\0')
     result = dict(regularFiles=0, logicalBytes=0, fullClonePairs=0, sharedLogicalBytes=0,
                   sharedAllocatedReferenceBytes=0, recipientPrivateBytes=0, controlFullClonePairs=0,
@@ -86,7 +89,9 @@ def audit(donor, recipient, control):
         if mode not in (b'100644', b'100755'):
             result['skippedEntries'] += 1; continue
         source, target, normal = [root / rel for root in (donor, recipient, control)]
-        assert all(stat.S_ISREG(os.lstat(x).st_mode) and os.lstat(x).st_nlink == 1 for x in (source, target, normal)), rel
+        metadata = [os.lstat(x) for x in (source, target, normal)]
+        assert all(stat.S_ISREG(m.st_mode) and m.st_nlink == 1 for m in metadata), rel
+        assert len({(m.st_dev, m.st_ino) for m in metadata}) == 3, rel
         assert hash_file(source) == hash_file(target) == hash_file(normal), rel
         a, b, c = [attrs(x) for x in (source, target, normal)]
         size = source.stat().st_size

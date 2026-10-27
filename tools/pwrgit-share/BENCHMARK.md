@@ -120,3 +120,52 @@ cargo test --locked cargo_donor_independent_freshness_gate -- --nocapture
 ```
 
 The benchmark script creates and removes only its own disposable fixture. The freshness test asserts both the rejected relocation experiment and the public `fingerprint-unproven` result.
+
+
+## PwrRoute validation — real project, 2026-10-27
+
+The earlier fixture run was not validation of a large Rust application. This follow-up used PwrRoute commit `e1f276114cf5932f60b74aa1c6da16034990b878`, `cargo 1.97.1 (c980f4866 2026-06-30)` / `rustc 1.97.1 (8bab26f4f 2026-07-14)`, a local `git clone --no-hardlinks` snapshot, and disposable linked worktrees. The original checkout remained clean at its original HEAD, and no target directory was created there. Builds and final CLI checks used an explicitly temporary Cargo home; dependencies were fetched once into it, then all builds and metadata checks ran `--locked --offline`. An initial compatibility probe unexpectedly reached metadata with the inherited default Cargo home before the harness was corrected; no global Cargo configuration was changed.
+
+DiskHound's `native/diskhound-native-scanner/src/clone_attrs.rs` at local commit `0b0209b` identified the stronger APFS attributes to inspect. The independent [apfs-audit.py](scripts/apfs-audit.py) reads `CLONEID`, `CLONE_REFCNT`, `REALDEVID`, `EXT_FLAGS`, `PRIVATESIZE`, and `DATAALLOCSIZE` from the kernel, with no-follow options. It requires matching nonzero clone IDs on the same real device, full-sharing flags, reference counts ≥2, and separate inodes with link counts of 1. Its ordinary-copy negative control and one-byte-write check passed. This is stronger evidence than a clone-operation counter or a free-space delta. The CLI's existing `measure` command still does not query these attributes.
+
+| PwrRoute source observation | Result |
+| --- | ---: |
+| Tracked regular files | 331 |
+| Logical source bytes | 8,794,237 |
+| Matching APFS full-clone pairs | 331 / 331 |
+| Recipient private file-data bytes | 0 |
+| Shared allocated data references | 9,576,448 bytes |
+| Plain Git control full-clone pairs | 0 |
+| Plain Git control private file-data bytes | 9,576,448 |
+| Symlinks checked out by Git | 9 |
+| Share-command source creation | 4.5358 s |
+| Plain Git source creation | 0.1032 s |
+
+Every regular tracked file's bytes matched the donor and plain control. All regular source entries had `nlink == 1`. A one-byte write to the recipient's largest tracked file changed its clone ID and allocated **16,384 private bytes**, while donor/original/control hashes stayed unchanged. Git reset restored the expected bytes; it wrote an ordinary private copy of that changed file. Editing/resetting the disposable donor also left the recipient unchanged. The zero above is private **file data**, not a claim that the directory/inode metadata costs zero disk space, nor an estimate of volume space freed.
+
+The real project uncovered and fixed two compatibility problems:
+
+- Cargo 1.97 keeps `.cargo-lock` shared and locks `.cargo-build-lock` / `.cargo-artifact-lock` exclusively. The CLI now checks all three, matching [Cargo's upstream change](https://github.com/rust-lang/cargo/pull/16886). A live PwrRoute build now returns exit 3 and creates/registers no new worktree. The regression test holds a shared legacy lock and each new exclusive lock.
+- Offline metadata without a platform filter attempted to fetch an uncached Linux-only package on this Mac. Metadata now supplies `--filter-platform <rustc-host>`; the same temporary macOS-only cache succeeds offline. The command-shape regression rejects unfiltered metadata.
+
+| PwrRoute build | Seconds | External Fresh / Compiling | Workspace Fresh / Compiling |
+| --- | ---: | --- | --- |
+| Donor engine, cold | 126.75 | 0 / 152 | 0 / 1 |
+| Recipient engine, cold | 126.34 | 0 / 152 | 0 / 1 |
+| Recipient full app, after engine | 419.98 | 89 / 445 | 0 / 6 |
+
+`cargo test --locked --offline -p pwrroute-engine` passed **146 tests in each worktree**. The full `pwrroute-app` GPUI binary compiled successfully in the reflinked worktree. This is compile and engine-test coverage; the UI was not launched. Subsequent Fresh outputs belong to that worktree's own prior engine build, not target seeding.
+
+The seed command returned `unitsSeeded: 0`, `cloneCount: 0`, `copyCount: 0`, and `reason: fingerprint-unproven`. Each cold engine target compiled all **152 external packages**. Cargo target sharing remains disabled: this does **not** deliver the multi-gigabyte Rust artifact reuse discussed in the design. A sampled `oxc_parser` rlib had distinct clone IDs and **12,795,904 private bytes in each target**; the donor hash stayed unchanged during recipient builds. Final target logical sizes were 923,368,145 bytes (donor engine/tests) and 4,181,413,573 bytes (recipient full app/engine/tests). These are logical file-length totals, not unique physical allocation or savings. All 3,721 fingerprint files examined had `nlink == 1`.
+
+The source implementation also remains slower than ordinary checkout on this project: roughly 4.54 s versus 0.10 s, because it invokes Git per file. Source sharing is validated; this run does not establish a speed advantage.
+
+Machine-readable evidence is in [pwrroute-2026-10-27.json](validation/pwrroute-2026-10-27.json). The disposable repositories, targets, and Cargo home were removed after capturing it. The original PwrRoute and DiskHound repositories were read only. The CLI suite now has **15 passing tests**; formatting, Clippy, and both macOS/Ubuntu CI jobs pass.
+
+Reproduce APFS controls with `python3 scripts/apfs-audit.py --self-test`. For a project, create a private `git clone --no-hardlinks` snapshot, make a normal worktree and a share-command worktree from it, then run:
+
+```sh
+python3 scripts/apfs-audit.py --donor /temp/snapshot --recipient /temp/shared --control /temp/plain
+```
+
+Keep `CARGO_HOME` explicitly pointed at a new temporary directory for every Cargo/share invocation that can query metadata; fetch the selected target's locked dependencies there before offline builds. Use the project's pinned toolchain, and create/remove only these disposable worktrees.
