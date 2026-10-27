@@ -190,7 +190,7 @@
           <div class="dv-opt">
             <div class="dv-olabel"><a class="dv-oid">2b</a>The motion &#8212; card flies to the toast, scrim fades (looping specimen)</div>
             <div class="loop"><div class="sb"></div><div class="scrim"></div><div class="card"></div></div>
-            <p class="note">280&nbsp;ms, the house ease-out. The real thing is a FLIP: the toast mounts, then animates from the dialog&#8217;s rectangle to its own. Reverse on expand. <b>prefers-reduced-motion</b> swaps it for a 120&nbsp;ms cross-fade.</p>
+            <p class="note">300&nbsp;ms, the house ease-out. As built, an empty card flies from the dialog&#8217;s rectangle to the toast&#8217;s while the toast fades in under it; scaling the real toast would stretch its text eightfold on the way. Reverse on expand. <b>prefers-reduced-motion</b> swaps it for a 120&nbsp;ms cross-fade.</p>
           </div>
         </div>
         <div class="dv-opts" style="margin-top:28px">
@@ -221,7 +221,7 @@
           <div class="dv-opt">
             <div class="dv-olabel"><a class="dv-oid">2f</a>The remembered view</div>
             <div class="find" style="width:640px">
-              <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">1</span><div><h4>First run ever: the dialog, then it shrinks itself</h4><p>With no remembered view, the dialog opens and minimises itself after <b>4&nbsp;s</b> unless the pointer is over it or focus is inside it. That teaches where the toast lives. Remembered: <b>toast</b>.</p></div></div>
+              <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">1</span><div><h4>First run ever: the dialog, then it shrinks itself</h4><p>With no remembered view, the dialog opens and minimises itself after <b>4&nbsp;s</b> unless the pointer has moved over it or a key was pressed in it. Focus is no signal: the dialog takes focus as it opens. That teaches where the toast lives. Remembered: <b>toast</b>.</p></div></div>
               <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">2</span><div><h4>Minimise (button, backdrop, Escape) remembers toast</h4><p>The next Fetch all opens straight to the toast.</p></div></div>
               <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">3</span><div><h4>Expanding the toast remembers dialog</h4><p>The next run opens as the dialog and stays put &#8212; no auto-shrink once the reader has chosen. One preference covers Fetch all and Pull all.</p></div></div>
               <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">4</span><div><h4>Close is still Close</h4><p>After the run, a backdrop click or Escape closes, as today. Cancel is the toast&#8217;s &#215; while running, Dismiss once finished.</p></div></div>
