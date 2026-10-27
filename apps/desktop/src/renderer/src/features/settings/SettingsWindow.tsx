@@ -519,6 +519,7 @@ function SettingsSectionBody(props: {
         onSidebarDensityChange={(sidebarDensity) => {
           update({ general: { sidebarDensity } });
         }}
+        onWorktreeSharingChange={update}
       />
     );
   }

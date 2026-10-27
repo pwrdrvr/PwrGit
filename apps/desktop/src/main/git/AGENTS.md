@@ -760,6 +760,11 @@ Cases `worktreeRemove` does not check (submodules, a missing `.git` link, a
 tests pin this against real Git, with an event-loop stall assertion that the
 old path failed at 33s.
 
+Worktree sharing through `pwrgit-share` is opt-in; unavailable sharing falls
+back to a normal Git checkout. It uses reflinks, never hardlinks. Size UI must
+not promise freed bytes: shared extents may still belong to another checkout.
+See the [worktree sharing design](../../../../../docs/plans/2026-10-27-worktree-share.md).
+
 ## Removing a repository never prunes
 
 **No step runs `git worktree prune`.** `repo-removal.ts`:
