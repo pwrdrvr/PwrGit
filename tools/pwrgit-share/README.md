@@ -1,0 +1,30 @@
+# pwrgit-share
+
+MIT, copyright 2026 PwrDrvr LLC. One Rust library and one CLI; no desktop packaging or auto-update integration.
+
+From this directory, build with `cargo build --locked --release`. The pinned stable toolchain is Rust/Cargo 1.94.1. Install the resulting `target/release/pwrgit-share` on `PATH`, or configure PwrGit's `worktreeShareCommand`.
+
+```sh
+pwrgit-share probe --json /existing/destination/parent
+pwrgit-share worktree add -b feature --seed-target --donor /repo --json -- /new/worktree HEAD
+pwrgit-share target seed --from /repo/target --to /other/worktree/target --json
+pwrgit-share measure --json /other/worktree
+```
+
+The library exports `probe`, `worktree_add`, `target_seed`, and `measure`, with serializable result structs. `Error.code` is the CLI exit code. `Options.force_no_cow` (or CLI environment `PWRGIT_SHARE_FORCE_NONE=1`) disables sharing for diagnostics and fallback tests. It cannot enable sharing.
+
+Source materialization uses macOS `fclonefileat` (the descriptor form of `clonefile`) or Linux `FICLONE`. A real temporary-file clone and independent write in the destination parent establish capability. No-follow opens protect every donor path component. Git registers the worktree with `--no-checkout`; clean regular files with matching blob IDs and modes are cloned, hashed, entered into Git's stat cache, then Git completes checkout. Counts include only clones whose inodes survived checkout. Dirty, ignored, untracked, symlink, submodule, and unusual-mode files are left to Git. Unsupported/cross-filesystem source clones fall back to checkout. The CLI accepts `-b`; unknown flags and explicit `--detach` are errors. Existing branch arguments retain Git's normal branch semantics.
+
+Cargo targets are separate directories. Seeding holds nonblocking shared locks on every visible donor profile `.cargo-lock`; a locked donor returns exit 3 before registering a worktree. Only profiles whose locks are held can be seeded. The pinned Cargo build `1.94.1 (29ea6fb6a 2026-03-24)` fails the donor-independent gate when vendored registry sources relocate with the worktree. Production therefore deliberately returns zero units with `fingerprint-unproven` for all Cargo versions; mismatched/unknown rustc identities return `toolchain-mismatch`. A fixed Cargo-home source path being Fresh is insufficient to enable seeding. No public flag or environment variable bypasses this gate. Metadata uses `--offline --locked` and inherits the caller's `CARGO_HOME`; no configuration is written. The donor target must be immediately beside its `Cargo.toml`; external/custom build directory layouts are currently `layout-unknown`.
+
+The test-only experiment clones classic-layout regular library fingerprint files and matching hashed `deps/` artifacts for unambiguous registry/Git packages. Its candidate selection skips build scripts, proc macros, dependencies on excluded units, duplicate package names, and unknown layouts. This is a rejected experiment, not an enabled target-sharing feature. Workspace/path units, incremental state, Cargo locks, and uplifted final binaries are never seeded. `unitsSeeded` would count fingerprint units; workspace/path skip counts describe excluded metadata packages, and `layout-unknown` counts dependency packages with no proven unit. Modes and mtimes are preserved by the clone primitive; production target seeding writes no target bytes while the gate is closed. No hardlinks or byte-copy fallback exist; `copyCount` is always 0. Cargo still validates every fingerprint and decides freshness.
+
+Staging uses private `<name>.<pid>.<sequence>.pwrgit-share-partial` directories. The final target is published using an atomic rename that refuses to replace an existing destination, including an empty directory. Failure/cancellation removes this process's partials and any worktree it registered. It never sweeps someone else's partials, prunes worktrees, runs `git gc`/`cargo clean`, or removes a donor/Cargo home. `SIGINT` and `SIGTERM` request cleanup at the next subprocess or file boundary; embedders can call `cancel()`. Git subprocess completion is awaited before cleanup.
+
+All command results are JSON on stdout, including without `--json`; errors are JSON on stderr. Exit codes: 0 valid checkout or honest skipped seed, 1 I/O/seed/checkout failure, 2 usage, 3 donor locked, 4 Git failure before materialization, 130 cancellation. A fallback exit 0 already created a valid worktree: callers must not create it again.
+
+`measure.logicalBytes` sums regular-file lengths without following symlinks. Counts come from the initial operation record (the private Git admin directory for a worktree; a future enabled target seed can use `.pwrgit-share.json`), with `countsOrigin` explaining that subsequent edits are not tracked. For other directories counts are 0/unknown. Counts describe clone operations, not surviving physical extent sizes. APFS allocation is `not-distinguishable`; neither `du` nor `st_blocks` proves sharing. Free-space deltas in [BENCHMARK.md](BENCHMARK.md) are noisy.
+
+Users may install sccache or Kache separately for compiler reuse. This tool never configures or spawns them, sets a wrapper, or edits global Cargo config. Smaller debug information and faster linkers are separate user choices.
+
+Run `cargo test --locked`, `cargo fmt --check`, and `cargo clippy --locked --all-targets -- -D warnings`. Tests create disposable repositories and temporary Cargo homes. The repeatable benchmark is `python3 scripts/benchmark.py target/release/pwrgit-share`; it uses vendored registry data and a local `file://` Git dependency, with no registry downloads. [BENCHMARK.md](BENCHMARK.md) records this machine's run and its limits.
