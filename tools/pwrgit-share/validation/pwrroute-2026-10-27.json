@@ -1,0 +1,263 @@
+{
+  "date": "2026-10-27",
+  "sourceCommit": "e1f276114cf5932f60b74aa1c6da16034990b878",
+  "toolchain": "1.97",
+  "source": {
+    "sourceSeconds": 4.535803624996333,
+    "report": {
+      "fallback": "none",
+      "clonedFiles": 331,
+      "checkoutFiles": 9,
+      "hashedMismatches": 0
+    },
+    "plainSeconds": 0.10321275000751484
+  },
+  "apfs": {
+    "regularFiles": 331,
+    "logicalBytes": 8794237,
+    "fullClonePairs": 331,
+    "sharedLogicalBytes": 8794237,
+    "sharedAllocatedReferenceBytes": 9576448,
+    "recipientPrivateBytes": 0,
+    "controlFullClonePairs": 0,
+    "controlPrivateBytes": 9576448,
+    "skippedEntries": 9,
+    "nonemptyUnsharedPaths": [],
+    "largestSamples": [
+      {
+        "path": "THIRD_PARTY_LICENSES",
+        "logicalBytes": 1314411,
+        "donor": {
+          "allocatedReferenceBytes": 1314816,
+          "privateBytes": 0,
+          "realDevice": 16777230,
+          "cloneId": 407323511,
+          "extendedFlags": 65,
+          "cloneRefcount": 2
+        },
+        "recipient": {
+          "allocatedReferenceBytes": 1314816,
+          "privateBytes": 0,
+          "realDevice": 16777230,
+          "cloneId": 407323511,
+          "extendedFlags": 65,
+          "cloneRefcount": 2
+        },
+        "control": {
+          "allocatedReferenceBytes": 1314816,
+          "privateBytes": 1314816,
+          "realDevice": 16777230,
+          "cloneId": 407336089,
+          "extendedFlags": 0,
+          "cloneRefcount": 1
+        }
+      },
+      {
+        "path": "packaging/macos/PwrRoute.icns",
+        "logicalBytes": 494876,
+        "donor": {
+          "allocatedReferenceBytes": 495616,
+          "privateBytes": 0,
+          "realDevice": 16777230,
+          "cloneId": 407323856,
+          "extendedFlags": 65,
+          "cloneRefcount": 2
+        },
+        "recipient": {
+          "allocatedReferenceBytes": 495616,
+          "privateBytes": 0,
+          "realDevice": 16777230,
+          "cloneId": 407323856,
+          "extendedFlags": 65,
+          "cloneRefcount": 2
+        },
+        "control": {
+          "allocatedReferenceBytes": 495616,
+          "privateBytes": 495616,
+          "realDevice": 16777230,
+          "cloneId": 407336433,
+          "extendedFlags": 0,
+          "cloneRefcount": 1
+        }
+      },
+      {
+        "path": "licenses/velopack.txt",
+        "logicalBytes": 445523,
+        "donor": {
+          "allocatedReferenceBytes": 446464,
+          "privateBytes": 0,
+          "realDevice": 16777230,
+          "cloneId": 407323838,
+          "extendedFlags": 65,
+          "cloneRefcount": 2
+        },
+        "recipient": {
+          "allocatedReferenceBytes": 446464,
+          "privateBytes": 0,
+          "realDevice": 16777230,
+          "cloneId": 407323838,
+          "extendedFlags": 65,
+          "cloneRefcount": 2
+        },
+        "control": {
+          "allocatedReferenceBytes": 446464,
+          "privateBytes": 446464,
+          "realDevice": 16777230,
+          "cloneId": 407336415,
+          "extendedFlags": 0,
+          "cloneRefcount": 1
+        }
+      }
+    ]
+  },
+  "isolation": {
+    "path": "THIRD_PARTY_LICENSES",
+    "before": {
+      "allocatedReferenceBytes": 1314816,
+      "privateBytes": 0,
+      "realDevice": 16777230,
+      "cloneId": 407323511,
+      "extendedFlags": 65,
+      "cloneRefcount": 2
+    },
+    "afterOneByteWrite": {
+      "allocatedReferenceBytes": 1314816,
+      "privateBytes": 16384,
+      "realDevice": 16777230,
+      "cloneId": 407377036,
+      "extendedFlags": 1,
+      "cloneRefcount": 1
+    },
+    "afterReset": {
+      "allocatedReferenceBytes": 1314816,
+      "privateBytes": 1314816,
+      "realDevice": 16777230,
+      "cloneId": 407377039,
+      "extendedFlags": 0,
+      "cloneRefcount": 1
+    },
+    "bothDirectionsIsolated": true,
+    "originalUnchanged": true
+  },
+  "seed": {
+    "fallback": "none",
+    "clonedFiles": 331,
+    "checkoutFiles": 9,
+    "hashedMismatches": 0,
+    "target": {
+      "unitsSeeded": 0,
+      "unitsSkipped": {
+        "fingerprint-unproven": 632,
+        "workspace": 8
+      },
+      "cloneCount": 0,
+      "copyCount": 0,
+      "reason": "fingerprint-unproven"
+    }
+  },
+  "realCargoLock": {
+    "exitCode": 3,
+    "worktreeExists": false,
+    "lockName": ".cargo-build-lock"
+  },
+  "builds": {
+    "donor-build": {
+      "seconds": 126.75,
+      "counts": {
+        "registryGit": {
+          "Fresh": 0,
+          "Compiling": 152
+        },
+        "workspace": {
+          "Fresh": 0,
+          "Compiling": 1
+        }
+      },
+      "finished": true
+    },
+    "recipient-build": {
+      "seconds": 126.34,
+      "counts": {
+        "registryGit": {
+          "Fresh": 0,
+          "Compiling": 152
+        },
+        "workspace": {
+          "Fresh": 0,
+          "Compiling": 1
+        }
+      },
+      "finished": true
+    },
+    "app-build": {
+      "seconds": 419.98,
+      "counts": {
+        "registryGit": {
+          "Fresh": 89,
+          "Compiling": 445
+        },
+        "workspace": {
+          "Fresh": 0,
+          "Compiling": 6
+        }
+      },
+      "finished": true
+    }
+  },
+  "engineTests": {
+    "donor": {
+      "passed": 146,
+      "failed": 0
+    },
+    "recipient": {
+      "passed": 146,
+      "failed": 0
+    }
+  },
+  "targets": {
+    "donor": {
+      "logicalBytes": 923368145,
+      "regularFiles": 3293
+    },
+    "build-recipient": {
+      "logicalBytes": 4181413573,
+      "regularFiles": 11106
+    }
+  },
+  "fingerprintFilesWithNlinkOne": {
+    "donor": 776,
+    "build-recipient": 2945
+  },
+  "registryArtifactSample": {
+    "name": "liboxc_parser-fff272508f433600.rlib",
+    "donor": {
+      "allocatedReferenceBytes": 12795904,
+      "privateBytes": 12795904,
+      "realDevice": 16777230,
+      "cloneId": 407383314,
+      "extendedFlags": 0,
+      "cloneRefcount": 1
+    },
+    "recipient": {
+      "allocatedReferenceBytes": 12795904,
+      "privateBytes": 12795904,
+      "realDevice": 16777230,
+      "cloneId": 407394967,
+      "extendedFlags": 0,
+      "cloneRefcount": 1
+    },
+    "fullClonePair": false,
+    "donorUnchanged": true
+  },
+  "originalCheckoutUnchanged": true,
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+  "temporaryFixturesRemoved": true,
+  "distinctInodeRecheck": {
+    "regularFiles": 331,
+    "fullClonePairs": 331,
+    "recipientPrivateBytes": 0,
+    "controlFullClonePairs": 0,
+    "allThreeInodesDistinct": true
+  }
+}
