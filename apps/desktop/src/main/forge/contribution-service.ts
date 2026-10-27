@@ -2,6 +2,8 @@ import {
   canonicalForgeHostname,
   contributionWindow,
   type ContributionIdentity,
+  type ContributionBlockedOrganization,
+  type ContributionRepo,
   type ContributionRecord,
   type ContributionSnapshot,
   type ContributionWindow,
@@ -12,6 +14,7 @@ import type { ForgeHosts } from "./hosts";
 import {
   GitHubContributionProvider,
   ContributionRateLimitError,
+  ContributionSsoError,
   type ContributionProvider
 } from "./github/contribution-provider";
 import { logMain } from "../logs";
@@ -128,6 +131,12 @@ export class ContributionService {
     const repos = new Map(stored.repos.map((repo) => [repo.id, repo]));
     const snapshot: ContributionSnapshot = {
       ...stored,
+      // Older checkpoints distinguish authored discoveries by their source.
+      inventorySeen:
+        stored.inventorySeen ??
+        stored.repos
+          .filter((repo) => repo.source !== "authored_inventory")
+          .map((repo) => repo.id),
       records: stored.records.map(({ repoId, ...record }) => {
         const repo = repos.get(repoId);
         if (!repo)
@@ -238,6 +247,7 @@ export class ContributionService {
       inventoryComplete: false,
       inventoryExpected: null,
       inventoryReceived: 0,
+      inventorySeen: [],
       organizationsComplete: false,
       repoCursor: null,
       orgCursor: null,
@@ -254,6 +264,30 @@ export class ContributionService {
         complete: false
       }
     };
+    // Retry skipped work only after the accessible pass finishes. Rewinding
+    // every interrupted activation could starve repositories beyond its budget.
+    if (cached?.accessibleComplete) {
+      const retry = snapshot.authoredInventory.retry;
+      if (retry) {
+        const inventory = snapshot.authoredInventory;
+        inventory.cursor = retry.cursor;
+        inventory.seen = inventory.seen.slice(0, retry.seenCount);
+        inventory.received = retry.seenCount;
+        inventory.skipped = 0;
+        inventory.exhausted = false;
+        inventory.complete = false;
+        delete inventory.retry;
+      }
+      if (snapshot.repoRetry) {
+        snapshot.repoIndex = snapshot.repoRetry.index;
+        snapshot.prCursor = snapshot.repoRetry.cursor;
+        delete snapshot.repoRetry;
+      }
+      snapshot.blockedOrganizations = [];
+      snapshot.blockedRepoIds = [];
+      snapshot.blockedLifecycleIds = [];
+    }
+    snapshot.accessibleComplete = false;
     snapshot.status = "collecting";
     snapshot.issues = [];
     snapshot.retryAt = null;
@@ -280,6 +314,8 @@ export class ContributionService {
     signal: AbortSignal
   ): Promise<void> {
     let activationPages = 0;
+    let stage = "Repository discovery";
+    let issueRepoId: string | null = null;
     const startedAt = Date.now();
     const request = async () => {
       signal.throwIfAborted();
@@ -290,6 +326,53 @@ export class ContributionService {
       await this.pause(signal);
       signal.throwIfAborted();
       this.provider(scope.profileId, scope.host);
+    };
+    const addBlocked = (
+      organizations: ContributionBlockedOrganization[],
+      repo?: ContributionRepo
+    ) => {
+      const known = organizations.filter((org) => org.id || org.login);
+      if (repo?.ownerKind === "organization")
+        known.push({ id: repo.ownerId, login: repo.owner });
+      const entries = known.length ? known : [{ id: null, login: null }];
+      snapshot.blockedOrganizations ??= [];
+      for (const org of entries) {
+        const existing = snapshot.blockedOrganizations.find((item) =>
+          org.login && item.login
+            ? item.login.toLowerCase() === org.login.toLowerCase()
+            : item.id === org.id && item.login === org.login
+        );
+        if (!existing) snapshot.blockedOrganizations.push(org);
+      }
+    };
+    const blocked = (repo: ContributionRepo) =>
+      repo.ownerKind === "organization" &&
+      snapshot.blockedOrganizations?.some(
+        (org) => org.login?.toLowerCase() === repo.owner.toLowerCase()
+      );
+    const skipRepo = () => {
+      if (!snapshot.repoRetry || snapshot.repoIndex < snapshot.repoRetry.index)
+        snapshot.repoRetry = {
+          index: snapshot.repoIndex,
+          cursor: snapshot.prCursor
+        };
+      snapshot.blockedRepoIds ??= [];
+      const id = snapshot.repos[snapshot.repoIndex]!.id;
+      if (!snapshot.blockedRepoIds.includes(id))
+        snapshot.blockedRepoIds.push(id);
+      snapshot.repoIndex++;
+      snapshot.prCursor = null;
+      this.save(snapshot);
+    };
+    const inventorySso = (cause: unknown) => {
+      if (!(cause instanceof ContributionSsoError) || signal.aborted)
+        throw cause;
+      addBlocked(cause.organizations);
+      snapshot.issues.push({
+        repoId: null,
+        message: `${stage}: ${cause.message}`
+      });
+      this.save(snapshot);
     };
     const nextCursor = (
       previous: string | null,
@@ -303,65 +386,102 @@ export class ContributionService {
       return more ? next : null;
     };
     try {
-      while (!snapshot.inventoryComplete) {
-        await request();
-        const page = await provider.repositories(
-          snapshot.identity,
-          snapshot.repoCursor,
-          signal
-        );
-        if (
-          page.totalCount === undefined ||
-          (snapshot.inventoryExpected !== null &&
-            snapshot.inventoryExpected !== page.totalCount)
-        )
-          throw new Error(
-            "Repository inventory count changed or was unavailable. Refresh to rediscover coverage."
+      try {
+        while (!snapshot.inventoryComplete) {
+          await request();
+          const page = await provider.repositories(
+            snapshot.identity,
+            snapshot.repoCursor,
+            signal
           );
-        const repos = new Map(snapshot.repos.map((repo) => [repo.id, repo]));
-        for (const repo of page.nodes) {
-          if (repos.has(repo.id))
+          if (
+            page.totalCount === undefined ||
+            (snapshot.inventoryExpected !== null &&
+              snapshot.inventoryExpected !== page.totalCount)
+          )
             throw new Error(
-              "Repository inventory repeated a node ID. Refresh to rediscover coverage."
+              "Repository inventory count changed or was unavailable. Refresh to rediscover coverage."
             );
-          repos.set(repo.id, repo);
+          const repos = new Map(snapshot.repos.map((repo) => [repo.id, repo]));
+          const seen = new Set(snapshot.inventorySeen);
+          const positions = new Map(
+            snapshot.repos.map((repo, index) => [repo.id, index])
+          );
+          let nextRepoIndex = snapshot.repoIndex;
+          for (const repo of page.nodes) {
+            if (seen.has(repo.id))
+              throw new Error(
+                "Repository inventory repeated a node ID. Refresh to rediscover coverage."
+              );
+            seen.add(repo.id);
+            if (repos.get(repo.id)?.source === "authored_inventory")
+              nextRepoIndex = Math.min(nextRepoIndex, positions.get(repo.id)!);
+            repos.set(repo.id, { ...repo, source: "affiliated" });
+          }
+          if (repos.size > REPO_CAP)
+            throw new Error(
+              "Repository inventory exceeds the 10,000-repository storage limit."
+            );
+          const cursor = nextCursor(
+            snapshot.repoCursor,
+            page.cursor,
+            page.more
+          );
+          const received = snapshot.inventoryReceived + page.nodes.length;
+          if (
+            seen.size !== received ||
+            received > page.totalCount ||
+            (!page.more && received !== page.totalCount)
+          )
+            throw new Error(
+              "Repository inventory count does not match received nodes. Coverage is incomplete."
+            );
+          snapshot.inventoryExpected = page.totalCount;
+          snapshot.inventoryReceived = received;
+          snapshot.inventorySeen = [...seen];
+          snapshot.repos = [...repos.values()];
+          snapshot.records = snapshot.records.map((record) => ({
+            ...record,
+            repo: repos.get(record.repo.id)!
+          }));
+          // Authored-only entries may already have been passed without a merger
+          // scan. Promotion must revisit them, preserving repository order.
+          if (nextRepoIndex < snapshot.repoIndex) {
+            snapshot.repoIndex = nextRepoIndex;
+            snapshot.prCursor = null;
+            if (snapshot.blockedRepoIds)
+              snapshot.blockedRepoIds = snapshot.blockedRepoIds.filter(
+                (id) => positions.get(id)! < nextRepoIndex
+              );
+          }
+          snapshot.repoCursor = cursor;
+          snapshot.inventoryComplete = !page.more;
+          snapshot.pages++;
+          this.save(snapshot);
         }
-        if (repos.size > REPO_CAP)
-          throw new Error(
-            "Repository inventory exceeds the 10,000-repository storage limit."
-          );
-        const cursor = nextCursor(snapshot.repoCursor, page.cursor, page.more);
-        const received = snapshot.inventoryReceived + page.nodes.length;
-        if (
-          received > page.totalCount ||
-          (!page.more && received !== page.totalCount)
-        )
-          throw new Error(
-            "Repository inventory count does not match received nodes. Coverage is incomplete."
-          );
-        snapshot.inventoryExpected = page.totalCount;
-        snapshot.inventoryReceived = received;
-        snapshot.repos = [...repos.values()];
-        snapshot.repoCursor = cursor;
-        snapshot.inventoryComplete = !page.more;
-        snapshot.pages++;
-        this.save(snapshot);
+      } catch (cause) {
+        inventorySso(cause);
       }
-      while (!snapshot.organizationsComplete) {
-        await request();
-        const page = await provider.organizations(
-          snapshot.identity,
-          snapshot.orgCursor,
-          signal
-        );
-        const cursor = nextCursor(snapshot.orgCursor, page.cursor, page.more);
-        snapshot.organizations = [
-          ...new Set([...snapshot.organizations, ...page.nodes])
-        ];
-        snapshot.orgCursor = cursor;
-        snapshot.organizationsComplete = !page.more;
-        snapshot.pages++;
-        this.save(snapshot);
+      stage = "Organization discovery";
+      try {
+        while (!snapshot.organizationsComplete) {
+          await request();
+          const page = await provider.organizations(
+            snapshot.identity,
+            snapshot.orgCursor,
+            signal
+          );
+          const cursor = nextCursor(snapshot.orgCursor, page.cursor, page.more);
+          snapshot.organizations = [
+            ...new Set([...snapshot.organizations, ...page.nodes])
+          ];
+          snapshot.orgCursor = cursor;
+          snapshot.organizationsComplete = !page.more;
+          snapshot.pages++;
+          this.save(snapshot);
+        }
+      } catch (cause) {
+        inventorySso(cause);
       }
       const records = new Map(
         snapshot.records.map((row) => [
@@ -370,90 +490,123 @@ export class ContributionService {
         ])
       );
       // Direct lifetime author inventory covers personal/external projects without search indexing.
-      while (!snapshot.authoredInventory.complete) {
-        await request();
-        const inventory = snapshot.authoredInventory;
-        const page = await provider.authored(
-          snapshot.identity,
-          inventory.cursor,
-          signal
-        );
-        if (
-          page.totalCount === undefined ||
-          (inventory.expected !== null &&
-            inventory.expected !== page.totalCount)
-        )
-          throw new Error(
-            "Authored inventory count changed or was unavailable. Restart discovery."
+      stage = "Authored PR inventory";
+      try {
+        while (
+          !snapshot.authoredInventory.complete &&
+          !snapshot.authoredInventory.exhausted
+        ) {
+          await request();
+          const inventory = snapshot.authoredInventory;
+          const page = await provider.authored(
+            snapshot.identity,
+            inventory.cursor,
+            signal
           );
-        const seen = new Set(inventory.seen),
-          repos = new Map(snapshot.repos.map((repo) => [repo.id, repo]));
-        const additions = new Map(records);
-        for (const row of page.nodes) {
-          if (row.author !== snapshot.identity.id || !row.lifecycle)
-            throw new Error(
-              "An authored inventory node does not belong to the verified viewer."
-            );
-          if (seen.has(row.id))
-            throw new Error(
-              "Authored inventory repeated a PR node ID. Restart discovery."
-            );
-          seen.add(row.id);
-          const repo = repos.get(row.repo.id) ?? {
-            ...row.repo,
-            source: "authored_inventory" as const
-          };
-          repos.set(repo.id, repo);
-          row.repo = repo;
-          const mergedAt = row.mergedAt ? Date.parse(row.mergedAt) : NaN;
           if (
-            Date.parse(row.lifecycle.createdAt) <
-              Date.parse(snapshot.window.end) &&
-            (!row.mergedAt || mergedAt >= Date.parse(snapshot.window.start))
-          ) {
+            page.totalCount === undefined ||
+            (inventory.expected !== null &&
+              inventory.expected !== page.totalCount)
+          )
+            throw new Error(
+              "Authored inventory count changed or was unavailable. Restart discovery."
+            );
+          const seen = new Set(inventory.seen),
+            repos = new Map(snapshot.repos.map((repo) => [repo.id, repo]));
+          const additions = new Map(records);
+          for (const row of page.nodes) {
+            if (row.author !== snapshot.identity.id || !row.lifecycle)
+              throw new Error(
+                "An authored inventory node does not belong to the verified viewer."
+              );
+            if (seen.has(row.id))
+              throw new Error(
+                "Authored inventory repeated a PR node ID. Restart discovery."
+              );
+            seen.add(row.id);
+            const repo = repos.get(row.repo.id) ?? {
+              ...row.repo,
+              source: "authored_inventory" as const
+            };
+            repos.set(repo.id, repo);
+            row.repo = repo;
+            const mergedAt = row.mergedAt ? Date.parse(row.mergedAt) : NaN;
             if (
-              Date.parse(row.lifecycle.updatedAt) <
-                Date.parse(snapshot.window.start) &&
-              row.lifecycle.state === "CLOSED"
+              Date.parse(row.lifecycle.createdAt) <
+                Date.parse(snapshot.window.end) &&
+              (!row.mergedAt || mergedAt >= Date.parse(snapshot.window.start))
             ) {
-              row.lifecycle.frozenState = row.lifecycle.state;
-              row.lifecycle.complete = true;
+              if (
+                Date.parse(row.lifecycle.updatedAt) <
+                  Date.parse(snapshot.window.start) &&
+                row.lifecycle.state === "CLOSED"
+              ) {
+                row.lifecycle.frozenState = row.lifecycle.state;
+                row.lifecycle.complete = true;
+              }
+              additions.set(JSON.stringify([row.repo.id, row.id]), row);
             }
-            additions.set(JSON.stringify([row.repo.id, row.id]), row);
           }
+          const skipped = page.skipped ?? 0;
+          if (!Number.isSafeInteger(skipped) || skipped < 0)
+            throw new Error(
+              "GitHub returned invalid skipped authored coverage."
+            );
+          const skippedTotal = (inventory.skipped ?? 0) + skipped;
+          const received = inventory.received + page.nodes.length;
+          if (
+            received + skippedTotal > page.totalCount ||
+            (!page.more &&
+              (received + skippedTotal !== page.totalCount ||
+                seen.size !== received))
+          )
+            throw new Error(
+              "Authored inventory count does not match distinct received PRs."
+            );
+          if (
+            seen.size + skippedTotal > RECORD_CAP ||
+            additions.size > RECORD_CAP
+          )
+            throw new Error(
+              "Authored inventory exceeds the 20,000-PR metadata limit."
+            );
+          if (repos.size > REPO_CAP)
+            throw new Error(
+              "Authored repositories exceed the 10,000-repository limit."
+            );
+          const cursor = nextCursor(inventory.cursor, page.cursor, page.more);
+          snapshot.repos = [...repos.values()];
+          if (skipped) {
+            inventory.retry ??= {
+              cursor: inventory.cursor,
+              seenCount: inventory.seen.length
+            };
+            addBlocked(page.blockedOrganizations ?? []);
+          }
+          inventory.skipped = skippedTotal;
+          inventory.exhausted = !page.more;
+          inventory.cursor = cursor;
+          inventory.expected = page.totalCount;
+          inventory.received = received;
+          inventory.seen = [...seen];
+          inventory.complete = !page.more && skippedTotal === 0;
+          records.clear();
+          for (const [id, row] of additions) records.set(id, row);
+          snapshot.records = [...records.values()];
+          snapshot.pages++;
+          this.save(snapshot);
         }
-        const received = inventory.received + page.nodes.length;
-        if (
-          received > page.totalCount ||
-          (!page.more &&
-            (received !== page.totalCount || seen.size !== page.totalCount))
-        )
-          throw new Error(
-            "Authored inventory count does not match distinct received PRs."
-          );
-        if (seen.size > RECORD_CAP || additions.size > RECORD_CAP)
-          throw new Error(
-            "Authored inventory exceeds the 20,000-PR metadata limit."
-          );
-        if (repos.size > REPO_CAP)
-          throw new Error(
-            "Authored repositories exceed the 10,000-repository limit."
-          );
-        const cursor = nextCursor(inventory.cursor, page.cursor, page.more);
-        snapshot.repos = [...repos.values()];
-        inventory.cursor = cursor;
-        inventory.expected = page.totalCount;
-        inventory.received = received;
-        inventory.seen = [...seen];
-        inventory.complete = !page.more;
-        records.clear();
-        for (const [id, row] of additions) records.set(id, row);
-        snapshot.records = [...records.values()];
-        snapshot.pages++;
-        this.save(snapshot);
+      } catch (cause) {
+        inventorySso(cause);
       }
+      stage = "Repository PR collection";
       while (snapshot.repoIndex < snapshot.repos.length) {
         const repo = snapshot.repos[snapshot.repoIndex]!;
+        issueRepoId = repo.id;
+        if (blocked(repo)) {
+          skipRepo();
+          continue;
+        }
         // External authored activity is already complete from viewer.pullRequests.
         // Do not scan tens of thousands of unrelated PRs in contributed projects.
         if (repo.source === "authored_inventory") {
@@ -462,12 +615,21 @@ export class ContributionService {
           continue;
         }
         await request();
-        const page = await provider.pulls(
-          snapshot.identity,
-          repo,
-          snapshot.prCursor,
-          signal
-        );
+        let page: Awaited<ReturnType<ContributionProvider["pulls"]>>;
+        try {
+          page = await provider.pulls(
+            snapshot.identity,
+            repo,
+            snapshot.prCursor,
+            signal
+          );
+        } catch (cause) {
+          if (!(cause instanceof ContributionSsoError) || signal.aborted)
+            throw cause;
+          addBlocked(cause.organizations, repo);
+          skipRepo();
+          continue;
+        }
         // Process the entire page before applying the UPDATED_AT stop boundary.
         const cursor = nextCursor(snapshot.prCursor, page.cursor, page.more);
         const additions = page.nodes.filter(
@@ -500,17 +662,39 @@ export class ContributionService {
         snapshot.pages++;
         this.save(snapshot);
       }
+      stage = "Authored PR lifecycle collection";
+      // Lifecycle requests span repositories; a refusal cannot be assigned to one.
+      issueRepoId = null;
+      let timelineBatchSize = 25;
       while (true) {
         const pending = snapshot.records
-          .filter((row) => row.lifecycle && !row.lifecycle.complete)
-          .slice(0, 25);
+          .filter(
+            (row) =>
+              row.lifecycle &&
+              !row.lifecycle.complete &&
+              !blocked(row.repo) &&
+              !snapshot.blockedLifecycleIds?.includes(row.id)
+          )
+          .slice(0, timelineBatchSize);
         if (!pending.length) break;
         await request();
-        const pages = await provider.timelines(
-          snapshot.identity,
-          pending,
-          signal
-        );
+        let pages: Awaited<ReturnType<ContributionProvider["timelines"]>>;
+        try {
+          pages = await provider.timelines(snapshot.identity, pending, signal);
+        } catch (cause) {
+          if (!(cause instanceof ContributionSsoError) || signal.aborted)
+            throw cause;
+          // Isolate a refused batch before assigning the failure to an org.
+          if (pending.length > 1) {
+            timelineBatchSize = 1;
+            continue;
+          }
+          addBlocked(cause.organizations, pending[0]!.repo);
+          snapshot.blockedLifecycleIds ??= [];
+          snapshot.blockedLifecycleIds.push(pending[0]!.id);
+          this.save(snapshot);
+          continue;
+        }
         if (pages.length !== pending.length)
           throw new Error("Some PR lifecycle histories were not returned.");
         const updates = pending.map((row) => {
@@ -627,19 +811,28 @@ export class ContributionService {
         this.save(snapshot);
       }
       signal.throwIfAborted();
-      snapshot.status = "complete";
-      snapshot.refreshedAt = new Date().toISOString();
+      snapshot.accessibleComplete = true;
+      snapshot.status =
+        snapshot.inventoryComplete &&
+        snapshot.organizationsComplete &&
+        snapshot.authoredInventory.complete &&
+        !snapshot.blockedOrganizations?.length &&
+        !snapshot.blockedRepoIds?.length &&
+        !snapshot.blockedLifecycleIds?.length
+          ? "complete"
+          : "partial";
+      if (snapshot.status === "complete")
+        snapshot.refreshedAt = new Date().toISOString();
     } catch (cause) {
       snapshot.status = signal.aborted ? "canceled" : "partial";
-      snapshot.issues = [
-        {
-          repoId: snapshot.repos[snapshot.repoIndex]?.id ?? null,
-          message:
-            cause instanceof Error
-              ? cause.message
-              : "Collection stopped; coverage is incomplete."
-        }
-      ];
+      snapshot.issues.push({
+        repoId: issueRepoId,
+        message: `${stage}: ${
+          cause instanceof Error
+            ? cause.message
+            : "Collection stopped; coverage is incomplete."
+        }`
+      });
       snapshot.retryAt =
         cause instanceof ContributionRateLimitError ? cause.retryAt : null;
     }

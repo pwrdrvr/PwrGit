@@ -4,7 +4,11 @@ import {
   ContributionService,
   type ContributionScope
 } from "./contribution-service";
-import type { ContributionProvider } from "./github/contribution-provider";
+import {
+  GitHubContributionProvider,
+  ContributionSsoError,
+  type ContributionProvider
+} from "./github/contribution-provider";
 import type { ContributionRepo, ContributionRecord } from "@pwrgit/shared";
 
 const identity = { id: "U1", login: "sample-user", host: "github.com" };
@@ -84,6 +88,335 @@ afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
 describe("local contribution checkpoints", () => {
+  it.each([
+    ["repositories", "Repository discovery", null],
+    ["organizations", "Organization discovery", null],
+    ["authored", "Authored PR inventory", null],
+    ["pulls", "Repository PR collection", repo.id]
+  ] as const)(
+    "identifies a failed %s stage without blaming an unrelated repository",
+    async (method, stage, repoId) => {
+      const provider = base();
+      provider[method] = async () => {
+        throw new Error(
+          "SAML SSO authorization required; resume after authorizing GitHub CLI."
+        );
+      };
+      const { service } = setup(provider);
+      await service.start(scope, false);
+      await service.settled();
+      expect(service.read(scope)).toMatchObject({
+        status: "partial",
+        repoIndex: 0,
+        issues: [
+          {
+            repoId,
+            message: `${stage}: SAML SSO authorization required; resume after authorizing GitHub CLI.`
+          }
+        ]
+      });
+      expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+    }
+  );
+  it("keeps authored pages and resumes their cursor after an SSO refusal", async () => {
+    const provider = base();
+    let authorized = false;
+    const cursors: (string | null)[] = [];
+    provider.authored = async (_identity, cursor) => {
+      cursors.push(cursor);
+      if (cursor === "PAGE_3" && !authorized)
+        throw new Error("SAML SSO authorization required.");
+      const index = cursor === "PAGE_3" ? 3 : cursor === "PAGE_2" ? 2 : 1;
+      return {
+        ...page<ContributionRecord>(
+          [
+            {
+              ...row(`A${index}`),
+              author: identity.id,
+              mergedAt: null,
+              lifecycle: {
+                createdAt: "2025-01-01T00:00:00Z",
+                updatedAt: "2025-02-01T00:00:00Z",
+                closedAt: "2025-02-01T00:00:00Z",
+                state: "CLOSED",
+                events: [],
+                complete: false,
+                cursor: null
+              }
+            }
+          ],
+          `PAGE_${index + 1}`,
+          index < 3
+        ),
+        totalCount: 3
+      };
+    };
+    provider.pulls = vi.fn(provider.pulls);
+    const { db, service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    const partial = service.read(scope)!;
+    expect(partial).toMatchObject({
+      status: "partial",
+      repoIndex: 0,
+      authoredInventory: { received: 2, cursor: "PAGE_3", complete: false },
+      issues: [
+        {
+          repoId: null,
+          message: "Authored PR inventory: SAML SSO authorization required."
+        }
+      ]
+    });
+    expect(partial.records.map((record) => record.id)).toEqual(["A1", "A2"]);
+    expect(provider.pulls).not.toHaveBeenCalled();
+    authorized = true;
+    const restarted = new ContributionService(
+      db,
+      hosts,
+      () => provider,
+      async () => {}
+    );
+    await restarted.start(scope, false);
+    await restarted.settled();
+    const complete = restarted.read(scope)!;
+    expect(complete.status).toBe("complete");
+    expect(complete.authoredInventory).toMatchObject({
+      received: 3,
+      complete: true
+    });
+    expect(complete.records.map((record) => record.id)).toEqual([
+      "A1",
+      "A2",
+      "A3",
+      "P1"
+    ]);
+    expect(complete.window).toEqual(partial.window);
+    expect(complete.startedAt).toBe(partial.startedAt);
+    expect(complete.issues).toEqual([]);
+    expect(cursors).toEqual([null, "PAGE_2", "PAGE_3", "PAGE_3"]);
+    expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+  });
+  it("finishes accessible activity after a blocked authored page and retries the gap after restart", async () => {
+    const provider = base();
+    let authorized = false;
+    const cursors: (string | null)[] = [];
+    provider.authored = async (_identity, cursor) => {
+      cursors.push(cursor);
+      const index = cursor ? 2 : 1;
+      const nodes: ContributionRecord[] = [
+        {
+          ...row(`A${index}`),
+          author: identity.id,
+          mergedAt: null,
+          lifecycle: {
+            createdAt: "2025-01-01T00:00:00Z",
+            updatedAt: "2025-02-01T00:00:00Z",
+            closedAt: "2025-02-01T00:00:00Z",
+            state: "CLOSED",
+            events: [],
+            complete: false,
+            cursor: null
+          }
+        }
+      ];
+      if (!cursor && authorized) nodes.push({ ...nodes[0]!, id: "RECOVERED" });
+      return {
+        ...page(nodes, cursor ? null : "NEXT", !cursor),
+        totalCount: 3,
+        ...(!cursor && !authorized
+          ? {
+              skipped: 1,
+              blockedOrganizations: [{ id: "42", login: "blocked-org" }]
+            }
+          : {})
+      };
+    };
+    provider.pulls = vi.fn(provider.pulls);
+    const { db, service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    const partial = service.read(scope)!;
+    expect(partial).toMatchObject({
+      status: "partial",
+      accessibleComplete: true,
+      repoIndex: 1,
+      authoredInventory: {
+        received: 2,
+        skipped: 1,
+        exhausted: true,
+        complete: false
+      },
+      blockedOrganizations: [{ id: "42", login: "blocked-org" }]
+    });
+    expect(partial.records.map((record) => record.id)).toEqual([
+      "A1",
+      "A2",
+      "P1"
+    ]);
+    expect(provider.pulls).toHaveBeenCalledTimes(1);
+    authorized = true;
+    const restarted = new ContributionService(
+      db,
+      hosts,
+      () => provider,
+      async () => {}
+    );
+    await restarted.start(scope, false);
+    await restarted.settled();
+    const complete = restarted.read(scope)!;
+    expect(complete.status).toBe("complete");
+    expect(complete.authoredInventory).toMatchObject({
+      received: 3,
+      skipped: 0,
+      complete: true
+    });
+    expect(complete.records.some((record) => record.id === "RECOVERED")).toBe(
+      true
+    );
+    expect(complete.blockedOrganizations).toEqual([]);
+    expect(complete.window).toEqual(partial.window);
+    expect(cursors).toEqual([null, "NEXT", null, "NEXT"]);
+    expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+  });
+  it("skips the rest of an SSO-blocked organization and continues other repositories", async () => {
+    const provider = base();
+    const blocked = {
+      ...repo,
+      id: "BLOCKED",
+      owner: "blocked-org",
+      ownerId: "O42",
+      path: "blocked-org/one"
+    };
+    provider.repositories = async () =>
+      page([
+        blocked,
+        { ...blocked, id: "BLOCKED2", path: "blocked-org/two" },
+        repo
+      ]);
+    const calls: string[] = [];
+    let authorized = false;
+    const denied = new GitHubContributionProvider(identity.host, async () =>
+      JSON.stringify({
+        data: {
+          viewer: identity,
+          rateLimit: { remaining: 4000, resetAt: "2026-10-28T00:00:00Z" },
+          node: null
+        },
+        errors: [
+          {
+            type: "FORBIDDEN",
+            extensions: { saml_failure: true },
+            message: "SAML enforcement"
+          }
+        ]
+      })
+    );
+    provider.pulls = async (viewer, item, cursor, signal) => {
+      calls.push(item.id);
+      if (item.owner === "blocked-org" && !authorized)
+        return denied.pulls(viewer, item, cursor, signal);
+      return {
+        ...page([
+          {
+            ...row(item.id === repo.id ? "ACCESSIBLE" : `RECOVERED_${item.id}`),
+            repo: item
+          }
+        ]),
+        oldestUpdatedAt: "2026-05-01T00:00:00Z"
+      };
+    };
+    const { service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    expect(calls).toEqual(["BLOCKED", repo.id]);
+    expect(service.read(scope)).toMatchObject({
+      status: "partial",
+      accessibleComplete: true,
+      repoIndex: 3,
+      blockedRepoIds: ["BLOCKED", "BLOCKED2"],
+      blockedOrganizations: [{ login: "blocked-org" }],
+      records: [{ id: "ACCESSIBLE" }]
+    });
+    authorized = true;
+    await service.start(scope, false);
+    await service.settled();
+    expect(service.read(scope)).toMatchObject({
+      status: "complete",
+      blockedRepoIds: [],
+      blockedOrganizations: []
+    });
+    expect(service.read(scope)?.records).toHaveLength(3);
+    expect(calls).toEqual(["BLOCKED", repo.id, "BLOCKED", "BLOCKED2", repo.id]);
+  });
+  it("isolates SSO failures in mixed lifecycle batches and retries skipped histories", async () => {
+    const provider = base();
+    let authorized = false;
+    const blockedRepo = {
+      ...repo,
+      id: "B",
+      owner: "blocked-org",
+      path: "blocked-org/widget"
+    };
+    const rows: ContributionRecord[] = ["BLOCKED1", "OPEN", "BLOCKED2"].map(
+      (id) => ({
+        ...row(id),
+        repo: id === "OPEN" ? repo : blockedRepo,
+        author: identity.id,
+        mergedAt: null,
+        lifecycle: {
+          createdAt: "2026-05-01T00:00:00Z",
+          updatedAt: "2026-06-01T00:00:00Z",
+          closedAt: null,
+          state: "OPEN",
+          events: [],
+          complete: false,
+          cursor: null
+        }
+      })
+    );
+    provider.authored = async () =>
+      page(rows.map((row) => structuredClone(row)));
+    const calls: string[][] = [];
+    provider.timelines = async (_identity, items) => {
+      calls.push(items.map((item) => item.id));
+      if (!authorized && items.some((item) => item.repo.id === "B"))
+        throw new ContributionSsoError();
+      return items.map((item) => ({
+        id: item.id,
+        events: [],
+        cursor: null,
+        more: false,
+        filteredCount: 0
+      }));
+    };
+    const { service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    const partial = service.read(scope)!;
+    expect(partial).toMatchObject({
+      status: "partial",
+      accessibleComplete: true
+    });
+    expect(
+      partial.records.find((row) => row.id === "OPEN")?.lifecycle?.complete
+    ).toBe(true);
+    expect(calls).toEqual([
+      ["BLOCKED1", "OPEN", "BLOCKED2"],
+      ["BLOCKED1"],
+      ["OPEN"]
+    ]);
+    authorized = true;
+    await service.start(scope, false);
+    await service.settled();
+    expect(service.read(scope)?.status).toBe("complete");
+    expect(
+      service
+        .read(scope)
+        ?.records.filter((row) => row.lifecycle)
+        .every((row) => row.lifecycle?.complete)
+    ).toBe(true);
+    expect(calls.at(-1)).toEqual(["BLOCKED1", "BLOCKED2"]);
+  });
   it("retains readable partial checkpoints when a host is disabled, while refusing new network reads", async () => {
     let enabled = true;
     const hostGate = {
@@ -278,6 +611,157 @@ describe("local contribution checkpoints", () => {
       expect(service.read(scope)?.repoIndex).toBe(0);
     }
   });
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true]
+  ])(
+    "promotes authored discoveries on inventory resume (prior inventory page=%s, legacy checkpoint=%s)",
+    async (priorPage, legacy) => {
+      const provider = base();
+      const overlap = { ...repo, id: "OVERLAP", path: "sample-org/overlap" };
+      const external = {
+        ...repo,
+        id: "EXTERNAL",
+        path: "other-org/external",
+        owner: "other-org",
+        ownerId: "O2"
+      };
+      const added = { ...repo, id: "ADDED", path: "sample-org/added" };
+      let authorized = false;
+      const inventoryCursors: (string | null)[] = [];
+      provider.repositories = async (_identity, cursor) => {
+        inventoryCursors.push(cursor);
+        if (!authorized && (!priorPage || cursor))
+          throw new ContributionSsoError();
+        return cursor
+          ? { ...page([overlap, added]), totalCount: 3 }
+          : { ...page([repo], "NEXT", true), totalCount: 3 };
+      };
+      provider.authored = async () =>
+        page(
+          [overlap, external].map(
+            (item): ContributionRecord => ({
+              ...row(`AUTHORED_${item.id}`),
+              repo: item,
+              author: identity.id,
+              mergedAt: null,
+              lifecycle: {
+                createdAt: "2025-01-01T00:00:00Z",
+                updatedAt: "2025-02-01T00:00:00Z",
+                closedAt: "2025-02-01T00:00:00Z",
+                state: "CLOSED",
+                events: [],
+                complete: false,
+                cursor: null
+              }
+            })
+          )
+        );
+      const pulls = vi.fn<ContributionProvider["pulls"]>(
+        async (_identity, item) => ({
+          ...page([{ ...row(`MERGED_${item.id}`), repo: item }]),
+          oldestUpdatedAt: "2026-05-01T00:00:00Z"
+        })
+      );
+      provider.pulls = pulls;
+      const { db, service } = setup(provider);
+      await service.start(scope, false);
+      await service.settled();
+      const partial = service.read(scope)!;
+      expect(partial).toMatchObject({
+        status: "partial",
+        accessibleComplete: true,
+        inventoryComplete: false,
+        inventoryReceived: priorPage ? 1 : 0
+      });
+      expect(partial.repos.find((item) => item.id === overlap.id)?.source).toBe(
+        "authored_inventory"
+      );
+      expect(partial.repoIndex).toBe(partial.repos.length);
+      expect(pulls).toHaveBeenCalledTimes(priorPage ? 1 : 0);
+      if (legacy) {
+        const stored = db
+          .prepare(
+            "SELECT snapshot FROM contribution_snapshots WHERE profile_id=?"
+          )
+          .get(scope.profileId) as { snapshot: string };
+        const checkpoint = JSON.parse(stored.snapshot);
+        delete checkpoint.inventorySeen;
+        db.prepare(
+          "UPDATE contribution_snapshots SET snapshot=? WHERE profile_id=?"
+        ).run(JSON.stringify(checkpoint), scope.profileId);
+      }
+      authorized = true;
+      const restarted = new ContributionService(
+        db,
+        hosts,
+        () => provider,
+        async () => {}
+      );
+      await restarted.start(scope, false);
+      await restarted.settled();
+      const complete = restarted.read(scope)!;
+      expect(complete).toMatchObject({
+        status: "complete",
+        inventoryReceived: 3,
+        inventoryComplete: true
+      });
+      expect(complete.inventorySeen).toEqual([repo.id, overlap.id, added.id]);
+      expect(
+        complete.repos.find((item) => item.id === overlap.id)?.source
+      ).toBe("affiliated");
+      expect(
+        complete.repos.find((item) => item.id === external.id)?.source
+      ).toBe("authored_inventory");
+      expect(
+        complete.records.some(
+          (item) => item.id === `MERGED_${overlap.id}` && item.author === "U2"
+        )
+      ).toBe(true);
+      expect(
+        complete.records.find((item) => item.id === `AUTHORED_${overlap.id}`)
+          ?.repo.source
+      ).toBe("affiliated");
+      expect(pulls.mock.calls.map(([, item]) => item.id)).toEqual(
+        priorPage
+          ? [repo.id, overlap.id, added.id]
+          : [overlap.id, repo.id, added.id]
+      );
+      expect(inventoryCursors).toEqual(
+        priorPage ? [null, "NEXT", "NEXT"] : [null, null, "NEXT"]
+      );
+      expect(complete.window).toEqual(partial.window);
+      expect(complete.startedAt).toBe(partial.startedAt);
+      expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+    }
+  );
+  it.each([false, true])(
+    "still rejects repeated inventory IDs (same page=%s)",
+    async (samePage) => {
+      const provider = base();
+      provider.repositories = async (_identity, cursor) =>
+        samePage
+          ? { ...page([repo, repo]), totalCount: 2 }
+          : { ...page([repo], cursor ? null : "NEXT", !cursor), totalCount: 2 };
+      const { service } = setup(provider);
+      await service.start(scope, false);
+      await service.settled();
+      expect(service.read(scope)).toMatchObject({
+        status: "partial",
+        inventoryComplete: false,
+        inventoryReceived: samePage ? 0 : 1,
+        issues: [
+          {
+            message: expect.stringContaining(
+              "Repository inventory repeated a node ID"
+            )
+          }
+        ]
+      });
+    }
+  );
   it("enumerates authored external/personal activity directly, retains old closed stock, and avoids unrelated external PR walks", async () => {
     const provider = base();
     let externalWalks = 0;
