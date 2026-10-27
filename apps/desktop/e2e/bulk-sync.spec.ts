@@ -1,4 +1,5 @@
 import { writeFileSync } from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { launchApp, type AppHandle } from "./fixtures/electron-app";
@@ -93,29 +94,55 @@ test("Fetch all reports one broken remote without stopping other repositories", 
 test("Fetch all minimises to a toast and expands back to its results", async () => {
   sandbox = createGitSandbox();
   sandbox.makeRepoBehindRemote("alpha");
-  sandbox.makeRepoBehindRemote("beta");
+  const wedged = sandbox.makeRepoBehindRemote("beta");
+  // beta's origin accepts the connection and never answers, so the run is
+  // still live when Minimise is clicked. Local remotes finish in
+  // milliseconds, and a finished run has no Minimise to click.
+  const held: Socket[] = [];
+  const silent = createServer((socket) => {
+    held.push(socket);
+    socket.on("error", () => undefined);
+  });
+  await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+  const address = silent.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("silent remote did not bind a TCP port");
+  }
+  sandbox.git(
+    wedged.path,
+    "remote",
+    "set-url",
+    "origin",
+    `git://127.0.0.1:${address.port}/beta.git`
+  );
 
-  handle = await launchApp();
-  const { window } = handle;
-  await addRootAndExpand(window, handle, sandbox, "alpha");
-  await rememberDialogView(window);
-  await window.getByRole("button", { name: "Fetch all repos", exact: true }).click();
+  try {
+    handle = await launchApp();
+    const { window } = handle;
+    await addRootAndExpand(window, handle, sandbox, "alpha");
+    await rememberDialogView(window);
+    await window.getByRole("button", { name: "Fetch all repos", exact: true }).click();
 
-  const dialog = window.getByRole("dialog", { name: "Fetch all repositories" });
-  await expect(dialog).toBeVisible();
-  // Minimise is offered only while the run is live; a fast run may already
-  // have finished, and then Escape closes rather than minimises.
-  const minimise = dialog.getByRole("button", { name: "Minimise to a toast" });
-  if (await minimise.isVisible()) {
-    await minimise.click();
+    const dialog = window.getByRole("dialog", { name: "Fetch all repositories" });
+    await expect(dialog).toContainText("Fetching beta", { timeout: 20_000 });
+    await dialog.getByRole("button", { name: "Minimise to a toast" }).click();
+
     const toast = window.locator(".bulk-sync-toast");
     await expect(toast).toBeVisible();
     await expect(dialog).toHaveCount(0);
-    await expect(toast).toContainText("Fetched 2 repositories", {
-      timeout: 20_000
-    });
+    await expect(toast).toContainText("Fetching beta");
+
     await toast.getByRole("button", { name: "Show details" }).click();
+    await expect(dialog).toBeVisible();
+
+    // Drop the wedge: beta's fetch fails, and the run ends in the dialog.
+    // Close the socket before the app, as remote-activity.spec does, so no
+    // Git process is left blocked on it at teardown.
+    for (const socket of held) socket.destroy();
+    await expect(dialog).toContainText("1 failed", { timeout: 20_000 });
+    await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible();
+  } finally {
+    for (const socket of held) socket.destroy();
+    silent.close();
   }
-  await expect(dialog).toContainText("2 remotes fetched", { timeout: 20_000 });
-  await expect(dialog.getByRole("button", { name: "Close" })).toBeVisible();
 });
