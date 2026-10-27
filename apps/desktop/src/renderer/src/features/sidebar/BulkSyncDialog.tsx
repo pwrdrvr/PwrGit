@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
 import type {
   BulkSyncMode,
   BulkSyncRepoResult,
@@ -14,7 +22,10 @@ import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { MinimizeGlyph } from "../../lib/MinimizeGlyph";
 import { BulkSyncStatus, type BulkSyncStatusPhase } from "./BulkSyncStatus";
+import { BulkSyncToast } from "./BulkSyncToast";
+import type { BulkSyncView, FetchScope } from "./bulk-sync-prefs";
 import { countOutcomes, finishedCount } from "./bulk-sync-progress";
 
 type RepoProgress =
@@ -183,21 +194,108 @@ function RepoResultDetails({ result, includeAll = false }: {
   );
 }
 
+/** The run's title, which names its scope. */
+export function runTitle(mode: BulkSyncMode, scope: FetchScope = "all"): string {
+  if (mode === "soft-pull") return "Try to pull all safely";
+  return scope === "recent"
+    ? "Fetch recent repositories"
+    : "Fetch all repositories";
+}
+
+/** Where a run is drawn. `hidden` is a timed fetch nobody has asked to see. */
+export type BulkSyncPresentation = BulkSyncView | "hidden";
+
+/** How long a clean finish stays in the toast before it leaves by itself. */
+export const TOAST_DISMISS_MS = 6_000;
+
+const FLY_MS = 300;
+const FLY_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
+
+/**
+ * The dialog-to-toast motion (design/Fetch Toast and Scope - UX Review.dc.html,
+ * 2b). An empty card flies from the view being left to the view arriving, and
+ * the arriving view fades in under it, so the eye follows the run into the
+ * corner and back. Scaling the real content instead would stretch its text
+ * eight times over on the way. Reduced motion gets the fade alone.
+ */
+function flyBetween(from: DOMRect, target: HTMLElement): void {
+  if (typeof target.animate !== "function") return;
+  const reduce =
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  if (reduce) {
+    target.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120 });
+    return;
+  }
+  const to = target.getBoundingClientRect();
+  if (to.width === 0 || from.width === 0) return;
+  const ghost = document.createElement("div");
+  ghost.className = "bulk-sync-ghost";
+  ghost.setAttribute("aria-hidden", "true");
+  document.body.append(ghost);
+  const frame = (rect: DOMRect) => ({
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    opacity: 1
+  });
+  const flight = ghost.animate([frame(from), { ...frame(to), opacity: 0.4 }], {
+    duration: FLY_MS,
+    easing: FLY_EASING,
+    fill: "forwards"
+  });
+  const land = (): void => ghost.remove();
+  flight.onfinish = land;
+  flight.oncancel = land;
+  target.animate([{ opacity: 0 }, { opacity: 0 }, { opacity: 1 }], {
+    duration: FLY_MS + 80,
+    easing: "ease-out"
+  });
+}
+
+/**
+ * Fetch all, Fetch recent and Try pull all: one run, drawn as a dialog, a
+ * toast, or not at all.
+ *
+ * The run lives here and not in either view, so minimising the dialog does
+ * not stop it. That is why closing is no longer the only way back to the
+ * app: while the run is live, Escape and a backdrop click minimise, and the
+ * dialog's own button says so. Unmounting this component still cancels the
+ * run. Design: `design/Fetch Toast and Scope - UX Review.dc.html`, turn 2.
+ */
 export function BulkSyncDialog({
   profileId,
   repos,
+  repoIds,
+  scope = "all",
   mode,
   platform,
+  view = "dialog",
+  autoMinimizeMs = null,
+  onViewChange,
+  onFinished,
   onClose
 }: {
   profileId: string;
+  /** The repositories the run covers, for the list drawn before results. */
   repos: Repo[];
+  /** Limit the run to these repositories (Fetch recent). */
+  repoIds?: string[];
+  scope?: FetchScope;
   mode: BulkSyncMode;
   platform: string;
+  view?: BulkSyncPresentation;
+  /** Minimise the dialog by itself after this long, unless the reader has
+   *  touched it — the first run's lesson in where the toast lives. */
+  autoMinimizeMs?: number | null;
+  /** Without it the run has no toast, and Escape closes as it always did. */
+  onViewChange?: (view: BulkSyncView) => void;
+  onFinished?: (summary: BulkSyncSummary | null) => void;
   onClose: () => void;
 }) {
   const tip = useViewportTooltip();
   const repoSnapshot = useRef(repos).current;
+  const repoIdsRef = useRef(repoIds);
   const operationIdRef = useRef("");
   const [completed, setCompleted] = useState(0);
   const [total, setTotal] = useState(repoSnapshot.length);
@@ -260,7 +358,14 @@ export function BulkSyncDialog({
     queueMicrotask(() => {
       if (!live) return;
       started = true;
-      void dispatch("remote:bulkSync", { operationId, profileId, mode }).then(
+      void dispatch("remote:bulkSync", {
+        operationId,
+        profileId,
+        mode,
+        ...(repoIdsRef.current === undefined
+          ? {}
+          : { repoIds: repoIdsRef.current })
+      }).then(
         (result) => {
           settled = true;
           if (!live) return;
@@ -305,8 +410,7 @@ export function BulkSyncDialog({
     [progress, repoSnapshot, summary]
   );
   const running = summary === null && error === null;
-  const title =
-    mode === "fetch" ? "Fetch all repositories" : "Try to pull all safely";
+  const title = runTitle(mode, scope);
   const runningRepos = ordered.filter(
     ({ progress: state }) => state?.phase === "running"
   );
@@ -342,149 +446,284 @@ export function BulkSyncDialog({
     if (!result.ok) setError(result.error.message);
   };
 
-  const modalRef = useModal<HTMLDivElement>({ onClose });
+  const canMinimize = running && onViewChange !== undefined;
+
+  // The surface on screen, so a view change knows where to fly from.
+  const surfaceRef = useRef<HTMLElement | null>(null);
+  const flyFromRef = useRef<DOMRect | null>(null);
+  const setSurface = useCallback((el: HTMLElement | null) => {
+    surfaceRef.current = el;
+  }, []);
+  const switchView = useCallback(
+    (next: BulkSyncView) => {
+      flyFromRef.current = surfaceRef.current?.getBoundingClientRect() ?? null;
+      onViewChange?.(next);
+    },
+    [onViewChange]
+  );
+  useLayoutEffect(() => {
+    const from = flyFromRef.current;
+    flyFromRef.current = null;
+    if (from !== null && surfaceRef.current !== null) {
+      flyBetween(from, surfaceRef.current);
+    }
+  }, [view]);
+
+  const onFinishedRef = useRef(onFinished);
+  onFinishedRef.current = onFinished;
+  const ended = !running;
+  // Once per run: `summary` and the end are set in the same render, and
+  // neither changes again.
+  useEffect(() => {
+    if (ended) onFinishedRef.current?.(summary);
+  }, [ended, summary]);
+
+  // The first run's dialog minimises itself unless the reader has moved
+  // over it or typed in it. Focus is not a signal: the dialog takes focus
+  // itself when it opens.
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (
+      autoMinimizeMs === null ||
+      view !== "dialog" ||
+      !canMinimize ||
+      touched
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => switchView("toast"), autoMinimizeMs);
+    return () => window.clearTimeout(timer);
+  }, [autoMinimizeMs, canMinimize, switchView, touched, view]);
+
+  // A clean finish in the toast leaves by itself; a failure stays until
+  // someone has read it. Hovering holds it.
+  const [toastHeld, setToastHeld] = useState(false);
+  const cleanFinish =
+    summary !== null && !summary.cancelled && !summaryHasFailures(summary);
+  useEffect(() => {
+    if (view !== "toast" || !cleanFinish || toastHeld) return;
+    const timer = window.setTimeout(onClose, TOAST_DISMISS_MS);
+    return () => window.clearTimeout(timer);
+  }, [cleanFinish, onClose, toastHeld, view]);
+
+  if (view === "hidden") return null;
+
+  if (view === "toast") {
+    return (
+      <BulkSyncToast
+        title={title}
+        surfaceRef={setSurface}
+        phase={statusPhase}
+        hasFailures={summary !== null && summaryHasFailures(summary)}
+        activity={activityTitle}
+        counts={outcomeCounts}
+        inFlight={runningRepos.length}
+        queued={queuedCount}
+        startedAt={startedAt}
+        durationMs={summary === null ? null : runDurationMs(summary)}
+        error={error}
+        cancelling={cancelling}
+        onExpand={() => switchView("dialog")}
+        onCancel={() => void cancel()}
+        onDismiss={onClose}
+        onHold={setToastHeld}
+      />
+    );
+  }
 
   return (
-    <div
-      className="overlay-backdrop bulk-sync-backdrop"
-      onClick={running ? undefined : onClose}
+    <ModalSurface
+      label={title}
+      onSurface={setSurface}
+      onTouch={() => setTouched(true)}
+      onEscape={canMinimize ? () => switchView("toast") : onClose}
+      onBackdrop={
+        canMinimize ? () => switchView("toast") : running ? undefined : onClose
+      }
+      after={tip.tooltipNode}
     >
+          <div className="bulk-sync__head">
+            <div>
+              <h2>{title}</h2>
+              <p>
+                {mode === "fetch"
+                  ? "Configured remotes are fetched with --prune once per repository. This removes stale remote-tracking references; local branches are kept. One failure does not stop the rest."
+                  : "Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here."}
+              </p>
+            </div>
+            <span className="bulk-sync__count" aria-live="polite">
+              {completed} / {total}
+            </span>
+            {canMinimize && (
+              <button
+                type="button"
+                className="bulk-sync__minimize"
+                aria-label="Minimise to a toast"
+                {...hoverTooltip(tip, "Minimise — the run keeps going in a toast")}
+                onClick={() => switchView("toast")}
+              >
+                <MinimizeGlyph />
+              </button>
+            )}
+          </div>
+
+          {(running || summary !== null) && (
+            <BulkSyncStatus
+              phase={statusPhase}
+              hasFailures={summary !== null && summaryHasFailures(summary)}
+              title={
+                summary === null
+                  ? activityTitle
+                  : summary.cancelled
+                    ? "Cancelled"
+                    : "Finished"
+              }
+              detail={
+                summary !== null
+                  ? { kind: "summary", text: overallSummary(summary) }
+                  : runningRepos.length === 1 && runningRepos[0] !== undefined
+                    ? {
+                        kind: "path",
+                        text: displayPath(runningRepos[0].repo.path, platform)
+                      }
+                    : null
+              }
+              counts={outcomeCounts}
+              inFlight={runningRepos.length}
+              queued={queuedCount}
+              startedAt={startedAt}
+              durationMs={summary === null ? null : runDurationMs(summary)}
+            />
+          )}
+          {error !== null && <div className="modal__error">{error}</div>}
+
+          <div className="bulk-sync__repos" aria-label="Repository results">
+            {ordered.map(({ repo, progress: state }) => {
+              const pathLabel = displayPath(repo.path, platform);
+              const result = state?.phase === "complete" ? state.result : null;
+              const status = repoStatus(state, mode);
+              const stateClass =
+                state?.phase === "running"
+                  ? "running"
+                  : result === null
+                    ? "queued"
+                    : result.outcome;
+              return (
+                <article
+                  className={`bulk-sync__repo is-${stateClass}`}
+                  key={repo.id}
+                >
+                  <div className="bulk-sync__repo-head">
+                    <div>
+                      <strong>{repo.name}</strong>
+                      <small
+                        className="selectable"
+                        {...hoverTooltip(tip, pathLabel)}
+                      >
+                        {pathLabel}
+                      </small>
+                    </div>
+                    <span className={`bulk-sync__repo-status is-${stateClass}`}>
+                      {status}
+                    </span>
+                  </div>
+                  {result === null ? (
+                    state?.phase === "running" ? (
+                      <>
+                        <p role="status">{state.detail ?? "Preparing repository…"}</p>
+                        {state.worktreePath !== undefined && (
+                          <small className="bulk-sync__worktree-path selectable">{state.worktreePath}</small>
+                        )}
+                        {mode === "soft-pull" && state.totalWorktrees !== undefined && (
+                          <p>{state.worktrees.length} of {state.totalWorktrees} worktrees checked</p>
+                        )}
+                        {(state.remotes.length > 0 || state.worktrees.length > 0) && (
+                          <details className="bulk-sync__completed">
+                            <summary>Completed tasks ({state.remotes.length + state.worktrees.length})</summary>
+                            <RepoResultDetails result={state} includeAll />
+                          </details>
+                        )}
+                        <div className="bulk-sync__recent">
+                          <RepoResultDetails result={{
+                            remotes: state.worktrees.length === 0 ? state.remotes.slice(-3) : [],
+                            worktrees: state.worktrees.slice(-3)
+                          }} includeAll />
+                        </div>
+                      </>
+                    ) : <p>Queued</p>
+                  ) : (
+                    <>
+                      <p>{repoSummary(result, mode)}</p>
+                      <RepoResultDetails result={result} />
+                    </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="modal__actions">
+            {running ? (
+              <button
+                className="modal__cancel"
+                disabled={cancelling}
+                onClick={() => void cancel()}
+                autoFocus
+              >
+                {cancelling ? "Cancelling…" : "Cancel"}
+              </button>
+            ) : (
+              <button className="modal__create" onClick={onClose} autoFocus>
+                Close
+              </button>
+            )}
+          </div>
+    </ModalSurface>
+  );
+}
+
+/**
+ * The dialog's frame. Its own component so `useModal` — Escape, the focus
+ * trap and focus restore — is mounted only while the dialog is: a minimised
+ * run must not keep trapping focus in a dialog that is not there.
+ */
+function ModalSurface({
+  label,
+  onSurface,
+  onTouch,
+  onEscape,
+  onBackdrop,
+  after,
+  children
+}: {
+  label: string;
+  onSurface: (el: HTMLElement | null) => void;
+  onTouch: () => void;
+  onEscape: () => void;
+  onBackdrop: (() => void) | undefined;
+  after: ReactNode;
+  children: ReactNode;
+}) {
+  const modalRef = useModal<HTMLElement>({ onClose: onEscape });
+  return (
+    <div className="overlay-backdrop bulk-sync-backdrop" onClick={onBackdrop}>
       <section
-        ref={modalRef}
+        ref={(el) => {
+          modalRef.current = el;
+          onSurface(el);
+        }}
         tabIndex={-1}
         className="modal bulk-sync"
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-label={label}
         onClick={(event) => event.stopPropagation()}
+        onPointerMove={onTouch}
+        onKeyDown={onTouch}
       >
-        <div className="bulk-sync__head">
-          <div>
-            <h2>{title}</h2>
-            <p>
-              {mode === "fetch"
-                ? "Configured remotes are fetched with --prune once per repository. This removes stale remote-tracking references; local branches are kept. One failure does not stop the rest."
-                : "Only clean, attached branches with a proven fast-forward are updated. PwrGit never stashes, merges histories, rebases, resets, or discards work here."}
-            </p>
-          </div>
-          <span className="bulk-sync__count" aria-live="polite">
-            {completed} / {total}
-          </span>
-        </div>
-
-        {(running || summary !== null) && (
-          <BulkSyncStatus
-            phase={statusPhase}
-            hasFailures={summary !== null && summaryHasFailures(summary)}
-            title={
-              summary === null
-                ? activityTitle
-                : summary.cancelled
-                  ? "Cancelled"
-                  : "Finished"
-            }
-            detail={
-              summary !== null
-                ? { kind: "summary", text: overallSummary(summary) }
-                : runningRepos.length === 1 && runningRepos[0] !== undefined
-                  ? {
-                      kind: "path",
-                      text: displayPath(runningRepos[0].repo.path, platform)
-                    }
-                  : null
-            }
-            counts={outcomeCounts}
-            inFlight={runningRepos.length}
-            queued={queuedCount}
-            startedAt={startedAt}
-            durationMs={summary === null ? null : runDurationMs(summary)}
-          />
-        )}
-        {error !== null && <div className="modal__error">{error}</div>}
-
-        <div className="bulk-sync__repos" aria-label="Repository results">
-          {ordered.map(({ repo, progress: state }) => {
-            const pathLabel = displayPath(repo.path, platform);
-            const result = state?.phase === "complete" ? state.result : null;
-            const status = repoStatus(state, mode);
-            const stateClass =
-              state?.phase === "running"
-                ? "running"
-                : result === null
-                  ? "queued"
-                  : result.outcome;
-            return (
-              <article
-                className={`bulk-sync__repo is-${stateClass}`}
-                key={repo.id}
-              >
-                <div className="bulk-sync__repo-head">
-                  <div>
-                    <strong>{repo.name}</strong>
-                    <small
-                      className="selectable"
-                      {...hoverTooltip(tip, pathLabel)}
-                    >
-                      {pathLabel}
-                    </small>
-                  </div>
-                  <span className={`bulk-sync__repo-status is-${stateClass}`}>
-                    {status}
-                  </span>
-                </div>
-                {result === null ? (
-                  state?.phase === "running" ? (
-                    <>
-                      <p role="status">{state.detail ?? "Preparing repository…"}</p>
-                      {state.worktreePath !== undefined && (
-                        <small className="bulk-sync__worktree-path selectable">{state.worktreePath}</small>
-                      )}
-                      {mode === "soft-pull" && state.totalWorktrees !== undefined && (
-                        <p>{state.worktrees.length} of {state.totalWorktrees} worktrees checked</p>
-                      )}
-                      {(state.remotes.length > 0 || state.worktrees.length > 0) && (
-                        <details className="bulk-sync__completed">
-                          <summary>Completed tasks ({state.remotes.length + state.worktrees.length})</summary>
-                          <RepoResultDetails result={state} includeAll />
-                        </details>
-                      )}
-                      <div className="bulk-sync__recent">
-                        <RepoResultDetails result={{
-                          remotes: state.worktrees.length === 0 ? state.remotes.slice(-3) : [],
-                          worktrees: state.worktrees.slice(-3)
-                        }} includeAll />
-                      </div>
-                    </>
-                  ) : <p>Queued</p>
-                ) : (
-                  <>
-                    <p>{repoSummary(result, mode)}</p>
-                    <RepoResultDetails result={result} />
-                  </>
-                )}
-              </article>
-            );
-          })}
-        </div>
-
-        <div className="modal__actions">
-          {running ? (
-            <button
-              className="modal__cancel"
-              disabled={cancelling}
-              onClick={() => void cancel()}
-              autoFocus
-            >
-              {cancelling ? "Cancelling…" : "Cancel"}
-            </button>
-          ) : (
-            <button className="modal__create" onClick={onClose} autoFocus>
-              Close
-            </button>
-          )}
-        </div>
+        {children}
       </section>
-      {tip.tooltipNode}
+      {after}
     </div>
   );
 }

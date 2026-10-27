@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type Page } from "@playwright/test";
@@ -254,4 +255,115 @@ test("the uncommitted-changes prompt, on a contrived repository", async () => {
   await window.mouse.move(6, 6);
   await window.waitForTimeout(400);
   await prompt.screenshot({ path: join(OUT, "dirty-switch-prompt.png") });
+});
+
+/**
+ * Fetch ▾ and the minimised run, for `design/Fetch Toast and Scope - UX
+ * Review.dc.html` and its PR.
+ *
+ * Five invented repositories. `ledger-web` has a second remote that does not
+ * exist, so the run finishes with a failure; `orbit-deploy`'s origin is a
+ * local `git://` port that accepts and never answers (remote-activity.spec's
+ * wedge), so the run stays live until the test drops the socket. Nothing in
+ * the frame came from a real account or repository.
+ */
+test("Fetch ▾, the run's dialog and its toast, on contrived repositories", async () => {
+  mkdirSync(OUT, { recursive: true });
+  sandbox = createGitSandbox();
+  const box = sandbox;
+  for (const name of ["atlas-api", "billing-core", "northwind-labs"]) {
+    box.makeRepoBehindRemote(name);
+  }
+  const ledger = box.makeRepoBehindRemote("ledger-web");
+  box.git(
+    ledger.path,
+    "remote",
+    "add",
+    "mirror",
+    join(box.reposDir, "does-not-exist.git")
+  );
+  const held: Socket[] = [];
+  const silent = createServer((socket) => {
+    held.push(socket);
+    socket.on("error", () => undefined);
+  });
+  await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+  const address = silent.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("silent remote did not bind");
+  }
+  const orbit = box.makeRepoBehindRemote("orbit-deploy");
+  box.git(
+    orbit.path,
+    "remote",
+    "set-url",
+    "origin",
+    `git://127.0.0.1:${address.port}/orbit-deploy.git`
+  );
+
+  try {
+    handle = await launchApp({ theme: "dark" });
+    const { app, window } = handle;
+    await app.evaluate(async ({ BrowserWindow }, size) => {
+      BrowserWindow.getAllWindows()[0]?.setBounds({ x: 0, y: 0, ...size });
+    }, WINDOW);
+    await addRootAndExpand(window, handle, box, "atlas-api");
+
+    // 1. The scope and schedule menu.
+    await window.getByRole("button", { name: "Fetch options" }).click();
+    await window
+      .locator('[role="menuitemradio"]', { hasText: "Every 5 minutes" })
+      .click();
+    await window.getByRole("button", { name: "Fetch options" }).click();
+    await window.locator(".pop-menu__heading").waitFor();
+    await window.mouse.move(6, 6);
+    await window.waitForTimeout(300);
+    await window.screenshot({ path: join(OUT, "fetch-menu.png") });
+    await window.keyboard.press("Escape");
+
+    // 2. A first run: the dialog, live, with orbit-deploy still fetching.
+    await window.getByRole("button", { name: "Fetch all repos" }).click();
+    const dialog = window.getByRole("dialog", { name: "Fetch all repositories" });
+    await dialog.waitFor();
+    await window.waitForTimeout(1500);
+    await window.screenshot({ path: join(OUT, "fetch-dialog-running.png") });
+
+    // 3. It minimises itself after four seconds on a first run.
+    await dialog.waitFor({ state: "detached", timeout: 10_000 });
+    const toast = window.locator(".bulk-sync-toast");
+    await toast.waitFor();
+    await window.waitForTimeout(600);
+    await window.screenshot({ path: join(OUT, "fetch-toast-running.png") });
+    await toast.screenshot({ path: join(OUT, "fetch-toast-running-crop.png") });
+
+    // 4. Drop the wedge: the run ends with failures, and the toast stays.
+    for (const socket of held) socket.destroy();
+    await toast.locator(".bulk-sync__mark").waitFor({ timeout: 20_000 });
+    await window.waitForTimeout(400);
+    await toast.screenshot({ path: join(OUT, "fetch-toast-failed-crop.png") });
+
+    // 5. Back to the dialog, from the toast.
+    await toast.getByRole("button", { name: "Show details" }).click();
+    await dialog.waitFor();
+    await window.mouse.move(6, 6);
+    await window.waitForTimeout(500);
+    await window.screenshot({ path: join(OUT, "fetch-dialog-finished.png") });
+    await dialog.getByRole("button", { name: "Close" }).click();
+
+    // 6. Fetch recent becomes the face.
+    await window.getByRole("button", { name: "Fetch options" }).click();
+    await window
+      .locator('[role="menuitemradio"]', { hasText: "Fetch recent repositories" })
+      .click();
+    // Picking a scope runs it; the remembered view is now the toast.
+    await window.locator(".bulk-sync-toast").waitFor();
+    await window.mouse.move(6, 6);
+    await window.waitForTimeout(800);
+    await window
+      .locator(".sidebar-toolbar")
+      .screenshot({ path: join(OUT, "fetch-recent-toolbar.png") });
+  } finally {
+    for (const socket of held) socket.destroy();
+    silent.close();
+  }
 });

@@ -1741,6 +1741,9 @@ export interface Commands {
       operationId: string;
       profileId: ProfileId;
       mode: BulkSyncMode;
+      /** Only these repositories of the profile (Fetch recent). Absent means
+       *  every visible repository. An id outside the profile is ignored. */
+      repoIds?: string[];
     };
     res: BulkSyncSummary;
   };

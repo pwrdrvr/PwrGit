@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SidebarToolbar, addMenuReasons } from "./SidebarToolbar";
+import { SidebarToolbar, addMenuReasons, fetchFace } from "./SidebarToolbar";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -41,7 +41,11 @@ function handlers() {
 }
 
 function render(
-  props: { hasProfile: boolean; rootCount: number; repoCount: number },
+  props: {
+    hasProfile: boolean;
+    rootCount: number;
+    repoCount: number;
+  } & Partial<Parameters<typeof SidebarToolbar>[0]>,
   h = handlers()
 ) {
   act(() => {
@@ -149,5 +153,111 @@ describe("SidebarToolbar", () => {
     expect(addFolders.disabled).toBe(false);
     act(() => addFolders.click());
     expect(h.onAddFolder).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the Fetch face after the remembered scope", () => {
+    render({
+      hasProfile: true,
+      rootCount: 1,
+      repoCount: 3,
+      recentCount: 2,
+      fetchScope: "recent"
+    });
+    const face = button("Fetch recent repos");
+    expect(face.textContent).toContain("Fetch recent");
+    expect(face.disabled).toBe(false);
+  });
+
+  it("disables Fetch recent while the Focused list is empty", () => {
+    render({
+      hasProfile: true,
+      rootCount: 1,
+      repoCount: 3,
+      recentCount: 0,
+      fetchScope: "recent"
+    });
+    expect(button("Fetch recent repos").disabled).toBe(true);
+    // The chevron still opens, so the scope can be changed back.
+    expect(button("Fetch options").disabled).toBe(false);
+  });
+
+  it("offers both scopes and every interval as radio entries, and runs the picks", () => {
+    const onPickFetchScope = vi.fn();
+    const onPickFetchInterval = vi.fn();
+    render({
+      hasProfile: true,
+      rootCount: 1,
+      repoCount: 3,
+      recentCount: 2,
+      fetchInterval: 5,
+      onPickFetchScope,
+      onPickFetchInterval
+    });
+    const chevron = button("Fetch options");
+    act(() => chevron.click());
+    expect(chevron.getAttribute("aria-expanded")).toBe("true");
+    const radios = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')
+    ];
+    // An entry with a hint stacks label over hint; read the label alone.
+    const label = (el: Element): string | null =>
+      (el.querySelector(".pop-menu__stack > span:first-child") ?? el).textContent;
+    expect(radios.map(label)).toEqual([
+      "Fetch all repositories",
+      "Fetch recent repositories",
+      "Off",
+      "Every minute",
+      "Every 5 minutes",
+      "Every 15 minutes",
+      "Every hour"
+    ]);
+    expect(
+      radios.filter((el) => el.getAttribute("aria-checked") === "true").map(label)
+    ).toEqual(["Fetch all repositories", "Every 5 minutes"]);
+    expect(document.querySelector(".pop-menu__heading")?.textContent).toBe(
+      "Fetch automatically"
+    );
+    act(() => radios[1]!.click());
+    expect(onPickFetchScope).toHaveBeenCalledWith("recent");
+    act(() => chevron.click());
+    act(() =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+        .find((el) => el.textContent === "Every hour")!
+        .click()
+    );
+    expect(onPickFetchInterval).toHaveBeenCalledWith(60);
+  });
+
+  it("marks the face busy while a fetch runs, and keeps it clickable", () => {
+    const h = render({
+      hasProfile: true,
+      rootCount: 1,
+      repoCount: 3,
+      fetchBusy: true
+    });
+    const face = button("Fetch all repos");
+    expect(face.getAttribute("aria-busy")).toBe("true");
+    act(() => face.click());
+    expect(h.onFetchAll).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fetchFace", () => {
+  it("says what the face fetches, the schedule, and the last timed result", () => {
+    expect(
+      fetchFace({
+        scope: "recent",
+        repoCount: 40,
+        recentCount: 1,
+        interval: 15,
+        busy: false,
+        lastAuto: "Last automatic fetch at 2:05 PM: all fetched."
+      }).tooltip
+    ).toBe(
+      "Fetch and prune the 1 repository in the Focused list; local branches are kept Fetching automatically every 15 minutes. Last automatic fetch at 2:05 PM: all fetched."
+    );
+    expect(
+      fetchFace({ scope: "all", repoCount: 4, recentCount: 1, interval: 0, busy: true })
+    ).toMatchObject({ name: "Fetch all repos", label: "Fetch all", count: 4 });
   });
 });

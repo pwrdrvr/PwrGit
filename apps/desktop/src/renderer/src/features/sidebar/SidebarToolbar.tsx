@@ -7,6 +7,13 @@ import { WrenchGlyph } from "../../lib/WrenchGlyph";
 import { useFitLadder } from "../../lib/useFitLadder";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import {
+  FETCH_INTERVALS,
+  fetchIntervalLabel,
+  fetchIntervalPhrase,
+  type FetchInterval,
+  type FetchScope
+} from "./bulk-sync-prefs";
 
 /**
  * Steps the row takes, in order, when it does not fit: Add's word goes first,
@@ -46,24 +53,71 @@ export function addMenuReasons(input: {
  * contains its shorter visible label (SC 2.5.3), so voice control and the E2E
  * suite find them as before.
  */
+/** The Fetch face's accessible name, visible label and hover card. */
+export function fetchFace(input: {
+  scope: FetchScope;
+  repoCount: number;
+  recentCount: number;
+  interval: FetchInterval;
+  busy: boolean;
+  /** The last timed run's result, when it is worth a line. */
+  lastAuto?: string | undefined;
+}): { name: string; label: string; tooltip: string; count: number } {
+  const recent = input.scope === "recent";
+  const count = recent ? input.recentCount : input.repoCount;
+  const lines = [
+    recent
+      ? `Fetch and prune the ${count} ${count === 1 ? "repository" : "repositories"} in the Focused list; local branches are kept`
+      : "Fetch and prune stale remote-tracking references in every repository; local branches are kept"
+  ];
+  const every = fetchIntervalPhrase(input.interval);
+  if (every !== null) lines.push(`Fetching automatically ${every}.`);
+  if (input.busy) lines.push("Running now — click to watch.");
+  else if (input.lastAuto !== undefined) lines.push(input.lastAuto);
+  return {
+    name: recent ? "Fetch recent repos" : "Fetch all repos",
+    label: recent ? "Fetch recent" : "Fetch all",
+    tooltip: lines.join(" "),
+    count
+  };
+}
+
 export function SidebarToolbar({
   hasProfile,
   rootCount,
   repoCount,
+  recentCount = repoCount,
+  fetchScope = "all",
+  fetchInterval = 0,
+  fetchBusy = false,
+  lastAutoFetch,
   onAddFolder,
   onClone,
   onFork,
   onFetchAll,
+  onPickFetchScope,
+  onPickFetchInterval,
   onPullAll,
   onMaintenance
 }: {
   hasProfile: boolean;
   rootCount: number;
   repoCount: number;
+  /** Repositories in the Focused list, which is what Fetch recent fetches. */
+  recentCount?: number;
+  fetchScope?: FetchScope;
+  fetchInterval?: FetchInterval;
+  /** A fetch is running, possibly a timed one nobody is watching. */
+  fetchBusy?: boolean;
+  lastAutoFetch?: string | undefined;
   onAddFolder: () => void;
   onClone: () => void;
   onFork: () => void;
+  /** The face: fetch the remembered scope, or show the run in flight. */
   onFetchAll: () => void;
+  /** Remember a scope and fetch it now. */
+  onPickFetchScope?: (scope: FetchScope) => void;
+  onPickFetchInterval?: (minutes: FetchInterval) => void;
   onPullAll: () => void;
   onMaintenance: () => void;
 }): ReactElement {
@@ -71,11 +125,56 @@ export function SidebarToolbar({
   const rowRef = useRef<HTMLDivElement>(null);
   const lastRef = useRef<HTMLButtonElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
+  const fetchMenuRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [fetchMenu, setFetchMenu] = useState<{ x: number; y: number } | null>(
+    null
+  );
   useFitLadder(rowRef, rowRef, lastRef, SIDEBAR_TOOLBAR_FIT_STEPS);
 
   const reasons = addMenuReasons({ hasProfile, rootCount });
   const syncDisabled = !hasProfile || repoCount === 0;
+  const face = fetchFace({
+    scope: fetchScope,
+    repoCount,
+    recentCount,
+    interval: fetchInterval,
+    busy: fetchBusy,
+    lastAuto: lastAutoFetch
+  });
+  const fetchItems: MenuItem[] = [
+    {
+      type: "item",
+      label: "Fetch all repositories",
+      hint: `${repoCount} ${repoCount === 1 ? "repository" : "repositories"}`,
+      checked: fetchScope === "all",
+      radio: true,
+      onSelect: () => onPickFetchScope?.("all")
+    },
+    {
+      type: "item",
+      label: "Fetch recent repositories",
+      hint:
+        recentCount === 0
+          ? "Nothing in the Focused list yet"
+          : `The Focused list · ${recentCount} ${recentCount === 1 ? "repository" : "repositories"}`,
+      checked: fetchScope === "recent",
+      radio: true,
+      ...(recentCount === 0 ? { disabled: true } : {}),
+      onSelect: () => onPickFetchScope?.("recent")
+    },
+    { type: "sep" },
+    { type: "heading", label: "Fetch automatically" },
+    ...FETCH_INTERVALS.map(
+      (minutes): MenuItem => ({
+        type: "item",
+        label: fetchIntervalLabel(minutes),
+        checked: fetchInterval === minutes,
+        radio: true,
+        onSelect: () => onPickFetchInterval?.(minutes)
+      })
+    )
+  ];
   const item = (
     label: string,
     reason: string | undefined,
@@ -124,20 +223,43 @@ export function SidebarToolbar({
           The glyphs are the worktree toolbar's own Fetch and Pull marks, so
           each bulk action reads as the same verb as the single one. Neither
           button animates; each opens BulkSyncDialog, which owns progress. */}
-      <button
-        type="button"
-        className="sidebar-toolbar__btn sidebar-toolbar__sync"
-        aria-label="Fetch all repos"
-        disabled={syncDisabled}
-        {...hoverTooltip(
-          tip,
-          "Fetch and prune stale remote-tracking references in every repository; local branches are kept"
-        )}
-        onClick={onFetchAll}
-      >
-        <RefreshGlyph size={12} />
-        <span className="sidebar-toolbar__label">Fetch all</span>
-      </button>
+      {/* A split button: the face runs the remembered scope and wears its
+          name, the chevron picks the scope and the automatic interval.
+          design/Fetch Toast and Scope - UX Review.dc.html, turn 3. */}
+      <div className="sidebar-toolbar__split">
+        <button
+          type="button"
+          className="sidebar-toolbar__btn sidebar-toolbar__sync"
+          aria-label={face.name}
+          aria-busy={fetchBusy}
+          disabled={!hasProfile || face.count === 0}
+          {...hoverTooltip(tip, face.tooltip)}
+          onClick={onFetchAll}
+        >
+          <RefreshGlyph size={12} />
+          <span className="sidebar-toolbar__label">{face.label}</span>
+        </button>
+        <button
+          ref={fetchMenuRef}
+          type="button"
+          className="sidebar-toolbar__btn sidebar-toolbar__chevron"
+          aria-label="Fetch options"
+          aria-haspopup="menu"
+          aria-expanded={fetchMenu !== null}
+          disabled={syncDisabled}
+          {...hoverTooltip(tip, "Fetch all or recent, and fetch automatically")}
+          onClick={(event) => {
+            const rect = (
+              event.currentTarget.parentElement ?? event.currentTarget
+            ).getBoundingClientRect();
+            setFetchMenu((current) =>
+              current === null ? { x: rect.left, y: rect.bottom + 4 } : null
+            );
+          }}
+        >
+          <ChevronGlyph size={10} />
+        </button>
+      </div>
       <button
         type="button"
         className="sidebar-toolbar__btn sidebar-toolbar__sync"
@@ -176,6 +298,16 @@ export function SidebarToolbar({
             item("Fork…", reasons.fork, onFork)
           ]}
           onClose={() => setMenu(null)}
+        />
+      )}
+      {fetchMenu !== null && (
+        <ContextMenu
+          x={fetchMenu.x}
+          y={fetchMenu.y}
+          label="Fetch options"
+          triggerRef={fetchMenuRef}
+          items={fetchItems}
+          onClose={() => setFetchMenu(null)}
         />
       )}
       {tip.tooltipNode}

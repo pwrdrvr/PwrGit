@@ -865,6 +865,35 @@ textarea,
   width: 30px;
   padding: 0;
 }
+/* Fetch ▾: the face and its chevron read as one button with a seam. The
+   pair grows like a sync button; the chevron never steps, so the scope menu
+   stays reachable at every width. design/Fetch Toast and Scope - UX
+   Review.dc.html, 3a and 3c. */
+.sidebar-toolbar__split {
+  flex: 1 0 auto;
+  display: flex;
+}
+.sidebar-toolbar__split > .sidebar-toolbar__sync {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.sidebar-toolbar__chevron {
+  width: 20px;
+  padding: 0;
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  color: var(--text-muted);
+}
+.sidebar-toolbar__chevron[aria-expanded="true"] {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.sidebar-toolbar__sync[aria-busy="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
 .sidebar-toolbar__btn:hover:not(:disabled) {
   border-color: var(--accent-border);
   color: var(--text-primary);
@@ -895,6 +924,14 @@ textarea,
   flex: 1 1 0;
   min-width: 30px;
   padding: 0;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__split {
+  flex: 1 1 0;
+  min-width: 50px;
+}
+.sidebar-toolbar--icons .sidebar-toolbar__chevron {
+  flex: 0 0 20px;
+  min-width: 20px;
 }
 
 .sidebar__lens {
@@ -6876,6 +6913,120 @@ button.agent-menu__item:hover {
   color: var(--text-secondary);
   font: 600 10px/1 var(--font-mono);
 }
+.bulk-sync__minimize {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.bulk-sync__minimize:hover {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+/* A run, minimised (BulkSyncToast). Bottom-left, under the sidebar that
+   started it and clear of the bottom-right error stack. Above that stack
+   (90) and below dialogs (110). design/Fetch Toast and Scope - UX
+   Review.dc.html, 2c–2e. */
+.bulk-sync-toast {
+  position: fixed;
+  left: 16px;
+  bottom: 48px;
+  z-index: 100;
+  width: min(340px, calc(100vw - 32px));
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-elevated);
+  box-shadow: var(--shadow-popover);
+}
+.bulk-sync-toast.is-live {
+  border-color: var(--accent-border);
+}
+.bulk-sync-toast.is-failed {
+  border-color: color-mix(in srgb, var(--danger-base) 55%, transparent);
+}
+.bulk-sync-toast__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bulk-sync-toast__top > .bulk-sync__spinner {
+  width: 13px;
+  height: 13px;
+}
+.bulk-sync-toast__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.bulk-sync-toast__headline {
+  overflow: hidden;
+  color: var(--text-primary);
+  font: 650 11.5px/1.25 var(--font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-sync-toast__meta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font: 500 10px/1.2 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bulk-sync-toast__icon {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.bulk-sync-toast__icon:hover {
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+.bulk-sync-toast__body:focus-visible,
+.bulk-sync-toast__icon:focus-visible,
+.bulk-sync__minimize:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.bulk-sync__bar.bulk-sync-toast__bar {
+  height: 4px;
+  margin-top: 8px;
+}
+/* The empty card that flies between the dialog and the toast. */
+.bulk-sync-ghost {
+  position: fixed;
+  z-index: 115;
+  pointer-events: none;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-popover);
+}
+
 /* The run status card — one element from the first repository to the receipt
    (design/Bulk Sync Progress - UX Review.dc.html, 2b). Its border carries the
    accent only while the run is live; the fill stays the panel so the bar's
@@ -12113,6 +12264,15 @@ body.is-col-resizing {
   height: 1px;
   background: var(--border-subtle);
   margin: 4px;
+}
+/* A group label inside a menu, aligned with the labels of a checked group
+   (the 12px check slot plus the item's 8px gap). */
+.pop-menu__heading {
+  padding: 6px 9px 4px 29px;
+  color: var(--text-subtle);
+  font: 650 9.5px/1 var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 /* Pull's menu. Each row says what it does to which branch, so it is two
    lines where the kebab's rows are one, and the width is set for the

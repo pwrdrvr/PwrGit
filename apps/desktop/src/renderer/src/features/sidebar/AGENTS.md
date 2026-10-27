@@ -152,6 +152,33 @@ title strip (`TitleBar`'s `.titlebar-jump`, `onOpenSearch`). Rules:
 
 Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3.
 
+## Fetch ▾ and the bulk-sync run
+
+Fetch all is a split button. The face runs the remembered scope (`all`, or
+`recent`, which is the Focused list from `focusedRepos`, every page of it)
+and its accessible name follows: "Fetch all repos" / "Fetch recent repos".
+The chevron ("Fetch options") picks the scope, which also runs it, and the
+automatic interval. Scope, interval and view live in `bulk-sync-prefs.ts`
+(`localStorage`, per machine). Rules, all in `useBulkSyncRun.ts`:
+
+- **The run is not the dialog.** `BulkSyncDialog` owns the operation and
+  draws it as `dialog`, `toast` or `hidden`; unmounting it still cancels. So
+  while a run is live, Escape and a backdrop click **minimise**, never
+  cancel. Once it has finished they close, as before.
+- **One run at a time** (`nextBulkSyncRun`, pure and tested). A click on a
+  live run shows it instead of starting another; a timed tick skips it.
+- **The view is remembered.** Minimising writes `toast`, expanding writes
+  `dialog`. With nothing written yet, the first dialog minimises itself
+  after `FIRST_RUN_MINIMIZE_MS` unless the pointer moved or a key was
+  pressed inside it (focus is no signal: the dialog takes it). E2E specs
+  that read the dialog write `dialog` first, or a slow runner loses it.
+- **Timed runs are `hidden`.** At one minute a toast would be up a third of
+  the time, and a repository that always fails would raise one every tick.
+  The face shows `aria-busy` while a fetch runs; its hover card carries
+  the last timed result.
+
+Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
+
 ## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.

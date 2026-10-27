@@ -25,9 +25,15 @@ export type MenuItem =
        *  check typed into the label instead was read aloud as "check mark"
        *  and announced no state. */
       checked?: boolean;
+      /** With `checked`: one of a group where exactly one is on, so the
+       *  entry is a `menuitemradio` rather than a checkbox. */
+      radio?: boolean;
       onSelect: () => void;
     }
-  | { type: "sep" };
+  | { type: "sep" }
+  /** A label over the group of entries below it ("Fetch automatically").
+   *  Not focusable, and not a menu item: the arrow keys pass over it. */
+  | { type: "heading"; label: string };
 
 /**
  * A context menu anchored at a screen point (right-click). Portalled to <body>,
@@ -129,11 +135,21 @@ export function ContextMenu({
       {items.map((it, i) =>
         it.type === "sep" ? (
           <div key={i} className="pop-menu__sep" />
+        ) : it.type === "heading" ? (
+          <div key={i} className="pop-menu__heading" role="presentation">
+            {it.label}
+          </div>
         ) : (
           <button
             key={i}
             className={`pop-menu__item${it.danger === true ? " pop-menu__item--danger" : ""}`}
-            role={it.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            role={
+              it.checked === undefined
+                ? "menuitem"
+                : it.radio === true
+                  ? "menuitemradio"
+                  : "menuitemcheckbox"
+            }
             aria-checked={it.checked}
             disabled={it.disabled === true}
             onClick={(e) => {
