@@ -84,6 +84,26 @@ afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
 describe("local contribution checkpoints", () => {
+  it.each([
+    ["repositories", "Repository discovery", null],
+    ["organizations", "Organization discovery", null],
+    ["authored", "Authored PR inventory", null],
+    ["pulls", "Repository PR collection", repo.id]
+  ] as const)("identifies a failed %s stage without blaming an unrelated repository", async (method, stage, repoId) => {
+    const provider = base();
+    provider[method] = async () => {
+      throw new Error("SAML SSO authorization required; resume after authorizing GitHub CLI.");
+    };
+    const { service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    expect(service.read(scope)).toMatchObject({
+      status: "partial",
+      repoIndex: 0,
+      issues: [{ repoId, message: `${stage}: SAML SSO authorization required; resume after authorizing GitHub CLI.` }]
+    });
+    expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+  });
   it("retains readable partial checkpoints when a host is disabled, while refusing new network reads", async () => {
     let enabled = true;
     const hostGate = {

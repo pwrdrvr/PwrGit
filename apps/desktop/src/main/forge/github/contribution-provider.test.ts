@@ -6,7 +6,7 @@ import {
   CONTRIBUTION_AUTHORED_QUERY
 } from "./contribution-provider";
 import type { ContributionRepo } from "@pwrgit/shared";
-import type { runGh } from "../../github/gh-cli";
+import { GhCliError, type runGh } from "../../github/gh-cli";
 
 const identity = { id: "U1", login: "sample-user", host: "ghe.example.test" };
 const repo: ContributionRepo = {
@@ -30,6 +30,49 @@ const response = (extra: Record<string, unknown>) =>
   });
 const signal = new AbortController().signal;
 describe("GitHub contribution read adapter", () => {
+  it.each(["cli failure", "resolved response"])(
+    "identifies SAML SSO refusals in a %s without exposing partial data or private diagnostics",
+    async (transport) => {
+      const raw = JSON.stringify({
+        data: { viewer: { pullRequests: { nodes: [null] } } },
+        errors: [
+          {
+            type: "FORBIDDEN",
+            path: ["viewer", "pullRequests", "nodes", 0],
+            message:
+              "Resource protected by organization SAML enforcement. You must grant your OAuth token access to private-org. private-payload ghp_secret12345678"
+          }
+        ]
+      });
+      let calls = 0;
+      const provider = new GitHubContributionProvider(identity.host, async () => {
+        calls++;
+        if (transport === "cli failure")
+          throw new GhCliError("private stderr", "command_failed", raw, "private stderr");
+        return raw;
+      });
+      await expect(provider.authored(identity, "PAGE_3", signal)).rejects.toThrow(
+        /SAML SSO.*GitHub CLI.*resume/
+      );
+      await expect(provider.authored(identity, "PAGE_3", signal)).rejects.not.toThrow(
+        /private|ghp_/
+      );
+      expect(calls).toBe(2); // Access refusals are not retried.
+    }
+  );
+  it("distinguishes ordinary GraphQL access refusals from SSO requirements", async () => {
+    const provider = new GitHubContributionProvider(identity.host, async () => {
+      throw new GhCliError("private stderr", "command_failed", JSON.stringify({
+        errors: [{ type: "FORBIDDEN", message: "private-org access denied" }]
+      }), "private stderr");
+    });
+    await expect(provider.authored(identity, null, signal)).rejects.toThrow(
+      /denied access.*repository permissions/
+    );
+    await expect(provider.authored(identity, null, signal)).rejects.not.toThrow(
+      /SAML|private-org/
+    );
+  });
   it("pins both inventory affiliation filters, includes forks/archived and uses native pagination rather than unsupported search", async () => {
     const calls: string[][] = [];
     const run: typeof runGh = async (args) => {
