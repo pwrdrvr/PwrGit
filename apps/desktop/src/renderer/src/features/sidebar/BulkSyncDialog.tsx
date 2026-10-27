@@ -194,6 +194,30 @@ function RepoResultDetails({ result, includeAll = false }: {
   );
 }
 
+/**
+ * The status card's second line while a run is live. It is drawn on every
+ * render, never only when exactly one repository is in flight: a line that
+ * came and went as repositories started and finished moved the bar and the
+ * whole list under it, several times a second (layout shift).
+ *
+ * It names the repository that started last, with a count of the others in
+ * flight beside it. Between repositories, when nothing is in flight for a
+ * moment, it keeps the last path rather than going blank.
+ */
+export function livePathLine(
+  running: ReadonlyArray<{ id: string; path: string }>,
+  newestStartedId: string | null,
+  previous: string | null,
+  platform: string
+): string | null {
+  if (running.length === 0) return previous;
+  const lead =
+    running.find((repo) => repo.id === newestStartedId) ?? running[0]!;
+  const others = running.length - 1;
+  const path = displayPath(lead.path, platform);
+  return others > 0 ? `${path} · +${others} more` : path;
+}
+
 /** The run's title, which names its scope. */
 export function runTitle(mode: BulkSyncMode, scope: FetchScope = "all"): string {
   if (mode === "soft-pull") return "Try to pull all safely";
@@ -296,6 +320,10 @@ export function BulkSyncDialog({
   const tip = useViewportTooltip();
   const repoSnapshot = useRef(repos).current;
   const repoIdsRef = useRef(repoIds);
+  // The repository that started last, and the path line last drawn, so the
+  // status card's second line always has something to say. See livePathLine.
+  const newestStartedRef = useRef<string | null>(null);
+  const lastPathRef = useRef<string | null>(null);
   const operationIdRef = useRef("");
   const [completed, setCompleted] = useState(0);
   const [total, setTotal] = useState(repoSnapshot.length);
@@ -323,6 +351,7 @@ export function BulkSyncDialog({
       setProgress((previous) => {
         const next = new Map(previous);
         if (event.phase === "repo_started") {
+          newestStartedRef.current = event.repoId!;
           next.set(event.repoId!, { phase: "running", remotes: [], worktrees: [] });
         } else if (event.phase === "repo_progress") {
           const current = previous.get(event.repoId!);
@@ -446,6 +475,13 @@ export function BulkSyncDialog({
     if (!result.ok) setError(result.error.message);
   };
 
+  const livePath = livePathLine(
+    runningRepos.map(({ repo }) => repo),
+    newestStartedRef.current,
+    lastPathRef.current,
+    platform
+  );
+  lastPathRef.current = livePath;
   const canMinimize = running && onViewChange !== undefined;
 
   // The surface on screen, so a view change knows where to fly from.
@@ -581,12 +617,7 @@ export function BulkSyncDialog({
               detail={
                 summary !== null
                   ? { kind: "summary", text: overallSummary(summary) }
-                  : runningRepos.length === 1 && runningRepos[0] !== undefined
-                    ? {
-                        kind: "path",
-                        text: displayPath(runningRepos[0].repo.path, platform)
-                      }
-                    : null
+                  : { kind: "path", text: livePath ?? "\u00a0" }
               }
               counts={outcomeCounts}
               inFlight={runningRepos.length}

@@ -13,6 +13,7 @@ vi.mock("../../lib/pwrgit", () => ({ dispatch, subscribe }));
 
 import {
   BulkSyncDialog,
+  livePathLine,
   TOAST_DISMISS_MS,
   type BulkSyncPresentation
 } from "./BulkSyncDialog";
@@ -266,5 +267,81 @@ describe("BulkSyncDialog views", () => {
       "remote:bulkSync",
       expect.anything()
     );
+  });
+});
+
+describe("livePathLine", () => {
+  const a = { id: "a", path: "/repos/atlas-api" };
+  const b = { id: "b", path: "/repos/billing-core" };
+
+  it("names the repository that started last, and counts the others", () => {
+    expect(livePathLine([a, b], "b", null, "darwin")).toBe(
+      "/repos/billing-core · +1 more"
+    );
+    expect(livePathLine([a], "b", null, "darwin")).toBe("/repos/atlas-api");
+  });
+
+  it("keeps the last line between repositories instead of going blank", () => {
+    expect(livePathLine([], null, "/repos/atlas-api", "darwin")).toBe(
+      "/repos/atlas-api"
+    );
+  });
+});
+
+describe("the status card's path line", () => {
+  it("stays on screen as repositories start and finish (no layout shift)", async () => {
+    let progress: ((event: unknown) => void) | undefined;
+    subscribe.mockImplementation((_channel: string, handler: (e: unknown) => void) => {
+      progress = handler;
+      return vi.fn();
+    });
+    const two: Repo[] = [
+      repos[0]!,
+      { ...repos[0]!, id: "repo-b", name: "billing-core", path: "/repos/billing-core" }
+    ];
+    await act(async () => {
+      root.render(
+        <BulkSyncDialog
+          profileId="profile-1"
+          repos={two}
+          mode="fetch"
+          platform="darwin"
+          onClose={vi.fn()}
+        />
+      );
+    });
+    const operationId = dispatch.mock.calls[0]?.[1].operationId as string;
+    const line = (): string | null | undefined =>
+      document.querySelector(".bulk-sync__status-copy > span")?.textContent;
+    const event = (phase: string, repoId: string, extra: object = {}) =>
+      act(async () => {
+        progress?.({
+          operationId,
+          mode: "fetch",
+          phase,
+          totalRepos: 2,
+          completedRepos: 0,
+          repoId,
+          ...extra
+        });
+      });
+
+    // Before anything starts: the line is there, holding its height.
+    expect(line()).toBe("\u00a0");
+    await event("repo_started", "repo-a");
+    expect(line()).toBe("/repos/atlas-api");
+    await event("repo_started", "repo-b");
+    expect(line()).toBe("/repos/billing-core · +1 more");
+    await event("repo_completed", "repo-b", {
+      result: {
+        repoId: "repo-b",
+        name: "billing-core",
+        path: "/repos/billing-core",
+        outcome: "success",
+        remotes: [],
+        worktrees: []
+      }
+    });
+    expect(line()).toBe("/repos/atlas-api");
   });
 });

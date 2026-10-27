@@ -856,10 +856,17 @@ textarea,
   margin-left: -2px;
   color: var(--text-muted);
 }
-/* Fetch all and Pull all divide whatever the row has spare. Grow, never
-   shrink — see the note above. */
-.sidebar-toolbar__sync {
-  flex-grow: 1;
+/* Fetch ▾ and Pull all divide whatever the row has spare, equally: a zero
+   basis shares the room by flex-grow alone, so a longer label ("Fetch
+   recent") or the chevron cannot make one wider than the other. They still
+   never shrink below their content (min-width: auto), which is what the fit
+   ladder measures — see the note above. */
+.sidebar-toolbar > .sidebar-toolbar__sync,
+.sidebar-toolbar__split {
+  flex: 1 0 0;
+}
+.sidebar-toolbar__split > .sidebar-toolbar__sync {
+  flex: 1 0 0;
 }
 .sidebar-toolbar__icon {
   width: 30px;
@@ -870,7 +877,6 @@ textarea,
    stays reachable at every width. design/Fetch Toast and Scope - UX
    Review.dc.html, 3a and 3c. */
 .sidebar-toolbar__split {
-  flex: 1 0 auto;
   display: flex;
 }
 .sidebar-toolbar__split > .sidebar-toolbar__sync {
@@ -7148,27 +7154,34 @@ button.agent-menu__item:hover {
   min-width: 0;
   box-shadow: none;
 }
-/* One color per outcome, read by both the bar segment and its legend swatch
-   so the two cannot drift apart. --danger-base is the failed card border's own
+/* One color per outcome, read by the bar segment, its legend swatch, and the
+   toast's bar, so the three cannot drift apart. The toast is not inside a
+   status card, which is why it is named here: scoped to the card alone, its
+   segments drew transparent and only the in-flight stripes showed. --danger-base is the failed card border's own
    base: --status-error sat too close to the light theme's warning brown to
    read as a different outcome. */
-.bulk-sync__status .is-success {
+.bulk-sync__status .is-success,
+.bulk-sync-toast__bar > .is-success {
   --bulk-sync-outcome: var(--status-ok);
 }
-.bulk-sync__status .is-partial {
+.bulk-sync__status .is-partial,
+.bulk-sync-toast__bar > .is-partial {
   --bulk-sync-outcome: var(--status-warning);
 }
-.bulk-sync__status .is-skipped {
+.bulk-sync__status .is-skipped,
+.bulk-sync-toast__bar > .is-skipped {
   --bulk-sync-outcome: color-mix(
     in srgb,
     var(--status-warning) 50%,
     var(--bg-panel)
   );
 }
-.bulk-sync__status .is-failed {
+.bulk-sync__status .is-failed,
+.bulk-sync-toast__bar > .is-failed {
   --bulk-sync-outcome: var(--danger-base);
 }
-.bulk-sync__status .is-cancelled {
+.bulk-sync__status .is-cancelled,
+.bulk-sync-toast__bar > .is-cancelled {
   --bulk-sync-outcome: var(--status-suspended);
 }
 /* In flight is the one accent in the bar, and the one moving part. The global
