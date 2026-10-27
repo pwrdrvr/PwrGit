@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   GitHubContributionProvider,
   CONTRIBUTION_REPOS_QUERY,
@@ -48,23 +48,33 @@ describe("GitHub contribution read adapter", () => {
       const provider = new GitHubContributionProvider(identity.host, async () => {
         calls++;
         if (transport === "cli failure")
-          throw new GhCliError("private stderr", "command_failed", raw, "private stderr");
+          throw new GhCliError(
+            "private stderr",
+            "command_failed",
+            raw,
+            "private stderr"
+          );
         return raw;
       });
       await expect(provider.authored(identity, "PAGE_3", signal)).rejects.toThrow(
         /SAML SSO.*GitHub CLI.*resume/
       );
-      await expect(provider.authored(identity, "PAGE_3", signal)).rejects.not.toThrow(
-        /private|ghp_/
-      );
+      await expect(
+        provider.authored(identity, "PAGE_3", signal)
+      ).rejects.not.toThrow(/private|ghp_/);
       expect(calls).toBe(2); // Access refusals are not retried.
     }
   );
   it("distinguishes ordinary GraphQL access refusals from SSO requirements", async () => {
     const provider = new GitHubContributionProvider(identity.host, async () => {
-      throw new GhCliError("private stderr", "command_failed", JSON.stringify({
-        errors: [{ type: "FORBIDDEN", message: "private-org access denied" }]
-      }), "private stderr");
+      throw new GhCliError(
+        "private stderr",
+        "command_failed",
+        JSON.stringify({
+          errors: [{ type: "FORBIDDEN", message: "private-org access denied" }]
+        }),
+        "private stderr"
+      );
     });
     await expect(provider.authored(identity, null, signal)).rejects.toThrow(
       /denied access.*repository permissions/
@@ -72,6 +82,30 @@ describe("GitHub contribution read adapter", () => {
     await expect(provider.authored(identity, null, signal)).rejects.not.toThrow(
       /SAML|private-org/
     );
+  });
+  it("still retries transient HTTP failures carrying a GraphQL error envelope", async () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi
+        .fn<typeof runGh>()
+        .mockRejectedValueOnce(
+          new GhCliError(
+            "HTTP 502",
+            "command_failed",
+            JSON.stringify({ errors: [{ type: "INTERNAL", message: "private" }] }),
+            "HTTP 502"
+          )
+        )
+        .mockResolvedValue(response({}));
+      const result = new GitHubContributionProvider(identity.host, run).verify(
+        signal
+      );
+      await vi.runAllTimersAsync();
+      await expect(result).resolves.toEqual(identity);
+      expect(run).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("pins both inventory affiliation filters, includes forks/archived and uses native pagination rather than unsupported search", async () => {
     const calls: string[][] = [];

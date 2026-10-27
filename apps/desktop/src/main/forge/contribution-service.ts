@@ -280,6 +280,8 @@ export class ContributionService {
     signal: AbortSignal
   ): Promise<void> {
     let activationPages = 0;
+    let stage = "Repository discovery";
+    let issueRepoId: string | null = null;
     const startedAt = Date.now();
     const request = async () => {
       signal.throwIfAborted();
@@ -347,6 +349,7 @@ export class ContributionService {
         snapshot.pages++;
         this.save(snapshot);
       }
+      stage = "Organization discovery";
       while (!snapshot.organizationsComplete) {
         await request();
         const page = await provider.organizations(
@@ -370,6 +373,7 @@ export class ContributionService {
         ])
       );
       // Direct lifetime author inventory covers personal/external projects without search indexing.
+      stage = "Authored PR inventory";
       while (!snapshot.authoredInventory.complete) {
         await request();
         const inventory = snapshot.authoredInventory;
@@ -452,8 +456,10 @@ export class ContributionService {
         snapshot.pages++;
         this.save(snapshot);
       }
+      stage = "Repository PR collection";
       while (snapshot.repoIndex < snapshot.repos.length) {
         const repo = snapshot.repos[snapshot.repoIndex]!;
+        issueRepoId = repo.id;
         // External authored activity is already complete from viewer.pullRequests.
         // Do not scan tens of thousands of unrelated PRs in contributed projects.
         if (repo.source === "authored_inventory") {
@@ -500,6 +506,9 @@ export class ContributionService {
         snapshot.pages++;
         this.save(snapshot);
       }
+      stage = "Authored PR lifecycle collection";
+      // Lifecycle requests span repositories; a refusal cannot be assigned to one.
+      issueRepoId = null;
       while (true) {
         const pending = snapshot.records
           .filter((row) => row.lifecycle && !row.lifecycle.complete)
@@ -633,11 +642,12 @@ export class ContributionService {
       snapshot.status = signal.aborted ? "canceled" : "partial";
       snapshot.issues = [
         {
-          repoId: snapshot.repos[snapshot.repoIndex]?.id ?? null,
-          message:
+          repoId: issueRepoId,
+          message: `${stage}: ${
             cause instanceof Error
               ? cause.message
               : "Collection stopped; coverage is incomplete."
+          }`
         }
       ];
       snapshot.retryAt =

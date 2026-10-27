@@ -89,19 +89,102 @@ describe("local contribution checkpoints", () => {
     ["organizations", "Organization discovery", null],
     ["authored", "Authored PR inventory", null],
     ["pulls", "Repository PR collection", repo.id]
-  ] as const)("identifies a failed %s stage without blaming an unrelated repository", async (method, stage, repoId) => {
+  ] as const)(
+    "identifies a failed %s stage without blaming an unrelated repository",
+    async (method, stage, repoId) => {
+      const provider = base();
+      provider[method] = async () => {
+        throw new Error(
+          "SAML SSO authorization required; resume after authorizing GitHub CLI."
+        );
+      };
+      const { service } = setup(provider);
+      await service.start(scope, false);
+      await service.settled();
+      expect(service.read(scope)).toMatchObject({
+        status: "partial",
+        repoIndex: 0,
+        issues: [
+          {
+            repoId,
+            message: `${stage}: SAML SSO authorization required; resume after authorizing GitHub CLI.`
+          }
+        ]
+      });
+      expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
+    }
+  );
+  it("keeps authored pages and resumes their cursor after an SSO refusal", async () => {
     const provider = base();
-    provider[method] = async () => {
-      throw new Error("SAML SSO authorization required; resume after authorizing GitHub CLI.");
+    let authorized = false;
+    const cursors: (string | null)[] = [];
+    provider.authored = async (_identity, cursor) => {
+      cursors.push(cursor);
+      if (cursor === "PAGE_3" && !authorized)
+        throw new Error("SAML SSO authorization required.");
+      const index = cursor === "PAGE_3" ? 3 : cursor === "PAGE_2" ? 2 : 1;
+      return {
+        ...page<ContributionRecord>(
+          [{
+            ...row(`A${index}`),
+            author: identity.id,
+            mergedAt: null,
+            lifecycle: {
+              createdAt: "2025-01-01T00:00:00Z",
+              updatedAt: "2025-02-01T00:00:00Z",
+              closedAt: "2025-02-01T00:00:00Z",
+              state: "CLOSED",
+              events: [],
+              complete: false,
+              cursor: null
+            }
+          }],
+          `PAGE_${index + 1}`,
+          index < 3
+        ),
+        totalCount: 3
+      };
     };
-    const { service } = setup(provider);
+    provider.pulls = vi.fn(provider.pulls);
+    const { db, service } = setup(provider);
     await service.start(scope, false);
     await service.settled();
-    expect(service.read(scope)).toMatchObject({
+    const partial = service.read(scope)!;
+    expect(partial).toMatchObject({
       status: "partial",
       repoIndex: 0,
-      issues: [{ repoId, message: `${stage}: SAML SSO authorization required; resume after authorizing GitHub CLI.` }]
+      authoredInventory: { received: 2, cursor: "PAGE_3", complete: false },
+      issues: [
+        {
+          repoId: null,
+          message: "Authored PR inventory: SAML SSO authorization required."
+        }
+      ]
     });
+    expect(partial.records.map((record) => record.id)).toEqual(["A1", "A2"]);
+    expect(provider.pulls).not.toHaveBeenCalled();
+    authorized = true;
+    const restarted = new ContributionService(
+      db,
+      hosts,
+      () => provider,
+      async () => {}
+    );
+    await restarted.start(scope, false);
+    await restarted.settled();
+    const complete = restarted.read(scope)!;
+    expect(complete.status).toBe("complete");
+    expect(complete.authoredInventory).toMatchObject({
+      received: 3,
+      complete: true
+    });
+    expect(complete.records.map((record) => record.id)).toEqual([
+      "A1", "A2", "A3", "P1"
+    ]);
+    expect(complete.window).toEqual(partial.window);
+    expect(complete.startedAt).toBe(partial.startedAt);
+    expect(complete.issues).toEqual([]);
+    expect(cursors).toEqual([null, "PAGE_2", "PAGE_3", "PAGE_3"]);
     expect(service.read({ ...scope, profileId: "profile2" })).toBeNull();
   });
   it("retains readable partial checkpoints when a host is disabled, while refusing new network reads", async () => {

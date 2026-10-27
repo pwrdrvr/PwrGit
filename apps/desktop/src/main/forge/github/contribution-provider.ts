@@ -184,6 +184,34 @@ export class ContributionRateLimitError extends Error {
     super("GitHub rate budget is low. Resume after the displayed reset time.");
   }
 }
+/** Classify structured failures without exposing GitHub's private error messages. */
+function graphqlFailure(response: Record<string, unknown>): Error | null {
+  if (response.errors === undefined) return null;
+  const errors: Record<string, unknown>[] = Array.isArray(response.errors)
+    ? response.errors.filter(
+        (error): error is Record<string, unknown> =>
+          error !== null && typeof error === "object" && !Array.isArray(error)
+      )
+    : [];
+  if (
+    errors.some(
+      (error) =>
+        error.type === "FORBIDDEN" &&
+        typeof error.message === "string" &&
+        /\bSAML\b|\bSSO\b|single.sign.on/i.test(error.message)
+    )
+  )
+    return new Error(
+      "GitHub requires SAML SSO authorization for an organization in this collection. Sign in through the organization's SSO and reauthorize GitHub CLI, then resume collection."
+    );
+  if (errors.some((error) => error.type === "FORBIDDEN"))
+    return new Error(
+      "GitHub denied access to analytics metadata. Check organization access policies and repository permissions for GitHub CLI, then resume collection."
+    );
+  return new Error(
+    "GitHub refused analytics metadata; partial data was retained. Check access and rate limits."
+  );
+}
 /** Same audited CLI/auth/host transport as other GitHub reads; never extracts a token. */
 export class GitHubContributionProvider implements ContributionProvider {
   constructor(
@@ -229,6 +257,21 @@ export class GitHubContributionProvider implements ContributionProvider {
           await delay(wait, { signal });
           continue;
         }
+        // gh exits nonzero on GraphQL errors, even with an HTTP 200 and a
+        // partial JSON response. Inspect only the structured error envelope;
+        // never accept its data or forward raw stdout/stderr to the snapshot.
+        if (cause instanceof GhCliError && cause.code === "command_failed") {
+          let response: Record<string, unknown> | undefined;
+          try {
+            response = object(JSON.parse(cause.stdout));
+          } catch {
+            // Non-JSON CLI/transport failures retain the generic diagnostic.
+          }
+          if (response) {
+            const failure = graphqlFailure(response);
+            if (failure) throw failure;
+          }
+        }
         // Do not log private API payloads or stderr. Auth/SSO/access/rate failure is never zero.
         throw new Error(
           "GitHub analytics read failed. Check CLI sign-in, SSO authorization, repository access and rate limits, then resume."
@@ -240,10 +283,8 @@ export class GitHubContributionProvider implements ContributionProvider {
       } catch {
         throw new Error("GitHub returned invalid analytics metadata.");
       }
-      if (response.errors !== undefined)
-        throw new Error(
-          "GitHub refused analytics metadata; partial data was retained. Check access and rate limits."
-        );
+      const failure = graphqlFailure(response);
+      if (failure) throw failure;
       const data = object(response.data),
         viewer = object(data.viewer);
       const id = string(viewer.id),
