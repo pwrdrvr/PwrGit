@@ -2,7 +2,8 @@ import type {
   ContributionIdentity,
   ContributionRepo,
   ContributionRecord,
-  ContributionEvent
+  ContributionEvent,
+  ContributionBlockedOrganization
 } from "@pwrgit/shared";
 import { runGh, GhCliError } from "../../github/gh-cli";
 import { forgeRetryDelayMs } from "../retry";
@@ -13,6 +14,8 @@ type Page<T> = {
   cursor: string | null;
   more: boolean;
   totalCount?: number;
+  skipped?: number;
+  blockedOrganizations?: ContributionBlockedOrganization[];
 };
 export interface ContributionProvider {
   verify(signal: AbortSignal): Promise<ContributionIdentity>;
@@ -169,7 +172,11 @@ function pullRecord(
     };
   return record;
 }
-function page<T>(value: unknown, parse: (value: unknown) => T): Page<T> {
+function page<T>(
+  value: unknown,
+  parse: (value: unknown) => T,
+  skipped: number[] = []
+): Page<T> {
   const connection = object(value),
     info = object(connection.pageInfo);
   if (!Array.isArray(connection.nodes) || typeof info.hasNextPage !== "boolean")
@@ -177,13 +184,41 @@ function page<T>(value: unknown, parse: (value: unknown) => T): Page<T> {
   const cursor = info.endCursor === null ? null : string(info.endCursor);
   if (info.hasNextPage && (!cursor || !connection.nodes.length))
     throw new Error("GitHub returned a stalled analytics page.");
-  return { nodes: connection.nodes.map(parse), cursor, more: info.hasNextPage };
+  return {
+    nodes: connection.nodes.flatMap((node, index) =>
+      skipped.includes(index) ? [] : [parse(node)]
+    ),
+    cursor,
+    more: info.hasNextPage
+  };
 }
 export class ContributionRateLimitError extends Error {
   constructor(readonly retryAt: string) {
     super("GitHub rate budget is low. Resume after the displayed reset time.");
   }
 }
+export class ContributionSsoError extends Error {
+  constructor(readonly organizations: ContributionBlockedOrganization[] = []) {
+    super(
+      "GitHub requires SAML SSO authorization for an organization in this collection. Sign in through the organization's SSO and reauthorize GitHub CLI, then resume collection."
+    );
+  }
+}
+function isSsoRefusal(error: Record<string, unknown>): boolean {
+  return (
+    error.type === "FORBIDDEN" &&
+    ((typeof error.extensions === "object" &&
+      error.extensions !== null &&
+      (error.extensions as Record<string, unknown>).saml_failure === true) ||
+      (typeof error.message === "string" &&
+        /\bSAML\b|\bSSO\b|single.sign.on/i.test(error.message)))
+  );
+}
+type QueryResult = {
+  data: Record<string, unknown>;
+  skipped: number[];
+  blockedOrganizations: ContributionBlockedOrganization[];
+};
 /** Classify structured failures without exposing GitHub's private error messages. */
 function graphqlFailure(response: Record<string, unknown>): Error | null {
   if (response.errors === undefined) return null;
@@ -194,16 +229,12 @@ function graphqlFailure(response: Record<string, unknown>): Error | null {
       )
     : [];
   if (
-    errors.some(
-      (error) =>
-        error.type === "FORBIDDEN" &&
-        typeof error.message === "string" &&
-        /\bSAML\b|\bSSO\b|single.sign.on/i.test(error.message)
-    )
+    errors.length &&
+    Array.isArray(response.errors) &&
+    errors.length === response.errors.length &&
+    errors.every(isSsoRefusal)
   )
-    return new Error(
-      "GitHub requires SAML SSO authorization for an organization in this collection. Sign in through the organization's SSO and reauthorize GitHub CLI, then resume collection."
-    );
+    return new ContributionSsoError();
   if (errors.some((error) => error.type === "FORBIDDEN"))
     return new Error(
       "GitHub denied access to analytics metadata. Check organization access policies and repository permissions for GitHub CLI, then resume collection."
@@ -214,6 +245,77 @@ function graphqlFailure(response: Record<string, unknown>): Error | null {
 }
 /** Same audited CLI/auth/host transport as other GitHub reads; never extracts a token. */
 export class GitHubContributionProvider implements ContributionProvider {
+  private ssoOrganizations = new Map<
+    string,
+    ContributionBlockedOrganization[]
+  >();
+  private async identifySsoOrganizations(
+    identity: ContributionIdentity,
+    signal: AbortSignal
+  ): Promise<ContributionBlockedOrganization[]> {
+    const cached = this.ssoOrganizations.get(identity.id);
+    if (cached) return cached;
+    const organizations: ContributionBlockedOrganization[] = [];
+    try {
+      const headers = await this.run(
+        [
+          "api",
+          "--hostname",
+          this.host,
+          "--include",
+          "user/repos?per_page=1",
+          "--jq",
+          "empty"
+        ],
+        { signal, timeoutMs: 45_000 }
+      );
+      const match =
+        /^x-github-sso:\s*partial-results;\s*organizations=([\d, ]+)\s*$/im.exec(
+          headers
+        );
+      const ids = [
+        ...new Set(match?.[1].split(",").map((id) => Number(id.trim())) ?? [])
+      ]
+        .filter((id) => Number.isSafeInteger(id) && id > 0)
+        .slice(0, 100);
+      for (const id of ids) {
+        let login: string | null = null;
+        try {
+          // Public directory lookup avoids requiring SSO/admin:org for the
+          // identity itself. Never substitute the next org if this ID is gone.
+          const raw = await this.run(
+            [
+              "api",
+              "--hostname",
+              this.host,
+              `organizations?since=${id - 1}&per_page=1`,
+              "--jq",
+              "map({id,login})"
+            ],
+            { signal, timeoutMs: 45_000 }
+          );
+          const result: unknown = JSON.parse(raw);
+          if (Array.isArray(result) && result.length === 1) {
+            const org = object(result[0]);
+            if (
+              org.id === id &&
+              typeof org.login === "string" &&
+              /^[a-z\d](?:[a-z\d-]{0,38})$/i.test(org.login)
+            )
+              login = org.login;
+          }
+        } catch {
+          signal.throwIfAborted();
+        }
+        organizations.push({ id: String(id), login });
+      }
+    } catch {
+      signal.throwIfAborted();
+    }
+    if (!organizations.length) organizations.push({ id: null, login: null });
+    this.ssoOrganizations.set(identity.id, organizations);
+    return organizations;
+  }
   constructor(
     readonly host: string,
     private readonly run: typeof runGh = runGh
@@ -222,8 +324,9 @@ export class GitHubContributionProvider implements ContributionProvider {
     query: string,
     variables: Record<string, string | null>,
     signal: AbortSignal,
-    identity?: ContributionIdentity
-  ): Promise<Record<string, unknown>> {
+    identity?: ContributionIdentity,
+    recoverConnection?: "pullRequests"
+  ): Promise<QueryResult> {
     const args = [
       "api",
       "graphql",
@@ -257,25 +360,25 @@ export class GitHubContributionProvider implements ContributionProvider {
           await delay(wait, { signal });
           continue;
         }
-        // gh exits nonzero on GraphQL errors, even with an HTTP 200 and a
-        // partial JSON response. Inspect only the structured error envelope;
-        // never accept its data or forward raw stdout/stderr to the snapshot.
+        // gh exits nonzero on GraphQL errors even for an HTTP 200. Only
+        // structured GraphQL failures may reach the shared response parser.
         if (cause instanceof GhCliError && cause.code === "command_failed") {
-          let response: Record<string, unknown> | undefined;
           try {
-            response = object(JSON.parse(cause.stdout));
+            const response = object(JSON.parse(cause.stdout));
+            if (response.errors !== undefined) {
+              raw = cause.stdout;
+            } else throw new Error();
           } catch {
-            // Non-JSON CLI/transport failures retain the generic diagnostic.
+            throw new Error(
+              "GitHub analytics read failed. Check CLI sign-in, SSO authorization, repository access and rate limits, then resume."
+            );
           }
-          if (response) {
-            const failure = graphqlFailure(response);
-            if (failure) throw failure;
-          }
+        } else {
+          // Do not log private API payloads or stderr. Auth/SSO/access/rate failure is never zero.
+          throw new Error(
+            "GitHub analytics read failed. Check CLI sign-in, SSO authorization, repository access and rate limits, then resume."
+          );
         }
-        // Do not log private API payloads or stderr. Auth/SSO/access/rate failure is never zero.
-        throw new Error(
-          "GitHub analytics read failed. Check CLI sign-in, SSO authorization, repository access and rate limits, then resume."
-        );
       }
       let response: Record<string, unknown>;
       try {
@@ -284,11 +387,18 @@ export class GitHubContributionProvider implements ContributionProvider {
         throw new Error("GitHub returned invalid analytics metadata.");
       }
       const failure = graphqlFailure(response);
-      if (failure) throw failure;
-      const data = object(response.data),
+      if (failure && !(failure instanceof ContributionSsoError)) throw failure;
+      let data: Record<string, unknown>, viewer: Record<string, unknown>;
+      let id: string, login: string;
+      try {
+        data = object(response.data);
         viewer = object(data.viewer);
-      const id = string(viewer.id),
+        id = string(viewer.id);
         login = string(viewer.login);
+      } catch (cause) {
+        // Without the identity envelope an SSO page is not recoverable.
+        throw failure ?? cause;
+      }
       if (
         identity &&
         (id !== identity.id ||
@@ -302,11 +412,46 @@ export class GitHubContributionProvider implements ContributionProvider {
         throw new Error("GitHub did not report its analytics rate budget.");
       if (rate.remaining < 200)
         throw new ContributionRateLimitError(timestamp(rate.resetAt));
-      return data;
+      let skipped: number[] = [];
+      let blockedOrganizations: ContributionBlockedOrganization[] = [];
+      if (failure instanceof ContributionSsoError) {
+        blockedOrganizations = identity
+          ? await this.identifySsoOrganizations(identity, signal)
+          : [];
+        if (!recoverConnection || !identity)
+          throw new ContributionSsoError(blockedOrganizations);
+        const refusal = new ContributionSsoError(blockedOrganizations);
+        const connection = viewer[recoverConnection];
+        if (
+          !connection ||
+          typeof connection !== "object" ||
+          Array.isArray(connection)
+        )
+          throw refusal;
+        const nodes = (connection as Record<string, unknown>).nodes;
+        const errors = response.errors as Record<string, unknown>[];
+        const indices = errors.map((error) => {
+          const path = error.path;
+          if (
+            !Array.isArray(path) ||
+            path[0] !== "viewer" ||
+            path[1] !== recoverConnection ||
+            path[2] !== "nodes" ||
+            !Number.isSafeInteger(path[3]) ||
+            path[3] < 0 ||
+            !Array.isArray(nodes) ||
+            path[3] >= nodes.length
+          )
+            throw refusal;
+          return path[3] as number;
+        });
+        skipped = [...new Set(indices)];
+      }
+      return { data, skipped, blockedOrganizations };
     }
   }
   async verify(signal: AbortSignal): Promise<ContributionIdentity> {
-    const data = await this.query(`query { ${VIEWER} }`, {}, signal),
+    const { data } = await this.query(`query { ${VIEWER} }`, {}, signal),
       viewer = object(data.viewer);
     return {
       id: string(viewer.id),
@@ -319,7 +464,7 @@ export class GitHubContributionProvider implements ContributionProvider {
     cursor: string | null,
     signal: AbortSignal
   ): Promise<Page<ContributionRepo>> {
-    const data = await this.query(
+    const { data } = await this.query(
       CONTRIBUTION_REPOS_QUERY,
       { cursor },
       signal,
@@ -342,7 +487,7 @@ export class GitHubContributionProvider implements ContributionProvider {
     cursor: string | null,
     signal: AbortSignal
   ): Promise<Page<string>> {
-    const data = await this.query(
+    const { data } = await this.query(
       `query($cursor:String) {
         viewer { id login organizations(first:100, after:$cursor) {
           nodes { login }
@@ -363,7 +508,7 @@ export class GitHubContributionProvider implements ContributionProvider {
     cursor: string | null,
     signal: AbortSignal
   ) {
-    const data = await this.query(
+    const { data } = await this.query(
       CONTRIBUTION_PULLS_QUERY,
       { id: repo.id, cursor },
       signal,
@@ -390,23 +535,34 @@ export class GitHubContributionProvider implements ContributionProvider {
     cursor: string | null,
     signal: AbortSignal
   ): Promise<Page<ContributionRecord>> {
-    const data = await this.query(
+    const { data, skipped, blockedOrganizations } = await this.query(
       CONTRIBUTION_AUTHORED_QUERY,
       { cursor },
       signal,
-      identity
+      identity,
+      "pullRequests"
     );
     const connection = object(object(data.viewer).pullRequests);
-    const result = page(connection, (value) => {
-      const pull = object(value),
-        record = pullRecord(pull, repository(pull.repository), identity);
-      if (record.author !== identity.id)
-        throw new Error(
-          "GitHub's authored inventory returned a PR by another actor. Author coverage is unverified."
-        );
-      return record;
-    });
-    return { ...result, totalCount: count(connection.totalCount) };
+    const result = page(
+      connection,
+      (value) => {
+        const pull = object(value),
+          record = pullRecord(pull, repository(pull.repository), identity);
+        if (record.author !== identity.id)
+          throw new Error(
+            "GitHub's authored inventory returned a PR by another actor. Author coverage is unverified."
+          );
+        return record;
+      },
+      skipped
+    );
+    return {
+      ...result,
+      totalCount: count(connection.totalCount),
+      ...(skipped.length
+        ? { skipped: skipped.length, blockedOrganizations }
+        : {})
+    };
   }
   async timelines(
     identity: ContributionIdentity,
@@ -433,7 +589,7 @@ export class GitHubContributionProvider implements ContributionProvider {
         } } }`;
       })
       .join("\n");
-    const data = await this.query(
+    const { data } = await this.query(
       `query { ${VIEWER} ${fields} }`,
       {},
       signal,

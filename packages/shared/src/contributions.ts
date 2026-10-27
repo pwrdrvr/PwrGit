@@ -52,6 +52,10 @@ export type ContributionWindow = {
   end: string;
   partialDay?: boolean;
 };
+export type ContributionBlockedOrganization = {
+  id: string | null;
+  login: string | null;
+};
 export type ContributionSnapshot = {
   version: 1;
   profileId: string;
@@ -73,12 +77,20 @@ export type ContributionSnapshot = {
   prCursor: string | null;
   pages: number;
   retryAt: string | null;
+  accessibleComplete?: boolean;
+  blockedOrganizations?: ContributionBlockedOrganization[];
+  blockedRepoIds?: string[];
+  blockedLifecycleIds?: string[];
+  repoRetry?: { index: number; cursor: string | null };
   authoredInventory: {
     cursor: string | null;
     expected: number | null;
     received: number;
     seen: string[];
     complete: boolean;
+    skipped?: number;
+    exhausted?: boolean;
+    retry?: { cursor: string | null; seenCount: number };
   };
   issues: { repoId: string | null; message: string }[];
 };

@@ -448,9 +448,13 @@ export function ContributionScreen({
         status: current.status,
         inventoryComplete: current.inventoryComplete,
         authoredInventory: current.authoredInventory,
+        blockedOrganizations: current.blockedOrganizations ?? [],
+        blockedRepoIds: current.blockedRepoIds ?? [],
+        accessibleComplete: current.accessibleComplete ?? false,
         mergerScope:
           "Affiliated repositories plus own PRs in external projects; other-author external mergers unverified",
-        reposCovered: current.repoIndex,
+        reposCovered: current.repoIndex - (current.blockedRepoIds?.length ?? 0),
+        reposSkipped: current.blockedRepoIds?.length ?? 0,
         reposDiscovered: current.repos.length,
         issues: current.issues,
         refreshedAt: current.refreshedAt,
@@ -728,14 +732,46 @@ export function ContributionScreen({
                   ? "Collection in progress"
                   : `Incomplete · ${current.status}`}
             </strong>{" "}
-            · {current.repoIndex} of {current.repos.length} repositories covered
-            · inventory {current.inventoryReceived}/
-            {current.inventoryExpected ?? "unknown"} · {current.pages} pages ·{" "}
-            {current.organizations.length} visible organization memberships
+            · {current.repoIndex - (current.blockedRepoIds?.length ?? 0)} of{" "}
+            {current.repos.length} repositories covered · inventory{" "}
+            {current.inventoryReceived}/{current.inventoryExpected ?? "unknown"}{" "}
+            · {current.pages} pages · {current.organizations.length} visible
+            organization memberships
             {!current.inventoryComplete
               ? " · repository discovery incomplete"
               : ""}
           </p>
+          {!!current.blockedOrganizations?.length && (
+            <div>
+              <p>
+                {current.accessibleComplete
+                  ? "Accessible activity collected."
+                  : "Continuing to collect accessible activity."}{" "}
+                SSO-blocked organizations are skipped. Totals remain incomplete.
+              </p>
+              <ul aria-label="SSO-blocked organizations">
+                {current.blockedOrganizations.map((org, index) => (
+                  <li key={index}>
+                    {org.login ??
+                      (org.id
+                        ? `Organization ID ${org.id}`
+                        : "Organization not identified by GitHub")}
+                    {" · SAML SSO authorization required"}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                {current.authoredInventory.skipped ?? 0} authored PRs skipped ·{" "}
+                {current.blockedRepoIds?.length ?? 0}{" "}
+                {current.blockedRepoIds?.length === 1
+                  ? "repository"
+                  : "repositories"}{" "}
+                skipped. Sign in through the organization's SSO and reauthorize
+                GitHub CLI, then use Resume collection to retry the skipped
+                activity.
+              </p>
+            </div>
+          )}
           <p>
             {current.window.startDate} through {current.window.endDate} ·{" "}
             {current.window.timezone} · UTC [{current.window.start},{" "}

@@ -4,7 +4,11 @@ import {
   ContributionService,
   type ContributionScope
 } from "./contribution-service";
-import { GitHubContributionProvider, type ContributionProvider } from "./github/contribution-provider";
+import {
+  GitHubContributionProvider,
+  ContributionSsoError,
+  type ContributionProvider
+} from "./github/contribution-provider";
 import type { ContributionRepo, ContributionRecord } from "@pwrgit/shared";
 
 const identity = { id: "U1", login: "sample-user", host: "github.com" };
@@ -125,20 +129,22 @@ describe("local contribution checkpoints", () => {
       const index = cursor === "PAGE_3" ? 3 : cursor === "PAGE_2" ? 2 : 1;
       return {
         ...page<ContributionRecord>(
-          [{
-            ...row(`A${index}`),
-            author: identity.id,
-            mergedAt: null,
-            lifecycle: {
-              createdAt: "2025-01-01T00:00:00Z",
-              updatedAt: "2025-02-01T00:00:00Z",
-              closedAt: "2025-02-01T00:00:00Z",
-              state: "CLOSED",
-              events: [],
-              complete: false,
-              cursor: null
+          [
+            {
+              ...row(`A${index}`),
+              author: identity.id,
+              mergedAt: null,
+              lifecycle: {
+                createdAt: "2025-01-01T00:00:00Z",
+                updatedAt: "2025-02-01T00:00:00Z",
+                closedAt: "2025-02-01T00:00:00Z",
+                state: "CLOSED",
+                events: [],
+                complete: false,
+                cursor: null
+              }
             }
-          }],
+          ],
           `PAGE_${index + 1}`,
           index < 3
         ),
@@ -179,7 +185,10 @@ describe("local contribution checkpoints", () => {
       complete: true
     });
     expect(complete.records.map((record) => record.id)).toEqual([
-      "A1", "A2", "A3", "P1"
+      "A1",
+      "A2",
+      "A3",
+      "P1"
     ]);
     expect(complete.window).toEqual(partial.window);
     expect(complete.startedAt).toBe(partial.startedAt);
@@ -194,17 +203,32 @@ describe("local contribution checkpoints", () => {
     provider.authored = async (_identity, cursor) => {
       cursors.push(cursor);
       const index = cursor ? 2 : 1;
-      const nodes: ContributionRecord[] = [{
-        ...row(`A${index}`), author: identity.id, mergedAt: null,
-        lifecycle: {
-          createdAt: "2025-01-01T00:00:00Z", updatedAt: "2025-02-01T00:00:00Z",
-          closedAt: "2025-02-01T00:00:00Z", state: "CLOSED", events: [], complete: false, cursor: null
+      const nodes: ContributionRecord[] = [
+        {
+          ...row(`A${index}`),
+          author: identity.id,
+          mergedAt: null,
+          lifecycle: {
+            createdAt: "2025-01-01T00:00:00Z",
+            updatedAt: "2025-02-01T00:00:00Z",
+            closedAt: "2025-02-01T00:00:00Z",
+            state: "CLOSED",
+            events: [],
+            complete: false,
+            cursor: null
+          }
         }
-      }];
+      ];
       if (!cursor && authorized) nodes.push({ ...nodes[0]!, id: "RECOVERED" });
       return {
-        ...page(nodes, cursor ? null : "NEXT", !cursor), totalCount: 3,
-        ...(!cursor && !authorized ? { skipped: 1, blockedOrganizations: [{ id: "42", login: "blocked-org" }] } : {})
+        ...page(nodes, cursor ? null : "NEXT", !cursor),
+        totalCount: 3,
+        ...(!cursor && !authorized
+          ? {
+              skipped: 1,
+              blockedOrganizations: [{ id: "42", login: "blocked-org" }]
+            }
+          : {})
       };
     };
     provider.pulls = vi.fn(provider.pulls);
@@ -213,20 +237,42 @@ describe("local contribution checkpoints", () => {
     await service.settled();
     const partial = service.read(scope)!;
     expect(partial).toMatchObject({
-      status: "partial", accessibleComplete: true, repoIndex: 1,
-      authoredInventory: { received: 2, skipped: 1, exhausted: true, complete: false },
+      status: "partial",
+      accessibleComplete: true,
+      repoIndex: 1,
+      authoredInventory: {
+        received: 2,
+        skipped: 1,
+        exhausted: true,
+        complete: false
+      },
       blockedOrganizations: [{ id: "42", login: "blocked-org" }]
     });
-    expect(partial.records.map((record) => record.id)).toEqual(["A1", "A2", "P1"]);
+    expect(partial.records.map((record) => record.id)).toEqual([
+      "A1",
+      "A2",
+      "P1"
+    ]);
     expect(provider.pulls).toHaveBeenCalledTimes(1);
     authorized = true;
-    const restarted = new ContributionService(db, hosts, () => provider, async () => {});
+    const restarted = new ContributionService(
+      db,
+      hosts,
+      () => provider,
+      async () => {}
+    );
     await restarted.start(scope, false);
     await restarted.settled();
     const complete = restarted.read(scope)!;
     expect(complete.status).toBe("complete");
-    expect(complete.authoredInventory).toMatchObject({ received: 3, skipped: 0, complete: true });
-    expect(complete.records.some((record) => record.id === "RECOVERED")).toBe(true);
+    expect(complete.authoredInventory).toMatchObject({
+      received: 3,
+      skipped: 0,
+      complete: true
+    });
+    expect(complete.records.some((record) => record.id === "RECOVERED")).toBe(
+      true
+    );
     expect(complete.blockedOrganizations).toEqual([]);
     expect(complete.window).toEqual(partial.window);
     expect(cursors).toEqual([null, "NEXT", null, "NEXT"]);
@@ -234,28 +280,142 @@ describe("local contribution checkpoints", () => {
   });
   it("skips the rest of an SSO-blocked organization and continues other repositories", async () => {
     const provider = base();
-    const blocked = { ...repo, id: "BLOCKED", owner: "blocked-org", ownerId: "O42", path: "blocked-org/one" };
-    provider.repositories = async () => page([blocked, { ...blocked, id: "BLOCKED2", path: "blocked-org/two" }, repo]);
+    const blocked = {
+      ...repo,
+      id: "BLOCKED",
+      owner: "blocked-org",
+      ownerId: "O42",
+      path: "blocked-org/one"
+    };
+    provider.repositories = async () =>
+      page([
+        blocked,
+        { ...blocked, id: "BLOCKED2", path: "blocked-org/two" },
+        repo
+      ]);
     const calls: string[] = [];
-    const denied = new GitHubContributionProvider(identity.host, async () => JSON.stringify({
-      data: { viewer: identity, rateLimit: { remaining: 4000, resetAt: "2026-10-28T00:00:00Z" }, node: null },
-      errors: [{ type: "FORBIDDEN", extensions: { saml_failure: true }, message: "SAML enforcement" }]
-    }));
+    let authorized = false;
+    const denied = new GitHubContributionProvider(identity.host, async () =>
+      JSON.stringify({
+        data: {
+          viewer: identity,
+          rateLimit: { remaining: 4000, resetAt: "2026-10-28T00:00:00Z" },
+          node: null
+        },
+        errors: [
+          {
+            type: "FORBIDDEN",
+            extensions: { saml_failure: true },
+            message: "SAML enforcement"
+          }
+        ]
+      })
+    );
     provider.pulls = async (viewer, item, cursor, signal) => {
       calls.push(item.id);
-      if (item.owner === "blocked-org") return denied.pulls(viewer, item, cursor, signal);
-      return { ...page([row("ACCESSIBLE")]), oldestUpdatedAt: "2026-05-01T00:00:00Z" };
+      if (item.owner === "blocked-org" && !authorized)
+        return denied.pulls(viewer, item, cursor, signal);
+      return {
+        ...page([
+          {
+            ...row(item.id === repo.id ? "ACCESSIBLE" : `RECOVERED_${item.id}`),
+            repo: item
+          }
+        ]),
+        oldestUpdatedAt: "2026-05-01T00:00:00Z"
+      };
     };
     const { service } = setup(provider);
     await service.start(scope, false);
     await service.settled();
     expect(calls).toEqual(["BLOCKED", repo.id]);
     expect(service.read(scope)).toMatchObject({
-      status: "partial", accessibleComplete: true, repoIndex: 3,
+      status: "partial",
+      accessibleComplete: true,
+      repoIndex: 3,
       blockedRepoIds: ["BLOCKED", "BLOCKED2"],
       blockedOrganizations: [{ login: "blocked-org" }],
       records: [{ id: "ACCESSIBLE" }]
     });
+    authorized = true;
+    await service.start(scope, false);
+    await service.settled();
+    expect(service.read(scope)).toMatchObject({
+      status: "complete",
+      blockedRepoIds: [],
+      blockedOrganizations: []
+    });
+    expect(service.read(scope)?.records).toHaveLength(3);
+    expect(calls).toEqual(["BLOCKED", repo.id, "BLOCKED", "BLOCKED2", repo.id]);
+  });
+  it("isolates SSO failures in mixed lifecycle batches and retries skipped histories", async () => {
+    const provider = base();
+    let authorized = false;
+    const blockedRepo = {
+      ...repo,
+      id: "B",
+      owner: "blocked-org",
+      path: "blocked-org/widget"
+    };
+    const rows: ContributionRecord[] = ["BLOCKED1", "OPEN", "BLOCKED2"].map(
+      (id) => ({
+        ...row(id),
+        repo: id === "OPEN" ? repo : blockedRepo,
+        author: identity.id,
+        mergedAt: null,
+        lifecycle: {
+          createdAt: "2026-05-01T00:00:00Z",
+          updatedAt: "2026-06-01T00:00:00Z",
+          closedAt: null,
+          state: "OPEN",
+          events: [],
+          complete: false,
+          cursor: null
+        }
+      })
+    );
+    provider.authored = async () =>
+      page(rows.map((row) => structuredClone(row)));
+    const calls: string[][] = [];
+    provider.timelines = async (_identity, items) => {
+      calls.push(items.map((item) => item.id));
+      if (!authorized && items.some((item) => item.repo.id === "B"))
+        throw new ContributionSsoError();
+      return items.map((item) => ({
+        id: item.id,
+        events: [],
+        cursor: null,
+        more: false,
+        filteredCount: 0
+      }));
+    };
+    const { service } = setup(provider);
+    await service.start(scope, false);
+    await service.settled();
+    const partial = service.read(scope)!;
+    expect(partial).toMatchObject({
+      status: "partial",
+      accessibleComplete: true
+    });
+    expect(
+      partial.records.find((row) => row.id === "OPEN")?.lifecycle?.complete
+    ).toBe(true);
+    expect(calls).toEqual([
+      ["BLOCKED1", "OPEN", "BLOCKED2"],
+      ["BLOCKED1"],
+      ["OPEN"]
+    ]);
+    authorized = true;
+    await service.start(scope, false);
+    await service.settled();
+    expect(service.read(scope)?.status).toBe("complete");
+    expect(
+      service
+        .read(scope)
+        ?.records.filter((row) => row.lifecycle)
+        .every((row) => row.lifecycle?.complete)
+    ).toBe(true);
+    expect(calls.at(-1)).toEqual(["BLOCKED1", "BLOCKED2"]);
   });
   it("retains readable partial checkpoints when a host is disabled, while refusing new network reads", async () => {
     let enabled = true;
