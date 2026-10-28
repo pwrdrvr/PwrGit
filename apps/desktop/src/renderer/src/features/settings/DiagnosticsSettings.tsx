@@ -13,6 +13,7 @@ import {
   SettingsSegmented
 } from "./SettingsLayout";
 import { SettingsSwitch } from "./SettingsSwitch";
+import { DeveloperToolsSection } from "./DeveloperToolsSection";
 import {
   hoverTooltip,
   useViewportTooltip
@@ -49,14 +50,17 @@ const HEAP_SNAPSHOT_LIMIT_OPTIONS: Array<{
 ];
 
 /**
- * Memory / CPU profiling pane — the settings face of the diagnostics port
- * from PwrAgnt (heap monitor, hot renderer CPU profiler, startup profiler).
- * Sessions land in `diagnosticsOutputRoot`; heap monitor and hot-CPU changes
- * apply live, the startup profiler applies on the next launch.
+ * Troubleshooting pane — PwrAgnt's pane of the same name: Developer Mode and
+ * process ids first, then the diagnostics port (heap monitor, hot renderer CPU
+ * profiler, startup profiler). The page id stays `diagnostics` so deep links
+ * that already name it keep working. Sessions land in `diagnosticsOutputRoot`;
+ * heap monitor and hot-CPU changes apply live, the startup profiler applies on
+ * the next launch.
  */
 export function DiagnosticsSettings(props: {
   saving: boolean;
   snapshot: AppSettingsSnapshot;
+  onDeveloperModeChange: (enabled: boolean) => void;
   onHeapMonitorEnabledChange: (enabled: boolean) => void;
   onHotCpuEnabledChange: (enabled: boolean) => void;
   onHotCpuStartDelayChange: (delayMs: HotCpuStartDelayMs) => void;
@@ -82,14 +86,14 @@ export function DiagnosticsSettings(props: {
   const hotDurationSeconds = HOT_CPU_TUNING.profileDurationMs / 1_000;
 
   return (
-    <SettingsSectionStack aria-label="Memory and CPU profiling settings" paneId="diagnostics">
+    <SettingsSectionStack aria-label="Troubleshooting settings" paneId="diagnostics">
       <SettingsPanelHead
-        eyebrow="Diagnostics"
-        title="Memory / CPU profiling"
+        eyebrow="Troubleshooting"
+        title="Troubleshooting"
         help={
           <>
-            Capture heap snapshots and CPU profiles for slow or leaky sessions.
-            Artifacts are written to{" "}
+            Inspect PwrGit, and capture heap snapshots and CPU profiles for slow
+            or leaky sessions. Artifacts are written to{" "}
             <button
               className="settings-pathlink"
               type="button"
@@ -105,6 +109,12 @@ export function DiagnosticsSettings(props: {
             and open in Chrome DevTools.
           </>
         }
+      />
+
+      <DeveloperToolsSection
+        saving={props.saving}
+        developerMode={props.snapshot.general.developerMode}
+        onDeveloperModeChange={props.onDeveloperModeChange}
       />
 
       <SettingsSection

@@ -107,7 +107,7 @@ MIT
 - ee-first@1.1.1 | jonathanong/ee-first
 - electron@44.9.3 | https://github.com/electron/electron
 - electron-log@5.4.4 | megahertz/electron-log
-- electron-updater@6.8.9 | https://github.com/electron-userland/electron-builder
+- electron-updater@6.8.10 | https://github.com/electron-userland/electron-builder
 - encodeurl@2.0.0 | pillarjs/encodeurl
 - es-define-property@1.0.1 | https://github.com/ljharb/es-define-property
 - es-errors@1.3.0 | https://github.com/ljharb/es-errors
@@ -168,8 +168,8 @@ MIT
 - proxy-addr@2.0.8 | jshttp/proxy-addr
 - range-parser@1.3.0 | jshttp/range-parser
 - raw-body@3.0.2 | stream-utils/raw-body
-- react@19.3.0 | https://github.com/react/react
-- react-dom@19.3.0 | https://github.com/react/react
+- react@19.3.1 | https://github.com/react/react
+- react-dom@19.3.1 | https://github.com/react/react
 - require-from-string@2.0.2 | floatdrop/require-from-string
 - router@2.2.0 | pillarjs/router
 - safer-buffer@2.1.2 | https://github.com/ChALkeR/safer-buffer
@@ -1491,7 +1491,7 @@ builder-util-runtime@9.7.0 (MIT)
 
 Applies to:
 - builder-util-runtime@9.7.0 (MIT)
-- electron-updater@6.8.9 (MIT)
+- electron-updater@6.8.10 (MIT)
 
 Representative file: builder-util-runtime@9.7.0/LICENSE
 
@@ -4155,15 +4155,15 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-react@19.3.0 (MIT)
+react@19.3.1 (MIT)
 ------------------
 
 Applies to:
-- react@19.3.0 (MIT)
-- react-dom@19.3.0 (MIT)
+- react@19.3.1 (MIT)
+- react-dom@19.3.1 (MIT)
 - scheduler@0.28.0 (MIT)
 
-Representative file: react@19.3.0/LICENSE
+Representative file: react@19.3.1/LICENSE
 
 MIT License
 

@@ -71,7 +71,7 @@ const SECTIONS: Array<{ id: SettingsPage; label: string }> = [
   { id: "ai-features", label: "AI Features" },
   { id: "agents", label: "Local Agents" },
   { id: "experimental", label: "Experimental" },
-  { id: "diagnostics", label: "Memory / CPU" },
+  { id: "diagnostics", label: "Troubleshooting" },
   { id: "about", label: "About" }
 ];
 
@@ -510,9 +510,6 @@ function SettingsSectionBody(props: {
         onThemeChange={(theme) => {
           update({ general: { theme } });
         }}
-        onDeveloperModeChange={(enabled) => {
-          update({ general: { developerMode: enabled } });
-        }}
         onSearchAllProfilesChange={(enabled) => {
           update({ general: { searchAllProfiles: enabled } });
         }}
@@ -564,6 +561,9 @@ function SettingsSectionBody(props: {
     <DiagnosticsSettings
       saving={settings.saving}
       snapshot={snapshot}
+      onDeveloperModeChange={(enabled) => {
+        update({ general: { developerMode: enabled } });
+      }}
       onHeapMonitorEnabledChange={(enabled) => {
         updateDiagnostics({ heapMonitorEnabled: enabled });
       }}

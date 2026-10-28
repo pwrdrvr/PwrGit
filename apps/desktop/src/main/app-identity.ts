@@ -3,10 +3,12 @@ import {
   inferUpdateSelection,
   ok,
   type AppIdentity,
+  type AppProcessIds,
   type UpdatesSettings
 } from "@pwrgit/shared";
 import desktopPackage from "../../package.json";
 import type { CommandBus } from "./command-bus";
+import { formatProcessIds } from "./process-ids";
 
 type AppIdentityInput = {
   name: string;
@@ -84,9 +86,25 @@ export function readAppIdentity(): AppIdentity {
   });
 }
 
+/** The live process table, and the identity it belongs to for a pasted report. */
+export function createAppProcessIds(
+  identity: AppIdentity,
+  line: string
+): AppProcessIds {
+  const shown = line === "" ? "unavailable" : line;
+  return {
+    line,
+    diagnosticsText: `${identity.diagnosticsText}\nProcesses: ${shown}`
+  };
+}
+
 export function registerAppIdentityHandlers(
   bus: CommandBus,
-  readIdentity: () => AppIdentity = readAppIdentity
+  readIdentity: () => AppIdentity = readAppIdentity,
+  readProcessLine: () => string = () => formatProcessIds(app.getAppMetrics())
 ): void {
   bus.register("app:readIdentity", () => ok(readIdentity()));
+  bus.register("app:readProcessIds", () =>
+    ok(createAppProcessIds(readIdentity(), readProcessLine()))
+  );
 }
