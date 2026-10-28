@@ -242,10 +242,15 @@ export function RepoRefsSections({
   // A ref, so a caller's inline callback does not re-run the load.
   const onBranchesRef = useRef(onBranches);
   onBranchesRef.current = onBranches;
+  const loadRef = useRef(0);
   const load = useCallback(async () => {
+    const request = ++loadRef.current;
     setLoading(true);
     setError(null);
     const result = await dispatch("repo:refs", { repoId: repo.id });
+    // Reloads arrive in bursts (a bulk fetch reloads every repo once per
+    // repo it finishes); only the newest answer may land.
+    if (request !== loadRef.current) return;
     setLoading(false);
     if (result.ok) {
       setRefs(result.value);
@@ -363,6 +368,11 @@ export function RepoRefsSections({
     await load();
   };
 
+  // "…" only until the first answer. A reload keeps the last counts on
+  // screen: every `repo:changed` reloads every expanded repository, and
+  // blanking each count meanwhile flashed the whole sidebar during a bulk
+  // fetch.
+  const pending = loading && refs === null;
   const branchCount = refs?.branches.length;
   const tagCount = refs?.tagCount;
   const remoteCount = refs?.remotes.length;
@@ -610,7 +620,7 @@ export function RepoRefsSections({
             aria-expanded={openSections.has("branches")}
             {...steppedTooltip(
               tip,
-              `Branches · ${loading ? "…" : (branchCount ?? 0)}`
+              `Branches · ${pending ? "…" : (branchCount ?? 0)}`
             )}
             onClick={(event) => {
               event.stopPropagation();
@@ -622,7 +632,7 @@ export function RepoRefsSections({
             <SectionGlyph kind="branches" />
             <span className="ref-section__label">Branches</span>
             <span className="ref-section__count">
-              {loading ? "…" : (branchCount ?? 0)}
+              {pending ? "…" : (branchCount ?? 0)}
             </span>
             {/* Still part of the disclosure's name; the visible copy sits at
                 the far end of the heading, after the counts (below). */}
@@ -811,7 +821,7 @@ export function RepoRefsSections({
               })}
             </div>
             {error !== null && <div className="ref-section__error">{error}</div>}
-            {!loading && refs !== null && refs.branches.length === 0 && (
+            {refs !== null && refs.branches.length === 0 && (
               <div className="ref-section__empty">No local branches.</div>
             )}
             {refs !== null && refs.branches.length > 0 && (
@@ -836,7 +846,7 @@ export function RepoRefsSections({
           <button
             className="ref-section__head"
             aria-expanded={openSections.has("tags")}
-            {...steppedTooltip(tip, `Tags · ${loading ? "…" : (tagCount ?? 0)}`)}
+            {...steppedTooltip(tip, `Tags · ${pending ? "…" : (tagCount ?? 0)}`)}
             onClick={(event) => {
               event.stopPropagation();
               tip.hide();
@@ -847,7 +857,7 @@ export function RepoRefsSections({
             <SectionGlyph kind="tags" />
             <span className="ref-section__label">Tags</span>
             <span className="ref-section__count">
-              {loading ? "…" : (tagCount ?? 0)}
+              {pending ? "…" : (tagCount ?? 0)}
             </span>
           </button>
         </div>
@@ -912,7 +922,7 @@ export function RepoRefsSections({
               </div>
             ))}
             {error !== null && <div className="ref-section__error">{error}</div>}
-            {!loading && refs !== null && refs.tagCount === 0 && (
+            {refs !== null && refs.tagCount === 0 && (
               <div className="ref-section__empty">No local tags.</div>
             )}
             {refs !== null && refs.tagCount > 0 && (
@@ -928,7 +938,7 @@ export function RepoRefsSections({
             )}
             {/* With no tags at all there is nothing to browse, but there is
                 still something to do — the browser is where Create tag lives. */}
-            {!loading && refs !== null && refs.tagCount === 0 && (
+            {refs !== null && refs.tagCount === 0 && (
               <button
                 className="ref-view-all"
                 onClick={(event) => {
@@ -950,7 +960,7 @@ export function RepoRefsSections({
             aria-expanded={openSections.has("remotes")}
             {...steppedTooltip(
               tip,
-              `Remotes · ${loading ? "…" : (remoteCount ?? 0)}`
+              `Remotes · ${pending ? "…" : (remoteCount ?? 0)}`
             )}
             onClick={(event) => {
               event.stopPropagation();
@@ -962,7 +972,7 @@ export function RepoRefsSections({
             <SectionGlyph kind="remotes" />
             <span className="ref-section__label">Remotes</span>
             <span className="ref-section__count">
-              {loading ? "…" : (remoteCount ?? 0)}
+              {pending ? "…" : (remoteCount ?? 0)}
             </span>
           </button>
           <button
@@ -1277,7 +1287,7 @@ export function RepoRefsSections({
               );
             })}
             {error !== null && <div className="ref-section__error">{error}</div>}
-            {!loading && refs !== null && refs.remotes.length === 0 && (
+            {refs !== null && refs.remotes.length === 0 && (
               <div className="ref-section__empty">No remotes configured.</div>
             )}
             {refs !== null && (

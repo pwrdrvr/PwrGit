@@ -424,3 +424,70 @@ describe("RepoRefsSections forge links", () => {
     expect(disclosure.getAttribute("aria-expanded")).toBe("true");
   });
 });
+
+describe("a reload keeps the last answer on screen", () => {
+  const branch = (name: string): RepoRefs["branches"][number] => ({
+    name,
+    fullName: `refs/heads/${name}`,
+    head: "a".repeat(40),
+    upstream: `origin/${name}`,
+    ahead: 0,
+    behind: 0,
+    tracking: "up_to_date",
+    checkedOutWorktreeIds: []
+  });
+  const withBranches = (count: number): RepoRefs => ({
+    ...refs,
+    branches: Array.from({ length: count }, (_, i) => branch(`b${i}`))
+  });
+  const rerender = async (next: Repo): Promise<void> => {
+    await act(async () => {
+      root.render(
+        <RepoRefsSections
+          repo={next}
+          now={0}
+          focusedWorktree={primary}
+          onRevealWorktree={() => undefined}
+          onCreateWorktree={() => undefined}
+          onFork={() => undefined}
+        />
+      );
+    });
+  };
+  const branchesHead = (): string =>
+    [...container.querySelectorAll(".ref-section__head")].find((head) =>
+      head.textContent?.includes("Branches")
+    )?.textContent ?? "";
+
+  it("never blanks the counts while every repo reloads (a bulk fetch)", async () => {
+    // Each `repo:changed` hands every row a new Repo object, which reloads
+    // its refs. The counts must not flash "…" while the reload is out.
+    const answers: Array<(value: unknown) => void> = [];
+    dispatchMock.mockImplementation((channel: string) =>
+      Promise.resolve(
+        channel === "repo:refs"
+          ? ok(withBranches(3))
+          : ok({ hosts: [], overrides: {} })
+      )
+    );
+    await rerender(repo);
+    expect(branchesHead()).toContain("3");
+
+    dispatchMock.mockImplementation((channel: string) =>
+      channel === "repo:refs"
+        ? new Promise((resolve) => answers.push(resolve))
+        : Promise.resolve(ok({ hosts: [], overrides: {} }))
+    );
+    await rerender({ ...repo });
+    expect(branchesHead()).toContain("3");
+    expect(branchesHead()).not.toContain("…");
+
+    // Two reloads in flight: the newer answer wins even if the older lands
+    // last.
+    await rerender({ ...repo });
+    expect(answers).toHaveLength(2);
+    await act(async () => answers[1]!(ok(withBranches(5))));
+    await act(async () => answers[0]!(ok(withBranches(4))));
+    expect(branchesHead()).toContain("5");
+  });
+});
