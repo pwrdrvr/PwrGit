@@ -557,6 +557,25 @@ jobs:
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
+      - name: Inspect restored Windows dependency links
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import path from "node:path";
+            import { createRequire } from "node:module";
+            const require = createRequire(path.resolve("package.json"));
+            const owner = path.dirname(require.resolve("proper-lockfile/package.json"));
+            console.log("proper-lockfile", owner);
+            const candidates = [path.join(owner, "../retry"), ...fs.readdirSync("node_modules/.pnpm").filter(x => x.startsWith("retry@") || x.startsWith("is-core-module@")).map(x => path.resolve("node_modules/.pnpm", x)), path.resolve("node_modules/.pnpm/node_modules/retry")];
+            for (const file of candidates) {
+              try {
+                const stat = fs.lstatSync(file);
+                console.log(JSON.stringify({ file, symbolic: stat.isSymbolicLink(), target: stat.isSymbolicLink() ? fs.readlinkSync(file) : null, real: fs.realpathSync(file), children: fs.readdirSync(file).slice(0,12) }));
+              } catch (error) { console.log(file, error.code, error.message); }
+            }
+            for (const file of [owner, path.dirname(owner), "node_modules/.pnpm/node_modules"]) console.log("entries", file, fs.readdirSync(file).slice(0,30));
+          '
+
       # prepare builds outside node_modules, so the archive cannot carry it.
       - name: Build MCP server workspace output
         run: pnpm --filter @pwrgit/mcp-server build
