@@ -461,6 +461,14 @@ export type AppIdentity = {
   diagnosticsText: string;
 };
 
+/** Settings → Troubleshooting → Process IDs: the live Electron process table. */
+export type AppProcessIds = {
+  /** `main=311 gpu=315 renderer=330,341 …` — the line `main.log` records. */
+  line: string;
+  /** The build identity plus that line, ready to paste into a report. */
+  diagnosticsText: string;
+};
+
 // Last 1.0 core that used `-beta.N` as the Stable prerelease line. Builds
 // at this core stay on Stable so a website Beta download cannot be confused
 // with `v1.0.0-beta.50`.
@@ -2425,6 +2433,7 @@ export interface Commands {
 
   // Desktop auto-update (Settings → Updates)
   "app:readIdentity": { req: void; res: AppIdentity };
+  "app:readProcessIds": { req: void; res: AppProcessIds };
   "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
   "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
   "app:checkForUpdate": { req: void; res: AppUpdateCheckResult };

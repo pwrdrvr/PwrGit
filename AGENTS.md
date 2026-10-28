@@ -1,63 +1,67 @@
 # AGENTS.md
 
-Guidance for coding agents (and humans) in PwrGit — a cross-platform Electron
-git client in the Pwr family (siblings: PwrSnap, PwrAgnt). Keep this file short;
-see **Docs & conventions** below.
+Guidance for coding agents (and humans) in PwrGit, a cross-platform Electron
+git client in the Pwr family (siblings: PwrSnap, PwrAgnt). Nested `AGENTS.md`
+files beside the code carry the detail; read the ones on the path to what you
+change.
 
-## Set up a new checkout or worktree
+## Rules that always apply
 
-Enter the repo through nvm, then install. **Do not assume `nvm` is
-initialized** — it is a shell function, and a non-interactive agent shell
-usually does not have it, so `node` is whatever the machine defaults to:
+1. **Use the `.nvmrc` Node for `pnpm i`, tests and builds.** First compare
+   `node --version` with `.nvmrc`. A PwrAgent or Codex environment usually
+   puts the correct Node first on `PATH`. If the versions match, run commands
+   as they are. If they do not match, run `source ~/.nvm/nvm.sh && nvm use`
+   first. A wrong-Node install does not fail at install time. It fails later,
+   as a broken test or database. Each checkout/worktree needs its own `pnpm i`.
+2. **Run `pnpm lint` before pushing.** It is exactly what CI's Typecheck job
+   runs. New repo-wide checks go in its chain in the root `package.json`, not
+   in a new CI step.
+3. **A PR that changes visible UI has before/after screenshots** with
+   contrived data. You don't need the live app:
+   [docs/pr-screenshots.md](docs/pr-screenshots.md) covers harness renders,
+   `design-shots.spec.ts`, and `gh --attach`. "Not launched" is not a reason to
+   skip. If nothing can show the change, say why and ask the operator.
+4. **Never make CI green by adding a `minimumReleaseAgeExclude` entry or a
+   license id.** Both are supply-chain or legal decisions; read
+   [scripts/AGENTS.md](scripts/AGENTS.md) first.
+5. **Never launch Electron directly or target the generic `Electron` app.**
+   See [Launch the dev app](#launch-the-dev-app).
+6. **Every new `AGENTS.md` gets a sibling `CLAUDE.md` symlink**
+   (`ln -s AGENTS.md CLAUDE.md`).
+
+## Set up a checkout or worktree
+
+Skip the nvm lines when `node --version` already matches `.nvmrc`.
 
 ```bash
-source ~/.nvm/nvm.sh   # agent shells: nvm is undefined until you source it
+source ~/.nvm/nvm.sh   # nvm is a shell function; agent shells lack it
 nvm install            # first time on a machine
 nvm use                # reads .nvmrc (Node 24)
-pnpm i                 # every fresh checkout/worktree needs its own
+pnpm i
 ```
 
-A root `preinstall` guard ([scripts/check-node-version.mjs](scripts/check-node-version.mjs))
-fails the install under a Node that does not match `.nvmrc`, or one that is not
-nvm's on a machine that has nvm. Native modules are compiled against the ABI of
-whichever Node ran the install, and a wrong-ABI build does not announce itself:
-it surfaces much later as a test failure or a launch crash that reads like a
-broken database.
-
-One `pnpm i` serves both runtimes. It leaves separate `better-sqlite3` artifacts
-for this machine's Node (what `vitest` loads) and Electron (what the app loads),
-both staged from the package's ABI-independent Node-API prebuild, so `pnpm test`
-and `pnpm dev` need no rebuild between them, in either order.
-`apps/desktop/AGENTS.md` describes the layout. If a
-native ABI error
-does appear — *"better_sqlite3.node was compiled against a different Node.js
-version using NODE_MODULE_VERSION 147; this version requires 145"* — one
-command repairs whichever half is stale:
+A `preinstall` guard ([scripts/check-node-version.mjs](scripts/check-node-version.mjs))
+refuses a Node that doesn't match `.nvmrc`. One `pnpm i` stages
+`better-sqlite3` for both this Node (vitest) and Electron (the app), so
+`pnpm test` and `pnpm dev` need no rebuild between them
+([apps/desktop/AGENTS.md](apps/desktop/AGENTS.md) has the layout). If you see
+*"better_sqlite3.node was compiled against a different Node.js version"*, run:
 
 ```bash
 pnpm --filter @pwrgit/desktop run rebuild:electron-native
 ```
 
-Never `pnpm rebuild better-sqlite3` from the repo root: better-sqlite3 is a
-desktop dependency, not a root one, so the root rebuild silently no-ops.
-`require("better-sqlite3")` keeps working afterwards and only `new Database()`
-fails, which is a confusing place to start debugging.
+Never `pnpm rebuild better-sqlite3` from the repo root. It silently no-ops
+(the package is a desktop dependency), and only `new Database()` fails
+afterwards.
 
-## Linux sandbox setup
+Don't share `node_modules` between worktrees: workspace imports resolve into
+the donor checkout, and installs mutate its dependencies.
 
-Install and desktop dev/preview warn when Electron's setuid helper is not
-root-owned with mode 4755. The warning is advisory: user namespaces may allow
-launch without it. For the fatal SUID sandbox error, use
-`pnpm fix:linux-sandbox`; it resolves this checkout's Electron helper and uses
-sudo only for chown/chmod. Do not run the app as root or disable its sandbox.
-The helper may need repair after Electron is replaced. This fixes permissions,
-not renderer/window visibility or host mount/security policy.
-
-Keep a separate `pnpm install` per checkout/worktree. Root `node_modules` alone
-cannot supply a fresh workspace's package-local dependency links. Sharing
-package node_modules can resolve workspace imports into the donor checkout,
-and installs/native staging then mutate shared dependencies. A symlink to the
-same repaired helper inherits its permissions but is not a complete setup fix.
+**Linux:** if Electron reports the fatal SUID sandbox error, run
+`pnpm fix:linux-sandbox` (sudo for chown/chmod only). Don't run the app as
+root or disable its sandbox. The install-time warning alone is advisory.
+Re-run the fix after Electron is replaced.
 
 ## Common commands
 
@@ -66,167 +70,71 @@ pnpm dev        # run the app (electron-vite dev)
 pnpm build      # production build
 pnpm test       # vitest across the workspace
 pnpm typecheck  # TypeScript 7 native compiler across packages
-pnpm lint       # every check CI runs, cheapest-first (see below)
+pnpm lint       # every check CI runs, cheapest-first
 ```
 
-For headed lab E2E, prefer PwrSuiteLab Control MCP and read
-[the E2E guidance](apps/desktop/e2e/AGENTS.md#headed-e2e-in-pwrsuitelab).
-It covers live schema discovery, guest setup, ownership, and the script fallback
-when MCP is unavailable. Use the dedicated E2E VM, never a GHA runner or the
-physical host desktop for this workflow.
+`pnpm lint` chains `lint:syntax` → `lint:forge-kinds` → `lint:colors` →
+`deps:maturity` → `licenses:check` → `lint:boundaries` → `typecheck`.
 
-`pnpm lint` chains `lint:syntax` → `lint:forge-kinds` → `lint:colors` → `deps:maturity` →
-`licenses:check` → `lint:boundaries` → `typecheck`, ordered so a fast failure
-doesn't wait on the slow one. CI's Typecheck job runs exactly this one command,
-so **add new repo-wide checks to the chain in the root `package.json`**, not as
-another CI step.
+- `deps:maturity` enforces the seven-day dependency cooldown;
+  `licenses:check` gates every shipped license.
+  [scripts/AGENTS.md](scripts/AGENTS.md) explains both, and which of the three
+  license scripts actually judges a dependency.
+- `lint:boundaries` (dependency-cruiser, `.dependency-cruiser.cjs`) keeps main,
+  preload and renderer separate bundles sharing only `@pwrgit/shared`.
+  Violations type-check and bundle, then fail at launch.
+- `typecheck` is the unused-code gate (`noUnusedLocals` /
+  `noUnusedParameters`). Two blind spots: a leading `_` exempts parameters
+  *and imports* (don't use it to hide a dead import), and an export nobody
+  imports is never flagged (grep for a symbol after deleting its last import).
+  An unused binding in a test is often a missing assertion. Compiler selection
+  (TS7 vs TS6) is in [scripts/AGENTS.md](scripts/AGENTS.md).
 
-`deps:maturity` enforces the seven-day dependency cooldown
-(`minimumReleaseAge` in `pnpm-workspace.yaml`). Adding an exclusion to get past
-it is a supply-chain decision — [scripts/AGENTS.md](scripts/AGENTS.md) says why
-the check exists and what an exclusion costs.
-
-`licenses:check` chains three scripts that are easy to mistake for each other;
-[scripts/AGENTS.md](scripts/AGENTS.md) says which one judges a dependency's
-license and which two do not. **Adding a dependency under an unfamiliar license
-is a legal decision — read that file before making the build green.**
-
-`lint:boundaries` is dependency-cruiser (`.dependency-cruiser.cjs`). It enforces
-that main, preload, and renderer stay three separate bundles sharing only
-`@pwrgit/shared` — violations there type-check and usually bundle, then fail at
-launch, so `tsc` will not catch them. The config's header comments explain each
-rule.
-
-`typecheck` selects the exact-pinned `typescript-native` alias through
-`scripts/typecheck.mjs`. Keep TypeScript 6 (`typescript`) for dependency-cruiser's
-JavaScript API and MCP declaration/JS emit. Both dependencies publish `tsc`, so
-do not rely on whichever binary happens to win `node_modules/.bin/tsc`.
-For a comparison or fallback, run `PWRGIT_TYPECHECK_COMPILER=typescript pnpm typecheck`.
-Editor/LSP selection is independent; compiler timings do not measure session memory.
-
-`typecheck` also carries the unused-code gate: `tsconfig.base.json` sets
-`noUnusedLocals` and `noUnusedParameters`, which `apps/desktop`,
-`packages/mcp-server` and `packages/shared` all extend. An unused import, an
-unread local, or the dead value half of `import { x, type X }` fails **`pnpm
-typecheck`**, and so `pnpm lint` and CI's Typecheck job. It also fails `pnpm
-build` for `packages/mcp-server`, whose build is `tsc`; the desktop half of
-that build is electron-vite and type-checks nothing, so `pnpm typecheck` is
-the command to trust. Two blind spots worth knowing, both verified by probe
-rather than assumed:
-
-- **A leading `_` exempts parameters _and imports_, but not locals.**
-  `function f(_x: string) {}` and `import { y as _y } from "./m"` are both
-  silent; `const _z = 1` is still TS6133. So the prefix is right for a
-  parameter that documents a signature — a test double's ignored argument, a
-  `describe.each` title slot — and is a way to wave a dead import straight
-  past this gate. Don't use it for that.
-- **An export nobody imports stays invisible.** Removing a symbol's last
-  importer leaves its `export` dead and silent. Grep for the symbol after
-  deleting an import.
-
-And "the compiler says unused" is not "dead code" — an unused binding in a
-test is often a missing assertion. Ask what it was for before deleting it.
+E2E needs a build (`pnpm build`) and has its own guide:
+[apps/desktop/e2e/AGENTS.md](apps/desktop/e2e/AGENTS.md). For headed E2E in
+the lab VM, read [docs/headed-e2e-pwrsuitelab.md](docs/headed-e2e-pwrsuitelab.md)
+first.
 
 ## Launch the dev app
 
-Prefer the **Dev** action from `.codex/environments/environment.toml`. It is the
-canonical launch path: from the repository root it runs `nvm use --silent`,
-enables Corepack, and then runs the root `pnpm dev` script.
+Several Pwr Electron apps and checkouts run on this machine at once, so it is
+easy to drive the wrong one.
 
-Before launching, check whether a window titled `PwrGit` already exists and
-reuse it when suitable. Do not launch an Electron binary directly or start a
-second isolated PwrGit instance for ordinary visual verification; if a launch
-is required, use the canonical path above or the fallback below.
+- Reuse an existing `PwrGit` window when suitable. Otherwise launch with the
+  **Dev** action in `.codex/environments/environment.toml`
+  (`nvm use --silent`, `corepack enable`, `pnpm dev`). Don't start a second
+  isolated instance just to look at something.
+- For Computer Use, never target the generic `Electron` name or
+  `com.github.Electron`. Resolve the PwrGit window's exact Electron app path
+  and confirm it belongs to this checkout. If you can't tell, stop.
+- Shells hosted by another Pwr app can inherit `ELECTRON_EXEC_PATH`,
+  `ELECTRON_CLI_ARGS` or `ELECTRON_MAJOR_VER`, which silently launch PwrGit
+  through a sibling's Electron. Without the Dev action, with `node --version`
+  matching `.nvmrc`:
 
-For Computer Use, never target the generic `Electron` display name or shared
-`com.github.Electron` bundle ID. Resolve the running PwrGit window and process,
-then target its exact Electron app path. Confirm that executable belongs to
-PwrGit—not PwrAgent, PwrSnap, or another checkout or project.
-If it cannot be identified unambiguously, stop instead of guessing.
+  ```bash
+  corepack enable
+  env -u ELECTRON_EXEC_PATH -u ELECTRON_CLI_ARGS -u ELECTRON_MAJOR_VER pnpm dev
+  ```
 
-Agent shells hosted by another Electron Pwr app can inherit that parent's
-`ELECTRON_EXEC_PATH`, `ELECTRON_CLI_ARGS`, or `ELECTRON_MAJOR_VER`. Running
-Electron with those overrides can silently launch PwrGit through a sibling
-app's Electron installation. If the Dev action is unavailable, first confirm
-that the active `node` matches `.nvmrc`. Do not assume `nvm` is initialized in a
-non-interactive agent shell. With the correct Node already active, mirror the
-rest of the action while clearing only those launch overrides:
-
-```bash
-node --version # must match .nvmrc
-corepack enable
-env -u ELECTRON_EXEC_PATH -u ELECTRON_CLI_ARGS -u ELECTRON_MAJOR_VER pnpm dev
-```
-
-If the Node version is wrong and `nvm` is unavailable, use the canonical Dev
-action instead of improvising another Electron launch path.
-
-The resulting Electron executable must come from this PwrGit worktree's
-`node_modules`, and its user-data directory must be PwrGit's—not PwrAgent's or
-another sibling app's. If either is wrong, stop the process you just started
-and relaunch with the canonical action or clean command above.
+  If the Electron binary isn't from this worktree's `node_modules`, or the
+  user-data directory isn't PwrGit's, stop that process and relaunch.
 
 ## Packaging & releases
 
-Packaging goes through `apps/desktop/scripts/release.mjs` (pnpm-deploy stage →
-electron-builder; `pnpm --filter @pwrgit/desktop package:dryrun` for a local
-unsigned DMG). Releases are cut by pushing a `vX.Y.Z` tag that matches
-`apps/desktop/package.json` and a `CHANGELOG.md` section (`pnpm release:check`
-verifies). Tag suffixes map onto Settings → Updates: no suffix is Stable
-Latest, `-prerelease` is Stable Prerelease, `-beta` is Beta Latest, `-alpha`
-is Beta Prerelease. CI, preview builds, and signing secrets are documented in
-`.github/workflows/README.md`.
-
-### macOS app icon
-
-`mac.icon` is `build/icon.icon`, an Icon Composer package that electron-builder
-compiles with Xcode 26's `actool`; nothing in this repo hand-builds a `.icns`,
-and every job or machine that packages the mac app needs an actool 26 or newer
-selected. Why, how to regenerate, and how to verify: `apps/desktop/AGENTS.md`
-"macOS app icon".
-
-## Pull Requests
-
-- Prefer before/after screenshots on PRs that change visible UI.
-  - Use 100% contrived fixture data when possible.
-  - If a screenshot is not 100% contrived, show it to the operator and wait for approval before attaching. Redact anything that must not ship (secrets, tokens, customer data, private thread text, account identifiers).
-- GitHub CLI 2.99+ (`gh` v2.99.0) can attach images and videos with the repeatable `--attach` flag on `gh pr create`, `gh pr edit`, and `gh pr comment`.
-  - Reference the local path in the Markdown body so `gh` rewrites it to the uploaded URL in place. Unreferenced attachments are appended at the end.
-  - **The match is a literal string comparison, and a mismatch fails silently.** `gh` rewrites `](path)` only when `path` is byte-identical to what `--attach` was given — so `--attach /tmp/shots/after.png` against a body saying `![after](./after.png)` does not match. The upload still happens; the broken relative link stays where it was, a second copy is appended at the end, and `gh` exits 0. Pass the same spelling in both places, absolute or relative, and keep the paths short enough to retype exactly.
-  - **After the upload, edit the live body, never your draft.** The rewrite exists only in the uploaded body. The local body file keeps the local paths. For every later body edit, run `gh pr view <n> --json body -q .body > <file>` and edit that copy. Never re-send the original draft: it replaces the live `user-attachments` URLs with dead local paths. To add an image later, pass `--attach` for the new file only. Existing `user-attachments` URLs match no `--attach` path, so `gh` leaves them alone. An image that is already uploaded matches nothing in the live body either, so attaching it again appends a duplicate copy at the end.
-  - **Look at the rendered PR before calling it done.** `gh` exits 0 in each of these cases. Finding `user-attachments` URLs in `gh pr view --json body` is not enough, because after a mismatch they are present, just in the wrong place. Verify that every image link in the body is a `user-attachments` URL, and that each asset fetches with HTTP 200 and the local file's byte count. To recover from a mismatch without re-uploading: read those URLs back out of the body and `gh pr edit --body-file` with them inlined where you wanted them.
-  - Example:
-
-    ```bash
-    gh pr create \
-      --title "fix(desktop): tighten sidebar padding" \
-      --body-file /tmp/pr-body.md \
-      --attach ./before.png \
-      --attach ./after.png
-    ```
-
-    With this body:
-
-    ```markdown
-    ## Before
-    ![sidebar before](./before.png)
-
-    ## After
-    ![sidebar after](./after.png)
-    ```
-
-  - Alt text can also follow the path after `#`, as in `--attach './after.png#sidebar after'`. The `#alt` suffix is not part of the path `gh` matches on. Update `gh` to v2.99.0 or later before using `--attach`.
+Packaging goes through `apps/desktop/scripts/release.mjs`
+(`pnpm --filter @pwrgit/desktop package:dryrun` builds a local unsigned DMG).
+A release is a pushed `vX.Y.Z` tag matching `apps/desktop/package.json` and a
+`CHANGELOG.md` section (`pnpm release:check`). Tag suffixes: none = Stable
+Latest, `-prerelease` = Stable Prerelease, `-beta` = Beta Latest, `-alpha` =
+Beta Prerelease. CI, preview builds and signing:
+`.github/workflows/README.md`. The macOS icon needs Xcode 26's actool; see
+"macOS app icon" in [apps/desktop/AGENTS.md](apps/desktop/AGENTS.md).
 
 ## Docs & conventions
 
-- **Agent guidance lives in `AGENTS.md`** — not in READMEs or human-facing code
-  comments.
-- **Progressive disclosure — short and close.** Put guidance in the smallest
-  scope that needs it: a nested `AGENTS.md` beside the code it governs, not one
-  giant root file. An agent editing `apps/desktop/src/main/**` should find
-  main-process notes there; someone touching only `packages/shared` shouldn't
-  have to read desktop build lore. Keep every `AGENTS.md` brief — the goal is
-  that an agent reads only what's on the path to the file it's changing.
-- **Always symlink `CLAUDE.md → AGENTS.md`.** Whenever you add an `AGENTS.md`,
-  create a sibling `CLAUDE.md` symlink to it (`ln -s AGENTS.md CLAUDE.md`) so
-  both toolchains read one source of truth.
+- Agent guidance lives in `AGENTS.md`, not in READMEs or code comments.
+- Put it in the smallest scope that needs it: a nested `AGENTS.md` beside the
+  code it governs. Long operator procedures go in `docs/`, with a one-line
+  pointer that says when to read them. Keep every `AGENTS.md` brief.
+- Symlink `CLAUDE.md → AGENTS.md` beside every `AGENTS.md`.
