@@ -2,170 +2,147 @@
 
 ## Appearance axes: `--sidebar-title-size` and `data-density`
 
-Two independent axes, persisted in `general.sidebarTextSize` /
-`general.sidebarDensity` and stamped on `<html>` by `lib/appearance.ts`.
-**Defaults carry no attribute** — the bare `:root` block is the tuned default,
-so returning to it means *removing* the attribute, not writing `md`.
+- **Type size and density are independent axes.** Never add a font-size to a
+  `[data-density]` block. Never add padding to the token ladder.
+- **Rows use `min-height` plus padding, never `height`.** A fixed height
+  cannot grow with the type axis, so the text clips.
 
-Type reads the token; density only touches padding and gaps. Keeping them
-independent is the point: large text at high density is a combination the old
-fixed-height rows could not express. So don't add a font-size to a
-`[data-density]` block, and don't add padding to the token ladder.
-
-Sidebar rows are `min-height` + padding, never `height`. A fixed height cannot
-grow with the type axis — the text clips instead. Same rule for any new row.
+Settings persist the axes in `general.sidebarTextSize` and
+`general.sidebarDensity`. `lib/appearance.ts` stamps them on `<html>`. The
+bare `:root` block is the tuned default and carries no attribute. To return to
+a default, remove the attribute; do not write `md`. Type reads the token.
+Density changes only padding and gaps. This allows large text at high density.
 
 ## The sidebar toolbar steps down by fit, so its buttons are rigid
 
-`.sidebar-toolbar` (Add ▾, Fetch all, Pull all, the maintenance wrench) is one
-row, and `SidebarToolbar`'s `useFitLadder` drops Add's word and then Fetch and
-Pull's words while the last button would overflow. That test only works if
-nothing shrinks: Fetch and Pull grow into spare room (`flex-grow: 1`) but keep
-`flex-shrink: 0`, or the row reads as fitting while a label ellipsizes. The
-title strip's `.titlebar-jump` is rigid for the same reason, and steps while a
-crumb is cut short. Design: `design/Sidebar Header Toolbar - UX Review.dc.html`.
+- **Fetch and Pull keep `flex-shrink: 0`.** They grow into spare room
+  (`flex-grow: 1`) but never shrink.
+
+`.sidebar-toolbar` is one row: Add ▾, Fetch all, Pull all, the maintenance
+wrench. `useFitLadder` in `SidebarToolbar` removes Add's word, then the words
+of Fetch and Pull, while the last button overflows. A shrinking button makes
+the row report a fit while a label ellipsizes. The title strip's
+`.titlebar-jump` is rigid for the same reason; it steps while a crumb is cut
+short. Design: `design/Sidebar Header Toolbar - UX Review.dc.html`.
 
 ## PwrGit deliberately has no centre-column cap
 
-PwrAgnt caps its chat column (`--chat-column-max: 940px`) because a transcript
-is prose and long measures hurt reading. PwrGit's centre pane is a lineage
-graph and a diff — data-dense surfaces that *want* the horizontal room. The
-sidebar default likewise stays 320px against PwrAgnt's 408px: PwrGit rows carry
-a short repo name, not a thread title plus chip rows.
+- **Do not "align" these with PwrAgnt** unless the reason applies to this
+  app's content. They are intentional divergences, not drift.
 
-These are considered divergences, not drift. Don't "align" them without a
-reason that applies to this app's content.
+PwrAgnt caps its chat column (`--chat-column-max: 940px`) because a
+transcript is prose. PwrGit's centre pane is a lineage graph and a diff, which
+need the horizontal room. The sidebar default is 320px (PwrAgnt: 408px),
+because a PwrGit row carries only a short repo name.
 
 ## Text selection is opt-IN, not opt-out
 
-`.app` sets `user-select: none`. Chrome is not a document: before this, any
-drag in the sidebar painted a blue selection across every row it crossed, and
-each row that later grew a drag affordance had to remember to opt out.
+- **Add a new copyable text surface to the opt-in list beside `.app` in
+  `app.css`.** Examples: diff bodies, file paths, commit subjects and hashes,
+  log output. Use `.selectable` for a one-off.
+- **Do not fix an unselectable surface with `user-select: none` on its
+  neighbor.**
+- **Keep form controls opted in** (`input`, `textarea`, `[contenteditable]`,
+  near the top of `app.css`). A field without selection is broken.
 
-So a **new text surface a user would want to copy** must be added to the
-opt-in list beside `.app` in `app.css` — diff bodies, file paths, commit
-subjects and hashes, log output. Do not "fix" an unselectable surface by
-adding `user-select: none` to its neighbor. `.selectable` is the escape hatch
-for a one-off that doesn't warrant its own rule.
-
-Form controls (`input`, `textarea`, `[contenteditable]`) opt back in near the
-top of the file and must stay that way — a field you can't select inside is
-broken, not merely unpolished.
+`.app` sets `user-select: none` because app chrome is not a document. Without
+it, a sidebar drag painted a selection across every row.
 
 ## Busy state is `[aria-busy]`, and the arrow spins
 
-Every control that re-reads state — `git fetch` over the network or a local
-re-read — says "working" one way: an accent tint on the button, plus its
-circular-arrow glyph rotating in place. Three treatments used to be visible on
-one screen; see `design/Refresh Affordances - Normalization.dc.html`.
+A control that re-reads state (network `git fetch` or a local re-read) shows
+"working" one way: an accent tint, and its circular-arrow glyph rotating. See
+`design/Refresh Affordances - Normalization.dc.html`. A new refresh control
+obeys all three rules:
 
-Three rules fall out of that, and a new refresh control needs all three:
+- **Draw the glyph with `lib/RefreshGlyph.tsx`, never a `↻` text
+  character.** Neither bundled face has U+21BB, so it draws in an OS font. A
+  text node also gives the animation no target; spinning the whole bordered
+  24px button made it cartwheel.
+- **Paint busy from `[aria-busy="true"]`, not from a class.** The blanket
+  `prefers-reduced-motion` rule at the top of `app.css` stops every
+  animation, but the tint survives. A control also cannot look busy without
+  announcing it.
+- **Do not add your selector to the spin rule.** It keys off
+  `.refresh-glyph`, which the shared component stamps. Only the tint list
+  names buttons, because their shapes differ.
 
-- **Draw the glyph with `lib/RefreshGlyph.tsx`**, never a `↻` text character.
-  Neither bundled face contains U+21BB, so that character resolves through an
-  OS fallback and changes shape per platform. A text node also gives an animation
-  nothing to target: the rule had to spin the *button*, and a bordered 24px box
-  cartwheeled.
-- **Paint busy from `[aria-busy="true"]`, not a class.** The blanket
-  `prefers-reduced-motion` rule at the top of `app.css` kills every animation,
-  so a motion-only busy state leaves reduced-motion users with no signal at
-  all. A tint survives it. Keying paint to the ARIA state also means a control
-  cannot look busy without announcing it.
-- **Don't add your selector to the spin rule.** It keys off `.refresh-glyph`,
-  which the shared component stamps, so it already covers you. Only the tint
-  list enumerates buttons, because their shapes differ.
+A glyph that is not a circular arrow (Pull's ↓, Push's ↑) swaps to
+`.wt-btn__spinner`. A spinning "down" arrow looks broken.
 
-A glyph that is not a circular arrow — Pull's ↓, Push's ↑ — swaps to
-`.wt-btn__spinner` instead. Spinning an arrow that means "down" reads as
-broken. The rule is the glyph, not the control.
-
-In-flight is `aria-disabled`, never `disabled`: Chromium blurs an element the
-moment it becomes disabled, so activating one from the keyboard throws focus to
-`<body>` for the length of the operation (SC 2.4.3). Guard the click handler
-instead. `disabled` still belongs on a genuinely unavailable action.
-
-One considered exception, `.lens-chip.is-empty`: a lens with nothing in it is
-genuinely unavailable, and still uses `aria-disabled` plus a guarded click. A
-`disabled` button receives no pointer events, so it can show no hover card —
-and these five chips are icon-only, which makes "why is this one grey" a
-question the chip itself has to answer. Reach for `disabled` on a genuinely
-unavailable control unless it owes the user an explanation on hover.
-
-**Dimming a focusable control with `opacity` dims its focus ring too.** An
-`aria-disabled` control keeps focus, and nothing exempts an outline from its
-own element's opacity. `filter: opacity()` halves it the same way, and a
-`mask` removes it. So a new dimmed `aria-disabled` rule also joins the
-focused-unavailable block in `app.css` (after every fade rule, so it wins the
-tie). While focused, that block trades the fade for a muted paint at full
-opacity: subtle border, transparent fill, `--text-subtle` text.
+- **Mark an in-flight control `aria-disabled`, never `disabled`, and guard the
+  click handler.** Chromium blurs an element when it becomes `disabled`, so
+  keyboard activation sends focus to `<body>` (WCAG SC 2.4.3).
+- **Use `disabled` for a truly unavailable action**, unless it must explain
+  itself on hover. A `disabled` button gets no pointer events, so it shows no
+  hover card. For this reason `.lens-chip.is-empty` uses `aria-disabled` and a
+  guarded click: the lens chips are icon-only, so the chip must explain why it
+  is grey.
+- **`opacity` on a focusable control also dims its focus ring.**
+  `filter: opacity()` does the same, and a `mask` removes the ring. Add each
+  new dimmed `aria-disabled` rule to the focused-unavailable block in
+  `app.css`. That block comes after every fade rule, so it wins the tie. While
+  focused, it paints subtle border, transparent fill and `--text-subtle` text
+  at full opacity.
 
 ## No raw color literals outside `tokens.css`
 
-`tokens.css` holds the theme blocks — `:root` (dark) and
-`:root[data-theme="light"]`. They are the **only** place a hex / `rgb()` /
-`rgba()` / `hsl()` literal may appear in renderer CSS. `app.css` and any other
-stylesheet here must use `var(--token)`, or
-`color-mix(in srgb, var(--token) X%, transparent)` for a derived alpha.
+- **Only `tokens.css` may contain a hex, `rgb()`, `rgba()` or `hsl()`
+  literal.** Elsewhere use `var(--token)`, or
+  `color-mix(in srgb, var(--token) X%, transparent)` for a derived alpha.
+- **For a one-off tint, use inline `color-mix` on an existing token** before
+  you add a token.
+- **Define a new color in both theme blocks**: `:root` (dark) and
+  `:root[data-theme="light"]`.
 
-`pnpm lint:colors` (`scripts/lint-renderer-colors.mjs`, run in CI) enforces
-this. It walks the whole renderer tree, not just this directory, so a
-stylesheet dropped beside a feature component is covered too. A literal
-anywhere else — including a stray `:root` block in `app.css`, or a second
-`tokens.css` elsewhere in the tree — fails the build. Without it, the next
-`color: #abcdef;` silently breaks light theme, because a literal doesn't flip
-with `data-theme`.
+A literal does not flip with `data-theme`, so it silently breaks light theme.
+`pnpm lint:colors` (`scripts/lint-renderer-colors.mjs`, run in CI) walks the
+whole renderer tree. It fails a literal anywhere else, including a stray
+`:root` block in `app.css` or a second `tokens.css`.
 
-Adding a one-off tint? Reach for inline `color-mix` on an existing token
-before adding a token. Adding a genuinely new color? Define it in **both**
-theme blocks.
+`ALLOWED_SELECTOR_SUBSTRINGS` in the script exempts illustration assets that
+must not flip. Keep it empty unless a surface truly cannot be themed, and
+document the reason in the script.
 
-The script has a substring allowlist for illustration assets that must not
-theme-flip. It's empty today; keep it that way unless a surface truly can't
-be themed, and document why in the script.
-
-`theme-contract.test.ts` covers what the linter can't: both blocks declare the
-same surface, every token has a reader, and the main process's pre-paint
-literals still match the tokens they mirror.
+`theme-contract.test.ts` checks that both blocks declare the same tokens, that
+every token has a reader, and that main's pre-paint literals match their
+tokens.
 
 ## The palette is shared across the Pwr family
 
-Values track PwrAgnt's `docs/UI-THEME.md` — the cross-app source of truth for
-the "Tangerine Terminal" theme. Prefer PwrAgnt's token names when adding
-something that has an equivalent there, so the block can eventually lift into
-a shared package. PwrGit-only tokens (`--border-default`, `--accent-tint`,
-`--bg-rail`, `--danger-on`, `--lane-*`, …) are commented as such in
-`tokens.css`.
+- **Use PwrAgnt's token name when an equivalent exists**, so the block can
+  later move into a shared package.
 
-The block is a **subset** of PwrAgnt's contract on purpose: tokens no PwrGit
-surface paints with are left out, because an unread token drifts silently.
-Pull one back in from PwrAgnt's `docs/UI-THEME.md` when something needs it.
+Values follow PwrAgnt's `docs/UI-THEME.md`, the source of truth for the
+"Tangerine Terminal" theme. `tokens.css` marks PwrGit-only tokens
+(`--border-default`, `--accent-tint`, `--bg-rail`, `--danger-on`, `--lane-*`,
+…). The block is a **subset** on purpose: an unread token drifts silently.
+Copy a token from `docs/UI-THEME.md` when a surface needs it.
 
 ## A bundled font is requested by its `@font-face` name
 
-A bundled face loads only when a rule names its exact `@font-face` family, and
-nothing warns when none does: text falls through the stack. @fontsource calls
-Geist's sans "Geist Sans", not upstream's "Geist" (the name PwrAgnt's
-`docs/UI-THEME.md` uses). Asking for "Geist" left the bundled sans unloaded from
-v0.1.0 through 0.17.0, so sans text drew in whatever the machine had installed:
-the platform font, on a machine without Geist. `bundled-fonts.test.ts` fails
+- **Name the exact `@font-face` family.** Otherwise the face never loads and
+  text silently falls through the stack.
+- **Draw an icon as a stroked SVG component, never a text character.** Use
+  `lib/*Glyph.tsx` or a local one such as the sidebar's `SectionGlyph`
+  (`features/sidebar/section-fit.tsx`).
+- **Probe each new non-ASCII character in the face its rule asks for.** The
+  answer is per-codepoint and per-face.
+- **Do not trust `document.fonts.check()`.** It is vacuously `true` for a
+  family that no face matches. Use CDP's `CSS.getPlatformFontsForNode`, which
+  names the font that drew the glyphs.
+
+@fontsource names the sans "Geist Sans", not upstream's "Geist" (the name in
+PwrAgnt's `docs/UI-THEME.md`). PwrGit asked for "Geist" from v0.1.0 through
+0.17.0, so sans text drew in the platform font. `bundled-fonts.test.ts` fails
 unless a font token leads with each family `fonts.css` imports.
 
-`document.fonts.check('13px Geist')` returned `true` throughout. `check()` is
-vacuously true for a family no face in the set matches, so it cannot show a face
-loaded. Ask CDP's `CSS.getPlatformFontsForNode`, which names the font that drew
-the glyphs and whether it is a web font.
-
-The bundled Geist Sans is latin only, so a glyph outside it draws in the OS
-font beside Geist. "↻ Fetch all repos" came apart exactly that way once Geist
-loaded. That is why an icon is a stroked SVG component — `lib/*Glyph.tsx`, or
-a local one like Sidebar's `ForkGlyph` — and not a text character. The refs
-sections' `+` and `●` were the last two icons drawn as text; they are now
+The bundled Geist Sans is latin only. A glyph outside it draws in an OS font,
+as "↻ Fetch all repos" did. The refs sections' `+` and `●` are now
 `<PlusGlyph />` and `<CheckoutGlyph />`.
 
-**Don't convert the rest of the arrows on suspicion — probe first.** "Latin
-only" is narrower than it sounds, and the characters this renderer actually
-uses are mostly inside it. Asking `CSS.getPlatformFontsForNode` which font drew
-each one, against `geist-sans-latin-600-normal.woff2`:
+**Do not convert the remaining arrows on suspicion; probe first.** In
+`geist-sans-latin-600-normal.woff2`:
 
 | char | drew in |
 |---|---|
@@ -173,30 +150,26 @@ each one, against `geist-sans-latin-600-normal.woff2`:
 | `●` U+25CF, `→` U+2192, `·` U+00B7, `…` U+2026, `↵` U+21B5 | Geist SemiBold |
 | `↻` U+21BB | **Menlo** — the OS |
 
-So `↑3 ↓2` in a ref row is typographic notation that renders in the bundled
-face, not a latent bug. U+21BB was the outlier, and it is gone. A NEW
-character still needs the probe before it ships — the answer is
-per-codepoint, and nothing warns when it falls through.
+So `↑3 ↓2` in a ref row is safe typography. This table is Geist Sans only.
+`●` drew in **Menlo** in `.badge` and `.hit-status__b`, which use
+`--font-mono`; Geist Mono lacks it. Those marks are now `DotGlyph`.
 
-**The probe is per-face too, and this table is Geist Sans.** `●` was once
-listed here as safe for the dirty badge. It is in Geist Sans, but `.badge`
-and `.hit-status__b` set it in `--font-mono`, Geist Mono does not have it, and
-the mono stack did not reach Geist Sans then: `CSS.getPlatformFontsForNode`
-named **Menlo**. The marks are now `DotGlyph`. Probe a character in the face
-its rule asks for.
+### The mono stack's symbol fallthrough
 
-**The mono stack falls through to Geist Sans's symbols.** `--font-mono` is
-`"Geist Mono", "Geist Sans Symbols", …OS fonts`. `"Geist Sans Symbols"` is a
-`@font-face` alias in `fonts.css` over Geist Sans's own files, so it costs no
-second download. Its `unicode-range` covers the symbol blocks (arrows, math
-operators, misc technical, enclosed alphanumerics, geometric shapes through
-dingbats) **minus every codepoint Geist Mono has**. It is not plain
-`"Geist Sans"` second because of `font-display: swap`: while Geist Mono loads,
-the next loaded family draws *every* glyph, and plain Geist Sans would set mono
-digits and letters proportionally for that moment. The alias cannot reach a
-letter or digit. Its weights mirror Geist Mono's 400/500/600, so a 700 mono
-rule draws both at 600. Probed in a Vite harness build, at the weight each rule
-asks for:
+`--font-mono` is `"Geist Mono", "Geist Sans Symbols", …OS fonts`.
+`"Geist Sans Symbols"` is a `@font-face` alias in `fonts.css` over Geist
+Sans's files, so it adds no download.
+
+- Its `unicode-range` covers arrows, math operators, misc technical, enclosed
+  alphanumerics, and geometric shapes through dingbats, minus every codepoint
+  Geist Mono has.
+- It is not plain `"Geist Sans"` because of `font-display: swap`. While Geist
+  Mono loads, the next family draws every glyph, which would set mono letters
+  and digits proportionally. The alias cannot reach a letter or digit.
+- Its weights mirror Geist Mono's 400/500/600. A 700 mono rule draws both at
+  600.
+
+Probed in a Vite harness build:
 
 | char, where it is set in mono | before | after |
 |---|---|---|
@@ -206,21 +179,22 @@ asks for:
 | `←` `→`: commit-alignment relation | **Menlo** | Geist SemiBold |
 | `≈`: commit-alignment relation (700) | **Courier** | Geist SemiBold |
 
-Every box holding only Geist Mono glyphs measured identical before and after.
-The boxes holding a fallthrough glyph grew by its wider advance: a `⏎` keycap
-went from 20.0px to 22.9px.
+Boxes with only Geist Mono glyphs did not change size. A box with a
+fallthrough glyph grew by its wider advance: a `⏎` keycap went from 20.0px to
+22.9px.
 
-**Reading the cmap answers the same question without a running app**, and it
-answers the *cause* rather than the symptom: `CSS.getPlatformFontsForNode`
-names the font that drew a glyph, while the face's character map says whether
-it could have. Parse the `.woff` beside the `.woff2` — it is zlib rather than
-brotli, so `zlib.decompress` on each table in the WOFF directory is the whole
-reader — and look the codepoint up in `cmap`. Probe U+21BB alongside whatever
-you are asking about: a reader that finds it present is reading the file wrong.
+### Reading the cmap
 
-The agent surfaces were checked that way against both faces
-(`geist-sans-latin-600-normal.woff`, 538 codepoints;
-`geist-mono-latin-400-normal.woff`, 225):
+The face's `cmap` tells whether it *can* draw a codepoint, without a running
+app:
+
+1. Parse the `.woff` beside the `.woff2` (zlib, not brotli).
+2. Run `zlib.decompress` on each table in the WOFF directory.
+3. Look up the codepoint in `cmap`.
+4. Also look up U+21BB. If the reader finds it, the reader is wrong.
+
+Agent surfaces checked against `geist-sans-latin-600-normal.woff` (538
+codepoints) and `geist-mono-latin-400-normal.woff` (225):
 
 | char | in either bundled face? |
 |---|---|
@@ -231,91 +205,90 @@ The agent surfaces were checked that way against both faces
 | `⚙` `＋` `ⓘ` `⚠` `⌕` `⟳` `▸` | **no** — now `SettingsGlyph`, `PlusGlyph`, `InfoGlyph`, `WarningGlyph`, `SearchGlyph`, `RefreshGlyph`, `ChevronGlyph` |
 | `⑂` U+2442, `⌂` U+2302 (branch, worktree holder) | **no** — now `lib/BranchGlyph.tsx`, `lib/WorktreeGlyph.tsx`, `lib/CheckoutGlyph.tsx` |
 
-On macOS those resolved to Menlo, Zapf Dingbats, PingFang SC, Hiragino Sans
-and the system face — five families in one icon column. The audit, the
-rasters and what was kept as typography (and why) are in
+On macOS these drew in five different families in one icon column. The audit
+and what stays as typography:
 [design/Text Glyph Icons - UX Review.dc.html](../../../../../../design/Text%20Glyph%20Icons%20-%20UX%20Review.dc.html).
 
-`text-glyph-coverage.test.ts` now sweeps the renderer: every non-ASCII
-character in JSX text and string literals (`.tsx` and `.ts` alike — keycap
-labels are built in `lib/platform.ts`) and in stylesheet `content:` strings
-must draw in a bundled face **in both `--font-sans` and `--font-mono`**. Coverage is read from the `.woff`
-files' `cmap`, narrowed by each face's `unicode-range`. It cannot see which
-stack a site uses, so it asks both. A stack counts only its leading run of
-bundled families, which makes a fallthrough placed behind an OS font fail. It
-also holds the fallthrough's range disjoint from the face ahead of it, and its
-weights equal to that face's. A character only Geist Mono has, such as box
-drawing, would fail the sans stack. The fix then is a symmetric fallthrough,
-not an exception. The `PENDING` list names the characters still drawn from
-text that no Geist face has — today the macOS `⌘` `⌥` keycaps and the refs
-browser's `⧉` copy mark — and what is to replace them.
+### `text-glyph-coverage.test.ts`
 
-**An SVG in a flex button needs `flex: 0 0 auto`, and the label needs its own
-element.** Both fall out of the swap and neither announces itself. A text node
-sitting on the baseline draws the mark ~2px above the label's optical centre,
-so the button wants `display: flex; align-items: center` — at which point the
-glyph becomes a flex item, inherits `0 1 auto`, and gives up width to the label
-(measured: a 12px mark drawn at 9.86px at the 240px sidebar floor). And
-`text-overflow` needs a block container, so a button that used to ellipsize its
-own text stops doing anything once its text is one of two flex items; the
-truncation moves to a `__label` span. `.sidebar-toolbar__btn > svg` is the
-glyph half of the rule in use.
+Every non-ASCII character in JSX text, string literals (`.tsx` and `.ts`;
+keycap labels come from `lib/platform.ts`) and stylesheet `content:` strings
+must draw in a bundled face **in both `--font-sans` and `--font-mono`**.
+
+- Coverage comes from each `.woff` `cmap`, narrowed by `unicode-range`.
+- It checks both stacks, because it cannot see which one a site uses.
+- A stack counts only its leading run of bundled families, so a fallthrough
+  behind an OS font fails.
+- A fallthrough's range must be disjoint from the face ahead of it, with equal
+  weights.
+- A Geist Mono-only character (such as box drawing) fails the sans stack. Fix
+  it with a symmetric fallthrough, not an exception.
+- `PENDING` lists characters no Geist face has, and their replacements. Today:
+  the macOS `⌘` `⌥` keycaps and the refs browser's `⧉` copy mark.
+
+### SVG glyphs in flex buttons
+
+- **Give an SVG in a flex button `flex: 0 0 auto`.** The button needs
+  `display: flex; align-items: center`, because a baseline glyph sits ~2px
+  above the label's optical centre. A flex item defaults to `0 1 auto` and
+  shrinks: a 12px mark drew at 9.86px at the 240px sidebar minimum.
+- **Put an ellipsizing label in its own `__label` span.** `text-overflow`
+  needs a block container, and the text is now a flex item.
+
+`.sidebar-toolbar__btn > svg` is the glyph half of this rule.
 
 ## Theme selection uses one light attribute
 
-The dark palette is the bare `:root`; Light (including resolved System mode)
-sets `data-theme="light"` on `<html>`. Returning to dark removes the attribute.
-The preload bootstrap and inline `<head>` script apply this before first paint;
-the renderer appearance sync keeps every window live afterwards.
+The dark palette is the bare `:root`. Light, including System mode resolved
+to light, sets `data-theme="light"` on `<html>`. To return to dark, remove the
+attribute. The preload bootstrap and an inline `<head>` script apply it before
+first paint. The renderer appearance sync then keeps every window current.
 
 ## Window chrome can't read tokens
 
-`src/main/window-chrome.ts` hand-mirrors `--bg-app`, `--bg-titlebar` and
-`--text-secondary`: `backgroundColor` and the Windows title-bar overlay paint
-before the renderer exists. Change a token, change that file —
-`theme-contract.test.ts` fails if they drift.
+- **When you change `--bg-app`, `--bg-titlebar` or `--text-secondary`, also
+  change `src/main/window-chrome.ts`.**
+
+`backgroundColor` and the Windows title-bar overlay paint before the renderer
+exists, so that file copies the values by hand. `theme-contract.test.ts`
+fails if they drift.
 
 ## TSX is not covered by the lint
 
-`lint:colors` is CSS-only. SVG `fill=` / `stroke=` attributes and inline
-styles in `.tsx` need a manual pass. Pass `var(--token)` strings instead of
-literals — Chromium resolves custom properties in SVG presentation
-attributes, which is how `GraphRow.tsx` renders lane colors.
+- **Check SVG `fill=` / `stroke=` and inline styles in `.tsx` by hand.**
+  `lint:colors` reads CSS only.
+- **Pass `var(--token)` strings, not literals.** Chromium resolves custom
+  properties in SVG presentation attributes, as `GraphRow.tsx` does for lane
+  colors.
 
 ## A 15px glyph separates by silhouette, not by counting
 
-Row glyphs are drawn at 15px in a 24-unit viewBox, so a 1.7–1.8 stroke lands on
-about 1.1 device pixels and an `r2` circle is a 3px disc whose interior fills
-with antialiasing. Node count, radius and anything inside a closed shape are all
-gone at that size; what survives is the **silhouette class** (open line art vs a
-closed shape), fill vs stroke, and gross aspect.
-
-This is why the ⌘K palette shipped a branch glyph and a worktree glyph that
-nobody could tell apart: both were an open trunk on the left with round nodes
-and a curve to an upper-right node, differing only in how many circles and how
-big. The folder beside them was always legible, and never had more detail — it
-had a different silhouette.
-
-Two consequences when adding or changing one of these marks:
-
-- **Check it as a raster, not as vector.** Blowing the SVG up proves nothing;
-  render at the real 15px and magnify the bitmap with nearest-neighbour. A
-  contact sheet and the two failing marks are in
+- **Check a glyph as a raster at the real 15px**, magnified with
+  nearest-neighbour. An enlarged SVG proves nothing. Contact sheet:
   [design/Palette Kind Glyphs - UX Review.dc.html](../../../../../../design/Palette%20Kind%20Glyphs%20-%20UX%20Review.dc.html).
-- **Check it against its neighbours, not alone.** Every glyph here reads fine on
-  its own; the question is only ever whether it reads apart from the row above
-  it. Moving the palette's worktree mark to a closed shape traded one collision
-  for a possible worktree-vs-repo one, and that had to be drawn to settle.
+- **Check a glyph against its neighbours, not alone.** A change can trade one
+  collision for another; the palette's closed-shape worktree mark risked a
+  worktree-vs-repo collision.
 
-**One noun, one drawing, on every surface.** A branch is `BranchGlyph`
-(Lucide `git-branch`, the graph chip's mark), a linked worktree is
-`WorktreeGlyph`, the primary checkout is `CheckoutGlyph`'s house, a pull
-or merge request is `ChangeRequestGlyph`, a remote is `RemoteGlyph` (a
-cloud, checked at 15px beside the others for the sidebar's section
-headings), and a repository is the palette's folder. The sidebar, the refs
-browser, the graph and the ⌘K palette each had drawn their own until
+At 15px in a 24-unit viewBox, a 1.7–1.8 stroke is about 1.1 device pixels
+and an `r2` circle is a 3px disc. Node count, radius and detail inside a
+closed shape disappear. Only the **silhouette class** (open line art or closed
+shape), fill vs stroke, and gross aspect survive. So the ⌘K palette's branch
+and worktree glyphs (both an open trunk with nodes and a curve, differing only
+in circles) were indistinguishable, while the folder stayed legible.
+
+**One noun, one drawing, on every surface.** Use these before you draw a
+variant:
+
+- Branch: `BranchGlyph` (Lucide `git-branch`, the graph chip's mark).
+- Linked worktree: `WorktreeGlyph`.
+- Primary checkout: `CheckoutGlyph` (a house).
+- Pull or merge request: `ChangeRequestGlyph`.
+- Remote: `RemoteGlyph` (a cloud, checked at 15px for the sidebar's section
+  headings).
+- Repository: the palette's folder.
+
 [design/Worktree Chip Glyphs - UX Review.dc.html](../../../../../../design/Worktree%20Chip%20Glyphs%20-%20UX%20Review.dc.html)
-(2c) folded them together. Reach for these before drawing a variant.
-
-A glyph also needs words. See "The kind glyph is labelled twice" in
+(2c) merged the separate sidebar, refs browser, graph and ⌘K palette glyphs.
+A glyph also needs words: see "The kind glyph is labelled twice" in
 `features/sidebar/AGENTS.md`.
