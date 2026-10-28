@@ -55,13 +55,53 @@ repositories after rotation. See the distribution runbook for exact checks.
 | `preview-build.yml` | `build-preview` PR label | Unsigned macOS universal + arm64 DMGs and updater ZIPs (macOS 26/Xcode 26) + Windows NSIS installer, uploaded as workflow artifacts. |
 | `release.yml` | `v*` tag push, manual dispatch with a tag, or `ci:linux-packages` / `ci:windows-signing` PR label | Tests and stages via `apps/desktop/scripts/release.mjs`. Tagged runs gate GitHub Pre-release creation on native Linux package/runtime validation, signed/notarized macOS (macOS 26/Xcode 26), and Azure-signed Windows. On same-repo PRs every job skips unless a label opts in: `ci:linux-packages` validates Linux packages on both CPUs and `ci:windows-signing` runs the real Windows signing path; both upload artifacts only. |
 
+## Dependency caches
+
+All dependency jobs pin configure-nodejs v1.7.0 to
+`9bb6e786801cf822d57b2298e02ccefd05e8ef0f` and use the integrity-pinned pnpm
+release in `package.json`. pnpm 12.13.0 includes the macOS pnpmfile worker
+pipe-inheritance fix ([pnpm #16871](https://github.com/pnpm/pnpm/pull/16871)).
+
+| Jobs | Mode | Installation behavior |
+| --- | --- | --- |
+| Linux/Windows CI install gates | Completed tree, `populate` | Exact hit probes only; miss frozen-installs with lifecycle scripts, validates inputs/lock bytes and saves inline. |
+| Linux/Windows CI lint, build, test and E2E | Completed tree, `restore` | Exact restore and Node ABI validation; missing/incompatible trees fail without installing. |
+| Hosted macOS CI gate | Default download store, `lookup-only` | Seeds pnpm, Corepack and Electron downloads for cold Tart runners. |
+| Tart macOS E2E and opt-in check benchmark | Persistent download store | Frozen-installs each checkout; warm store skips archive transfer. Separate root per repository and runner. |
+| Release, preview and docs screenshots | Default download store | Frozen-installs with lifecycle scripts on every run; caches Electron downloads too. |
+
+Completed trees use the same action SHA, Node version, policy suffix and explicit
+`cache-inputs` in every producer/consumer pair. The action also hashes lockfile
+bytes, workspace manifests/config and `.pnpmfile.cjs`. Extra inputs cover
+`.nvmrc`, the preinstall guard, Electron downloader, SQLite staging scripts and
+the Linux sandbox warning's imported helper. OS, architecture, stable image
+family, Node major/ABI and exact pnpm pin remain compatibility boundaries.
+`packageImportMethod: auto` keeps materialized files portable. No prefix fallback
+or shared `node_modules` links are used.
+
+Consumers disable pnpm's implicit dependency verification/install before
+`pnpm run`. They rebuild the MCP server's `prepare` output from current sources
+because `packages/mcp-server/dist` is outside the archived dependency trees.
+The existing SQLite native guards remain in unit-test jobs. A producer still
+runs the full install lifecycle on a miss; no install uses `--ignore-scripts`.
+
+Persistent roots are `~/Library/Caches/pwrgit-ci/${{ runner.name }}`, outside
+checkout and runner temporary directories, on the runner's home volume. The
+action expires/reseeds them after 14 days. They retain downloads, not completed
+trees; never combine `persistent-store-dir` with `dependency-cache: node-modules`
+or `lookup-only`. The same-repository guards keep fork code off Tart. These
+runners already share trusted same-repository jobs; release/signing stays on
+hosted runners. Do not reuse a root across products or runner listeners.
+
 ## macOS desktop E2E
 
 Four shards run on the same self-hosted ARM64 Tart pool as PwrAgnt, selected
 by `[self-hosted, macOS, ARM64, pwrdrvr-macos]`. Add `pwrdrvr/PwrGit` to that
 organization runner group's selected repositories before enabling the jobs;
 otherwise they remain queued. Guests need a logged-in desktop session.
-The hosted `macos-26` install job primes the matching macOS/ARM64 cache.
+The hosted `macos-26` install job primes download caches for cold macOS/ARM64
+stores. Each Tart runner keeps its own PwrGit store outside checkout; it never
+restores a completed tree from the hosted image.
 
 Mac jobs run on main pushes and code-impacting same-repository PRs. Fork PRs
 skip both Mac jobs so untrusted fork code never reaches the persistent guests.

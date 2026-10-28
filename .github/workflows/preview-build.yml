@@ -29,9 +29,11 @@ jobs:
 
       - name: Install Node.js and dependencies
         timeout-minutes: 10
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@9bb6e786801cf822d57b2298e02ccefd05e8ef0f # v1.7.0
         with:
           node-version: 24.22.1
+          cache-electron: "true"
+          cache-key-suffix: pwrgit-store-9bb6e786801cf822d57b2298e02ccefd05e8ef0f-v1
 
       - name: Compute preview version
         id: version
@@ -94,9 +96,11 @@ jobs:
       # one-off build, so there is no fan-out to prime for.
       - name: Install Node.js and dependencies
         timeout-minutes: 10
-        uses: pwrdrvr/configure-nodejs@v1
+        uses: pwrdrvr/configure-nodejs@9bb6e786801cf822d57b2298e02ccefd05e8ef0f # v1.7.0
         with:
           node-version: 24.22.1
+          cache-electron: "true"
+          cache-key-suffix: pwrgit-store-9bb6e786801cf822d57b2298e02ccefd05e8ef0f-v1
 
       # windows-latest defaults to pwsh; force bash for the version-stamp steps
       # so they stay identical to the macOS preview job above.
