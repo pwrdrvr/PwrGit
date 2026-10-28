@@ -79,6 +79,15 @@ family, Node major/ABI and exact pnpm pin remain compatibility boundaries.
 `packageImportMethod: auto` keeps materialized files portable. No prefix fallback
 or shared `node_modules` links are used.
 
+Hosted Linux and Windows producers set `TAR_OPTIONS: --hard-dereference` for
+GNU tar (Windows uses Git for Windows' GNU tar). The cache glob can enumerate
+pnpm bin files through workspace symlinks as well as their real store paths;
+without this flag, tar emits hard-link entries targeting paths that are absent
+during extraction. Store file bytes instead, preserving pnpm symlinks. This
+can increase archive size. The policy suffix explicitly versions this choice
+so consumers cannot restore older, broken archives. See
+[GNU tar hard links](https://www.gnu.org/software/tar/manual/html_node/hard-links.html).
+
 Consumers disable pnpm's implicit dependency verification/install before
 `pnpm run`. They rebuild the MCP server's `prepare` output from current sources
 because `packages/mcp-server/dist` is outside the archived dependency trees.

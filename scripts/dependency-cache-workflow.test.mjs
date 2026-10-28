@@ -47,6 +47,8 @@ test.each([
   const producerSetup = setup(producerJob);
   expect(input(producerSetup, "cache-mode")).toBe("populate");
   expect(producerJob).not.toContain("PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN");
+  expect(producerJob).toContain("TAR_OPTIONS: --hard-dereference");
+  expect(input(producerSetup, "cache-key-suffix")).toContain("hard-dereference-v2");
   for (const consumer of consumers) {
     const consumerJob = job(consumer);
     const consumerSetup = setup(consumerJob);
