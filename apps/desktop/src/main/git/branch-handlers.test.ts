@@ -399,7 +399,8 @@ describe("branch handlers", () => {
         worktreeId: "worktree-2"
       });
       expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
-        profileId: "profile-1"
+        profileId: "profile-1",
+        repoIds: ["repo-1"]
       });
     });
 
@@ -478,7 +479,8 @@ describe("branch handlers", () => {
         worktreeId: "worktree-2"
       });
       expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
-        profileId: "profile-1"
+        profileId: "profile-1",
+        repoIds: ["repo-1"]
       });
     });
   });

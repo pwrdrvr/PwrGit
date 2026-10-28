@@ -185,6 +185,18 @@ timeout, holds the repository lock only for ref writes (`ls-remote` runs
 unlocked), and `tracked()` aborts it so a user's fetch never queues behind it.
 A background check without all three belongs in the registry.
 
+## `repo:changed` names its repositories when it can
+
+Pass `repoIds` when known repositories changed in place (a fetch, a branch,
+a tag, a worktree, a state re-read). The sidebar then re-reads only those
+rows (`repo:list` with `repoIds`), and every other repository keeps its
+object. Without it, each window re-reads the whole profile and every
+expanded repository re-runs `repo:refs`. Over a bulk fetch that was one git
+call per expanded repository per repository fetched.
+
+Leave `repoIds` off only when the list or its order may move: a scan, clone,
+fork, removal, hide, pin or reorder.
+
 ## Paths from git are always forward-slash
 
 `git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform. Split

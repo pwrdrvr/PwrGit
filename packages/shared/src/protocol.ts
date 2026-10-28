@@ -980,7 +980,15 @@ export interface Commands {
   };
 
   // Repos & discovery (U6)
-  "repo:list": { req: { profileId?: ProfileId }; res: Repo[] };
+  /**
+   * The profile's repositories, or only `repoIds` among them (an answer may
+   * omit one that is gone or hidden). The sidebar asks for `repoIds` when a
+   * `repo:changed` names them.
+   */
+  "repo:list": {
+    req: { profileId?: ProfileId; repoIds?: RepoId[] };
+    res: Repo[];
+  };
   /**
    * Take a repository out of one profile's view without touching disk. The
    * sidebar, lenses, counts, bulk sync, maintenance, ⌘K and the agent catalog
@@ -2465,7 +2473,13 @@ export type Res<C extends CommandName> = Commands[C]["res"];
 /** Server → renderer push events. */
 export interface Events {
   "profile:changed": ProfileList;
-  "repo:changed": { profileId: ProfileId };
+  /**
+   * Something about the profile's repositories changed. With `repoIds`, only
+   * those repositories changed, in place: the list and its order did not, so
+   * a listener re-reads just them. Without it, re-read the whole list (a
+   * scan, clone, removal, hide, pin or reorder).
+   */
+  "repo:changed": { profileId: ProfileId; repoIds?: RepoId[] };
   /** Each step of a running `repo:remove`, as the whole step list. */
   "repo:removalProgress": RepoRemovalProgress;
   /** Live Git progress for one clone command, correlated by operation id. */

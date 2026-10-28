@@ -1,4 +1,4 @@
-import type { Repo } from "@pwrgit/shared";
+import type { Repo } from "./types";
 
 /**
  * Enforce single ownership of every worktree across the repo list. The current

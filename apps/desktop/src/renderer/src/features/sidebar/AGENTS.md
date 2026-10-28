@@ -387,10 +387,11 @@ runs `useStepLadder` (`section-fit.tsx`; step CSS in `app.css`). Design: `design
 - **A section with its own data calls `useRefitSections()`**, as
   `RepoRefsSections` and `RepoChangeRequestSection` do: it re-renders after
   `RepoRow`.
-- **A reload keeps the last answer on screen.** `repo:changed` names only
-  the profile, so every one reloads every expanded repository (a bulk fetch
-  sends one per repository). Draw "…" only before the first answer, and let
-  only the newest reload land, as `RepoRefsSections` does.
+- **A reload keeps the last answer on screen.** A section reloads when its
+  `Repo` object changes. `useRepoTree` swaps in only the repositories a
+  `repo:changed` names, but one without `repoIds` replaces every object.
+  Draw "…" only before the first answer, and let only the newest reload
+  land, as `RepoRefsSections` does.
 - **The ladder observes `.repo-block`, not `.repo-sections`.** The sections
   unmount with the disclosure, so a mount-time observer would watch a
   detached node after re-expand.

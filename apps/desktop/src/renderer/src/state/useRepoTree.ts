@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Repo, Res } from "@pwrgit/shared";
+import { claimWorktreeOwnership, type Repo, type Res } from "@pwrgit/shared";
 import { confirmDialog, notifyDialog } from "../features/shell/dialogs";
 import { dispatch, subscribe } from "../lib/pwrgit";
 import { showErrorToast, showInfoToast } from "../lib/toast";
@@ -10,6 +10,31 @@ import {
 } from "./readState";
 
 export type RemovalProgress = { done: number; total: number };
+
+/**
+ * Swap re-read repositories into the tree by id. Every other repository keeps
+ * its object, so nothing keyed on it (memoized rows, each expanded repo's
+ * `repo:refs`) re-runs. A named repository missing from the answer is gone or
+ * hidden, so it leaves. Ownership runs over the merged list, as main runs it
+ * over a full one (`repo-ownership.ts`), so a fossil duplicate stays single.
+ */
+export function mergeChangedRepos(
+  current: Repo[],
+  asked: readonly string[],
+  fresh: readonly Repo[]
+): Repo[] {
+  const byId = new Map(fresh.map((repo) => [repo.id, repo]));
+  const named = new Set(asked);
+  const merged: Repo[] = [];
+  for (const repo of current) {
+    if (!named.has(repo.id)) merged.push(repo);
+    else {
+      const next = byId.get(repo.id);
+      if (next !== undefined) merged.push(next);
+    }
+  }
+  return claimWorktreeOwnership(merged);
+}
 
 export type RemoveWorktreesOptions = {
   /**
@@ -95,6 +120,9 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     useState<ReadState>(LOADING_READ_STATE);
   const mountedRef = useRef(false);
   const requestRef = useRef(0);
+  /** Repositories a `repo:changed` named, waiting for their re-read. */
+  const changedRef = useRef(new Set<string>());
+  const readingChangedRef = useRef(false);
   const [removalProgress, setRemovalProgress] =
     useState<RemovalProgress | null>(null);
   const [refreshingRepoIds, setRefreshingRepoIds] = useState<Set<string>>(
@@ -155,6 +183,46 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
 
   const retry = useCallback(() => reload(true), [reload]);
 
+  /**
+   * Re-read only the repositories a `repo:changed` named. A bulk fetch sends
+   * one per repository it finishes; re-reading the whole profile each time
+   * replaced every Repo object, so every expanded repository re-ran
+   * `repo:refs` once per repository fetched — O(n²) git for one Fetch all.
+   *
+   * One read at a time: ids that arrive meanwhile join the next batch, so a
+   * burst costs a few reads and answers cannot land out of order. A full
+   * reload started after a read covers it, so that read's answer is dropped.
+   */
+  const reloadChanged = useCallback(
+    async (repoIds: readonly string[]): Promise<void> => {
+      if (activeProfileId === null) return;
+      for (const id of repoIds) changedRef.current.add(id);
+      if (readingChangedRef.current) return;
+      readingChangedRef.current = true;
+      try {
+        while (changedRef.current.size > 0) {
+          const asked = [...changedRef.current];
+          changedRef.current.clear();
+          const request = requestRef.current;
+          const r = await dispatch("repo:list", {
+            profileId: activeProfileId,
+            repoIds: asked
+          });
+          if (!mountedRef.current || request !== requestRef.current) continue;
+          if (!r.ok) {
+            // Same as a failed full read: keep the last good tree.
+            setLoadState({ status: "error", message: r.error.message });
+            continue;
+          }
+          setRepos((rs) => mergeChangedRepos(rs, asked, r.value));
+        }
+      } finally {
+        readingChangedRef.current = false;
+      }
+    },
+    [activeProfileId]
+  );
+
   useEffect(() => {
     mountedRef.current = true;
     if (activeProfileId === null) {
@@ -174,14 +242,17 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     // arrive after this are asked about by `reload` — see `identityAskedRef`.
     void dispatch("repo:refreshIdentities", { profileId: activeProfileId });
     const off = subscribe("repo:changed", (p) => {
-      if (p.profileId === activeProfileId) void reload();
+      if (p.profileId !== activeProfileId) return;
+      if (p.repoIds === undefined) void reload();
+      else if (p.repoIds.length > 0) void reloadChanged(p.repoIds);
     });
     return () => {
       mountedRef.current = false;
       requestRef.current += 1;
+      changedRef.current.clear();
       off();
     };
-  }, [activeProfileId, reload]);
+  }, [activeProfileId, reload, reloadChanged]);
 
   // Prune each worktree from the tree as its removal completes — live feedback
   // during a long batch delete, and it advances the progress counter.

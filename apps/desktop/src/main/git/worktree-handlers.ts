@@ -41,7 +41,10 @@ export function createWorktreeRefresher(
       | undefined;
     if (row !== undefined) {
       emitEvent("graph:changed", { repoId: row.repo_id });
-      emitEvent("repo:changed", { profileId: row.profile_id });
+      emitEvent("repo:changed", {
+        profileId: row.profile_id,
+        repoIds: [row.repo_id]
+      });
     }
   };
 
@@ -79,7 +82,10 @@ export function createWorktreeRefresher(
       .prepare("SELECT profile_id FROM repos WHERE id = ?")
       .get(repoId) as { profile_id: string } | undefined;
     if (repo !== undefined) {
-      emitEvent("repo:changed", { profileId: repo.profile_id });
+      emitEvent("repo:changed", {
+        profileId: repo.profile_id,
+        repoIds: [repoId]
+      });
     }
   };
 
