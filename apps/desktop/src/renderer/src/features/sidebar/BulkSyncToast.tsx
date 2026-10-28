@@ -80,6 +80,7 @@ export function BulkSyncToast({
       : phase === "cancelled"
         ? `${title} — cancelled`
         : finishedHeadline(mode, total, counts.success + counts.partial);
+  const done = error === null && !live && phase !== "cancelled";
   const tone = error !== null || (!live && hasFailures)
     ? " is-failed"
     : live
@@ -113,13 +114,22 @@ export function BulkSyncToast({
           className="bulk-sync-toast__body"
           onClick={onExpand}
         >
-          <span
-            className="bulk-sync-toast__headline"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            {headline}
+          <span className="bulk-sync-toast__title">
+            <span
+              className="bulk-sync-toast__headline"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {headline}
+            </span>
+            {/* A clean or partial finish puts its time beside the headline,
+                so the counts below pair up two to a row. */}
+            {done && durationMs !== null && (
+              <span className="bulk-sync-toast__duration">
+                {formatElapsed(durationMs)}
+              </span>
+            )}
           </span>
           <span className="bulk-sync-toast__meta">
             {error !== null ? (
@@ -134,7 +144,7 @@ export function BulkSyncToast({
             ) : phase === "cancelled" ? (
               durationMs !== null && `took ${formatElapsed(durationMs)}`
             ) : (
-              <FinishedMeta counts={counts} durationMs={durationMs} />
+              <FinishedMeta counts={counts} />
             )}
           </span>
         </button>
@@ -216,14 +226,13 @@ export function finishedHeadline(
 
 /**
  * Each outcome in the bar, in the dialog legend's words and swatches, so a
- * yellow segment says "partial" without opening anything.
+ * yellow segment says "partial" without opening anything. Two to a row, so
+ * four outcomes read as a square rather than three and a straggler.
  */
 function FinishedMeta({
-  counts,
-  durationMs
+  counts
 }: {
   counts: BulkSyncOutcomeCounts;
-  durationMs: number | null;
 }): ReactElement {
   return (
     <span className="bulk-sync-toast__counts">
@@ -234,7 +243,6 @@ function FinishedMeta({
           </span>
         )
       )}
-      {durationMs !== null && <span>{formatElapsed(durationMs)}</span>}
     </span>
   );
 }

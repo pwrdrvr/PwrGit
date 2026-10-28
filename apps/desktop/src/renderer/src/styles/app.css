@@ -7048,16 +7048,33 @@ button.agent-menu__item:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Finished counts wrap to a second row instead of losing the last one
-   (usually failed) to the ellipsis. */
+/* The headline and, on a finish, its duration: the time sits up here so
+   the counts below pair evenly. */
+.bulk-sync-toast__title {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+.bulk-sync-toast__title > .bulk-sync-toast__headline {
+  min-width: 0;
+}
+.bulk-sync-toast__duration {
+  flex: none;
+  color: var(--text-muted);
+  font: 500 10px/1.2 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+/* Finished counts, two to a row, rather than losing the last one (usually
+   failed) to the ellipsis. */
 .bulk-sync-toast__meta:has(> .bulk-sync-toast__counts) {
   overflow: visible;
   white-space: normal;
 }
 .bulk-sync-toast__counts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 9px;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 4px 14px;
 }
 .bulk-sync-toast__count {
   display: inline-flex;

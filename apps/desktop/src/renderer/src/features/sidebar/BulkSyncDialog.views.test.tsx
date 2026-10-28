@@ -350,6 +350,9 @@ describe("BulkSyncDialog views", () => {
     });
     const counts = toast()?.querySelector(".bulk-sync-toast__counts");
     expect(counts?.querySelector(".is-partial")?.textContent).toBe("1 partial");
+    // The time rides beside the headline, so the counts pair up evenly.
+    expect(toast()?.querySelector(".bulk-sync-toast__title .bulk-sync-toast__duration")).not.toBeNull();
+    expect(counts?.children).toHaveLength(1);
     expect(toast()?.textContent).not.toContain("click for details");
   });
 
