@@ -319,3 +319,18 @@ runtime licensing/source obligations; approvals in another product do not apply.
 Linux prunes the unused Git Credential Manager/.NET UI runtime, as macOS does.
 Git and Git LFS retain PwrGit's existing runtime notices and source pointers.
 No new shipped npm dependency or license-policy exception is needed here.
+
+## npm name reservation
+
+The unscoped `pwrgit` package on npm is a documentation-only name reservation,
+not a distribution channel for the desktop app. Its version is intentionally
+independent of the desktop version, and the desktop release workflow never
+publishes it. `pnpm package:reservation:check` verifies both its public
+metadata and the exact code-free tarball contents; `pnpm lint` runs that check
+in CI.
+
+Only publish a new reservation version when its npm-facing metadata needs to
+change. Review the dry-run check, merge the metadata first, and then publish
+that exact commit manually with `pnpm --filter pwrgit publish --access public`.
+Never add a launcher, CLI, library, SDK, API, desktop binary, or runtime
+dependency merely to make the reserved package appear functional.
