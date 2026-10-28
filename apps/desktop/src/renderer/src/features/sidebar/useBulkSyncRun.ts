@@ -140,17 +140,17 @@ export function useBulkSyncRun({
     []
   );
 
-  /** Remember a verb and scope as the face, and run it now. */
-  const pick = useCallback(
-    (nextVerb: SyncVerb, nextScope: FetchScope) => {
-      writeSyncVerb(nextVerb);
-      writeFetchScope(nextScope);
-      setVerb(nextVerb);
-      setScope(nextScope);
-      start(nextVerb === "pull" ? "soft-pull" : "fetch", { scope: nextScope });
-    },
-    [start]
-  );
+  /**
+   * Remember a verb and scope as the face. It runs nothing: the menu is where
+   * the button is set up, and the face is what runs it (0.45.0 ran each pick
+   * and closed the menu, so changing two settings started a run).
+   */
+  const pick = useCallback((nextVerb: SyncVerb, nextScope: FetchScope) => {
+    writeSyncVerb(nextVerb);
+    writeFetchScope(nextScope);
+    setVerb(nextVerb);
+    setScope(nextScope);
+  }, []);
 
   /** The face: run the remembered verb and scope. */
   const runFace = useCallback(() => {

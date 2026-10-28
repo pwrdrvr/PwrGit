@@ -314,7 +314,7 @@ test("Fetch ▾, the run's dialog and its toast, on contrived repositories", asy
     await window
       .locator('[role="menuitemradio"]', { hasText: "Every 5 minutes" })
       .click();
-    await window.getByRole("button", { name: "Sync options" }).click();
+    // The menu stays open after a pick, checked on the new interval.
     await window.locator(".pop-menu__heading").waitFor();
     await window.mouse.move(6, 6);
     await window.waitForTimeout(300);
@@ -355,7 +355,9 @@ test("Fetch ▾, the run's dialog and its toast, on contrived repositories", asy
     await window
       .locator('[role="menuitemradio"]', { hasText: "Fetch recent repositories" })
       .click();
-    // Picking a scope runs it; the remembered view is now the toast.
+    // Picking sets the face; the face runs it. The remembered view is now
+    // the toast.
+    await window.getByRole("button", { name: "Fetch recent repos" }).click();
     await window.locator(".bulk-sync-toast").waitFor();
     await window.mouse.move(6, 6);
     await window.waitForTimeout(800);

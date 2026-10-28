@@ -185,7 +185,7 @@ describe("SidebarToolbar", () => {
     expect(button("Sync options").disabled).toBe(false);
   });
 
-  it("offers the four actions and every interval as radio entries, and runs the picks", () => {
+  it("offers the four actions and every interval as radio entries, and stays open for each pick", () => {
     const onPickSync = vi.fn();
     const onPickFetchInterval = vi.fn();
     render({
@@ -225,13 +225,32 @@ describe("SidebarToolbar", () => {
     );
     act(() => radios[3]!.click());
     expect(onPickSync).toHaveBeenCalledWith("pull", "recent");
-    act(() => chevron.click());
+    // A setting, not a command: the menu is still there for the next one.
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    expect(chevron.getAttribute("aria-expanded")).toBe("true");
     act(() =>
       [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
         .find((el) => el.textContent === "Every hour")!
         .click()
     );
     expect(onPickFetchInterval).toHaveBeenCalledWith(60);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    // The chevron closes it.
+    act(() => chevron.click());
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it("closes the menu and runs the face when the face is clicked", () => {
+    const h = render({ hasProfile: true, rootCount: 1, repoCount: 3 });
+    act(() => button("Sync options").click());
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    const face = button("Fetch all repos");
+    act(() => {
+      face.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      face.click();
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(h.onSync).toHaveBeenCalledTimes(1);
   });
 
   it("marks the face busy while a run is going, and keeps it clickable", () => {

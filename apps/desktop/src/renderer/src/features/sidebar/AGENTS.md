@@ -143,11 +143,16 @@ half twice (and fought over the row's width). The face runs the remembered
 verb and scope — Fetch or Pull, `all` or `recent` (the Focused list from
 `focusedRepos`, every page of it) — and its accessible name keeps the old
 buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
-"Try pull recent". The chevron ("Sync options") lists those four, picking
-one runs it, and then **Fetch automatically**. Verb, scope, interval and
-view live in `bulk-sync-prefs.ts` (`localStorage`, per machine). Rules, all
-in `useBulkSyncRun.ts`:
+"Try pull recent". The chevron ("Sync options") lists those four, then
+**Fetch automatically**. Verb, scope, interval and view live in
+`bulk-sync-prefs.ts` (`localStorage`, per machine). Rules, all in
+`useBulkSyncRun.ts`:
 
+- **The menu configures; the face runs.** Every entry is `keepOpen`: a pick
+  moves its check and relabels the face, starts nothing, and leaves the menu
+  open. The menu closes on the chevron, an outside click (the face included,
+  which then runs) or Escape. 0.45.0 ran each pick and closed the menu, so
+  setting an interval meant reopening it and choosing a scope started a run.
 - **Timed runs only fetch**, whatever the face says. Pulling on a timer would
   move checkouts under the reader.
 - **The run is not the dialog.** `BulkSyncDialog` owns the operation and
