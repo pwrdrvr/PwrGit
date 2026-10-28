@@ -61,11 +61,40 @@ Syntax lint adds coverage; PwrGit had no ESLint
 baseline to accelerate. Oxfmt/automatic formatting requires its own scoped
 change rather than a bulk format alongside correctness checks.
 
+## Typecheck: which compiler, and what it gates
+
+`pnpm typecheck` runs the exact-pinned TypeScript 7 native compiler
+(`typescript-native` alias) through `typecheck.mjs`. TypeScript 6
+(`typescript`) stays for dependency-cruiser's JavaScript API and the MCP
+server's declaration/JS emit. Both packages publish `tsc`, so never rely on
+whichever binary wins `node_modules/.bin/tsc`.
+`PWRGIT_TYPECHECK_COMPILER=typescript pnpm typecheck` runs TS6 for comparison
+or fallback. Editor/LSP compiler selection is independent of this.
+
+`tsconfig.base.json` sets `noUnusedLocals` and `noUnusedParameters`;
+`apps/desktop`, `packages/mcp-server` and `packages/shared` extend it. So an
+unused import or local, or the dead value half of `import { x, type X }`,
+fails `pnpm typecheck` and `pnpm lint`. It also fails `pnpm build` for
+`packages/mcp-server` (its build is `tsc`). The desktop build is electron-vite
+and type-checks nothing, so `pnpm typecheck` is the command to trust.
+
+Blind spots, verified by probe:
+
+- **A leading `_` exempts parameters and imports, but not locals.**
+  `function f(_x: string) {}` and `import { y as _y } from "./m"` are silent;
+  `const _z = 1` is still TS6133. Use the prefix for a parameter that documents
+  a signature (a test double's ignored argument, a `describe.each` title slot),
+  never to wave a dead import past the gate.
+- **An export nobody imports is invisible.** Removing a symbol's last importer
+  leaves its `export` dead and silent. Grep for the symbol after deleting an
+  import.
+
+"The compiler says unused" is not "dead code": an unused binding in a test is
+often a missing assertion. Ask what it was for before deleting it.
+
 ## Compiler measurements
 
-`typecheck.mjs` resolves TS7's CLI explicitly; `PWRGIT_TYPECHECK_COMPILER=typescript`
-selects TS6 for fallback or comparison. Keep TS6 for dependency-cruiser and MCP
-emit. `benchmark-checks.mjs OUTPUT` runs on macOS through `resource-run.mjs`:
+`benchmark-checks.mjs OUTPUT` compares TS7 and TS6. It runs on macOS through `resource-run.mjs`:
 identical sources/configs/dependencies, three paired workspace typecheck/full-lint
 samples, warm caches, CI mode and 6 GiB Node old space. It verifies repository
 file inventories and rejects injected type/unused-binding defects before timing.
