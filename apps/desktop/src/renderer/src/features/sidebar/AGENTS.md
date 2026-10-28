@@ -2,469 +2,437 @@
 
 ## The kind glyph is labelled twice
 
-Every `.overlay-result` in the ⌘K palette (`RepoSwitcherOverlay.tsx`) leads with
-a 15px glyph naming the hit's kind. It carries its word two ways, and both are
-load-bearing:
+Each `.overlay-result` in the ⌘K palette (`RepoSwitcherOverlay.tsx`) starts
+with a 15px kind glyph. Keep both labels:
 
-- an `.a11y-sr-only` span with the kind, **before** the glyph; and
-- `hoverTooltip(tip, …)` on the `.overlay-result__kind` wrapper, with the same
-  string.
+- an `.a11y-sr-only` span with the kind, **before** the glyph;
+- `hoverTooltip(tip, …)` on the `.overlay-result__kind` wrapper, same string.
 
-The reason it is not an `aria-label` on the `<svg>`: the row is a
-`role="option"`, so its accessible name is built from its own subtree — text in
-the subtree is what actually gets announced when the listbox is arrowed, which
-is why the folder label beside it uses the same `.a11y-sr-only` shape. The
-`<svg>` itself is `aria-hidden` so the kind is not announced twice.
+Rules:
 
-The reason the tooltip is on a wrapper `<span>` and not spread onto the `<svg>`:
-`hoverTooltip`'s handlers are typed for `HTMLElement`, and `SVGSVGElement` is not
-one. `tsc` catches this; the wrapper is the same workaround
-`.overlay-result__folder` already uses.
+- **No `aria-label` on the `<svg>`; keep it `aria-hidden`.** The row is
+  `role="option"`, so screen readers announce its subtree text (the folder
+  label uses the same `.a11y-sr-only` shape). `aria-hidden` stops a double
+  announcement.
+- **Put the tooltip on the wrapper `<span>`**, as `.overlay-result__folder`
+  does. `hoverTooltip` is typed for `HTMLElement`; `SVGSVGElement` fails `tsc`.
+- **Keep the string short**: it is read on **every** arrow key. Only
+  `hitKindLabel()` spells it.
 
-Keep the string short — it is read aloud on **every** arrow key through the
-list, so a sentence is punishing. `hitKindLabel()` is the one place it is
-spelled.
+Four glyphs serve five kinds:
 
-Only four glyphs exist for five kinds: `isWorktreelessBranch()` sends both
-`local_branch` and `remote_branch` to `BranchGlyph`, so those two rows are the
-identical drawing and only the label and `__meta` tell them apart. The fifth,
-`change_request` (an open PR whose head is not in the checkout), draws
-`ChangeRequestGlyph` (`lib/`) and says the forge's own noun — "Pull
-request" or "Merge request" — through `changeRequestLabel`, never a hard-coded word. Options for
-giving the remote its own mark are in
+- `isWorktreelessBranch()` sends `local_branch` and `remote_branch` to
+  `BranchGlyph`. Only the label and `__meta` tell them apart.
+- `change_request` (an open PR whose head is not in the checkout) draws
+  `ChangeRequestGlyph` (`lib/`), labelled with the forge's noun ("Pull
+  request" or "Merge request") from `changeRequestLabel`, never hard-coded.
+
+Remote-glyph options:
 [design/Palette Kind Glyphs - UX Review.dc.html](../../../../../../../design/Palette%20Kind%20Glyphs%20-%20UX%20Review.dc.html),
-turn 4. Legibility rules for a mark this small: "A 15px glyph separates by
-silhouette, not by counting" in `styles/AGENTS.md`.
+turn 4. Legibility at 15px: "A 15px glyph separates by silhouette, not by
+counting" in `styles/AGENTS.md`.
 
 ## Palette rows are asserted on by E2E
 
-Several specs in `apps/desktop/e2e` locate rows with `.overlay-result` plus a
-`hasText` filter, so **text added to a row lands in those filters**. The
-sr-only kind label is deliberately a word no fixture branch name contains.
+**Text that you add to a palette row lands in E2E filters.** Specs in
+`apps/desktop/e2e` find rows with `.overlay-result` plus `hasText`. The sr-only
+kind label is a word that no fixture branch name contains.
 
 ## A PR is found through the ref that holds it
 
-Main resolves a PR search hit to the worktree or branch holding its head
-(`RepoIndexer.searchAll`), so a palette row keeps its own kind and only gains
-`pr`. Two consequences in the renderer:
+Main resolves a PR hit to the worktree or branch that holds its head
+(`RepoIndexer.searchAll`). The row keeps its own kind and gains `pr`.
 
 - **`buildPaletteItems` lifts the hit whose `pr.number` the query names** into
-  the leading group beside an exactly-named repo. A bare number also reads as
-  a commit-hash prefix and a path, and those groups otherwise sit above it.
-- **A `change_request` hit has nothing to pin or poll** (`hasNoCheckout`), and
-  picking it fetches first: `pr:fetchHead`, then `hitForLocation` turns the
-  answer back into the branch hit the existing New-worktree path expects.
+  the leading group, beside an exactly-named repo. A bare number also matches
+  commit-hash prefixes and paths, whose groups otherwise sit above it.
+- **A `change_request` hit has nothing to pin or poll** (`hasNoCheckout`).
+  Picking it calls `pr:fetchHead`. `hitForLocation` turns the answer into the
+  branch hit that the New-worktree path expects.
 
-The refs browser (`RepoRefsModal` + `RepoChangeRequests.tsx`) matches with the
-shared `changeRequestMatch`, so `106` means #106 — never #1060 — in both places.
-With a query typed, every tab shows its own hit count, which is why the tag and
-remote searches run while their tabs are hidden.
+The refs browser (`RepoRefsModal` + `RepoChangeRequests.tsx`) also uses the
+shared `changeRequestMatch`: `106` means #106, never #1060. With a query, every
+tab shows its hit count, so tag and remote searches run while hidden.
 
 ## The sidebar's PR section reads a cache and asks nothing per PR
 
 `RepoChangeRequestSection` (between Worktrees and Branches) draws main's open
-list — one forge list call per repository, refreshed by the repo-expand sweep.
-It mounts with `refreshOnOpen: false`, so opening a repository costs no extra
-call; only ⟳ asks, with `wait: true` so the button can stay busy until the
-answer lands. Don't add a per-row lookup: a list of 30 rows would become 30
-API calls on every expand.
+list: one forge list call per repository, refreshed by the repo-expand sweep.
 
-- **Local is `refs/heads`, not "fetched".** A worktree or local branch holds
-  the head; a fetched `origin/…` head is still Remote only, because + Worktree
-  is the step that makes it yours (`change-request-groups.ts`).
-- **Remote only starts closed**, per repository
-  (`pwrgit.changeRequestsRemoteOpen.<repoId>`). On a busy repository it is
-  mostly other people's work.
-- **+ Worktree goes through `reachableLocation`**, the refs browser's path:
-  main re-locates the head with git (fetching it if it is not here), then the
-  PR goes to `NewWorktreeModal` so the dialog names it. The list's locations
-  come from the branch index and can lag a terminal; the action must not.
-- **It must not shift the sections below it.** The heading renders before
-  the first answer whenever `repo.identity` names a forge (count `…`), and
-  `useChangeRequestList` keeps each repo's last answer for the session, so a
-  re-expand paints at once. What is left is a first expand, per session, of a
-  repo with no identity yet or a section left open — keep it that way.
-- **A failed refresh is shown, not swallowed**: `list.failure` draws a
-  warning line under the heading and tints ⟳; the entries stay the last good
-  list.
-- **More than one remote: a lens, only when it has something to say.** Main
-  lists every forge remote (`list.remotes`). With two or more of them
-  listing something, a lens under the heading picks All or one remote
-  (remembered per repo, `pwrgit.changeRequestsLens.<repoId>`; past three it
-  is a `<select>`), the original first (`identity.parent`). On All each row
-  carries a `RemoteChip`; on one remote the lens already says it. The
-  heading says "Pull & merge requests" only when the forges differ.
-- **Local is keyed by branch** (`groupChangeRequests`): a fork checkout's
-  branch with a CI PR on `origin` and the PR sent upstream draws once, led
-  by the one that leaves your repository, the other as a paired chip.
-  Rows are keyed `changeRequestKey` (forge repository + number), never the
-  number alone, and every verb passes `entry.forgeRepo` to `pr:fetchHead`.
-- **A row is a place, not a launcher.** A click (or Space) shows the change
-  request in the main pane — `../change-request/AGENTS.md` — and the list
-  stays put. Arrow keys select after 150 ms at rest. The row's own verb (⌂
-  or + Worktree) is Enter, double-click and its button. The selection comes
-  through `ChangeRequestSelectionContext`, not props, and while a change
-  request has it the worktree rows drop their selected look
-  (`RepoRow`).
+- **No per-row lookup.** 30 rows would cost 30 API calls per expand.
+- **It mounts with `refreshOnOpen: false`.** Only ⟳ asks, with `wait: true`
+  so the button stays busy until the answer.
+- **Local is `refs/heads`, not "fetched".** A fetched `origin/…` head stays in
+  Remote only. The `+ Worktree` step makes it yours
+  (`change-request-groups.ts`).
+- **Remote only starts closed** per repository
+  (`pwrgit.changeRequestsRemoteOpen.<repoId>`); on busy repos it is mostly
+  others' work.
+- **+ Worktree goes through `reachableLocation`**, as in the refs browser.
+  Main re-locates the head with git (`main/github/AGENTS.md`), then
+  `NewWorktreeModal` names the PR. Never act on the list's locations; the
+  branch index can lag a terminal.
+- **Do not shift the sections below.** With a forge in `repo.identity`, the
+  heading renders before the first answer (count `…`). `useChangeRequestList`
+  keeps each repo's last answer per session, so re-expands paint at once.
+  Only a session's first expand of a repo without identity, or with the
+  section left open, still shifts.
+- **Show a failed refresh.** `list.failure` draws a warning and tints ⟳; the
+  entries stay the last good list.
+- **Lens only for two or more remotes that list something** (from
+  `list.remotes`). It picks All or one remote, per repo
+  (`pwrgit.changeRequestsLens.<repoId>`). Past three it is a `<select>`. The
+  original (`identity.parent`) comes first. On All, rows carry a `RemoteChip`.
+  The heading says "Pull & merge requests" only when the forges differ.
+- **Local is keyed by branch** (`groupChangeRequests`). A fork branch with a
+  CI PR on `origin` and a PR upstream draws once, led by the upstream PR, the
+  other as a paired chip.
+- **Key rows by `changeRequestKey`** (forge repository + number), never the
+  number alone. Every verb passes `entry.forgeRepo` to `pr:fetchHead`.
+- **A row is a place, not a launcher.** Click or Space shows it in the main
+  pane (`../change-request/AGENTS.md`); arrows select after 150 ms at rest.
+  Its verb (⌂ or + Worktree) runs on Enter, double-click and its button.
+  Selection comes through `ChangeRequestSelectionContext`, not props; while
+  it is set, worktree rows drop their selected look (`RepoRow`).
 
 Design: `design/Change Requests in Sidebar - UX Review.dc.html`, 2b and 3.
 Design: `design/Change Request View - UX Review.dc.html`, 2a.
 
 ## The palette asks in this window's profile
 
-`repo:search` carries `windowProfileId()`, and main answers from that profile
-alone unless the search is widened. The search line's This profile / All
-profiles control (`SettingsSegmented`, ⇧⌘A, shown only with two or more
-profiles) **is** General → Search all profiles — it writes that setting rather
-than keeping its own, and follows `settings:changed`, so the palette and
-Settings cannot disagree. It sits on the search line, not the footer, so it
-stays under the pointer when the result list changes height. Each search also
-sends the scope shown (`allProfiles`), so results never lag a save in flight.
-Two consequences here:
+`repo:search` carries `windowProfileId()`. Main answers from that profile only,
+unless widened. The search line's This profile / All profiles control
+(`SettingsSegmented`, ⇧⌘A) shows only with two or more profiles.
 
-- **The profile badge on each row is load-bearing, not decoration.** With the
-  setting on, rows from elsewhere appear, and `App.tsx` routes a pick in
-  another profile to **that** profile's window instead of acting in this one —
-  one of the three ways to reach it.
-- **Do not filter or re-sort by profile in the renderer.** The index caps its
-  answer at 60 rows before any of it arrives, so a pass here is too late to put
-  back a row that was never sent. Both the scope and this-profile-first
-  ordering live in `searchAll` — see "Main cannot tell which profile is asking"
-  in `src/main/AGENTS.md`.
+- **The control *is* General → Search all profiles.** It writes that setting,
+  keeps no own state, and follows `settings:changed`. It sits on the search
+  line, not the footer, so it stays under the pointer as the list resizes.
+- **Each search sends the scope shown (`allProfiles`)**, so results never lag
+  a save in flight.
+- **The profile badge on each row is load-bearing.** `App.tsx` routes a pick
+  from another profile to **that** profile's window (one of three ways to
+  reach it).
+- **Do not filter or re-sort by profile in the renderer.** Main caps the
+  answer at 60 rows first. Scope and this-profile-first order live in
+  `searchAll` ("Main cannot tell which profile is asking", `src/main/AGENTS.md`).
 
 ## The sidebar's actions are one toolbar row; search is in the title strip
 
-`SidebarToolbar` is Add ▾ (Add folders, Clone, Fork through `ContextMenu`),
-Fetch all, Pull all, and the maintenance wrench. The jump field moved to the
-title strip (`TitleBar`'s `.titlebar-jump`, `onOpenSearch`). Rules:
+`SidebarToolbar` holds Add ▾ (Add folders, Clone, Fork through
+`ContextMenu`), Fetch all, Pull all, and the maintenance wrench. The jump
+field is in the title strip (`TitleBar`'s `.titlebar-jump`, `onOpenSearch`).
 
-- **Names outlive labels.** The visible labels are short ("Fetch all") and
-  step out at narrow widths, so every button spells its accessible name —
-  "Fetch all repos", "Try pull all", "Repository maintenance…", "Add
-  repositories" — and each contains its visible label (SC 2.5.3). E2E finds
-  them by those names; don't rename one without the specs.
-- **A disabled menu entry explains itself** with `hint`, from
-  `addMenuReasons`, rather than leaving the menu.
-- **Day one lives in the empty list.** While the profile has no folder,
-  `.sidebar__start` draws Add folders in `.sidebar__empty`, outside the
-  `role="tree"` wrapper. E2E reaches Add folders through `clickAddFolders`
-  (`e2e/fixtures/steps.ts`), which handles both places.
+- **Names outlive labels.** Short labels ("Fetch all") hide at narrow widths.
+  Accessible names ("Fetch all repos", "Try pull all", "Repository
+  maintenance…", "Add repositories") contain the visible label (SC 2.5.3).
+  E2E finds buttons by name; rename only with the specs.
+- **A disabled menu entry explains itself** with `hint` from
+  `addMenuReasons`. Do not remove it from the menu.
+- **Day one lives in the empty list.** With no folder, `.sidebar__start`
+  draws Add folders in `.sidebar__empty`, outside `role="tree"`. E2E's
+  `clickAddFolders` (`e2e/fixtures/steps.ts`) handles both places.
 
 Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3.
 
 ## The sidebar footer holds the profile's AI switch
 
 `.sidebar__footer` sits under `.sidebar__list` and carries `AiFeaturesSwitch`.
-It is a footer and not a list row because the switch belongs to the profile,
-not to a repo. The rules it follows are in `settings/AGENTS.md`.
+It is a footer, not a row: the switch belongs to the profile
+(`settings/AGENTS.md`).
 
-A dialog opened from here renders in place, like `NewWorktreeModal` and the
-rest: `.overlay-backdrop` is `position: fixed` and covers the window, even
-though `.pane--sidebar` carries `container-type: inline-size`. That reads as
-though it would confine a fixed child — layout containment does — but Chromium
-does not confine one here, measured at 1000×700 with the pane at 300px. Don't
-portal a sidebar overlay to `<body>` on that theory.
+**Do not portal a sidebar overlay to `<body>`.** Dialogs render in place, like
+`NewWorktreeModal`. `.overlay-backdrop` (`position: fixed`) covers the window.
+`.pane--sidebar` has `container-type: inline-size`, but Chromium does not
+confine the fixed child (measured at 1000×700, pane 300px).
 
 ## Three things pin, and a branch pin follows the branch
 
-`repos.pinned`, `worktrees.pinned` and `pinned_branches` (migration 0036). The
-last exists because `local_branches` is a derived search table — its rows are
-dropped and re-synced whenever a branch gains a worktree or a ref listing
-changes — so a pin cannot live there, and `worktrees.pinned` cannot pin a branch
-nobody has checked out.
+Pins live in `repos.pinned`, `worktrees.pinned` and `pinned_branches`
+(migration 0036). `local_branches` cannot hold a pin: it is a derived search
+table, re-synced when a branch gains a worktree or a ref listing changes.
+`worktrees.pinned` cannot pin an unchecked-out branch.
 
-The rules that keep the three from disagreeing (all in `RepoIndexer`):
+Rules (all in `RepoIndexer`):
 
 - **A worktree reads as pinned when its branch is** (`PINNED_WORKTREE_SQL`).
-  Pin `main`, create a worktree on it later, and the Pinned group still shows it.
-- **`worktree:setPin(false)` also deletes the branch's row**, or unpinning a
-  worktree whose pin came from its branch would change nothing.
+  Pin `main`, add a worktree on it later: Pinned shows the worktree.
+- **`worktree:setPin(false)` also deletes the branch's row.** Otherwise
+  unpinning a branch-derived pin does nothing.
 - **`branch:setPin` pins a holding worktree directly** and writes a row only
-  for a branch nothing holds; `Repo.pinnedBranches` lists just those, so a
-  branch never shows twice.
-- **A rename moves the pin** (`renamePinnedBranch`, called before the refresh),
-  and the ref listing prunes pins on branches git no longer has.
+  for an unheld branch. `Repo.pinnedBranches` lists those rows, so no branch
+  shows twice.
+- **A rename moves the pin** (`renamePinnedBranch`, before the refresh). The
+  ref listing prunes pins on branches git no longer has.
 
-Only local branches pin. A remote-tracking ref has no local name of its own and a
-change request no checkout; the ⌘K star and the refs browser's star both skip
-them, and the refs browser keeps an empty slot so names stay aligned.
+**Only local branches pin** (remote-tracking refs have no local name, change
+requests no checkout). The ⌘K and refs-browser stars skip them; the refs
+browser keeps an empty slot so names align.
 
 ## Other worktrees shows six, and the row you are on ghosts in
 
 `sliceOtherWorktrees` (`repo-view.ts`) draws the first six in-flight rows of
-`remaining`, in the sort chip's order, then "Finished N" and "View all N
-worktrees…". Both open the refs browser's Worktrees tab (`RepoWorktreeTable`).
-The heading still counts all of `remaining`, so the headings add up to the
-repo row. Design: `design/Worktree List Cap - UX Review.dc.html`.
+`remaining` (sort chip order), then "Finished N" and "View all N worktrees…",
+which open the refs browser's Worktrees tab (`RepoWorktreeTable`). The heading
+counts all of `remaining`, so headings sum to the repo row.
+Design: `design/Worktree List Cap - UX Review.dc.html`.
 
-- **`isFinishedWorktree` is the one test**, shared with Focused's Working
-  block. Finished means clean (`dirty === 0`), not pinned, and done with:
-  its PR merged or closed, its upstream gone, or old enough in main. A
-  merged or closed PR proves that only when its `headOid` equals the
-  checkout's `head`. After a squash merge, nothing else in Git ties the
-  branch to main, and `--not --remotes` counts every commit as unpushed. A bare
-  `mergedIntoDefault` waits 24 hours, so a branch cut a minute ago is not
-  "finished" just because it has no commits yet.
+- **`isFinishedWorktree` is the only test** (shared with Focused's Working
+  block): clean (`dirty === 0`), not pinned, and done — PR merged or closed,
+  upstream gone, or old enough in main.
+- **A merged or closed PR counts only if its `headOid` equals the checkout's
+  `head`.** After a squash merge nothing else in Git ties the branch to main,
+  and `--not --remotes` counts every commit as unpushed.
+- **A bare `mergedIntoDefault` waits 24 hours**, so a new branch with no
+  commits is not "finished".
 - **Selecting a row never opens the disclosure.** A selected row outside the
-  six is drawn as a ghost: the same `WorktreeRow` with `ghost`, under a
-  "visiting" rule below the six, or directly above a closed disclosure. It
-  is not draggable, and ⌘⇧↑/↓ moves rows only among the drawn six.
-  `displayIds` is the drawn order, ghost included, so posinset and the arrow
-  walk follow what is on screen.
-- **One lifecycle word per row.** A merged or closed chip hides `gone`, because
-  the merge already explains the deleted branch. An open chip beside `gone` is
-  stale PR state; main refreshes it on the gone transition (`github/AGENTS.md`).
+  six draws as a ghost (`WorktreeRow` with `ghost`), not draggable, under a
+  "visiting" rule or above a closed disclosure. ⌘⇧↑/↓ moves only the drawn
+  six. `displayIds` is the drawn order (ghost included) for posinset and
+  arrows.
+- **One lifecycle word per row.** A merged or closed chip hides `gone`. An
+  open chip beside `gone` is stale; main refreshes it on the gone transition
+  (`github/AGENTS.md`).
 
 ## The refs browser's rows are focus stops
 
-`lib/refsRowKeys.ts`: ↓ from the filter enters the rows, ↑/↓ walk them,
-Home/End jump, Space pins, and Enter or a double-click runs the primary action
-— the button inside `data-refs-primary` (`RefRowActions`' first slot). Space
-is a **row** key on purpose — in the filter it types a space. A row's copy
-targets take `deferForDoubleClick`, so a double-click on the name activates
-without copying. The actions column is three fixed slots (`RefRowActions`) on
-every tab, the Remotes cards' branch rows included, and `--refs-actions-w` in
-`app.css` is their widths plus gaps: change a slot, change the token, or the
-columns drift again. Don't hand-roll a row's buttons outside it, and don't
-size its grid track by hand: the Remotes cards' fixed 112px track squeezed two
-buttons' labels onto two lines. The track is the token.
+Keys (`lib/refsRowKeys.ts`): ↓ from the filter enters the rows; ↑/↓ walk;
+Home/End jump. Space pins — a **row** key, because in the filter it types a
+space. Enter or double-click runs the button inside `data-refs-primary`
+(`RefRowActions`' first slot). Copy targets take `deferForDoubleClick`, so a
+double-click on the name does not copy.
 
-**Anything a sidebar row can do, its refs-browser row must do too** — the
-browser is how the rows past the short list are reached. When you add a verb,
-chip or gesture to a sidebar ref row, add it there (both `RepoRefsModal` and
-`ChangeRequestTable`), and the parity tests in `RepoRefsModal.test.tsx` and
-`RepoChangeRequestSection.test.tsx` beside it. `WorktreeHolderChip` is the
-shared "which worktree holds this" chip.
+- **The actions column is three fixed slots (`RefRowActions`) on every tab**,
+  Remotes cards' branch rows included. Do not hand-roll row buttons outside it.
+- **`--refs-actions-w` in `app.css` is the slot widths plus gaps.** Change a
+  slot, change the token, or the columns drift.
+- **Size the grid track with the token, never by hand.** A fixed 112px track
+  on the Remotes cards wrapped two button labels.
+
+**Anything a sidebar row can do, its refs-browser row must do too**: the
+browser reaches rows past the short list. Add each new verb, chip or gesture
+to `RepoRefsModal` and `ChangeRequestTable`, with parity tests in
+`RepoRefsModal.test.tsx` and `RepoChangeRequestSection.test.tsx`.
+`WorktreeHolderChip` is the shared "which worktree holds this" chip.
 
 ## Clone and Fork… ask the forge the same question
 
-Clone's "Clone from" pair (the original, or your fork) runs `repo:forkPreflight`
-once per pick, after `repo:forkTargets` — the same answer `ForkRepoDialog`
-reads. `repo:forkTargets` is asked 300ms after the source box starts asking
-a forge anything (once per instance, never on open), so the accounts are
-known by the time a row can be picked. The default, the pill and the submit
-label come from `clone-from.ts` and `forkAction`, not from JSX, and are
-unit-tested there. Two rules worth keeping:
+Clone's "Clone from" pair (the original, or your fork) runs
+`repo:forkPreflight` once per pick, after `repo:forkTargets`, as
+`ForkRepoDialog` does. `repo:forkTargets` runs once per instance, 300ms after
+the source box first asks a forge anything, never on open. The default, pill
+and submit label come from `clone-from.ts` and `forkAction` (unit-tested), not
+JSX.
 
 - **Creating a repository is never a default.** Your fork is preselected only
-  when you can't push to the original *and* the fork already exists.
-- **`originRepository` is the one source of "what origin will be".** The
-  protocol cards, "Will create" and the SSH recovery card all read it, so
-  choosing the fork can't leave one of them describing the source.
+  when you cannot push to the original *and* the fork exists.
+- **`originRepository` is the one source of "what origin will be"** for the
+  protocol cards, "Will create" and the SSH recovery card.
 
-A repository that is **itself a fork** gets an "Add `upstream`" row (on by
-default; parent first, root second for a fork of a fork) and `repo:clone`
-carries the slug. Where the lineage comes from:
+A repository that is **itself a fork** gets an "Add `upstream`" row, on by
+default: parent first, then root for a fork of a fork. `repo:clone` carries
+the slug. Lineage sources:
 
-- **A search row has no `parent`**, so its absence means "not asked".
+- **A search row has no `parent`**, so absence means "not asked".
   `cloneLineageSource` takes preflight's source, then a one-off
-  `repo:checkCloneSource`, then the pick — and only one that names a parent.
-- **Your own fork gets no preflight** when you have no other account to fork
-  into, which is exactly when the lookup runs. Don't key it per keystroke.
-  A successful exact-name check is already the answer.
-- **Clone waits for the answer** (`lineageKnown`). The row is on by default,
-  and a quick Enter before the forge replied would clone a fork without it.
+  `repo:checkCloneSource`, then the pick, and accepts only one that names a
+  parent.
+- **Your own fork gets no preflight** without another account to fork into;
+  that is when the lookup runs. Never per keystroke; a successful exact-name
+  check is already the answer.
+- **Clone waits for the answer** (`lineageKnown`). An early Enter would clone a
+  fork without its default-on upstream row.
 - **GitHub search rows carry `isFork`** (no parent). `true` draws the row at
-  the pick with its target reading `checking…`; `false` skips the lookup.
+  the pick with target `checking…`; `false` skips the lookup.
 
 Design: `design/Upstream When Cloning a Fork - UX Review.dc.html`.
 
 **Nothing below the source may move after the pick.** The forge answers
-0.6–2s after a click, by which time focus is in Check out to; rows inserted
-then moved it, Clone with and the footer ~100px. So every forge-dependent
-row is drawn in the pick's frame and only its words change later: the pair
-(accounts asked early, or `viewerCanPush: false`, which no account's own
-repository has), the pending upstream row, "Fork into" on the Clone from
-label's line, held hidden while the original is chosen, and the cards' top
-lines at chip height. Measure a change here the way pwrdrvr/PwrGit#477 did (a
-Vite build of the dialog against a fake bridge with delayed answers, a
-`layout-shift` observer and a rAF sampler on the controls below). Still
-moving: a fork of a fork's radio list, which appears when the lineage lands.
-Design: `design/Clone Dialog Layout Shift - UX Review.dc.html`.
+0.6–2s later, with focus already in Check out to; late rows moved focus, Clone
+with and the footer ~100px. Draw every forge-dependent row in the pick's frame
+and change only its words:
 
-Fork… opened from a checkout (`inPlace`) forks it **in place** while the source
-is still that checkout: it asks `repo:forkCheckoutPreflight`, submits
+- the pair (accounts asked early, or `viewerCanPush: false`, which no
+  account's own repository has);
+- the pending upstream row;
+- "Fork into" on the Clone from label's line, hidden while the original is
+  chosen;
+- the cards' top lines, at chip height.
+
+To measure, do as pwrdrvr/PwrGit#477: a Vite build of the dialog against a
+fake bridge with delayed answers, a `layout-shift` observer, and a rAF sampler
+on the controls below. Known remaining shift: a fork of a fork's radio list
+appears when the lineage arrives. Design:
+`design/Clone Dialog Layout Shift - UX Review.dc.html`.
+
+Fork… from a checkout (`inPlace`) forks it **in place** while the source is
+that checkout. It asks `repo:forkCheckoutPreflight`, submits
 `repo:forkCheckout`, and draws `ForkRemotePlan` (shared with
-`ForkCheckoutDialog`) instead of Clone with / Check out to. Reveal still wins
-when your fork is already checked out elsewhere. Design:
+`ForkCheckoutDialog`) in place of Clone with / Check out to. Reveal wins when
+your fork is already checked out elsewhere. Design:
 `design/Fork While Cloning - UX Review.dc.html`.
 
 ## Fork tracking repair draws the route, from one dialog
 
-A branch can be left pulling from and pushing to the fork's parent after a
-remote rename. Push (refused), Pull's menu and the Remotes card all open
-`ForkTrackingRecoveryDialog`; none of them changes the branch's upstream
-without it. `ForkRoute` draws Now and After as three boxes (the original,
-this checkout, the fork), so the change reads without Git's vocabulary; the
-command itself sits under "In Git terms". Two rules:
+A remote rename can leave a branch pulling from and pushing to the fork's
+parent. Push (refused), Pull's menu and the Remotes card all open
+`ForkTrackingRecoveryDialog`. **Only that dialog changes the branch's
+upstream.** `ForkRoute` draws Now and After as three boxes (original, this
+checkout, fork); the git command sits under "In Git terms".
 
-- **Only a refused push says the original is closed to you.** `viewerCanPush`
-  is known for `origin` alone, and here `origin` is the fork; a maintainer can
-  have a fork and still push upstream, so the Pull and Remotes entries draw no
-  refusal and no "can't push". (Publish and Fork&hellip; may say it from
-  `viewerCanPush: false`, because there `origin` *is* the original.)
-- **A fork other than `origin` is offered only once the forge confirms it**
-  forks the same parent and takes your pushes. `remote:inspectForkTracking`
-  asks after releasing the repository lock; the renderer never guesses from a
-  remote's URL. Two or more draws the scrolling Push to list.
+- **Only a refused push says the original is closed to you.**
+  `viewerCanPush` is known only for `origin` (here the fork), and a maintainer
+  with a fork can still push upstream. Pull and Remotes draw no "can't push".
+  Publish and Fork&hellip; may, from `viewerCanPush: false`: there `origin`
+  *is* the original.
+- **Offer a fork other than `origin` only after the forge confirms** it forks
+  the same parent and accepts your pushes. `remote:inspectForkTracking` asks
+  after it releases the repository lock. Never guess from a remote's URL. Two
+  or more draw the scrolling Push to list.
 
 Design: `design/Fork Tracking Repair - UX Review.dc.html`, 2b and 4a.
 
 ## The route is drawn wherever a fork changes where a branch goes
 
-`RouteStrip` (in `ForkRoute.tsx`) is the repair's strip made general: three
-boxes, arrows whose direction follows the verb, and a phase pill. It also
-draws Fork&hellip;'s plan (`forkPlanRoutes`), Publish's destination
-(`publishRoute`), and the Remotes card in the healthy case too
-(`remotesRoute`). `RouteLine` is the one-line form under each Pull menu choice.
-Roles come from `routedRemotes` in `@pwrgit/shared`, never from a remote's
-name:
+`RouteStrip` (`ForkRoute.tsx`) generalizes the repair's strip (three boxes,
+verb-directed arrows, a phase pill). It also draws
+Fork&hellip;'s plan (`forkPlanRoutes`), Publish's destination
+(`publishRoute`), and the Remotes card, healthy case included
+(`remotesRoute`). `RouteLine` is the one-line form under each Pull menu
+choice. **Roles come from `routedRemotes` in `@pwrgit/shared`, never from a
+remote's name:**
 
-- **The forge's identity names the fork and the original only while origin's
-  URL still matches it.** A remote called `upstream` that is not the parent is
-  "other" and gets no role.
-- **"You can push" is drawn only from `viewerCanPush`, and only for a remote
-  whose push URL is origin's repository.** No pill means "not asked", which is
-  why Publish to the original says PwrGit hasn't asked.
-- **Sync's dotted arrow appears only where the original is known to carry the
-  branch**: its default branch, a fetched branch of that name, or the branch it
-  tracks now (the repair). Absent from the preview sample proves nothing, so
-  it draws no arrow rather than a guess.
-- **One-line routes read in the strip's order**, the original first and this
-  checkout dashed: `RouteLine` in Pull's choices, `ForkRouteLine` in its
-  repair note.
+- **The forge's identity names fork and original only while origin's URL
+  still matches it.** A remote called `upstream` that is not the parent is
+  "other", with no role.
+- **Draw "You can push" only from `viewerCanPush`, and only for a remote whose
+  push URL is origin's repository.** No pill means "not asked" (Publish to the
+  original says so).
+- **Sync's dotted arrow needs the original to be known to carry the branch**:
+  its default branch, a fetched branch of that name, or the branch it tracks
+  now (the repair). Absence from the preview sample proves nothing, so draw no
+  arrow.
+- **One-line routes use the strip's order**: original first, this checkout
+  dashed (`RouteLine` in Pull's choices, `ForkRouteLine` in its repair note).
 - **Fork&hellip; draws strips only for a branch that tracks a remote**
-  (`routeBranch`). An unpublished branch has no route to change, so it keeps
-  the "Afterwards" list.
+  (`routeBranch`). An unpublished branch keeps the "Afterwards" list.
 
 Design: `design/Fork Route Graphic - UX Review.dc.html`.
 
 ## The sidebar holds the reader's row across a selection change
 
-`sidebar-anchor.ts` remembers the row last pressed, focused or scrolled with
-(`data-nav-anchor`, `data-wt-id`, `data-repo-id`) and its offset in the list.
-A selection change caused by a press holds that row still for a moment, and
-Back restores it by key. Both run in Sidebar's layout effects, before paint,
-and while one holds its row the "reveal the selection" scroll stands down.
-A row someone can jump *from* needs a stable `data-nav-anchor`. A ghost
-keeps `data-wt-id`, so reveals and anchors find it like the real row.
+`sidebar-anchor.ts` remembers the last pressed, focused or scrolled row
+(`data-nav-anchor`, `data-wt-id`, `data-repo-id`) and its offset. A
+press-caused selection change holds it still briefly; Back restores it by key.
+Both run in Sidebar's layout effects before paint and suspend the "reveal the
+selection" scroll.
+
+- **A row that a user can jump *from* needs a stable `data-nav-anchor`.**
+- A ghost keeps `data-wt-id`, so reveals and anchors find it.
 
 ## Section headings never overlap, wrap, or cut a count
 
-The Worktrees / PRs / Branches / Tags / Remotes headings live in section rows
-that can be 170px wide (a narrow sidebar with the repository index). Each
-repository block steps them down by what fits, never by a breakpoint:
-`RepoRow` wraps every heading it draws in `.repo-sections` and runs
-`useStepLadder` on it (`section-fit.tsx`; the CSS for each step is in
-`app.css`). Design: `design/Sidebar Section Headings - UX Review.dc.html`,
+Section rows for Worktrees / PRs / Branches / Tags / Remotes can be 170px
+(narrow sidebar plus repository index). Each repository block steps them down
+by fit, **never by a breakpoint**: `RepoRow` wraps them in `.repo-sections` and
+runs `useStepLadder` (`section-fit.tsx`; step CSS in `app.css`). Design: `design/Sidebar Section Headings - UX Review.dc.html`,
 2c and turn 3.
 
-- **Steps, cumulative:** `fit-short` ("Pull requests" → "PRs"),
-  `fit-glyphs` (every label → its glyph beside its count), then
-  `fit-fold-1..3` (gone, then behind, then ahead fold into a +N chip). The
-  totals, "N failing", the refresh buttons and Recent never step; past the
-  last step a row clips at its own edge.
-- **Per repository block, not per tree** (operator's call): a quiet
-  repository keeps its words at the width where a busy one has folded.
-- **The fit test is "every heading row's items end inside its box"**
-  (`headingsFit`, over `.ref-section__head-wrap` and the Worktrees
-  `.wt-section__head`). A new heading needs one of those classes, or the
-  ladder cannot see it.
-- **Everything a step acts on is rigid** (`flex: 0 0 auto`): the disclosure,
-  every chip, ⟳ and Recent. A shrinkable item never overflows, so the block
-  would read as fitting while it ellipsized. Only "on main" is leftover.
-- **The sections re-render on their own state** (refs and the PR list land
-  after `RepoRow` rendered), so `RepoRefsSections` and
-  `RepoChangeRequestSection` call `useRefitSections()`. A new section with
-  its own data must too. The ladder observes `.repo-block`, not
-  `.repo-sections`: the sections unmount with the disclosure, and an
-  observer attached at mount would watch a detached node after a re-expand.
-- **Words leave the screen, not the name.** A stepped-away label is visually
-  hidden inside its button, so the name still says "Branches 533" and
-  contains the visible "PRs" (SC 2.5.3); `steppedTooltip` shows
-  "Branches · 533" on hover only once the step is taken. The glyphs are the
-  shared marks: `WorktreeGlyph`, `ChangeRequestGlyph`, `BranchGlyph`,
-  `TagGlyph` and `RemoteGlyph` (Lucide's cloud).
-- **+N is one chip per fold step** (`foldChips`), each holding what its step
-  folded; CSS shows only the deepest step's. Its card and name list the
-  folded counts, and a click opens the refs browser on Branches,
-  unfiltered, since it can hold more than one status.
+- **Cumulative steps:** `fit-short` ("Pull requests" → "PRs"), `fit-glyphs`
+  (labels → glyph beside count), then `fit-fold-1..3` (gone, then behind,
+  then ahead fold into a +N chip). Totals, "N failing", refresh buttons and
+  Recent never step. Past the last step a row clips at its edge.
+- **Per repository block, not per tree** (operator's decision): a quiet repo
+  keeps its words where a busy one folds.
+- **Fit test: every heading row's items end inside its box** (`headingsFit`
+  over `.ref-section__head-wrap` and the Worktrees `.wt-section__head`). A new
+  heading needs one of those classes.
+- **Everything a step acts on is rigid** (`flex: 0 0 auto`): disclosure,
+  chips, ⟳, Recent. A shrinkable item ellipsizes and passes the test. Only
+  "on main" takes leftover space.
+- **A section with its own data calls `useRefitSections()`**, as
+  `RepoRefsSections` and `RepoChangeRequestSection` do: it re-renders after
+  `RepoRow`.
+- **The ladder observes `.repo-block`, not `.repo-sections`.** The sections
+  unmount with the disclosure, so a mount-time observer would watch a
+  detached node after re-expand.
+- **Words leave the screen, not the accessible name.** A stepped label is
+  visually hidden, so the name still says "Branches 533" and contains the
+  visible "PRs" (SC 2.5.3). `steppedTooltip` shows "Branches · 533" on hover
+  only after the step.
+- **Glyphs are the shared marks:** `WorktreeGlyph`, `ChangeRequestGlyph`,
+  `BranchGlyph`, `TagGlyph`, `RemoteGlyph` (Lucide's cloud).
+- **+N is one chip per fold step** (`foldChips`); CSS shows only the deepest.
+  Its card and name list the folded counts. A click opens the refs browser on
+  Branches, unfiltered, because the chip can mix statuses.
 
-The repository row has its own ladder, with "the name is whole"
-(`isCutShort`, a text range against the box, not `scrollWidth`) as the
-test: `rr-no-marks` (forge chip and `.repo-mark`s leave; the fork mark that
-carries an upstream pull is `.badge--source`, an action, and stays), then
-`rr-short-count` ("279 wts" → worktree glyph + 279). Only then does the name
-ellipsize. The star and kebab never step.
+The repository row has its own ladder. Test: the name is whole (`isCutShort`,
+a text range against the box, not `scrollWidth`). Steps: `rr-no-marks` (forge
+chip and `.repo-mark`s leave; `.badge--source`, the fork mark that carries an
+upstream pull, is an action and stays), then `rr-short-count` ("279 wts" →
+worktree glyph + 279). Then the name ellipsizes. Star and kebab never step.
 
-`e2e/section-headings.spec.ts` measures all of it in a Vite build of the
-real `RepoRow` at section rows of 270, 222, 194 and 170px, in a hidden
-Electron window (`e2e/AGENTS.md`, "Harness pages"). Run it after touching
-heading markup or CSS; jsdom has no layout and cannot.
+**Run `e2e/section-headings.spec.ts` after you touch heading markup or CSS**
+(jsdom has no layout). It measures a Vite build of the real `RepoRow` at 270,
+222, 194 and 170px in a hidden Electron window (`e2e/AGENTS.md`, "Harness
+pages").
 
 ## The repository index is a map beside the tree, not part of it
 
-`RepoIndex.tsx` draws every repository in the lens, by name, in a column to
-the left of `.sidebar__list`, under the same folder labels. The rules are in
-`repo-index.ts`, and they are unit-tested there.
+`RepoIndex.tsx` lists the lens's repositories by name, left of
+`.sidebar__list`, under the same folder labels. Rules: `repo-index.ts`
+(unit-tested).
 
-- **It spends only the width past the tree's floor.** The tree is built for
-  the sidebar's 240px minimum (`SIDEBAR_MIN_WIDTH`, shared with App's
-  resize). The index is `max-content` wide, capped at the sidebar width
-  minus that floor (`--repo-index-max`, written straight onto the aside so
-  dragging the edge re-renders nothing). It hides once that cap is below the
-  probe's measured `calc(7ch + 19px)` in the index's own font. Don't replace
-  that with a breakpoint: the probe moves with the text-size axis.
-- **`.sidebar__tree-pane` is the tree's size container.** It has no padding
-  and no border, so with the index hidden it measures exactly what
-  `.pane--sidebar` does. Narrow-width rules inside the tree (the 260px ghost
-  tag) follow the tree's own width when the index takes some of it.
-- **A name selects the way its row does, then scrolls.** `jumpToRepo` and
-  the repo row's click share `selectPrimaryUnlessHeld`: the primary worktree,
-  unless the selection is already in that repository. The first build only
-  opened and scrolled. The old repository then stayed drawn as selected
-  beside the one just picked, and that read as two selections at once.
-  It also releases any anchor hold (`releaseSidebarAnchor`), expands like a
-  manual expand (`onExpandRepo`), and puts the `.repo-block` at the top of
-  the readable area: under the sticky folder heading when grouped. Measure
-  the block, not the sticky `.repo-row`, which reports where it is stuck. A
-  repository near the end gets `.sidebar__jump-room`, a blank tail of exactly
-  the missing height. The tail is dropped once it scrolls out of view.
-- **Only the selection gets a tint.** `.is-selected` is the collapsed tree
-  row's look: accent name on `--bg-hover-strong`. The scroll position
-  (`.is-current`, `.is-in-view`) is a rail and nothing else. A tint on both
-  is the two-selections bug again.
-- **The width is natural until dragged.** The grip is the shell's
-  `PaneResizer` (drag, arrow keys, double-click for natural width), saved as
-  `pwrgit.repoIndexWidth`. Its bounds are read back from the column's own
-  computed `min-width` and `max-width`, so a drag cannot cross the probe's
-  minimum or the tree's floor.
-- **Scroll-spy names the block whose header is stuck**, not the most visible
-  one. `spyRepos` takes the first block whose bottom is below the line. The
-  index keeps that item in view, except while the pointer or focus is in the
-  index. The spy state lives in `RepoIndex`, so a scroll re-renders the
-  column and not the sidebar.
-- **The hover hold spans index and tree** (`held.containerProps` is on
-  `.sidebar__body`), so Focused cannot re-sort under a pointer moving from
-  one to the other.
-- **Accessibility.** It is a `nav` named "Repository index", with a list per
-  folder and a button per repository, outside `role="tree"`. The spy item has
-  `aria-current="location"`. It has one roving tab stop: ↑/↓, Home/End,
-  typeahead, and Enter or Space to jump. Display options → Repo index turns
-  it off (`pwrgit.repoIndex`). That kebab is now always drawn, and its hint
-  says why an enabled index isn't showing.
+- **It uses only the width past the tree's floor**: the sidebar's 240px
+  minimum (`SIDEBAR_MIN_WIDTH`, shared with App's resize). The index is
+  `max-content`, capped at sidebar width minus the floor (`--repo-index-max`,
+  written onto the aside so a drag re-renders nothing). It hides when the cap
+  is below the probe's `calc(7ch + 19px)` in its own font. **Never replace the
+  probe with a breakpoint**: it moves with the text-size axis.
+- **`.sidebar__tree-pane` is the tree's size container** (no padding or
+  border, so it equals `.pane--sidebar` when the index is hidden). Narrow
+  rules in the tree (the 260px ghost tag) follow the tree's width.
+- **A name selects like its row, then scrolls.** `jumpToRepo` and the row
+  click share `selectPrimaryUnlessHeld` (primary worktree, unless the
+  selection is already in that repo); scroll-only showed two selections. It
+  also calls `releaseSidebarAnchor` and `onExpandRepo`, and puts the
+  `.repo-block` at the top of the readable area (under the sticky folder
+  heading when grouped). Measure the block, not the sticky `.repo-row`, which
+  reports where it is stuck. A repo near the end gets `.sidebar__jump-room`, a
+  blank tail of the missing height, dropped once it scrolls away.
+- **Only the selection gets a tint**: `.is-selected` is the collapsed tree
+  row's accent name on `--bg-hover-strong`. Scroll position (`.is-current`,
+  `.is-in-view`) is a rail only; tinting both shows two selections.
+- **Width is natural until dragged.** The grip is the shell's `PaneResizer`
+  (drag, arrows, double-click for natural), saved as `pwrgit.repoIndexWidth`.
+  Its bounds come from the column's computed `min-width` and `max-width`, so a
+  drag cannot cross the probe minimum or the tree's floor.
+- **Scroll-spy names the block whose header is stuck** (`spyRepos`: first
+  block whose bottom is below the line), not the most visible one. The index
+  scrolls it into view unless pointer or focus is there. Spy state lives in
+  `RepoIndex`, so a scroll re-renders only the column.
+- **The hover hold spans index and tree** (`held.containerProps` on
+  `.sidebar__body`), so Focused cannot re-sort under a moving pointer.
+- **Accessibility:** a `nav` named "Repository index", outside `role="tree"`,
+  with a list per folder and a button per repository. The spy item has
+  `aria-current="location"`. One roving tab stop: ↑/↓, Home/End, typeahead,
+  Enter or Space to jump. Display options → Repo index turns it off
+  (`pwrgit.repoIndex`). That kebab is always drawn; its hint says why an
+  enabled index is not showing.
 
 Design: `design/Sidebar Repo Index - UX Review.dc.html`, 3a and turn 4.
 
 ## Hide and Remove live on the repo row's menu
 
-Hide asks nothing and offers Undo on its toast; Remove opens
-`RemoveRepositoryDialog`, whose rules (`removalStatus`, `checkoutChoices`)
-are in `@pwrgit/shared` so the button the dialog enables is the one main
-accepts. Both move the selection to the neighbouring repository first
-(`selectNeighbourOf`), or the window falls back to the first repo. Hidden
-repositories come back through `HiddenReposButton` (the footer row, drawn only
-while something is hidden), Settings → Profiles, and the palette, which shows
-a hidden repository only for its full name. Main excludes hidden rows from
-`repo:search`, so do not filter them here. Design:
-`design/Remove and Hide Repository - UX Review.dc.html`.
+- **Hide asks nothing** and offers Undo on its toast.
+- **Remove opens `RemoveRepositoryDialog`.** Its rules (`removalStatus`,
+  `checkoutChoices`) live in `@pwrgit/shared`, so the dialog enables exactly
+  what main accepts.
+- **Both move the selection to the neighbouring repository first**
+  (`selectNeighbourOf`); otherwise the window falls back to the first repo.
+- **Hidden repositories return through** `HiddenReposButton` (footer row,
+  only while something is hidden), Settings → Profiles, and the palette (full
+  name only).
+- **Do not filter hidden rows in the renderer.** Main excludes them from
+  `repo:search`.
+
+Design: `design/Remove and Hide Repository - UX Review.dc.html`.

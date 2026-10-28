@@ -7,10 +7,12 @@ change.
 
 ## Rules that always apply
 
-1. **`source ~/.nvm/nvm.sh && nvm use` before `pnpm i`, tests or builds.**
-   Agent shells don't have nvm loaded, and a wrong-Node install fails later as
-   a broken test or database, not at install. Each checkout/worktree needs its
-   own `pnpm i`.
+1. **Use the `.nvmrc` Node for `pnpm i`, tests and builds.** First compare
+   `node --version` with `.nvmrc`. A PwrAgent or Codex environment usually
+   puts the correct Node first on `PATH`. If the versions match, run commands
+   as they are. If they do not match, run `source ~/.nvm/nvm.sh && nvm use`
+   first. A wrong-Node install does not fail at install time. It fails later,
+   as a broken test or database. Each checkout/worktree needs its own `pnpm i`.
 2. **Run `pnpm lint` before pushing.** It is exactly what CI's Typecheck job
    runs. New repo-wide checks go in its chain in the root `package.json`, not
    in a new CI step.
@@ -28,6 +30,8 @@ change.
    (`ln -s AGENTS.md CLAUDE.md`).
 
 ## Set up a checkout or worktree
+
+Skip the nvm lines when `node --version` already matches `.nvmrc`.
 
 ```bash
 source ~/.nvm/nvm.sh   # nvm is a shell function; agent shells lack it
