@@ -113,21 +113,6 @@ export function BulkSyncToast({
           >
             {headline}
           </span>
-          {(error !== null || live || phase !== "cancelled" || finished > 0) && (
-            <span className="bulk-sync-toast__meta">
-              {error !== null ? (
-                error
-              ) : live ? (
-                <LiveMeta
-                  finished={finished}
-                  total={total}
-                  failed={counts.failed}
-                />
-              ) : (
-                <FinishedMeta counts={counts} />
-              )}
-            </span>
-          )}
         </button>
         <span className="bulk-sync-toast__end">
           {live ? (
@@ -175,6 +160,21 @@ export function BulkSyncToast({
           )}
         </span>
       </div>
+      {/* Below the header, not inside its button, so the counts get the
+          card's full width instead of the room left beside the actions. A
+          pointer target only: the headline button and Show details are the
+          keyboard's way in. */}
+      {(error !== null || live || phase !== "cancelled" || finished > 0) && (
+        <div className="bulk-sync-toast__meta" onClick={onExpand}>
+          {error !== null ? (
+            error
+          ) : live ? (
+            <LiveMeta finished={finished} total={total} failed={counts.failed} />
+          ) : (
+            <FinishedMeta counts={counts} />
+          )}
+        </div>
+      )}
       {total > 0 && (live || hasFailures) && (
         <div className="bulk-sync__bar bulk-sync-toast__bar" aria-hidden="true">
           {BULK_SYNC_OUTCOMES.map((outcome) => (
@@ -219,8 +219,8 @@ export function finishedHeadline(
 
 /**
  * Each outcome in the bar, in the dialog legend's words and swatches, so a
- * yellow segment says "partial" without opening anything. Two to a row, so
- * four outcomes read as a square rather than three and a straggler.
+ * yellow segment says "partial" without opening anything. One row across
+ * the card's full width; a run with wide numbers wraps.
  */
 function FinishedMeta({
   counts

@@ -7054,23 +7054,25 @@ button.agent-menu__item:hover {
   white-space: nowrap;
 }
 .bulk-sync-toast__meta {
+  margin-top: 4px;
   overflow: hidden;
   color: var(--text-muted);
   font: 500 10px/1.2 var(--font-sans);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
 }
-/* Finished counts, two to a row, rather than losing the last one (usually
-   failed) to the ellipsis. */
+/* Finished counts across the card's full width; wide numbers wrap rather
+   than losing the last count (usually failed) to the ellipsis. */
 .bulk-sync-toast__meta:has(> .bulk-sync-toast__counts) {
   overflow: visible;
   white-space: normal;
 }
 .bulk-sync-toast__counts {
-  display: grid;
-  grid-template-columns: repeat(2, max-content);
-  gap: 4px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 .bulk-sync-toast__count {
   display: inline-flex;

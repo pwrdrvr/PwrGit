@@ -190,8 +190,9 @@ buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
   Design: `design/Bulk Sync Toast Header - UX Review.dc.html`.
 - **The headline counts what went through.** "Pulled 29 of 83 repositories",
   never "Pulled 83" over 52 skipped. The counts below name each outcome in
-  the legend's words ("12 partial"), two to a row, rather than ellipsizing
-  the last count (usually failed).
+  the legend's words ("12 partial") on one row under the header, across the
+  card's full width (not beside the actions), wrapping rather than
+  ellipsizing the last count (usually failed).
 - **Skipped means held back from something to pull.** A worktree with
   nothing to pull (detached, no upstream or one deleted on the remote,
   ahead, or dirty but already current) keeps its reason in the details but
