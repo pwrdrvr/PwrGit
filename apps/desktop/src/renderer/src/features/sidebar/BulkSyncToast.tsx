@@ -197,25 +197,21 @@ export function BulkSyncToast({
 }
 
 /**
- * The finished line names the run and its size only. What went how is the
- * meta line's job, in the bar's colors, so the part that matters is never
- * the part an ellipsis cuts off.
+ * The finished line says how many repositories went through out of how many
+ * ran. Skipped and failed ones are not in the first number, so "Pulled 83"
+ * never stands over 52 skipped. What went how is the counts row's job.
  */
 export function finishedHeadline(
   mode: BulkSyncMode,
   total: number,
   succeeded: number = total
 ): string {
-  const repos = `${total} ${total === 1 ? "repository" : "repositories"}`;
+  const noun = total === 1 ? "repository" : "repositories";
+  const verb = mode === "fetch" ? "Fetched" : "Pulled";
+  if (succeeded >= total) return `${verb} ${total} ${noun}`;
   // A run where nothing went through must not read as a success.
-  if (succeeded === 0 && total > 0) {
-    return mode === "fetch"
-      ? `Fetched none of ${repos}`
-      : `Pulled none of ${repos}`;
-  }
-  return mode === "fetch"
-    ? `Fetched ${repos}`
-    : `Pulled safely across ${repos}`;
+  if (succeeded === 0) return `${verb} none of ${total} ${noun}`;
+  return `${verb} ${succeeded} of ${total} ${noun}`;
 }
 
 /**

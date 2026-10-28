@@ -330,7 +330,13 @@ describe("BulkSyncDialog views", () => {
   it("does not headline a run where nothing went through as a success", () => {
     expect(finishedHeadline("fetch", 33, 0)).toBe("Fetched none of 33 repositories");
     expect(finishedHeadline("soft-pull", 1, 0)).toBe("Pulled none of 1 repository");
-    expect(finishedHeadline("fetch", 33, 30)).toBe("Fetched 33 repositories");
+    expect(finishedHeadline("fetch", 33, 33)).toBe("Fetched 33 repositories");
+    expect(finishedHeadline("soft-pull", 83, 83)).toBe("Pulled 83 repositories");
+  });
+
+  it("counts only the repositories that went through in the headline", () => {
+    expect(finishedHeadline("soft-pull", 83, 29)).toBe("Pulled 29 of 83 repositories");
+    expect(finishedHeadline("fetch", 33, 30)).toBe("Fetched 30 of 33 repositories");
   });
 
   it("names each finished outcome in the bar's words", async () => {

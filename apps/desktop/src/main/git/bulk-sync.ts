@@ -287,16 +287,10 @@ async function inspectWorktree(
     }
   }
 
-  if (statusLines.length > 0) {
-    return {
-      kind: "result",
-      value: worktreeResult(worktree, {
-        outcome: "skipped",
-        reason: "dirty",
-        message: "The worktree has uncommitted or untracked changes."
-      })
-    };
-  }
+  // Uncommitted changes only block a pull that would move HEAD. A dirty
+  // worktree already at its upstream (or ahead of it) has nothing to pull, so
+  // it reports as up to date rather than inflating the skipped count.
+  const dirty = statusLines.length > 0;
 
   report("Reading branch and upstream…");
   const branchRaw = await checked(git, ["branch", "--show-current"], worktree.path);
@@ -455,7 +449,20 @@ async function inspectWorktree(
   if (!canFastForward.ok) {
     return unsafeProbe(worktree, "Git could not prove a fast-forward is safe.");
   }
-  if (canFastForward.value.exitCode === 0) return { kind: "ready", value: ready };
+  if (canFastForward.value.exitCode === 0) {
+    if (dirty) {
+      return {
+        kind: "result",
+        value: worktreeResult(worktree, {
+          branch,
+          outcome: "skipped",
+          reason: "dirty",
+          message: "The worktree has uncommitted or untracked changes."
+        })
+      };
+    }
+    return { kind: "ready", value: ready };
+  }
   if (canFastForward.value.exitCode !== 1) {
     return unsafeProbe(worktree, "Git could not compare the local and upstream tips.");
   }

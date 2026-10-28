@@ -7048,14 +7048,22 @@ button.agent-menu__item:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Finished counts wrap to a second row instead of losing the last one
+   (usually failed) to the ellipsis. */
+.bulk-sync-toast__meta:has(> .bulk-sync-toast__counts) {
+  overflow: visible;
+  white-space: normal;
+}
 .bulk-sync-toast__counts {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px 9px;
 }
 .bulk-sync-toast__count {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
 }
 .bulk-sync-toast__count::before {
   width: 6px;

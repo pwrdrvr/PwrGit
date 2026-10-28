@@ -269,6 +269,21 @@ describe("bulk repository synchronization", () => {
     60_000
   );
 
+  it("reports a dirty worktree with nothing to pull as up to date, not skipped", async () => {
+    const current = trackedRepo("dirty-current");
+    writeFileSync(join(current.input.path, "scratch.txt"), "work in progress\n");
+    const before = git(current.input.path, "status", "--porcelain");
+
+    const summary = await bulkSyncRepositories(systemGit, [current.input], {
+      operationId: "dirty-current",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.outcome).toBe("up_to_date");
+    expect(summary.results[0]?.outcome).toBe("success");
+    expect(git(current.input.path, "status", "--porcelain")).toBe(before);
+  });
+
   it("does not confuse branches or tags named like operation pseudo-refs with active operations", async () => {
     const branchNamedLikeRef = trackedRepo("pseudo-branch");
     const branchUpstream = leaveMainBehind(branchNamedLikeRef);
