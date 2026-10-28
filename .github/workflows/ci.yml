@@ -570,6 +570,7 @@ jobs:
             for (const file of candidates) {
               try {
                 const stat = fs.lstatSync(file);
+                console.log("link", file, stat.isSymbolicLink(), stat.isSymbolicLink() ? fs.readlinkSync(file) : null);
                 console.log(JSON.stringify({ file, symbolic: stat.isSymbolicLink(), target: stat.isSymbolicLink() ? fs.readlinkSync(file) : null, real: fs.realpathSync(file), children: fs.readdirSync(file).slice(0,12) }));
               } catch (error) { console.log(file, error.code, error.message); }
             }
