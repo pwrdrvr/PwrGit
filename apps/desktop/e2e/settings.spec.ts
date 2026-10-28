@@ -120,8 +120,15 @@ test("menu opens the Settings window; panes render and settings persist", async 
     app.evaluate(({ nativeTheme }) => nativeTheme.themeSource)
   ).toBe("light");
 
-  // General is the landing section. Developer Mode starts off — the View
+  // Troubleshooting → Chrome DevTools. Developer Mode starts off — the View
   // menu carries no Electron developer items.
+  await settings
+    .locator(".settings-nav__button", { hasText: "Troubleshooting" })
+    .click();
+  // Process IDs come from main's live process table.
+  await expect(
+    settings.locator(".settings-field", { hasText: "Process IDs" })
+  ).toContainText(/main=\d+/);
   const viewMenuLabels = () =>
     app.evaluate(({ Menu }) => {
       const view = Menu.getApplicationMenu()?.items.find(
@@ -286,9 +293,9 @@ test("menu opens the Settings window; panes render and settings persist", async 
   await searchSwitch.click();
   await expect(searchSwitch).toHaveAttribute("aria-checked", "true");
 
-  // Memory / CPU: arming hot CPU capture enables its dependent controls.
+  // Troubleshooting: arming hot CPU capture enables its dependent controls.
   await settings
-    .locator(".settings-nav__button", { hasText: "Memory / CPU" })
+    .locator(".settings-nav__button", { hasText: "Troubleshooting" })
     .click();
   const armSwitch = settings.getByRole("switch", {
     name: "Arm hot CPU capture"

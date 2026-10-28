@@ -32,7 +32,7 @@ export type AppMenuOptions = {
   onCopyDiagnostics: () => void;
   onOpenExternalLink: (label: string, url: string) => void;
   onReplayOnboarding: () => void;
-  /** Settings → General → Developer Mode: expose Force Reload and Toggle
+  /** Settings → Troubleshooting → Developer Mode: expose Force Reload and Toggle
    *  Developer Tools in the View menu. Reload Window is always there. */
   developerMode: boolean;
 };
