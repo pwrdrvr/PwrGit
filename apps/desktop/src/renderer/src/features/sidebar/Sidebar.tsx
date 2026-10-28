@@ -606,13 +606,14 @@ export function Sidebar({
     setSel({ repoId: "", ids: EMPTY_IDS, anchor: null });
 
   const focusContext = { selectedWorktreeId, visits: focusVisits };
-  const counts = lensCounts(repos, now, focusContext);
-  // Fetch recent fetches the Focused list, every page of it.
+  // Fetch recent fetches the Focused list, every page of it; the lens count
+  // reads the same list rather than walking the ladder again.
   const recentRepos = useMemo(
     () =>
       focusedRepos(repos, { selectedWorktreeId, visits: focusVisits }, now),
     [focusVisits, now, repos, selectedWorktreeId]
   );
+  const counts = lensCounts(repos, now, focusContext, recentRepos);
   const bulk = useBulkSyncRun({
     profileId: activeProfile?.id ?? null,
     repos,

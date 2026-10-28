@@ -37,7 +37,8 @@ export type BulkSyncRun = {
  *
  * - A live run is never doubled. A click on a live run that nobody can see
  *   shows it in the remembered view; a timed tick leaves it alone.
- * - A finished run is replaced.
+ * - A finished run is replaced by a click. A timed tick skips while a
+ *   finished run is still on screen, so it never closes what is being read.
  * - A recent run (fetch or pull) with nothing in the Focused list starts
  *   nothing.
  */
@@ -56,6 +57,11 @@ export function nextBulkSyncRun(
   if (current !== null && !current.finished) {
     if (request.auto || current.view !== "hidden") return current;
     return { ...current, view: request.remembered ?? "dialog" };
+  }
+  // A finished run still on screen is being read (a failure toast stays
+  // until dismissed); a timed tick must not swap it for a hidden run.
+  if (request.auto && current !== null && current.view !== "hidden") {
+    return current;
   }
   const scope = request.scope;
   const repos = scope === "recent" ? request.recentRepos : request.repos;
@@ -80,9 +86,11 @@ export function describeAutoFetch(
 ): string {
   const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   if (summary === null) return `The automatic fetch at ${time} could not run.`;
-  const failed = summary.counts.remotes.failed + summary.counts.repos.failed;
+  // Repositories, each counted once: a repository whose only remote failed
+  // is in both the remote and the repository counts.
+  const failed = summary.counts.repos.failed + summary.counts.repos.partial;
   return failed > 0
-    ? `Last automatic fetch at ${time}: ${failed} failed.`
+    ? `Last automatic fetch at ${time}: ${failed} ${failed === 1 ? "repository" : "repositories"} with failures.`
     : `Last automatic fetch at ${time}: all fetched.`;
 }
 

@@ -552,6 +552,7 @@ export function BulkSyncDialog({
     return (
       <BulkSyncToast
         title={title}
+        mode={mode}
         surfaceRef={setSurface}
         phase={statusPhase}
         hasFailures={summary !== null && summaryHasFailures(summary)}

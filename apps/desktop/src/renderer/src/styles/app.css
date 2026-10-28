@@ -891,11 +891,6 @@ textarea,
   background: var(--bg-hover-strong);
   color: var(--text-primary);
 }
-.sidebar-toolbar__sync[aria-busy="true"] {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent-bright);
-}
 .sidebar-toolbar__btn:hover:not(:disabled) {
   border-color: var(--accent-border);
   color: var(--text-primary);
@@ -18054,7 +18049,8 @@ button.agent-auth-node:focus-visible,
 .wt-refresh[aria-busy="true"],
 .ref-mini-action[aria-busy="true"],
 .ref-fetch-all[aria-busy="true"],
-.submodule-panel__refresh[aria-busy="true"] {
+.submodule-panel__refresh[aria-busy="true"],
+.sidebar-toolbar__sync[aria-busy="true"] {
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent-bright);

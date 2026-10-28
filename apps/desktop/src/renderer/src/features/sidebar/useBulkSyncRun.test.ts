@@ -2,7 +2,12 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import type { Repo } from "@pwrgit/shared";
-import { nextBulkSyncRun, type BulkSyncRun } from "./useBulkSyncRun";
+import {
+  describeAutoFetch,
+  nextBulkSyncRun,
+  type BulkSyncRun
+} from "./useBulkSyncRun";
+import type { BulkSyncSummary } from "@pwrgit/shared";
 import {
   BULK_SYNC_VIEW_KEY,
   FETCH_INTERVAL_KEY,
@@ -88,6 +93,27 @@ describe("nextBulkSyncRun", () => {
     ).toMatchObject({ key: hidden.key, view: "toast" });
     const shown = { ...hidden, view: "dialog" as const };
     expect(nextBulkSyncRun(shown, request({ key: 8 }))).toBe(shown);
+  });
+
+  it("never lets a timed tick close a finished run still on screen", () => {
+    const shown = {
+      ...(nextBulkSyncRun(null, request({ remembered: "toast" })) as BulkSyncRun),
+      finished: true
+    };
+    expect(nextBulkSyncRun(shown, request({ auto: true, key: 9 }))).toBe(shown);
+  });
+
+  it("counts each repository with a failure once", () => {
+    const summary = {
+      counts: {
+        repos: { success: 3, partial: 1, skipped: 0, failed: 1, cancelled: 0 },
+        remotes: { fetched: 4, skipped: 0, failed: 2, cancelled: 0 },
+        worktrees: { updated: 0, upToDate: 0, skipped: 0, failed: 0, cancelled: 0 }
+      }
+    } as unknown as BulkSyncSummary;
+    expect(describeAutoFetch(summary, new Date(2026, 9, 28, 14, 5))).toMatch(
+      /: 2 repositories with failures\.$/
+    );
   });
 
   it("replaces a finished run", () => {

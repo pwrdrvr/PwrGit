@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import type { BulkSyncMode } from "@pwrgit/shared";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { ExpandGlyph } from "../../lib/ExpandGlyph";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
@@ -22,6 +23,7 @@ import {
  */
 export function BulkSyncToast({
   title,
+  mode,
   surfaceRef,
   phase,
   hasFailures,
@@ -39,6 +41,7 @@ export function BulkSyncToast({
   onHold
 }: {
   title: string;
+  mode: BulkSyncMode;
   surfaceRef: (el: HTMLElement | null) => void;
   phase: BulkSyncStatusPhase;
   hasFailures: boolean;
@@ -67,7 +70,7 @@ export function BulkSyncToast({
       ? activity
       : phase === "cancelled"
         ? `${title} — cancelled`
-        : finishedHeadline(title, total, counts.failed, hasFailures);
+        : finishedHeadline(mode, total, counts.failed, hasFailures);
   const tone = error !== null || (!live && hasFailures)
     ? " is-failed"
     : live
@@ -185,14 +188,12 @@ export function BulkSyncToast({
 }
 
 export function finishedHeadline(
-  title: string,
+  mode: BulkSyncMode,
   total: number,
   failed: number,
   hasFailures: boolean
 ): string {
-  // "Fetch all repositories" → "Fetched 48 repositories"; Try pull all keeps
-  // its own title, which is already a sentence about what happened.
-  const verb = title.startsWith("Fetch")
+  const verb = mode === "fetch"
     ? `Fetched ${total} ${total === 1 ? "repository" : "repositories"}`
     : `Pulled safely across ${total} ${total === 1 ? "repository" : "repositories"}`;
   if (failed > 0) return `${verb} · ${failed} failed`;
