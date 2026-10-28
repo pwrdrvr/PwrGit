@@ -198,8 +198,13 @@ describe("SidebarToolbar", () => {
       onPickFetchInterval
     });
     const chevron = button("Sync options");
+    const caret = (): string | null | undefined =>
+      chevron.querySelector("path")?.getAttribute("d");
+    expect(caret()).toBe("m6 9 6 6 6-6");
     act(() => chevron.click());
     expect(chevron.getAttribute("aria-expanded")).toBe("true");
+    // The caret points up while its menu is open, as PwrAgnt's Send caret.
+    expect(caret()).toBe("m18 15-6-6-6 6");
     const radios = [
       ...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')
     ];
@@ -238,6 +243,7 @@ describe("SidebarToolbar", () => {
     // The chevron closes it.
     act(() => chevron.click());
     expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(caret()).toBe("m6 9 6 6 6-6");
   });
 
   it("closes the menu and runs the face when the face is clicked", () => {

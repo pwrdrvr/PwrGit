@@ -296,7 +296,10 @@ export function SidebarToolbar({
             );
           }}
         >
-          <ChevronGlyph size={10} />
+          {/* Up while its menu is open, as PwrAgnt's Send caret flips: the
+              chevron says which control opened the menu. Drawn, not rotated
+              (lib/ChevronGlyph.tsx). */}
+          <ChevronGlyph size={10} up={syncMenu !== null} />
         </button>
       </div>
       <button

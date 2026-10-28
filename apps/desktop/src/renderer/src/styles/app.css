@@ -872,24 +872,85 @@ textarea,
    button with a seam. The chevron never steps, so the menu stays reachable
    at every width. design/Fetch Toast and Scope - UX
    Review.dc.html, 3a and 3c. */
+/* One bordered control with two zones, as PwrAgnt's composer Send pill
+   (`.composer__send-split-pill`). The split owns the border, radius and
+   fill, and clips the face and chevron, which shed theirs. As two butted
+   buttons, hover lit only the chevron's three sides against a grey seam that
+   belonged to the face, and open looked like hover.
+   design/Sync Split Button - UX Review.dc.html, turn 2. */
 .sidebar-toolbar__split {
   display: flex;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-panel-elevated);
+  transition: border-color 120ms ease;
 }
-.sidebar-toolbar__split > .sidebar-toolbar__sync {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+.sidebar-toolbar__split > .sidebar-toolbar__btn {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
-.sidebar-toolbar__chevron {
+/* The seam: a rest-only hairline that says "two targets". */
+.sidebar-toolbar__split > .sidebar-toolbar__chevron {
   width: 20px;
   padding: 0;
-  border-left: 0;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
+  border-left: 1px solid var(--border-default);
   color: var(--text-muted);
 }
-.sidebar-toolbar__chevron[aria-expanded="true"] {
+/* Hover anywhere lights the whole outline, as on every toolbar button; the
+   zone under the pointer fills, so it is plain which half a click fires.
+   Once a zone fills, its edge is the boundary and the seam would read as a
+   stray sliver beside it. */
+.sidebar-toolbar__split:hover:has(> :enabled) {
+  border-color: var(--accent-border);
+}
+.sidebar-toolbar__split > .sidebar-toolbar__btn:hover:not(:disabled) {
   background: var(--bg-hover-strong);
-  color: var(--text-primary);
+}
+/* Doubled class: the generic `.sidebar-toolbar__btn:hover:not(:disabled)`
+   below paints an accent border at this specificity and comes later. */
+.sidebar-toolbar__split:hover > .sidebar-toolbar__chevron.sidebar-toolbar__btn,
+.sidebar-toolbar__split:has(> .sidebar-toolbar__chevron[aria-expanded="true"])
+  > .sidebar-toolbar__chevron.sidebar-toolbar__btn {
+  border-left-color: transparent;
+}
+/* Open is its own state, held while the menu stays open: the outline lit,
+   the chevron zone tinted, and its caret pointing up (SidebarToolbar). */
+.sidebar-toolbar__split:has(> .sidebar-toolbar__chevron[aria-expanded="true"]) {
+  border-color: var(--accent-border);
+}
+/* Doubled class so open outranks the zone hover fill above and the generic
+   hover colour below: it is what the pointer came to see. */
+.sidebar-toolbar__split > .sidebar-toolbar__chevron.sidebar-toolbar__btn[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+/* One focus ring around the pair. A ring on either half would be cut by the
+   clip into an orange bar at the seam (PwrAgnt hit exactly that), and focus
+   would jump between two differently sized boxes. */
+.sidebar-toolbar__split:has(> :focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.sidebar-toolbar__split > .sidebar-toolbar__btn:focus,
+.sidebar-toolbar__split > .sidebar-toolbar__btn:focus-visible {
+  outline: none;
+}
+/* Busy: the face keeps the shared [aria-busy] tint; the outline is the
+   split's, so it follows here. */
+.sidebar-toolbar__split:has(> [aria-busy="true"]) {
+  border-color: var(--accent-border);
+}
+/* With no profile both halves are disabled: dim the control once, not each
+   half inside it as well. */
+.sidebar-toolbar__split:not(:has(> :enabled)) {
+  opacity: 0.42;
+}
+.sidebar-toolbar__split:not(:has(> :enabled)) > .sidebar-toolbar__btn {
+  opacity: 1;
 }
 .sidebar-toolbar__btn:hover:not(:disabled) {
   border-color: var(--accent-border);

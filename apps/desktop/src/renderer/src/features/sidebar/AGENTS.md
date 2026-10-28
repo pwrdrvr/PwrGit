@@ -153,6 +153,13 @@ buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
   open. The menu closes on the chevron, an outside click (the face included,
   which then runs) or Escape. 0.45.0 ran each pick and closed the menu, so
   setting an interval meant reopening it and choosing a scope started a run.
+- **The split is one control, as PwrAgnt's Send pill.** `.sidebar-toolbar__split`
+  owns the border, radius and fill and clips the face and chevron, which shed
+  theirs. Hover lights the whole outline and fills the half under the pointer;
+  open tints the chevron and points its caret up (`ChevronGlyph up`); one
+  focus ring rings the pair. Don't give either half its own border or
+  outline: as butted buttons, hover drew a three-sided orange box.
+  Design: `design/Sync Split Button - UX Review.dc.html`.
 - **Timed runs only fetch**, whatever the face says. Pulling on a timer would
   move checkouts under the reader.
 - **The run is not the dialog.** `BulkSyncDialog` owns the operation and
