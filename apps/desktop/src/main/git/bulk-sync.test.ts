@@ -319,6 +319,36 @@ describe("bulk repository synchronization", () => {
       "ahead"
     ]);
     expect(result.outcome).toBe("success");
+    expect(summary.counts.worktrees).toMatchObject({ nothingToPull: 4, skipped: 0 });
+  });
+
+  it("keeps a failed fetch failed when the other worktrees have nothing to pull", async () => {
+    const repo = trackedRepo("fetch-fails");
+    const detached = join(root, `${repo.input.id}-detached`);
+    git(repo.input.path, "worktree", "add", "--detach", detached);
+    repo.input.worktrees.push({ id: `${repo.input.id}-detached`, branch: "", path: detached });
+    rmSync(repo.remote, { recursive: true, force: true });
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "fetch-fails",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.outcome).toBe("failed");
+  });
+
+  it("skips a worktree with a bisect in progress", async () => {
+    const repo = trackedRepo("bisecting");
+    leaveMainBehind(repo);
+    git(repo.input.path, "bisect", "start");
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "bisecting",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.reason).toBe("in_progress");
+    expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(repo.base);
   });
 
   it("calls a repository with only detached worktrees a success, not skipped", async () => {
@@ -590,8 +620,13 @@ describe("bulk repository synchronization", () => {
       }
       if (args[0] === "rev-parse") {
         if (args.includes("--git-path")) {
-          // No rebase state directories exist.
-          return ok({ stdout: "/nonexistent/rebase-merge\n/nonexistent/rebase-apply\n", stderr: "", exitCode: 0 });
+          // No operation state file exists.
+          const paths = args.filter((_, i) => args[i - 1] === "--git-path");
+          return ok({
+            stdout: paths.map((path) => `/nonexistent/${path}\n`).join(""),
+            stderr: "",
+            exitCode: 0
+          });
         }
         const target = args.at(-1);
         if (target === "HEAD") {

@@ -9,7 +9,7 @@ import {
   ok,
   type Result
 } from "@pwrgit/shared";
-import { existsSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   NO_OPTIONAL_LOCKS,
@@ -70,16 +70,16 @@ type WorktreeInspection =
   | { kind: "ready"; value: ReadyWorktree }
   | { kind: "result"; value: BulkSyncWorktreeResult };
 
-// REBASE_HEAD and AUTO_MERGE are left behind after a rebase or merge ends,
-// so they prove nothing. A rebase is in progress while its state directory
-// exists (REBASE_STATE_DIRS), which is what `git status` checks too.
-const IN_PROGRESS_REFS = [
+// Files and directories in the worktree's git dir that exist only while an
+// operation is in progress (the set `git status` checks).
+const OPERATION_STATE_PATHS = [
   "MERGE_HEAD",
   "CHERRY_PICK_HEAD",
   "REVERT_HEAD",
-  "BISECT_START"
+  "BISECT_LOG",
+  "rebase-merge",
+  "rebase-apply"
 ] as const;
-const REBASE_STATE_DIRS = ["rebase-merge", "rebase-apply"] as const;
 
 const authFailure = (message: string): boolean =>
   /authentication failed|terminal prompts disabled|could not read (?:username|password)|username for ['"]|password for ['"]|permission denied \(publickey|credential[^\r\n]*(?:failed|unavailable)|http basic: access denied/i.test(
@@ -256,54 +256,31 @@ async function inspectWorktree(
   }
 
   report("Checking for in-progress Git operations…");
-  for (const ref of IN_PROGRESS_REFS) {
-    const raw = await git(
-      ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", ref],
-      worktree.path,
-      NO_OPTIONAL_LOCKS
-    );
-    if (!raw.ok) {
-      return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
-    }
-    if (raw.value.exitCode === 0 && raw.value.stdout.trim() === ref) {
-      return {
-        kind: "result",
-        value: worktreeResult(worktree, {
-          outcome: "skipped",
-          reason: "in_progress",
-          message: "A merge, rebase, cherry-pick, revert, or bisect is in progress."
-        })
-      };
-    }
-    if (
-      raw.value.exitCode === 0 &&
-      raw.value.stdout.trim().startsWith("refs/")
-    ) {
-      // rev-parse DWIM-resolves ordinary branches and tags with names such as
-      // MERGE_HEAD. Only the literal pseudo-ref denotes an active operation.
-      continue;
-    }
-    if (raw.value.exitCode === 0) {
-      return unsafeProbe(worktree, "Git returned an ambiguous operation state.");
-    }
-    if (raw.value.exitCode !== 1) {
-      return unsafeProbe(worktree, "Git could not verify repository operation state.");
-    }
-  }
-
-  const rebaseDirs = await git(
-    ["rev-parse", ...REBASE_STATE_DIRS.flatMap((dir) => ["--git-path", dir])],
+  // One rev-parse names every state file; their presence is what `git
+  // status` reads too. Pseudo-refs read through `rev-parse --verify` were
+  // wrong both ways: AUTO_MERGE and REBASE_HEAD outlive the operation that
+  // wrote them, and BISECT_START holds a branch name, so it never resolved.
+  const statePaths = await git(
+    ["rev-parse", ...OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path])],
     worktree.path,
     NO_OPTIONAL_LOCKS
   );
-  if (!rebaseDirs.ok || rebaseDirs.value.exitCode !== 0) {
-    return unsafeProbe(worktree, "Git could not inspect rebase state.");
+  if (!statePaths.ok || statePaths.value.exitCode !== 0) {
+    return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
   }
-  const rebasing = rebaseDirs.value.stdout
-    .split("\n")
-    .filter(Boolean)
-    .some((dir) => existsSync(resolve(worktree.path, dir)));
-  if (rebasing) {
+  const present = await Promise.all(
+    statePaths.value.stdout
+      .split("\n")
+      .map((path) => path.trim())
+      .filter(Boolean)
+      .map((path) =>
+        access(resolve(worktree.path, path)).then(
+          () => true,
+          () => false
+        )
+      )
+  );
+  if (present.includes(true)) {
     return {
       kind: "result",
       value: worktreeResult(worktree, {
@@ -643,14 +620,16 @@ function repoOutcome(
       ? remotes.some((result) => result.outcome === "fetched")
       : worktrees.some(
           (result) =>
-            result.outcome === "updated" ||
-            result.outcome === "up_to_date" ||
-            nothingToPull(result)
+            result.outcome === "updated" || result.outcome === "up_to_date"
         );
+  // Nothing-to-pull worktrees are neutral: they don't make a failed or
+  // blocked repository partial, and a repository of only those succeeded.
+  const idle =
+    mode === "soft-pull" && worktrees.length > 0 && worktrees.every(nothingToPull);
   if ((cancelled || failed || skipped) && succeeded) return "partial";
   if (cancelled) return "cancelled";
   if (failed) return "failed";
-  if (skipped || !succeeded) return "skipped";
+  if (skipped || !(succeeded || idle)) return "skipped";
   return "success";
 }
 
@@ -737,6 +716,7 @@ function countResults(results: BulkSyncRepoResult[]): BulkSyncCounts {
     worktrees: {
       updated: 0,
       upToDate: 0,
+      nothingToPull: 0,
       skipped: 0,
       failed: 0,
       cancelled: 0
@@ -747,6 +727,7 @@ function countResults(results: BulkSyncRepoResult[]): BulkSyncCounts {
     for (const remote of repo.remotes) counts.remotes[remote.outcome] += 1;
     for (const worktree of repo.worktrees) {
       if (worktree.outcome === "up_to_date") counts.worktrees.upToDate += 1;
+      else if (nothingToPull(worktree)) counts.worktrees.nothingToPull += 1;
       else counts.worktrees[worktree.outcome] += 1;
     }
   }

@@ -50,7 +50,7 @@ function cleanSummary(): BulkSyncSummary {
     counts: {
       repos: { success: 1, partial: 0, skipped: 0, failed: 0, cancelled: 0 },
       remotes: { fetched: 1, skipped: 0, failed: 0, cancelled: 0 },
-      worktrees: { updated: 0, upToDate: 0, skipped: 0, failed: 0, cancelled: 0 }
+      worktrees: { updated: 0, upToDate: 0, nothingToPull: 0, skipped: 0, failed: 0, cancelled: 0 }
     },
     results: [
       {
