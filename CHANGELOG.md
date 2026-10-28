@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.45.0 - 2026-10-28
+
+- Bulk sync - Added a minimizable progress toast for Fetch and Pull, so a run can continue while you work elsewhere. Minimise, Escape, or clicking outside the dialog now moves progress to the toast rather than cancelling the run; click it to reopen details. PwrGit remembers your preferred view, and failures remain visible until dismissed.
+- Fetch and Pull - Combined the sidebar actions into one split button that remembers your last action. Choose all repositories or Recent, which follows the Focused list. Optional automatic fetch runs silently at your chosen interval, never pulls, and leaves its last result on the button's hover card.
+- Contributions - Fixed collection stopping at organizations requiring SAML SSO. PwrGit now continues through accessible activity, identifies blocked organizations and skipped counts where available, and clearly marks coverage as incomplete. Resume can retry the missed activity after SSO authorization without discarding collected records.
+- Troubleshooting - Renamed Settings → Memory / CPU to Troubleshooting and moved Developer Mode there from General. Added live process IDs with a Copy process IDs action that refreshes the list and includes the build identity; heap monitoring and CPU profiling remain in the same pane.
+- Minor - Updated React, electron-updater, and supporting development dependencies.
+
 ## v0.44.0 - 2026-10-26
 
 - Sidebar headings - Improved narrow layouts with headings that adapt to each repository's actual content. Labels shorten to PRs or MRs, then icons, only when needed; quieter repositories keep their words. Totals, failing-request counts, refresh controls, and the worktree sort control stay available, with accessible names and hover descriptions preserved.
