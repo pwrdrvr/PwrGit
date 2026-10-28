@@ -5,12 +5,15 @@ import {
   readBulkSyncView,
   readFetchInterval,
   readFetchScope,
+  readSyncVerb,
   writeBulkSyncView,
   writeFetchInterval,
   writeFetchScope,
+  writeSyncVerb,
   type BulkSyncView,
   type FetchInterval,
-  type FetchScope
+  type FetchScope,
+  type SyncVerb
 } from "./bulk-sync-prefs";
 
 export type BulkSyncRun = {
@@ -35,7 +38,8 @@ export type BulkSyncRun = {
  * - A live run is never doubled. A click on a live run that nobody can see
  *   shows it in the remembered view; a timed tick leaves it alone.
  * - A finished run is replaced.
- * - Fetch recent with nothing in the Focused list starts nothing.
+ * - A recent run (fetch or pull) with nothing in the Focused list starts
+ *   nothing.
  */
 export function nextBulkSyncRun(
   current: BulkSyncRun | null,
@@ -53,7 +57,7 @@ export function nextBulkSyncRun(
     if (request.auto || current.view !== "hidden") return current;
     return { ...current, view: request.remembered ?? "dialog" };
   }
-  const scope = request.mode === "fetch" ? request.scope : "all";
+  const scope = request.scope;
   const repos = scope === "recent" ? request.recentRepos : request.repos;
   if (repos.length === 0) return current;
   return {
@@ -83,8 +87,10 @@ export function describeAutoFetch(
 }
 
 /**
- * Fetch all, Fetch recent and Try pull all for one sidebar: the run, the
- * remembered scope, view and interval, and the interval's timer.
+ * Fetch and Try pull, all or recent, for one sidebar: the run, the
+ * remembered verb, scope, view and interval, and the interval's timer.
+ * Timed runs only ever fetch: pulling on a timer would move checkouts under
+ * the reader.
  * Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
  */
 export function useBulkSyncRun({
@@ -97,6 +103,7 @@ export function useBulkSyncRun({
   recentRepos: Repo[];
 }) {
   const [scope, setScope] = useState<FetchScope>(readFetchScope);
+  const [verb, setVerb] = useState<SyncVerb>(readSyncVerb);
   const [interval, setIntervalMinutes] =
     useState<FetchInterval>(readFetchInterval);
   const [run, setRun] = useState<BulkSyncRun | null>(null);
@@ -125,14 +132,22 @@ export function useBulkSyncRun({
     []
   );
 
-  const pickScope = useCallback(
-    (next: FetchScope) => {
-      writeFetchScope(next);
-      setScope(next);
-      start("fetch", { scope: next });
+  /** Remember a verb and scope as the face, and run it now. */
+  const pick = useCallback(
+    (nextVerb: SyncVerb, nextScope: FetchScope) => {
+      writeSyncVerb(nextVerb);
+      writeFetchScope(nextScope);
+      setVerb(nextVerb);
+      setScope(nextScope);
+      start(nextVerb === "pull" ? "soft-pull" : "fetch", { scope: nextScope });
     },
     [start]
   );
+
+  /** The face: run the remembered verb and scope. */
+  const runFace = useCallback(() => {
+    start(verb === "pull" ? "soft-pull" : "fetch");
+  }, [start, verb]);
 
   const pickInterval = useCallback((minutes: FetchInterval) => {
     writeFetchInterval(minutes);
@@ -179,9 +194,11 @@ export function useBulkSyncRun({
     scope,
     interval,
     lastAutoFetch,
-    fetchBusy: run !== null && !run.finished && run.mode === "fetch",
+    verb,
+    busy: run !== null && !run.finished,
     start,
-    pickScope,
+    runFace,
+    pick,
     pickInterval,
     setView,
     finish,

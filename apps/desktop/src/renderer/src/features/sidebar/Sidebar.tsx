@@ -1312,14 +1312,14 @@ export function Sidebar({
         onClone={onCloneRepo}
         onFork={() => void openFork()}
         recentCount={recentRepos.length}
-        fetchScope={bulk.scope}
+        syncVerb={bulk.verb}
+        syncScope={bulk.scope}
         fetchInterval={bulk.interval}
-        fetchBusy={bulk.fetchBusy}
+        syncBusy={bulk.busy}
         lastAutoFetch={bulk.lastAutoFetch}
-        onFetchAll={() => bulk.start("fetch")}
-        onPickFetchScope={bulk.pickScope}
+        onSync={bulk.runFace}
+        onPickSync={bulk.pick}
         onPickFetchInterval={bulk.pickInterval}
-        onPullAll={() => bulk.start("soft-pull")}
         onMaintenance={() => setMaintenance({})}
       />
 

@@ -816,7 +816,7 @@ textarea,
 
 /* ---- Sidebar: the one row of profile-wide actions ----
 
-   Add ▾ (Add folders, Clone, Fork), Fetch all, Pull all, and the maintenance
+   Add ▾ (Add folders, Clone, Fork), the Fetch/Pull ▾ button, and the maintenance
    wrench, in one tier of `.wt-btn`-shaped buttons. It replaced five rows in
    four styles. design/Sidebar Header Toolbar - UX Review.dc.html, 2b and 3b.
 
@@ -856,25 +856,21 @@ textarea,
   margin-left: -2px;
   color: var(--text-muted);
 }
-/* Fetch ▾ and Pull all divide whatever the row has spare, equally: a zero
-   basis shares the room by flex-grow alone, so a longer label ("Fetch
-   recent") or the chevron cannot make one wider than the other. They still
-   never shrink below their content (min-width: auto), which is what the fit
-   ladder measures — see the note above. */
-.sidebar-toolbar > .sidebar-toolbar__sync,
+/* The sync button takes whatever the row has spare. Grow, never shrink — see
+   the note above. Inside it, the face grows and the chevron stays 20px. */
 .sidebar-toolbar__split {
-  flex: 1 0 0;
+  flex: 1 0 auto;
 }
 .sidebar-toolbar__split > .sidebar-toolbar__sync {
-  flex: 1 0 0;
+  flex: 1 0 auto;
 }
 .sidebar-toolbar__icon {
   width: 30px;
   padding: 0;
 }
-/* Fetch ▾: the face and its chevron read as one button with a seam. The
-   pair grows like a sync button; the chevron never steps, so the scope menu
-   stays reachable at every width. design/Fetch Toast and Scope - UX
+/* The sync button (Fetch ▾ / Pull ▾): the face and its chevron read as one
+   button with a seam. The chevron never steps, so the menu stays reachable
+   at every width. design/Fetch Toast and Scope - UX
    Review.dc.html, 3a and 3c. */
 .sidebar-toolbar__split {
   display: flex;
@@ -919,10 +915,9 @@ textarea,
 .sidebar-toolbar--add-icon .sidebar-toolbar__add .sidebar-toolbar__label {
   display: none;
 }
-/* Step 2: Fetch and Pull lose their words together — a labelled Fetch beside
-   a bare arrow reads as two tiers — and the four buttons share the row
-   equally, like the lens chips under them. The accessible names are spelled
-   on the buttons, so nothing is lost to a screen reader. */
+/* Step 2: the sync button loses its words too, and Add, sync and the wrench
+   share the row equally, like the lens chips under them. The accessible
+   names are spelled on the buttons, so nothing is lost to a screen reader. */
 .sidebar-toolbar--icons .sidebar-toolbar__label {
   display: none;
 }

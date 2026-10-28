@@ -57,7 +57,7 @@ test("the toolbar is one row and stays put above a long scrolling repo list", as
     )
     .toBeLessThanOrEqual(620);
 
-  // One row: Add, Fetch ▾, Pull all and the wrench share a top edge and a
+  // One row: Add, the sync button and the wrench share a top edge and a
   // height, and the row is no taller than one button plus its padding. This is
   // what replaced five rows in four styles (design/Sidebar Header Toolbar -
   // UX Review.dc.html, 2b).
@@ -74,9 +74,10 @@ test("the toolbar is one row and stays put above a long scrolling repo list", as
       rowHeight: Math.round(row.getBoundingClientRect().height)
     };
   });
-  // Five buttons: Fetch ▾ is a face and its chevron ("Fetch options"),
-  // two buttons drawn as one (design/Fetch Toast and Scope - UX Review.dc.html).
-  expect(geometry.count).toBe(5);
+  // Four buttons: Add, the sync button's face and its chevron ("Sync
+  // options", two buttons drawn as one; Pull is a choice on it), and the
+  // wrench. design/Fetch Toast and Scope - UX Review.dc.html, turn 5.
+  expect(geometry.count).toBe(4);
   expect(geometry.tops).toHaveLength(1);
   expect(geometry.heights).toHaveLength(1);
   expect(geometry.rowHeight).toBeLessThanOrEqual(

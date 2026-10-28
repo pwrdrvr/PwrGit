@@ -1,14 +1,19 @@
 /**
- * What the Fetch ▾ button and the bulk-sync run remember between runs.
+ * What the sync button (Fetch ▾ / Pull ▾) and the bulk-sync run remember
+ * between runs.
  * Design: `design/Fetch Toast and Scope - UX Review.dc.html`, turns 2 and 3.
  *
- * All three are per machine (`localStorage`), not per profile, and every
+ * All four are per machine (`localStorage`), not per profile, and every
  * read falls back to the default on anything it does not recognise, so a
  * stale or hand-edited value never breaks the toolbar.
  */
 
-/** Which repositories the Fetch button's face fetches. */
+/** Which repositories the sync button's face covers. */
 export type FetchScope = "all" | "recent";
+
+/** What the sync button's face does: fetch, or fetch and then fast-forward
+ *  clean branches (Try pull). Timed runs always fetch, whatever this says. */
+export type SyncVerb = "fetch" | "pull";
 
 /** How a run shows itself when it starts. Unset means "never chosen": the
  *  dialog opens and minimises itself once, to teach where the toast lives. */
@@ -19,6 +24,7 @@ export const FETCH_INTERVALS = [0, 1, 5, 15, 60] as const;
 export type FetchInterval = (typeof FETCH_INTERVALS)[number];
 
 export const FETCH_SCOPE_KEY = "pwrgit.fetchScope";
+export const SYNC_VERB_KEY = "pwrgit.syncVerb";
 export const FETCH_INTERVAL_KEY = "pwrgit.fetchIntervalMinutes";
 export const BULK_SYNC_VIEW_KEY = "pwrgit.bulkSyncView";
 
@@ -47,6 +53,14 @@ export function readFetchScope(): FetchScope {
 
 export function writeFetchScope(scope: FetchScope): void {
   write(FETCH_SCOPE_KEY, scope);
+}
+
+export function readSyncVerb(): SyncVerb {
+  return read(SYNC_VERB_KEY) === "pull" ? "pull" : "fetch";
+}
+
+export function writeSyncVerb(verb: SyncVerb): void {
+  write(SYNC_VERB_KEY, verb);
 }
 
 export function readFetchInterval(): FetchInterval {

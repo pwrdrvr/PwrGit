@@ -41,7 +41,14 @@ test("Try pull all fast-forwards safe repos and leaves dirty work untouched", as
   const { window } = handle;
   await addRootAndExpand(window, handle, sandbox, "safe");
   await rememberDialogView(window);
-  await window.getByRole("button", { name: "Try pull all", exact: true }).click();
+  // Try pull is a choice on the one sync button; picking it runs it.
+  await window.getByRole("button", { name: "Sync options" }).click();
+  await window
+    .getByRole("menuitemradio", { name: /^Pull all repositories/ })
+    .click();
+  await expect(
+    window.getByRole("button", { name: "Try pull all", exact: true })
+  ).toBeVisible();
 
   const dialog = window.getByRole("dialog", {
     name: "Try to pull all safely"

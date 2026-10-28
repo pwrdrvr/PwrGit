@@ -220,7 +220,11 @@ export function livePathLine(
 
 /** The run's title, which names its scope. */
 export function runTitle(mode: BulkSyncMode, scope: FetchScope = "all"): string {
-  if (mode === "soft-pull") return "Try to pull all safely";
+  if (mode === "soft-pull") {
+    return scope === "recent"
+      ? "Try to pull recent repositories safely"
+      : "Try to pull all safely";
+  }
   return scope === "recent"
     ? "Fetch recent repositories"
     : "Fetch all repositories";

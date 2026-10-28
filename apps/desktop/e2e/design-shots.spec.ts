@@ -310,11 +310,11 @@ test("Fetch ▾, the run's dialog and its toast, on contrived repositories", asy
     await addRootAndExpand(window, handle, box, "atlas-api");
 
     // 1. The scope and schedule menu.
-    await window.getByRole("button", { name: "Fetch options" }).click();
+    await window.getByRole("button", { name: "Sync options" }).click();
     await window
       .locator('[role="menuitemradio"]', { hasText: "Every 5 minutes" })
       .click();
-    await window.getByRole("button", { name: "Fetch options" }).click();
+    await window.getByRole("button", { name: "Sync options" }).click();
     await window.locator(".pop-menu__heading").waitFor();
     await window.mouse.move(6, 6);
     await window.waitForTimeout(300);
@@ -351,7 +351,7 @@ test("Fetch ▾, the run's dialog and its toast, on contrived repositories", asy
     await dialog.getByRole("button", { name: "Close" }).click();
 
     // 6. Fetch recent becomes the face.
-    await window.getByRole("button", { name: "Fetch options" }).click();
+    await window.getByRole("button", { name: "Sync options" }).click();
     await window
       .locator('[role="menuitemradio"]', { hasText: "Fetch recent repositories" })
       .click();

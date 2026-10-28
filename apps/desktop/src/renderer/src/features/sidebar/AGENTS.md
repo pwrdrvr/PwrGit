@@ -152,15 +152,21 @@ title strip (`TitleBar`'s `.titlebar-jump`, `onOpenSearch`). Rules:
 
 Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3.
 
-## Fetch ▾ and the bulk-sync run
+## One sync button (Fetch ▾ / Pull ▾) and the bulk-sync run
 
-Fetch all is a split button. The face runs the remembered scope (`all`, or
-`recent`, which is the Focused list from `focusedRepos`, every page of it)
-and its accessible name follows: "Fetch all repos" / "Fetch recent repos".
-The chevron ("Fetch options") picks the scope, which also runs it, and the
-automatic interval. Scope, interval and view live in `bulk-sync-prefs.ts`
-(`localStorage`, per machine). Rules, all in `useBulkSyncRun.ts`:
+Fetch and Try pull are one split button: Try pull already fetches every
+repository before it fast-forwards, so two buttons offered the same first
+half twice (and fought over the row's width). The face runs the remembered
+verb and scope — Fetch or Pull, `all` or `recent` (the Focused list from
+`focusedRepos`, every page of it) — and its accessible name keeps the old
+buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
+"Try pull recent". The chevron ("Sync options") lists those four, picking
+one runs it, and then **Fetch automatically**. Verb, scope, interval and
+view live in `bulk-sync-prefs.ts` (`localStorage`, per machine). Rules, all
+in `useBulkSyncRun.ts`:
 
+- **Timed runs only fetch**, whatever the face says. Pulling on a timer would
+  move checkouts under the reader.
 - **The run is not the dialog.** `BulkSyncDialog` owns the operation and
   draws it as `dialog`, `toast` or `hidden`; unmounting it still cancels. So
   while a run is live, Escape and a backdrop click **minimise**, never
@@ -174,8 +180,9 @@ automatic interval. Scope, interval and view live in `bulk-sync-prefs.ts`
   that read the dialog write `dialog` first, or a slow runner loses it.
 - **Timed runs are `hidden`.** At one minute a toast would be up a third of
   the time, and a repository that always fails would raise one every tick.
-  The face shows `aria-busy` while a fetch runs; its hover card carries
-  the last timed result.
+  The face shows `aria-busy` while any run is going (Pull's arrow swaps to
+  the ring; the circular arrow turns); its hover card carries the last
+  timed result.
 
 Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
 

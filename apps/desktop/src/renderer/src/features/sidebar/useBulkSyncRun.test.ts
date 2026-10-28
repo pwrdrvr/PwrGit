@@ -11,9 +11,11 @@ import {
   readBulkSyncView,
   readFetchInterval,
   readFetchScope,
+  readSyncVerb,
   writeBulkSyncView,
   writeFetchInterval,
-  writeFetchScope
+  writeFetchScope,
+  writeSyncVerb
 } from "./bulk-sync-prefs";
 
 const repo = (id: string): Repo => ({
@@ -60,10 +62,10 @@ describe("nextBulkSyncRun", () => {
     expect(run?.repos.map((r) => r.id)).toEqual(["b"]);
   });
 
-  it("pulls everything whatever the fetch scope is", () => {
+  it("pulls recent as the Focused list's ids too", () => {
     const run = nextBulkSyncRun(null, request({ mode: "soft-pull", scope: "recent" }));
-    expect(run?.scope).toBe("all");
-    expect(run?.repoIds).toBeUndefined();
+    expect(run?.scope).toBe("recent");
+    expect(run?.repoIds).toEqual(["b"]);
   });
 
   it("starts nothing for an empty scope", () => {
@@ -99,6 +101,7 @@ describe("bulk-sync prefs", () => {
 
   it("defaults, and falls back on values it does not know", () => {
     expect(readFetchScope()).toBe("all");
+    expect(readSyncVerb()).toBe("fetch");
     expect(readFetchInterval()).toBe(0);
     expect(readBulkSyncView()).toBeNull();
     window.localStorage.setItem(FETCH_SCOPE_KEY, "everything");
@@ -111,9 +114,11 @@ describe("bulk-sync prefs", () => {
 
   it("round-trips what is written", () => {
     writeFetchScope("recent");
+    writeSyncVerb("pull");
     writeFetchInterval(15);
     writeBulkSyncView("toast");
     expect(readFetchScope()).toBe("recent");
+    expect(readSyncVerb()).toBe("pull");
     expect(readFetchInterval()).toBe(15);
     expect(readBulkSyncView()).toBe("toast");
   });

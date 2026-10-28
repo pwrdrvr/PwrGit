@@ -292,6 +292,45 @@
           <div class="fitem"><span class="pin">?</span><div><h4>The toast sits bottom-left</h4><p>Near the sidebar that started it, and clear of the bottom-right error stack it would otherwise push around.</p></div></div>
         </div>
       </section>
+
+      <!-- ============================ TURN 5 ============================ -->
+      <section class="dv-turn" id="t5" data-screen-label="Turn 5 One sync button">
+        <div class="dv-thd"><a class="dv-tid" href="#t5">5</a><span class="dv-tname">One sync button &#8212; Fetch and Pull share a face and a menu</span></div>
+        <p class="dv-sub">Operator&#8217;s ask, 2026-10-28: <b>&#8220;Pull all and Fetch are very similar&#8230; both should probably have the same chevron and options? Maybe they should be one button?&#8221;</b> Chosen: one button. <b>Try pull already fetches every repository before it fast-forwards</b>, so two buttons offered the same first half twice &#8212; and as two flex items, Fetch &#9662; and Pull all could not even agree on a width (the chevron&#8217;s wrapper has no padding, so a zero basis gave Pull all its 20&nbsp;px of padding and border as a head start). This turn supersedes turn&nbsp;3&#8217;s row; the menu&#8217;s automatic interval and the quiet timed run are unchanged.</p>
+        <div class="dv-opts">
+          <div class="dv-opt">
+            <div class="dv-olabel"><a class="dv-oid" href="#5a">5a</a>The row, and the menu open</div>
+            <div>
+              <div class="tb">
+                <span class="tbtn">+ Add &#9662;</span>
+                <span class="split"><span class="tbtn">&#10227; Fetch recent</span><span class="tbtn chev open">&#9662;</span></span>
+                <span class="tbtn">&#9874;</span>
+              </div>
+              <div class="menu" style="margin-left:60px; width:280px">
+                <div class="mi"><span></span><span>Fetch all repositories<small>48 repositories</small></span></div>
+                <div class="mi hov"><span class="ck">&#10003;</span><span>Fetch recent repositories<small>The Focused list &#183; 9 repositories</small></span></div>
+                <div class="mi"><span></span><span>Pull all repositories<small>48 repositories &#183; then fast-forward clean branches</small></span></div>
+                <div class="mi"><span></span><span>Pull recent repositories<small>The Focused list &#183; 9 repositories &#183; then fast-forward clean branches</small></span></div>
+                <div class="msep"></div>
+                <div class="mhead">Fetch automatically</div>
+                <div class="mi"><span></span><span>Off</span></div>
+                <div class="mi"><span class="ck">&#10003;</span><span>Every 5 minutes</span></div>
+                <div class="mi"><span></span><span>&#8230;</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="dv-opt">
+            <div class="dv-olabel"><a class="dv-oid" href="#5b">5b</a>Rules</div>
+            <div class="find" style="width:460px">
+              <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">1</span><div><h4>Four actions, one radio group</h4><p>Fetch or Pull, all or recent. Picking one runs it and makes it the face: <b>Fetch all</b>, <b>Fetch recent</b>, <b>Pull all</b>, <b>Pull recent</b>.</p></div></div>
+              <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">2</span><div><h4>Names keep the old buttons&#8217; words</h4><p>&#8220;Fetch all repos&#8221;, &#8220;Fetch recent repos&#8221;, &#8220;Try pull all&#8221;, &#8220;Try pull recent&#8221;, so voice control and E2E still find them. The chevron is &#8220;Sync options&#8221;.</p></div></div>
+              <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">3</span><div><h4>Timed runs only fetch</h4><p>Even with Pull on the face. Pulling on a timer would move checkouts under the reader.</p></div></div>
+              <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">4</span><div><h4>Busy reads per glyph</h4><p>Fetch&#8217;s circular arrow turns; Pull&#8217;s down arrow swaps to the ring, as on the worktree toolbar.</p></div></div>
+              <div class="fitem"><span class="pin" style="background:var(--rv-ok);color:#050505">5</span><div><h4>The row gets a slot back</h4><p>One grower between Add and the wrench, so &#8220;Fetch recent&#8221; and &#8220;Pull recent&#8221; keep their words at widths where two buttons dropped to glyphs.</p></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
     </x-dc>
   </body>
 </html>
