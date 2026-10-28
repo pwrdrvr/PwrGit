@@ -107,12 +107,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: populate
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -137,12 +137,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: populate
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -174,12 +174,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -215,12 +215,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -251,12 +251,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -317,12 +317,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -377,11 +377,11 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           cache-electron: "true"
-          cache-key-suffix: pwrgit-store-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           lookup-only: "true"
 
   macos-e2e:
@@ -405,12 +405,12 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         timeout-minutes: 10
         with:
           node-version: 24.22.1
           cache-electron: "true"
-          cache-key-suffix: pwrgit-store-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           persistent-store-dir: ~/Library/Caches/pwrgit-ci/${{ runner.name }}
 
       - name: Clear leftover Electron state from previous jobs
@@ -537,12 +537,12 @@ jobs:
       # `packageManager` field via Corepack, so there's no second pnpm pin to
       # drift on upgrade.
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -617,12 +617,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs

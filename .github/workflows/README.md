@@ -57,8 +57,8 @@ repositories after rotation. See the distribution runbook for exact checks.
 
 ## Dependency caches
 
-All dependency jobs currently validate the configure-nodejs archive-root fix at
-`311efb2f64811ab65d8943dd7c221de22c2f38d1` and use the integrity-pinned pnpm
+All dependency jobs pin configure-nodejs v1.7.1 to
+`d416c1c78119b25fe03ee3ef78b75af0d69b10a7` and use the integrity-pinned pnpm
 release in `package.json`. pnpm 12.13.0 includes the macOS pnpmfile worker
 pipe-inheritance fix ([pnpm #16871](https://github.com/pnpm/pnpm/pull/16871)).
 
