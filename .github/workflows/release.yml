@@ -59,11 +59,11 @@ jobs:
 
       - name: Install Node.js and dependencies
         timeout-minutes: 10
-        uses: pwrdrvr/configure-nodejs@9bb6e786801cf822d57b2298e02ccefd05e8ef0f # v1.7.0
+        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           cache-electron: "true"
-          cache-key-suffix: pwrgit-store-9bb6e786801cf822d57b2298e02ccefd05e8ef0f-v1
+          cache-key-suffix: pwrgit-store-657f19991a4fb8d954f583de675c882f8dfd116b-v1
 
       - name: Check release metadata
         env:
@@ -257,11 +257,11 @@ jobs:
 
       - name: Install Node.js and dependencies
         timeout-minutes: 10
-        uses: pwrdrvr/configure-nodejs@9bb6e786801cf822d57b2298e02ccefd05e8ef0f # v1.7.0
+        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           cache-electron: "true"
-          cache-key-suffix: pwrgit-store-9bb6e786801cf822d57b2298e02ccefd05e8ef0f-v1
+          cache-key-suffix: pwrgit-store-657f19991a4fb8d954f583de675c882f8dfd116b-v1
 
       - name: Check release metadata
         if: ${{ github.event_name != 'pull_request' }}
@@ -347,11 +347,11 @@ jobs:
       # `packageManager` field via Corepack.
       - name: Install Node.js and dependencies
         timeout-minutes: 10
-        uses: pwrdrvr/configure-nodejs@9bb6e786801cf822d57b2298e02ccefd05e8ef0f # v1.7.0
+        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           cache-electron: "true"
-          cache-key-suffix: pwrgit-store-9bb6e786801cf822d57b2298e02ccefd05e8ef0f-v1
+          cache-key-suffix: pwrgit-store-657f19991a4fb8d954f583de675c882f8dfd116b-v1
 
       - name: Check release metadata
         if: ${{ github.event_name != 'pull_request' }}

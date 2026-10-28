@@ -57,8 +57,8 @@ repositories after rotation. See the distribution runbook for exact checks.
 
 ## Dependency caches
 
-All dependency jobs pin configure-nodejs v1.7.0 to
-`9bb6e786801cf822d57b2298e02ccefd05e8ef0f` and use the integrity-pinned pnpm
+All dependency jobs currently validate the configure-nodejs archive-root fix at
+`657f19991a4fb8d954f583de675c882f8dfd116b` and use the integrity-pinned pnpm
 release in `package.json`. pnpm 12.13.0 includes the macOS pnpmfile worker
 pipe-inheritance fix ([pnpm #16871](https://github.com/pnpm/pnpm/pull/16871)).
 
@@ -79,14 +79,11 @@ family, Node major/ABI and exact pnpm pin remain compatibility boundaries.
 `packageImportMethod: auto` keeps materialized files portable. No prefix fallback
 or shared `node_modules` links are used.
 
-Hosted Linux and Windows producers set `TAR_OPTIONS: --hard-dereference` for
-GNU tar (Windows uses Git for Windows' GNU tar). The cache glob can enumerate
-pnpm bin files through workspace symlinks as well as their real store paths;
-without this flag, tar emits hard-link entries targeting paths that are absent
-during extraction. Store file bytes instead, preserving pnpm symlinks. This
-can increase archive size. The policy suffix explicitly versions this choice
-so consumers cannot restore older, broken archives. See
-[GNU tar hard links](https://www.gnu.org/software/tar/manual/html_node/hard-links.html).
+The action revision excludes nested `node_modules` matches from the archive
+manifest before tar runs. Each workspace dependency root is archived recursively
+once, preserving its relative package links and native files. This avoids tar
+directory/hard-link failures when the cache glob visits pnpm symlink aliases.
+No tar overrides are required.
 
 Consumers disable pnpm's implicit dependency verification/install before
 `pnpm run`. They rebuild the MCP server's `prepare` output from current sources

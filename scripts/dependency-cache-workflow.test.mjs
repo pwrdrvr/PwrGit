@@ -8,7 +8,7 @@ const workflowDirectory = resolve(root, ".github/workflows");
 const workflows = readdirSync(workflowDirectory).filter((name) => name.endsWith(".yml"))
   .map((name) => [name, readFileSync(resolve(workflowDirectory, name), "utf8")]);
 const ci = workflows.find(([name]) => name === "ci.yml")[1];
-const action = "pwrdrvr/configure-nodejs@9bb6e786801cf822d57b2298e02ccefd05e8ef0f";
+const action = "pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b";
 
 function job(name) {
   const body = ci.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];
@@ -47,8 +47,6 @@ test.each([
   const producerSetup = setup(producerJob);
   expect(input(producerSetup, "cache-mode")).toBe("populate");
   expect(producerJob).not.toContain("PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN");
-  expect(producerJob).toContain("TAR_OPTIONS: --hard-dereference");
-  expect(input(producerSetup, "cache-key-suffix")).toContain("hard-dereference-v2");
   for (const consumer of consumers) {
     const consumerJob = job(consumer);
     const consumerSetup = setup(consumerJob);
