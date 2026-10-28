@@ -79,7 +79,7 @@ repository's default branch:
   branches may publish suffix-free stable releases: for example, `v1.0.1` from
   `releases/1.0` and `v2.0.0` from `main`. Do not publish `-alpha` or `-beta`
   from the maintenance branch: the Beta feed is shared and selects the next
-  train's higher SemVer candidate. A short-lived `release/v<version>`
+  train's higher SemVer candidate. A fallback `release/v<version>`
   pull-request source branch is only a metadata-review vehicle and never
   substitutes for, or triggers, a maintenance branch; do not create
   `releases/N.N` merely because that source PR promotes a beta to stable.
@@ -210,7 +210,7 @@ repository's default branch:
 
    ```bash
    RELEASE_TAG=v<version> pnpm release:check
-   pnpm typecheck
+   pnpm lint
    pnpm test
    pnpm build
    ```
@@ -232,22 +232,42 @@ git commit -S -m "chore(release): prepare v<version>"
 git log -1 --show-signature --format=fuller
 ```
 
-If maintainer direct-push bypass is explicitly supported, push the signed
-commit to the release branch, then fetch and fast-forward before tagging:
+Use a signed, non-force direct push to the lifecycle-selected release branch
+(`main` for the active train). The maintainer has authorized this as the default
+release path, matching PwrAgnt. Do not open a routine release-metadata PR or wait
+for PR CI: local gates above and the guarded tag-triggered release workflow
+remain required. Ordinary main-branch CI may still run; do not add skip markers
+or weaken workflow checks to avoid it.
+
+Fetch immediately before pushing and confirm the current remote release branch
+is an ancestor of the tested checkpoint. If it advanced with untested changes,
+integrate and review those changes and rerun the applicable gates before
+publishing; never force-push over concurrent work.
 
 ```bash
+git fetch origin <release-branch> --tags
+git merge-base --is-ancestor origin/<release-branch> HEAD
 git push origin HEAD:<release-branch>
 git fetch origin <release-branch> --tags
-git pull --ff-only
 ```
 
-If direct push is rejected, use a short-lived `release/v<version>` metadata
-source branch and a pull request based on the repository's PR template. Merge
+If GitHub branch protection rejects the direct push, use a short-lived
+`release/v<version>` metadata source branch and a pull request based on the
+repository's PR template. A non-fast-forward rejection instead requires syncing
+and validating concurrent changes, not automatically opening a PR. Squash merge
 it into the lifecycle-selected `<release-branch>`; it remains a metadata source
 branch, not a `releases/N.N` maintenance branch, even when a beta becomes
 stable. Wait for every required check and merge using the method documented by
 the repository. After landing, fetch the release branch and identify the actual
-landed commit; do not tag the pre-merge branch commit by assumption.
+landed commit; do not tag the pre-merge branch commit by assumption. A squash
+merge replaces the original locally signed checkpoint with a GitHub-authored
+commit; if a locally signed landed commit is required, stop and ask rather than
+silently substituting that merge.
+
+After either path, identify the actual remote release-branch commit and verify
+its tree matches the validated tree. If the remote advanced again, review and
+validate the added changes before selecting the release commit. Do not assume
+the checkout's branch name or its pre-push HEAD proves what landed.
 
 Rerun the metadata gate on the landed release-branch commit:
 
