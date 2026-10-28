@@ -58,7 +58,7 @@ repositories after rotation. See the distribution runbook for exact checks.
 ## Dependency caches
 
 All dependency jobs currently validate the configure-nodejs archive-root fix at
-`657f19991a4fb8d954f583de675c882f8dfd116b` and use the integrity-pinned pnpm
+`311efb2f64811ab65d8943dd7c221de22c2f38d1` and use the integrity-pinned pnpm
 release in `package.json`. pnpm 12.13.0 includes the macOS pnpmfile worker
 pipe-inheritance fix ([pnpm #16871](https://github.com/pnpm/pnpm/pull/16871)).
 
@@ -83,7 +83,10 @@ The action revision excludes nested `node_modules` matches from the archive
 manifest before tar runs. Each workspace dependency root is archived recursively
 once, preserving its relative package links and native files. This avoids tar
 directory/hard-link failures when the cache glob visits pnpm symlink aliases.
-No tar overrides are required.
+The Windows restore codec also preserves producer-recorded directory-link types
+when GNU tar restores a directory alias with a file-link flag. It validates
+existing sources and internal targets after key/ABI checks; missing or changed
+links fail. No tar overrides or dependency installs are required.
 
 Consumers disable pnpm's implicit dependency verification/install before
 `pnpm run`. They rebuild the MCP server's `prepare` output from current sources

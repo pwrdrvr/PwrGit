@@ -8,7 +8,7 @@ const workflowDirectory = resolve(root, ".github/workflows");
 const workflows = readdirSync(workflowDirectory).filter((name) => name.endsWith(".yml"))
   .map((name) => [name, readFileSync(resolve(workflowDirectory, name), "utf8")]);
 const ci = workflows.find(([name]) => name === "ci.yml")[1];
-const action = "pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b";
+const action = "pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1";
 
 function job(name) {
   const body = ci.split(`\n  ${name}:\n`)[1]?.split(/\n  [\w-]+:\n/)[0];

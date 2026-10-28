@@ -107,12 +107,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: populate
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -137,12 +137,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: populate
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -174,12 +174,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -215,12 +215,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -251,12 +251,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -317,12 +317,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -377,11 +377,11 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           cache-electron: "true"
-          cache-key-suffix: pwrgit-store-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-store-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           lookup-only: "true"
 
   macos-e2e:
@@ -405,12 +405,12 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         timeout-minutes: 10
         with:
           node-version: 24.22.1
           cache-electron: "true"
-          cache-key-suffix: pwrgit-store-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-store-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           persistent-store-dir: ~/Library/Caches/pwrgit-ci/${{ runner.name }}
 
       - name: Clear leftover Electron state from previous jobs
@@ -537,12 +537,12 @@ jobs:
       # `packageManager` field via Corepack, so there's no second pnpm pin to
       # drift on upgrade.
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
@@ -556,26 +556,6 @@ jobs:
             apps/desktop/scripts/install-electron-binary.mjs
             apps/desktop/scripts/rebuild-native-for-electron.mjs
             apps/desktop/scripts/stage-better-sqlite3-arch.mjs
-
-      - name: Inspect restored Windows dependency links
-        run: |
-          node --input-type=module -e '
-            import fs from "node:fs";
-            import path from "node:path";
-            import { createRequire } from "node:module";
-            const require = createRequire(path.resolve("package.json"));
-            const owner = path.dirname(require.resolve("proper-lockfile/package.json"));
-            console.log("proper-lockfile", owner);
-            const candidates = [path.join(owner, "../retry"), ...fs.readdirSync("node_modules/.pnpm").filter(x => x.startsWith("retry@") || x.startsWith("is-core-module@")).map(x => path.resolve("node_modules/.pnpm", x)), path.resolve("node_modules/.pnpm/node_modules/retry")];
-            for (const file of candidates) {
-              try {
-                const stat = fs.lstatSync(file);
-                console.log("link", file, stat.isSymbolicLink(), stat.isSymbolicLink() ? fs.readlinkSync(file) : null);
-                console.log(JSON.stringify({ file, symbolic: stat.isSymbolicLink(), target: stat.isSymbolicLink() ? fs.readlinkSync(file) : null, real: fs.realpathSync(file), children: fs.readdirSync(file).slice(0,12) }));
-              } catch (error) { console.log(file, error.code, error.message); }
-            }
-            for (const file of [owner, path.dirname(owner), "node_modules/.pnpm/node_modules"]) console.log("entries", file, fs.readdirSync(file).slice(0,30));
-          '
 
       # prepare builds outside node_modules, so the archive cannot carry it.
       - name: Build MCP server workspace output
@@ -637,12 +617,12 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Node.js and dependencies
-        uses: pwrdrvr/configure-nodejs@657f19991a4fb8d954f583de675c882f8dfd116b # configure-nodejs #15; pending release
+        uses: pwrdrvr/configure-nodejs@311efb2f64811ab65d8943dd7c221de22c2f38d1 # configure-nodejs #15; pending release
         with:
           node-version: 24.22.1
           dependency-cache: node-modules
           cache-mode: restore
-          cache-key-suffix: pwrgit-tree-657f19991a4fb8d954f583de675c882f8dfd116b-v1
+          cache-key-suffix: pwrgit-tree-311efb2f64811ab65d8943dd7c221de22c2f38d1-v1
           cache-inputs: |
             .nvmrc
             scripts/check-node-version.mjs
