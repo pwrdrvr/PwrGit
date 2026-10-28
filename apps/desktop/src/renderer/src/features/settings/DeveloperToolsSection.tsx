@@ -35,7 +35,7 @@ export function DeveloperToolsSection(props: {
   platform?: string;
 }) {
   const [processIds, setProcessIds] = useState<AppProcessIds | null>(null);
-  const [readError, setReadError] = useState<string | null>(null);
+  const [readFailed, setReadFailed] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const platform = props.platform ?? currentPlatform();
@@ -54,10 +54,11 @@ export function DeveloperToolsSection(props: {
     let canceled = false;
     readProcessIds()
       .then((value) => {
-        if (!canceled) setProcessIds(value);
+        // A Copy click may already have stored a newer read; keep that one.
+        if (!canceled) setProcessIds((current) => current ?? value);
       })
-      .catch((cause: unknown) => {
-        if (!canceled) setReadError(errorText(cause));
+      .catch(() => {
+        if (!canceled) setReadFailed(true);
       });
     return () => {
       canceled = true;
@@ -66,11 +67,21 @@ export function DeveloperToolsSection(props: {
 
   const copyProcessIds = async (): Promise<void> => {
     try {
-      const fresh = await readProcessIds();
-      setProcessIds(fresh);
-      setReadError(null);
-      await copyText(fresh.diagnosticsText);
-      setFeedback({ kind: "status", message: "Process IDs copied." });
+      // Prefer a fresh read; if main can't answer, the table on screen is
+      // still worth copying.
+      let text = processIds?.diagnosticsText;
+      let message = "Process IDs copied.";
+      try {
+        const fresh = await readProcessIds();
+        setProcessIds(fresh);
+        setReadFailed(false);
+        text = fresh.diagnosticsText;
+      } catch (cause) {
+        if (text === undefined) throw cause;
+        message = "Copied the process IDs shown; a fresh read failed.";
+      }
+      await copyText(text);
+      setFeedback({ kind: "status", message });
     } catch (cause) {
       setFeedback({
         kind: "error",
@@ -127,7 +138,7 @@ export function DeveloperToolsSection(props: {
                 <code className="settings-field__value">{line}</code>
               ) : (
                 <span className="settings-field__value settings-field__value--absent">
-                  {processIds === null && readError === null
+                  {processIds === null && !readFailed
                     ? "Loading…"
                     : "Unavailable"}
                 </span>

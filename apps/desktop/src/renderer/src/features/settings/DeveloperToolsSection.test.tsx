@@ -96,4 +96,38 @@ describe("DeveloperToolsSection process ids", () => {
     });
     expect(container.textContent).toContain("Unavailable");
   });
+
+  it("copies the table on screen when a fresh read fails", async () => {
+    await act(async () => {
+      root.render(card());
+    });
+    mocks.dispatchOrThrow.mockRejectedValue(new Error("busy"));
+    const copy = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Copy process IDs"
+    );
+    await act(async () => copy?.click());
+
+    expect(mocks.copyText).toHaveBeenCalledWith(FIRST.diagnosticsText);
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(
+      "Copied the process IDs shown; a fresh read failed."
+    );
+  });
+
+  it("keeps a Copy read that lands before the mount read", async () => {
+    let resolveMount: (value: AppProcessIds) => void = () => undefined;
+    mocks.dispatchOrThrow.mockImplementationOnce(
+      () => new Promise<AppProcessIds>((resolve) => { resolveMount = resolve; })
+    );
+    await act(async () => {
+      root.render(card());
+    });
+    mocks.dispatchOrThrow.mockResolvedValue(LATER);
+    const copy = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Copy process IDs"
+    );
+    await act(async () => copy?.click());
+    await act(async () => resolveMount(FIRST));
+
+    expect(container.querySelector("code")?.textContent).toBe(LATER.line);
+  });
 });
