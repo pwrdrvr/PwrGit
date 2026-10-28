@@ -9,6 +9,8 @@ import {
   ok,
   type Result
 } from "@pwrgit/shared";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   NO_OPTIONAL_LOCKS,
   requireExit0,
@@ -68,14 +70,16 @@ type WorktreeInspection =
   | { kind: "ready"; value: ReadyWorktree }
   | { kind: "result"; value: BulkSyncWorktreeResult };
 
+// REBASE_HEAD and AUTO_MERGE are left behind after a rebase or merge ends,
+// so they prove nothing. A rebase is in progress while its state directory
+// exists (REBASE_STATE_DIRS), which is what `git status` checks too.
 const IN_PROGRESS_REFS = [
   "MERGE_HEAD",
   "CHERRY_PICK_HEAD",
   "REVERT_HEAD",
-  "REBASE_HEAD",
-  "BISECT_START",
-  "AUTO_MERGE"
+  "BISECT_START"
 ] as const;
+const REBASE_STATE_DIRS = ["rebase-merge", "rebase-apply"] as const;
 
 const authFailure = (message: string): boolean =>
   /authentication failed|terminal prompts disabled|could not read (?:username|password)|username for ['"]|password for ['"]|permission denied \(publickey|credential[^\r\n]*(?:failed|unavailable)|http basic: access denied/i.test(
@@ -285,6 +289,29 @@ async function inspectWorktree(
     if (raw.value.exitCode !== 1) {
       return unsafeProbe(worktree, "Git could not verify repository operation state.");
     }
+  }
+
+  const rebaseDirs = await git(
+    ["rev-parse", ...REBASE_STATE_DIRS.flatMap((dir) => ["--git-path", dir])],
+    worktree.path,
+    NO_OPTIONAL_LOCKS
+  );
+  if (!rebaseDirs.ok || rebaseDirs.value.exitCode !== 0) {
+    return unsafeProbe(worktree, "Git could not inspect rebase state.");
+  }
+  const rebasing = rebaseDirs.value.stdout
+    .split("\n")
+    .filter(Boolean)
+    .some((dir) => existsSync(resolve(worktree.path, dir)));
+  if (rebasing) {
+    return {
+      kind: "result",
+      value: worktreeResult(worktree, {
+        outcome: "skipped",
+        reason: "in_progress",
+        message: "A merge, rebase, cherry-pick, revert, or bisect is in progress."
+      })
+    };
   }
 
   // Uncommitted changes only block a pull that would move HEAD. A dirty
@@ -581,6 +608,20 @@ async function softPullWorktree(
   });
 }
 
+// Skips with nothing to pull: a detached HEAD, a branch with no upstream (or
+// one deleted on the remote), or a branch only ahead. The worktree row keeps
+// its reason, but the repository is not held back by it. Agent worktrees are
+// mostly these, so counting them turned whole repositories "partial".
+const NOTHING_TO_PULL = new Set<NonNullable<BulkSyncWorktreeResult["reason"]>>([
+  "detached_head",
+  "no_upstream",
+  "ahead"
+]);
+const nothingToPull = (result: BulkSyncWorktreeResult): boolean =>
+  result.outcome === "skipped" &&
+  result.reason !== undefined &&
+  NOTHING_TO_PULL.has(result.reason);
+
 function repoOutcome(
   mode: BulkSyncMode,
   remotes: BulkSyncRemoteResult[],
@@ -594,13 +635,17 @@ function repoOutcome(
     worktrees.some((result) => result.outcome === "failed");
   const skipped =
     remotes.some((result) => result.outcome === "skipped") ||
-    worktrees.some((result) => result.outcome === "skipped");
+    worktrees.some(
+      (result) => result.outcome === "skipped" && !nothingToPull(result)
+    );
   const succeeded =
     mode === "fetch"
       ? remotes.some((result) => result.outcome === "fetched")
       : worktrees.some(
           (result) =>
-            result.outcome === "updated" || result.outcome === "up_to_date"
+            result.outcome === "updated" ||
+            result.outcome === "up_to_date" ||
+            nothingToPull(result)
         );
   if ((cancelled || failed || skipped) && succeeded) return "partial";
   if (cancelled) return "cancelled";

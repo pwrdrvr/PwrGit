@@ -182,10 +182,17 @@ buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
 - **Only a clean finish leaves by itself, and it shows its clock.** The
   toast draws the remote-activity card's green rail; the dismiss timer banks
   what is left under the pointer and resumes from there, so rail and timer
-  agree. A failure or a cancel draws no rail and stays. The finished line
-  names each outcome in the legend's words ("12 partial"): a repository is
-  `partial` when its pull updated some worktrees and skipped others (dirty,
-  ahead, no upstream), which is most repositories with many agent worktrees.
+  agree. A failure or a cancel draws no rail and stays.
+- **The headline counts what went through.** "Pulled 29 of 83 repositories",
+  never "Pulled 83" over 52 skipped. The counts row below names each outcome
+  in the legend's words ("12 partial") and wraps to a second row rather
+  than ellipsizing the last count (usually failed).
+- **Skipped means held back from something to pull.** A worktree with
+  nothing to pull (detached, no upstream or one deleted on the remote,
+  ahead, or dirty but already current) keeps its reason in the details but
+  does not make its repository `skipped` or `partial` (`repoOutcome` in
+  `main/git/bulk-sync.ts`). In 0.45.0 agent worktrees turned most
+  repositories partial and dirty-but-current checkouts skipped.
 
 Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
 

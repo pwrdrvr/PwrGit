@@ -284,6 +284,96 @@ describe("bulk repository synchronization", () => {
     expect(git(current.input.path, "status", "--porcelain")).toBe(before);
   });
 
+  it("does not hold a repository back for worktrees with nothing to pull", async () => {
+    // Main is current; the others are the shapes agent worktrees leave:
+    // detached, no upstream, an upstream deleted on the remote, and ahead.
+    const repo = trackedRepo("agent-worktrees");
+    const add = (name: string, ...args: string[]) => {
+      const path = join(root, `${repo.input.id}-${name}`);
+      git(repo.input.path, "worktree", "add", ...args, path);
+      repo.input.worktrees.push({ id: `${repo.input.id}-${name}`, branch: name, path });
+      return path;
+    };
+    add("detached", "--detach");
+    add("local", "-b", "local");
+    const gone = add("gone", "-b", "gone");
+    git(gone, "push", "-u", "origin", "gone");
+    git(repo.input.path, "push", "origin", "--delete", "gone");
+    const ahead = add("ahead", "-b", "ahead");
+    git(ahead, "push", "-u", "origin", "ahead");
+    writeFileSync(join(ahead, "ahead.txt"), "local\n");
+    git(ahead, "add", "-A");
+    git(ahead, "commit", "-m", "ahead");
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "agent-worktrees",
+      mode: "soft-pull"
+    });
+
+    const result = summary.results[0]!;
+    expect(result.worktrees.map((worktree) => worktree.reason)).toEqual([
+      undefined,
+      "detached_head",
+      "no_upstream",
+      "no_upstream",
+      "ahead"
+    ]);
+    expect(result.outcome).toBe("success");
+  });
+
+  it("calls a repository with only detached worktrees a success, not skipped", async () => {
+    const repo = trackedRepo("all-detached");
+    git(repo.input.path, "switch", "--detach");
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "all-detached",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.reason).toBe("detached_head");
+    expect(summary.results[0]?.outcome).toBe("success");
+  });
+
+  it("ignores AUTO_MERGE and REBASE_HEAD left behind by a finished merge or rebase", async () => {
+    const repo = trackedRepo("leftovers");
+    const upstream = leaveMainBehind(repo);
+    const gitDir = join(repo.input.path, ".git");
+    writeFileSync(join(gitDir, "AUTO_MERGE"), `${repo.base}\n`);
+    writeFileSync(join(gitDir, "REBASE_HEAD"), `${repo.base}\n`);
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "leftovers",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.outcome).toBe("updated");
+    expect(git(repo.input.path, "rev-parse", "HEAD")).toBe(upstream);
+  });
+
+  it("still skips a worktree mid-rebase", async () => {
+    const repo = trackedRepo("mid-rebase");
+    leaveMainBehind(repo);
+    git(repo.input.path, "switch", "-c", "topic");
+    writeFileSync(join(repo.input.path, "shared.txt"), "topic\n");
+    git(repo.input.path, "commit", "-am", "topic");
+    git(repo.input.path, "switch", "main");
+    writeFileSync(join(repo.input.path, "shared.txt"), "main\n");
+    git(repo.input.path, "commit", "-am", "main");
+    git(repo.input.path, "switch", "topic");
+    expect(gitMayFail(repo.input.path, "rebase", "main")).not.toBe(0);
+    // Stage the resolution so only the rebase directory marks the operation.
+    writeFileSync(join(repo.input.path, "shared.txt"), "resolved\n");
+    git(repo.input.path, "add", "shared.txt");
+    repo.input.worktrees[0]!.branch = "topic";
+
+    const summary = await bulkSyncRepositories(systemGit, [repo.input], {
+      operationId: "mid-rebase",
+      mode: "soft-pull"
+    });
+
+    expect(summary.results[0]?.worktrees[0]?.reason).toBe("in_progress");
+  });
+
   it("does not confuse branches or tags named like operation pseudo-refs with active operations", async () => {
     const branchNamedLikeRef = trackedRepo("pseudo-branch");
     const branchUpstream = leaveMainBehind(branchNamedLikeRef);
@@ -499,6 +589,10 @@ describe("bulk repository synchronization", () => {
         });
       }
       if (args[0] === "rev-parse") {
+        if (args.includes("--git-path")) {
+          // No rebase state directories exist.
+          return ok({ stdout: "/nonexistent/rebase-merge\n/nonexistent/rebase-apply\n", stderr: "", exitCode: 0 });
+        }
         const target = args.at(-1);
         if (target === "HEAD") {
           return ok({ stdout: "local\n", stderr: "", exitCode: 0 });
