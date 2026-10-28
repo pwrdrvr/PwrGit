@@ -95,8 +95,10 @@ export async function removeStashByHash(
     // restore work and only then discover that removal cannot be prepared.
     writeFileSync(log + ".lock", rewritten);
     writeFileSync(ref + ".lock", previous + "\n");
-    const unpack = !remaining.length && layout.packedLines !== null;
-    if (unpack) writeFileSync(packed + ".lock", withoutStashLine(layout.packedLines!));
+    const unpacked = !remaining.length && layout.packedLines
+      ? withoutStashLine(layout.packedLines)
+      : null;
+    if (unpacked !== null) writeFileSync(packed + ".lock", unpacked, "latin1");
     if (beforeRemove) {
       const restored = await beforeRemove();
       if (!restored.ok) return restored;
@@ -111,7 +113,7 @@ export async function removeStashByHash(
         owned.delete(ref + ".lock");
       } else {
         // Git's order: packed first, so the stale line never shows through.
-        if (unpack) {
+        if (unpacked !== null) {
           renameSync(packed + ".lock", packed);
           owned.delete(packed + ".lock");
         }
@@ -163,7 +165,8 @@ function readStashLayout(ref: string, log: string, packed: string): StashLayout 
   let packedLines: string[] | null = null;
   let packedTip: string | undefined;
   if (packedKind === "file") {
-    const lines = readFileSync(packed, "utf8").split("\n");
+    // latin1 round-trips every byte: other refs' names need not be UTF-8.
+    const lines = readFileSync(packed, "latin1").split("\n");
     const hits = lines.flatMap((line) => STASH_PACKED_LINE.exec(line)?.[1] ?? []);
     if (hits.length > 1) return { ok: false, reason: "packed-refs lists refs/stash more than once" };
     if (hits.length) {

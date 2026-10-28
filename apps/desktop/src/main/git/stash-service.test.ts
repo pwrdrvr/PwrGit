@@ -224,6 +224,35 @@ describe("stash service (system git)", () => {
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("baseline\n");
   });
 
+  it("refuses packed-refs that list refs/stash twice", async () => {
+    const selected = await save("selected");
+    rmSync(join(repo, ".git", "refs", "stash"));
+    writeFileSync(join(repo, ".git", "packed-refs"),
+      `${selected} refs/stash\n${selected} refs/stash\n`);
+    expect(await dropStash(systemGit, repo, selected)).toMatchObject({
+      ok: false, error: { code: "unsupported_stash_storage" }
+    });
+  });
+
+  it("keeps other packed refs byte for byte when dropping the last stash", async () => {
+    const selected = await save("selected");
+    git(repo, ["pack-refs", "--all"]);
+    const packed = join(repo, ".git", "packed-refs");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    // A non-UTF-8 ref name, as a Linux remote can deliver.
+    const foreign = Buffer.concat([
+      Buffer.from(head + " refs/tags/caf"), Buffer.from([0xe9]), Buffer.from("\n")
+    ]);
+    const before = Buffer.concat([readFileSync(packed), foreign]);
+    writeFileSync(packed, before);
+    expect(await dropStash(systemGit, repo, selected)).toEqual(ok(undefined));
+    const stashLine = Buffer.from(selected + " refs/stash\n");
+    const at = before.indexOf(stashLine);
+    expect(readFileSync(packed)).toEqual(Buffer.concat([
+      before.subarray(0, at), before.subarray(at + stashLine.length)
+    ]));
+  });
+
   it("refuses a stash ref that is neither loose nor packed", async () => {
     const selected = await save("selected");
     rmSync(join(repo, ".git", "refs", "stash"));
