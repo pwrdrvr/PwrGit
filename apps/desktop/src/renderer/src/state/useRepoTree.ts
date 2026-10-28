@@ -120,9 +120,6 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     useState<ReadState>(LOADING_READ_STATE);
   const mountedRef = useRef(false);
   const requestRef = useRef(0);
-  /** Repositories a `repo:changed` named, waiting for their re-read. */
-  const changedRef = useRef(new Set<string>());
-  const readingChangedRef = useRef(false);
   const [removalProgress, setRemovalProgress] =
     useState<RemovalProgress | null>(null);
   const [refreshingRepoIds, setRefreshingRepoIds] = useState<Set<string>>(
@@ -183,46 +180,6 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
 
   const retry = useCallback(() => reload(true), [reload]);
 
-  /**
-   * Re-read only the repositories a `repo:changed` named. A bulk fetch sends
-   * one per repository it finishes; re-reading the whole profile each time
-   * replaced every Repo object, so every expanded repository re-ran
-   * `repo:refs` once per repository fetched — O(n²) git for one Fetch all.
-   *
-   * One read at a time: ids that arrive meanwhile join the next batch, so a
-   * burst costs a few reads and answers cannot land out of order. A full
-   * reload started after a read covers it, so that read's answer is dropped.
-   */
-  const reloadChanged = useCallback(
-    async (repoIds: readonly string[]): Promise<void> => {
-      if (activeProfileId === null) return;
-      for (const id of repoIds) changedRef.current.add(id);
-      if (readingChangedRef.current) return;
-      readingChangedRef.current = true;
-      try {
-        while (changedRef.current.size > 0) {
-          const asked = [...changedRef.current];
-          changedRef.current.clear();
-          const request = requestRef.current;
-          const r = await dispatch("repo:list", {
-            profileId: activeProfileId,
-            repoIds: asked
-          });
-          if (!mountedRef.current || request !== requestRef.current) continue;
-          if (!r.ok) {
-            // Same as a failed full read: keep the last good tree.
-            setLoadState({ status: "error", message: r.error.message });
-            continue;
-          }
-          setRepos((rs) => mergeChangedRepos(rs, asked, r.value));
-        }
-      } finally {
-        readingChangedRef.current = false;
-      }
-    },
-    [activeProfileId]
-  );
-
   useEffect(() => {
     mountedRef.current = true;
     if (activeProfileId === null) {
@@ -241,18 +198,61 @@ export function useRepoTree(activeProfileId: string | null): UseRepoTree {
     // stale arrives as a repo:identityChanged delta a moment later. Rows that
     // arrive after this are asked about by `reload` — see `identityAskedRef`.
     void dispatch("repo:refreshIdentities", { profileId: activeProfileId });
+    /*
+     * Re-read only the repositories a `repo:changed` names. A bulk fetch
+     * sends one per repository it finishes; re-reading the whole profile
+     * each time replaced every Repo object, so every expanded repository
+     * re-ran `repo:refs` once per repository fetched (O(n²) git).
+     *
+     * One read at a time: ids that arrive meanwhile join the next batch, so a
+     * burst costs a few reads and answers cannot land out of order. A full
+     * reload started after a read covers it, so that answer is dropped. The
+     * queue belongs to this profile's subscription and dies with it, so a
+     * read still out after a profile switch cannot drain the next profile's
+     * ids under the old profile's name.
+     */
+    const profileId = activeProfileId;
+    const changed = new Set<string>();
+    let reading = false;
+    let live = true;
+    const reloadChanged = async (): Promise<void> => {
+      if (reading) return;
+      reading = true;
+      try {
+        while (live && changed.size > 0) {
+          const asked = [...changed];
+          changed.clear();
+          const request = requestRef.current;
+          const r = await dispatch("repo:list", { profileId, repoIds: asked });
+          if (!live || request !== requestRef.current) continue;
+          if (!r.ok) {
+            // The full read owns the error and ready states; let it decide.
+            changed.clear();
+            void reload();
+            return;
+          }
+          setRepos((rs) => mergeChangedRepos(rs, asked, r.value));
+        }
+      } finally {
+        reading = false;
+      }
+    };
     const off = subscribe("repo:changed", (p) => {
-      if (p.profileId !== activeProfileId) return;
-      if (p.repoIds === undefined) void reload();
-      else if (p.repoIds.length > 0) void reloadChanged(p.repoIds);
+      if (p.profileId !== profileId) return;
+      if (p.repoIds === undefined) {
+        void reload();
+        return;
+      }
+      for (const id of p.repoIds) changed.add(id);
+      void reloadChanged();
     });
     return () => {
+      live = false;
       mountedRef.current = false;
       requestRef.current += 1;
-      changedRef.current.clear();
       off();
     };
-  }, [activeProfileId, reload, reloadChanged]);
+  }, [activeProfileId, reload]);
 
   // Prune each worktree from the tree as its removal completes — live feedback
   // during a long batch delete, and it advances the progress counter.

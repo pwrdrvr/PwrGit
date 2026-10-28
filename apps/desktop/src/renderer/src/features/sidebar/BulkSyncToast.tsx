@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import type { BulkSyncMode } from "@pwrgit/shared";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { ExpandGlyph } from "../../lib/ExpandGlyph";
@@ -66,6 +66,10 @@ export function BulkSyncToast({
   countdown?: ToastCountdown | null;
 }): ReactElement {
   const tip = useViewportTooltip();
+  // Leaving by Show details unmounts the toast under the pointer, with no
+  // pointerleave; without this the hold outlived it and a later clean finish
+  // never left by itself.
+  useEffect(() => () => onHold(false), [onHold]);
   const live = phase === "running" || phase === "cancelling";
   const finished = finishedCount(counts);
   const total = finished + inFlight + queued;
@@ -75,7 +79,7 @@ export function BulkSyncToast({
       ? activity
       : phase === "cancelled"
         ? `${title} — cancelled`
-        : finishedHeadline(mode, total);
+        : finishedHeadline(mode, total, counts.success + counts.partial);
   const tone = error !== null || (!live && hasFailures)
     ? " is-failed"
     : live
@@ -197,8 +201,18 @@ export function BulkSyncToast({
  * meta line's job, in the bar's colors, so the part that matters is never
  * the part an ellipsis cuts off.
  */
-export function finishedHeadline(mode: BulkSyncMode, total: number): string {
+export function finishedHeadline(
+  mode: BulkSyncMode,
+  total: number,
+  succeeded: number = total
+): string {
   const repos = `${total} ${total === 1 ? "repository" : "repositories"}`;
+  // A run where nothing went through must not read as a success.
+  if (succeeded === 0 && total > 0) {
+    return mode === "fetch"
+      ? `Fetched none of ${repos}`
+      : `Pulled none of ${repos}`;
+  }
   return mode === "fetch"
     ? `Fetched ${repos}`
     : `Pulled safely across ${repos}`;

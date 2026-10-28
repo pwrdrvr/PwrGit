@@ -248,8 +248,8 @@ export function RepoRefsSections({
     setLoading(true);
     setError(null);
     const result = await dispatch("repo:refs", { repoId: repo.id });
-    // Reloads arrive in bursts (a bulk fetch reloads every repo once per
-    // repo it finishes); only the newest answer may land.
+    // Reloads can overlap (a burst of changes to this repository); only the
+    // newest answer may land.
     if (request !== loadRef.current) return;
     setLoading(false);
     if (result.ok) {
@@ -368,10 +368,9 @@ export function RepoRefsSections({
     await load();
   };
 
-  // "…" only until the first answer. A reload keeps the last counts on
-  // screen: every `repo:changed` reloads every expanded repository, and
-  // blanking each count meanwhile flashed the whole sidebar during a bulk
-  // fetch.
+  // "…" only until the first answer. A reload (a new Repo object for this
+  // repository) keeps the last counts on screen; blanking them flashed every
+  // expanded repository during a bulk fetch.
   const pending = loading && refs === null;
   const branchCount = refs?.branches.length;
   const tagCount = refs?.tagCount;

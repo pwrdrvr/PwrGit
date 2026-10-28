@@ -18,6 +18,7 @@ import {
   type BulkSyncPresentation
 } from "./BulkSyncDialog";
 import type { BulkSyncView } from "./bulk-sync-prefs";
+import { finishedHeadline } from "./BulkSyncToast";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -304,6 +305,32 @@ describe("BulkSyncDialog views", () => {
     expect(onClose).not.toHaveBeenCalled();
     await act(async () => vi.advanceTimersByTime(1));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets go of a hold when the toast leaves under the pointer", async () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    await render({ initial: "toast", onClose });
+    await act(async () => {
+      toast()!.dispatchEvent(new Event("pointerover", { bubbles: true }));
+    });
+    // Show details unmounts the toast with the pointer still on it.
+    await act(async () => byName("Show details").click());
+    await act(async () => byName("Minimise to a toast").click());
+    await act(async () => {
+      finish(cleanSummary());
+    });
+    expect(
+      toast()?.querySelector(".bulk-sync-toast__rail")?.getAttribute("data-paused")
+    ).toBeNull();
+    await act(async () => vi.advanceTimersByTime(TOAST_DISMISS_MS));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not headline a run where nothing went through as a success", () => {
+    expect(finishedHeadline("fetch", 33, 0)).toBe("Fetched none of 33 repositories");
+    expect(finishedHeadline("soft-pull", 1, 0)).toBe("Pulled none of 1 repository");
+    expect(finishedHeadline("fetch", 33, 30)).toBe("Fetched 33 repositories");
   });
 
   it("names each finished outcome in the bar's words", async () => {

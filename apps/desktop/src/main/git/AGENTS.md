@@ -197,6 +197,11 @@ call per expanded repository per repository fetched.
 Leave `repoIds` off only when the list or its order may move: a scan, clone,
 fork, removal, hide, pin or reorder.
 
+A change that only moves refs (a new branch on a remote) changes no
+checkout's state, so the worktree refresher says nothing. That is why
+`refreshRemoteBranches` in `remote-handlers.ts` names its repository: it is
+the only signal that reloads that repository's Branches and Remotes.
+
 ## Paths from git are always forward-slash
 
 `git status`, `ls-files` and `ls-tree` report `a/b/c` on every platform. Split
