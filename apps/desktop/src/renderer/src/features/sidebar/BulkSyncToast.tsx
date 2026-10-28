@@ -6,7 +6,7 @@ import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { formatElapsed } from "../remote/remote-activity";
 import { useSecondsClock } from "../../state/useRemoteActivity";
-import { StatusMark, type BulkSyncStatusPhase } from "./BulkSyncStatus";
+import type { BulkSyncStatusPhase } from "./BulkSyncStatus";
 import {
   BULK_SYNC_OUTCOMES,
   finishedCount,
@@ -80,7 +80,6 @@ export function BulkSyncToast({
       : phase === "cancelled"
         ? `${title} — cancelled`
         : finishedHeadline(mode, total, counts.success + counts.partial);
-  const done = error === null && !live && phase !== "cancelled";
   const tone = error !== null || (!live && hasFailures)
     ? " is-failed"
     : live
@@ -95,92 +94,86 @@ export function BulkSyncToast({
       onPointerEnter={() => onHold(true)}
       onPointerLeave={() => onHold(false)}
     >
+      {/* One header row, as the remote-activity card's: the headline at the
+          left edge and the clock, Show details and Dismiss on its line at the
+          right. No status mark: a circled red cross beside Dismiss read as a
+          second close button. The border carries the tone and the counts say
+          what happened. design/Bulk Sync Toast Header - UX Review.dc.html. */}
       <div className="bulk-sync-toast__top">
-        {live ? (
-          <span className="bulk-sync__spinner" aria-hidden="true" />
-        ) : (
-          <StatusMark
-            mark={
-              phase === "cancelled"
-                ? "cancelled"
-                : hasFailures || error !== null
-                  ? "failed"
-                  : "ok"
-            }
-          />
-        )}
         <button
           type="button"
           className="bulk-sync-toast__body"
           onClick={onExpand}
         >
-          <span className="bulk-sync-toast__title">
-            <span
-              className="bulk-sync-toast__headline"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {headline}
+          <span
+            className="bulk-sync-toast__headline"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            {headline}
+          </span>
+          {(error !== null || live || phase !== "cancelled" || finished > 0) && (
+            <span className="bulk-sync-toast__meta">
+              {error !== null ? (
+                error
+              ) : live ? (
+                <LiveMeta
+                  finished={finished}
+                  total={total}
+                  failed={counts.failed}
+                />
+              ) : (
+                <FinishedMeta counts={counts} />
+              )}
             </span>
-            {/* A clean or partial finish puts its time beside the headline,
-                so the counts below pair up two to a row. */}
-            {done && durationMs !== null && (
-              <span className="bulk-sync-toast__duration">
+          )}
+        </button>
+        <span className="bulk-sync-toast__end">
+          {live ? (
+            <LiveClock startedAt={startedAt} />
+          ) : (
+            error === null &&
+            durationMs !== null && (
+              <span className="bulk-sync-toast__clock">
                 {formatElapsed(durationMs)}
               </span>
-            )}
-          </span>
-          <span className="bulk-sync-toast__meta">
-            {error !== null ? (
-              error
-            ) : live ? (
-              <LiveMeta
-                startedAt={startedAt}
-                finished={finished}
-                total={total}
-                failed={counts.failed}
-              />
-            ) : phase === "cancelled" ? (
-              durationMs !== null && `took ${formatElapsed(durationMs)}`
-            ) : (
-              <FinishedMeta counts={counts} />
-            )}
-          </span>
-        </button>
-        <button
-          type="button"
-          className="bulk-sync-toast__icon"
-          aria-label="Show details"
-          {...hoverTooltip(tip, "Show details")}
-          onClick={onExpand}
-        >
-          <ExpandGlyph size={12} />
-        </button>
-        {live ? (
+            )
+          )}
           <button
             type="button"
             className="bulk-sync-toast__icon"
-            aria-label={cancelling ? "Cancelling…" : "Cancel"}
-            {...hoverTooltip(tip, cancelling ? "Cancelling…" : "Cancel")}
-            aria-disabled={cancelling}
-            onClick={() => {
-              if (!cancelling) onCancel();
-            }}
+            aria-label="Show details"
+            {...hoverTooltip(tip, "Show details")}
+            onClick={onExpand}
           >
-            <CloseGlyph size={12} />
+            <ExpandGlyph size={12} />
           </button>
-        ) : (
-          <button
-            type="button"
-            className="bulk-sync-toast__icon"
-            aria-label="Dismiss"
-            {...hoverTooltip(tip, "Dismiss")}
-            onClick={onDismiss}
-          >
-            <CloseGlyph size={12} />
-          </button>
-        )}
+          {live ? (
+            <button
+              type="button"
+              className="bulk-sync-toast__icon"
+              aria-label={cancelling ? "Cancelling…" : "Cancel"}
+              {...hoverTooltip(tip, cancelling ? "Cancelling…" : "Cancel")}
+              aria-disabled={cancelling}
+              onClick={() => {
+                if (!cancelling) onCancel();
+              }}
+            >
+              <CloseGlyph size={12} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="bulk-sync-toast__icon"
+              aria-label="Dismiss"
+              {...hoverTooltip(tip, "Dismiss")}
+              onClick={onDismiss}
+            >
+              <CloseGlyph size={12} />
+            </button>
+          )}
+        </span>
       </div>
       {total > 0 && (live || hasFailures) && (
         <div className="bulk-sync__bar bulk-sync-toast__bar" aria-hidden="true">
@@ -285,22 +278,28 @@ function CountdownRail({ countdown }: { countdown: ToastCountdown }): ReactEleme
 
 /** The only part of the toast that changes every second. */
 function LiveMeta({
-  startedAt,
   finished,
   total,
   failed
 }: {
-  startedAt: number;
   finished: number;
   total: number;
   failed: number;
 }): ReactElement {
-  const now = useSecondsClock(true);
   return (
     <>
       {finished} of {total}
-      {failed > 0 && ` · ${failed} failed`} ·{" "}
-      {formatElapsed(Math.max(0, now - startedAt))}
+      {failed > 0 && ` · ${failed} failed`}
     </>
+  );
+}
+
+/** The run's clock, ticking in the header while it is live. */
+function LiveClock({ startedAt }: { startedAt: number }): ReactElement {
+  const now = useSecondsClock(true);
+  return (
+    <span className="bulk-sync-toast__clock">
+      {formatElapsed(Math.max(0, now - startedAt))}
+    </span>
   );
 }

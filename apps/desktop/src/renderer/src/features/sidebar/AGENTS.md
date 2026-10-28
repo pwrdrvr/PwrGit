@@ -183,10 +183,15 @@ buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
   toast draws the remote-activity card's green rail; the dismiss timer banks
   what is left under the pointer and resumes from there, so rail and timer
   agree. A failure or a cancel draws no rail and stays.
+- **The toast's header is the remote-activity card's.** Headline at the left
+  edge; clock, Show details and Dismiss (Cancel while live) on its line at
+  the right, as 20px buttons 2px apart. No status mark: a circled red cross
+  beside Dismiss read as a second close. The border carries the tone.
+  Design: `design/Bulk Sync Toast Header - UX Review.dc.html`.
 - **The headline counts what went through.** "Pulled 29 of 83 repositories",
-  never "Pulled 83" over 52 skipped. The counts row below names each outcome
-  in the legend's words ("12 partial") and wraps to a second row rather
-  than ellipsizing the last count (usually failed).
+  never "Pulled 83" over 52 skipped. The counts below name each outcome in
+  the legend's words ("12 partial"), two to a row, rather than ellipsizing
+  the last count (usually failed).
 - **Skipped means held back from something to pull.** A worktree with
   nothing to pull (detached, no upstream or one deleted on the remote,
   ahead, or dirty but already current) keeps its reason in the details but

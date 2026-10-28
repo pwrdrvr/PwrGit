@@ -7012,14 +7012,27 @@ button.agent-menu__item:hover {
 .bulk-sync-toast.is-failed {
   border-color: color-mix(in srgb, var(--danger-base) 55%, transparent);
 }
+/* The remote-activity card's header: copy at the left edge, the clock and
+   the two actions pinned to the headline's line at the right. */
 .bulk-sync-toast__top {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 10px;
 }
-.bulk-sync-toast__top > .bulk-sync__spinner {
-  width: 13px;
-  height: 13px;
+.bulk-sync-toast__end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Centres the 20px buttons on the headline's 14px line. */
+  margin: -3px -3px -3px 0;
+}
+/* Tabular figures: a ticking clock that reflows reads as a glitch. */
+.bulk-sync-toast__clock {
+  margin-right: 6px;
+  color: var(--text-muted);
+  font: 500 10px/1.2 var(--font-sans);
+  font-variant-numeric: tabular-nums;
 }
 .bulk-sync-toast__body {
   flex: 1;
@@ -7047,23 +7060,6 @@ button.agent-menu__item:hover {
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-/* The headline and, on a finish, its duration: the time sits up here so
-   the counts below pair evenly. */
-.bulk-sync-toast__title {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  min-width: 0;
-}
-.bulk-sync-toast__title > .bulk-sync-toast__headline {
-  min-width: 0;
-}
-.bulk-sync-toast__duration {
-  flex: none;
-  color: var(--text-muted);
-  font: 500 10px/1.2 var(--font-sans);
-  font-variant-numeric: tabular-nums;
 }
 /* Finished counts, two to a row, rather than losing the last one (usually
    failed) to the ellipsis. */
@@ -7112,21 +7108,25 @@ button.agent-menu__item:hover {
   animation-play-state: paused;
   background: var(--text-muted);
 }
+/* One tight cluster, as .remote-activity__close: 20px, 2px apart, muted at
+   rest, a fill on hover. 24px boxes 8px apart read as two unrelated
+   controls. */
 .bulk-sync-toast__icon {
   flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: pointer;
 }
 .bulk-sync-toast__icon:hover {
-  border-color: var(--border-subtle);
+  background: var(--bg-panel-hover);
   color: var(--text-primary);
 }
 .bulk-sync-toast__body:focus-visible,

@@ -338,7 +338,7 @@ test("Fetch ▾, the run's dialog and its toast, on contrived repositories", asy
 
     // 4. Drop the wedge: the run ends with failures, and the toast stays.
     for (const socket of held) socket.destroy();
-    await toast.locator(".bulk-sync__mark").waitFor({ timeout: 20_000 });
+    await toast.getByRole("button", { name: "Dismiss" }).waitFor({ timeout: 20_000 });
     await window.waitForTimeout(400);
     await toast.screenshot({ path: join(OUT, "fetch-toast-failed-crop.png") });
 
