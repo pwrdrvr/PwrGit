@@ -167,6 +167,14 @@ in `useBulkSyncRun.ts`:
   the ring; the circular arrow turns); its hover card carries the last
   timed result.
 
+- **Only a clean finish leaves by itself, and it shows its clock.** The
+  toast draws the remote-activity card's green rail; the dismiss timer banks
+  what is left under the pointer and resumes from there, so rail and timer
+  agree. A failure or a cancel draws no rail and stays. The finished line
+  names each outcome in the legend's words ("12 partial"): a repository is
+  `partial` when its pull updated some worktrees and skipped others (dirty,
+  ahead, no upstream), which is most repositories with many agent worktrees.
+
 Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
 
 ## The sidebar footer holds the profile's AI switch

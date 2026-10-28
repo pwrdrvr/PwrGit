@@ -1,7 +1,8 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import type { BulkSyncMode } from "@pwrgit/shared";
 import { CloseGlyph } from "../../lib/CloseGlyph";
 import { ExpandGlyph } from "../../lib/ExpandGlyph";
+import { prefersReducedMotion } from "../../lib/reducedMotion";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { formatElapsed } from "../remote/remote-activity";
 import { useSecondsClock } from "../../state/useRemoteActivity";
@@ -38,7 +39,8 @@ export function BulkSyncToast({
   onExpand,
   onCancel,
   onDismiss,
-  onHold
+  onHold,
+  countdown = null
 }: {
   title: string;
   mode: BulkSyncMode;
@@ -59,6 +61,9 @@ export function BulkSyncToast({
   onDismiss: () => void;
   /** The pointer is over the toast, so a timed dismiss should wait. */
   onHold: (held: boolean) => void;
+  /** A timed dismiss is running: the rail drains with it. Null for a toast
+   *  that stays (live, failed, cancelled). */
+  countdown?: ToastCountdown | null;
 }): ReactElement {
   const tip = useViewportTooltip();
   const live = phase === "running" || phase === "cancelling";
@@ -70,7 +75,7 @@ export function BulkSyncToast({
       ? activity
       : phase === "cancelled"
         ? `${title} — cancelled`
-        : finishedHeadline(mode, total, counts.failed, hasFailures);
+        : finishedHeadline(mode, total);
   const tone = error !== null || (!live && hasFailures)
     ? " is-failed"
     : live
@@ -122,11 +127,10 @@ export function BulkSyncToast({
                 total={total}
                 failed={counts.failed}
               />
+            ) : phase === "cancelled" ? (
+              durationMs !== null && `took ${formatElapsed(durationMs)}`
             ) : (
-              <>
-                {durationMs !== null && `took ${formatElapsed(durationMs)}`}
-                {hasFailures && " · click for details"}
-              </>
+              <FinishedMeta counts={counts} durationMs={durationMs} />
             )}
           </span>
         </button>
@@ -182,22 +186,83 @@ export function BulkSyncToast({
           <i className="is-queued" style={{ flexGrow: queued }} />
         </div>
       )}
+      {countdown !== null && <CountdownRail countdown={countdown} />}
       {tip.tooltipNode}
     </section>
   );
 }
 
-export function finishedHeadline(
-  mode: BulkSyncMode,
-  total: number,
-  failed: number,
-  hasFailures: boolean
-): string {
-  const verb = mode === "fetch"
-    ? `Fetched ${total} ${total === 1 ? "repository" : "repositories"}`
-    : `Pulled safely across ${total} ${total === 1 ? "repository" : "repositories"}`;
-  if (failed > 0) return `${verb} · ${failed} failed`;
-  return hasFailures ? `${verb} · with failures` : verb;
+/**
+ * The finished line names the run and its size only. What went how is the
+ * meta line's job, in the bar's colors, so the part that matters is never
+ * the part an ellipsis cuts off.
+ */
+export function finishedHeadline(mode: BulkSyncMode, total: number): string {
+  const repos = `${total} ${total === 1 ? "repository" : "repositories"}`;
+  return mode === "fetch"
+    ? `Fetched ${repos}`
+    : `Pulled safely across ${repos}`;
+}
+
+/**
+ * Each outcome in the bar, in the dialog legend's words and swatches, so a
+ * yellow segment says "partial" without opening anything.
+ */
+function FinishedMeta({
+  counts,
+  durationMs
+}: {
+  counts: BulkSyncOutcomeCounts;
+  durationMs: number | null;
+}): ReactElement {
+  return (
+    <span className="bulk-sync-toast__counts">
+      {BULK_SYNC_OUTCOMES.filter((outcome) => counts[outcome] > 0).map(
+        (outcome) => (
+          <span key={outcome} className={`bulk-sync-toast__count is-${outcome}`}>
+            <strong>{counts[outcome]}</strong> {outcome}
+          </span>
+        )
+      )}
+      {durationMs !== null && <span>{formatElapsed(durationMs)}</span>}
+    </span>
+  );
+}
+
+export type ToastCountdown = {
+  durationMs: number;
+  /** Held under the pointer: the rail stops where it is. */
+  paused: boolean;
+  /** What is left of the timer now. */
+  leftMs: () => number;
+};
+
+/**
+ * The app toast's countdown, as the remote-activity card draws it: green,
+ * because a draining bar here also means "this went well". The timer banks
+ * what is left while held and the CSS pauses with it, so the two resume
+ * together. Under reduced motion the blanket `animation: none` would leave a
+ * full rail on a card that then vanished, so it steps once a second instead.
+ */
+function CountdownRail({ countdown }: { countdown: ToastCountdown }): ReactElement {
+  const [reduced] = useState(prefersReducedMotion);
+  useSecondsClock(reduced);
+  return (
+    <span
+      className="bulk-sync-toast__rail"
+      aria-hidden="true"
+      data-paused={countdown.paused ? "true" : undefined}
+      style={
+        reduced
+          ? {
+              transform: `scaleX(${(
+                countdown.leftMs() / countdown.durationMs
+              ).toFixed(3)})`
+            }
+          : { animationDuration: `${countdown.durationMs}ms` }
+      }
+    />
+  );
 }
 
 /** The only part of the toast that changes every second. */

@@ -259,6 +259,67 @@ describe("BulkSyncDialog views", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("draws the countdown on a clean finish, and none on a failure", async () => {
+    vi.useFakeTimers();
+    await render({ initial: "toast", onClose: vi.fn() });
+    const rail = () => toast()?.querySelector(".bulk-sync-toast__rail") ?? null;
+    expect(rail()).toBeNull(); // live: nothing is counting down yet
+    await act(async () => {
+      finish(cleanSummary());
+    });
+    expect(rail()?.getAttribute("style")).toContain(`${TOAST_DISMISS_MS}ms`);
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await render({ initial: "toast", onClose: vi.fn() });
+    const failed = cleanSummary();
+    failed.counts.repos = { ...failed.counts.repos, success: 0, failed: 1 };
+    failed.results = [{ ...failed.results[0]!, outcome: "failed" }];
+    await act(async () => {
+      finish(failed);
+    });
+    expect(rail()).toBeNull();
+  });
+
+  it("holds the countdown under the pointer and resumes from what was left", async () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    await render({ initial: "toast", onClose });
+    await act(async () => {
+      finish(cleanSummary());
+    });
+    await act(async () => vi.advanceTimersByTime(4_000));
+    const card = toast()!;
+    await act(async () => {
+      card.dispatchEvent(new Event("pointerover", { bubbles: true }));
+    });
+    expect(card.querySelector(".bulk-sync-toast__rail")?.getAttribute("data-paused")).toBe("true");
+    await act(async () => vi.advanceTimersByTime(30_000));
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => {
+      card.dispatchEvent(new Event("pointerout", { bubbles: true }));
+    });
+    // The 2s the rail still showed, not a fresh 6s.
+    await act(async () => vi.advanceTimersByTime(1_999));
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("names each finished outcome in the bar's words", async () => {
+    vi.useFakeTimers();
+    await render({ initial: "toast", onClose: vi.fn() });
+    const partial = cleanSummary();
+    partial.counts.repos = { ...partial.counts.repos, success: 0, partial: 1 };
+    partial.results = [{ ...partial.results[0]!, outcome: "partial" }];
+    await act(async () => {
+      finish(partial);
+    });
+    const counts = toast()?.querySelector(".bulk-sync-toast__counts");
+    expect(counts?.querySelector(".is-partial")?.textContent).toBe("1 partial");
+    expect(toast()?.textContent).not.toContain("click for details");
+  });
+
   it("draws nothing for a timed run nobody has opened, while still running it", async () => {
     await render({ initial: "hidden", onClose: vi.fn() });
     expect(dialog()).toBeNull();

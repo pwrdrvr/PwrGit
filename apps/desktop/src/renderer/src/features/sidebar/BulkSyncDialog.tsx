@@ -535,16 +535,40 @@ export function BulkSyncDialog({
     return () => window.clearTimeout(timer);
   }, [autoMinimizeMs, canMinimize, switchView, touched, view]);
 
-  // A clean finish in the toast leaves by itself; a failure stays until
-  // someone has read it. Hovering holds it.
+  // A clean finish in the toast leaves by itself, and its rail shows the
+  // time left; a failure stays until someone has read it. Hovering holds it:
+  // the timer banks what is left and resumes from there, as the rail does.
+  // Opening the dialog starts it over.
   const [toastHeld, setToastHeld] = useState(false);
   const cleanFinish =
     summary !== null && !summary.cancelled && !summaryHasFailures(summary);
+  const dismissing = view === "toast" && cleanFinish;
+  const dismissClock = useRef<{ remaining: number; since: number | null }>({
+    remaining: TOAST_DISMISS_MS,
+    since: null
+  });
   useEffect(() => {
-    if (view !== "toast" || !cleanFinish || toastHeld) return;
-    const timer = window.setTimeout(onClose, TOAST_DISMISS_MS);
-    return () => window.clearTimeout(timer);
-  }, [cleanFinish, onClose, toastHeld, view]);
+    if (!dismissing) {
+      dismissClock.current = { remaining: TOAST_DISMISS_MS, since: null };
+      return;
+    }
+    if (toastHeld) return;
+    const from = Date.now();
+    const { remaining } = dismissClock.current;
+    dismissClock.current = { remaining, since: from };
+    const timer = window.setTimeout(onClose, remaining);
+    return () => {
+      window.clearTimeout(timer);
+      dismissClock.current = {
+        remaining: Math.max(0, remaining - (Date.now() - from)),
+        since: null
+      };
+    };
+  }, [dismissing, onClose, toastHeld]);
+  const dismissLeft = useCallback((): number => {
+    const { remaining, since } = dismissClock.current;
+    return Math.max(0, since === null ? remaining : remaining - (Date.now() - since));
+  }, []);
 
   if (view === "hidden") return null;
 
@@ -568,6 +592,15 @@ export function BulkSyncDialog({
         onCancel={() => void cancel()}
         onDismiss={onClose}
         onHold={setToastHeld}
+        countdown={
+          dismissing
+            ? {
+                durationMs: TOAST_DISMISS_MS,
+                paused: toastHeld,
+                leftMs: dismissLeft
+              }
+            : null
+        }
       />
     );
   }

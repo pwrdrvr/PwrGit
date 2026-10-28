@@ -6933,6 +6933,8 @@ button.agent-menu__item:hover {
    Review.dc.html, 2c–2e. */
 .bulk-sync-toast {
   position: fixed;
+  /* Clips the countdown rail to the rounded corners. */
+  overflow: hidden;
   left: 16px;
   bottom: 48px;
   z-index: 100;
@@ -6984,6 +6986,45 @@ button.agent-menu__item:hover {
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.bulk-sync-toast__counts {
+  display: inline-flex;
+  gap: 4px 9px;
+}
+.bulk-sync-toast__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bulk-sync-toast__count::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--bulk-sync-outcome);
+  content: "";
+}
+.bulk-sync-toast__count strong {
+  color: var(--text-secondary);
+  font-weight: 650;
+}
+.bulk-sync-toast__count.is-failed strong {
+  color: var(--danger-text);
+}
+/* The remote-activity card's rail (`.remote-activity__rail`): green, because
+   only a clean finish drains. */
+.bulk-sync-toast__rail {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--status-ok);
+  transform-origin: left center;
+  animation: remote-activity-countdown linear forwards;
+}
+.bulk-sync-toast__rail[data-paused="true"] {
+  animation-play-state: paused;
+  background: var(--text-muted);
 }
 .bulk-sync-toast__icon {
   flex: 0 0 auto;
@@ -7151,15 +7192,18 @@ button.agent-menu__item:hover {
    base: --status-error sat too close to the light theme's warning brown to
    read as a different outcome. */
 .bulk-sync__status .is-success,
-.bulk-sync-toast__bar > .is-success {
+.bulk-sync-toast__bar > .is-success,
+.bulk-sync-toast__count.is-success {
   --bulk-sync-outcome: var(--status-ok);
 }
 .bulk-sync__status .is-partial,
-.bulk-sync-toast__bar > .is-partial {
+.bulk-sync-toast__bar > .is-partial,
+.bulk-sync-toast__count.is-partial {
   --bulk-sync-outcome: var(--status-warning);
 }
 .bulk-sync__status .is-skipped,
-.bulk-sync-toast__bar > .is-skipped {
+.bulk-sync-toast__bar > .is-skipped,
+.bulk-sync-toast__count.is-skipped {
   --bulk-sync-outcome: color-mix(
     in srgb,
     var(--status-warning) 50%,
@@ -7167,11 +7211,13 @@ button.agent-menu__item:hover {
   );
 }
 .bulk-sync__status .is-failed,
-.bulk-sync-toast__bar > .is-failed {
+.bulk-sync-toast__bar > .is-failed,
+.bulk-sync-toast__count.is-failed {
   --bulk-sync-outcome: var(--danger-base);
 }
 .bulk-sync__status .is-cancelled,
-.bulk-sync-toast__bar > .is-cancelled {
+.bulk-sync-toast__bar > .is-cancelled,
+.bulk-sync-toast__count.is-cancelled {
   --bulk-sync-outcome: var(--status-suspended);
 }
 /* In flight is the one accent in the bar, and the one moving part. The global
