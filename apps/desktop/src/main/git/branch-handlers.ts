@@ -120,7 +120,7 @@ export function registerBranchHandlers(
     for (const worktree of worktrees) {
       emitEvent("worktree:changed", { worktreeId: worktree.id });
     }
-    emitEvent("repo:changed", { profileId });
+    emitEvent("repo:changed", { profileId, repoIds: [repoId] });
   };
 
   bus.register("worktree:readDirty", async (req) => {
@@ -251,7 +251,10 @@ export function registerBranchHandlers(
       );
       await indexer.refreshRepoWorktrees(row.repo_id);
       refresher.refreshWorktree(req.worktreeId);
-      emitEvent("repo:changed", { profileId: row.profile_id });
+      emitEvent("repo:changed", {
+      profileId: row.profile_id,
+      repoIds: [row.repo_id]
+    });
       return ok({
         checkedOutWorktreeId: req.worktreeId,
         worktreePath: null
@@ -291,7 +294,10 @@ export function registerBranchHandlers(
     // repo-wide, so invalidate the repository instead of pretending one
     // worktree's own state moved.
     emitEvent("graph:changed", { repoId: row.repo_id });
-    emitEvent("repo:changed", { profileId: row.profile_id });
+    emitEvent("repo:changed", {
+      profileId: row.profile_id,
+      repoIds: [row.repo_id]
+    });
 
     // A branch is checked out in at most one worktree, so the branch name
     // identifies the row the refresh just indexed. Reading it back beats
@@ -335,7 +341,10 @@ export function registerBranchHandlers(
     // sidebar all reflect the new checkout.
     await indexer.refreshRepoWorktrees(row.repo_id);
     refresher.refreshWorktree(req.worktreeId);
-    emitEvent("repo:changed", { profileId: row.profile_id });
+    emitEvent("repo:changed", {
+      profileId: row.profile_id,
+      repoIds: [row.repo_id]
+    });
     return ok({ carried: result.value.carried });
   });
 

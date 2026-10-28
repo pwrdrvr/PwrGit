@@ -11,6 +11,7 @@ import { basename, join } from "node:path";
 import {
   changeRequestLocalBranch,
   changeRequestNumberQuery,
+  claimWorktreeOwnership,
   err,
   ok,
   toForgeHost,
@@ -45,7 +46,6 @@ import {
   type WorktreeInfo
 } from "./git-service";
 import { SEARCH_ROW_REPO_SQL, visibleRepoSql } from "./hidden-repos";
-import { claimWorktreeOwnership } from "./repo-ownership";
 import { forgetVanishedWorktrees } from "./vanished-worktrees";
 import { checkoutExists } from "./worktree-liveness";
 import { forkSourceFromRow } from "./worktree-state";
@@ -497,11 +497,15 @@ export class RepoIndexer {
   }
 
   /** `includeHidden` is for callers asking what is on disk rather than what
-   *  to show — clone's "already cloned" and fork's "Reveal checkout". */
+   *  to show — clone's "already cloned" and fork's "Reveal checkout".
+   *  `repoIds` reads only those rows: a `repo:changed` that names its
+   *  repositories is answered with them, not with the whole profile. */
   listRepos(
     profileId: ProfileId,
-    options: { includeHidden?: boolean } = {}
+    options: { includeHidden?: boolean; repoIds?: readonly string[] } = {}
   ): Repo[] {
+    const only = options.repoIds;
+    if (only !== undefined && only.length === 0) return [];
     // NOCASE so "apple" sorts next to "Apple" rather than after "Zebra" —
     // SQLite's default TEXT collation is binary (all uppercase before any
     // lowercase). The trailing `name` breaks NOCASE ties deterministically.
@@ -518,13 +522,14 @@ export class RepoIndexer {
         `SELECT id, profile_id, name, path, pinned, custom_order FROM repos r
          WHERE profile_id = ?
            ${options.includeHidden === true ? "" : `AND ${visibleRepoSql("r")}`}
+           ${only === undefined ? "" : `AND r.id IN (${only.map(() => "?").join(", ")})`}
          ORDER BY pinned DESC, (custom_order IS NULL), custom_order,
                   name COLLATE NOCASE, name`
       )
-      .all(profileId) as RepoRow[];
+      .all(profileId, ...(only ?? [])) as RepoRow[];
     // Ownership filter: a fossil DB (older builds) can hold the same worktree
     // under two repos, which renders as two "selected" rows at once.
-    const identities = this.identityRows(profileId);
+    const identities = this.identityRows(profileId, only);
     return claimWorktreeOwnership(
       repoRows.map((r) => this.repoFromRow(r, identities.get(r.id) ?? null))
     );
@@ -1526,7 +1531,10 @@ export class RepoIndexer {
   }
 
   /** Every stored identity for one profile, keyed by repo id. */
-  private identityRows(profileId: ProfileId): Map<string, RepoIdentityRow> {
+  private identityRows(
+    profileId: ProfileId,
+    repoIds?: readonly string[]
+  ): Map<string, RepoIdentityRow> {
     const rows = this.db
       .prepare(
         `SELECT i.repo_id, i.host, i.hostname, i.owner, i.name, i.visibility,
@@ -1534,9 +1542,10 @@ export class RepoIndexer {
                 i.remote_hosts, i.viewer_can_push, i.fetched_at
          FROM repo_identity i
          JOIN repos r ON r.id = i.repo_id
-         WHERE r.profile_id = ?`
+         WHERE r.profile_id = ?
+           ${repoIds === undefined ? "" : `AND r.id IN (${repoIds.map(() => "?").join(", ")})`}`
       )
-      .all(profileId) as RepoIdentityRow[];
+      .all(profileId, ...(repoIds ?? [])) as RepoIdentityRow[];
     return new Map(rows.map((row) => [row.repo_id, row]));
   }
 

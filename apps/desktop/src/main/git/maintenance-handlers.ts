@@ -167,7 +167,7 @@ export function registerMaintenanceHandlers(
     logMain("info", "maintenance", `restored ${req.branch} at ${req.head.slice(0, 12)} in ${repo.path}`);
     await indexer.refreshRepoWorktrees(repo.id);
     emitEvent("graph:changed", { repoId: repo.id });
-    emitEvent("repo:changed", { profileId: repo.profileId });
+    emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repo.id] });
     return ok(null);
   });
 
@@ -508,7 +508,7 @@ export function registerMaintenanceHandlers(
                 };
               }
               emitEvent("graph:changed", { repoId: repo.id });
-              emitEvent("repo:changed", { profileId: repo.profileId });
+              emitEvent("repo:changed", { profileId: repo.profileId, repoIds: [repo.id] });
             }
           } catch (cause) {
             result = {

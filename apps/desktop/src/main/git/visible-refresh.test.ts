@@ -80,7 +80,8 @@ describe("VisibleWorktreeRefresher", () => {
       emit: {
         worktreeChanged: (id) => emitted.push(`wt:${id}`),
         graphChanged: (id) => emitted.push(`graph:${id}`),
-        repoChanged: (id) => emitted.push(`repo:${id}`)
+        repoChanged: (id, repoIds) =>
+          emitted.push(`repo:${id}:${[...repoIds].sort().join(",")}`)
       },
       isFocused: () => focused,
       now: () => clock,
@@ -177,13 +178,18 @@ describe("VisibleWorktreeRefresher", () => {
 
   // A batch of eight changed rows is one sidebar reload per profile and one
   // graph invalidation per repository, not eight of each.
+  // The repo event names its repositories, so a window re-reads only those
+  // rows rather than its whole profile (useRepoTree's reloadChanged).
   it("emits once per repository and per profile for a whole round", async () => {
     addRepo("p", "a", ["a1", "a2"]);
+    addRepo("p", "c", ["c1"]);
+    addRepo("p", "quiet", ["quiet1"]);
     addRepo("q", "b", ["b1"]);
-    refresher.report(1, ["a1", "a2"]);
+    refresher.report(1, ["a1", "a2", "c1", "quiet1"]);
     refresher.report(2, ["b1"]);
     behindNext.set("a1", 3);
     behindNext.set("a2", 1);
+    behindNext.set("c1", 2);
     behindNext.set("b1", 7);
     clock += VISIBLE_STALE_MS;
 
@@ -191,15 +197,17 @@ describe("VisibleWorktreeRefresher", () => {
     expect(emitted.filter((e) => e.startsWith("wt:")).sort()).toEqual([
       "wt:a1",
       "wt:a2",
-      "wt:b1"
+      "wt:b1",
+      "wt:c1"
     ]);
     expect(emitted.filter((e) => e.startsWith("graph:")).sort()).toEqual([
       "graph:a",
-      "graph:b"
+      "graph:b",
+      "graph:c"
     ]);
     expect(emitted.filter((e) => e.startsWith("repo:")).sort()).toEqual([
-      "repo:p",
-      "repo:q"
+      "repo:p:a,c",
+      "repo:q:b"
     ]);
   });
 

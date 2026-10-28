@@ -70,6 +70,8 @@ import {
   type RepoIndexFit
 } from "./repo-index";
 import { BulkSyncDialog } from "./BulkSyncDialog";
+import { FIRST_RUN_MINIMIZE_MS } from "./bulk-sync-prefs";
+import { useBulkSyncRun } from "./useBulkSyncRun";
 import { MaintenanceDialog } from "./MaintenanceDialog";
 import { HiddenReposButton } from "./HiddenReposButton";
 import { RemoveRepositoryDialog } from "./RemoveRepositoryDialog";
@@ -81,6 +83,7 @@ import {
   filterReposByLens,
   FOCUS_REPO_LIMIT,
   focusedRepoPage,
+  focusedRepos,
   focusReasonForRepo,
   groupReposByRoot,
   LENS_EMPTY_COPY,
@@ -323,9 +326,6 @@ export function Sidebar({
   const [sortByRepo, setSortByRepo] = useState<Record<string, WorktreeSort>>({});
   const [orderByRepo, setOrderByRepo] = useState<Record<string, string[]>>({});
   const [newWorktree, setNewWorktree] = useState<NewWorktreeState | null>(null);
-  const [bulkSyncMode, setBulkSyncMode] = useState<
-    "fetch" | "soft-pull" | null
-  >(null);
   /** The maintenance dialog, and — when the refs browser opened it — the one
    *  repository it reviews, or the Prune worktrees tab it opens on. Prune
    *  has no repository scope; it reviews the whole profile. */
@@ -606,7 +606,19 @@ export function Sidebar({
     setSel({ repoId: "", ids: EMPTY_IDS, anchor: null });
 
   const focusContext = { selectedWorktreeId, visits: focusVisits };
-  const counts = lensCounts(repos, now, focusContext);
+  // Fetch recent fetches the Focused list, every page of it; the lens count
+  // reads the same list rather than walking the ladder again.
+  const recentRepos = useMemo(
+    () =>
+      focusedRepos(repos, { selectedWorktreeId, visits: focusVisits }, now),
+    [focusVisits, now, repos, selectedWorktreeId]
+  );
+  const counts = lensCounts(repos, now, focusContext, recentRepos);
+  const bulk = useBulkSyncRun({
+    profileId: activeProfile?.id ?? null,
+    repos,
+    recentRepos
+  });
   // Where a window with no remembered lens lands, decided once — the first
   // time repos actually arrive, because until then every count is 0 and
   // "empty" and "not read yet" look identical.
@@ -1300,8 +1312,15 @@ export function Sidebar({
         onAddFolder={onAddFolder}
         onClone={onCloneRepo}
         onFork={() => void openFork()}
-        onFetchAll={() => setBulkSyncMode("fetch")}
-        onPullAll={() => setBulkSyncMode("soft-pull")}
+        recentCount={recentRepos.length}
+        syncVerb={bulk.verb}
+        syncScope={bulk.scope}
+        fetchInterval={bulk.interval}
+        syncBusy={bulk.busy}
+        lastAutoFetch={bulk.lastAutoFetch}
+        onSync={bulk.runFace}
+        onPickSync={bulk.pick}
+        onPickFetchInterval={bulk.pickInterval}
         onMaintenance={() => setMaintenance({})}
       />
 
@@ -1523,13 +1542,24 @@ export function Sidebar({
         />
       )}
 
-      {bulkSyncMode !== null && activeProfile !== null && (
+      {bulk.run !== null && activeProfile !== null && (
         <BulkSyncDialog
+          key={bulk.run.key}
           profileId={activeProfile.id}
-          repos={repos}
-          mode={bulkSyncMode}
+          repos={bulk.run.repos}
+          {...(bulk.run.repoIds === undefined
+            ? {}
+            : { repoIds: bulk.run.repoIds })}
+          scope={bulk.run.scope}
+          mode={bulk.run.mode}
           platform={platform}
-          onClose={() => setBulkSyncMode(null)}
+          view={bulk.run.view}
+          autoMinimizeMs={
+            bulk.run.autoMinimize ? FIRST_RUN_MINIMIZE_MS : null
+          }
+          onViewChange={bulk.setView}
+          onFinished={bulk.finish}
+          onClose={bulk.close}
         />
       )}
       {maintenance !== null && activeProfile !== null && (

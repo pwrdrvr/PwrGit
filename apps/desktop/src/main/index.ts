@@ -877,7 +877,10 @@ if (!gotSingleInstanceLock) {
               if (refresh.outcome === "deindexed") {
                 emitEvent("repo:changed", { profileId: refresh.profileId });
               } else if (refresh.removed > 0) {
-                emitEvent("repo:changed", { profileId: refresh.repo.profileId });
+                emitEvent("repo:changed", {
+                  profileId: refresh.repo.profileId,
+                  repoIds: [refresh.repo.id]
+                });
               }
             })
             .catch((cause) => {
@@ -1127,7 +1130,8 @@ if (!gotSingleInstanceLock) {
         worktreeChanged: (worktreeId) =>
           emitEvent("worktree:changed", { worktreeId }),
         graphChanged: (repoId) => emitEvent("graph:changed", { repoId }),
-        repoChanged: (profileId) => emitEvent("repo:changed", { profileId })
+        repoChanged: (profileId, repoIds) =>
+          emitEvent("repo:changed", { profileId, repoIds })
       },
       isFocused: () => BrowserWindow.getFocusedWindow() !== null
     });

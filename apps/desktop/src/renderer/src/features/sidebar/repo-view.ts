@@ -464,10 +464,12 @@ function repoHasPrunable(r: Repo, now: number): boolean {
 export function lensCounts(
   repos: Repo[],
   now: number = Date.now(),
-  focus: FocusContext = { selectedWorktreeId: null, visits: {} }
+  focus: FocusContext = { selectedWorktreeId: null, visits: {} },
+  /** The Focused list, when the caller already has it (Fetch recent does). */
+  focused: readonly Repo[] = focusedRepos(repos, focus, now)
 ): Record<Lens, number> {
   return {
-    Focused: focusedRepos(repos, focus, now).length,
+    Focused: focused.length,
     Pinned: repos.filter(repoIsPinned).length,
     Behind: repos.filter((r) => r.worktrees.some((w) => w.behind > 0)).length,
     Stale: repos.filter((r) => repoHasPrunable(r, now)).length,

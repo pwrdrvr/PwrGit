@@ -52,7 +52,10 @@ export function registerWorktreeLifecycleHandlers(
     });
     if (!added.ok) return added;
     await indexer.refreshRepoWorktrees(repo.id);
-    emitEvent("repo:changed", { profileId: repo.profile_id });
+    emitEvent("repo:changed", {
+      profileId: repo.profile_id,
+      repoIds: [repo.id]
+    });
     // Hand the new worktree's id back so the caller can select it. A branch is
     // checked out in at most one worktree, so its name identifies the row the
     // refresh just indexed — reading it back beats rebuilding the id from a

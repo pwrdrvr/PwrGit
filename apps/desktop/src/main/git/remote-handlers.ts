@@ -371,7 +371,21 @@ export function registerRemoteHandlers(
     if (indexer === undefined) return;
     try {
       const refreshed = await indexer.refreshRepoRemoteBranches(repoId);
-      if (!refreshed.ok) {
+      if (refreshed.ok) {
+        // The refs listing moved even when no checkout's state did (a new
+        // branch on a remote), and the worktree refresh announces only state.
+        // Name the repository, so the sidebar re-reads its row and its
+        // Branches and Remotes sections reload; nothing else does.
+        const row = db
+          .prepare("SELECT profile_id FROM repos WHERE id = ?")
+          .get(repoId) as { profile_id: string } | undefined;
+        if (row !== undefined) {
+          emitEvent("repo:changed", {
+            profileId: row.profile_id,
+            repoIds: [repoId]
+          });
+        }
+      } else {
         logMain(
           "warn",
           "remote",

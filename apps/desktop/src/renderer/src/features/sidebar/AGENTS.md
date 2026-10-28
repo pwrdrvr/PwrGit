@@ -119,13 +119,14 @@ unless widened. The search line's This profile / All profiles control
 ## The sidebar's actions are one toolbar row; search is in the title strip
 
 `SidebarToolbar` holds Add ▾ (Add folders, Clone, Fork through
-`ContextMenu`), Fetch all, Pull all, and the maintenance wrench. The jump
-field is in the title strip (`TitleBar`'s `.titlebar-jump`, `onOpenSearch`).
+`ContextMenu`), the one sync button (Fetch ▾ / Pull ▾, below), and the
+maintenance wrench. The jump field is in the title strip (`TitleBar`'s
+`.titlebar-jump`, `onOpenSearch`).
 
 - **Names outlive labels.** Short labels ("Fetch all") hide at narrow widths.
-  Accessible names ("Fetch all repos", "Try pull all", "Repository
-  maintenance…", "Add repositories") contain the visible label (SC 2.5.3).
-  E2E finds buttons by name; rename only with the specs.
+  Accessible names ("Fetch all repos" or the sync face's other names,
+  "Repository maintenance…", "Add repositories") contain the visible label
+  (SC 2.5.3). E2E finds buttons by name; rename only with the specs.
 - **A disabled menu entry explains itself** with `hint` from
   `addMenuReasons`. Do not remove it from the menu.
 - **Day one lives in the empty list.** With no folder, `.sidebar__start`
@@ -133,6 +134,48 @@ field is in the title strip (`TitleBar`'s `.titlebar-jump`, `onOpenSearch`).
   `clickAddFolders` (`e2e/fixtures/steps.ts`) handles both places.
 
 Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3.
+
+## One sync button (Fetch ▾ / Pull ▾) and the bulk-sync run
+
+Fetch and Try pull are one split button: Try pull already fetches every
+repository before it fast-forwards, so two buttons offered the same first
+half twice (and fought over the row's width). The face runs the remembered
+verb and scope — Fetch or Pull, `all` or `recent` (the Focused list from
+`focusedRepos`, every page of it) — and its accessible name keeps the old
+buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
+"Try pull recent". The chevron ("Sync options") lists those four, picking
+one runs it, and then **Fetch automatically**. Verb, scope, interval and
+view live in `bulk-sync-prefs.ts` (`localStorage`, per machine). Rules, all
+in `useBulkSyncRun.ts`:
+
+- **Timed runs only fetch**, whatever the face says. Pulling on a timer would
+  move checkouts under the reader.
+- **The run is not the dialog.** `BulkSyncDialog` owns the operation and
+  draws it as `dialog`, `toast` or `hidden`; unmounting it still cancels. So
+  while a run is live, Escape and a backdrop click **minimise**, never
+  cancel. Once it has finished they close, as before.
+- **One run at a time** (`nextBulkSyncRun`, pure and tested). A click on a
+  live run shows it instead of starting another; a timed tick skips it.
+- **The view is remembered.** Minimising writes `toast`, expanding writes
+  `dialog`. With nothing written yet, the first dialog minimises itself
+  after `FIRST_RUN_MINIMIZE_MS` unless the pointer moved or a key was
+  pressed inside it (focus is no signal: the dialog takes it). E2E specs
+  that read the dialog write `dialog` first, or a slow runner loses it.
+- **Timed runs are `hidden`.** At one minute a toast would be up a third of
+  the time, and a repository that always fails would raise one every tick.
+  The face shows `aria-busy` while any run is going (Pull's arrow swaps to
+  the ring; the circular arrow turns); its hover card carries the last
+  timed result.
+
+- **Only a clean finish leaves by itself, and it shows its clock.** The
+  toast draws the remote-activity card's green rail; the dismiss timer banks
+  what is left under the pointer and resumes from there, so rail and timer
+  agree. A failure or a cancel draws no rail and stays. The finished line
+  names each outcome in the legend's words ("12 partial"): a repository is
+  `partial` when its pull updated some worktrees and skipped others (dirty,
+  ahead, no upstream), which is most repositories with many agent worktrees.
+
+Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
 
 ## The sidebar footer holds the profile's AI switch
 
@@ -352,6 +395,11 @@ runs `useStepLadder` (`section-fit.tsx`; step CSS in `app.css`). Design: `design
 - **A section with its own data calls `useRefitSections()`**, as
   `RepoRefsSections` and `RepoChangeRequestSection` do: it re-renders after
   `RepoRow`.
+- **A reload keeps the last answer on screen.** A section reloads when its
+  `Repo` object changes. `useRepoTree` swaps in only the repositories a
+  `repo:changed` names, but one without `repoIds` replaces every object.
+  Draw "…" only before the first answer, and let only the newest reload
+  land, as `RepoRefsSections` does.
 - **The ladder observes `.repo-block`, not `.repo-sections`.** The sections
   unmount with the disclosure, so a mount-time observer would watch a
   detached node after re-expand.

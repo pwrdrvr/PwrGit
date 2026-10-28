@@ -1544,7 +1544,9 @@ describe("remote handlers", () => {
 
   it("refreshes remote-branch search after fetching repository refs", async () => {
     const db = {
-      prepare: vi.fn(() => ({ get: vi.fn(() => ({ path: "/repos/project" })) }))
+      prepare: vi.fn(() => ({
+        get: vi.fn(() => ({ path: "/repos/project", profile_id: "profile-1" }))
+      }))
     } as unknown as DB;
     const refresher = {
       refreshWorktree: vi.fn(async () => undefined),
@@ -1569,6 +1571,12 @@ describe("remote handlers", () => {
     expect(indexer.refreshRepoRemoteBranches).toHaveBeenCalledExactlyOnceWith(
       "repo-1"
     );
+    // A new remote branch moves no checkout's state, so this event is the
+    // only thing that reloads the sidebar's Branches and Remotes for it.
+    expect(emitEvent).toHaveBeenCalledWith("repo:changed", {
+      profileId: "profile-1",
+      repoIds: ["repo-1"]
+    });
 
     vi.mocked(indexer.refreshRepoRemoteBranches).mockClear();
     await expect(
