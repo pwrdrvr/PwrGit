@@ -8,6 +8,7 @@ import {
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import {
   type BranchRef,
   type BranchTrackingStatus,
@@ -214,7 +215,10 @@ export async function readChanges(
       // parent status to recurse into it duplicates that state and can turn a
       // 20-child parent refresh into a long synchronous walk. Commit-pin
       // mismatches still appear as changes.
-      "--ignore-submodules=dirty"
+      "--ignore-submodules=dirty",
+      // An agent's worktree inside this checkout is another checkout, not
+      // content to stage.
+      ...(await nestedWorktreePathspec(cwd))
     ],
     cwd,
     NO_OPTIONAL_LOCKS
@@ -239,7 +243,9 @@ export async function readCheckoutDirtyCount(
     "status",
     "--porcelain=v2",
     "--untracked-files=normal",
-    "--ignore-submodules=none"
+    "--ignore-submodules=none",
+    // A nested worktree of this repository is never carried by a switch.
+    ...(await nestedWorktreePathspec(cwd))
   ];
   const raw = await git(args, cwd, NO_OPTIONAL_LOCKS);
   if (!raw.ok) return raw;
@@ -1958,7 +1964,10 @@ async function requireCleanWorktree(
   git: GitExec,
   cwd: string
 ): Promise<Result<void>> {
-  const statusRaw = await git(["status", "--porcelain"], cwd);
+  const statusRaw = await git(
+    ["status", "--porcelain", ...(await nestedWorktreePathspec(cwd))],
+    cwd
+  );
   if (!statusRaw.ok) return statusRaw;
   const status = requireExit0(statusRaw.value, ["status"]);
   if (!status.ok) return status;
@@ -2072,7 +2081,9 @@ export async function inspectRemoteDivergence(
   if (!upstream.ok) return upstream;
 
   const [statusRaw, comparison] = await Promise.all([
-    git(["status", "--porcelain"], cwd),
+    nestedWorktreePathspec(cwd).then((nested) =>
+      git(["status", "--porcelain", ...nested], cwd)
+    ),
     compareCommitRanges(git, cwd, ref ?? "@{u}")
   ]);
   if (!statusRaw.ok) return statusRaw;
@@ -3100,7 +3111,12 @@ export async function pullFastForward(
     .filter((path) => path !== "");
 
   onProgress("prepare");
-  const statusRaw = await pullGit(["status", "--porcelain"], cwd);
+  // A nested agent worktree alone must not make the pull stash: git skips it
+  // ("Ignoring path") and would record an empty stash.
+  const statusRaw = await pullGit(
+    ["status", "--porcelain", ...(await nestedWorktreePathspec(cwd))],
+    cwd
+  );
   if (!statusRaw.ok) return statusRaw;
   const status = requireExit0(statusRaw.value, ["status", "--porcelain"]);
   if (!status.ok) return status;

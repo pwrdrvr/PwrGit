@@ -18,7 +18,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./access-policy": "./src/access-policy.ts",
-    "./agent-access-protocol": "./src/agent-access-protocol.ts"
+    "./agent-access-protocol": "./src/agent-access-protocol.ts",
+    "./nested-worktrees": "./src/nested-worktrees.ts"
   },
   "scripts": {
     "build": "node ../../scripts/resource-run.mjs node ../../node_modules/typescript/lib/tsc.js -p tsconfig.build.json",

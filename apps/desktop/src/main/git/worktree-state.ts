@@ -7,6 +7,7 @@ import type { DB } from "../persistence/db";
 import { mapLimit } from "../util/map-limit";
 import { NO_OPTIONAL_LOCKS, requireExit0, type GitExec } from "./dugite";
 import { checkoutExists } from "./worktree-liveness";
+import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 
 /** A probe found `branch`'s configured upstream deleted. */
@@ -518,7 +519,10 @@ export class WorktreeStateService {
         // Coarse dirtiness is also a checkout-safety signal. Dirty initialized
         // children must keep this count nonzero or a cached clean state can
         // suppress the branch-switch confirmation.
-        "--ignore-submodules=none"
+        "--ignore-submodules=none",
+        // An agent's worktree nested in this one (`.claude/worktrees/x`) is
+        // another checkout with its own row, not this one's dirt.
+        ...(await nestedWorktreePathspec(wt.path))
       ],
       wt.path,
       NO_OPTIONAL_LOCKS

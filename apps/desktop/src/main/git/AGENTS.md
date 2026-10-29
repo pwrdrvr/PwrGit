@@ -208,6 +208,20 @@ the only signal that reloads that repository's Branches and Remotes.
 on `/`. Do not use `node:path`, `sep`, or `join()`, which makes backslashes
 that git never emits.
 
+## A nested agent worktree is not a change
+
+Agents put worktrees inside the repository (`.claude/worktrees/<name>`).
+`git status` reports each one as an untracked folder, so a clean primary read
+`●1` and every branch switch asked about it. Any status read that becomes a
+dirty count or a change list appends `nestedWorktreePathspec(cwd)`
+(`@pwrgit/mcp-server/nested-worktrees`): exclude pathspecs for this
+repository's linked worktrees inside `cwd`.
+
+- It is fs-only (no Git process) and keeps a real file beside the worktree
+  visible. A folder whose `.git` link is gone counts as content again.
+- Removal checks (`worktreeRemove`, `repo-removal.ts`) deliberately do not use
+  it: deleting the folder deletes the nested checkout too.
+
 ## Batched pathspecs are all-or-nothing
 
 `runBatched` splits long path lists across several git runs, because Windows
