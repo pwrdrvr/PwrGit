@@ -91,6 +91,40 @@ it("labels no-upstream commit counts without inventing a tracked destination", (
   expect(markup).not.toContain("to push to the branch it tracks");
 });
 
+describe("WorktreeRow — commits that landed under another name", () => {
+  const head = "0123456789abcdef0123456789abcdef01234567";
+  const merged = {
+    number: 116,
+    url: "https://example.test/acme/widget/pull/116",
+    title: "Pinned runner readiness",
+    state: "merged" as const,
+    isDraft: false,
+    headOid: head
+  };
+
+  it("drops the ↑N beside the merged chip when the tip is the change request's head", () => {
+    const markup = render(
+      worktree({ ahead: 2, tracking: "unpublished", head, pr: merged })
+    );
+    expect(markup).not.toContain("↑2");
+    expect(markup).not.toContain("not on fetched remote branches");
+    expect(markup).toContain("merged #116");
+  });
+
+  it("keeps the ↑N once the tip moved on after the merge", () => {
+    const markup = render(
+      worktree({
+        ahead: 3,
+        tracking: "unpublished",
+        head: "fedcba9876543210fedcba9876543210fedcba98",
+        pr: merged
+      })
+    );
+    expect(markup).toContain("↑3");
+    expect(markup).toContain("not on fetched remote branches; no upstream configured");
+  });
+});
+
 describe("WorktreeRow — what Pull would bring in", () => {
   const source = {
     remote: "upstream",

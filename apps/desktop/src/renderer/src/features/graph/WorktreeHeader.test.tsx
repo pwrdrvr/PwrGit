@@ -3008,6 +3008,74 @@ describe("WorktreeHeader publishes a branch Push has nowhere to send", () => {
     expect(container.querySelector(".sync-chip:not(.sync-chip--drift)")?.textContent).toBe("no upstream");
   });
 
+  describe("a tip that is a merged change request's head", () => {
+    const head = "0123456789abcdef0123456789abcdef01234567";
+    const merged = {
+      number: 116,
+      url: "https://example.test/acme/widget/pull/116",
+      title: "Pinned runner readiness",
+      state: "merged" as const,
+      isDraft: false,
+      forge: "github" as const,
+      headOid: head
+    };
+    const chip = (): Element | null =>
+      container.querySelector(".sync-chip:not(.sync-chip--drift)");
+    const tooltipOf = async (element: Element | null): Promise<string | null | undefined> => {
+      await act(async () => element?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+      return document.querySelector('[role="tooltip"]')?.textContent;
+    };
+
+    it("says the commits landed rather than that they are local work", async () => {
+      await mount({
+        row: { ...unpublishedRow, ahead: 2, head, pr: merged },
+        state: snapshot({ ahead: 2, head })
+      });
+      expect(chip()?.textContent).toBe("landed in #116");
+      expect(chip()?.className).toContain("sync-chip--muted");
+      expect(chip()?.getAttribute("data-mid")).toBe("landed #116");
+      expect(chip()?.getAttribute("data-short")).toBe("landed");
+      expect(await tooltipOf(chip())).toBe(
+        "These 2 commits are pull request #116's head, which was merged. " +
+          "Its remote branch is gone, so no remote branch holds them."
+      );
+    });
+
+    it("speaks of one commit in the singular, and in the forge's own words", async () => {
+      await mount({
+        row: {
+          ...unpublishedRow,
+          ahead: 1,
+          head,
+          pr: { ...merged, number: 41, forge: "gitlab" }
+        },
+        state: snapshot({ ahead: 1, head })
+      });
+      expect(chip()?.textContent).toBe("landed in !41");
+      expect(await tooltipOf(chip())).toBe(
+        "This commit is merge request !41's head, which was merged. " +
+          "Its remote branch is gone, so no remote branch holds it."
+      );
+    });
+
+    it("keeps counting local work once the tip moved on after the merge", async () => {
+      const moved = "fedcba9876543210fedcba9876543210fedcba98";
+      await mount({
+        row: { ...unpublishedRow, ahead: 3, head: moved, pr: merged },
+        state: snapshot({ ahead: 3, head: moved })
+      });
+      expect(chip()?.textContent).toBe("↑3 local · no upstream");
+    });
+
+    it("keeps counting local work for a change request that is still open", async () => {
+      await mount({
+        row: { ...unpublishedRow, ahead: 2, head, pr: { ...merged, state: "open" } },
+        state: snapshot({ ahead: 2, head })
+      });
+      expect(chip()?.textContent).toBe("↑2 local · no upstream");
+    });
+  });
+
   it("asks where to publish, and pushes nothing until it is answered", async () => {
     await mount();
     await clickPush();

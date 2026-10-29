@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type { Worktree } from "@pwrgit/shared";
+import { worktreeLandedChangeRequest, type Worktree } from "@pwrgit/shared";
 import {
   currentPlatform,
   elidePathMiddle,
@@ -104,6 +104,11 @@ export function WorktreeRow({
   // was deleted; "gone" beside it said the same thing twice.
   const showsPr = worktree.pr !== undefined && !worktree.isDefaultBranch;
   const prSettled = showsPr && worktree.pr?.state !== "open";
+  // No upstream, and the tip IS a merged change request's head: its commits
+  // are on no remote ref only because that branch was deleted after the
+  // merge. The "merged" chip says where they went, so an ↑N claiming unpushed
+  // work beside it is dropped (the header's "landed in #N" is the same rule).
+  const landed = showsPr && worktreeLandedChangeRequest(worktree) !== null;
   // The primary checkout sits in the repo's own directory, which the folder row
   // directly above already names — repeating it on every repo's first row would
   // be noise, so only linked worktrees carry the folder.
@@ -305,7 +310,7 @@ export function WorktreeRow({
       {/* On a fork row whose source has commits, the source badge carries the
           branch's own ↑ against the source, as the header's `↓12 upstream ·
           ↑2` does; an ↑ against origin beside it counted something else. */}
-      {!missing && worktree.ahead > 0 && pull?.kind !== "source" && (
+      {!missing && worktree.ahead > 0 && !landed && pull?.kind !== "source" && (
         <>
           <span className="badge-text badge-text--ok" aria-hidden="true">
             ↑{worktree.ahead}
