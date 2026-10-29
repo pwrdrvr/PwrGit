@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.46.0 - 2026-10-28
+
+- Sync options - Fixed the Fetch/Pull menu closing and starting a run when changing its settings. Picks now stay open and only configure the button; click the main button to run. The split button shares one outline, focus ring, and busy state.
+- Automatic sync - Fixed the timer always fetching even when the button was set to Pull. Each tick now follows the selected action and repository scope. If you already have Pull and an interval selected, timed runs will now pull: only safe fast-forwards proceed, while dirty branches needing updates, diverged branches, and in-progress operations stay untouched. Timed runs remain silent unless opened, with their result available on hover.
+- Bulk pull - Improved result counts so already-current dirty checkouts and worktrees with nothing to pull no longer inflate skipped or partial totals. Fixed stale merge/rebase markers blocking safe pulls. Progress headlines now report how many repositories completed, and the toast keeps all result counts visible.
+- Stashes - Fixed Drop and Pop failing after Git garbage collection packed the stash ref, including when a newer loose ref shadows an older packed entry. Removing the last stash no longer lets the stale packed entry reappear.
+- Commit graph - Fixed the trunk remaining dashed after a completed Pull. Cached graphs now check for changed refs, older in-flight builds cannot replace newer cached results, and successful no-op pulls also refresh the graph.
+- Diagnostics - Expanded Help → Copy Diagnostics Info into a plain-text and formatted report with build/runtime identity, profile and repository context, process IDs, local paths, and Git/LFS details. Review the copied profile names and paths before sharing it.
+
 ## v0.45.0 - 2026-10-28
 
 - Bulk sync - Added a minimizable progress toast for Fetch and Pull, so a run can continue while you work elsewhere. Minimise, Escape, or clicking outside the dialog now moves progress to the toast rather than cancelling the run; click it to reopen details. PwrGit remembers your preferred view, and failures remain visible until dismissed.
