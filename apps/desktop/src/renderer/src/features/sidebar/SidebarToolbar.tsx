@@ -111,8 +111,9 @@ export function syncFace(input: {
  * The sync button is one split button for Fetch and Try pull: Try pull
  * already fetches every repository before it fast-forwards, so two buttons
  * offered the same first half twice. The face runs the remembered verb and
- * scope and wears its name; the chevron picks another (which runs it) and
- * the automatic fetch interval. design/Fetch Toast and Scope - UX
+ * scope and wears its name. The chevron's menu sets the button up (which
+ * verb and scope the face runs, and the automatic fetch interval) and stays
+ * open while you do; the face runs it. design/Fetch Toast and Scope - UX
  * Review.dc.html, turn 5.
  */
 export function SidebarToolbar({
@@ -149,7 +150,7 @@ export function SidebarToolbar({
   onFork: () => void;
   /** The face: run the remembered verb and scope, or show the run in flight. */
   onSync: () => void;
-  /** Remember a verb and scope as the face and run it now. */
+  /** Remember a verb and scope as the face. Runs nothing: the face does. */
   onPickSync?: (verb: SyncVerb, scope: FetchScope) => void;
   onPickFetchInterval?: (minutes: FetchInterval) => void;
   onMaintenance: () => void;
@@ -194,6 +195,7 @@ export function SidebarToolbar({
               : what,
         checked: syncVerb === verb && syncScope === scope,
         radio: true,
+        keepOpen: true,
         ...(count === 0 ? { disabled: true } : {}),
         onSelect: () => onPickSync?.(verb, scope)
       };
@@ -206,6 +208,7 @@ export function SidebarToolbar({
         label: fetchIntervalLabel(minutes),
         checked: fetchInterval === minutes,
         radio: true,
+        keepOpen: true,
         onSelect: () => onPickFetchInterval?.(minutes)
       })
     )
@@ -293,7 +296,10 @@ export function SidebarToolbar({
             );
           }}
         >
-          <ChevronGlyph size={10} />
+          {/* Up while its menu is open, as PwrAgnt's Send caret flips: the
+              chevron says which control opened the menu. Drawn, not rotated
+              (lib/ChevronGlyph.tsx). */}
+          <ChevronGlyph size={10} up={syncMenu !== null} />
         </button>
       </div>
       <button

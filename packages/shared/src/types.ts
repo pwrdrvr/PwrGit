@@ -1955,6 +1955,9 @@ export type BulkSyncCounts = {
   worktrees: {
     updated: number;
     upToDate: number;
+    /** Skipped with nothing to pull (detached, no upstream, ahead): not
+     *  in `skipped`, which counts only worktrees held back from commits. */
+    nothingToPull: number;
     skipped: number;
     failed: number;
     cancelled: number;

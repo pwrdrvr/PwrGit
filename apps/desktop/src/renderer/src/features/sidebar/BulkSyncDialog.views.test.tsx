@@ -50,7 +50,7 @@ function cleanSummary(): BulkSyncSummary {
     counts: {
       repos: { success: 1, partial: 0, skipped: 0, failed: 0, cancelled: 0 },
       remotes: { fetched: 1, skipped: 0, failed: 0, cancelled: 0 },
-      worktrees: { updated: 0, upToDate: 0, skipped: 0, failed: 0, cancelled: 0 }
+      worktrees: { updated: 0, upToDate: 0, nothingToPull: 0, skipped: 0, failed: 0, cancelled: 0 }
     },
     results: [
       {
@@ -330,7 +330,13 @@ describe("BulkSyncDialog views", () => {
   it("does not headline a run where nothing went through as a success", () => {
     expect(finishedHeadline("fetch", 33, 0)).toBe("Fetched none of 33 repositories");
     expect(finishedHeadline("soft-pull", 1, 0)).toBe("Pulled none of 1 repository");
-    expect(finishedHeadline("fetch", 33, 30)).toBe("Fetched 33 repositories");
+    expect(finishedHeadline("fetch", 33, 33)).toBe("Fetched 33 repositories");
+    expect(finishedHeadline("soft-pull", 83, 83)).toBe("Pulled 83 repositories");
+  });
+
+  it("counts only the repositories that went through in the headline", () => {
+    expect(finishedHeadline("soft-pull", 83, 29)).toBe("Pulled 29 of 83 repositories");
+    expect(finishedHeadline("fetch", 33, 30)).toBe("Fetched 30 of 33 repositories");
   });
 
   it("names each finished outcome in the bar's words", async () => {
@@ -344,7 +350,24 @@ describe("BulkSyncDialog views", () => {
     });
     const counts = toast()?.querySelector(".bulk-sync-toast__counts");
     expect(counts?.querySelector(".is-partial")?.textContent).toBe("1 partial");
+    // The clock sits in the header with the actions and the counts run full
+    // width below; no status mark rides beside Dismiss to read as a second close.
+    expect(toast()?.querySelector(".bulk-sync-toast__end .bulk-sync-toast__clock")).not.toBeNull();
+    expect(counts?.children).toHaveLength(1);
+    expect(toast()?.querySelector(".bulk-sync__mark")).toBeNull();
     expect(toast()?.textContent).not.toContain("click for details");
+  });
+
+  it("opens the details from the counts row, which sits outside the headline's button", async () => {
+    vi.useFakeTimers();
+    await render({ initial: "toast", onClose: vi.fn() });
+    await act(async () => {
+      finish(cleanSummary());
+    });
+    const meta = toast()?.querySelector<HTMLElement>(".bulk-sync-toast__meta");
+    expect(meta?.closest("button")).toBeNull();
+    await act(async () => meta!.click());
+    expect(dialog()).not.toBeNull();
   });
 
   it("draws nothing for a timed run nobody has opened, while still running it", async () => {

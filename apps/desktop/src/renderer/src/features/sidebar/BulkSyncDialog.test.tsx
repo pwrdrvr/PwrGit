@@ -50,6 +50,7 @@ function counts(results: BulkSyncRepoResult[]): BulkSyncSummary["counts"] {
     worktrees: {
       updated: 1,
       upToDate: 0,
+      nothingToPull: 0,
       skipped: 1,
       failed: 0,
       cancelled: 0

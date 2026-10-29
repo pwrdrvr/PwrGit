@@ -28,6 +28,10 @@ export type MenuItem =
       /** With `checked`: one of a group where exactly one is on, so the
        *  entry is a `menuitemradio` rather than a checkbox. */
       radio?: boolean;
+      /** A setting, not a command: choosing it leaves the menu open, so the
+       *  reader can change several and see each take. The menu still closes
+       *  on its trigger, an outside click and Escape. */
+      keepOpen?: boolean;
       onSelect: () => void;
     }
   | { type: "sep" }
@@ -156,7 +160,7 @@ export function ContextMenu({
               e.stopPropagation();
               e.preventDefault();
               it.onSelect();
-              onClose();
+              if (it.keepOpen !== true) onClose();
             }}
           >
             {it.checked !== undefined && (

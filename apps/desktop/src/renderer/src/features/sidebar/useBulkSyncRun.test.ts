@@ -108,7 +108,7 @@ describe("nextBulkSyncRun", () => {
       counts: {
         repos: { success: 3, partial: 1, skipped: 0, failed: 1, cancelled: 0 },
         remotes: { fetched: 4, skipped: 0, failed: 2, cancelled: 0 },
-        worktrees: { updated: 0, upToDate: 0, skipped: 0, failed: 0, cancelled: 0 }
+        worktrees: { updated: 0, upToDate: 0, nothingToPull: 0, skipped: 0, failed: 0, cancelled: 0 }
       }
     } as unknown as BulkSyncSummary;
     expect(describeAutoFetch(summary, new Date(2026, 9, 28, 14, 5))).toMatch(

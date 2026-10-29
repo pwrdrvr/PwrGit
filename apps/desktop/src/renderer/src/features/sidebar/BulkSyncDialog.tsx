@@ -117,11 +117,12 @@ function overallSummary(summary: BulkSyncSummary): string {
       .filter(Boolean)
       .join(" · ");
   }
-  const { updated, upToDate, skipped, failed, cancelled } =
+  const { updated, upToDate, nothingToPull, skipped, failed, cancelled } =
     summary.counts.worktrees;
   return [
     `${updated} worktree${updated === 1 ? "" : "s"} updated`,
     `${upToDate} already current`,
+    nothingToPull > 0 ? `${nothingToPull} with nothing to pull` : null,
     skipped > 0 ? `${skipped} safely skipped` : null,
     failed > 0 ? `${failed} failed` : null,
     cancelled > 0 ? `${cancelled} cancelled` : null

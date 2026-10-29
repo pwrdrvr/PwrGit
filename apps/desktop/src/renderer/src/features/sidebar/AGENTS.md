@@ -143,11 +143,23 @@ half twice (and fought over the row's width). The face runs the remembered
 verb and scope — Fetch or Pull, `all` or `recent` (the Focused list from
 `focusedRepos`, every page of it) — and its accessible name keeps the old
 buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
-"Try pull recent". The chevron ("Sync options") lists those four, picking
-one runs it, and then **Fetch automatically**. Verb, scope, interval and
-view live in `bulk-sync-prefs.ts` (`localStorage`, per machine). Rules, all
-in `useBulkSyncRun.ts`:
+"Try pull recent". The chevron ("Sync options") lists those four, then
+**Fetch automatically**. Verb, scope, interval and view live in
+`bulk-sync-prefs.ts` (`localStorage`, per machine). Rules, all in
+`useBulkSyncRun.ts`:
 
+- **The menu configures; the face runs.** Every entry is `keepOpen`: a pick
+  moves its check and relabels the face, starts nothing, and leaves the menu
+  open. The menu closes on the chevron, an outside click (the face included,
+  which then runs) or Escape. 0.45.0 ran each pick and closed the menu, so
+  setting an interval meant reopening it and choosing a scope started a run.
+- **The split is one control, as PwrAgnt's Send pill.** `.sidebar-toolbar__split`
+  owns the border, radius and fill and clips the face and chevron, which shed
+  theirs. Hover lights the whole outline and fills the half under the pointer;
+  open tints the chevron and points its caret up (`ChevronGlyph up`); one
+  focus ring rings the pair. Don't give either half its own border or
+  outline: as butted buttons, hover drew a three-sided orange box.
+  Design: `design/Sync Split Button - UX Review.dc.html`.
 - **Timed runs only fetch**, whatever the face says. Pulling on a timer would
   move checkouts under the reader.
 - **The run is not the dialog.** `BulkSyncDialog` owns the operation and
@@ -170,10 +182,23 @@ in `useBulkSyncRun.ts`:
 - **Only a clean finish leaves by itself, and it shows its clock.** The
   toast draws the remote-activity card's green rail; the dismiss timer banks
   what is left under the pointer and resumes from there, so rail and timer
-  agree. A failure or a cancel draws no rail and stays. The finished line
-  names each outcome in the legend's words ("12 partial"): a repository is
-  `partial` when its pull updated some worktrees and skipped others (dirty,
-  ahead, no upstream), which is most repositories with many agent worktrees.
+  agree. A failure or a cancel draws no rail and stays.
+- **The toast's header is the remote-activity card's.** Headline at the left
+  edge; clock, Show details and Dismiss (Cancel while live) on its line at
+  the right, as 20px buttons 2px apart. No status mark: a circled red cross
+  beside Dismiss read as a second close. The border carries the tone.
+  Design: `design/Bulk Sync Toast Header - UX Review.dc.html`.
+- **The headline counts what went through.** "Pulled 29 of 83 repositories",
+  never "Pulled 83" over 52 skipped. The counts below name each outcome in
+  the legend's words ("12 partial") on one row under the header, across the
+  card's full width (not beside the actions), wrapping rather than
+  ellipsizing the last count (usually failed).
+- **Skipped means held back from something to pull.** A worktree with
+  nothing to pull (detached, no upstream or one deleted on the remote,
+  ahead, or dirty but already current) keeps its reason in the details but
+  does not make its repository `skipped` or `partial` (`repoOutcome` in
+  `main/git/bulk-sync.ts`). In 0.45.0 agent worktrees turned most
+  repositories partial and dirty-but-current checkouts skipped.
 
 Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
 

@@ -9,6 +9,8 @@ import {
   ok,
   type Result
 } from "@pwrgit/shared";
+import { access } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   NO_OPTIONAL_LOCKS,
   requireExit0,
@@ -68,13 +70,15 @@ type WorktreeInspection =
   | { kind: "ready"; value: ReadyWorktree }
   | { kind: "result"; value: BulkSyncWorktreeResult };
 
-const IN_PROGRESS_REFS = [
+// Files and directories in the worktree's git dir that exist only while an
+// operation is in progress (the set `git status` checks).
+const OPERATION_STATE_PATHS = [
   "MERGE_HEAD",
   "CHERRY_PICK_HEAD",
   "REVERT_HEAD",
-  "REBASE_HEAD",
-  "BISECT_START",
-  "AUTO_MERGE"
+  "BISECT_LOG",
+  "rebase-merge",
+  "rebase-apply"
 ] as const;
 
 const authFailure = (message: string): boolean =>
@@ -252,51 +256,45 @@ async function inspectWorktree(
   }
 
   report("Checking for in-progress Git operations…");
-  for (const ref of IN_PROGRESS_REFS) {
-    const raw = await git(
-      ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", ref],
-      worktree.path,
-      NO_OPTIONAL_LOCKS
-    );
-    if (!raw.ok) {
-      return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
-    }
-    if (raw.value.exitCode === 0 && raw.value.stdout.trim() === ref) {
-      return {
-        kind: "result",
-        value: worktreeResult(worktree, {
-          outcome: "skipped",
-          reason: "in_progress",
-          message: "A merge, rebase, cherry-pick, revert, or bisect is in progress."
-        })
-      };
-    }
-    if (
-      raw.value.exitCode === 0 &&
-      raw.value.stdout.trim().startsWith("refs/")
-    ) {
-      // rev-parse DWIM-resolves ordinary branches and tags with names such as
-      // MERGE_HEAD. Only the literal pseudo-ref denotes an active operation.
-      continue;
-    }
-    if (raw.value.exitCode === 0) {
-      return unsafeProbe(worktree, "Git returned an ambiguous operation state.");
-    }
-    if (raw.value.exitCode !== 1) {
-      return unsafeProbe(worktree, "Git could not verify repository operation state.");
-    }
+  // One rev-parse names every state file; their presence is what `git
+  // status` reads too. Pseudo-refs read through `rev-parse --verify` were
+  // wrong both ways: AUTO_MERGE and REBASE_HEAD outlive the operation that
+  // wrote them, and BISECT_START holds a branch name, so it never resolved.
+  const statePaths = await git(
+    ["rev-parse", ...OPERATION_STATE_PATHS.flatMap((path) => ["--git-path", path])],
+    worktree.path,
+    NO_OPTIONAL_LOCKS
+  );
+  if (!statePaths.ok || statePaths.value.exitCode !== 0) {
+    return unsafeProbe(worktree, "Git could not inspect in-progress operations.");
   }
-
-  if (statusLines.length > 0) {
+  const present = await Promise.all(
+    statePaths.value.stdout
+      .split("\n")
+      .map((path) => path.trim())
+      .filter(Boolean)
+      .map((path) =>
+        access(resolve(worktree.path, path)).then(
+          () => true,
+          () => false
+        )
+      )
+  );
+  if (present.includes(true)) {
     return {
       kind: "result",
       value: worktreeResult(worktree, {
         outcome: "skipped",
-        reason: "dirty",
-        message: "The worktree has uncommitted or untracked changes."
+        reason: "in_progress",
+        message: "A merge, rebase, cherry-pick, revert, or bisect is in progress."
       })
     };
   }
+
+  // Uncommitted changes only block a pull that would move HEAD. A dirty
+  // worktree already at its upstream (or ahead of it) has nothing to pull, so
+  // it reports as up to date rather than inflating the skipped count.
+  const dirty = statusLines.length > 0;
 
   report("Reading branch and upstream…");
   const branchRaw = await checked(git, ["branch", "--show-current"], worktree.path);
@@ -455,7 +453,20 @@ async function inspectWorktree(
   if (!canFastForward.ok) {
     return unsafeProbe(worktree, "Git could not prove a fast-forward is safe.");
   }
-  if (canFastForward.value.exitCode === 0) return { kind: "ready", value: ready };
+  if (canFastForward.value.exitCode === 0) {
+    if (dirty) {
+      return {
+        kind: "result",
+        value: worktreeResult(worktree, {
+          branch,
+          outcome: "skipped",
+          reason: "dirty",
+          message: "The worktree has uncommitted or untracked changes."
+        })
+      };
+    }
+    return { kind: "ready", value: ready };
+  }
   if (canFastForward.value.exitCode !== 1) {
     return unsafeProbe(worktree, "Git could not compare the local and upstream tips.");
   }
@@ -574,6 +585,20 @@ async function softPullWorktree(
   });
 }
 
+// Skips with nothing to pull: a detached HEAD, a branch with no upstream (or
+// one deleted on the remote), or a branch only ahead. The worktree row keeps
+// its reason, but the repository is not held back by it. Agent worktrees are
+// mostly these, so counting them turned whole repositories "partial".
+const NOTHING_TO_PULL = new Set<NonNullable<BulkSyncWorktreeResult["reason"]>>([
+  "detached_head",
+  "no_upstream",
+  "ahead"
+]);
+const nothingToPull = (result: BulkSyncWorktreeResult): boolean =>
+  result.outcome === "skipped" &&
+  result.reason !== undefined &&
+  NOTHING_TO_PULL.has(result.reason);
+
 function repoOutcome(
   mode: BulkSyncMode,
   remotes: BulkSyncRemoteResult[],
@@ -587,7 +612,9 @@ function repoOutcome(
     worktrees.some((result) => result.outcome === "failed");
   const skipped =
     remotes.some((result) => result.outcome === "skipped") ||
-    worktrees.some((result) => result.outcome === "skipped");
+    worktrees.some(
+      (result) => result.outcome === "skipped" && !nothingToPull(result)
+    );
   const succeeded =
     mode === "fetch"
       ? remotes.some((result) => result.outcome === "fetched")
@@ -595,10 +622,14 @@ function repoOutcome(
           (result) =>
             result.outcome === "updated" || result.outcome === "up_to_date"
         );
+  // Nothing-to-pull worktrees are neutral: they don't make a failed or
+  // blocked repository partial, and a repository of only those succeeded.
+  const idle =
+    mode === "soft-pull" && worktrees.length > 0 && worktrees.every(nothingToPull);
   if ((cancelled || failed || skipped) && succeeded) return "partial";
   if (cancelled) return "cancelled";
   if (failed) return "failed";
-  if (skipped || !succeeded) return "skipped";
+  if (skipped || !(succeeded || idle)) return "skipped";
   return "success";
 }
 
@@ -685,6 +716,7 @@ function countResults(results: BulkSyncRepoResult[]): BulkSyncCounts {
     worktrees: {
       updated: 0,
       upToDate: 0,
+      nothingToPull: 0,
       skipped: 0,
       failed: 0,
       cancelled: 0
@@ -695,6 +727,7 @@ function countResults(results: BulkSyncRepoResult[]): BulkSyncCounts {
     for (const remote of repo.remotes) counts.remotes[remote.outcome] += 1;
     for (const worktree of repo.worktrees) {
       if (worktree.outcome === "up_to_date") counts.worktrees.upToDate += 1;
+      else if (nothingToPull(worktree)) counts.worktrees.nothingToPull += 1;
       else counts.worktrees[worktree.outcome] += 1;
     }
   }
