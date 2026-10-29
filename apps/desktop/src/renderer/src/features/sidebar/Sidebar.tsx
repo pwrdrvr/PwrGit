@@ -1318,6 +1318,8 @@ export function Sidebar({
         fetchInterval={bulk.interval}
         syncBusy={bulk.busy}
         lastAutoRun={bulk.lastAutoRun}
+        lastRun={bulk.lastRun}
+        onShowRun={bulk.showRun}
         onSync={bulk.runFace}
         onPickSync={bulk.pick}
         onPickFetchInterval={bulk.pickInterval}
@@ -1557,6 +1559,7 @@ export function Sidebar({
           autoMinimizeMs={
             bulk.run.autoMinimize ? FIRST_RUN_MINIMIZE_MS : null
           }
+          {...(bulk.run.replay === undefined ? {} : { replay: bulk.run.replay })}
           onViewChange={bulk.setView}
           onFinished={bulk.finish}
           onClose={bulk.close}

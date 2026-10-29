@@ -84,7 +84,9 @@ export function BulkSyncToast({
     ? " is-failed"
     : live
       ? " is-live"
-      : "";
+      : phase === "cancelled"
+        ? " is-cancelled"
+        : "";
 
   return (
     <section

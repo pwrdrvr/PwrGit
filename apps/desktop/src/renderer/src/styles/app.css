@@ -7104,7 +7104,17 @@ button.agent-menu__item:hover {
   transform-origin: left center;
   animation: remote-activity-countdown linear forwards;
 }
-.bulk-sync-toast__rail[data-paused="true"] {
+/* A failure's or a cancel's rail drains too (Sync options can reopen it),
+   in its own color: green would say it went well. */
+.bulk-sync-toast.is-failed .bulk-sync-toast__rail {
+  background: var(--danger-base);
+}
+.bulk-sync-toast.is-cancelled .bulk-sync-toast__rail {
+  background: var(--status-suspended);
+}
+/* Held under the pointer, any rail greys; as specific as the tones above
+   and after them, so it wins. */
+.bulk-sync-toast .bulk-sync-toast__rail[data-paused="true"] {
   animation-play-state: paused;
   background: var(--text-muted);
 }

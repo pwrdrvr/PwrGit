@@ -3,7 +3,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SidebarToolbar, addMenuReasons, syncFace } from "./SidebarToolbar";
+import type { BulkSyncSummary } from "@pwrgit/shared";
+import { SidebarToolbar, addMenuReasons, lastRunHint, syncFace } from "./SidebarToolbar";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
@@ -300,5 +301,36 @@ describe("syncFace", () => {
     expect(
       syncFace({ verb: "pull", scope: "all", repoCount: 4, recentCount: 1, interval: 0, busy: true })
     ).toMatchObject({ name: "Try pull all", label: "Pull all", count: 4 });
+  });
+});
+
+describe("lastRunHint", () => {
+  it("says what the last run did, when, and whether the timer ran it", () => {
+    const hint = lastRunHint({
+      mode: "soft-pull",
+      scope: "recent",
+      auto: true,
+      at: new Date(2026, 9, 29, 14, 5),
+      summary: {
+        counts: { repos: { success: 20, partial: 9, skipped: 52, failed: 2, cancelled: 0 } },
+        results: Array.from({ length: 83 })
+      } as unknown as BulkSyncSummary
+    });
+    expect(hint).toMatch(/^Pulled 29 of 83 repositories · automatic, .+$/);
+  });
+
+  it("says when the last run was cancelled", () => {
+    const hint = lastRunHint({
+      mode: "fetch",
+      scope: "all",
+      auto: false,
+      at: new Date(2026, 9, 29, 14, 5),
+      summary: {
+        cancelled: true,
+        counts: { repos: { success: 3, partial: 0, skipped: 0, failed: 0, cancelled: 80 } },
+        results: Array.from({ length: 83 })
+      } as unknown as BulkSyncSummary
+    });
+    expect(hint).toMatch(/^Fetched 3 of 83 repositories · cancelled · \d/);
   });
 });

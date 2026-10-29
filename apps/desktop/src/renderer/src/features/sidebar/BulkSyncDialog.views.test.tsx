@@ -15,6 +15,7 @@ import {
   BulkSyncDialog,
   livePathLine,
   TOAST_DISMISS_MS,
+  TOAST_FAILED_DISMISS_MS,
   type BulkSyncPresentation
 } from "./BulkSyncDialog";
 import type { BulkSyncView } from "./bulk-sync-prefs";
@@ -73,11 +74,13 @@ const views: BulkSyncView[] = [];
 function Harness({
   initial,
   autoMinimizeMs = null,
+  replay,
   onClose,
   onFinished
 }: {
   initial: BulkSyncPresentation;
   autoMinimizeMs?: number | null;
+  replay?: BulkSyncSummary;
   onClose: () => void;
   onFinished?: () => void;
 }) {
@@ -92,6 +95,7 @@ function Harness({
       platform="darwin"
       view={view}
       autoMinimizeMs={autoMinimizeMs}
+      {...(replay === undefined ? {} : { replay })}
       onViewChange={(next) => {
         views.push(next);
         setView(next);
@@ -243,7 +247,9 @@ describe("BulkSyncDialog views", () => {
     expect(onFinished).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a finish with failures in the toast until it is dismissed", async () => {
+  // A repository that fails every run (its remote was deleted) pinned the
+  // toast forever; Sync options → Show last run brings a failure back.
+  it("keeps a finish with failures longer, then lets it go", async () => {
     vi.useFakeTimers();
     const onClose = vi.fn();
     await render({ initial: "toast", onClose });
@@ -254,13 +260,15 @@ describe("BulkSyncDialog views", () => {
       finish(failed);
     });
     expect(toast()?.textContent).toContain("1 failed");
-    await act(async () => vi.advanceTimersByTime(TOAST_DISMISS_MS * 3));
+    await act(async () => vi.advanceTimersByTime(TOAST_DISMISS_MS));
     expect(onClose).not.toHaveBeenCalled();
-    await act(async () => byName("Dismiss").click());
+    await act(async () =>
+      vi.advanceTimersByTime(TOAST_FAILED_DISMISS_MS - TOAST_DISMISS_MS)
+    );
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("draws the countdown on a clean finish, and none on a failure", async () => {
+  it("draws a short countdown on a clean finish and a longer one on a failure", async () => {
     vi.useFakeTimers();
     await render({ initial: "toast", onClose: vi.fn() });
     const rail = () => toast()?.querySelector(".bulk-sync-toast__rail") ?? null;
@@ -279,7 +287,7 @@ describe("BulkSyncDialog views", () => {
     await act(async () => {
       finish(failed);
     });
-    expect(rail()).toBeNull();
+    expect(rail()?.getAttribute("style")).toContain(`${TOAST_FAILED_DISMISS_MS}ms`);
   });
 
   it("holds the countdown under the pointer and resumes from what was left", async () => {
@@ -368,6 +376,18 @@ describe("BulkSyncDialog views", () => {
     expect(meta?.closest("button")).toBeNull();
     await act(async () => meta!.click());
     expect(dialog()).not.toBeNull();
+  });
+
+  // Sync options → Show last run reopens a finished run as a record.
+  it("replays a finished run's results without starting another", async () => {
+    const onFinished = vi.fn();
+    const failed = cleanSummary();
+    failed.counts.repos = { ...failed.counts.repos, success: 0, failed: 1 };
+    failed.results = [{ ...failed.results[0]!, outcome: "failed" }];
+    await render({ initial: "dialog", replay: failed, onClose: vi.fn(), onFinished });
+    expect(dispatch).not.toHaveBeenCalledWith("remote:bulkSync", expect.anything());
+    expect(dialog()?.textContent).toContain("1 failed");
+    expect(onFinished).not.toHaveBeenCalled();
   });
 
   it("draws nothing for a timed run nobody has opened, while still running it", async () => {

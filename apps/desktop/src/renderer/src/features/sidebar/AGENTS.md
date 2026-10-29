@@ -194,11 +194,18 @@ match the face. Verb, scope, interval and view live in
   The face shows `aria-busy` while any run is going (Pull's arrow swaps to
   the ring; the circular arrow turns); its hover card carries the last
   timed result.
+- **Sync options → Show last run reads any run afterwards.** The menu's
+  last entry shows the run going now ("Show the running sync", a hidden
+  timed one included) or reopens the newest finished run's dialog from its
+  stored summary (`BulkSyncRun.replay`, `BulkSyncDialog replay`), which
+  starts no operation. The record belongs to the profile.
 
-- **Only a clean finish leaves by itself, and it shows its clock.** The
-  toast draws the remote-activity card's green rail; the dismiss timer banks
-  what is left under the pointer and resumes from there, so rail and timer
-  agree. A failure or a cancel draws no rail and stays.
+- **A finished toast leaves by itself, and shows its clock.** A clean finish
+  after `TOAST_DISMISS_MS` on the green rail; a failure or a cancel after
+  `TOAST_FAILED_DISMISS_MS`, its rail red on a failure. A repository that
+  fails every run (a deleted remote) used to pin the toast for good; Show last
+  run brings it back. A run that stopped with an error stays. The dismiss
+  timer banks what is left under the pointer, so rail and timer agree.
 - **The toast's header is the remote-activity card's.** Headline at the left
   edge; clock, Show details and Dismiss (Cancel while live) on its line at
   the right, as 20px buttons 2px apart. No status mark: a circled red cross
