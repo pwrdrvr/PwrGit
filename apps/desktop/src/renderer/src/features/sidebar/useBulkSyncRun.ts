@@ -29,6 +29,18 @@ export type BulkSyncRun = {
   /** Started by the interval, not by a click. */
   auto: boolean;
   finished: boolean;
+  /** A finished run reopened from Sync options: the dialog draws this
+   *  summary and starts nothing. */
+  replay?: BulkSyncSummary;
+};
+
+/** The newest finished run, kept so Sync options can show it again. */
+export type LastBulkSyncRun = {
+  summary: BulkSyncSummary;
+  mode: BulkSyncMode;
+  scope: FetchScope;
+  auto: boolean;
+  at: Date;
 };
 
 /**
@@ -132,6 +144,9 @@ export function useBulkSyncRun({
     useState<FetchInterval>(readFetchInterval);
   const [run, setRun] = useState<BulkSyncRun | null>(null);
   const [lastAutoRun, setLastAutoRun] = useState<string | undefined>();
+  const [lastRun, setLastRun] = useState<LastBulkSyncRun | null>(null);
+  const lastRunRef = useRef(lastRun);
+  lastRunRef.current = lastRun;
   const keyRef = useRef(0);
   const runRef = useRef(run);
   runRef.current = run;
@@ -188,6 +203,15 @@ export function useBulkSyncRun({
   const finish = useCallback((summary: BulkSyncSummary | null) => {
     const current = runRef.current;
     if (current === null) return;
+    if (summary !== null) {
+      setLastRun({
+        summary,
+        mode: current.mode,
+        scope: current.scope,
+        auto: current.auto,
+        at: new Date()
+      });
+    }
     if (current.auto) {
       setLastAutoRun(describeAutoRun(summary, new Date(), current.mode));
     }
@@ -203,8 +227,45 @@ export function useBulkSyncRun({
     setRun(null);
   }, []);
 
-  // A run belongs to the profile that started it.
-  useEffect(() => close, [close, profileId]);
+  /**
+   * Sync options' "Show": the run going now (a timed one is hidden), or the
+   * last one's results. A timed run never raises a toast by itself, and a
+   * finished toast leaves; this is how either is read afterwards.
+   */
+  const showRun = useCallback(() => {
+    const current = runRef.current;
+    if (current !== null && !current.finished) {
+      const next = { ...current, view: "dialog" as const, autoMinimize: false };
+      runRef.current = next;
+      setRun(next);
+      return;
+    }
+    const last = lastRunRef.current;
+    if (last === null) return;
+    keyRef.current += 1;
+    const next: BulkSyncRun = {
+      key: keyRef.current,
+      mode: last.mode,
+      scope: last.scope,
+      repos: [],
+      view: "dialog",
+      autoMinimize: false,
+      auto: last.auto,
+      finished: true,
+      replay: last.summary
+    };
+    runRef.current = next;
+    setRun(next);
+  }, []);
+
+  // A run belongs to the profile that started it, and so does its record.
+  useEffect(
+    () => () => {
+      close();
+      setLastRun(null);
+    },
+    [close, profileId]
+  );
 
   useEffect(() => {
     if (interval === 0 || profileId === null) return;
@@ -224,6 +285,7 @@ export function useBulkSyncRun({
     scope,
     interval,
     lastAutoRun,
+    lastRun,
     verb,
     busy: run !== null && !run.finished,
     start,
@@ -232,6 +294,7 @@ export function useBulkSyncRun({
     pickInterval,
     setView,
     finish,
-    close
+    close,
+    showRun
   };
 }

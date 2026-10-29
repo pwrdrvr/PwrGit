@@ -7,6 +7,8 @@ import { WrenchGlyph } from "../../lib/WrenchGlyph";
 import { useFitLadder } from "../../lib/useFitLadder";
 import { hoverTooltip, useViewportTooltip } from "../../lib/useViewportTooltip";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { finishedHeadline } from "./BulkSyncToast";
+import type { LastBulkSyncRun } from "./useBulkSyncRun";
 import {
   FETCH_INTERVALS,
   fetchIntervalLabel,
@@ -108,6 +110,18 @@ export function syncFace(input: {
       };
 }
 
+/** Show last run's second line: what it did, when, and whether you ran it. */
+export function lastRunHint(last: LastBulkSyncRun): string {
+  const { success, partial } = last.summary.counts.repos;
+  const what = finishedHeadline(
+    last.mode,
+    last.summary.results.length,
+    success + partial
+  );
+  const time = last.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `${what} · ${last.auto ? "automatic, " : ""}${time}`;
+}
+
 /**
  * The one row of profile-wide actions above the lens row: Add ▾ (Add folders,
  * Clone, Fork), the sync button, and Repository maintenance as a wrench.
@@ -130,12 +144,14 @@ export function SidebarToolbar({
   fetchInterval = 0,
   syncBusy = false,
   lastAutoRun,
+  lastRun = null,
   onAddFolder,
   onClone,
   onFork,
   onSync,
   onPickSync,
   onPickFetchInterval,
+  onShowRun,
   onMaintenance
 }: {
   hasProfile: boolean;
@@ -149,6 +165,10 @@ export function SidebarToolbar({
   /** A run is in flight, possibly a timed fetch nobody is watching. */
   syncBusy?: boolean;
   lastAutoRun?: string | undefined;
+  /** The newest finished run, for Sync options → Show last run. */
+  lastRun?: LastBulkSyncRun | null;
+  /** Show the run going now, or the last one's results. */
+  onShowRun?: () => void;
   onAddFolder: () => void;
   onClone: () => void;
   onFork: () => void;
@@ -219,7 +239,33 @@ export function SidebarToolbar({
         keepOpen: true,
         onSelect: () => onPickFetchInterval?.(minutes)
       })
-    )
+    ),
+    { type: "sep" },
+    // A timed run raises no toast, and a finished toast leaves: this is how
+    // either is read afterwards. It opens the dialog, so the menu closes.
+    syncBusy
+      ? {
+          type: "item",
+          label: "Show the running sync",
+          inset: true,
+          onSelect: () => onShowRun?.()
+        }
+      : lastRun === null
+        ? {
+            type: "item",
+            label: "Show last run",
+            inset: true,
+            disabled: true,
+            hint: "Nothing has run yet",
+            onSelect: () => undefined
+          }
+        : {
+            type: "item",
+            label: "Show last run",
+            inset: true,
+            hint: lastRunHint(lastRun),
+            onSelect: () => onShowRun?.()
+          }
   ];
   const item = (
     label: string,

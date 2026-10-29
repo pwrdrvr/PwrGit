@@ -7104,6 +7104,11 @@ button.agent-menu__item:hover {
   transform-origin: left center;
   animation: remote-activity-countdown linear forwards;
 }
+/* A failure's rail drains too (it can be reopened from Sync options), in
+   the failure's color: green would say it went well. */
+.bulk-sync-toast.is-failed .bulk-sync-toast__rail {
+  background: var(--danger-base);
+}
 .bulk-sync-toast__rail[data-paused="true"] {
   animation-play-state: paused;
   background: var(--text-muted);

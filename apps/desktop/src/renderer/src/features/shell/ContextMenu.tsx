@@ -32,6 +32,9 @@ export type MenuItem =
        *  reader can change several and see each take. The menu still closes
        *  on its trigger, an outside click and Escape. */
       keepOpen?: boolean;
+      /** Without `checked`: still lead with an empty check slot, so a command
+       *  under a group of checkable entries lines up with them. */
+      inset?: boolean;
       onSelect: () => void;
     }
   | { type: "sep" }
@@ -163,9 +166,9 @@ export function ContextMenu({
               if (it.keepOpen !== true) onClose();
             }}
           >
-            {it.checked !== undefined && (
+            {(it.checked !== undefined || it.inset === true) && (
               <span className="pop-menu__check" aria-hidden="true">
-                {it.checked && <CheckGlyph />}
+                {it.checked === true && <CheckGlyph />}
               </span>
             )}
             {it.hint === undefined ? (

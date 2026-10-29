@@ -236,6 +236,10 @@ export type BulkSyncPresentation = BulkSyncView | "hidden";
 
 /** How long a clean finish stays in the toast before it leaves by itself. */
 export const TOAST_DISMISS_MS = 6_000;
+/** A finish with failures, or a cancel, stays longer but still leaves: a
+ *  repository that fails every run (a deleted remote) otherwise pinned the
+ *  toast forever. Sync options → Show last run brings it back. */
+export const TOAST_FAILED_DISMISS_MS = 15_000;
 
 const FLY_MS = 300;
 const FLY_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
@@ -301,6 +305,7 @@ export function BulkSyncDialog({
   platform,
   view = "dialog",
   autoMinimizeMs = null,
+  replay,
   onViewChange,
   onFinished,
   onClose
@@ -317,6 +322,9 @@ export function BulkSyncDialog({
   /** Minimise the dialog by itself after this long, unless the reader has
    *  touched it — the first run's lesson in where the toast lives. */
   autoMinimizeMs?: number | null;
+  /** A finished run's summary, reopened from Sync options: drawn as the
+   *  finished dialog, with no new operation started. */
+  replay?: BulkSyncSummary;
   /** Without it the run has no toast, and Escape closes as it always did. */
   onViewChange?: (view: BulkSyncView) => void;
   onFinished?: (summary: BulkSyncSummary | null) => void;
@@ -330,19 +338,29 @@ export function BulkSyncDialog({
   const newestStartedRef = useRef<string | null>(null);
   const lastPathRef = useRef<string | null>(null);
   const operationIdRef = useRef("");
-  const [completed, setCompleted] = useState(0);
-  const [total, setTotal] = useState(repoSnapshot.length);
+  const replayRef = useRef(replay);
+  const [completed, setCompleted] = useState(replay?.results.length ?? 0);
+  const [total, setTotal] = useState(replay?.results.length ?? repoSnapshot.length);
   const [cancelling, setCancelling] = useState(false);
-  const [summary, setSummary] = useState<BulkSyncSummary | null>(null);
+  const [summary, setSummary] = useState<BulkSyncSummary | null>(replay ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [progress, setProgress] = useState<Map<string, RepoProgress>>(
-    () => new Map(repoSnapshot.map((repo) => [repo.id, { phase: "waiting" }]))
+  const [progress, setProgress] = useState<Map<string, RepoProgress>>(() =>
+    replay === undefined
+      ? new Map(repoSnapshot.map((repo) => [repo.id, { phase: "waiting" }]))
+      : new Map(
+          replay.results.map((result) => [
+            result.repoId,
+            { phase: "complete", result } as const
+          ])
+        )
   );
   // The live clock's origin. The operation launches one microtask after
   // mount, so this is its start to well inside the clock's one-second grain.
   const [startedAt] = useState(() => Date.now());
 
   useEffect(() => {
+    // A reopened run is a record, not an operation.
+    if (replayRef.current !== undefined) return;
     let live = true;
     let started = false;
     let settled = false;
@@ -516,7 +534,7 @@ export function BulkSyncDialog({
   // Once per run: `summary` and the end are set in the same render, and
   // neither changes again.
   useEffect(() => {
-    if (ended) onFinishedRef.current?.(summary);
+    if (ended && replayRef.current === undefined) onFinishedRef.current?.(summary);
   }, [ended, summary]);
 
   // The first run's dialog minimises itself unless the reader has moved
@@ -536,36 +554,46 @@ export function BulkSyncDialog({
     return () => window.clearTimeout(timer);
   }, [autoMinimizeMs, canMinimize, switchView, touched, view]);
 
-  // A clean finish in the toast leaves by itself, and its rail shows the
-  // time left; a failure stays until someone has read it. Hovering holds it:
-  // the timer banks what is left and resumes from there, as the rail does.
-  // Opening the dialog starts it over.
+  // A finished toast leaves by itself, and its rail shows the time left: a
+  // clean finish soon, a failure or a cancel after longer, since Sync options
+  // can show it again. A run that stopped with an error stays. Hovering holds
+  // it: the timer banks what is left and resumes from there, as the rail
+  // does. Opening the dialog starts it over.
   const [toastHeld, setToastHeld] = useState(false);
   const cleanFinish =
     summary !== null && !summary.cancelled && !summaryHasFailures(summary);
-  const dismissing = view === "toast" && cleanFinish;
-  const dismissClock = useRef<{ remaining: number; since: number | null }>({
-    remaining: TOAST_DISMISS_MS,
-    since: null
-  });
+  const dismissMs = cleanFinish ? TOAST_DISMISS_MS : TOAST_FAILED_DISMISS_MS;
+  const dismissing = view === "toast" && summary !== null && error === null;
+  // `total` is the duration the bank was filled for: the finish decides it
+  // in the same render that starts the clock, so a bank filled while the run
+  // was live is refilled rather than spent at the wrong length.
+  const dismissClock = useRef<{
+    total: number;
+    remaining: number;
+    since: number | null;
+  }>({ total: dismissMs, remaining: dismissMs, since: null });
   useEffect(() => {
     if (!dismissing) {
-      dismissClock.current = { remaining: TOAST_DISMISS_MS, since: null };
+      dismissClock.current = { total: dismissMs, remaining: dismissMs, since: null };
       return;
+    }
+    if (dismissClock.current.total !== dismissMs) {
+      dismissClock.current = { total: dismissMs, remaining: dismissMs, since: null };
     }
     if (toastHeld) return;
     const from = Date.now();
     const { remaining } = dismissClock.current;
-    dismissClock.current = { remaining, since: from };
+    dismissClock.current = { total: dismissMs, remaining, since: from };
     const timer = window.setTimeout(onClose, remaining);
     return () => {
       window.clearTimeout(timer);
       dismissClock.current = {
+        total: dismissMs,
         remaining: Math.max(0, remaining - (Date.now() - from)),
         since: null
       };
     };
-  }, [dismissing, onClose, toastHeld]);
+  }, [dismissing, dismissMs, onClose, toastHeld]);
   const dismissLeft = useCallback((): number => {
     const { remaining, since } = dismissClock.current;
     return Math.max(0, since === null ? remaining : remaining - (Date.now() - since));
@@ -596,7 +624,7 @@ export function BulkSyncDialog({
         countdown={
           dismissing
             ? {
-                durationMs: TOAST_DISMISS_MS,
+                durationMs: dismissMs,
                 paused: toastHeld,
                 leftMs: dismissLeft
               }

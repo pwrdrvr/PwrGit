@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Repo } from "@pwrgit/shared";
+import type { BulkSyncSummary, Repo } from "@pwrgit/shared";
 import { useBulkSyncRun } from "./useBulkSyncRun";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -81,5 +81,40 @@ describe("useBulkSyncRun picks", () => {
     act(() => latest.pickInterval(5));
     expect(latest.interval).toBe(5);
     expect(latest.run).toBeNull();
+  });
+});
+
+describe("useBulkSyncRun Show last run", () => {
+  const summary = {
+    operationId: "op",
+    mode: "soft-pull",
+    cancelled: false,
+    startedAt: "2026-10-29T12:00:00.000Z",
+    finishedAt: "2026-10-29T12:00:05.000Z",
+    counts: { repos: { success: 1, partial: 0, skipped: 0, failed: 1, cancelled: 0 } },
+    results: []
+  } as unknown as BulkSyncSummary;
+
+  it("shows a hidden timed run while it is going", () => {
+    act(() => latest.start("fetch", { auto: true }));
+    expect(latest.run?.view).toBe("hidden");
+    act(() => latest.showRun());
+    expect(latest.run).toMatchObject({ view: "dialog", finished: false, auto: true });
+  });
+
+  it("keeps the last finished run, and reopens it as a replay after it closed", () => {
+    act(() => latest.start("soft-pull", { auto: true }));
+    act(() => latest.finish(summary));
+    // A timed run nobody opened leaves nothing on screen...
+    expect(latest.run).toBeNull();
+    // ...but is still there to read.
+    expect(latest.lastRun).toMatchObject({ mode: "soft-pull", auto: true, summary });
+    act(() => latest.showRun());
+    expect(latest.run).toMatchObject({
+      view: "dialog",
+      finished: true,
+      mode: "soft-pull",
+      replay: summary
+    });
   });
 });
