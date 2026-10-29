@@ -241,6 +241,14 @@ how they are drawn. Run both when you change either half.
   forks at the merge base, so the dashed leg runs past our rows and bends into
   our lane. `lane-layout.test.ts` pins that geometry, including the
   rewritten-SHA case where both legs carry the same work.
+- **The lane cache is checked against the refs, not trusted for its TTL.**
+  Each build stores a digest of `refs/heads` + `refs/remotes`, read before
+  the build reads anything. An unforced request whose digest no longer
+  matches rebuilds, and only the newest build started for a key may write
+  the cache. Why: a pull fetches, then fast-forwards seconds later. A build
+  in between sees `origin/main` ahead of `main` and dashes the trunk; as
+  last writer it used to stay cached after the fast-forward.
+  `graph-handlers.test.ts` reproduces it with a held `git log`.
 - **The focused worktree's own branch is never skipped.** It can fall out of
   the repo-level set (`ACTIVE_DRAW_CAP` keeps 30 branches by recency), so the
   per-worktree step adds its upstream again. Put anything scoped to "what the

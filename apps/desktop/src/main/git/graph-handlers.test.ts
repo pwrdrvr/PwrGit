@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -15,13 +15,26 @@ import { createSystemGit } from "./test-support/system-git";
 // graph-handlers reaches for `execGit` directly rather than taking a GitExec,
 // so the only way to drive it against a real repo is to swap the module. System
 // git keeps the test independent of dugite's bundled binary, as elsewhere here.
-const { systemGit } = vi.hoisted(() => {
+const { systemGit, gitGate } = vi.hoisted(() => {
   // This factory is hoisted above the imports, so `createSystemGit` is still
   // in its temporal dead zone here; build the real exec on first call.
   let impl: GitExec | undefined;
+  // A test can hold the next git call that matches `match` until it releases
+  // it, to interleave a graph build with a ref update.
+  const gitGate: {
+    match: ((args: readonly string[], cwd: string) => boolean) | null;
+    held: Promise<void> | null;
+  } = { match: null, held: null };
   return {
-    systemGit: ((args, cwd, options) =>
-      (impl ??= createSystemGit())(args, cwd, options)) satisfies GitExec
+    gitGate,
+    systemGit: (async (args, cwd, options) => {
+      if (gitGate.match?.(args, cwd) === true && gitGate.held !== null) {
+        const held = gitGate.held;
+        gitGate.match = null;
+        await held;
+      }
+      return (impl ??= createSystemGit())(args, cwd, options);
+    }) satisfies GitExec
   };
 });
 
@@ -455,5 +468,128 @@ describe("graph tag navigation", () => {
     } finally {
       git(repoPath, ["tag", "-d", "milestone", "v2.9.0", "v2.10.0"]);
     }
+  });
+});
+
+// A pull fetches first and fast-forwards later. A graph built in between sees
+// origin/main moved and local main not yet, and draws the trunk dashed. These
+// pin that such a build can never become the cached answer after the
+// fast-forward lands.
+describe("graph:lanes cache across a pull's ref updates", () => {
+  let pullBus: CommandBus;
+  let appRepo: string;
+  let workRepo: string;
+  let appWorktreeId: string;
+
+  const tipOf = (graph: LaneGraph, branch: string): string | undefined =>
+    Object.entries(graph.tips).find(([, names]) => names.includes(branch))?.[0];
+
+  const appLanes = async (force: boolean): Promise<LaneGraph> => {
+    const res = await pullBus.dispatch("graph:lanes", {
+      worktreeId: appWorktreeId,
+      scope: "active",
+      force
+    });
+    if (!res.ok) throw new Error(`graph:lanes failed: ${res.error.message}`);
+    return res.value;
+  };
+
+  const rev = (dir: string, ref: string): string =>
+    execFileSync("git", ["rev-parse", ref], { cwd: dir }).toString().trim();
+
+  /** Push a new commit from the other clone and fetch it into the app repo,
+   *  leaving the app repo exactly where a pull is between its two steps. */
+  const landUpstreamCommit = (name: string): string => {
+    const tip = commit(workRepo, name);
+    git(workRepo, ["push", "-q", "origin", "main"]);
+    git(appRepo, ["fetch", "-q", "origin"]);
+    return tip;
+  };
+
+  beforeAll(async () => {
+    const root = mkdtempSync(join(tmpdir(), "pwrgit-graph-pull-"));
+    const bare = join(root, "upstream.git");
+    git(root, ["init", "-q", "--bare", "-b", "main", bare]);
+    workRepo = join(root, "work");
+    git(root, ["clone", "-q", bare, workRepo]);
+    git(workRepo, ["config", "user.email", EMAIL]);
+    git(workRepo, ["config", "user.name", "Grapher"]);
+    git(workRepo, ["config", "core.autocrlf", "false"]);
+    commit(workRepo, "base");
+    git(workRepo, ["push", "-q", "origin", "main"]);
+    appRepo = join(root, "app");
+    git(root, ["clone", "-q", bare, appRepo]);
+
+    const pullDb = openDatabase(":memory:");
+    const profile = new ProfileService(pullDb).create({
+      name: "Pull",
+      email: EMAIL,
+      roots: [root]
+    });
+    const indexed = await new RepoIndexer(pullDb, systemGit).indexRepoAt(
+      profile.id,
+      appRepo
+    );
+    if (!indexed.ok) throw new Error("indexRepoAt failed");
+    const main = indexed.value.worktrees.find((w) => w.branch === "main");
+    if (main === undefined) throw new Error("no main worktree");
+    appWorktreeId = main.id;
+    pullBus = new CommandBus();
+    registerGraphHandlers(
+      pullBus,
+      pullDb,
+      new WorktreeStateService(pullDb, systemGit)
+    );
+  });
+
+  afterEach(() => {
+    gitGate.match = null;
+    gitGate.held = null;
+  });
+
+  it("never lets a build that read refs mid-pull overwrite a newer one", async () => {
+    const upstreamTip = landUpstreamCommit("upstream-1");
+
+    // A build that starts now reads local main behind origin/main. Hold it in
+    // its log walk, after the tips are read, until the pull has finished.
+    let release!: () => void;
+    let reached!: () => void;
+    const atGate = new Promise<void>((resolve) => (reached = resolve));
+    gitGate.held = new Promise<void>((resolve) => (release = resolve));
+    gitGate.match = (args, cwd) => {
+      // The trunk walk; the indexer stores the checkout's real path.
+      const hit =
+        args[0] === "log" &&
+        args[1] === "--topo-order" &&
+        realpathSync(cwd) === realpathSync(appRepo);
+      if (hit) reached();
+      return hit;
+    };
+    const midPull = appLanes(true);
+    await atGate;
+
+    git(appRepo, ["merge", "-q", "--ff-only", "origin/main"]);
+    expect(rev(appRepo, "main")).toBe(upstreamTip);
+
+    // The pull's own invalidation: a forced build after the fast-forward.
+    expect(tipOf(await appLanes(true), "main")).toBe(upstreamTip);
+
+    // The held build now finishes, late, with what it read before.
+    release();
+    expect(tipOf(await midPull, "main")).not.toBe(upstreamTip);
+
+    // Any later ordinary load (a scope switch, a PR refresh) must not get it.
+    expect(tipOf(await appLanes(false), "main")).toBe(upstreamTip);
+  });
+
+  it("rebuilds an unforced load when the refs moved since the cached build", async () => {
+    const upstreamTip = landUpstreamCommit("upstream-2");
+    // Cached while local main is behind…
+    expect(tipOf(await appLanes(true), "main")).not.toBe(upstreamTip);
+
+    // …then the fast-forward lands with no graph invalidation reaching us.
+    git(appRepo, ["merge", "-q", "--ff-only", "origin/main"]);
+
+    expect(tipOf(await appLanes(false), "main")).toBe(upstreamTip);
   });
 });
