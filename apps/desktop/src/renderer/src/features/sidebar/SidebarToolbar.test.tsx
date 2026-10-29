@@ -318,4 +318,19 @@ describe("lastRunHint", () => {
     });
     expect(hint).toMatch(/^Pulled 29 of 83 repositories · automatic, .+$/);
   });
+
+  it("says when the last run was cancelled", () => {
+    const hint = lastRunHint({
+      mode: "fetch",
+      scope: "all",
+      auto: false,
+      at: new Date(2026, 9, 29, 14, 5),
+      summary: {
+        cancelled: true,
+        counts: { repos: { success: 3, partial: 0, skipped: 0, failed: 0, cancelled: 80 } },
+        results: Array.from({ length: 83 })
+      } as unknown as BulkSyncSummary
+    });
+    expect(hint).toMatch(/^Fetched 3 of 83 repositories · cancelled · \d/);
+  });
 });

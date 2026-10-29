@@ -119,7 +119,10 @@ export function lastRunHint(last: LastBulkSyncRun): string {
     success + partial
   );
   const time = last.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return `${what} · ${last.auto ? "automatic, " : ""}${time}`;
+  // A cancelled run's counts stop where it stopped; say so, or the rest read
+  // as skipped or failed.
+  const cancelled = last.summary.cancelled ? " · cancelled" : "";
+  return `${what}${cancelled} · ${last.auto ? "automatic, " : ""}${time}`;
 }
 
 /**
