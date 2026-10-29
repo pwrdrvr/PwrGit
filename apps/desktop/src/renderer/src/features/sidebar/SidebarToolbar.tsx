@@ -129,7 +129,7 @@ export function SidebarToolbar({
   syncScope = "all",
   fetchInterval = 0,
   syncBusy = false,
-  lastAutoFetch,
+  lastAutoRun,
   onAddFolder,
   onClone,
   onFork,
@@ -148,7 +148,7 @@ export function SidebarToolbar({
   fetchInterval?: FetchInterval;
   /** A run is in flight, possibly a timed fetch nobody is watching. */
   syncBusy?: boolean;
-  lastAutoFetch?: string | undefined;
+  lastAutoRun?: string | undefined;
   onAddFolder: () => void;
   onClone: () => void;
   onFork: () => void;
@@ -179,7 +179,7 @@ export function SidebarToolbar({
     recentCount,
     interval: fetchInterval,
     busy: syncBusy,
-    lastAuto: lastAutoFetch
+    lastAuto: lastAutoRun
   });
   const syncItems: MenuItem[] = [
     ...SYNC_ACTIONS.map(({ verb, scope }): MenuItem => {

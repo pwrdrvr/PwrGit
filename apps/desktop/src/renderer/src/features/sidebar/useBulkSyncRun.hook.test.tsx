@@ -63,7 +63,6 @@ describe("useBulkSyncRun picks", () => {
   it("runs the face's verb and scope on the timer", () => {
     vi.useFakeTimers();
     try {
-      act(() => root.render(<Harness key="timer" />));
       act(() => latest.pick("pull", "recent"));
       act(() => latest.pickInterval(5));
       act(() => vi.advanceTimersByTime(5 * 60_000));

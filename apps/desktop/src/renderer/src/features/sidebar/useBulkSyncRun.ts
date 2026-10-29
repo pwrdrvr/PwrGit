@@ -80,7 +80,7 @@ export function nextBulkSyncRun(
 }
 
 /** The tooltip line a timed run leaves behind. */
-export function describeAutoFetch(
+export function describeAutoRun(
   summary: BulkSyncSummary | null,
   at: Date,
   mode: BulkSyncMode = "fetch"
@@ -88,12 +88,26 @@ export function describeAutoFetch(
   const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   const what = mode === "soft-pull" ? "pull" : "fetch";
   if (summary === null) return `The automatic ${what} at ${time} could not run.`;
-  // Repositories, each counted once: a repository whose only remote failed
-  // is in both the remote and the repository counts.
-  const failed = summary.counts.repos.failed + summary.counts.repos.partial;
-  return failed > 0
-    ? `Last automatic ${what} at ${time}: ${failed} ${failed === 1 ? "repository" : "repositories"} with failures.`
-    : `Last automatic ${what} at ${time}: all ${what === "pull" ? "pulled" : "fetched"}.`;
+  const { failed, partial, skipped } = summary.counts.repos;
+  const repos = (n: number) => `${n} ${n === 1 ? "repository" : "repositories"}`;
+  if (mode === "fetch") {
+    // Repositories, each counted once: a repository whose only remote failed
+    // is in both the remote and the repository counts, and is `partial`.
+    const withFailures = failed + partial;
+    return withFailures > 0
+      ? `Last automatic fetch at ${time}: ${repos(withFailures)} with failures.`
+      : `Last automatic fetch at ${time}: all fetched.`;
+  }
+  // A pull's partial and skipped repositories were held back (local changes,
+  // diverged), not failed; calling them failures cried wolf every tick.
+  const heldBack = partial + skipped;
+  const parts = [
+    failed > 0 ? `${repos(failed)} with failures` : null,
+    heldBack > 0 ? `${repos(heldBack)} held back` : null
+  ].filter((part) => part !== null);
+  return parts.length > 0
+    ? `Last automatic pull at ${time}: ${parts.join(", ")}.`
+    : `Last automatic pull at ${time}: all pulled.`;
 }
 
 /**
@@ -117,7 +131,7 @@ export function useBulkSyncRun({
   const [interval, setIntervalMinutes] =
     useState<FetchInterval>(readFetchInterval);
   const [run, setRun] = useState<BulkSyncRun | null>(null);
-  const [lastAutoFetch, setLastAutoFetch] = useState<string | undefined>();
+  const [lastAutoRun, setLastAutoRun] = useState<string | undefined>();
   const keyRef = useRef(0);
   const runRef = useRef(run);
   runRef.current = run;
@@ -175,7 +189,7 @@ export function useBulkSyncRun({
     const current = runRef.current;
     if (current === null) return;
     if (current.auto) {
-      setLastAutoFetch(describeAutoFetch(summary, new Date(), current.mode));
+      setLastAutoRun(describeAutoRun(summary, new Date(), current.mode));
     }
     // A timed run nobody opened has nothing left to show.
     const next =
@@ -209,7 +223,7 @@ export function useBulkSyncRun({
     run,
     scope,
     interval,
-    lastAutoFetch,
+    lastAutoRun,
     verb,
     busy: run !== null && !run.finished,
     start,

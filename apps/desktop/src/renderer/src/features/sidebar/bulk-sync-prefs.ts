@@ -19,7 +19,7 @@ export type SyncVerb = "fetch" | "pull";
  *  dialog opens and minimises itself once, to teach where the toast lives. */
 export type BulkSyncView = "dialog" | "toast";
 
-/** Minutes between automatic fetches; 0 is off. */
+/** Minutes between automatic runs of the face (fetch or pull); 0 is off. */
 export const FETCH_INTERVALS = [0, 1, 5, 15, 60] as const;
 export type FetchInterval = (typeof FETCH_INTERVALS)[number];
 

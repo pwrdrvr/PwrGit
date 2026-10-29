@@ -1317,7 +1317,7 @@ export function Sidebar({
         syncScope={bulk.scope}
         fetchInterval={bulk.interval}
         syncBusy={bulk.busy}
-        lastAutoFetch={bulk.lastAutoFetch}
+        lastAutoRun={bulk.lastAutoRun}
         onSync={bulk.runFace}
         onPickSync={bulk.pick}
         onPickFetchInterval={bulk.pickInterval}
