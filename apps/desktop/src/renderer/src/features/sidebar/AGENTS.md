@@ -145,6 +145,9 @@ last two within `RECENT_DAYS` (7, `@pwrgit/shared`). Don't add HEAD's date
 pull moves the first and agent worktrees carry the second, so through 0.46.0
 "recent" held 88 repos the user had not touched. The worktree list inside a
 repo (`partitionFocusedWorktrees`) still surfaces work in flight.
+`lastAuthoredAt` is kept current for every worktree by main's sweep
+(`WorktreeStateService.sweepAuthored`, at launch and every 15 minutes), not
+only for rows on screen: Focused decides what is on screen.
 
 ## One sync button (Fetch ▾ / Pull ▾) and the bulk-sync run
 

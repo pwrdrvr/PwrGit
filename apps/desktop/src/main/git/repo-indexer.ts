@@ -1478,7 +1478,8 @@ export class RepoIndexer {
       const tracking = missing ? undefined : trackingFromWorktreeState(w);
       if (tracking !== undefined) wt.tracking = tracking;
       if (w.last_activity_at !== null) wt.lastActivityAt = w.last_activity_at;
-      if (w.last_authored_at !== null) wt.lastAuthoredAt = w.last_authored_at;
+      // A gone checkout is no longer work of yours to focus on.
+      if (!missing && w.last_authored_at !== null) wt.lastAuthoredAt = w.last_authored_at;
       if (!missing && w.head !== null && w.head !== "") wt.head = w.head;
       const source = missing ? undefined : forkSourceFromRow(w);
       if (source !== undefined) wt.source = source;

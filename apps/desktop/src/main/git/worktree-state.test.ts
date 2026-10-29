@@ -200,6 +200,34 @@ describe("WorktreeStateService (system git)", () => {
     expect((await isolated.compute(id))?.lastAuthoredAt).toBeUndefined();
   });
 
+  // compute() runs for rows on screen, and Focused decides what is on screen,
+  // so a commit made elsewhere reaches the store only through the sweep.
+  it("sweeps your commits into every worktree's row, and honours .mailmap", async () => {
+    const repo = join(mkdtempSync(join(tmpdir(), "pwrgit-sweep-")), "repo");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "me@work.example"]);
+    git(repo, ["config", "user.name", "Me"]);
+    // A mailmap that renames your configured address must not hide you.
+    writeFileSync(join(repo, ".mailmap"), "Me <me@home.example> <me@work.example>\n");
+    git(repo, ["add", ".mailmap"]);
+    git(repo, ["-c", "user.email=other@x.example", "commit", "-m", "theirs"]);
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({ name: "T", email: "me@work.example" });
+    const added = await new RepoIndexer(isolatedDb, systemGit).indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const id = added.value.worktrees[0]!.id;
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    expect((await isolated.compute(id))?.lastAuthoredAt).toBeUndefined();
+
+    git(repo, ["commit", "--allow-empty", "-m", "mine"]);
+    const moved = await isolated.sweepAuthored();
+    expect(moved.get(profile.id)).toEqual([added.value.id]);
+    expect(isolated.getCached(id)?.lastAuthoredAt).toBeTruthy();
+    // Nothing moved since: nothing to announce.
+    expect((await isolated.sweepAuthored()).size).toBe(0);
+  });
+
   // On a fork `main` tracks the user's own copy, so its counts read 0/0 while
   // the source moves on. The source counts ride in the same snapshot, so the
   // sidebar (which reads only the stored row) says what the header says.
