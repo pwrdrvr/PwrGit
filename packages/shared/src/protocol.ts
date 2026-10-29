@@ -461,6 +461,14 @@ export type AppIdentity = {
   diagnosticsText: string;
 };
 
+/** What a profile window was showing, for Help → Copy Diagnostics Info. */
+export type DiagnosticsRepositoryContext = {
+  name: string;
+  path: string;
+  worktreePath: string | null;
+  branch: string | null;
+};
+
 /** Settings → Troubleshooting → Process IDs: the live Electron process table. */
 export type AppProcessIds = {
   /** `main=311 gpu=315 renderer=330,341 …` — the line `main.log` records. */
@@ -2442,6 +2450,13 @@ export interface Commands {
   // Desktop auto-update (Settings → Updates)
   "app:readIdentity": { req: void; res: AppIdentity };
   "app:readProcessIds": { req: void; res: AppProcessIds };
+  /** Help → Copy Diagnostics Info, re-copied with the asking window's
+   *  repository once main's `ui:copyDiagnostics` reaches it. `written` is
+   *  false when the user copied something else meanwhile, which is kept. */
+  "app:copyDiagnostics": {
+    req: { repository: DiagnosticsRepositoryContext | null };
+    res: { written: boolean };
+  };
   "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
   "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
   "app:checkForUpdate": { req: void; res: AppUpdateCheckResult };
@@ -2571,11 +2586,13 @@ export interface Events {
   /** Help → Replay Onboarding. Re-opens the wizard for a look;
    *  deliberately never clears `onboardingCompleted`. */
   "ui:replayOnboarding": Record<string, never>;
-  /** Help → Copy Diagnostics Info put the app identity on the clipboard.
-   *  Main names the one profile window that confirms it with a toast: the
-   *  focused one, else the active profile's, else any open one — so the copy
-   *  is confirmed even when Settings, Logs or nothing has focus. */
-  "ui:diagnosticsCopied": { profileId: string | null };
+  /** Help → Copy Diagnostics Info tried to put the app report on the
+   *  clipboard (`copied` says whether it did). Main names the one profile
+   *  window that adds its repository (`app:copyDiagnostics`) and confirms
+   *  with a toast: the focused one, else the active profile's, else any open
+   *  one — so the copy is confirmed even when Settings, Logs or nothing has
+   *  focus. */
+  "ui:copyDiagnostics": { profileId: string | null; copied: boolean };
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Git identity config changed through PwrGit, or a launch notice was

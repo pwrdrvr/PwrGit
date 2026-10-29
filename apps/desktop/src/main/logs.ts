@@ -136,6 +136,11 @@ export function logMain(level: LogLevel, scope: string, ...parts: unknown[]): vo
   electronLog.scope(scope)[level](...parts);
 }
 
+/** Where main.log is written; null before `initLogFile`. */
+export function currentLogFilePath(): string | null {
+  return logFilePath;
+}
+
 export function readLogSnapshot(): LogSnapshot {
   // Merge the two sequence-sorted rings back into one chronological stream.
   const main = mainRing.ordered();
