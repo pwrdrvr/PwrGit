@@ -12,7 +12,8 @@ import type { CommandBus } from "./command-bus";
 import {
   buildDiagnosticsReport,
   type DiagnosticsBuild,
-  type DiagnosticsGit
+  type DiagnosticsGit,
+  type DiagnosticsReport
 } from "./diagnostics-report";
 import { activeGitPath, bundledKeychainHelper, execGit, installedGitSelection } from "./git/dugite";
 import { probeGitRuntime } from "./git/runtime-status";
@@ -51,18 +52,32 @@ async function readBuild(): Promise<DiagnosticsBuild> {
   };
 }
 
-async function readGit(): Promise<DiagnosticsGit> {
-  const installed = installedGitSelection();
-  const path = activeGitPath();
-  const probed = await probeGitRuntime(path, installed === null ? "bundled" : "custom");
+/** One click copies twice (main, then the window); both share one probe. */
+const GIT_PROBE_REUSE_MS = 30_000;
+let gitProbe: { path: string; at: number; result: Promise<DiagnosticsGit> } | null = null;
+
+async function probeGit(path: string, installed: boolean): Promise<DiagnosticsGit> {
+  const probed = await probeGitRuntime(path, installed ? "custom" : "bundled");
   return {
-    source: installed === null ? "bundled" : "installed",
+    source: installed ? "installed" : "bundled",
     path,
     version: probed.git,
     lfs: probed.lfs,
-    keychainHelper: installed === null ? bundledKeychainHelper() : null
+    keychainHelper: installed ? null : bundledKeychainHelper()
   };
 }
+
+function readGit(now = Date.now()): Promise<DiagnosticsGit> {
+  const path = activeGitPath();
+  if (gitProbe === null || gitProbe.path !== path || now - gitProbe.at > GIT_PROBE_REUSE_MS) {
+    gitProbe = { path, at: now, result: probeGit(path, installedGitSelection() !== null) };
+  }
+  return gitProbe.result;
+}
+
+/** The text the menu last put on the clipboard, so the window's re-copy can
+ *  tell whether the user has copied something else since. */
+let menuCopyText: string | null = null;
 
 /**
  * Who should confirm the copy: the focused profile window, else the active
@@ -82,6 +97,7 @@ export type DiagnosticsCopyDeps = {
   profileName: (profileId: string) => string | null;
   openProfileIds: () => string[];
   profileFor: (window: BrowserWindow | null) => string | null;
+  windowFor: (profileId: string) => BrowserWindow | null;
   paths: {
     userData: string;
     database: string;
@@ -97,17 +113,17 @@ export type DiagnosticsCopyRequest = {
   repository?: DiagnosticsRepositoryContext | null;
 };
 
-export async function copyDiagnostics(
+async function buildReport(
   deps: DiagnosticsCopyDeps,
   request: DiagnosticsCopyRequest
-): Promise<void> {
+): Promise<DiagnosticsReport> {
   const [build, git] = await Promise.all([captureDiagnosticsBuild(), readGit()]);
   const name = (id: string): string => deps.profileName(id) ?? id;
   const rendererPid =
     request.sender !== null && !request.sender.isDestroyed()
       ? request.sender.getOSProcessId()
       : 0;
-  const report = buildDiagnosticsReport({
+  return buildDiagnosticsReport({
     collectedAt: new Date(),
     identity: readAppIdentity(),
     build,
@@ -128,22 +144,12 @@ export async function copyDiagnostics(
     paths: { ...deps.paths, log: currentLogFilePath() },
     git
   });
-  await clipboard.write([
-    new ClipboardItem({ "text/plain": report.text, "text/html": report.html })
-  ]);
 }
 
-/** The window a profile is bound to, if it is open. */
-function windowForProfile(
-  deps: DiagnosticsCopyDeps,
-  profileId: string | null
-): BrowserWindow | null {
-  if (profileId === null) return null;
-  return (
-    BrowserWindow.getAllWindows().find(
-      (window) => !window.isDestroyed() && deps.profileFor(window) === profileId
-    ) ?? null
-  );
+function writeReport(report: DiagnosticsReport): Promise<void> {
+  return clipboard.write([
+    new ClipboardItem({ "text/plain": report.text, "text/html": report.html })
+  ]);
 }
 
 /**
@@ -154,22 +160,32 @@ function windowForProfile(
 export async function copyDiagnosticsFromMenu(
   deps: DiagnosticsCopyDeps,
   target: { focused: string | null; activeId: string | null },
-  emit: (profileId: string | null) => void
+  emit: (profileId: string | null, copied: boolean) => void
 ): Promise<void> {
   const profileId = diagnosticsTargetProfile(
     target.focused,
     target.activeId,
     deps.openProfileIds()
   );
+  let copied = false;
   try {
-    await copyDiagnostics(deps, {
+    const report = await buildReport(deps, {
       profileId,
-      sender: windowForProfile(deps, profileId)?.webContents ?? null
+      sender: profileId === null ? null : (deps.windowFor(profileId)?.webContents ?? null)
     });
+    await writeReport(report);
+    menuCopyText = report.text;
+    copied = true;
   } catch (cause) {
+    menuCopyText = null;
     logMain("warn", "diagnostics", "copying diagnostics info failed", cause);
   }
-  emit(profileId);
+  emit(profileId, copied);
+}
+
+/** A pasteboard may hand back CRLF for the LF it was given. */
+function sameText(a: string, b: string): boolean {
+  return a.replace(/\r\n/g, "\n") === b.replace(/\r\n/g, "\n");
 }
 
 export function registerDiagnosticsCopyHandler(
@@ -182,11 +198,17 @@ export function registerDiagnosticsCopyHandler(
         ? null
         : (webContents.fromId(context.webContentsId) ?? null);
     const window = sender === null ? null : BrowserWindow.fromWebContents(sender);
-    await copyDiagnostics(deps, {
+    const report = await buildReport(deps, {
       profileId: deps.profileFor(window),
       sender,
       repository: req.repository
     });
-    return ok(null);
+    // The user copied something else since the menu's copy: keep theirs.
+    if (menuCopyText !== null && !sameText(await clipboard.readText(), menuCopyText)) {
+      return ok({ written: false });
+    }
+    await writeReport(report);
+    menuCopyText = null;
+    return ok({ written: true });
   });
 }

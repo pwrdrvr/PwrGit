@@ -14,6 +14,7 @@ import type {
   Worktree
 } from "@pwrgit/shared";
 import { showErrorToast, showInfoToast } from "./lib/toast";
+import { diagnosticsCopiedToast, diagnosticsRepository } from "./lib/diagnosticsCopy";
 import { useAgentOffered } from "./features/agent/agent-store";
 import { ChangeRequestRail } from "./features/change-request/ChangeRequestRail";
 import { ChangeRequestView } from "./features/change-request/ChangeRequestView";
@@ -669,28 +670,26 @@ export function App() {
   // so the toast shows even when Settings or Logs has focus, and only once.
   useEffect(
     () =>
-      subscribe("ui:copyDiagnostics", ({ profileId }) => {
+      subscribe("ui:copyDiagnostics", ({ profileId, copied }) => {
         if (profileId === null || profileId !== windowProfileId()) return;
         void dispatch("app:copyDiagnostics", {
-          repository:
-            selectedRepo === null
-              ? null
-              : {
-                  name: selectedRepo.name,
-                  path: selectedRepo.path,
-                  worktreePath: selectedWorktree?.path ?? null,
-                  branch: selectedWorktree?.branch ?? null
-                }
-        }).then((result) =>
-          showInfoToast({
-            key: "diagnostics-copied",
-            title: "Diagnostics info copied",
-            // A failed re-copy leaves main's first copy, without the repository.
-            message: result.ok
-              ? "PwrGit's build, processes, log and data paths, Git and this window's repository are on the clipboard, ready to paste into an issue."
-              : "PwrGit's build, processes, log and data paths and Git are on the clipboard, ready to paste into an issue."
-          })
-        );
+          repository: diagnosticsRepository(selectedRepo, selectedWorktree)
+        }).then((result) => {
+          const toast = diagnosticsCopiedToast(copied, result);
+          if (toast === null) return;
+          if (toast.tone === "error") {
+            showErrorToast({
+              title: "Could not copy diagnostics info",
+              message: toast.message
+            });
+          } else {
+            showInfoToast({
+              key: "diagnostics-copied",
+              title: "Diagnostics info copied",
+              message: toast.message
+            });
+          }
+        });
       }),
     [selectedRepo, selectedWorktree]
   );

@@ -2451,10 +2451,11 @@ export interface Commands {
   "app:readIdentity": { req: void; res: AppIdentity };
   "app:readProcessIds": { req: void; res: AppProcessIds };
   /** Help → Copy Diagnostics Info, re-copied with the asking window's
-   *  repository once main's `ui:copyDiagnostics` reaches it. */
+   *  repository once main's `ui:copyDiagnostics` reaches it. `written` is
+   *  false when the user copied something else meanwhile, which is kept. */
   "app:copyDiagnostics": {
     req: { repository: DiagnosticsRepositoryContext | null };
-    res: null;
+    res: { written: boolean };
   };
   "app:readUpdateStatus": { req: void; res: AppUpdateStatus };
   "app:readUpdateReleases": { req: void; res: AppUpdateReleaseVersions };
@@ -2585,12 +2586,13 @@ export interface Events {
   /** Help → Replay Onboarding. Re-opens the wizard for a look;
    *  deliberately never clears `onboardingCompleted`. */
   "ui:replayOnboarding": Record<string, never>;
-  /** Help → Copy Diagnostics Info already put the app report on the
-   *  clipboard. Main names the one profile window that adds its repository
-   *  (`app:copyDiagnostics`) and confirms with a toast: the focused one, else
-   *  the active profile's, else any open one — so the copy is confirmed even
-   *  when Settings, Logs or nothing has focus. */
-  "ui:copyDiagnostics": { profileId: string | null };
+  /** Help → Copy Diagnostics Info tried to put the app report on the
+   *  clipboard (`copied` says whether it did). Main names the one profile
+   *  window that adds its repository (`app:copyDiagnostics`) and confirms
+   *  with a toast: the focused one, else the active profile's, else any open
+   *  one — so the copy is confirmed even when Settings, Logs or nothing has
+   *  focus. */
+  "ui:copyDiagnostics": { profileId: string | null; copied: boolean };
   /** App settings changed (any window) — payload is the fresh snapshot. */
   "settings:changed": AppSettingsSnapshot;
   /** Git identity config changed through PwrGit, or a launch notice was

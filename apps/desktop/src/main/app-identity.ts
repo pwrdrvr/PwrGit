@@ -26,7 +26,8 @@ const PLATFORM_NAMES: Record<string, string> = {
   linux: "Linux"
 };
 
-function releaseLabel(release: UpdatesSettings): string {
+/** "Stable / Latest" — the release a version infers to, as people read it. */
+export function releaseLabel(release: UpdatesSettings): string {
   const train = release.train === "stable" ? "Stable" : "Beta";
   const track = release.channel === "latest" ? "Latest" : "Prerelease";
   return `${train} / ${track}`;

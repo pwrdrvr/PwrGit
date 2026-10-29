@@ -910,6 +910,7 @@ if (!gotSingleInstanceLock) {
       profileName: (profileId) => profiles.get(profileId)?.name ?? null,
       openProfileIds: () => windows.openProfileIds(),
       profileFor: (window) => windows.profileFor(window),
+      windowFor: (profileId) => windows.windowFor(profileId),
       paths: {
         userData: app.getPath("userData"),
         database: join(app.getPath("userData"), "pwrgit.db"),
@@ -1017,7 +1018,8 @@ if (!gotSingleInstanceLock) {
               focused: windows.focusedProfileId(),
               activeId: profiles.getActiveId()
             },
-            (profileId) => emitEvent("ui:copyDiagnostics", { profileId })
+            (profileId, copied) =>
+              emitEvent("ui:copyDiagnostics", { profileId, copied })
           );
         },
         onOpenLicense: () =>

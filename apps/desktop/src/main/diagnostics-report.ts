@@ -1,4 +1,5 @@
 import type { AppIdentity, DiagnosticsRepositoryContext } from "@pwrgit/shared";
+import { releaseLabel } from "./app-identity";
 
 /**
  * Help → Copy Diagnostics Info. One report answers "which PwrGit, which
@@ -66,11 +67,9 @@ function available(value: string | null | undefined): string {
 
 function appSection(input: DiagnosticsInput): Section {
   const { identity, build } = input;
-  const train = identity.release.train === "stable" ? "Stable" : "Beta";
-  const track = identity.release.channel === "latest" ? "Latest" : "Prerelease";
   const rows: Row[] = [
     ["Version", `${identity.name} ${identity.version}`],
-    ["Release", `${train} / ${track}`],
+    ["Release", releaseLabel(identity.release)],
     ["Build", build.kind === "packaged" ? "Packaged" : "Development"],
     ["Executable", input.executablePath],
     ["App path", input.appPath]
