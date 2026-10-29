@@ -462,8 +462,8 @@ export function repoPinSource(r: Repo): RepoPinSource {
   return "none";
 }
 
-function repoHasPrunable(r: Repo, now: number): boolean {
-  return r.worktrees.some((w) => isPrunableWorktree(w, now));
+function repoHasPrunable(r: Repo, now: number, finishedAfterDays?: number): boolean {
+  return r.worktrees.some((w) => isPrunableWorktree(w, now, finishedAfterDays));
 }
 
 /**
@@ -478,13 +478,15 @@ export function lensCounts(
   now: number = Date.now(),
   focus: FocusContext = { selectedWorktreeId: null, visits: {} },
   /** The Focused list, when the caller already has it (Fetch recent does). */
-  focused: readonly Repo[] = focusedRepos(repos, focus, now)
+  focused: readonly Repo[] = focusedRepos(repos, focus, now),
+  /** The Stale lens's merged-branch rule (`worktreeFinishedAfterDays`). */
+  finishedAfterDays?: number
 ): Record<Lens, number> {
   return {
     Focused: focused.length,
     Pinned: repos.filter(repoIsPinned).length,
     Behind: repos.filter((r) => r.worktrees.some((w) => w.behind > 0)).length,
-    Stale: repos.filter((r) => repoHasPrunable(r, now)).length,
+    Stale: repos.filter((r) => repoHasPrunable(r, now, finishedAfterDays)).length,
     All: repos.length
   };
 }
@@ -547,7 +549,9 @@ export function filterReposByLens(
   repos: Repo[],
   lens: Lens,
   now: number = Date.now(),
-  focus: FocusContext = { selectedWorktreeId: null, visits: {} }
+  focus: FocusContext = { selectedWorktreeId: null, visits: {} },
+  /** The Stale lens's merged-branch rule (`worktreeFinishedAfterDays`). */
+  finishedAfterDays?: number
 ): Repo[] {
   let list = repos;
   if (lens === "Focused") {
@@ -557,7 +561,7 @@ export function filterReposByLens(
   } else if (lens === "Pinned") {
     list = repos.filter(repoIsPinned);
   } else if (lens === "Stale") {
-    list = repos.filter((r) => repoHasPrunable(r, now));
+    list = repos.filter((r) => repoHasPrunable(r, now, finishedAfterDays));
   }
   if (lens === "All") return [...list].sort(byName);
   const byPin = [...list].sort(

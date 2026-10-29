@@ -10,7 +10,8 @@ import {
   formatBytes,
   STALE_AGE_DAYS,
   type PruneCandidate,
-  type PruneScanSummary
+  type PruneScanSummary,
+  type WorktreeFinishedAfterDays
 } from "@pwrgit/shared";
 import { confirmDialog } from "../shell/dialogs";
 import { revealLabel, revealPath } from "../shell/reveal";
@@ -23,7 +24,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
-import { MaintenanceRulesApplied } from "./MaintenancePlan";
+import { FinishedAfterSelect, MaintenanceRulesApplied } from "./MaintenancePlan";
 import { StatusMark } from "./BulkSyncStatus";
 import {
   describeBytes,
@@ -67,8 +68,12 @@ export function PruneWorktreesPanel({
   onContinue,
   step = false,
   onChangeRules,
-  protectRecent: initialProtectRecent = true,
-  protectionDays: initialProtectionDays = 7
+  protectRecent: givenProtectRecent = true,
+  protectionDays: givenProtectionDays = 7,
+  finishedAfterDays: givenFinishedAfterDays = STALE_AGE_DAYS,
+  onProtectRecent,
+  onProtectionDays,
+  onFinishedAfterDays
 }: {
   profileId: string;
   /**
@@ -91,9 +96,27 @@ export function PruneWorktreesPanel({
   onChangeRules?: () => void;
   protectRecent?: boolean;
   protectionDays?: number;
+  /** Days without commits before a merged branch counts as finished. */
+  finishedAfterDays?: WorktreeFinishedAfterDays;
+  /** With these, the rules belong to the caller (which saves them); without,
+   *  the panel keeps its own copy, seeded from the values above. */
+  onProtectRecent?: (enabled: boolean) => void;
+  onProtectionDays?: (days: number) => void;
+  onFinishedAfterDays?: (days: WorktreeFinishedAfterDays) => void;
 }) {
-  const [protectRecent, setProtectRecent] = useState(initialProtectRecent);
-  const [protectionDays, setProtectionDays] = useState(initialProtectionDays);
+  const [ownProtectRecent, setOwnProtectRecent] = useState(givenProtectRecent);
+  const [ownProtectionDays, setOwnProtectionDays] = useState(givenProtectionDays);
+  const [ownFinishedAfterDays, setOwnFinishedAfterDays] = useState(givenFinishedAfterDays);
+  const protectRecent = onProtectRecent === undefined ? ownProtectRecent : givenProtectRecent;
+  const protectionDays = onProtectionDays === undefined ? ownProtectionDays : givenProtectionDays;
+  const finishedAfterDays = onFinishedAfterDays === undefined ? ownFinishedAfterDays : givenFinishedAfterDays;
+  const setProtectRecent = onProtectRecent ?? setOwnProtectRecent;
+  const setProtectionDays = onProtectionDays ?? setOwnProtectionDays;
+  const setFinishedAfterDays = onFinishedAfterDays ?? setOwnFinishedAfterDays;
+  // Read when a sweep starts, not a dependency of it: a changed rule must not
+  // cancel and restart a sweep the combined workflow already began.
+  const finishedAfterRef = useRef(finishedAfterDays);
+  finishedAfterRef.current = finishedAfterDays;
   const [stage, setStage] = useState<Stage>({ kind: autoStart ? "sweeping" : "idle" });
   const [summary, setSummary] = useState<PruneScanSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +171,12 @@ export function PruneWorktreesPanel({
         repoName: null,
         sizing: null
       });
-      void dispatch("prune:scan", { operationId, profileId, force }).then(
+      void dispatch("prune:scan", {
+        operationId,
+        profileId,
+        force,
+        finishedAfterDays: finishedAfterRef.current
+      }).then(
         (result) => {
           if (sweepRunRef.current !== run) return;
           if (result.ok) {
@@ -407,7 +435,7 @@ export function PruneWorktreesPanel({
 
             {!step && stage.kind === "idle" && <fieldset className="prune__protection">
               <legend>Finished worktrees</legend>
-              <div className="prune__fixed"><span className="prune__fixed-mark" aria-hidden="true" /><strong>Finished means merged</strong><p>A merged pull request, or merged into the default branch with no commits for {STALE_AGE_DAYS} days. Worktrees that share no history with the default branch count too.</p></div>
+              <div className="prune__fixed"><span className="prune__fixed-mark" aria-hidden="true" /><strong>Finished means merged</strong><p>A merged pull request, or a branch merged into the default branch. Worktrees that share no history with the default branch count after {STALE_AGE_DAYS} days without commits.</p></div>
               <div className="prune__protection-controls">
                 <label>
                   <input type="checkbox" checked={protectRecent} disabled={busy}
@@ -428,7 +456,15 @@ export function PruneWorktreesPanel({
                     ))}
                   </select>
               </div>
-              <p>Touched is the newest commit or file change, ignored files included. Resets to 7 days each time you open this tab.</p>
+              <div className="prune__protection-controls is-indented">
+                <span>Count a branch merged into the default branch as finished</span>
+                <FinishedAfterSelect label="Finished after" value={finishedAfterDays} disabled={busy}
+                  onChange={(days) => {
+                    setFinishedAfterDays(days);
+                    setSelected(new Set());
+                  }} />
+              </div>
+              <p>Touched is the newest commit or file change, ignored files included.{onFinishedAfterDays === undefined ? "" : " Both rules are saved, and the merged rule also decides the sidebar’s Stale lens."}</p>
             </fieldset>}
             {!step && stage.kind === "idle" && <div className="maintenance__never prune__never"><em>Never offered</em><span>Worktrees with uncommitted or untracked changes</span><span>The repository’s main checkout, and worktrees on the default branch</span><span>Worktrees whose activity could not be fully read</span></div>}
             {!step && stage.kind === "idle" && <p className="prune__intro-note">Removing a worktree deletes its folder. Its branch is kept, and so are the commits.</p>}
@@ -493,7 +529,7 @@ export function PruneWorktreesPanel({
             {stage.kind === "review" && keptDirty.length > 0 && (
               <KeptForChanges kept={keptDirty} />
             )}
-            {summary !== null && stage.kind === "review" && <MaintenanceRulesApplied kind="worktrees" protectRecent={protectRecent} protectionDays={protectionDays}
+            {summary !== null && stage.kind === "review" && <MaintenanceRulesApplied kind="worktrees" protectRecent={protectRecent} protectionDays={protectionDays} finishedAfterDays={finishedAfterDays}
               onChange={() => { if (step) onChangeRules?.(); else { setSummary(null); setStage({ kind: "idle" }); setSelected(new Set()); } }} />}
 
             {stage.kind === "review" && candidates.length > 0 && (

@@ -1,5 +1,6 @@
 import {
   err,
+  isWorktreeFinishedAfterDays,
   normalizeExcludes,
   ok,
   RECLAIM_DEFAULT_EXCLUDES,
@@ -248,6 +249,10 @@ export function registerPruneHandlers(
         operationId: req.operationId,
         signal: controller.signal,
         ...(req.force === undefined ? {} : { force: req.force }),
+        // Only the select's notches; anything else falls back to the default.
+        ...(isWorktreeFinishedAfterDays(req.finishedAfterDays)
+          ? { finishedAfterDays: req.finishedAfterDays }
+          : {}),
         computeRepoState: async (repoId) => {
           await refresher.refreshRepoWorktrees(repoId);
         },

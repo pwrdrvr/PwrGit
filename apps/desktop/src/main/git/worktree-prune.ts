@@ -68,6 +68,9 @@ export type PruneScanOptions = {
   concurrency?: number;
   /** Recompute even where a fresh snapshot exists. */
   force?: boolean;
+  /** Days without commits before a merged branch counts as finished;
+   *  `prunableReason`'s default when omitted. */
+  finishedAfterDays?: number;
   freshMs?: number;
   now?: () => Date;
   /** Run git for one repo's worktrees (in production, the state refresher). */
@@ -117,11 +120,12 @@ export function needsStateCompute(
  */
 export function candidatesForRepo(
   repo: Repo,
-  now: number = Date.now()
+  now: number = Date.now(),
+  finishedAfterDays?: number
 ): PruneCandidate[] {
   const out: PruneCandidate[] = [];
   for (const worktree of repo.worktrees) {
-    const reason = prunableReason(worktree, now);
+    const reason = prunableReason(worktree, now, finishedAfterDays);
     if (reason === null) continue;
     const candidate: PruneCandidate = {
       worktreeId: worktree.id,
@@ -227,7 +231,11 @@ export async function sweepPrunableWorktrees(
         message: "The repository is no longer indexed."
       };
     }
-    const candidates = candidatesForRepo(fresh, clock().getTime());
+    const candidates = candidatesForRepo(
+      fresh,
+      clock().getTime(),
+      options.finishedAfterDays
+    );
     worktreesConsidered += repo.worktreeIds.length;
     const outcome: PruneScanRepoOutcome =
       repo.worktreeIds.length === 0 ? "skipped" : compute ? "scanned" : "cached";

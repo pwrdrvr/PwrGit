@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import {
   BRANCH_CLEANUP_KEEP_DAYS,
   DEFAULT_BRANCH_CLEANUP_OPTIONS,
+  STALE_AGE_DAYS,
+  isBranchCleanupKeepDays,
+  isWorktreeFinishedAfterDays,
   type BranchCleanupKeepDays,
   type BranchCleanupOptions,
   type DeletedBranchResult,
@@ -12,7 +15,8 @@ import {
   type MaintenanceRepo,
   type MaintenanceRepoResult,
   type MaintenanceSummary,
-  type StaleBranch
+  type StaleBranch,
+  type WorktreeFinishedAfterDays
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
 import { displayPath } from "../../lib/platform";
@@ -134,6 +138,8 @@ export function MaintenanceDialog({
   const [gcReceipt, setGcReceipt] = useState<MaintenanceSummary | null>(null);
   const [protectRecent, setProtectRecent] = useState(true);
   const [protectionDays, setProtectionDays] = useState(7);
+  const [finishedAfterDays, setFinishedAfterDays] =
+    useState<WorktreeFinishedAfterDays>(STALE_AGE_DAYS);
   const workflowStarted = useRef(false);
   const workflowStartedAt = useRef(0);
   const [workflowDurationMs, setWorkflowDurationMs] = useState(0);
@@ -213,6 +219,11 @@ export function MaintenanceDialog({
           });
           if (general.branchCleanupKeepDays !== null)
             setLastKeepDays(general.branchCleanupKeepDays);
+          setProtectRecent(general.worktreeCleanupKeepDays !== null);
+          if (isBranchCleanupKeepDays(general.worktreeCleanupKeepDays))
+            setProtectionDays(general.worktreeCleanupKeepDays);
+          if (isWorktreeFinishedAfterDays(general.worktreeFinishedAfterDays))
+            setFinishedAfterDays(general.worktreeFinishedAfterDays);
         }
         setOptionsLoaded(true);
       });
@@ -243,6 +254,36 @@ export function MaintenanceDialog({
         }
       }
     });
+  };
+
+  /** The worktree rules are saved as they change, like the branch rules. */
+  const saveWorktreeRules = (enabled: boolean, days: number, finishedAfter: WorktreeFinishedAfterDays): void => {
+    void dispatch("settings:update", {
+      patch: {
+        general: {
+          worktreeCleanupKeepDays: enabled && isBranchCleanupKeepDays(days) ? days : null,
+          worktreeFinishedAfterDays: finishedAfter
+        }
+      }
+    }).catch(() => undefined);
+  };
+  const changeProtectRecent = (enabled: boolean): void => {
+    setProtectRecent(enabled);
+    saveWorktreeRules(enabled, protectionDays, finishedAfterDays);
+  };
+  const changeProtectionDays = (days: number): void => {
+    setProtectionDays(days);
+    saveWorktreeRules(protectRecent, days, finishedAfterDays);
+  };
+  const changeFinishedAfterDays = (days: WorktreeFinishedAfterDays): void => {
+    setFinishedAfterDays(days);
+    saveWorktreeRules(protectRecent, protectionDays, days);
+  };
+  const worktreeRules = {
+    protectRecent, protectionDays, finishedAfterDays,
+    onProtectRecent: changeProtectRecent,
+    onProtectionDays: changeProtectionDays,
+    onFinishedAfterDays: changeFinishedAfterDays
   };
 
   const reset = (): void => {
@@ -642,8 +683,7 @@ export function MaintenanceDialog({
             <MaintenancePlanForm plan={plan} onChange={setPlan}
               branchMode={branchMode} onBranchMode={changeBranchMode}
               options={combinedOptions()} onOptions={changeOptions}
-              gcMode={mode} onGcMode={setMode} protectRecent={protectRecent} protectionDays={protectionDays}
-              onProtectRecent={setProtectRecent} onProtectionDays={setProtectionDays} lastKeepDays={lastKeepDays} />
+              gcMode={mode} onGcMode={setMode} {...worktreeRules} lastKeepDays={lastKeepDays} />
             {error !== null && <div className="modal__error">{error}</div>}
             <div className="modal__actions">
               <span className="maintenance__footer-lead">{scopeRepoCount === null ? "This profile" : `${scopeRepoCount} ${scopeRepoCount === 1 ? "repository" : "repositories"}`} · {plan.worktrees && plan.branches && branchMode === "review" ? "stops twice for you" : plan.worktrees || plan.branches && branchMode === "review" ? "stops once for you" : "runs without stopping"}</span>
@@ -662,7 +702,7 @@ export function MaintenanceDialog({
             onCandidateCount={setWorktreeCandidateCount}
             autoStart={tab === "combined"}
             step={tab === "combined"}
-            {...(tab === "combined" ? { protectRecent, protectionDays } : {})}
+            {...worktreeRules}
             {...(tab === "combined" ? { onContinue: (count: number, size: string, items: { label: string; detail: string }[]) => {
               recordStep("worktrees", { state: count > 0 ? "done" : "skipped", summary: count > 0 ? `${count} removed · ${size}` : "Skipped", items });
               void continueAfterWorktrees();

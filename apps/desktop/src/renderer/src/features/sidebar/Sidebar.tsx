@@ -97,6 +97,7 @@ import {
 import { AiFeaturesSwitch } from "./AiFeaturesSwitch";
 import { useHoverStableOrder } from "./useHoverStableOrder";
 import { useListReorder } from "./useListReorder";
+import { FinishedAfterDaysContext, useFinishedAfterDaysSetting } from "./finished-after";
 
 /** Distinguishes repo drags from worktree drags (see useListReorder). */
 const REPO_MIME = "application/x-pwrgit-repo";
@@ -239,6 +240,7 @@ export function Sidebar({
   platform?: string;
 }) {
   const now = useRelativeClock();
+  const finishedAfterDays = useFinishedAfterDaysSetting();
   // The reorder gestures announce through a shared live region. Put it in the
   // DOM now, while nothing is being said, so the screen reader has registered
   // it long before the first ⌘⇧↑/↓ — see lib/announce.
@@ -411,7 +413,7 @@ export function Sidebar({
       filterReposByLens([repo], lens, now, {
         selectedWorktreeId,
         visits: focusVisits
-      }).length === 0
+      }, finishedAfterDays).length === 0
     ) {
       setLens("Focused");
     }
@@ -613,7 +615,7 @@ export function Sidebar({
       focusedRepos(repos, { selectedWorktreeId, visits: focusVisits }, now),
     [focusVisits, now, repos, selectedWorktreeId]
   );
-  const counts = lensCounts(repos, now, focusContext, recentRepos);
+  const counts = lensCounts(repos, now, focusContext, recentRepos, finishedAfterDays);
   const bulk = useBulkSyncRun({
     profileId: activeProfile?.id ?? null,
     repos,
@@ -645,7 +647,7 @@ export function Sidebar({
     landedRef.current = true;
     if (counts.Focused > 0) setLens("Focused");
   }, [repos.length, counts.Focused]);
-  const lensRepos = filterReposByLens(repos, lens, now, focusContext);
+  const lensRepos = filterReposByLens(repos, lens, now, focusContext, finishedAfterDays);
   // Selecting a worktree makes its repo `current` — rank 0 of the Focus ladder
   // — so without this the row the user just clicked would leave from under the
   // cursor. The lens keeps answering the question; the answer is only *shown*
@@ -1264,6 +1266,7 @@ export function Sidebar({
   };
 
   return (
+    <FinishedAfterDaysContext.Provider value={finishedAfterDays}>
     <aside ref={asideRef} className="pane pane--sidebar" data-testid="sidebar">
       <div className="sidebar__profile">
         {profileLoadState.status === "error" ? (
@@ -1648,5 +1651,6 @@ export function Sidebar({
       )}
       {tip.tooltipNode}
     </aside>
+    </FinishedAfterDaysContext.Provider>
   );
 }

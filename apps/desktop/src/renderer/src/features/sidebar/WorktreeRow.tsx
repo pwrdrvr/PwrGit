@@ -1,4 +1,5 @@
 import {
+  useContext,
   useEffect,
   useRef,
   type DragEvent,
@@ -27,6 +28,7 @@ import {
   type DropPosition
 } from "./repo-view";
 import { PullBadge } from "./PullBadge";
+import { FinishedAfterDaysContext } from "./finished-after";
 import { useReportVisible } from "../../lib/visibleWorktrees";
 import { DotGlyph } from "../../lib/DotGlyph";
 
@@ -94,7 +96,8 @@ export function WorktreeRow({
   /** Explicit only in deterministic platform component tests. */
   platform?: string;
 }) {
-  const prunable = isPrunableWorktree(worktree, now);
+  const finishedAfterDays = useContext(FinishedAfterDaysContext);
+  const prunable = isPrunableWorktree(worktree, now, finishedAfterDays);
   // The checkout is gone (deleted outside PwrGit, or on a volume that is not
   // mounted). Nothing is dirty, ahead or behind in a directory that does not
   // exist, so the count badges stay off whatever the row carries; the tag
