@@ -294,6 +294,10 @@ describe("syncFace", () => {
       "Fetch and prune stale remote-tracking references in the 1 repository in the Focused list; local branches are kept. Fetching automatically every 15 minutes. Last automatic fetch at 2:05 PM: all fetched."
     );
     expect(
+      syncFace({ verb: "pull", scope: "all", repoCount: 4, recentCount: 1, interval: 5, busy: false })
+        .tooltip
+    ).toContain("Pulling automatically every 5 minutes.");
+    expect(
       syncFace({ verb: "pull", scope: "all", repoCount: 4, recentCount: 1, interval: 0, busy: true })
     ).toMatchObject({ name: "Try pull all", label: "Pull all", count: 4 });
   });
