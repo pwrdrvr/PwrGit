@@ -164,7 +164,7 @@ export function BulkSyncToast({
           card's full width instead of the room left beside the actions. A
           pointer target only: the headline button and Show details are the
           keyboard's way in. */}
-      {(error !== null || live || phase !== "cancelled" || finished > 0) && (
+      {(error !== null || live || finished > 0) && (
         <div className="bulk-sync-toast__meta" onClick={onExpand}>
           {error !== null ? (
             error

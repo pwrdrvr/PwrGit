@@ -358,6 +358,18 @@ describe("BulkSyncDialog views", () => {
     expect(toast()?.textContent).not.toContain("click for details");
   });
 
+  it("opens the details from the counts row, which sits outside the headline's button", async () => {
+    vi.useFakeTimers();
+    await render({ initial: "toast", onClose: vi.fn() });
+    await act(async () => {
+      finish(cleanSummary());
+    });
+    const meta = toast()?.querySelector<HTMLElement>(".bulk-sync-toast__meta");
+    expect(meta?.closest("button")).toBeNull();
+    await act(async () => meta!.click());
+    expect(dialog()).not.toBeNull();
+  });
+
   it("draws nothing for a timed run nobody has opened, while still running it", async () => {
     await render({ initial: "hidden", onClose: vi.fn() });
     expect(dialog()).toBeNull();
