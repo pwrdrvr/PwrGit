@@ -103,6 +103,17 @@ describe("nextBulkSyncRun", () => {
     expect(nextBulkSyncRun(shown, request({ auto: true, key: 9 }))).toBe(shown);
   });
 
+  it("names a timed pull as a pull", () => {
+    const summary = {
+      counts: {
+        repos: { success: 3, partial: 0, skipped: 0, failed: 0, cancelled: 0 }
+      }
+    } as unknown as BulkSyncSummary;
+    expect(
+      describeAutoFetch(summary, new Date(2026, 9, 28, 14, 5), "soft-pull")
+    ).toMatch(/^Last automatic pull at .*: all pulled\.$/);
+  });
+
   it("counts each repository with a failure once", () => {
     const summary = {
       counts: {

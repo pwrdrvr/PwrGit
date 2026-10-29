@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Repo } from "@pwrgit/shared";
 import { useBulkSyncRun } from "./useBulkSyncRun";
 
@@ -57,6 +57,25 @@ describe("useBulkSyncRun picks", () => {
       scope: "recent",
       repoIds: ["atlas"]
     });
+  });
+
+  // 0.45.0's timer always fetched, so a face set to Pull never pulled.
+  it("runs the face's verb and scope on the timer", () => {
+    vi.useFakeTimers();
+    try {
+      act(() => root.render(<Harness key="timer" />));
+      act(() => latest.pick("pull", "recent"));
+      act(() => latest.pickInterval(5));
+      act(() => vi.advanceTimersByTime(5 * 60_000));
+      expect(latest.run).toMatchObject({
+        mode: "soft-pull",
+        scope: "recent",
+        auto: true,
+        repoIds: ["atlas"]
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("changes the interval without starting anything", () => {

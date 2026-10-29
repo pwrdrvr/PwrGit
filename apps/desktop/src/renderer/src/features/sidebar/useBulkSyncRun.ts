@@ -82,23 +82,25 @@ export function nextBulkSyncRun(
 /** The tooltip line a timed run leaves behind. */
 export function describeAutoFetch(
   summary: BulkSyncSummary | null,
-  at: Date
+  at: Date,
+  mode: BulkSyncMode = "fetch"
 ): string {
   const time = at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (summary === null) return `The automatic fetch at ${time} could not run.`;
+  const what = mode === "soft-pull" ? "pull" : "fetch";
+  if (summary === null) return `The automatic ${what} at ${time} could not run.`;
   // Repositories, each counted once: a repository whose only remote failed
   // is in both the remote and the repository counts.
   const failed = summary.counts.repos.failed + summary.counts.repos.partial;
   return failed > 0
-    ? `Last automatic fetch at ${time}: ${failed} ${failed === 1 ? "repository" : "repositories"} with failures.`
-    : `Last automatic fetch at ${time}: all fetched.`;
+    ? `Last automatic ${what} at ${time}: ${failed} ${failed === 1 ? "repository" : "repositories"} with failures.`
+    : `Last automatic ${what} at ${time}: all ${what === "pull" ? "pulled" : "fetched"}.`;
 }
 
 /**
  * Fetch and Try pull, all or recent, for one sidebar: the run, the
  * remembered verb, scope, view and interval, and the interval's timer.
- * Timed runs only ever fetch: pulling on a timer would move checkouts under
- * the reader.
+ * A timed run runs the face: its verb and scope. 0.45.0 always fetched,
+ * so a face set to Pull never pulled on the timer.
  * Design: `design/Fetch Toast and Scope - UX Review.dc.html`.
  */
 export function useBulkSyncRun({
@@ -119,8 +121,8 @@ export function useBulkSyncRun({
   const keyRef = useRef(0);
   const runRef = useRef(run);
   runRef.current = run;
-  const latest = useRef({ repos, recentRepos, scope });
-  latest.current = { repos, recentRepos, scope };
+  const latest = useRef({ repos, recentRepos, scope, verb });
+  latest.current = { repos, recentRepos, scope, verb };
 
   const start = useCallback(
     (mode: BulkSyncMode, options: { scope?: FetchScope; auto?: boolean } = {}) => {
@@ -172,7 +174,9 @@ export function useBulkSyncRun({
   const finish = useCallback((summary: BulkSyncSummary | null) => {
     const current = runRef.current;
     if (current === null) return;
-    if (current.auto) setLastAutoFetch(describeAutoFetch(summary, new Date()));
+    if (current.auto) {
+      setLastAutoFetch(describeAutoFetch(summary, new Date(), current.mode));
+    }
     // A timed run nobody opened has nothing left to show.
     const next =
       current.view === "hidden" ? null : { ...current, finished: true };
@@ -190,8 +194,12 @@ export function useBulkSyncRun({
 
   useEffect(() => {
     if (interval === 0 || profileId === null) return;
+    // Read at each tick, so changing the face doesn't restart the timer.
     const timer = window.setInterval(
-      () => start("fetch", { auto: true }),
+      () =>
+        start(latest.current.verb === "pull" ? "soft-pull" : "fetch", {
+          auto: true
+        }),
       interval * 60_000
     );
     return () => window.clearInterval(timer);

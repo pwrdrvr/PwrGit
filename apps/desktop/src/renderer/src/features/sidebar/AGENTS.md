@@ -144,7 +144,8 @@ verb and scope — Fetch or Pull, `all` or `recent` (the Focused list from
 `focusedRepos`, every page of it) — and its accessible name keeps the old
 buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
 "Try pull recent". The chevron ("Sync options") lists those four, then
-**Fetch automatically**. Verb, scope, interval and view live in
+the interval, headed **Fetch automatically** or **Pull automatically** to
+match the face. Verb, scope, interval and view live in
 `bulk-sync-prefs.ts` (`localStorage`, per machine). Rules, all in
 `useBulkSyncRun.ts`:
 
@@ -160,8 +161,9 @@ buttons' words: "Fetch all repos", "Fetch recent repos", "Try pull all",
   focus ring rings the pair. Don't give either half its own border or
   outline: as butted buttons, hover drew a three-sided orange box.
   Design: `design/Sync Split Button - UX Review.dc.html`.
-- **Timed runs only fetch**, whatever the face says. Pulling on a timer would
-  move checkouts under the reader.
+- **The timer runs the face**: its verb and scope, read at each tick. A
+  timed pull is the same soft pull (fast-forward only clean, tracked
+  branches). 0.45.0 always fetched, so a face set to Pull never pulled.
 - **The run is not the dialog.** `BulkSyncDialog` owns the operation and
   draws it as `dialog`, `toast` or `hidden`; unmounting it still cancels. So
   while a run is live, Escape and a backdrop click **minimise**, never

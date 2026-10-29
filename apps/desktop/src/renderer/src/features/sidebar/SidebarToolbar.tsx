@@ -85,7 +85,11 @@ export function syncFace(input: {
       : `Fetch and prune stale remote-tracking references in ${where}; local branches are kept.`
   ];
   const every = fetchIntervalPhrase(input.interval);
-  if (every !== null) lines.push(`Fetching automatically ${every}.`);
+  if (every !== null) {
+    lines.push(
+      `${input.verb === "pull" ? "Pulling" : "Fetching"} automatically ${every}.`
+    );
+  }
   if (input.busy) lines.push("Running now — click to watch.");
   else if (input.lastAuto !== undefined) lines.push(input.lastAuto);
   const word = recent ? "recent" : "all";
@@ -112,7 +116,7 @@ export function syncFace(input: {
  * already fetches every repository before it fast-forwards, so two buttons
  * offered the same first half twice. The face runs the remembered verb and
  * scope and wears its name. The chevron's menu sets the button up (which
- * verb and scope the face runs, and the automatic fetch interval) and stays
+ * verb and scope the face runs, and how often the timer runs it) and stays
  * open while you do; the face runs it. design/Fetch Toast and Scope - UX
  * Review.dc.html, turn 5.
  */
@@ -201,7 +205,11 @@ export function SidebarToolbar({
       };
     }),
     { type: "sep" },
-    { type: "heading", label: "Fetch automatically" },
+    // The timer runs the face, so the heading names its verb.
+    {
+      type: "heading",
+      label: syncVerb === "pull" ? "Pull automatically" : "Fetch automatically"
+    },
     ...FETCH_INTERVALS.map(
       (minutes): MenuItem => ({
         type: "item",
@@ -285,7 +293,7 @@ export function SidebarToolbar({
           disabled={syncDisabled}
           {...hoverTooltip(
             tip,
-            "Fetch or pull, all or recent — and fetch automatically"
+            "Fetch or pull, all or recent — and run it automatically"
           )}
           onClick={(event) => {
             const rect = (
