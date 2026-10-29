@@ -1,5 +1,6 @@
 import {
   isPrunableWorktree,
+  RECENT_MS,
   type Lens,
   type Repo,
   type Worktree,
@@ -105,6 +106,7 @@ export type FocusReason =
   | "current"
   | "pinned"
   | "viewed"
+  | "authored"
   | "changed"
   | "recent";
 
@@ -112,8 +114,9 @@ const FOCUS_REASON_RANK: Record<FocusReason, number> = {
   current: 0,
   pinned: 1,
   viewed: 2,
-  changed: 3,
-  recent: 4
+  authored: 3,
+  changed: 4,
+  recent: 5
 };
 
 const focusThreshold = (now: number): number =>
@@ -134,7 +137,24 @@ const newestVisit = (worktrees: Worktree[], visits: FocusVisits): number => {
   return newest;
 };
 
-/** The first matching rule is the reason rendered beside a focused repo. */
+/** Your newest commit across a repo's worktrees (`Worktree.lastAuthoredAt`). */
+const newestAuthored = (worktrees: Worktree[]): number => {
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const worktree of worktrees) {
+    const at = validTime(worktree.lastAuthoredAt);
+    if (at > newest) newest = at;
+  }
+  return newest;
+};
+
+/**
+ * The first matching rule is the reason rendered beside a focused repo. A
+ * repo is focused only for something *you* did: it holds the current
+ * worktree, you pinned it, you opened it in PwrGit, or you committed in it,
+ * the last two within `RECENT_DAYS`. Uncommitted or unpushed work and HEAD's
+ * date are not enough: agent worktrees carry the first, and every pull moves
+ * the second, so through 0.46.0 "recent" held most of a profile.
+ */
 export function focusReasonForRepo(
   repo: Repo,
   context: FocusContext,
@@ -149,25 +169,17 @@ export function focusReasonForRepo(
   if (repoIsPinned(repo)) {
     return "pinned";
   }
-  if (newestVisit(repo.worktrees, context.visits) >= focusThreshold(now)) {
+  const since = now - RECENT_MS;
+  if (newestVisit(repo.worktrees, context.visits) >= since) {
     return "viewed";
   }
-  if (
-    repo.worktrees.some(
-      (worktree) =>
-        worktree.dirty > 0 ||
-        worktree.ahead > 0 ||
-        worktree.tracking === "unpublished"
-    )
-  ) {
-    return "changed";
-  }
-  return repoLastActivity(repo) >= focusThreshold(now) ? "recent" : null;
+  return newestAuthored(repo.worktrees) >= since ? "authored" : null;
 }
 
 /**
  * The Focused repo list is a transparent priority ladder, never a weighted
- * score: current → pinned → viewed → changed/ahead → committed in 30 days.
+ * score: current → pinned → viewed → committed by you. It is also what
+ * Fetch/Pull recent runs over.
  */
 export function focusedRepos(
   repos: Repo[],
@@ -179,7 +191,7 @@ export function focusedRepos(
       repo,
       reason: focusReasonForRepo(repo, context, now),
       viewedAt: newestVisit(repo.worktrees, context.visits),
-      activityAt: repoLastActivity(repo)
+      activityAt: newestAuthored(repo.worktrees)
     }))
     .filter(
       (

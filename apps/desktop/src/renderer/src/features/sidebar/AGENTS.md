@@ -135,6 +135,17 @@ maintenance wrench. The jump field is in the title strip (`TitleBar`'s
 
 Design: `design/Sidebar Header Toolbar - UX Review.dc.html`, 2b and 3.
 
+## Focused means something you did
+
+`focusedRepos` (the Focused lens, and the sync button's `recent` scope) admits
+a repo only for the current worktree, a pin, a visit in PwrGit, or a commit
+**you authored** (`Worktree.lastAuthoredAt`, the repo's `user.email`), the
+last two within `RECENT_DAYS` (7, `@pwrgit/shared`). Don't add HEAD's date
+(`lastActivityAt`) or dirty/ahead/unpublished back to the repo ladder: every
+pull moves the first and agent worktrees carry the second, so through 0.46.0
+"recent" held 88 repos the user had not touched. The worktree list inside a
+repo (`partitionFocusedWorktrees`) still surfaces work in flight.
+
 ## One sync button (Fetch ▾ / Pull ▾) and the bulk-sync run
 
 Fetch and Try pull are one split button: Try pull already fetches every

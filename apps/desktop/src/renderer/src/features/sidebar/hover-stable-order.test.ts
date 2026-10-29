@@ -57,7 +57,7 @@ describe("the Focused lens under a click", () => {
     isDefaultBranch: true,
     pinned: false,
     isPrimary: true,
-    lastActivityAt: new Date(now - agoDays * DAY).toISOString()
+    lastAuthoredAt: new Date(now - agoDays * DAY).toISOString()
   });
 
   const repo = (id: string, agoDays: number): Repo => ({

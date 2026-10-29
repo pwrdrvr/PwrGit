@@ -91,6 +91,10 @@ export type Worktree = {
   isDefaultBranch: boolean;
   /** ISO-8601 time of the worktree branch's last commit (staleness signal). */
   lastActivityAt?: string;
+  /** ISO-8601 author time of the newest commit on HEAD by you (the repo's
+   *  user.email) within `RECENT_DAYS`; absent when there is none. What makes
+   *  a repo "recent": `lastActivityAt` moves with every pull. */
+  lastAuthoredAt?: string;
   /** Full object name of HEAD when state was last computed. Absent until then.
    *  Compared with a merged change request's `headOid`: after a squash merge
    *  that equality is the only proof the checkout holds nothing the merge did
@@ -1875,6 +1879,8 @@ export type WorktreeState = {
   isDefaultBranch: boolean;
   /** ISO-8601 time of the branch's last commit. */
   lastActivityAt?: string;
+  /** See `Worktree.lastAuthoredAt`. */
+  lastAuthoredAt?: string;
   /** ISO-8601 time the snapshot was computed. */
   updatedAt: string;
   /** The checkout's directory is gone (see `Worktree.missing`); the counts

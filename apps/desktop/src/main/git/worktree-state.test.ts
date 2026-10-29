@@ -159,6 +159,47 @@ describe("WorktreeStateService (system git)", () => {
     ).toBe("unpublished");
   });
 
+  // "Recent" is what you did. HEAD's date moves with every pull, so a pulled
+  // commit by someone else must not make the repo yours.
+  it("dates your newest commit on HEAD, not someone else's", async () => {
+    const repo = join(mkdtempSync(join(tmpdir(), "pwrgit-authored-")), "repo");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "Me@Example.com"]);
+    git(repo, ["config", "user.name", "Me"]);
+    git(repo, ["commit", "--allow-empty", "-m", "mine", "--date=2020-01-01T00:00:00Z"]);
+    const isolatedDb = openDatabase(":memory:");
+    const profile = new ProfileService(isolatedDb).create({ name: "T", email: "me@example.com" });
+    const added = await new RepoIndexer(isolatedDb, systemGit).indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const id = added.value.worktrees[0]!.id;
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+
+    // Committed now but authored long ago: outside the window, so not recent.
+    expect((await isolated.compute(id))?.lastAuthoredAt).toBeUndefined();
+
+    git(repo, ["commit", "--allow-empty", "-m", "mine, now"]);
+    const mine = (await isolated.compute(id))?.lastAuthoredAt;
+    expect(mine).toBeTruthy();
+
+    // A newer commit by someone else (a pull) leaves your date where it was.
+    git(repo, [
+      "-c", "user.email=someone@else.dev", "-c", "user.name=Someone",
+      "commit", "--allow-empty", "-m", "theirs"
+    ]);
+    const after = await isolated.compute(id);
+    expect(after?.lastAuthoredAt).toBe(mine);
+    expect(after?.lastActivityAt).toBeTruthy();
+    const repoId = added.value.id;
+    expect(
+      new RepoIndexer(isolatedDb, systemGit).getRepo(repoId)?.worktrees[0]?.lastAuthoredAt
+    ).toBe(mine);
+
+    // Under another identity none of it is yours.
+    git(repo, ["config", "user.email", "new@example.com"]);
+    expect((await isolated.compute(id))?.lastAuthoredAt).toBeUndefined();
+  });
+
   // On a fork `main` tracks the user's own copy, so its counts read 0/0 while
   // the source moves on. The source counts ride in the same snapshot, so the
   // sidebar (which reads only the stored row) says what the header says.
