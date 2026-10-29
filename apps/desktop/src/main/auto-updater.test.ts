@@ -1488,7 +1488,8 @@ describe("auto updater", () => {
     expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledTimes(1);
   });
 
-  it("flushes shutdown before handing the transition to the updater", async () => {
+  it.each(["darwin", "win32"] as const)("flushes shutdown before handing the transition to the updater on %s", async (platform) => {
+    setPlatform(platform);
     const flush = createDeferred<void>();
     const beforeQuitAndInstall = vi.fn(() => flush.promise);
     const updater = await startUpdater(beforeQuitAndInstall);
@@ -1499,7 +1500,9 @@ describe("auto updater", () => {
     expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
     flush.resolve();
     await expect(installing).resolves.toEqual({ status: "restarting" });
-    expect(autoUpdaterMock.quitAndInstall).toHaveBeenCalledOnce();
+    expect(autoUpdaterMock.quitAndInstall.mock.calls).toEqual([
+      platform === "win32" ? [true, true] : []
+    ]);
   });
 });
 
