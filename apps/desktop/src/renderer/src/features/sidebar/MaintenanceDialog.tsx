@@ -16,6 +16,7 @@ import {
   type MaintenanceRepoResult,
   type MaintenanceSummary,
   type StaleBranch,
+  type AppSettingsPatch,
   type WorktreeFinishedAfterDays
 } from "@pwrgit/shared";
 import { dispatch, subscribe } from "../../lib/pwrgit";
@@ -140,6 +141,8 @@ export function MaintenanceDialog({
   const [protectionDays, setProtectionDays] = useState(7);
   const [finishedAfterDays, setFinishedAfterDays] =
     useState<WorktreeFinishedAfterDays>(STALE_AGE_DAYS);
+  /** Worktree rules the reader changed before the saved ones arrived. */
+  const worktreeRulesTouched = useRef(new Set<"keep" | "finished">());
   const workflowStarted = useRef(false);
   const workflowStartedAt = useRef(0);
   const [workflowDurationMs, setWorkflowDurationMs] = useState(0);
@@ -219,10 +222,13 @@ export function MaintenanceDialog({
           });
           if (general.branchCleanupKeepDays !== null)
             setLastKeepDays(general.branchCleanupKeepDays);
-          setProtectRecent(general.worktreeCleanupKeepDays !== null);
-          if (isBranchCleanupKeepDays(general.worktreeCleanupKeepDays))
-            setProtectionDays(general.worktreeCleanupKeepDays);
-          if (isWorktreeFinishedAfterDays(general.worktreeFinishedAfterDays))
+          const touched = worktreeRulesTouched.current;
+          if (!touched.has("keep")) {
+            setProtectRecent(general.worktreeCleanupKeepDays !== null);
+            if (isBranchCleanupKeepDays(general.worktreeCleanupKeepDays))
+              setProtectionDays(general.worktreeCleanupKeepDays);
+          }
+          if (!touched.has("finished") && isWorktreeFinishedAfterDays(general.worktreeFinishedAfterDays))
             setFinishedAfterDays(general.worktreeFinishedAfterDays);
         }
         setOptionsLoaded(true);
@@ -256,31 +262,34 @@ export function MaintenanceDialog({
     });
   };
 
-  /** The worktree rules are saved as they change, like the branch rules. */
-  const saveWorktreeRules = (enabled: boolean, days: number, finishedAfter: WorktreeFinishedAfterDays): void => {
-    void dispatch("settings:update", {
-      patch: {
-        general: {
-          worktreeCleanupKeepDays: enabled && isBranchCleanupKeepDays(days) ? days : null,
-          worktreeFinishedAfterDays: finishedAfter
-        }
-      }
-    }).catch(() => undefined);
+  /** The worktree rules are saved as they change, like the branch rules —
+   *  only the rule that changed, so an edit made before the saved rules
+   *  arrive cannot overwrite the others with defaults. */
+  const saveGeneral = (general: NonNullable<AppSettingsPatch["general"]>): void => {
+    void dispatch("settings:update", { patch: { general } }).catch(() => undefined);
+  };
+  const saveKeep = (enabled: boolean, days: number): void => {
+    worktreeRulesTouched.current.add("keep");
+    // Off is the one null. A value off the notches is not saved at all,
+    // rather than saved as "protection off".
+    if (!enabled) saveGeneral({ worktreeCleanupKeepDays: null });
+    else if (isBranchCleanupKeepDays(days)) saveGeneral({ worktreeCleanupKeepDays: days });
   };
   const changeProtectRecent = (enabled: boolean): void => {
     setProtectRecent(enabled);
-    saveWorktreeRules(enabled, protectionDays, finishedAfterDays);
+    saveKeep(enabled, protectionDays);
   };
   const changeProtectionDays = (days: number): void => {
     setProtectionDays(days);
-    saveWorktreeRules(protectRecent, days, finishedAfterDays);
+    saveKeep(protectRecent, days);
   };
   const changeFinishedAfterDays = (days: WorktreeFinishedAfterDays): void => {
+    worktreeRulesTouched.current.add("finished");
     setFinishedAfterDays(days);
-    saveWorktreeRules(protectRecent, protectionDays, days);
+    saveGeneral({ worktreeFinishedAfterDays: days });
   };
   const worktreeRules = {
-    protectRecent, protectionDays, finishedAfterDays,
+    protectRecent, protectionDays, finishedAfterDays, rulesLoaded: optionsLoaded,
     onProtectRecent: changeProtectRecent,
     onProtectionDays: changeProtectionDays,
     onFinishedAfterDays: changeFinishedAfterDays

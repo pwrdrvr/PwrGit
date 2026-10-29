@@ -18,14 +18,18 @@ export function useFinishedAfterDaysSetting(): number {
   const [days, setDays] = useState<number>(STALE_AGE_DAYS);
   useEffect(() => {
     let live = true;
-    void dispatch("settings:read", undefined)
-      .then((result) => {
-        if (live && result.ok) setDays(readDays(result.value.general.worktreeFinishedAfterDays));
-      })
-      .catch(() => undefined);
+    // A change event is newer than the first read, which may answer later.
+    let changed = false;
     const off = subscribe("settings:changed", (snapshot) => {
+      changed = true;
       setDays(readDays(snapshot.general.worktreeFinishedAfterDays));
     });
+    void dispatch("settings:read", undefined)
+      .then((result) => {
+        if (live && !changed && result.ok)
+          setDays(readDays(result.value.general.worktreeFinishedAfterDays));
+      })
+      .catch(() => undefined);
     return () => {
       live = false;
       off();

@@ -71,10 +71,15 @@ export function prunableReason(
   const activityAt = new Date(w.lastActivityAt).getTime();
   if (!Number.isFinite(activityAt)) return null;
   if (w.mergedIntoDefault) {
+    // Anything but a real day count falls back to the default, never to
+    // "right away": this rule decides what may be deleted.
+    const days =
+      Number.isFinite(finishedAfterDays) && finishedAfterDays >= 0
+        ? finishedAfterDays
+        : STALE_AGE_DAYS;
     // "Right away" skips the clock, so a commit dated ahead (clock skew) does
     // not hold a merged branch back.
-    if (finishedAfterDays > 0 && now - activityAt <= finishedAfterDays * DAY_MS)
-      return null;
+    if (days > 0 && now - activityAt <= days * DAY_MS) return null;
     return { kind: "merged_into_default", defaultBranch: w.defaultBranch };
   }
   if (now - activityAt <= STALE_AGE_MS) return null;

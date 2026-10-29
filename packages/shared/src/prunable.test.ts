@@ -109,6 +109,9 @@ describe("prunableReason", () => {
     expect(prunableReason(wt({ ...merged, lastActivityAt: ago(3) }), NOW, 7)).toBeNull();
     expect(prunableReason(wt({ ...merged, lastActivityAt: ago(8) }), NOW, 7)?.kind)
       .toBe("merged_into_default");
+    // A value that is not a day count means the default, not "right away".
+    expect(prunableReason(wt({ ...merged, lastActivityAt: ago(3) }), NOW, Number.NaN)).toBeNull();
+    expect(prunableReason(wt({ ...merged, lastActivityAt: ago(3) }), NOW, -1)).toBeNull();
     // Activity that could not be read still keeps the row.
     expect(prunableReason(wt({ ...merged }), NOW, 0)).toBeNull();
   });

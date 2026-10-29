@@ -23,7 +23,7 @@ const steps: { key: StepKey; title: string }[] = [
   { key: "branches", title: "Local branches" },
   { key: "gc", title: "Garbage collection" }
 ];
-const daysLabel = (days: number) => `${days} ${days === 1 ? "day" : "days"}`;
+export const daysLabel = (days: number) => `${days} ${days === 1 ? "day" : "days"}`;
 const finishedAfterLabel = (days: number) => days === 0 ? "right away" : `after ${daysLabel(days)}`;
 
 /** Step 1's sentence, which follows the finished-after setting. */

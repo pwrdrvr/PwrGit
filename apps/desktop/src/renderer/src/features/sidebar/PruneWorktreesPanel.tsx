@@ -7,6 +7,7 @@ import {
   type ReactNode
 } from "react";
 import {
+  BRANCH_CLEANUP_KEEP_DAYS,
   formatBytes,
   STALE_AGE_DAYS,
   type PruneCandidate,
@@ -24,7 +25,7 @@ import {
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
 import { ReclaimDiskPanel } from "./ReclaimDiskPanel";
-import { FinishedAfterSelect, MaintenanceRulesApplied } from "./MaintenancePlan";
+import { daysLabel, FinishedAfterSelect, MaintenanceRulesApplied } from "./MaintenancePlan";
 import { StatusMark } from "./BulkSyncStatus";
 import {
   describeBytes,
@@ -73,7 +74,8 @@ export function PruneWorktreesPanel({
   finishedAfterDays: givenFinishedAfterDays = STALE_AGE_DAYS,
   onProtectRecent,
   onProtectionDays,
-  onFinishedAfterDays
+  onFinishedAfterDays,
+  rulesLoaded = true
 }: {
   profileId: string;
   /**
@@ -103,6 +105,8 @@ export function PruneWorktreesPanel({
   onProtectRecent?: (enabled: boolean) => void;
   onProtectionDays?: (days: number) => void;
   onFinishedAfterDays?: (days: WorktreeFinishedAfterDays) => void;
+  /** False until the caller's saved rules arrive; a sweep waits for them. */
+  rulesLoaded?: boolean;
 }) {
   const [ownProtectRecent, setOwnProtectRecent] = useState(givenProtectRecent);
   const [ownProtectionDays, setOwnProtectionDays] = useState(givenProtectionDays);
@@ -451,8 +455,8 @@ export function PruneWorktreesPanel({
                       setProtectionDays(Number(event.target.value));
                       setSelected(new Set());
                     }}>
-                    {[1, 3, 7, 14, 30, 90].map((days) => (
-                      <option key={days} value={days}>{days} {days === 1 ? "day" : "days"}</option>
+                    {BRANCH_CLEANUP_KEEP_DAYS.map((days) => (
+                      <option key={days} value={days}>{daysLabel(days)}</option>
                     ))}
                   </select>
               </div>
@@ -595,7 +599,7 @@ export function PruneWorktreesPanel({
               {stage.kind === "idle" ? (
                 <>
                   <button className="modal__cancel" onClick={onClose}>Close</button>
-                  <button className="modal__create" onClick={() => runSweep(false)}>Find finished worktrees</button>
+                  <button className="modal__create" disabled={!rulesLoaded} onClick={() => runSweep(false)}>Find finished worktrees</button>
                 </>
               ) : stage.kind === "sweeping" ? (
                 <button
