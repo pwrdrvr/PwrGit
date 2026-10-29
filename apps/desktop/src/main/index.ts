@@ -1515,7 +1515,32 @@ if (!gotSingleInstanceLock) {
         logMain("warn", "state", "visible-row refresh failed:", cause)
       );
     }, 5_000);
+    // "Recent" is your own commits across every repo, not just the rows on
+    // screen (WorktreeStateService.sweepAuthored). Once soon after launch,
+    // then every 15 minutes; a sweep still running skips the next tick.
+    let authoredSweeping = false;
+    const sweepAuthored = (): void => {
+      if (authoredSweeping) return;
+      authoredSweeping = true;
+      void stateService
+        .sweepAuthored()
+        .then((moved) => {
+          for (const [profileId, repoIds] of moved) {
+            emitEvent("repo:changed", { profileId, repoIds });
+          }
+        })
+        .catch((cause: unknown) =>
+          logMain("warn", "state", "authored-commit sweep failed:", cause)
+        )
+        .finally(() => {
+          authoredSweeping = false;
+        });
+    };
+    const authoredSweepStart = setTimeout(sweepAuthored, 15_000);
+    const authoredSweepPoll = setInterval(sweepAuthored, 15 * 60_000);
     app.on("before-quit", () => {
+      clearTimeout(authoredSweepStart);
+      clearInterval(authoredSweepPoll);
       clearInterval(activeStatePoll);
       clearInterval(visibleStatePoll);
       remoteTipChecker.stop();

@@ -27,3 +27,4 @@ export * from "./commit-identity";
 export * from "./contributions";
 export * from "./contribution-share";
 export * from "./repo-ownership";
+export * from "./recency";

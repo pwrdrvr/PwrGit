@@ -814,7 +814,10 @@ test("a viewed repo remains in Focused after a reload", async () => {
   await expect(window.locator(".repo-row__focus-reason")).toHaveText("Viewed");
 });
 
-test("Focused keeps clean unpublished work after its activity window expires", async () => {
+// Focused (and so Fetch/Pull recent) is for something you did. Unpushed work
+// alone no longer counts, since every agent worktree has some; a commit you
+// authored in the last RECENT_DAYS does.
+test("Focused takes in a repo you just committed in, not unpushed work alone", async () => {
   sandbox = createGitSandbox();
   const unpublished = sandbox.makeRepo("old-unpublished");
   sandbox.commitEmptyAt(
@@ -822,24 +825,24 @@ test("Focused keeps clean unpublished work after its activity window expires", a
     "local work not on a remote",
     Math.floor(Date.parse("2000-01-01T00:00:00Z") / 1000)
   );
+  const mine = sandbox.makeRepo("mine");
+  // The app reads "you" from the repo's user.email; the sandbox commits
+  // through GIT_AUTHOR_EMAIL, so name the same address here.
+  sandbox.git(mine.path, "config", "user.email", "test@pwrgit.com");
+  sandbox.commit(mine.path, "mine.txt", "yours, today");
 
   handle = await launchApp();
   const { window } = handle;
   await handle.setPickDirectory(sandbox.reposDir);
   await clickAddFolders(window);
   await lensChip(window, "All").click();
+  // On screen, both repos' snapshots are probed; main's sweep of your commits
+  // (WorktreeStateService.sweepAuthored, ~15s after launch) covers the rest.
   await expandRepoGroup(window, "old-unpublished");
-  // This chip is backed by the same completed state probe the repo index reads.
-  // This fixture has an initial commit plus the dated local commit, and no
-  // remote branches. Both commits therefore contribute to the local count.
-  await expect(window.locator(".wt-header .sync-chip")).toHaveText(
-    "↑2 local · no upstream",
-    { timeout: 20_000 }
-  );
+  await expandRepoGroup(window, "mine");
 
-  // Remove the selection-derived signal and remount the renderer. The only
-  // remaining Focus reason is the persisted unpublished tracking state; the
-  // branch timestamp is intentionally far outside the 30-day window.
+  // Remove the selection and visit signals and remount the renderer. The
+  // only Focus reason left is your own commit.
   await window.evaluate(() => {
     window.localStorage.clear();
     window.localStorage.setItem("pwrgit.lens", "Focused");
@@ -851,12 +854,11 @@ test("Focused keeps clean unpublished work after its activity window expires", a
     "true",
     { timeout: 20_000 }
   );
-  await expect(window.locator(".repo-row__name")).toHaveText([
-    "old-unpublished"
-  ]);
-  await expect(window.locator(".repo-row__focus-reason")).toHaveText(
-    "Changes"
-  );
+  // Long enough for the launch sweep if the on-screen probe hadn't landed.
+  await expect(window.locator(".repo-row__name")).toHaveText(["mine"], {
+    timeout: 40_000
+  });
+  await expect(window.locator(".repo-row__focus-reason")).toHaveText("Yours");
 });
 
 test(

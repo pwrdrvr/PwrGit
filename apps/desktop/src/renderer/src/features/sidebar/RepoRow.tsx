@@ -7,12 +7,13 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
-import type {
-  LocalBranchSummary,
-  TagSummary,
-  Repo,
-  Worktree,
-  WorktreeSort
+import {
+  RECENT_DAYS,
+  type LocalBranchSummary,
+  type TagSummary,
+  type Repo,
+  type Worktree,
+  type WorktreeSort
 } from "@pwrgit/shared";
 import { announce, movedMessage } from "../../lib/announce";
 import { copyText } from "../../lib/copyText";
@@ -95,7 +96,11 @@ const FOCUS_REASON_COPY: Record<
   },
   viewed: {
     short: "Viewed",
-    description: "focused because one of its worktrees was viewed in the last 30 days"
+    description: `focused because one of its worktrees was viewed in the last ${RECENT_DAYS} days`
+  },
+  authored: {
+    short: "Yours",
+    description: `focused because you committed here in the last ${RECENT_DAYS} days`
   },
   changed: {
     short: "Changes",
