@@ -3,8 +3,14 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { pwrgitLeftOnStashMessage } from "@pwrgit/shared";
 import type { GitExec } from "./dugite";
-import { switchBranchCarryingChanges } from "./git-service";
+import {
+  parseSwitchOverwritePaths,
+  switchBranch,
+  switchBranchCarryingChanges,
+  switchBranchLeavingChanges
+} from "./git-service";
 import { createSystemGit } from "./test-support/system-git";
 
 /**
@@ -262,5 +268,268 @@ describe("switchBranchCarryingChanges", () => {
     // The pre-existing entry is untouched and still says what it said.
     expect(stashCount(dir)).toBe(1);
     expect(gitOut(dir, ["stash", "list"])).toContain("unrelated");
+  });
+});
+
+/** `makeRepo`, plus a file `feature` added that `main` does not track — so an
+ *  untracked file of that name on `main` is one a switch would overwrite. */
+function makeRepoWithFeatureOnlyFile(): string {
+  const dir = makeRepo();
+  git(dir, ["switch", "feature"]);
+  write(dir, "only-on-feature.txt", "feature's own\n");
+  git(dir, ["add", "only-on-feature.txt"]);
+  git(dir, ["commit", "-m", "add only-on-feature.txt"]);
+  git(dir, ["switch", "main"]);
+  return dir;
+}
+
+/**
+ * "Bring my changes" is a plain `git switch` first. Git carries modified and
+ * untracked files that the destination does not touch, and refuses, atomically,
+ * when one would be overwritten — so the common case needs no stash at all,
+ * and the refusal has to name the files so the reader can be asked about them.
+ */
+describe("switchBranch (bring my changes)", () => {
+  it("brings untracked and non-conflicting modified files without a stash", async () => {
+    const dir = makeRepo();
+    write(dir, "quiet.txt", "edited on main\n");
+    write(dir, "brand-new.txt", "untracked\n");
+
+    const result = await switchBranch(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    expect(read(dir, "quiet.txt")).toBe("edited on main\n");
+    expect(read(dir, "brand-new.txt")).toBe("untracked\n");
+    expect(read(dir, "shared.txt")).toBe("feature rewrite\n");
+    // The point of trying the plain switch first: nothing was stashed.
+    expect(gitOut(dir, ["stash", "list"])).toBe("");
+  });
+
+  it("refuses with the files Git named, tracked and untracked, and moves nothing", async () => {
+    const dir = makeRepoWithFeatureOnlyFile();
+    write(dir, "shared.txt", "edited on main\n");
+    write(dir, "only-on-feature.txt", "mine, untracked\n");
+    write(dir, "quiet.txt", "also edited\n");
+    const before = porcelain(dir);
+
+    const result = await switchBranch(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("switch_would_overwrite");
+    expect([...(result.error.paths ?? [])].sort()).toEqual([
+      "only-on-feature.txt",
+      "shared.txt"
+    ]);
+    expect(branchOf(dir)).toBe("main");
+    expect(read(dir, "shared.txt")).toBe("edited on main\n");
+    expect(read(dir, "only-on-feature.txt")).toBe("mine, untracked\n");
+    expect(read(dir, "quiet.txt")).toBe("also edited\n");
+    expect(porcelain(dir)).toBe(before);
+    expect(stashCount(dir)).toBe(0);
+  });
+
+  // The fallback the reader is offered after that refusal. A plain switch
+  // refuses whenever a modified file differs between the branches, even when
+  // the edits would merge; the carrying switch merges them.
+  it("still merges the work in through the carrying switch after a refusal", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pwrgit-carry-"));
+    git(dir, ["init", "-b", "main"]);
+    git(dir, ["config", "user.email", "t@t.com"]);
+    git(dir, ["config", "user.name", "T"]);
+    git(dir, ["config", "core.autocrlf", "false"]);
+    write(dir, "lines.txt", "one\ntwo\nthree\nfour\nfive\n");
+    git(dir, ["add", "."]);
+    git(dir, ["commit", "-m", "base"]);
+    git(dir, ["switch", "-c", "feature"]);
+    write(dir, "lines.txt", "ONE\ntwo\nthree\nfour\nfive\n");
+    git(dir, ["commit", "-am", "feature edits the first line"]);
+    git(dir, ["switch", "main"]);
+    write(dir, "lines.txt", "one\ntwo\nthree\nfour\nFIVE\n");
+
+    const refused = await switchBranch(systemGit, dir, "feature");
+    expect(!refused.ok && refused.error.code).toBe("switch_would_overwrite");
+    expect(!refused.ok && refused.error.paths).toEqual(["lines.txt"]);
+    expect(branchOf(dir)).toBe("main");
+
+    const merged = await switchBranchCarryingChanges(systemGit, dir, "feature");
+    expect(merged.ok).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    expect(read(dir, "lines.txt")).toBe("ONE\ntwo\nthree\nfour\nFIVE\n");
+    expect(stashCount(dir)).toBe(0);
+  });
+});
+
+describe("parseSwitchOverwritePaths", () => {
+  it("reads every list Git printed, and nothing else", () => {
+    const stderr = [
+      "error: Your local changes to the following files would be overwritten by checkout:",
+      "\tshared.txt",
+      "\tdír/ünï name.txt",
+      "Please commit your changes or stash them before you switch branches.",
+      "error: The following untracked working tree files would be overwritten by checkout:",
+      "\tonly-on-feature.txt",
+      "Please move or remove them before you switch branches.",
+      "error: The following untracked working tree files would be removed by checkout:",
+      "\tgone/file.txt",
+      "Please move or remove them before you switch branches.",
+      "Aborting"
+    ].join("\r\n");
+    expect(parseSwitchOverwritePaths(stderr)).toEqual([
+      "shared.txt",
+      "dír/ünï name.txt",
+      "only-on-feature.txt",
+      "gone/file.txt"
+    ]);
+  });
+
+  it("finds nothing in an unrelated refusal", () => {
+    expect(
+      parseSwitchOverwritePaths("fatal: invalid reference: nope\n")
+    ).toEqual([]);
+  });
+});
+
+/**
+ * "Leave my changes on <branch>": stash them with the branch they were made on,
+ * then switch. Coming back looks for the stash's exact message.
+ */
+describe("switchBranchLeavingChanges", () => {
+  it("stashes the work under the branch it was made on, then switches clean", async () => {
+    const dir = makeRepo();
+    write(dir, "shared.txt", "edited on main\n");
+    write(dir, "brand-new.txt", "untracked\n");
+
+    const result = await switchBranchLeavingChanges(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.left).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    // Clean on the destination: its own file, and none of the left work.
+    expect(porcelain(dir)).toBe("");
+    expect(read(dir, "shared.txt")).toBe("feature rewrite\n");
+    expect(existsSync(join(dir, "brand-new.txt"))).toBe(false);
+    expect(gitOut(dir, ["stash", "list", "--format=%gs"])).toBe(
+      `On main: ${pwrgitLeftOnStashMessage("main")}`
+    );
+    // And the stash really holds it, untracked file included.
+    git(dir, ["switch", "main"]);
+    git(dir, ["stash", "apply", gitOut(dir, ["rev-parse", "refs/stash"])]);
+    expect(read(dir, "shared.txt")).toBe("edited on main\n");
+    expect(read(dir, "brand-new.txt")).toBe("untracked\n");
+  });
+
+  it("puts the work back when the switch fails after the stash", async () => {
+    const dir = makeRepo();
+    const linked = `${dir}-linked`;
+    git(dir, ["worktree", "add", linked, "feature"]);
+    write(dir, "shared.txt", "edited on main\n");
+    write(dir, "brand-new.txt", "untracked\n");
+    const before = porcelain(dir);
+
+    const result = await switchBranchLeavingChanges(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // Git's own refusal, so the caller can still go to the worktree holding it.
+    expect(result.error.code).toBe("checked_out_elsewhere");
+    expect(branchOf(dir)).toBe("main");
+    expect(read(dir, "shared.txt")).toBe("edited on main\n");
+    expect(read(dir, "brand-new.txt")).toBe("untracked\n");
+    expect(porcelain(dir)).toBe(before);
+    expect(stashCount(dir)).toBe(0);
+  });
+
+  it("switches without a stash when the tree went clean", async () => {
+    const dir = makeRepo();
+
+    const result = await switchBranchLeavingChanges(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.left).toBe(false);
+    expect(branchOf(dir)).toBe("feature");
+    expect(stashCount(dir)).toBe(0);
+  });
+
+  it("names a detached checkout's stash by its commit", async () => {
+    const dir = makeRepo();
+    git(dir, ["switch", "--detach", "HEAD"]);
+    const short = gitOut(dir, ["rev-parse", "--short", "HEAD"]);
+    write(dir, "quiet.txt", "edited while detached\n");
+
+    const result = await switchBranchLeavingChanges(systemGit, dir, "feature");
+
+    expect(result.ok).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    expect(gitOut(dir, ["stash", "list", "--format=%gs"])).toContain(
+      pwrgitLeftOnStashMessage(short)
+    );
+  });
+});
+
+/**
+ * Agents keep linked worktrees INSIDE the checkout (`.claude/worktrees/x`).
+ * To the outer checkout that is an untracked directory holding a `.git` file,
+ * and `git stash -u` answers it with "Ignoring path" — it must not be swept
+ * into a stash, cleaned away, or overwritten by any of the three answers.
+ */
+describe("a linked worktree nested inside the checkout", () => {
+  function makeNested(): { dir: string; inner: string } {
+    const dir = makeRepo();
+    const inner = join(dir, ".claude", "worktrees", "x");
+    git(dir, ["worktree", "add", "-b", "agent-x", inner, "main"]);
+    write(inner, "agent-work.txt", "the agent's uncommitted work\n");
+    write(inner, "quiet.txt", "the agent's edit\n");
+    return { dir, inner };
+  }
+  const survives = (inner: string): void => {
+    expect(read(inner, "agent-work.txt")).toBe("the agent's uncommitted work\n");
+    expect(read(inner, "quiet.txt")).toBe("the agent's edit\n");
+    expect(branchOf(inner)).toBe("agent-x");
+  };
+
+  it("survives a plain bring", async () => {
+    const { dir, inner } = makeNested();
+    write(dir, "quiet.txt", "edited on main\n");
+    expect((await switchBranch(systemGit, dir, "feature")).ok).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    survives(inner);
+  });
+
+  it("survives a leave", async () => {
+    const { dir, inner } = makeNested();
+    write(dir, "shared.txt", "edited on main\n");
+    write(dir, "brand-new.txt", "untracked\n");
+    const result = await switchBranchLeavingChanges(systemGit, dir, "feature");
+    expect(result.ok).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    survives(inner);
+    // The stash holds the outer checkout's work only.
+    const stash = gitOut(dir, ["rev-parse", "refs/stash"]);
+    expect(
+      gitOut(dir, ["show", "--name-only", "--format=", `${stash}^3`])
+    ).not.toContain(".claude");
+  });
+
+  it("survives a merge that lands", async () => {
+    const { dir, inner } = makeNested();
+    write(dir, "quiet.txt", "edited on main\n");
+    const result = await switchBranchCarryingChanges(systemGit, dir, "feature");
+    expect(result.ok).toBe(true);
+    expect(branchOf(dir)).toBe("feature");
+    survives(inner);
+  });
+
+  it("survives a merge that rolls back", async () => {
+    const { dir, inner } = makeNested();
+    write(dir, "shared.txt", "edited on main\n");
+    const result = await switchBranchCarryingChanges(systemGit, dir, "feature");
+    expect(!result.ok && result.error.code).toBe("carry_conflicts");
+    expect(branchOf(dir)).toBe("main");
+    expect(read(dir, "shared.txt")).toBe("edited on main\n");
+    survives(inner);
   });
 });

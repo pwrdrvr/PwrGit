@@ -234,6 +234,29 @@ limits a command line to ~32 KB.
 - A failure in a later batch leaves earlier batches applied. Announce the
   change also on error (`notifyChanged` in `changes-handlers.ts`).
 
+## Switching with uncommitted work: bring is a plain switch first
+
+`branch:switch` answers "where does the uncommitted work go", and no answer
+commits. `guardedSwitchBranch` (renderer `features/shell/branchSwitch.ts`)
+asks; `switch-carrying.test.ts` pins all three paths against real Git.
+
+- **Bring is a plain `git switch`; stash only on refusal.** Git carries what
+  the destination does not touch and refuses atomically when it would
+  overwrite a file. Do not stash "to be safe": the common case needs none.
+  The refusal is `switch_would_overwrite` with Git's list in `error.paths`,
+  parsed under `LC_ALL=C` (`parseSwitchOverwritePaths`, tracked and untracked
+  lists). Only then does the renderer offer `"merge"`
+  (`switchBranchCarryingChanges`) or `"leave"`.
+- **Leave stashes as `pwrgitLeftOnStashMessage(<branch>)`**, the exact text a
+  later switch onto that branch looks for to offer the work back. Change the
+  spelling in `@pwrgit/shared` only.
+- **Every stash in a switch is addressed by SHA, never `stash pop`**, and a
+  failed switch reapplies it before returning Git's original refusal
+  (`checked_out_elsewhere` is a navigation upstream).
+- A linked worktree nested in the checkout (`.claude/worktrees/x`) is an
+  untracked directory with a `.git` file. `stash -u` prints "Ignoring path"
+  and leaves it alone; keep a test proving each path still does.
+
 ## The lane graph draws fetched work, not just local work
 
 `graph-handlers.ts` builds the lineage from a trunk walk plus one not-in-trunk

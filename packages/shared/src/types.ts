@@ -1646,6 +1646,17 @@ export type PartialFileDiff = {
  *  list recognizes it by this exact text; nothing else marks the entry. */
 export const PWRGIT_PULL_STASH_MESSAGE = "pwrgit: auto-stash before pull";
 
+/**
+ * The name a branch switch gives the stash it makes when the reader chose to
+ * leave their uncommitted changes on the branch they were leaving. Coming back
+ * to that branch looks for this exact text to offer the changes back, so main
+ * (which writes it) and the renderer (which looks for it) share one spelling.
+ * Git records "On <branch>:" itself; this says why the entry exists.
+ */
+export function pwrgitLeftOnStashMessage(branch: string): string {
+  return `pwrgit: left on ${branch}`;
+}
+
 /** One entry in Git's repository-wide `refs/stash` reflog, newest first. */
 export type StashEntry = {
   /** Current reflog selector. This can move when another entry is added/dropped. */
