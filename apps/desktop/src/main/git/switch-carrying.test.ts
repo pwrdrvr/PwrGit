@@ -457,7 +457,7 @@ describe("switchBranchLeavingChanges", () => {
   it("names a detached checkout's stash by its commit", async () => {
     const dir = makeRepo();
     git(dir, ["switch", "--detach", "HEAD"]);
-    const short = gitOut(dir, ["rev-parse", "--short", "HEAD"]);
+    const short = gitOut(dir, ["rev-parse", "HEAD"]).trim().slice(0, 12);
     write(dir, "quiet.txt", "edited while detached\n");
 
     const result = await switchBranchLeavingChanges(systemGit, dir, "feature");

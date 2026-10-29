@@ -455,10 +455,9 @@ export async function switchWorktreeToBranch({
       outcome.code === "carry_conflicts"
         ? "Your changes stayed put"
         : "Switch failed",
-    message:
-      outcome.code === "switch_would_overwrite"
-        ? `${branch} could not be checked out without overwriting local changes. Commit or stash them first.`
-        : outcome.message.split("\n")[0],
+    // `switch_would_overwrite` never lands here: `guardedSwitchBranch` asks
+    // the overwrite question instead of returning it.
+    message: outcome.message.split("\n")[0],
     detail: outcome.message,
     subject: { repoId }
   });

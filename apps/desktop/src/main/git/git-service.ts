@@ -5050,24 +5050,6 @@ async function stashTip(
   return ok(sha === "" ? null : sha);
 }
 
-/** The name the leaving stash records: the branch, or a short commit for a
- *  detached checkout — there is no branch to come back to then, but the entry
- *  still has to say where the work came from. */
-async function checkoutLabel(
-  git: GitExec,
-  cwd: string
-): Promise<Result<string>> {
-  const symbolic = await git(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd);
-  if (!symbolic.ok) return symbolic;
-  const name = symbolic.value.stdout.trim();
-  if (symbolic.value.exitCode === 0 && name !== "") return ok(name);
-  const args = ["rev-parse", "--short", "HEAD"];
-  const raw = await git(args, cwd);
-  if (!raw.ok) return raw;
-  const checked = requireExit0(raw.value, args);
-  return checked.ok ? ok(checked.value.stdout.trim()) : checked;
-}
-
 /**
  * Check out `branch`, leaving the checkout's uncommitted work behind on the
  * branch it was made on — stashed as `pwrgitLeftOnStashMessage(<that branch>)`,
@@ -5086,9 +5068,14 @@ export async function switchBranchLeavingChanges(
   cwd: string,
   branch: string
 ): Promise<Result<{ left: boolean }>> {
-  const label = await checkoutLabel(git, cwd);
-  if (!label.ok) return label;
-  const message = pwrgitLeftOnStashMessage(label.value);
+  // The branch being left, or a short commit for a detached checkout: there
+  // is no branch to come back to then, but the entry still says where the
+  // work came from.
+  const here = await currentCheckoutRef(git, cwd);
+  if (!here.ok) return here;
+  const message = pwrgitLeftOnStashMessage(
+    /^[0-9a-f]{40,64}$/.test(here.value) ? here.value.slice(0, 12) : here.value
+  );
 
   // Compared before and after rather than reading Git's "No local changes to
   // save", which is translated.

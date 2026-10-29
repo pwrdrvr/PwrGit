@@ -648,7 +648,7 @@ export class PrService {
     repoId: string,
     prs: Map<string, PrSummary | null>,
     refs: Map<string, LocalBranchRef>,
-    opts: { trigger?: PrRefreshTrigger; force?: boolean },
+    opts: { trigger?: PrRefreshTrigger },
     generation: number
   ): Promise<void> {
     const candidates: Array<{ branch: string; tip: string }> = [];
@@ -665,13 +665,13 @@ export class PrService {
       candidates.push({ branch, tip });
     }
     if (candidates.length === 0 || !this.isCurrent(generation)) return;
+    // `force` is deliberately not passed on: it would re-ask about every tip
+    // (one REST call each on GitLab) on each forced branch refresh. The commit
+    // path's own TTL for this trigger already bounds how stale a tip can be.
     const changed = await this.refreshCommitsAtGeneration(
       repoId,
       [...tips],
-      {
-        ...(opts.trigger !== undefined ? { trigger: opts.trigger } : {}),
-        ...(opts.force === true ? { force: true } : {})
-      },
+      opts.trigger !== undefined ? { trigger: opts.trigger } : {},
       generation
     );
     if (changed.size > 0) {

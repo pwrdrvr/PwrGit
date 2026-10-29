@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -77,6 +77,27 @@ describe("nestedWorktreeExcludes", () => {
     execFileSync("git", ["init", "-q", vendored]);
     const excludes = await nestedWorktreeExcludes(primary);
     expect(excludes).not.toContain(":(exclude,top,literal)vendor/lib");
+  });
+
+  it("keeps asking about a worktree whose folder did not exist yet", async () => {
+    // `git worktree add` registers the admin entry before it writes the
+    // checkout; a read in between must not cache the worktree away.
+    const { primary, nested } = fixture();
+    const aside = `${nested}-aside`;
+    renameSync(nested, aside);
+    expect(await nestedWorktreeExcludes(primary)).toEqual([]);
+    renameSync(aside, nested);
+    expect(await nestedWorktreeExcludes(primary)).toEqual([
+      ":(exclude,top,literal).claude/worktrees/agent-1"
+    ]);
+  });
+
+  it("treats a folder named like ..scratch as inside the checkout", async () => {
+    const { primary } = fixture();
+    git(primary, ["worktree", "add", "-q", "-b", "dots", join(primary, "..scratch", "wt")]);
+    expect(await nestedWorktreeExcludes(primary)).toContain(
+      ":(exclude,top,literal)..scratch/wt"
+    );
   });
 
   it("notices a worktree added after the first read", async () => {

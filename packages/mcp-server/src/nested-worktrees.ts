@@ -61,7 +61,10 @@ async function hasLink(root: string): Promise<boolean> {
 /** `path` relative to `root` with forward slashes, when strictly inside it. */
 function insidePath(root: string, path: string): string | null {
   const rel = relative(root, path);
-  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return null;
+  // `..` as a whole segment, not a prefix: `..cache/agent` is inside.
+  if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return null;
+  }
   return sep === "/" ? rel : rel.split(sep).join("/");
 }
 
@@ -78,11 +81,27 @@ async function commonDir(cwd: string): Promise<string | null> {
   return realpath(resolve(admin, pointer));
 }
 
-type Listing = { mtimeMs: number; roots: string[] };
+/**
+ * How long a listing is trusted while `worktrees/` keeps its mtime. Adding or
+ * removing a worktree changes that mtime; `git worktree move` only rewrites a
+ * `gitdir` file inside it, so this bounds how long a move goes unseen.
+ */
+const RELIST_MS = 30_000;
+
+type Listing = {
+  mtimeMs: number;
+  listedAt: number;
+  /** Realpath'd roots of the worktrees whose folders exist. */
+  roots: string[];
+  /** Roots whose folder did not exist at listing time: `git worktree add`
+   *  creates the admin entry (moving the mtime) before the checkout, so a
+   *  read in between must keep asking about them rather than forget them. */
+  pending: string[];
+};
 const listings = new Map<string, Listing>();
 
 /** Every linked worktree's root (realpath'd), cached per common dir until
- *  `worktrees/` itself changes — an add or remove renames entries there. */
+ *  `worktrees/` changes or the listing is `RELIST_MS` old. */
 async function worktreeRoots(common: string): Promise<string[]> {
   const admin = join(common, "worktrees");
   let mtimeMs: number;
@@ -91,19 +110,48 @@ async function worktreeRoots(common: string): Promise<string[]> {
   } catch {
     return [];
   }
+  const now = Date.now();
   const cached = listings.get(common);
-  if (cached !== undefined && cached.mtimeMs === mtimeMs) return cached.roots;
+  if (
+    cached !== undefined &&
+    cached.mtimeMs === mtimeMs &&
+    now >= cached.listedAt &&
+    now - cached.listedAt < RELIST_MS
+  ) {
+    if (cached.pending.length > 0) {
+      const still: string[] = [];
+      for (const root of cached.pending) {
+        const real = await realpathOrNull(root);
+        if (real === null) still.push(root);
+        else cached.roots.push(real);
+      }
+      cached.pending = still;
+    }
+    return cached.roots;
+  }
   const roots: string[] = [];
+  const pending: string[] = [];
   for (const name of await readdir(admin)) {
+    let gitdir: string;
     try {
-      const gitdir = (await readFile(join(admin, name, "gitdir"), "utf8")).trim();
-      // `gitdir` names the worktree's `.git` link; its folder is the root. A
-      // checkout whose folder is gone has nothing to exclude.
-      roots.push(await realpath(dirname(resolve(admin, name, gitdir))));
+      gitdir = (await readFile(join(admin, name, "gitdir"), "utf8")).trim();
     } catch {
       continue;
     }
+    // `gitdir` names the worktree's `.git` link; its folder is the root.
+    const root = dirname(resolve(admin, name, gitdir));
+    const real = await realpathOrNull(root);
+    if (real === null) pending.push(root);
+    else roots.push(real);
   }
-  listings.set(common, { mtimeMs, roots });
+  listings.set(common, { mtimeMs, listedAt: now, roots, pending });
   return roots;
+}
+
+async function realpathOrNull(path: string): Promise<string | null> {
+  try {
+    return await realpath(path);
+  } catch {
+    return null;
+  }
 }
