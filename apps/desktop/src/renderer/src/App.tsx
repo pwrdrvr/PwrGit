@@ -483,18 +483,6 @@ export function App() {
     const offNew = subscribe("ui:newProfile", () => {
       if (document.hasFocus()) setProfileModal({ mode: "create" });
     });
-    const offCopied = subscribe("ui:diagnosticsCopied", ({ profileId }) => {
-      // Main picks the window, so the toast shows even when Settings or Logs
-      // has focus — and shows once, not in every window.
-      if (profileId !== null && profileId === windowProfileId()) {
-        showInfoToast({
-          key: "diagnostics-copied",
-          title: "Diagnostics info copied",
-          message:
-            "PwrGit's version, build and platform are on the clipboard, ready to paste into an issue."
-        });
-      }
-    });
     // Replay is a look, not a reset: it re-opens the wizard without ever
     // clearing `onboardingCompleted`, so the next launch stays quiet.
     const offReplay = subscribe("ui:replayOnboarding", () => {
@@ -505,7 +493,6 @@ export function App() {
     });
     return () => {
       offNew();
-      offCopied();
       offReplay();
     };
   }, []);
@@ -676,6 +663,37 @@ export function App() {
   );
   const selectedWorktree =
     selectedRepo?.worktrees.find((w) => w.id === selection?.worktreeId) ?? null;
+
+  // Help → Copy Diagnostics Info: main has already copied the app report and
+  // names one window to add the repository it shows and confirm. Main picks,
+  // so the toast shows even when Settings or Logs has focus, and only once.
+  useEffect(
+    () =>
+      subscribe("ui:copyDiagnostics", ({ profileId }) => {
+        if (profileId === null || profileId !== windowProfileId()) return;
+        void dispatch("app:copyDiagnostics", {
+          repository:
+            selectedRepo === null
+              ? null
+              : {
+                  name: selectedRepo.name,
+                  path: selectedRepo.path,
+                  worktreePath: selectedWorktree?.path ?? null,
+                  branch: selectedWorktree?.branch ?? null
+                }
+        }).then((result) =>
+          showInfoToast({
+            key: "diagnostics-copied",
+            title: "Diagnostics info copied",
+            // A failed re-copy leaves main's first copy, without the repository.
+            message: result.ok
+              ? "PwrGit's build, processes, log and data paths, Git and this window's repository are on the clipboard, ready to paste into an issue."
+              : "PwrGit's build, processes, log and data paths and Git are on the clipboard, ready to paste into an issue."
+          })
+        );
+      }),
+    [selectedRepo, selectedWorktree]
+  );
 
   const changeRequestRepo = useMemo(
     () =>

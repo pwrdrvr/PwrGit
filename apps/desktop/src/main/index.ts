@@ -3,7 +3,6 @@ import { join } from "node:path";
 import {
   app,
   BrowserWindow,
-  clipboard,
   dialog,
   nativeImage,
   nativeTheme,
@@ -25,10 +24,7 @@ import {
   type Profile,
   type BranchReveal
 } from "@pwrgit/shared";
-import {
-  readAppIdentity,
-  registerAppIdentityHandlers
-} from "./app-identity";
+import { registerAppIdentityHandlers } from "./app-identity";
 import { registerAppDocumentHandlers } from "./app-document-handlers";
 import { registerAgentHandlers } from "./ai/agent-handlers";
 import { LocalAgentSession } from "./ai/agent-session";
@@ -48,6 +44,12 @@ import {
 } from "./auto-updater";
 import { CommandBus, type CommandContext } from "./command-bus";
 import { registerClipboardHandlers } from "./clipboard-handlers";
+import {
+  captureDiagnosticsBuild,
+  copyDiagnosticsFromMenu,
+  registerDiagnosticsCopyHandler,
+  type DiagnosticsCopyDeps
+} from "./diagnostics-copy";
 import { registerDialogHandlers } from "./dialog-handlers";
 import { registerGitRuntimeHandlers } from "./git/runtime-status";
 import { configureBundledGit, configureBundledGitConfig, execGit, useInstalledGit } from "./git/dugite";
@@ -394,6 +396,8 @@ if (!gotSingleInstanceLock) {
     // watchProcessIds sees them appear, so a copied log identifies its own
     // processes without a trip to Activity Monitor or Task Manager.
     logMain("info", "app", `PwrGit ${app.getVersion()} starting pid=${process.pid}`);
+    // The dev checkout's branch and commit as they were at launch.
+    void captureDiagnosticsBuild();
     watchProcessIds();
     // Started once the log file is open, so a stall during the rest of startup
     // lands in main.log. Sleep stops the clock the heartbeat reads on some
@@ -902,6 +906,18 @@ if (!gotSingleInstanceLock) {
         appearance.appearance()
       );
     const windows = createProfileWindows({ appearance: appearanceForProfile });
+    const diagnosticsCopy: DiagnosticsCopyDeps = {
+      profileName: (profileId) => profiles.get(profileId)?.name ?? null,
+      openProfileIds: () => windows.openProfileIds(),
+      profileFor: (window) => windows.profileFor(window),
+      paths: {
+        userData: app.getPath("userData"),
+        database: join(app.getPath("userData"), "pwrgit.db"),
+        settings: join(app.getPath("userData"), "settings.json"),
+        diagnosticsOutput: diagnosticsOutputRoot
+      }
+    };
+    registerDiagnosticsCopyHandler(bus, diagnosticsCopy);
     // Settings, Logs and the document viewers have no profile of their own, so
     // they render in the palette of the window that opened them.
     const windowAppearances = createWindowAppearances<BrowserWindow>({
@@ -995,16 +1011,14 @@ if (!gotSingleInstanceLock) {
             openAppDocumentWindow("changelog", palette)
           ),
         onCopyDiagnostics: () => {
-          clipboard.writeText(readAppIdentity().diagnosticsText);
-          const open = windows.openProfileIds();
-          const activeId = profiles.getActiveId();
-          emitEvent("ui:diagnosticsCopied", {
-            profileId:
-              windows.focusedProfileId() ??
-              (activeId !== null && open.includes(activeId)
-                ? activeId
-                : (open[0] ?? null))
-          });
+          void copyDiagnosticsFromMenu(
+            diagnosticsCopy,
+            {
+              focused: windows.focusedProfileId(),
+              activeId: profiles.getActiveId()
+            },
+            (profileId) => emitEvent("ui:copyDiagnostics", { profileId })
+          );
         },
         onOpenLicense: () =>
           openAuxiliaryWindow((palette) =>
