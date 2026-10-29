@@ -40,6 +40,18 @@ fails.
     a configured fetch remote on the same GitHub instance.
   - Page past foreign heads. Omit an unfinished walk; never negative-cache it.
   - Exact-commit association is independent and can return upstream PRs.
+- **Ask by the published name, file under the local one.** A branch that
+  tracks a branch on an accepted source remote (`local-name` →
+  `origin/remote-name`) is asked about as `remote-name`. `branchesToCheck`'s
+  one `for-each-ref` carries tip and upstream. The answer is keyed back to the
+  local name, so `branch_pr`, `isFresh`, failure marks and `Worktree.pr` never
+  see the published one.
+- **A branch with no upstream falls back to its tip.** When its name finds
+  nothing, its tip's exact SHA goes through the commit path (`commit_pr`, its
+  TTL and throttle, at most `TIP_FALLBACK_LIMIT` per refresh). The answer is
+  kept only if its `headOid` IS the tip. Commit rows written this way are
+  announced through `onCommitsChanged`; a silent write would stop the
+  visible-commit monitor polling a hash the renderer never heard about.
 - **Backoff.** `pr-client.ts` wraps `@octokit/graphql` (ESM; a named import
   is correct). It obeys Retry-After and rate-limit-reset with exponential
   backoff (ghcrawl's semantics).

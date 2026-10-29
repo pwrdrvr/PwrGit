@@ -101,7 +101,7 @@ describe("change-request handlers", () => {
 
   it("rides the whole-repo PR sweep, not a targeted branch refresh", async () => {
     const onRepoSweep = vi.fn();
-    const prs = { refreshRepo: vi.fn(async () => new Map()) } as unknown as PrService;
+    const prs = { onCommitsChanged: () => () => undefined, refreshRepo: vi.fn(async () => new Map()) } as unknown as PrService;
     const bus = new CommandBus();
     const handlers = registerGitHubHandlers(
       bus,
