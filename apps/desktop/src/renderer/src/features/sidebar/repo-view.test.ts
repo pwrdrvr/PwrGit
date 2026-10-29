@@ -769,6 +769,20 @@ describe("staleness (isPrunableWorktree + Stale lens)", () => {
     expect(lensCounts(repos).Stale).toBe(1);
     expect(filterReposByLens(repos, "Stale").map((r) => r.id)).toEqual(["stale"]);
   });
+
+  it("Stale lens follows the finished-after setting for a merged branch", () => {
+    const now = Date.now();
+    const repos = [
+      repo({
+        id: "today",
+        worktrees: [wt({ id: "t", branch: "feat/merged-today", mergedIntoDefault: true, lastActivityAt: new Date(now - 3_600_000).toISOString() })]
+      })
+    ];
+    const focus = { selectedWorktreeId: null, visits: {} };
+    expect(lensCounts(repos, now).Stale).toBe(0);
+    expect(lensCounts(repos, now, focus, [], 0).Stale).toBe(1);
+    expect(filterReposByLens(repos, "Stale", now, focus, 0).map((r) => r.id)).toEqual(["today"]);
+  });
 });
 
 describe("groupReposByRoot", () => {

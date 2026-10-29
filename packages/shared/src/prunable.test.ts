@@ -94,6 +94,37 @@ describe("prunableReason", () => {
     ).not.toBeNull();
   });
 
+  it("follows the finished-after setting for a merged branch", () => {
+    const merged = { branch: "feat/today", mergedIntoDefault: true };
+    // Right away: a commit an hour ago, or dated ahead by clock skew, counts.
+    expect(prunableReason(wt({ ...merged, lastActivityAt: ago(0) }), NOW, 0)?.kind)
+      .toBe("merged_into_default");
+    expect(
+      prunableReason(
+        wt({ ...merged, lastActivityAt: new Date(NOW + DAY).toISOString() }),
+        NOW,
+        0
+      )?.kind
+    ).toBe("merged_into_default");
+    expect(prunableReason(wt({ ...merged, lastActivityAt: ago(3) }), NOW, 7)).toBeNull();
+    expect(prunableReason(wt({ ...merged, lastActivityAt: ago(8) }), NOW, 7)?.kind)
+      .toBe("merged_into_default");
+    // A value that is not a day count means the default, not "right away".
+    expect(prunableReason(wt({ ...merged, lastActivityAt: ago(3) }), NOW, Number.NaN)).toBeNull();
+    expect(prunableReason(wt({ ...merged, lastActivityAt: ago(3) }), NOW, -1)).toBeNull();
+    // Activity that could not be read still keeps the row.
+    expect(prunableReason(wt({ ...merged }), NOW, 0)).toBeNull();
+  });
+
+  it("keeps the fixed window for a diverged branch whatever the setting", () => {
+    // Nothing proves a branch with no shared history merged anywhere.
+    const orphan = { branch: "orphan", divergedFromDefault: true };
+    expect(prunableReason(wt({ ...orphan, lastActivityAt: ago(1) }), NOW, 0)).toBeNull();
+    expect(
+      prunableReason(wt({ ...orphan, lastActivityAt: ago(STALE_AGE_DAYS + 1) }), NOW, 0)?.kind
+    ).toBe("diverged");
+  });
+
   it("refuses every case the sweep must never touch", () => {
     const old = { lastActivityAt: ago(90), mergedIntoDefault: true };
     expect(prunableReason(wt({ branch: "p", ...old, isPrimary: true }), NOW)).toBeNull();

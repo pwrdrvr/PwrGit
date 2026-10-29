@@ -15,6 +15,7 @@ import type { ContributionIdentity, ContributionSnapshot } from "./contributions
 import type { HookRun, IgnoreDestination, IgnoreOptions, IgnorePatternChoice, IgnoredSummary, RepositorySetup, SetupIgnoreTest } from "./git-discovery";
 import type { MaintenanceScope, MaintenanceAction, MaintenanceSummary, MaintenanceProgress, BranchCleanupKeepDays } from "./maintenance";
 import { DEFAULT_BRANCH_CLEANUP_OPTIONS } from "./maintenance";
+import { STALE_AGE_DAYS, type WorktreeFinishedAfterDays } from "./prunable";
 import type {
   AgentChoice,
   AgentMessageDraft,
@@ -707,6 +708,13 @@ export type GeneralSettings = {
   /** Maintenance › Local branches: keep branches touched within this many
    *  days. Null switches the age guard off. */
   branchCleanupKeepDays: BranchCleanupKeepDays | null;
+  /** Maintenance › Worktrees: keep worktrees touched (a commit or a file
+   *  change) within this many days. Null switches the guard off. */
+  worktreeCleanupKeepDays: BranchCleanupKeepDays | null;
+  /** Days without commits before a branch merged into the default branch
+   *  counts as finished: the sidebar's Stale lens and the worktree sweep both
+   *  read it. 0 is "right away". */
+  worktreeFinishedAfterDays: WorktreeFinishedAfterDays;
   /**
    * Show the launch notice when Git outside PwrGit has no identity of its
    * own. On by default; switching it off is a deliberate "I only commit in
@@ -808,6 +816,8 @@ export const GENERAL_DEFAULTS: GeneralSettings = {
   branchCleanupPrProof: DEFAULT_BRANCH_CLEANUP_OPTIONS.prProof,
   maintenanceBranchMode: "review",
   branchCleanupKeepDays: DEFAULT_BRANCH_CLEANUP_OPTIONS.keepDays,
+  worktreeCleanupKeepDays: 7,
+  worktreeFinishedAfterDays: STALE_AGE_DAYS,
   gitIdentityReminder: true,
   gitIdentityByFolder: false
 };
@@ -1810,6 +1820,9 @@ export interface Commands {
       profileId: ProfileId;
       /** Re-run git even where a fresh state snapshot already exists. */
       force?: boolean;
+      /** Days without commits before a merged branch counts as finished
+       *  (`WORKTREE_FINISHED_AFTER_DAYS`). Omitted: STALE_AGE_DAYS. */
+      finishedAfterDays?: WorktreeFinishedAfterDays;
     };
     res: PruneScanSummary;
   };

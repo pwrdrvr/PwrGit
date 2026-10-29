@@ -20522,6 +20522,9 @@ button.agent-auth-node:focus-visible,
 .prune__protection-controls { justify-content: flex-start; }
 .prune__protection-controls label { color: var(--text-primary); font: 600 12px var(--font-sans); }
 .prune__protection-controls input { accent-color: var(--accent); }
+.prune__protection-controls + .prune__protection-controls { margin-top: 8px; }
+.prune__protection-controls.is-indented { padding-left: 27px; } /* the checkbox, its default margins and the gap */
+.prune__protection-controls.is-indented > span { color: var(--text-primary); font: 600 12px var(--font-sans); }
 .prune__never { flex: 0 0 auto; margin: 12px 18px 0; }
 .prune__intro-note { margin: 12px 18px 0; color: var(--text-muted); font: 400 11px/1.5 var(--font-sans); }
 .prune__summary { align-items: center; border-color: var(--border-subtle); background: var(--bg-panel); }
@@ -20659,6 +20662,8 @@ button.agent-auth-node:focus-visible,
 .maintenance__done-status.is-stopped > span { background: var(--danger-soft); color: var(--danger-text); }
 .maintenance__plan-rules { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 .maintenance__plan-rule { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* A rule with no checkbox lines its words up with the ones that have one. */
+.maintenance__plan-rule.is-indented { padding-left: 21px; }
 .maintenance__plan-mode { flex-basis: auto; }
 .modal.maintenance { height: auto; max-height: min(790px, 92vh); }
 .maintenance > .bulk-sync__status:not(.is-live) { height: auto; min-height: 54px; }

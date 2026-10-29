@@ -602,7 +602,7 @@ describe("combined maintenance workflow", () => {
   };
   const actions = () => runCalls().map(([, req]) => req.action.kind);
   let remove: ReturnType<typeof vi.fn<(ids: string[]) => Promise<RemoveWorktreesOutcome>>>;
-  async function open(savedMode: "review" | "auto" = "review") {
+  async function open(savedMode: "review" | "auto" = "review", savedGeneral: Record<string, unknown> = {}) {
     events.clear();
     remove = vi.fn(async (ids: string[]) => {
       ids.forEach((worktreeId) => events.get("worktree:removed")?.({ worktreeId }));
@@ -614,7 +614,8 @@ describe("combined maintenance workflow", () => {
     });
     dispatch.mockImplementation(async (name: string, req: { action?: { kind: string } }) => {
       if (name === "settings:read") return { ok: true, value: { general: {
-        branchCleanupPrProof: true, branchCleanupKeepDays: null, maintenanceBranchMode: savedMode
+        branchCleanupPrProof: true, branchCleanupKeepDays: null, maintenanceBranchMode: savedMode,
+        ...savedGeneral
       } } };
       if (name === "prune:scan") return { ok: true, value: scannedWorktrees };
       if (name === "maintenance:run") return { ok: true, value: summary([{
@@ -640,6 +641,44 @@ describe("combined maintenance workflow", () => {
     expect(dispatch.mock.calls.some(([name]) => name === "prune:scan")).toBe(false);
     await task(0); await task(1); await task(2);
     expect(button("Start").disabled).toBe(true);
+  });
+  it("restores the saved worktree rules, saves a change, and sweeps with them", async () => {
+    await open("review", { worktreeCleanupKeepDays: null, worktreeFinishedAfterDays: 0 });
+    const guard = container.querySelector<HTMLSelectElement>("select[aria-label='Combined worktree age guard']")!;
+    const finished = container.querySelector<HTMLSelectElement>("select[aria-label='Combined worktree finished after']")!;
+    expect(guard.disabled).toBe(true);
+    expect(finished.value).toBe("0");
+    expect(finished.selectedOptions[0]?.textContent).toBe("right away");
+    expect(container.textContent).toContain("or whose branch is merged into the default branch.");
+    await act(async () => {
+      finished.value = "7";
+      finished.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(dispatch).toHaveBeenCalledWith("settings:update", {
+      patch: { general: { worktreeFinishedAfterDays: 7 } }
+    });
+    expect(container.textContent).toContain("has had no commits for 7 days.");
+    await click("Start");
+    expect(dispatch.mock.calls.find(([name]) => name === "prune:scan")?.[1]).toMatchObject({ finishedAfterDays: 7 });
+    expect(container.textContent).toContain("Recent protection off");
+    expect(container.textContent).toContain("merged, no commits for 7 days");
+  });
+  it("saves the Worktrees tab's rules and sweeps with them", async () => {
+    await open("review", { worktreeCleanupKeepDays: null, worktreeFinishedAfterDays: 0 });
+    await click("Worktrees");
+    const guard = container.querySelector<HTMLInputElement>(".prune__protection input[type=checkbox]")!;
+    const finished = container.querySelector<HTMLSelectElement>("select[aria-label='Finished after']")!;
+    expect(guard.checked).toBe(false);
+    expect(finished.value).toBe("0");
+    await act(async () => {
+      finished.value = "3";
+      finished.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(dispatch).toHaveBeenCalledWith("settings:update", { patch: { general: { worktreeFinishedAfterDays: 3 } } });
+    await act(async () => guard.click());
+    expect(dispatch).toHaveBeenCalledWith("settings:update", { patch: { general: { worktreeCleanupKeepDays: 7 } } });
+    await click("Find finished worktrees");
+    expect(dispatch.mock.calls.find(([name]) => name === "prune:scan")?.[1]).toMatchObject({ finishedAfterDays: 3 });
   });
   it("pauses at both reviews and runs GC only after an explicit continuation", async () => {
     await open();

@@ -431,6 +431,10 @@ Files: `worktree-prune.ts` (the sweep), `worktree-reclaim.ts` (the
   `isPrunableWorktree` (`packages/shared/src/prunable.ts`) run in the
   renderer's Stale lens *and* the sweep in main. A second copy would let the
   two disagree about which rows the pruner may touch.
+- **A merged branch's age comes from `general.worktreeFinishedAfterDays`**
+  (0 is "right away"). Both callers pass it: the sidebar through
+  `FinishedAfterDaysContext`, the dialog in `prune:scan`'s request. A diverged
+  branch keeps the fixed `STALE_AGE_DAYS`, because nothing proves it merged.
 - **`prunableReason` returns null for `locked === true`**, as for dirty and
   missing. `git worktree lock` is git's only explicit "do not touch"
   (`repo-indexer.ts` reasons the same way). Removing a locked worktree needs
