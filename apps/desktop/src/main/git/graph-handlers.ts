@@ -359,7 +359,14 @@ export function registerGraphHandlers(
       // Builds overlap: a graph:changed during a slow build starts another.
       // The older one finishing last must not replace the newer answer — it
       // still answers its own request, but it never becomes the shared cache.
-      if (laneBuilds.get(key) === build) laneCache.set(key, cached);
+      if (laneBuilds.get(key) === build) {
+        laneCache.set(key, cached);
+        // Per-HEAD supplements were merged into the replaced base; drop them
+        // rather than leave one per HEAD ever seen.
+        for (const k of laneCache.keys()) {
+          if (k.startsWith(`${key}:`)) laneCache.delete(k);
+        }
+      }
     }
     if (cached === undefined) {
       return err({ kind: "repo", code: "graph_failed", message: "graph unavailable" });
@@ -427,7 +434,8 @@ export function registerGraphHandlers(
       if (
         supCached !== undefined &&
         req.force !== true &&
-        supCached.refsStamp === cached.refsStamp &&
+        refsStamp !== null &&
+        supCached.refsStamp === refsStamp &&
         Date.now() - supCached.at < LANE_TTL_MS
       ) {
         out = supCached;
