@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -480,6 +480,7 @@ describe("graph:lanes cache across a pull's ref updates", () => {
   let appRepo: string;
   let workRepo: string;
   let appWorktreeId: string;
+  let appWorktreePath: string;
 
   const tipOf = (graph: LaneGraph, branch: string): string | undefined =>
     Object.entries(graph.tips).find(([, names]) => names.includes(branch))?.[0];
@@ -534,6 +535,7 @@ describe("graph:lanes cache across a pull's ref updates", () => {
     const main = indexed.value.worktrees.find((w) => w.branch === "main");
     if (main === undefined) throw new Error("no main worktree");
     appWorktreeId = main.id;
+    appWorktreePath = main.path;
     pullBus = new CommandBus();
     registerGraphHandlers(
       pullBus,
@@ -557,11 +559,10 @@ describe("graph:lanes cache across a pull's ref updates", () => {
     const atGate = new Promise<void>((resolve) => (reached = resolve));
     gitGate.held = new Promise<void>((resolve) => (release = resolve));
     gitGate.match = (args, cwd) => {
-      // The trunk walk; the indexer stores the checkout's real path.
+      // The trunk walk, run in the checkout path the index stored. Compared
+      // as stored: git's spelling of a path differs per platform.
       const hit =
-        args[0] === "log" &&
-        args[1] === "--topo-order" &&
-        realpathSync(cwd) === realpathSync(appRepo);
+        args[0] === "log" && args[1] === "--topo-order" && cwd === appWorktreePath;
       if (hit) reached();
       return hit;
     };
