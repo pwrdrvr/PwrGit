@@ -1606,7 +1606,13 @@ export async function installDownloadedAppUpdate(): Promise<AppUpdateInstallResu
       app.quit();
     } else {
       await beforeQuitAndInstall?.();
-      autoUpdater.quitAndInstall();
+      if (process.platform === "win32") {
+        // NSIS defaults to its visible wizard. Install silently and
+        // have the installer relaunch the updated app when it finishes.
+        autoUpdater.quitAndInstall(true, true);
+      } else {
+        autoUpdater.quitAndInstall();
+      }
     }
     return { status: "restarting" };
   } catch (err) {
