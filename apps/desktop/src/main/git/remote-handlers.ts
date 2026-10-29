@@ -1063,6 +1063,12 @@ export function registerRemoteHandlers(
           `pull refresh failed ${path} during ${pullPhaseDescription("refresh")} after ${seconds(startedAt)}: ${sanitizeGitLogDetail(cause)}`
         );
       }
+      // The refresh above repaints the graph only when this branch's own
+      // counters moved. A pull that found the branch current, or moved only
+      // other branches' remote refs, moves none of them — and a graph built
+      // between the fetch and the fast-forward would keep drawing the trunk
+      // as fetched-but-unapplied.
+      emitEvent("graph:changed", { repoId: worktree.repoId });
       logMain(
         "info",
         "remote",

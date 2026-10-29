@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type Commit,
   type LaneGraph,
@@ -8,7 +9,7 @@ import {
 import type { CommandBus } from "../command-bus";
 import { prSummaryFromRow, prSummarySelect } from "../forge/pr-row";
 import type { DB } from "../persistence/db";
-import { execGit } from "./dugite";
+import { execGit, type GitExec } from "./dugite";
 import { missingWorktreeError } from "./worktree-liveness";
 import {
   branchTips,
@@ -46,9 +47,13 @@ type CachedLanes = {
   upstreamRefs: string[];
   matchedBranches: number;
   hiddenBranches: number;
+  /** The branch refs as they stood when this build began (`readRefsStamp`). */
+  refsStamp: string;
   at: number;
 };
 const laneCache = new Map<string, CachedLanes>();
+/** Builds started per cache key. Only the newest build may write the cache. */
+const laneBuilds = new Map<string, number>();
 const LANE_TTL_MS = 30_000;
 /** Trunk window — recent default-branch history drawn as the spine. */
 const TRUNK_CAP = 150;
@@ -58,6 +63,24 @@ const UNIQUE_CAP = 500;
  *  active worktree branches must not become a 400-lane curtain. Most recent
  *  first; the toolbar reports "N of M". */
 const ACTIVE_DRAW_CAP = 30;
+
+/**
+ * A digest of every local and remote-tracking branch tip. A cached build is
+ * only served while this still matches: refs move without a `graph:changed`
+ * reaching the renderer (a pull fetches, then fast-forwards seconds later; an
+ * agent pulls in a terminal), and a build that read them in between draws the
+ * trunk dashed until something forces a rebuild. Null when git cannot answer,
+ * which never matches. Tags are left out: tag commands invalidate the graph
+ * themselves, and a repo can carry tens of thousands of them.
+ */
+async function readRefsStamp(git: GitExec, cwd: string): Promise<string | null> {
+  const raw = await git(
+    ["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/remotes"],
+    cwd
+  );
+  if (!raw.ok || raw.value.exitCode !== 0) return null;
+  return createHash("sha1").update(raw.value.stdout).digest("hex");
+}
 
 export function registerGraphHandlers(
   bus: CommandBus,
@@ -154,16 +177,23 @@ export function registerGraphHandlers(
 
     // The branch set + union log is the same for every worktree in a repo — only
     // the HEAD dot moves — so compute it once and cache it. A plain worktree
-    // switch reuses the cache (one cheap rev-parse); `force` (a real change) and
-    // the TTL recompute it.
+    // switch reuses the cache (one cheap rev-parse and a for-each-ref); `force`
+    // (a real change), the TTL, and any branch ref that moved recompute it.
+    // The stamp is read BEFORE the build reads anything, so a ref that moves
+    // mid-build leaves the entry older than its refs, never newer.
     const key = `${wt.repo_id}:${req.scope}`;
+    const refsStamp = await readRefsStamp(execGit, wt.path);
     let cached = laneCache.get(key);
     const fresh =
       cached !== undefined &&
       req.force !== true &&
+      refsStamp !== null &&
+      cached.refsStamp === refsStamp &&
       Date.now() - cached.at < LANE_TTL_MS;
 
     if (!fresh) {
+      const build = (laneBuilds.get(key) ?? 0) + 1;
+      laneBuilds.set(key, build);
       const def = await state.resolveDefaultBranch(wt.repo_id, wt.path);
 
       let shown: string[];
@@ -323,9 +353,20 @@ export function registerGraphHandlers(
         upstreamRefs,
         matchedBranches,
         hiddenBranches,
+        refsStamp: refsStamp ?? "",
         at: Date.now()
       };
-      laneCache.set(key, cached);
+      // Builds overlap: a graph:changed during a slow build starts another.
+      // The older one finishing last must not replace the newer answer — it
+      // still answers its own request, but it never becomes the shared cache.
+      if (laneBuilds.get(key) === build) {
+        laneCache.set(key, cached);
+        // Per-HEAD supplements were merged into the replaced base; drop them
+        // rather than leave one per HEAD ever seen.
+        for (const k of laneCache.keys()) {
+          if (k.startsWith(`${key}:`)) laneCache.delete(k);
+        }
+      }
     }
     if (cached === undefined) {
       return err({ kind: "repo", code: "graph_failed", message: "graph unavailable" });
@@ -393,6 +434,8 @@ export function registerGraphHandlers(
       if (
         supCached !== undefined &&
         req.force !== true &&
+        refsStamp !== null &&
+        supCached.refsStamp === refsStamp &&
         Date.now() - supCached.at < LANE_TTL_MS
       ) {
         out = supCached;
