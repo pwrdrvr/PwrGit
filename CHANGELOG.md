@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.48.0 - 2026-10-30
+
+- Branch tracking - Added a tracking control in the branch switcher for choosing another remote's same-named branch, even when a local branch already exists. Compare ahead/behind counts, search by remote-qualified name, and review the commits leaving and arriving, push destination, and effect on uncommitted files before confirming.
+- Tracking safety - Added choices to change tracking without moving the branch, fast-forward it, or align it with the selected remote. Moves that would discard commits held by no remote require a copy branch first. Uncommitted files are not stashed up front, overwrite refusals leave them in place, stale reviews are rejected, and branches checked out in another worktree can change tracking without moving their tip.
+- Fork pulls - Added a remembered choice when a fork has moved ahead of its original: pull from the fork's own branch only, or keep syncing from the original. Choosing the fork-only path removes upstream rebase/reset suggestions from the Pull menu. A sync that brings in no commits and cannot push back now reports up to date instead of lingering as a red failure card.
+
 ## v0.47.0 - 2026-10-29
 
 - Branch switching - Added a choice to bring uncommitted changes along or leave them in a named stash on the current branch. Returning to that branch offers Restore, which brings the changes back unstaged. If switching would overwrite files, PwrGit names them and offers to merge the changes or leave them behind instead of requiring a commit first.
