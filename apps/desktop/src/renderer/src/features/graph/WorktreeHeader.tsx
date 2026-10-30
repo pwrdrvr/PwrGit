@@ -1690,8 +1690,9 @@ export function WorktreeHeader({
   const pickPullChoice = (next: PullChoice): void => {
     setPullChoice(next);
     writePullChoice(repo.id, next);
-    // A pick from the menu of a moved-on fork answers the question too.
-    if (movedOn && movedOnAnswer === null) {
+    // A pick from the menu of a moved-on fork answers the question too, and
+    // is how an earlier answer is changed ("Change it in the Pull menu").
+    if (movedOn || movedOnAnswer !== null) {
       const answer: MovedOnAnswer = next === "tracked" ? "tracked" : "sync";
       writeMovedOnAnswer(repo.id, answer);
       setMovedOnAnswer(answer);

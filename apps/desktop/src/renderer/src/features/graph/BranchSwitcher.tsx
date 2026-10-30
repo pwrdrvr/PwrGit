@@ -80,7 +80,9 @@ export function BranchSwitcher({
    *  "keep what it tracks", which outranks a search's pick. */
   const [picked, setPicked] = useState<Record<string, Pick | null>>({});
   const [choices, setChoices] = useState<Record<string, TrackingChoices | "loading">>({});
-  const [menu, setMenu] = useState<{ branch: string; sel: number; left: number; top: number } | null>(null);
+  /** The open remote menu. Its highlight is the ref, not a position: the
+   *  list re-sorts and can grow when the options arrive. */
+  const [menu, setMenu] = useState<{ branch: string; ref: string | null; left: number; top: number } | null>(null);
   const [review, setReview] = useState<{ branch: string; pick: Pick } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const caretRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -142,10 +144,21 @@ export function BranchSwitcher({
         tracked: option.tracked
       }));
     }
+    // The upstream's own remote ref, so a remote with a slash and an upstream
+    // under another name both read right; the bare name only if it isn't listed.
+    const upstreamRef =
+      row.ref.upstream === undefined
+        ? undefined
+        : (branches ?? []).find((b) => b.isRemote && b.name === row.ref.upstream);
     const upstream =
       row.ref.upstream === undefined
         ? []
-        : [{ pick: { remote: row.ref.upstream.split("/")[0] ?? "", remoteBranch: row.ref.name, ref: row.ref.upstream }, tracked: true }];
+        : [{
+            pick: upstreamRef !== undefined
+              ? pickOf(upstreamRef)
+              : { remote: row.ref.upstream.split("/")[0] ?? "", remoteBranch: row.ref.upstream.replace(/^[^/]+\//, ""), ref: row.ref.upstream },
+            tracked: true
+          }];
     return [...upstream, ...row.alternates.map((alt) => ({ pick: pickOf(alt), tracked: false }))];
   };
 
@@ -158,8 +171,8 @@ export function BranchSwitcher({
     loadChoices(row.ref.name);
     const options = menuOptions(row);
     const chosen = pickFor(row);
-    const at = Math.max(0, options.findIndex((o) => (chosen === null ? o.tracked : o.pick.ref === chosen.ref)));
-    setMenu({ branch: row.ref.name, sel: at, left: Math.max(12, Math.min(rect.left, window.innerWidth - 352)), top: rect.bottom + 6 });
+    const at = chosen?.ref ?? options.find((o) => o.tracked)?.pick.ref ?? options[0]?.pick.ref ?? null;
+    setMenu({ branch: row.ref.name, ref: at, left: Math.max(12, Math.min(rect.left, window.innerWidth - 352)), top: rect.bottom + 6 });
   };
 
   /** A menu choice: the tracked ref clears the row's pick; any other opens
@@ -219,13 +232,18 @@ export function BranchSwitcher({
   const retracked = async (done: RetrackDone, isCurrent: boolean): Promise<void> => {
     const moved = done.copied !== null
       ? `Its old tip is on ${done.copied}.`
-      : done.arrived > 0
+      : done.move === "forward" && done.arrived > 0
         ? `Fast-forwarded ${done.arrived} ${done.arrived === 1 ? "commit" : "commits"}.`
-        : done.moved
+        : done.move !== "none"
           ? `${done.branch} now matches ${done.ref}.`
           : "Only its tracking changed.";
     showInfoToast({ title: `${done.branch} tracks ${done.ref}`, message: moved });
     setReview(null);
+    // The list still shows the old upstream; if the switch below is declined
+    // the picker stays open, and must not offer the same change again.
+    void dispatch("branch:list", { worktreeId }).then((r) => {
+      if (r.ok) setBranches(r.value);
+    });
     setPicked((p) => ({ ...p, [done.branch]: null }));
     setChoices((c) => {
       const next = { ...c };
@@ -279,6 +297,11 @@ export function BranchSwitcher({
   const selected = rows[sel];
   const menuRow = menu === null ? undefined : rows.find((r) => r.ref.name === menu.branch);
   const menuList = menuRow === undefined ? [] : menuOptions(menuRow);
+  const menuSel = Math.max(0, menuList.findIndex((c) => c.pick.ref === menu?.ref));
+  const highlight = (i: number): void => {
+    const next = menuList[i];
+    if (menu !== null && next !== undefined) setMenu({ ...menu, ref: next.pick.ref });
+  };
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
@@ -317,13 +340,13 @@ export function BranchSwitcher({
               if (menu !== null && menuRow !== undefined) {
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
-                  setMenu({ ...menu, sel: Math.min(menu.sel + 1, menuList.length - 1) });
+                  highlight(Math.min(menuSel + 1, menuList.length - 1));
                 } else if (e.key === "ArrowUp") {
                   e.preventDefault();
-                  setMenu({ ...menu, sel: Math.max(menu.sel - 1, 0) });
+                  highlight(Math.max(menuSel - 1, 0));
                 } else if (e.key === "Enter") {
                   e.preventDefault();
-                  const choice = menuList[menu.sel];
+                  const choice = menuList[menuSel];
                   if (choice !== undefined) choose(menuRow, choice);
                 } else if (e.key === "ArrowLeft" || e.key === "Escape") {
                   e.preventDefault();
@@ -459,9 +482,9 @@ export function BranchSwitcher({
                 <div
                   key={choice.pick.ref}
                   role="option"
-                  aria-selected={i === menu.sel}
-                  className={`branch-track-menu__item${i === menu.sel ? " is-selected" : ""}`}
-                  onMouseEnter={() => setMenu({ ...menu, sel: i })}
+                  aria-selected={i === menuSel}
+                  className={`branch-track-menu__item${i === menuSel ? " is-selected" : ""}`}
+                  onMouseEnter={() => highlight(i)}
                   onClick={() => choose(menuRow, choice)}
                 >
                   <span className="branch-track-menu__check">

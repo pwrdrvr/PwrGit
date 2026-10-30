@@ -15,8 +15,11 @@ import { requireExit0, type GitExec } from "./dugite";
 import {
   listRemoteEndpoints,
   listWorktrees,
-  readCheckoutDirtyCount
+  readCheckoutDirtyCount,
+  splitRemoteRefname
 } from "./git-service";
+
+export { splitRemoteRefname };
 
 /**
  * Which remote a local branch tracks, and changing it: the switcher's
@@ -37,13 +40,11 @@ async function candidateRefs(
   git: GitExec,
   cwd: string,
   branch: string,
-  upstreamRef: string | null
+  upstreamRef: string | null,
+  remotes: readonly string[]
 ): Promise<
   Result<{ remote: string; remoteBranch: string; refname: string; head: string }[]>
 > {
-  const endpoints = await listRemoteEndpoints(git, cwd);
-  if (!endpoints.ok) return endpoints;
-  const remotes = endpoints.value.map((remote) => remote.name);
   const wanted = new Map<string, { remote: string; remoteBranch: string }>();
   for (const remote of remotes) {
     wanted.set(`${REMOTES}${remote}/${branch}`, { remote, remoteBranch: branch });
@@ -71,25 +72,6 @@ async function candidateRefs(
     out.push({ ...owner, refname, head });
   }
   return ok(out);
-}
-
-/** `refs/remotes/team/fork/main` → `team/fork` + `main` when `team/fork` is a
- *  configured remote. Longest remote name first: `team` is a prefix of
- *  `team/fork`. */
-export function splitRemoteRefname(
-  refname: string,
-  remotes: readonly string[]
-): { remote: string; remoteBranch: string } | null {
-  if (!refname.startsWith(REMOTES)) return null;
-  const rest = refname.slice(REMOTES.length);
-  const remote = [...remotes]
-    .sort((a, b) => b.length - a.length)
-    .find((name) => rest.startsWith(`${name}/`));
-  if (remote === undefined) return null;
-  const remoteBranch = rest.slice(remote.length + 1);
-  return remoteBranch === "" || remoteBranch === "HEAD"
-    ? null
-    : { remote, remoteBranch };
 }
 
 async function revParse(git: GitExec, cwd: string, ref: string): Promise<Result<string | null>> {
@@ -125,6 +107,21 @@ async function leftRight(
   return ok({ ahead: Number.parseInt(a, 10) || 0, behind: Number.parseInt(b, 10) || 0 });
 }
 
+/** Commits on `branchRef` that no remote-tracking ref has: what moving its
+ *  tip would lose. */
+async function countOnNoRemote(
+  git: GitExec,
+  cwd: string,
+  branchRef: string
+): Promise<Result<number>> {
+  const args = ["rev-list", "--count", branchRef, "--not", "--remotes"];
+  const raw = await git(args, cwd);
+  if (!raw.ok) return raw;
+  const checked = requireExit0(raw.value, args);
+  if (!checked.ok) return checked;
+  return ok(Number.parseInt(checked.value.stdout.trim(), 10) || 0);
+}
+
 function missingBranch(branch: string) {
   return err({
     kind: "repo" as const,
@@ -141,20 +138,38 @@ export async function listTrackingOptions(
   identity?: RepoIdentity,
   hosts: ForgeHostMap = {}
 ): Promise<Result<TrackingChoices>> {
-  const head = await revParse(git, cwd, `refs/heads/${branch}`);
-  if (!head.ok) return head;
-  if (head.value === null) return missingBranch(branch);
-  const upstream = await upstreamOf(git, cwd, branch);
-  if (!upstream.ok) return upstream;
-  const [refs, endpoints] = await Promise.all([
-    candidateRefs(git, cwd, branch, upstream.value),
+  const read = await readTrackingOptions(git, cwd, branch, identity, hosts);
+  return read.ok ? ok(read.value.choices) : read;
+}
+
+/** `listTrackingOptions`, plus the full upstream refname it read. */
+async function readTrackingOptions(
+  git: GitExec,
+  cwd: string,
+  branch: string,
+  identity?: RepoIdentity,
+  hosts: ForgeHostMap = {}
+): Promise<Result<{ choices: TrackingChoices; upstreamRef: string | null }>> {
+  const [head, upstream, endpoints] = await Promise.all([
+    revParse(git, cwd, `refs/heads/${branch}`),
+    upstreamOf(git, cwd, branch),
     listRemoteEndpoints(git, cwd)
   ]);
-  if (!refs.ok) return refs;
+  if (!head.ok) return head;
+  if (head.value === null) return missingBranch(branch);
+  if (!upstream.ok) return upstream;
   if (!endpoints.ok) return endpoints;
+  const refs = await candidateRefs(
+    git, cwd, branch, upstream.value, endpoints.value.map((remote) => remote.name)
+  );
+  if (!refs.ok) return refs;
+  const counted = await Promise.all(
+    refs.value.map((ref) => leftRight(git, cwd, `refs/heads/${branch}`, ref.refname))
+  );
   const options: TrackingOption[] = [];
-  for (const ref of refs.value) {
-    const counts = await leftRight(git, cwd, `refs/heads/${branch}`, ref.refname);
+  for (const [i, ref] of refs.value.entries()) {
+    const counts = counted[i];
+    if (counts === undefined) continue;
     if (!counts.ok) return counts;
     const fetchUrl = endpoints.value.find((remote) => remote.name === ref.remote)?.fetchUrl ?? "";
     const forge = parseForgeRemote(fetchUrl, hosts);
@@ -185,7 +200,7 @@ export async function listTrackingOptions(
   const choices: TrackingChoices = { branch, head: head.value, options };
   const tracked = options.find((option) => option.tracked);
   if (tracked !== undefined) choices.upstream = tracked.ref;
-  return ok(choices);
+  return ok({ choices, upstreamRef: upstream.value });
 }
 
 async function checkoutOf(
@@ -248,9 +263,10 @@ export async function inspectRetrack(
   identity?: RepoIdentity,
   hosts: ForgeHostMap = {}
 ): Promise<Result<RetrackReview>> {
-  const choices = await listTrackingOptions(git, cwd, req.branch, identity, hosts);
-  if (!choices.ok) return choices;
-  const target = choices.value.options.find(
+  const read = await readTrackingOptions(git, cwd, req.branch, identity, hosts);
+  if (!read.ok) return read;
+  const choices = read.value.choices;
+  const target = choices.options.find(
     (option) => option.remote === req.remote && option.remoteBranch === req.remoteBranch
   );
   if (target === undefined) {
@@ -262,17 +278,12 @@ export async function inspectRetrack(
   }
   const branchRef = `refs/heads/${req.branch}`;
   const targetRef = `${REMOTES}${target.remote}/${target.remoteBranch}`;
-  const upstreamRef = await upstreamOf(git, cwd, req.branch);
-  if (!upstreamRef.ok) return upstreamRef;
-  const from = choices.value.options.find((option) => option.tracked) ?? null;
+  const from = choices.options.find((option) => option.tracked) ?? null;
 
   // Leaving commits (on the branch, not on the target) that no remote has.
-  const unpushedArgs = ["rev-list", "--count", branchRef, "--not", "--remotes"];
-  const unpushedRaw = await git(unpushedArgs, cwd);
-  if (!unpushedRaw.ok) return unpushedRaw;
-  const unpushedChecked = requireExit0(unpushedRaw.value, unpushedArgs);
-  if (!unpushedChecked.ok) return unpushedChecked;
-  const unpushed = Number.parseInt(unpushedChecked.value.stdout.trim(), 10) || 0;
+  const unpushedCount = await countOnNoRemote(git, cwd, branchRef);
+  if (!unpushedCount.ok) return unpushedCount;
+  const unpushed = unpushedCount.value;
 
   let leavingOn: string | null = null;
   if (target.ahead > 0 && from !== null) {
@@ -315,8 +326,8 @@ export async function inspectRetrack(
 
   return ok({
     branch: req.branch,
-    head: choices.value.head,
-    upstreamRef: upstreamRef.value,
+    head: choices.head,
+    upstreamRef: read.value.upstreamRef,
     from,
     target,
     unpushed,
@@ -401,12 +412,9 @@ export async function retrackBranch(
   }
   if (req.move === "reset" && moves && req.copy === undefined) {
     // Moving the tip may only drop commits some remote still has.
-    const args = ["rev-list", "--count", branchRef, "--not", "--remotes"];
-    const raw = await git(args, cwd);
-    if (!raw.ok) return raw;
-    const checked = requireExit0(raw.value, args);
-    if (!checked.ok) return checked;
-    const lost = Number.parseInt(checked.value.stdout.trim(), 10) || 0;
+    const lostCount = await countOnNoRemote(git, cwd, branchRef);
+    if (!lostCount.ok) return lostCount;
+    const lost = lostCount.value;
     if (lost > 0) {
       return err({
         kind: "remote",
@@ -463,13 +471,25 @@ export async function retrackBranch(
         await git(["update-ref", "-d", `refs/heads/${copied}`, req.head], cwd);
       }
       const detail = raw.value.stderr.trim() || raw.value.stdout.trim();
+      if (checkout.value.kind !== "here") {
+        return err({
+          kind: "remote",
+          code: "retrack_stale",
+          message: `${req.branch} moved while it was being updated. Nothing was changed.`,
+          detail
+        });
+      }
+      // Only an overwrite refusal is about uncommitted files; a merge in
+      // progress or a held index lock is something else, and Git's own first
+      // line says what.
+      const overwrite = /would be overwritten|not uptodate|cannot merge/i.test(detail);
+      const reason = detail.split("\n").find((line) => line.trim() !== "")?.trim() ?? "Git refused";
       return err({
         kind: "remote",
-        code: checkout.value.kind === "here" ? "retrack_would_overwrite" : "retrack_stale",
-        message:
-          checkout.value.kind === "here"
-            ? `Uncommitted changes touch files that change on ${label}. Commit or stash them, then try again. Nothing was changed.`
-            : `${req.branch} moved while it was being updated. Nothing was changed.`,
+        code: overwrite ? "retrack_would_overwrite" : "retrack_refused",
+        message: overwrite
+          ? `Uncommitted changes touch files that change on ${label}. Commit or stash them, then try again. Nothing was changed.`
+          : `Git would not move ${req.branch} to ${label}: ${reason} Nothing was changed.`,
         detail
       });
     }

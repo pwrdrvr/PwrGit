@@ -217,6 +217,62 @@ describe("BranchSwitcher", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("keeps the menu's highlight on the same remote when the options land in another order", async () => {
+    let release: (() => void) | undefined;
+    bridge.dispatch.mockImplementation((name: string) => {
+      // Recency puts upstream before pwrdisk; the options sort by name.
+      if (name === "branch:list") {
+        return Promise.resolve(ok([branches[0], branches[1], branches[2], branches[4], branches[3]]));
+      }
+      if (name === "remote:trackingOptions") {
+        return new Promise((resolve) => {
+          release = () => resolve(ok(choices));
+        });
+      }
+      if (name === "remote:inspectRetrack") return Promise.resolve(ok(review));
+      return new Promise(() => undefined);
+    });
+    await mount();
+    await key("ArrowRight");
+    await key("ArrowDown");
+    const highlighted = () =>
+      document.querySelector(".branch-track-menu__item.is-selected .branch-track-menu__name")?.firstChild?.textContent;
+    expect(highlighted()).toBe("upstream");
+    await act(async () => release?.());
+    await flush();
+    expect(highlighted()).toBe("upstream");
+    await key("Enter");
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:inspectRetrack", expect.objectContaining({ remote: "upstream" }));
+  });
+
+  it("reports a reset as a reset, not a fast-forward", async () => {
+    const diverged: RetrackReview = {
+      ...review,
+      target: { ...(choices.options[1] as TrackingOption), ahead: 1, behind: 2 },
+      leavingOn: "origin/main",
+      arriving: []
+    };
+    bridge.dispatch.mockImplementation((name: string) => {
+      if (name === "branch:list") return Promise.resolve(ok(branches));
+      if (name === "remote:trackingOptions") return Promise.resolve(ok(choices));
+      if (name === "remote:inspectRetrack") return Promise.resolve(ok(diverged));
+      if (name === "remote:retrack") return Promise.resolve(ok({ moved: true, copied: null }));
+      return new Promise(() => undefined);
+    });
+    await mount();
+    await type("pwrdisk/main");
+    await key("Enter");
+    const move = [...container.querySelectorAll<HTMLButtonElement>(".retrack__choice")][1];
+    await act(async () => move?.click());
+    await act(async () => container.querySelector<HTMLButtonElement>(".retrack__foot .modal__create")?.click());
+    await flush();
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:retrack", expect.objectContaining({ move: "reset" }));
+    expect(showInfoToast).toHaveBeenCalledWith({
+      title: "main tracks pwrdisk/main",
+      message: "main now matches pwrdisk/main."
+    });
+  });
+
   it("still switches a plain row", async () => {
     await mount();
     await key("ArrowDown");

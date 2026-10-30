@@ -3471,13 +3471,31 @@ const BRANCH_FORMAT = [
   "%(contents:subject)"
 ].join("%09");
 
+/** `refs/remotes/team/fork/main` → `team/fork` + `main` when `team/fork` is a
+ *  configured remote. Longest remote name first: `team` is a prefix of
+ *  `team/fork`. Null for a ref no configured remote owns, and for `HEAD`. */
+export function splitRemoteRefname(
+  refname: string,
+  remotes: readonly string[]
+): { remote: string; remoteBranch: string } | null {
+  const prefix = "refs/remotes/";
+  if (!refname.startsWith(prefix)) return null;
+  const rest = refname.slice(prefix.length);
+  const remote = [...remotes]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => rest.startsWith(`${name}/`));
+  if (remote === undefined) return null;
+  const remoteBranch = rest.slice(remote.length + 1);
+  return remoteBranch === "" || remoteBranch === "HEAD"
+    ? null
+    : { remote, remoteBranch };
+}
+
 /** Parse the tab-delimited `git for-each-ref` output produced with BRANCH_FORMAT. */
 export function parseBranchRefs(
   stdout: string,
   remotes: readonly string[] = []
 ): BranchRef[] {
-  // Longest first: `team` is a prefix of `team/fork`.
-  const byLength = [...remotes].sort((a, b) => b.length - a.length);
   const out: BranchRef[] = [];
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") continue;
@@ -3492,13 +3510,10 @@ export function parseBranchRefs(
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;
     if (subject !== "") ref.subject = subject;
-    if (isRemote) {
-      const rest = full.slice("refs/remotes/".length);
-      const remote = byLength.find((name) => rest.startsWith(`${name}/`));
-      if (remote !== undefined) {
-        ref.remote = remote;
-        ref.remoteBranch = rest.slice(remote.length + 1);
-      }
+    const owner = isRemote ? splitRemoteRefname(full, remotes) : null;
+    if (owner !== null) {
+      ref.remote = owner.remote;
+      ref.remoteBranch = owner.remoteBranch;
     }
     out.push(ref);
   }

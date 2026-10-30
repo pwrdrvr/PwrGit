@@ -114,6 +114,8 @@ export type RetrackDone = {
   ref: string;
   moved: boolean;
   copied: string | null;
+  /** What the tip did: a fast-forward, a reset, or nothing. */
+  move: RetrackMove;
   arrived: number;
 };
 
@@ -191,7 +193,8 @@ export function RetrackReview({
       ref: review.target.ref,
       moved: result.value.moved,
       copied: result.value.copied,
-      arrived: result.value.moved && move !== "none" ? review.target.behind : 0
+      move: result.value.moved ? move : "none",
+      arrived: result.value.moved && move === "forward" ? review.target.behind : 0
     });
   };
 

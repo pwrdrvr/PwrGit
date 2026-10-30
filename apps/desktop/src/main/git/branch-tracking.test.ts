@@ -179,6 +179,17 @@ describe("retrackBranch", () => {
     expect(readFileSync(join(path, "other.txt"), "utf8")).toBe("dirty\n");
   });
 
+  it("says what Git refused when the refusal is not about uncommitted files", async () => {
+    const review = await reviewOf();
+    writeFileSync(join(path, ".git", "index.lock"), "");
+    const result = await applyFrom(review, { move: "forward" });
+    rmSync(join(path, ".git", "index.lock"));
+    expect(!result.ok && result.error.code).toBe("retrack_refused");
+    expect(!result.ok && result.error.message).toContain("Git would not move main to pwrdisk/main");
+    expect(git("rev-parse", "main")).toBe(base);
+    expect(git("rev-parse", "--abbrev-ref", "main@{u}")).toBe("origin/main");
+  });
+
   it("will not drop a commit no remote has, unless a copy keeps it", async () => {
     const local = commit("local.txt", "local\n", "local only");
     const review = await reviewOf();

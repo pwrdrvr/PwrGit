@@ -2753,6 +2753,41 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     expect(document.querySelector(".pull-menu__note")?.textContent).toContain("Watching upstream/main");
   });
 
+  it("changes the moved-on answer from the Pull menu, as the card says", async () => {
+    window.localStorage.setItem("pwrgit.forkMovedOn.repo-1", "tracked");
+    window.localStorage.setItem("pwrgit.pullChoice.repo-1", "tracked");
+    answer(movedOnFork(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await remount();
+    await openMenu();
+    await act(async () => {
+      row("Sync with upstream/main")?.click();
+      await settle();
+    });
+    expect(window.localStorage.getItem("pwrgit.forkMovedOn.repo-1")).toBe("sync");
+    bridge.dispatch.mockClear();
+    answer(movedOnFork(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await act(async () => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    // The button now runs what was picked, not the old answer.
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:syncFork", expect.objectContaining({ push: true }));
+    expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:pull", expect.anything());
+  });
+
   it("keeps syncing a moved-on fork once told to, without asking again", async () => {
     window.localStorage.setItem("pwrgit.forkMovedOn.repo-1", "sync");
     answer(movedOnFork(), {
