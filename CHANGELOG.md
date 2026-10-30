@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.49.0 - 2026-10-30
+
+- Fork pulls - Fixed conflicting default labels in the Pull menu while a moved-on fork's pull preference is still unanswered. The menu now explains that Pull temporarily reads the fork's tracked branch and asks you to choose, without presenting upstream sync as a saved default.
+
 ## v0.48.0 - 2026-10-30
 
 - Branch tracking - Added a tracking control in the branch switcher for choosing another remote's same-named branch, even when a local branch already exists. Compare ahead/behind counts, search by remote-qualified name, and review the commits leaving and arriving, push destination, and effect on uncommitted files before confirming.
