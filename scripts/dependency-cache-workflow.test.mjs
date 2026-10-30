@@ -42,6 +42,7 @@ test("every dependency setup uses the reviewed immutable action revision", () =>
 test.each([
   ["install-deps", ["typecheck", "build", "test", "desktop-e2e"]],
   ["windows-install-deps", ["windows", "windows-e2e"]],
+  ["macos-install-deps", ["macos-e2e"]],
 ])("%s has compatible strict completed-tree consumers", (producer, consumers) => {
   const producerJob = job(producer);
   const producerSetup = setup(producerJob);
@@ -90,20 +91,13 @@ test("completed-tree inputs include install scripts and their local import closu
   expect(readFileSync(resolve(root, "pnpm-workspace.yaml"), "utf8")).toContain("packageImportMethod: auto");
 });
 
-test("persistent macOS stores retain fork guards and isolate repositories and runners", () => {
-  const benchmark = workflows.find(([name]) => name === "check-performance.yml")[1];
-  for (const body of [job("macos-e2e"), benchmark]) {
-    expect(body).toContain("github.event.pull_request.head.repo.full_name == github.repository");
-    expect(body).toContain("runs-on: [self-hosted, macOS, ARM64, pwrdrvr-macos]");
-    const step = setup(body);
-    expect(input(step, "persistent-store-dir")).toBe("~/Library/Caches/pwrgit-ci/${{ runner.name }}");
-    expect(input(step, "cache-electron")).toBe('"true"');
-    expect(step).not.toMatch(/dependency-cache: node-modules|lookup-only/);
-    expect(input(step, "cache-key-suffix")).toBe(input(setup(job("macos-install-deps")), "cache-key-suffix"));
-    expect(input(step, "node-version")).toBe(input(setup(job("macos-install-deps")), "node-version"));
+test("CI runs only on GitHub-hosted runners", () => {
+  for (const [name, source] of workflows) {
+    expect(source, name).not.toMatch(/self-hosted|persistent-store-dir/);
   }
-  expect(job("macos-install-deps")).toContain("github.event.pull_request.head.repo.full_name == github.repository");
-  expect(setup(job("macos-install-deps"))).not.toContain("dependency-cache: node-modules");
+});
+
+test("unit-test jobs keep the Electron SQLite rebuild", () => {
   for (const name of ["test", "windows"]) {
     expect(job(name)).toContain("pnpm --filter @pwrgit/desktop run rebuild:electron-native");
   }

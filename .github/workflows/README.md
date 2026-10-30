@@ -64,11 +64,9 @@ pipe-inheritance fix ([pnpm #16871](https://github.com/pnpm/pnpm/pull/16871)).
 
 | Jobs | Mode | Installation behavior |
 | --- | --- | --- |
-| Linux/Windows CI install gates | Completed tree, `populate` | Exact hit probes only; miss frozen-installs with lifecycle scripts, validates inputs/lock bytes and saves inline. |
-| Linux/Windows CI lint, build, test and E2E | Completed tree, `restore` | Exact restore and Node ABI validation; missing/incompatible trees fail without installing. |
-| Hosted macOS CI gate | Default download store, `lookup-only` | Seeds pnpm, Corepack and Electron downloads for cold Tart runners. |
-| Tart macOS E2E and opt-in check benchmark | Persistent download store | Frozen-installs each checkout; warm store skips archive transfer. Separate root per repository and runner. |
-| Release, preview and docs screenshots | Default download store | Frozen-installs with lifecycle scripts on every run; caches Electron downloads too. |
+| Linux/Windows/macOS CI install gates | Completed tree, `populate` | Exact hit probes only; miss frozen-installs with lifecycle scripts, validates inputs/lock bytes and saves inline. |
+| Linux/Windows/macOS CI lint, build, test and E2E | Completed tree, `restore` | Exact restore and Node ABI validation; missing/incompatible trees fail without installing. |
+| Release, preview, docs screenshots and opt-in check benchmark | Default download store | Frozen-installs with lifecycle scripts on every run; caches Electron downloads too. |
 
 Completed trees use the same action SHA, Node version, policy suffix and explicit
 `cache-inputs` in every producer/consumer pair. The action also hashes lockfile
@@ -94,43 +92,28 @@ because `packages/mcp-server/dist` is outside the archived dependency trees.
 The existing SQLite native guards remain in unit-test jobs. A producer still
 runs the full install lifecycle on a miss; no install uses `--ignore-scripts`.
 
-Persistent roots are `~/Library/Caches/pwrgit-ci/${{ runner.name }}`, outside
-checkout and runner temporary directories, on the runner's home volume. The
-action expires/reseeds them after 14 days. They retain downloads, not completed
-trees; never combine `persistent-store-dir` with `dependency-cache: node-modules`
-or `lookup-only`. The same-repository guards keep fork code off Tart. These
-runners already share trusted same-repository jobs; release/signing stays on
-hosted runners. Do not reuse a root across products or runner listeners.
+Every workflow runs on GitHub-hosted runners, which are free for this public
+repository. The self-hosted Tart pool shared with PwrAgnt is no longer used.
 
 ## macOS desktop E2E
 
-Four shards run on the same self-hosted ARM64 Tart pool as PwrAgnt, selected
-by `[self-hosted, macOS, ARM64, pwrdrvr-macos]`. Add `pwrdrvr/PwrGit` to that
-organization runner group's selected repositories before enabling the jobs;
-otherwise they remain queued. Guests need a logged-in desktop session.
-The hosted `macos-26` install job primes download caches for cold macOS/ARM64
-stores. Each Tart runner keeps its own PwrGit store outside checkout; it never
-restores a completed tree from the hosted image.
+Four shards run on hosted `macos-26` (ARM64), restoring the completed tree
+that `macos-install-deps` produces, like the Windows lane. Hosted macOS
+runners have a logged-in desktop session.
 
-Mac jobs run on main pushes and code-impacting same-repository PRs. Fork PRs
-skip both Mac jobs so untrusted fork code never reaches the persistent guests.
+Mac jobs run on main pushes and every code-impacting PR, forks included.
 The required `Desktop E2E` check is the `desktop-e2e-result` aggregate, not
-any one platform job. It requires all Linux shards, all Windows shards, and —
-for eligible runs — all Mac shards. A fork PR is the one exception: the Mac
-lane is not scheduled there, so the aggregate records a warning that macOS
-coverage is unverified and passes on the other two. Every other missing result,
-a `skipped` from a broken install job included, fails the check.
+any one platform job. It requires all Linux, macOS and Windows shards; any
+other result, a `skipped` from a broken install job included, fails the check.
 
 Adding a platform to the gate is a change to that job's `needs`, not to branch
 protection: the ruleset names only `Desktop E2E`, so the context stays valid.
 Do not add per-shard job names as required checks — they bind the ruleset to
-the matrix size, and a skipped job satisfies a required check, so a fork-guarded
+the matrix size, and a skipped job satisfies a required check, so a skipped
 lane would gate nothing.
 
 Each shard uses one Playwright worker and uploads its own artifacts. The Mac
-lane uses software rendering to avoid Tart virtual GPU resets and clears
-workspace-scoped orphaned Electron processes plus dev Electron saved window
-state before testing, following PwrAgnt's persistent-runner cleanup.
+lane uses software rendering to avoid virtual GPU resets in the runner VM.
 
 ## macOS Icon Composer runner
 
@@ -185,8 +168,8 @@ Keep label names namespaced when they start, skip, or narrow CI work.
 
 `ci:benchmark-checks` opts same-repo PRs into `check-performance.yml`: three
 paired TS6/TS7 samples of identical typecheck and full-lint commands on one
-self-hosted Mac. Artifacts record revisions, source inventories, injected defect
-rejection, versions, load and RSS. Caches are warm; do not compare runners or
+hosted `macos-26` runner. Artifacts record revisions, source inventories, injected defect
+rejection, versions, load and RSS. Do not compare runners or
 interpret process RSS as LSP memory. Fork PRs cannot run this workflow.
 
 If you add another label-influenced workflow path, document it here in the same

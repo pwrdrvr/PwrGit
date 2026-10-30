@@ -363,15 +363,9 @@ jobs:
 
   macos-install-deps:
     name: Install Dependencies (macOS)
-    # Seed download caches for cold Tart stores; completed hosted trees are
-    # incompatible with the self-hosted image family.
     runs-on: macos-26
     needs: changes
-    if: >-
-      needs.changes.outputs.code_impacting == 'true' &&
-      (github.event_name == 'push' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    timeout-minutes: 15
+    if: needs.changes.outputs.code_impacting == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -380,25 +374,36 @@ jobs:
         uses: pwrdrvr/configure-nodejs@d416c1c78119b25fe03ee3ef78b75af0d69b10a7 # v1.7.1
         with:
           node-version: 24.22.1
-          cache-electron: "true"
-          cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
-          lookup-only: "true"
+          dependency-cache: node-modules
+          cache-mode: populate
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
+          cache-inputs: |
+            .nvmrc
+            scripts/check-node-version.mjs
+            scripts/linux-sandbox.mjs
+            scripts/lib/cli-entrypoint.mjs
+            scripts/resource-run.mjs
+            scripts/lib/tool-processes.mjs
+            scripts/tool-resource-policy.mjs
+            scripts/windows-tool-job.mjs
+            scripts/windows-tool-job.ps1
+            apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/rebuild-native-for-electron.mjs
+            apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
   macos-e2e:
     name: macOS Desktop E2E (${{ matrix.shard }}/4)
-    # Same restricted Tart runner pool as PwrAgnt. PwrGit must be allowed in
-    # the organization runner group. Never run public fork code on this pool.
-    runs-on: [self-hosted, macOS, ARM64, pwrdrvr-macos]
+    runs-on: macos-26
     needs: [changes, macos-install-deps]
-    if: >-
-      needs.changes.outputs.code_impacting == 'true' &&
-      (github.event_name == 'push' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: needs.changes.outputs.code_impacting == 'true'
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
+    env:
+      # Completed-tree consumers must never trigger pnpm implicit installs.
+      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: "false"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -409,32 +414,34 @@ jobs:
         timeout-minutes: 10
         with:
           node-version: 24.22.1
-          cache-electron: "true"
-          cache-key-suffix: pwrgit-store-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
-          persistent-store-dir: ~/Library/Caches/pwrgit-ci/${{ runner.name }}
+          dependency-cache: node-modules
+          cache-mode: restore
+          cache-key-suffix: pwrgit-tree-d416c1c78119b25fe03ee3ef78b75af0d69b10a7-v1
+          cache-inputs: |
+            .nvmrc
+            scripts/check-node-version.mjs
+            scripts/linux-sandbox.mjs
+            scripts/lib/cli-entrypoint.mjs
+            scripts/resource-run.mjs
+            scripts/lib/tool-processes.mjs
+            scripts/tool-resource-policy.mjs
+            scripts/windows-tool-job.mjs
+            scripts/windows-tool-job.ps1
+            apps/desktop/scripts/install-electron-binary.mjs
+            apps/desktop/scripts/rebuild-native-for-electron.mjs
+            apps/desktop/scripts/stage-better-sqlite3-arch.mjs
 
-      - name: Clear leftover Electron state from previous jobs
-        shell: bash
-        timeout-minutes: 5
-        run: bash ./scripts/ci/macos-e2e-pre-run-cleanup.sh
-
-      - name: Record VideoToolbox clients before E2E
-        run: /usr/sbin/ioclasscount AppleVideoToolboxParavirtualizationUserClient
+      # prepare builds outside node_modules, so the archive cannot carry it.
+      - name: Build MCP server workspace output
+        run: pnpm --filter @pwrgit/mcp-server build
 
       - name: Run desktop Electron E2E specs (macOS)
-        # Tart provides the desktop. Software rendering avoids the virtual
-        # AppleParavirtGPU resets observed in PwrAgnt's macOS E2E runs.
+        # Hosted macOS runners are VMs with a logged-in desktop. Software
+        # rendering avoids virtual GPU resets (see e2e/AGENTS.md).
         timeout-minutes: 20
         env:
           PWRGIT_E2E_DISABLE_GPU: "1"
         run: pnpm --filter @pwrgit/desktop test:e2e --fully-parallel --shard=${{ matrix.shard }}/4
-
-      # Codec flags prevent new leaks; they cannot clear a guest already
-      # degraded by earlier jobs. Keep before/after counts to distinguish that
-      # state from a regression. A degraded guest needs an operator reboot.
-      - name: Record VideoToolbox clients after E2E
-        if: ${{ !cancelled() }}
-        run: /usr/sbin/ioclasscount AppleVideoToolboxParavirtualizationUserClient
 
       - name: Upload desktop Playwright artifacts
         uses: actions/upload-artifact@v7
@@ -460,26 +467,11 @@ jobs:
       needs.changes.outputs.code_impacting == 'true'
     timeout-minutes: 5
     steps:
-      - name: Require Linux, eligible macOS and Windows Desktop E2E shards
+      - name: Require Linux, macOS and Windows Desktop E2E shards
         env:
           LINUX_E2E_RESULT: ${{ needs.desktop-e2e.result }}
           MACOS_E2E_RESULT: ${{ needs.macos-e2e.result }}
           WINDOWS_E2E_RESULT: ${{ needs.windows-e2e.result }}
-          # `macos-e2e` is deliberately not scheduled for fork PRs — the
-          # self-hosted guests must not run untrusted code — so it reports
-          # `skipped` there and requiring it unconditionally would block fork
-          # PRs on a lane that can never run.
-          #
-          # Test only for the fork and let every OTHER missing macOS result
-          # fail. Restating that job's whole scheduling expression here would
-          # be a second copy that can drift, and it would enumerate the events
-          # on which macOS *should* run: an event neither job anticipated (a
-          # `merge_group` trigger once a merge queue is enabled, say) would
-          # make it false and drop macOS from the gate silently. This way such
-          # an event fails closed instead.
-          MACOS_IS_FORK_PR: >-
-            ${{ github.event_name == 'pull_request'
-            && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           set -euo pipefail
 
@@ -506,16 +498,10 @@ jobs:
 
           say "### Desktop E2E platform results"
           require "Linux" "$LINUX_E2E_RESULT"
-          if [[ "$MACOS_IS_FORK_PR" == "true" && "$MACOS_E2E_RESULT" == "skipped" ]]; then
-            say "- SKIP \`macOS\` (skipped) — fork PR; self-hosted lane not scheduled"
-            echo "::warning::macOS Desktop E2E did not run for this fork PR; macOS-only coverage is unverified."
-          else
-            require "macOS" "$MACOS_E2E_RESULT"
-          fi
-          # `windows-e2e` has no eligibility condition — it is GitHub-hosted
-          # and carries the same `if` as the Linux matrix — so every
-          # non-success is a real failure, a `skipped` from a broken
-          # `windows-install-deps` included.
+          require "macOS" "$MACOS_E2E_RESULT"
+          # Every lane is GitHub-hosted and carries the same `if` as the Linux
+          # matrix, so every non-success is a real failure, a `skipped` from a
+          # broken install job included.
           require "Windows" "$WINDOWS_E2E_RESULT"
 
           exit "$status"
