@@ -355,15 +355,10 @@ export function ChangesTab({
   activeEmail,
   onOpenDiff,
   onOpenFileInsight,
-  activeFile,
-  commitNudge = 0
+  activeFile
 }: {
   worktree: Worktree | null;
   activeEmail: string;
-  /** Bumped when something elsewhere asked for the commit box — today, the
-   *  "Commit on <branch> first" answer to a dirty branch-switch prompt. The
-   *  count, not a flag: asking twice must move the caret twice. */
-  commitNudge?: number;
   /** The file the main pane is showing, so this list can mark it. */
   activeFile: { path: string; staged: boolean | null } | null;
   onOpenDiff: (path: string, staged: boolean) => void;
@@ -382,21 +377,6 @@ export function ChangesTab({
   const [committing, setCommitting] = useState(false);
   const agent = useAgent("commitMessage");
   const messageRef = useRef<HTMLTextAreaElement>(null);
-  /**
-   * Answering "Commit on <branch> first" is a promise to put the reader where
-   * they can do that.
-   *
-   * Keyed to an INCREASE since this mount, not to `> 0`. The count is
-   * monotonic for the life of the window, so a nudge answered once and a
-   * remount later — clicking a commit swaps this tab for `CommitTab`, closing
-   * it swaps back — would re-fire the effect and pull focus into the message
-   * box out of nowhere, mid-typing, somewhere else entirely.
-   */
-  const seenNudge = useRef(commitNudge);
-  useEffect(() => {
-    if (commitNudge > seenNudge.current) messageRef.current?.focus();
-    seenNudge.current = commitNudge;
-  }, [commitNudge]);
   /** Explicit folder disclosure state; unset folders follow the size default. */
   const [folderOpen, setFolderOpen] = useState<Record<string, boolean>>({});
   const [menu, setMenu] = useState<{

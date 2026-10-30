@@ -20,6 +20,7 @@ import {
   readCheckoutDirtyCount,
   switchBranch,
   switchBranchCarryingChanges,
+  switchBranchLeavingChanges,
   worktreeAdd
 } from "./git-service";
 import type { RepoIndexer } from "./repo-indexer";
@@ -319,22 +320,45 @@ export function registerBranchHandlers(
     const live = rowOf(req.worktreeId);
     if (!live.ok) return live;
     const row = live.value;
-    // Both halves run inside ONE queued operation. The carrying switch is four
-    // git commands with a rollback hanging off each, and a second operation
-    // landing between the stash and the reapply — a pull's own auto-stash, say —
-    // would leave the two reaching for each other's entry.
-    const result = await operations.run(req.worktreeId, () =>
-      req.carryChanges === true
-        ? switchBranchCarryingChanges(execGit, row.path, req.branch)
-        : switchBranch(execGit, row.path, req.branch).then((r) =>
-            r.ok ? ok({ carried: false }) : r
-          )
+    // Every half runs inside ONE queued operation. The merging and leaving
+    // switches are several git commands with a rollback hanging off each, and a
+    // second operation landing between the stash and the reapply — a pull's own
+    // auto-stash, say — would leave the two reaching for each other's entry.
+    // A plain switch (no `changes`) is the "bring my changes" answer: Git
+    // carries what it can and refuses, touching nothing, when it cannot.
+    const result = await operations.run(
+      req.worktreeId,
+      (): Promise<Result<{ carried: boolean; left: boolean }>> =>
+        req.changes === "merge"
+          ? switchBranchCarryingChanges(execGit, row.path, req.branch).then(
+              (r) => (r.ok ? ok({ carried: r.value.carried, left: false }) : r)
+            )
+          : req.changes === "leave"
+            ? switchBranchLeavingChanges(execGit, row.path, req.branch).then(
+                (r) => (r.ok ? ok({ carried: false, left: r.value.left }) : r)
+              )
+            : switchBranch(execGit, row.path, req.branch).then((r) =>
+                r.ok ? ok({ carried: false, left: false }) : r
+              )
     );
-    if (!result.ok) return result;
+    if (!result.ok) {
+      // A leave whose rollback failed kept the work in a stash entry the
+      // message names; the Stashes tab has to show it.
+      if (result.error.code === "leave_rollback_failed") {
+        emitEvent("stash:changed", { repoId: row.repo_id });
+      }
+      return result;
+    }
     logMain(
       "info",
       "branch",
-      `switched ${row.path} to ${req.branch}${result.value.carried ? " carrying uncommitted changes" : ""}`
+      `switched ${row.path} to ${req.branch}${
+        result.value.carried
+          ? " carrying uncommitted changes"
+          : result.value.left
+            ? " leaving uncommitted changes in the stash"
+            : ""
+      }`
     );
     // The worktree's branch column is now stale — re-list (branch is keyed by
     // path, so the id is stable) and recompute state so the header, graph, and
@@ -345,7 +369,9 @@ export function registerBranchHandlers(
       profileId: row.profile_id,
       repoIds: [row.repo_id]
     });
-    return ok({ carried: result.value.carried });
+    // The Stashes tab lists the entry the changes were left in.
+    if (result.value.left) emitEvent("stash:changed", { repoId: row.repo_id });
+    return ok(result.value);
   });
 
   bus.register("branch:rename", async (req) => {

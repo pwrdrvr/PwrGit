@@ -90,6 +90,23 @@ describe("the Worktrees tab's buckets", () => {
     expect(worktreeStatusText(linked[0]!, NOW)).toEqual({ label: "↑2", tone: "ahead" });
     expect(worktreeStatusText(linked[2]!, NOW).label).toBe("Finished");
   });
+
+  // Pushed under another name, squash-merged, remote branch deleted: the
+  // sidebar row and the header say it landed, so this cell must not claim ↑2.
+  it("drops ↑N for a landed branch that is still in flight", () => {
+    const landed = wt({
+      id: "deploy",
+      branch: "deploy/edge-probe",
+      head: "a".repeat(40),
+      tracking: "unpublished",
+      ahead: 2,
+      dirty: 1,
+      pr: { ...merged, headOid: "a".repeat(40) }
+    });
+    expect(worktreeStatusText(landed, NOW)).toEqual({ label: "●1", tone: "dirty" });
+    const movedOn = { ...landed, head: "b".repeat(40) };
+    expect(worktreeStatusText(movedOn, NOW).label).toBe("●1 ↑2");
+  });
 });
 
 describe("RepoRefsModal on Worktrees", () => {

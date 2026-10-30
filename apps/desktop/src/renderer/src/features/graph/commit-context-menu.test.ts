@@ -161,7 +161,11 @@ describe("switchFailureMessage", () => {
   it("explains the two refusals a graph click can walk into", () => {
     expect(
       switchFailureMessage(
-        { kind: "repo", code: "dirty", message: "error: your local changes…" },
+        {
+          kind: "repo",
+          code: "switch_would_overwrite",
+          message: "error: your local changes…"
+        },
         "feature/x"
       )
     ).toContain("uncommitted changes");

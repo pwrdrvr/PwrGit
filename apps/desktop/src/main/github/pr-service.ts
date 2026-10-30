@@ -10,6 +10,13 @@ const REPO_REFRESH_TTL_MS = 10 * 60_000;
 const SCHEDULED_BRANCH_REFRESH_TTL_MS = 60_000;
 const USER_BRANCH_REFRESH_TTL_MS = 10_000;
 const TERMINAL_USER_BRANCH_REFRESH_TTL_MS = 60_000;
+/**
+ * At most this many no-upstream branch tips are asked about per branch
+ * refresh. One exact SHA per branch, never a history: GitLab answers a commit
+ * with one REST call, and a checkout can hold hundreds of never-pushed
+ * branches. Worktree branches come first, so the rows on screen win.
+ */
+const TIP_FALLBACK_LIMIT = 50;
 
 export type PrRefreshTrigger = "scheduled" | "user";
 
@@ -71,6 +78,30 @@ export type PrStatusDeltas = {
   commits: Map<string, PrSummary | null>;
 };
 
+/** What `for-each-ref` says about one local branch. */
+type LocalBranchRef = {
+  /** Full object name of the tip. */
+  tip: string;
+  /**
+   * The branch it tracks; null with no upstream configured. `branch` is the
+   * name on `remote`, or null when the upstream names no remote branch (a
+   * local upstream, or a forge's `refs/pull/N/head`).
+   */
+  upstream: { remote: string; branch: string | null } | null;
+};
+
+/** The branches to ask about, and what Git knows of each local one. A branch
+ *  only a worktree row names (ref discovery failed) has no entry. */
+type BranchesToCheck = {
+  branches: string[];
+  refs: Map<string, LocalBranchRef>;
+};
+
+type CommitChangeListener = (
+  repoId: string,
+  changed: Map<string, PrSummary | null>
+) => void;
+
 /**
  * Fetches change-request status for a repo's branches and caches it in
  * branch_pr. Best-effort: silently no-ops when `origin` is on a host no
@@ -120,6 +151,13 @@ export class PrService {
    * see `BranchFailureScope`.
    */
   private readonly lastFailedAt = new Map<string, Map<FailureScope, number>>();
+  /**
+   * Told about commit associations a branch refresh wrote. A no-upstream
+   * branch's tip is looked up through `commit_pr`, and a row written there
+   * silently would stop the visible-commit monitor polling a hash the
+   * renderer never heard about.
+   */
+  private readonly commitListeners = new Set<CommitChangeListener>();
 
   constructor(
     private readonly db: DB,
@@ -143,6 +181,14 @@ export class PrService {
     // the other half: a refresh already in flight must not re-arm what this
     // just cleared.
     this.lastFailedAt.clear();
+  }
+
+  /** Hear about commit associations written by a branch refresh. */
+  onCommitsChanged(listener: CommitChangeListener): () => void {
+    this.commitListeners.add(listener);
+    return () => {
+      this.commitListeners.delete(listener);
+    };
   }
 
   /** Exact commit hashes whose PR association/status changed. */
@@ -469,8 +515,10 @@ export class PrService {
     ) {
       return new Map();
     }
-    const branches = await this.branchesToCheck(repoId, opts.branches);
-    if (branches.length === 0 || !this.isCurrent(generation)) return new Map();
+    const toCheck = await this.branchesToCheck(repoId, opts.branches);
+    if (toCheck.branches.length === 0 || !this.isCurrent(generation)) {
+      return new Map();
+    }
     const pendingStatus = this.pendingPrNumberRefreshes.get(repoId);
     if (pendingStatus !== undefined) {
       await pendingStatus;
@@ -484,7 +532,7 @@ export class PrService {
       return await this.refreshRepoAtGeneration(repoId, opts, generation);
     }
 
-    const refresh = this.refreshBranches(repoId, branches, opts, generation);
+    const refresh = this.refreshBranches(repoId, toCheck, opts, generation);
     this.pendingRepoRefreshes.set(repoId, refresh);
     try {
       return await refresh;
@@ -495,7 +543,7 @@ export class PrService {
 
   private async refreshBranches(
     repoId: string,
-    branches: string[],
+    { branches, refs }: BranchesToCheck,
     opts: {
       branches?: string[];
       trigger?: PrRefreshTrigger;
@@ -522,9 +570,11 @@ export class PrService {
     const connection = await connectForge(forge.provider, forge.repo.host);
     if (connection === null || !this.isCurrent(generation)) return empty;
 
-    let prs: Map<string, PrSummary | null>;
+    const prs = new Map<string, PrSummary | null>();
     try {
       const sourceRepos = [forge.repo];
+      // Remotes whose branches may be asked about under their own names.
+      const sourceRemotes = new Set(["origin"]);
       // A configured fork can legitimately contribute a same-named branch to
       // origin. PR metadata alone must never enlarge this local allowlist.
       const remotes = await this.git(["remote", "-v"], repo.path);
@@ -535,13 +585,32 @@ export class PrService {
       for (const remote of parseRemoteRows(remotes.value.stdout)) {
         if (remote.direction !== "fetch") continue;
         const source = this.resolveForge(remote.url)?.repo;
-        if (source !== undefined) sourceRepos.push(source);
+        if (source === undefined) continue;
+        sourceRepos.push(source);
+        sourceRemotes.add(remote.name);
       }
-      prs = await connection.fetchPrsForBranches(
+      // A change request is filed under the name the branch was PUBLISHED
+      // as: its upstream's, when it tracks a branch on an accepted source
+      // remote (`local-name` -> `origin/remote-name`). The answer is keyed
+      // back to the local name, so `branch_pr`, `isFresh`, the failure marks
+      // and `Worktree.pr` never see the published one.
+      const publishedName = (branch: string): string => {
+        const upstream = refs.get(branch)?.upstream ?? null;
+        return upstream !== null &&
+          upstream.branch !== null &&
+          sourceRemotes.has(upstream.remote)
+          ? upstream.branch
+          : branch;
+      };
+      const byName = await connection.fetchPrsForBranches(
         forge.repo,
-        branches,
+        [...new Set(branches.map(publishedName))],
         sourceRepos
       );
+      for (const branch of branches) {
+        const name = publishedName(branch);
+        if (byName.has(name)) prs.set(branch, byName.get(name) ?? null);
+      }
     } catch {
       // Best-effort; keep whatever's cached — but remember the attempt, or
       // nothing throttles the next one.
@@ -558,7 +627,62 @@ export class PrService {
     } else {
       this.recordFailure(repoId, scope, generation);
     }
+    await this.attachTipChangeRequests(repoId, prs, refs, opts, generation);
     return this.upsert(repoId, prs, generation);
+  }
+
+  /**
+   * A branch with no upstream that its name found nothing for may still BE a
+   * change request: pushed under another name (`git push origin
+   * HEAD:feat/x`), and after a squash merge that remote branch is usually
+   * deleted. Ask about its tip's exact SHA through the commit association
+   * (`commit_pr`), and accept the answer only when the change request's head
+   * IS that tip: one whose head is an ancestor says nothing about the
+   * commits after it.
+   *
+   * Best-effort like the rest: a failed lookup leaves the name's own answer
+   * (null) in place, retried with the branch's next refresh. The commit path
+   * keeps its own TTL and failure throttle.
+   */
+  private async attachTipChangeRequests(
+    repoId: string,
+    prs: Map<string, PrSummary | null>,
+    refs: Map<string, LocalBranchRef>,
+    opts: { trigger?: PrRefreshTrigger },
+    generation: number
+  ): Promise<void> {
+    const candidates: Array<{ branch: string; tip: string }> = [];
+    const tips = new Set<string>();
+    for (const [branch, pr] of prs) {
+      if (pr !== null) continue;
+      const ref = refs.get(branch);
+      if (ref === undefined || ref.upstream !== null) continue;
+      const tip = ref.tip.toLowerCase();
+      if (!tips.has(tip)) {
+        if (tips.size >= TIP_FALLBACK_LIMIT) continue;
+        tips.add(tip);
+      }
+      candidates.push({ branch, tip });
+    }
+    if (candidates.length === 0 || !this.isCurrent(generation)) return;
+    // `force` is deliberately not passed on: it would re-ask about every tip
+    // (one REST call each on GitLab) on each forced branch refresh. The commit
+    // path's own TTL for this trigger already bounds how stale a tip can be.
+    const changed = await this.refreshCommitsAtGeneration(
+      repoId,
+      [...tips],
+      opts.trigger !== undefined ? { trigger: opts.trigger } : {},
+      generation
+    );
+    if (changed.size > 0) {
+      for (const listener of this.commitListeners) listener(repoId, changed);
+    }
+    if (!this.isCurrent(generation)) return;
+    const byTip = this.cachedCommitPrs(repoId, [...tips]);
+    for (const { branch, tip } of candidates) {
+      const pr = byTip.get(tip);
+      if (pr != null && pr.headOid?.toLowerCase() === tip) prs.set(branch, pr);
+    }
   }
 
   /** Did the last attempt at this scope fail inside the window it earned? */
@@ -699,7 +823,7 @@ export class PrService {
   private async branchesToCheck(
     repoId: string,
     requested?: string[]
-  ): Promise<string[]> {
+  ): Promise<BranchesToCheck> {
     const rows = this.db
       .prepare("SELECT DISTINCT branch FROM worktrees WHERE repo_id = ?")
       .all(repoId) as { branch: string }[];
@@ -709,17 +833,29 @@ export class PrService {
     const repo = this.db
       .prepare("SELECT path FROM repos WHERE id = ?")
       .get(repoId) as { path: string } | undefined;
-    let localBranches: string[] = [];
+    const localBranches: string[] = [];
+    const refs = new Map<string, LocalBranchRef>();
     if (repo !== undefined) {
-      const refs = await this.git(
-        ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+      // One listing for names, tips and upstreams: the name a branch was
+      // published under, and whether it has an upstream at all, decide which
+      // question is asked about it.
+      const out = await this.git(
+        [
+          "for-each-ref",
+          "--format=%(refname:short)%00%(objectname)%00%(upstream:remotename)%00%(upstream:remoteref)",
+          "refs/heads"
+        ],
         repo.path
       );
-      if (refs.ok && refs.value.exitCode === 0) {
-        localBranches = refs.value.stdout
-          .split("\n")
-          .map((branch) => branch.trim())
-          .filter((branch) => branch !== "");
+      if (out.ok && out.value.exitCode === 0) {
+        for (const line of out.value.stdout.split("\n")) {
+          const [rawName = "", tip, remote = "", remoteRef = ""] = line.split("\0");
+          const name = rawName.trim();
+          if (name === "") continue;
+          localBranches.push(name);
+          const ref = parseLocalBranchRef(tip, remote.trim(), remoteRef.trim());
+          if (ref !== null) refs.set(name, ref);
+        }
       }
     }
     // Worktree rows remain a fallback when ref discovery fails, and also cover
@@ -727,9 +863,12 @@ export class PrService {
     // changing. Local non-worktree branches matter because squash/rebase merges
     // cannot be recognized by ancestry alone in the Active graph.
     const branches = [...new Set([...worktreeBranches, ...localBranches])];
-    if (requested === undefined) return branches;
+    if (requested === undefined) return { branches, refs };
     const available = new Set(branches);
-    return [...new Set(requested)].filter((branch) => available.has(branch));
+    return {
+      branches: [...new Set(requested)].filter((branch) => available.has(branch)),
+      refs
+    };
   }
 
   private upsert(
@@ -899,6 +1038,25 @@ export class PrService {
         undefined
     );
   }
+}
+
+/**
+ * One `for-each-ref` row's tip and upstream, or null when the row carried no
+ * usable tip (an older listing shape, or a parse failure): such a branch is
+ * asked about by its own name and gets no tip fallback.
+ */
+function parseLocalBranchRef(
+  tip: string | undefined,
+  remote: string,
+  remoteRef: string
+): LocalBranchRef | null {
+  if (tip === undefined || !/^[0-9a-f]{40,64}$/i.test(tip.trim())) return null;
+  if (remote === "") return { tip: tip.trim(), upstream: null };
+  const branch =
+    remote !== "." && remoteRef.startsWith("refs/heads/")
+      ? remoteRef.slice("refs/heads/".length)
+      : null;
+  return { tip: tip.trim(), upstream: { remote, branch: branch === "" ? null : branch } };
 }
 
 /** A whole-repo sweep and a targeted refresh back off independently. */

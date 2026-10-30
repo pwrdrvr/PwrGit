@@ -581,6 +581,44 @@ describe("WorktreeStateService (system git)", () => {
     ).toEqual({ branch: "feature", missing: 1 });
   });
 
+  // Agents put their worktrees inside the repository (`.claude/worktrees/x`).
+  // `git status` in the primary reports that checkout as an untracked folder,
+  // which read as `●1` on a clean primary and gated every branch switch.
+  it("does not count a nested agent worktree as the primary's change", async () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), "pwrgit-state-agent-"));
+    const repo = join(isolatedRoot, "repo");
+    const nested = join(repo, ".claude", "worktrees", "agent-1");
+    mkdirSync(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.email", "t@t.com"]);
+    git(repo, ["config", "user.name", "Tester"]);
+    writeFileSync(join(repo, "README.md"), "# repo\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-m", "init"]);
+    git(repo, ["worktree", "add", nested, "-b", "agent"]);
+    writeFileSync(join(nested, "wip.txt"), "agent work\n");
+
+    const isolatedDb = openDatabase(":memory:");
+    const profiles = new ProfileService(isolatedDb);
+    const profile = profiles.create({ name: "N", email: "n@t.com" });
+    const indexer = new RepoIndexer(isolatedDb, systemGit);
+    const added = await indexer.indexRepoAt(profile.id, repo);
+    if (!added.ok) throw new Error("indexRepoAt failed");
+    const primaryRow = added.value.worktrees.find((w) => w.branch === "main");
+    const agentRow = added.value.worktrees.find((w) => w.branch === "agent");
+    if (primaryRow === undefined || agentRow === undefined) {
+      throw new Error("worktrees not indexed");
+    }
+    const isolated = new WorktreeStateService(isolatedDb, systemGit);
+    expect((await isolated.compute(primaryRow.id))?.dirty).toBe(0);
+    // The agent's own work still counts, on its own row.
+    expect((await isolated.compute(agentRow.id))?.dirty).toBe(1);
+
+    // A real file beside it is still the primary's change.
+    writeFileSync(join(repo, ".claude", "notes.md"), "mine\n");
+    expect((await isolated.compute(primaryRow.id))?.dirty).toBe(1);
+  });
+
   it("returns null for an unknown worktree id", async () => {
     expect(await service.compute("nope")).toBeNull();
     expect(service.getCached("nope")).toBeNull();

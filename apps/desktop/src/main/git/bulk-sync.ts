@@ -11,6 +11,7 @@ import {
 } from "@pwrgit/shared";
 import { access } from "node:fs/promises";
 import { resolve } from "node:path";
+import { nestedWorktreePathspec } from "@pwrgit/mcp-server/nested-worktrees";
 import {
   NO_OPTIONAL_LOCKS,
   requireExit0,
@@ -237,7 +238,12 @@ async function inspectWorktree(
   report("Checking for uncommitted changes…");
   const status = await checked(
     git,
-    ["status", "--porcelain=v2", "--untracked-files=all"],
+    [
+      "status",
+      "--porcelain=v2",
+      "--untracked-files=all",
+      ...(await nestedWorktreePathspec(worktree.path))
+    ],
     worktree.path
   );
   if (!status.ok) {

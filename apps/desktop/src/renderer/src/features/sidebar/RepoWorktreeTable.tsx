@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { changeRequestMatch, type Repo, type Worktree } from "@pwrgit/shared";
+import {
+  changeRequestMatch,
+  worktreeLandedChangeRequest,
+  type Repo,
+  type Worktree
+} from "@pwrgit/shared";
 import { shortWhen } from "../graph/graph-view";
 import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
@@ -90,9 +95,12 @@ export function worktreeStatusText(
   if (isFinishedWorktree(worktree, now)) {
     return { label: "Finished", tone: "finished" };
   }
+  // A landed branch's ↑N counts commits a merged change request carried, not
+  // unpushed work: the sidebar row and the header drop it the same way.
+  const landed = worktreeLandedChangeRequest(worktree) !== null;
   const counts = [
     worktree.dirty > 0 ? `●${worktree.dirty}` : "",
-    worktree.ahead > 0 ? `↑${worktree.ahead}` : "",
+    worktree.ahead > 0 && !landed ? `↑${worktree.ahead}` : "",
     worktree.behind > 0 ? `↓${worktree.behind}` : ""
   ].filter(Boolean);
   if (counts.length > 0) {

@@ -5,6 +5,13 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
+import {
+  ASSUMED_FORGE_KIND,
+  changeRequestNoun,
+  changeRequestSigil,
+  landedChangeRequest,
+  type PrSummary
+} from "@pwrgit/shared";
 import type {
   RepositorySetup,
   ForkSourceTarget,
@@ -109,6 +116,16 @@ function baseChip(
   if (fromSource !== null) return fromSource;
   if (state === null) return { text: "…", tone: "muted" };
   if (!state.hasUpstream) {
+    const landed = landedFor(state, worktree);
+    if (landed !== null) {
+      const ref = `${changeRequestSigil(landed.forge ?? ASSUMED_FORGE_KIND)}${landed.number}`;
+      return {
+        text: `landed in ${ref}`,
+        tone: "muted",
+        mid: `landed ${ref}`,
+        short: "landed"
+      };
+    }
     return state.ahead > 0
       ? { text: `↑${state.ahead} local · no upstream`, tone: "ok", mid: `↑${state.ahead} local` }
       : { text: "no upstream", tone: "muted" };
@@ -133,6 +150,25 @@ function baseChip(
 }
 
 /**
+ * The merged change request a no-upstream branch's tip IS, from the shared
+ * predicate the sidebar row also asks. Its commits are on no remote ref once
+ * the change request's branch is deleted, so `ahead` counts them as local
+ * work; this is what says they landed. The head is the live snapshot's when
+ * it is this worktree's, else the row's.
+ */
+function landedFor(
+  state: WorktreeState | null,
+  worktree: Worktree
+): PrSummary | null {
+  const live = state?.worktreeId === worktree.id ? state : null;
+  return landedChangeRequest(
+    worktree.pr,
+    live?.head ?? worktree.head,
+    live?.hasUpstream ?? worktree.tracking !== "unpublished"
+  );
+}
+
+/**
  * The chip's tooltip at rest: the state in words, and on a fork, which
  * repository `upstream` is — the chip alone never said.
  */
@@ -141,7 +177,8 @@ function chipExplanation(
   fork: Pick<ForkStatus, "tracked"> & {
     source: (SourceCounts & { label: string; parent?: string }) | null;
   } | null,
-  branch: string
+  branch: string,
+  landed: PrSummary | null = null
 ): string | undefined {
   const source = fork?.source ?? null;
   if (source !== null && source.behind > 0) {
@@ -163,6 +200,16 @@ function chipExplanation(
     return `${who} ${branch} is ${commits(source.behind)} behind ${source.label}.${own}${trackedLine}`;
   }
   if (state === null) return undefined;
+  if (!state.hasUpstream && landed !== null) {
+    const kind = landed.forge ?? ASSUMED_FORGE_KIND;
+    const name = `${changeRequestNoun(kind)} ${changeRequestSigil(kind)}${landed.number}`;
+    if (state.ahead === 0) {
+      return `${branch} is ${name}'s head, which was merged. ${branch} has no upstream configured.`;
+    }
+    return state.ahead === 1
+      ? `This commit is ${name}'s head, which was merged. Its remote branch is gone, so no remote branch holds it.`
+      : `These ${commits(state.ahead)} are ${name}'s head, which was merged. Its remote branch is gone, so no remote branch holds them.`;
+  }
   if (!state.hasUpstream) {
     const local = state.ahead > 0
       ? `${commits(state.ahead)} not on fetched remote branches. ` : "";
@@ -1646,7 +1693,8 @@ export function WorktreeHeader({
                           state?.worktreeId === worktree.id ? state : null,
                           forkStatus ??
                             (seed === null ? null : { source: seed, tracked: null }),
-                          forkStatus?.branch ?? worktree.branch
+                          forkStatus?.branch ?? worktree.branch,
+                          landedFor(state, worktree)
                         )
                 )
               : {}

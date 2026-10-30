@@ -208,6 +208,20 @@ the only signal that reloads that repository's Branches and Remotes.
 on `/`. Do not use `node:path`, `sep`, or `join()`, which makes backslashes
 that git never emits.
 
+## A nested agent worktree is not a change
+
+Agents put worktrees inside the repository (`.claude/worktrees/<name>`).
+`git status` reports each one as an untracked folder, so a clean primary read
+`●1` and every branch switch asked about it. Any status read that becomes a
+dirty count or a change list appends `nestedWorktreePathspec(cwd)`
+(`@pwrgit/mcp-server/nested-worktrees`): exclude pathspecs for this
+repository's linked worktrees inside `cwd`.
+
+- It is fs-only (no Git process) and keeps a real file beside the worktree
+  visible. A folder whose `.git` link is gone counts as content again.
+- Removal checks (`worktreeRemove`, `repo-removal.ts`) deliberately do not use
+  it: deleting the folder deletes the nested checkout too.
+
 ## Batched pathspecs are all-or-nothing
 
 `runBatched` splits long path lists across several git runs, because Windows
@@ -219,6 +233,29 @@ limits a command line to ~32 KB.
   it. Otherwise later steps see an unexpected state.
 - A failure in a later batch leaves earlier batches applied. Announce the
   change also on error (`notifyChanged` in `changes-handlers.ts`).
+
+## Switching with uncommitted work: bring is a plain switch first
+
+`branch:switch` answers "where does the uncommitted work go", and no answer
+commits. `guardedSwitchBranch` (renderer `features/shell/branchSwitch.ts`)
+asks; `switch-carrying.test.ts` pins all three paths against real Git.
+
+- **Bring is a plain `git switch`; stash only on refusal.** Git carries what
+  the destination does not touch and refuses atomically when it would
+  overwrite a file. Do not stash "to be safe": the common case needs none.
+  The refusal is `switch_would_overwrite` with Git's list in `error.paths`,
+  parsed under `LC_ALL=C` (`parseSwitchOverwritePaths`, tracked and untracked
+  lists). Only then does the renderer offer `"merge"`
+  (`switchBranchCarryingChanges`) or `"leave"`.
+- **Leave stashes as `pwrgitLeftOnStashMessage(<branch>)`**, the exact text a
+  later switch onto that branch looks for to offer the work back. Change the
+  spelling in `@pwrgit/shared` only.
+- **Every stash in a switch is addressed by SHA, never `stash pop`**, and a
+  failed switch reapplies it before returning Git's original refusal
+  (`checked_out_elsewhere` is a navigation upstream).
+- A linked worktree nested in the checkout (`.claude/worktrees/x`) is an
+  untracked directory with a `.git` file. `stash -u` prints "Ignoring path"
+  and leaves it alone; keep a test proving each path still does.
 
 ## The lane graph draws fetched work, not just local work
 
