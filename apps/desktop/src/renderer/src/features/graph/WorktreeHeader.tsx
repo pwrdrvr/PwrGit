@@ -470,6 +470,21 @@ function pullMenuRows(
       choices
     };
   }
+  // Undecided: Pull already reads the fork, so its row carries the check, and
+  // without words that check reads as a choice the user made. Say it is not
+  // one yet, and that a pick here is the answer.
+  if (movedOn.now && movedOn.answer === null) {
+    return {
+      note: (
+        <>
+          {repos.fork} has moved on from {repos.original}, so Pull reads{" "}
+          <code>{tracked.label}</code> for now. Pick one below to decide.
+        </>
+      ),
+      actions: [],
+      choices
+    };
+  }
   if (!own) return { actions: [], choices };
   const pushes = choice !== "source";
   return {
