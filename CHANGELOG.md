@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.47.0 - 2026-10-29
+
+- Branch switching - Added a choice to bring uncommitted changes along or leave them in a named stash on the current branch. Returning to that branch offers Restore, which brings the changes back unstaged. If switching would overwrite files, PwrGit names them and offers to merge the changes or leave them behind instead of requiring a commit first.
+- Agent worktrees - Fixed linked worktrees nested inside their own repository appearing as uncommitted changes and unnecessarily triggering switch or pull safeguards. Real files beside them and independent nested repositories remain visible; removal checks still account for nested checkouts.
+- Pull requests - Improved matching when a branch's local name differs from its published name, and when a merged branch has no upstream. An exact-tip match to a merged request now shows that the work landed rather than presenting it as unpushed local commits.
+- Recent repositories - Made the Focused list and Fetch/Pull recent follow your activity: the current repository, pinned repositories, and those opened or committed to under your Git identity in the last seven days. Pulling someone else's commit or merely having dirty/ahead worktrees no longer makes a repository recent.
+- Worktree cleanup - Added a saved rule for when branches merged into the default branch count as finished, from right away to 30 days without commits. The recent-worktree protection is now remembered too, and the Stale lens follows the same rule. Existing defaults remain unchanged.
+- Sync results - Added Show last run in Sync options to reopen completed results without starting another operation, or to watch a running automatic sync. Completed failure and cancellation toasts now dismiss after 15 seconds, pausing on hover; runs stopped by an error remain visible.
+- Windows updates - Fixed in-app updates opening the full setup wizard by requesting silent installation and relaunch of the updated app. macOS and Linux update behavior is unchanged.
+
 ## v0.46.0 - 2026-10-28
 
 - Sync options - Fixed the Fetch/Pull menu closing and starting a run when changing its settings. Picks now stay open and only configure the button; click the main button to run. The split button shares one outline, focus ring, and busy state.
