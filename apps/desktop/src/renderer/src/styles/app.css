@@ -9756,7 +9756,7 @@ button.agent-menu__item:hover {
 .branch-track__hint {
   flex: 0 0 auto;
   font: 600 9.5px/1 var(--font-mono);
-  color: var(--accent-bright);
+  color: var(--accent);
 }
 .branch-track-menu {
   position: fixed;
@@ -9821,6 +9821,9 @@ button.agent-menu__item:hover {
 
 /* The review step, in place of the list inside the same overlay.
    Design: turn 3. */
+.overlay-panel.retrack:focus {
+  outline: none;
+}
 .retrack__head {
   display: flex;
   align-items: center;
@@ -19338,6 +19341,12 @@ button.agent-auth-node:focus-visible,
 }
 .pull-moved-on__text code {
   font: 500 11px/1.45 var(--font-mono);
+}
+.pull-moved-on__actions {
+  flex-wrap: wrap;
+}
+.pull-moved-on__actions .remote-activity__button {
+  white-space: nowrap;
 }
 .pull-moved-on__cap {
   margin: 0;

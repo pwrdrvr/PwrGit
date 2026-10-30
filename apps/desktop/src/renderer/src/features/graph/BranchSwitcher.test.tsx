@@ -202,6 +202,21 @@ describe("BranchSwitcher", () => {
     expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:retrack", expect.anything());
   });
 
+  it("takes focus into the review, so Esc goes back to the list", async () => {
+    await mount();
+    await type("pwrdisk/main");
+    await key("Enter");
+    const panel = container.querySelector<HTMLElement>(".overlay-panel.retrack");
+    expect(document.activeElement).toBe(panel);
+    await act(async () => {
+      panel?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await flush();
+    expect(container.querySelector(".retrack")).toBeNull();
+    expect(rowNames()).toEqual(["main"]);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("still switches a plain row", async () => {
     await mount();
     await key("ArrowDown");

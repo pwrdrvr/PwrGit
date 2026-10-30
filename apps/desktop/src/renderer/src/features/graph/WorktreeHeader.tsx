@@ -1657,7 +1657,7 @@ export function WorktreeHeader({
           <code>{fork.source.label}</code> doesn't, and there is nothing new
           there to bring in.
         </p>
-        <div className="remote-activity__actions">
+        <div className="remote-activity__actions pull-moved-on__actions">
           <button
             type="button"
             className="remote-activity__button remote-activity__button--primary"
@@ -1670,7 +1670,7 @@ export function WorktreeHeader({
             className="remote-activity__button"
             onClick={() => answerMovedOn("sync")}
           >
-            Keep syncing from {fork.source.remote}
+            Keep syncing
           </button>
         </div>
         <p className="pull-moved-on__cap">

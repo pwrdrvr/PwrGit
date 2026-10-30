@@ -152,12 +152,14 @@ export function BranchSwitcher({
   const openMenu = (row: SwitcherRow): void => {
     const caret = caretRefs.current.get(row.ref.name);
     if (caret === undefined) return;
-    const rect = caret.getBoundingClientRect();
+    // Under the chip, left-aligned with it, as the design draws it; pulled
+    // in from the window's right edge when the chip sits far right.
+    const rect = (caret.closest(".branch-track") ?? caret).getBoundingClientRect();
     loadChoices(row.ref.name);
     const options = menuOptions(row);
     const chosen = pickFor(row);
     const at = Math.max(0, options.findIndex((o) => (chosen === null ? o.tracked : o.pick.ref === chosen.ref)));
-    setMenu({ branch: row.ref.name, sel: at, left: Math.max(12, rect.right - 340), top: rect.bottom + 6 });
+    setMenu({ branch: row.ref.name, sel: at, left: Math.max(12, Math.min(rect.left, window.innerWidth - 352)), top: rect.bottom + 6 });
   };
 
   /** A menu choice: the tracked ref clears the row's pick; any other opens
@@ -243,6 +245,12 @@ export function BranchSwitcher({
       <div className="overlay-backdrop" onClick={onClose}>
         <div
           className="overlay-panel retrack"
+          // Holds focus while the review is up, so Esc reaches it: the
+          // search field that had focus is gone with the list.
+          tabIndex={-1}
+          ref={(el) => {
+            if (el !== null && !el.contains(document.activeElement)) el.focus();
+          }}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
