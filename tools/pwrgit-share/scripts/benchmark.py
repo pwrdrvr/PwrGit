@@ -123,8 +123,15 @@ extra=["fixture-registry/extra"]
     seeded, seed_report = source('seeded', seed=True)
     hidden = root / 'donor-hidden-target'; (donor / 'target').rename(hidden)
     first = build(seeded); first.update(run='same-commit', measure=measure(seeded / 'target')); result['rows'].append(first)
-    assert seed_report['target']['unitsSeeded'] == 0
-    assert seed_report['target']['reason'] == 'fingerprint-unproven'
+    if 'targetSkipped' in seed_report:
+        assert seed_report['targetSkipped'] == 'cow-unavailable', seed_report
+        assert 'target' not in seed_report, seed_report
+        assert seed_report['clonedFiles'] == 0, seed_report
+    else:
+        assert seed_report['target']['unitsSeeded'] == 0
+        assert seed_report['target']['reason'] == 'fingerprint-unproven'
+        assert seed_report['target']['cloneCount'] == 0
+        assert seed_report['target']['copyCount'] == 0
     assert first['counts']['registryGit']['Fresh'] == 0, first
     assert first['counts']['registryGit']['Compiling'] == 2
     assert first['counts']['workspacePath']['Compiling'] == 3
