@@ -517,6 +517,21 @@ pages").
 
 Design: `design/Sidebar Repo Index - UX Review.dc.html`, 3a and turn 4.
 
+## One object, one menu
+
+- **A worktree's entries come from `shell/worktree-menu-items.ts`** on every
+  surface: the row's kebab, its right-click, the graph header's kebab and the
+  refs browser's Worktrees tab. Don't hand-build a list beside it. They were
+  four lists, and right-click lost Reset while only the header could Fork.
+- **An entry that can't run on this row stays, disabled with a `hint`.** The
+  primary checkout's Remove points at Remove repository… on the repo row.
+- **A change request's Open/Copy link entries come from
+  `shell/change-request-menu-items.ts`**, in the forge's words. Never "PR #N".
+- **The repo row's kebab shows at rest on the repository that holds the
+  selection** (`.holds-selection`). Hidden there, people opened the primary
+  checkout's look-alike kebab one row down and read Repository setup… as
+  missing from that sidebar lens. No lens changes any menu.
+
 ## Hide and Remove live on the repo row's menu
 
 - **Hide asks nothing** and offers Undo on its toast.

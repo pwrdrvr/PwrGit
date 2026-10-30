@@ -37,8 +37,9 @@ import {
 } from "../../lib/useViewportTooltip";
 import { useRelativeClock } from "../../lib/useRelativeClock";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { forkMenuLabel, worktreeMenuItems } from "../shell/worktree-menu-items";
+import { openResetToRemote } from "../graph/reset-to-remote";
 import { ReadError } from "../shell/ReadError";
-import { revealLabel, revealPath } from "../shell/reveal";
 import {
   parseFocusVisits,
   recordFocusVisit,
@@ -145,7 +146,7 @@ const REPO_TREE_ID = "sidebar-repo-tree";
 // Multi-selection is scoped to a single repo's worktrees (a range needs one
 // ordering). `anchor` is the pivot for shift-click ranges.
 type Selection = { repoId: string; ids: Set<string>; anchor: string | null };
-type ContextState = { x: number; y: number; targets: Worktree[] };
+type ContextState = { x: number; y: number; repo: Repo; targets: Worktree[] };
 type OptionsState = { x: number; y: number };
 type NewWorktreeState = {
   repo: Repo;
@@ -1064,10 +1065,10 @@ export function Sidebar({
       targets = [w];
       setSel({ repoId: repo.id, ids: EMPTY_IDS, anchor: w.id });
     }
-    setCtx({ x: e.clientX, y: e.clientY, targets });
+    setCtx({ x: e.clientX, y: e.clientY, repo, targets });
   };
 
-  const contextItems = (targets: Worktree[]): MenuItem[] => {
+  const contextItems = (repo: Repo, targets: Worktree[]): MenuItem[] => {
     if (targets.length > 1) {
       const ids = targets.map((t) => t.id);
       return [
@@ -1088,27 +1089,13 @@ export function Sidebar({
     }
     const w = targets[0];
     if (w === undefined) return [];
-    return [
-      {
-        type: "item",
-        label: "Copy branch name",
-        onSelect: () => void copyText(w.branch)
-      },
-      { type: "item", label: "Copy path", onSelect: () => void copyText(w.path) },
-      {
-        type: "item",
-        label: revealLabel(platform),
-        onSelect: () => revealPath(w.path)
-      },
-      { type: "sep" },
-      {
-        type: "item",
-        label: "Remove worktree",
-        danger: true,
-        disabled: w.isPrimary,
-        onSelect: () => onRemoveWorktree(w.id)
-      }
-    ];
+    return worktreeMenuItems({
+      worktree: w,
+      platform,
+      fork: { label: forkMenuLabel(repo), onSelect: () => onForkCheckout(repo) },
+      onResetToRemote: () => openResetToRemote({ worktree: w }),
+      onRemove: () => onRemoveWorktree(w.id)
+    });
   };
 
   const cycleSort = (repoId: string): void => {
@@ -1610,7 +1597,7 @@ export function Sidebar({
         <ContextMenu
           x={ctx.x}
           y={ctx.y}
-          items={contextItems(ctx.targets)}
+          items={contextItems(ctx.repo, ctx.targets)}
           onClose={() => setCtx(null)}
         />
       )}

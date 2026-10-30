@@ -117,12 +117,20 @@ describe("BranchChipMenu", () => {
     expect(items()).toEqual([
       "Switch to feature/theirs from origin/feature/theirs",
       "Reset main to origin/feature/theirs…",
-      "Copy branch name"
+      "Copy branch name",
+      "Copy origin/feature/theirs"
     ]);
 
-    // The chip's own text is what gets copied — that is what is on screen.
+    // As the refs browser's remote menu: the short name, and the chip's
+    // own text as its own entry.
     click("Copy branch name");
-    expect(copyTextMock).toHaveBeenCalledWith("origin/feature/theirs");
+    expect(copyTextMock).toHaveBeenLastCalledWith("feature/theirs");
+  });
+
+  it("copies the chip's own text from its own entry", async () => {
+    await render({ ref: "origin/feature/theirs", isRemote: true });
+    click("Copy origin/feature/theirs");
+    expect(copyTextMock).toHaveBeenLastCalledWith("origin/feature/theirs");
   });
 
   it("opens the reset dialog on the exact chip that was right-clicked", async () => {

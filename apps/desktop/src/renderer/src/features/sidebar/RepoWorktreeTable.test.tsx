@@ -226,6 +226,7 @@ describe("RepoRefsModal on Worktrees", () => {
       "Copy branch name",
       "Copy path",
       revealLabel(),
+      "Reset to remote branch…",
       "Remove worktree"
     ]);
     await act(async () => items.at(-1)!.click());

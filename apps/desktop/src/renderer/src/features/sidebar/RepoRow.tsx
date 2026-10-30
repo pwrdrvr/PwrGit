@@ -20,6 +20,7 @@ import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
 import { revealLabel, revealPath } from "../shell/reveal";
+import { forkMenuLabel } from "../shell/worktree-menu-items";
 import {
   currentPlatform,
   hasPrimaryModifier,
@@ -343,9 +344,7 @@ export function RepoRow({
   const menuItems = (): MenuItem[] => [
     {
       type: "item",
-      // The slug once the forge has named it; the folder name until then,
-      // rather than a URL guessed from it.
-      label: `Fork ${repo.identity?.nameWithOwner ?? repo.name}…`,
+      label: forkMenuLabel(repo),
       onSelect: onForkRepo
     },
     {
@@ -687,6 +686,8 @@ export function RepoRow({
         onToggleWorktreePin(worktree.id, !worktree.pinned)
       }
       onRemove={() => onRemoveWorktree(worktree.id)}
+      forkLabel={forkMenuLabel(repo)}
+      onFork={onForkRepo}
       {...(worktree.isDefaultBranch
         ? {}
         : {
@@ -786,7 +787,8 @@ export function RepoRow({
       <div
         ref={rowRef}
         className={`repo-row${activeCollapsed ? " is-active" : ""}${
-          arrangeable ? " is-arrangeable" : ""
+          containsSelection ? " holds-selection" : ""
+        }${arrangeable ? " is-arrangeable" : ""
         }${dragging ? " is-dragging" : ""}${
           dropPosition === null ? "" : ` is-drop-${dropPosition}`
         }`}

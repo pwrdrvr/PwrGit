@@ -1,7 +1,7 @@
 import type { LaneBranchInfo } from "@pwrgit/shared";
 import { copyText } from "../../lib/copyText";
-import { dispatch } from "../../lib/pwrgit";
 import { ContextMenu, type MenuItem } from "../shell/ContextMenu";
+import { changeRequestMenuItems } from "../shell/change-request-menu-items";
 import { openResetToRemote } from "./reset-to-remote";
 import {
   type CommitSwitchTarget,
@@ -93,11 +93,21 @@ export function BranchChipMenu({
     items.push({ type: "sep" });
   }
 
+  // The short name, as the refs browser's remote menu copies; the remote's
+  // ref is its own entry. A collapsed chip naming only a remote has no
+  // branch, so its ref is all there is to copy.
   items.push({
     type: "item",
     label: "Copy branch name",
-    onSelect: () => void copyText(target.ref)
+    onSelect: () => void copyText(branch === "" ? target.ref : branch)
   });
+  if (target.isRemote && branch !== "" && branch !== target.ref) {
+    items.push({
+      type: "item",
+      label: `Copy ${target.ref}`,
+      onSelect: () => void copyText(target.ref)
+    });
+  }
   const worktreePath = info?.worktreePath;
   if (worktreePath !== undefined) {
     items.push({
@@ -109,19 +119,7 @@ export function BranchChipMenu({
 
   const pr = info?.pr;
   if (pr !== undefined && pr.url !== "") {
-    items.push(
-      { type: "sep" },
-      {
-        type: "item",
-        label: `Open PR #${pr.number}`,
-        onSelect: () => void dispatch("shell:openExternal", { url: pr.url })
-      },
-      {
-        type: "item",
-        label: `Copy PR #${pr.number} link`,
-        onSelect: () => void copyText(pr.url)
-      }
-    );
+    items.push({ type: "sep" }, ...changeRequestMenuItems(pr));
   }
 
   return (

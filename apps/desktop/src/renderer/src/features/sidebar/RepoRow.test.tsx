@@ -271,6 +271,16 @@ describe("RepoRow's Other worktrees past the cap", () => {
 });
 
 describe("RepoRow's actions menu", () => {
+  // The CSS shows the kebab at rest on this class, so the repository you are
+  // in never hides its menu behind the primary checkout's look-alike.
+  it("marks the row that holds the selection", async () => {
+    await render(null);
+    const row = (): Element | null => container.querySelector(".repo-row");
+    expect(row()?.classList.contains("holds-selection")).toBe(false);
+    await render("done-1");
+    expect(row()?.classList.contains("holds-selection")).toBe(true);
+  });
+
   const openMenu = async (): Promise<HTMLElement[]> => {
     const trigger = container.querySelector<HTMLButtonElement>(
       'button[aria-label="widget actions"]'

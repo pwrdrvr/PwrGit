@@ -6,7 +6,6 @@ import {
   type Worktree
 } from "@pwrgit/shared";
 import { shortWhen } from "../graph/graph-view";
-import { copyText } from "../../lib/copyText";
 import { dispatch } from "../../lib/pwrgit";
 import { showErrorToast } from "../../lib/toast";
 import {
@@ -15,7 +14,8 @@ import {
 } from "../../lib/useViewportTooltip";
 import { WorktreeGlyph } from "../../lib/WorktreeGlyph";
 import { CopyTarget } from "../shell/CopyTarget";
-import { revealLabel, revealPath } from "../shell/reveal";
+import { worktreeMenuItems } from "../shell/worktree-menu-items";
+import { openResetToRemote } from "../graph/reset-to-remote";
 import { PrChip } from "./PrChip";
 import { RefRowActions, RefRowMenu } from "./RefRowMenu";
 import { isFinishedWorktree, lastSegment, orderWorktrees } from "./repo-view";
@@ -285,34 +285,15 @@ export function RepoWorktreeTable({
                       label: pinned ? "Unpin worktree" : "Pin worktree",
                       onSelect: () => void togglePin(worktree)
                     },
-                    {
-                      type: "item",
-                      label: "Copy branch name",
-                      onSelect: () => void copyText(worktree.branch)
-                    },
-                    {
-                      type: "item",
-                      label: "Copy path",
-                      onSelect: () => void copyText(worktree.path)
-                    },
                     // The sidebar row's own menu, so a row past the six
                     // can do here what it could do there.
-                    {
-                      type: "item",
-                      label: revealLabel(),
-                      onSelect: () => revealPath(worktree.path)
-                    },
-                    ...(onRemoveWorktree === undefined
-                      ? []
-                      : [
-                          { type: "sep" as const },
-                          {
-                            type: "item" as const,
-                            label: "Remove worktree",
-                            danger: true,
-                            onSelect: () => onRemoveWorktree(worktree.id)
-                          }
-                        ])
+                    ...worktreeMenuItems({
+                      worktree,
+                      onResetToRemote: () => openResetToRemote({ worktree }),
+                      ...(onRemoveWorktree === undefined
+                        ? {}
+                        : { onRemove: () => onRemoveWorktree(worktree.id) })
+                    })
                   ]}
                 />
               }
