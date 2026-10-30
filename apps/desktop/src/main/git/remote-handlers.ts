@@ -75,6 +75,7 @@ import { RemoteTipChecker } from "./remote-tip-checker";
 import { WorktreeOperationQueue } from "./worktree-operation-queue";
 import { mapLimit } from "../util/map-limit";
 import { inspectForkTracking, repairForkTracking } from "./fork-tracking";
+import { inspectRetrack, listTrackingOptions, retrackBranch } from "./branch-tracking";
 
 /** Forge reads at once while confirming extra forks for tracking repair. */
 const FORK_CANDIDATE_READS = 3;
@@ -1231,6 +1232,60 @@ export function registerRemoteHandlers(
     if (!result.ok) return result;
     refresher.refreshRepoWorktrees(worktree.repoId);
     return ok(null);
+  });
+
+  // The switcher's tracking chip: which remote a branch follows, and moving
+  // it to another. Reads are local; the change runs under both locks because
+  // it can move a branch tip as well as rewrite its upstream.
+  bus.register("remote:trackingOptions", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    return listTrackingOptions(
+      execGit, worktree.path, req.branch, readIdentity?.(worktree.repoId), hostsForRemotes?.()
+    );
+  });
+
+  bus.register("remote:inspectRetrack", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    return inspectRetrack(
+      execGit, worktree.path, req, readIdentity?.(worktree.repoId), hostsForRemotes?.()
+    );
+  });
+
+  bus.register("remote:retrack", async (req) => {
+    const live = worktreeOf(req.worktreeId);
+    if (!live.ok) return live;
+    const worktree = live.value;
+    const { worktreeId: _worktreeId, ...change } = req;
+    const result = await operations.run(req.worktreeId, () =>
+      operations.runRepository(worktree.repoId, () =>
+        retrackBranch(execGit, worktree.path, change)
+      )
+    );
+    // A refused move changes nothing, but a failed upstream write after a
+    // move does; refresh either way.
+    await refresher.refreshRepoWorktrees(worktree.repoId);
+    const profile = db
+      .prepare("SELECT profile_id AS profileId FROM repos WHERE id = ?")
+      .get(worktree.repoId) as { profileId: string } | undefined;
+    // A tracking-only change moves no worktree state, so nothing above would
+    // repaint the sidebar's "tracks" text or the lanes drawn from upstreams.
+    if (profile !== undefined) {
+      emitEvent("repo:changed", { profileId: profile.profileId, repoIds: [worktree.repoId] });
+    }
+    emitEvent("graph:changed", { repoId: worktree.repoId });
+    if (!result.ok) return result;
+    logMain(
+      "info",
+      "remote",
+      `${req.branch} in ${worktree.path} now tracks ${req.remote}/${req.remoteBranch}` +
+        (result.value.moved ? ` (moved ${req.move} to ${req.targetHead.slice(0, 7)})` : "") +
+        (result.value.copied !== null ? `; old tip kept on ${result.value.copied}` : "")
+    );
+    return result;
   });
 
   bus.register("remote:forkStatus", async (req) => {

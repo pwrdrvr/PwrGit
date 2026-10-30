@@ -170,6 +170,25 @@ describe("parseBranchRefs", () => {
     );
     expect(out.map((ref) => ref.name)).toEqual(["topic/HEAD", "origin/topic/HEAD"]);
   });
+
+  it("names each remote ref's remote, matching a name with a slash whole", () => {
+    const out = parseBranchRefs(
+      [
+        row(["refs/heads/main", "main", "*", "origin/main", "", ""]),
+        row(["refs/remotes/origin/main", "origin/main", " ", "", "", ""]),
+        row(["refs/remotes/team/fork/main", "team/fork/main", " ", "", "", ""]),
+        row(["refs/remotes/gone/main", "gone/main", " ", "", "", ""])
+      ].join("\n"),
+      ["origin", "team", "team/fork"]
+    );
+    expect(out.map(({ name, remote, remoteBranch }) => ({ name, remote, remoteBranch }))).toEqual([
+      { name: "main", remote: undefined, remoteBranch: undefined },
+      { name: "origin/main", remote: "origin", remoteBranch: "main" },
+      { name: "team/fork/main", remote: "team/fork", remoteBranch: "main" },
+      // A ref no configured remote owns keeps its name and claims no remote.
+      { name: "gone/main", remote: undefined, remoteBranch: undefined }
+    ]);
+  });
 });
 
 describe("parseUnappliedUpstreams", () => {

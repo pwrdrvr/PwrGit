@@ -3471,8 +3471,31 @@ const BRANCH_FORMAT = [
   "%(contents:subject)"
 ].join("%09");
 
+/** `refs/remotes/team/fork/main` → `team/fork` + `main` when `team/fork` is a
+ *  configured remote. Longest remote name first: `team` is a prefix of
+ *  `team/fork`. Null for a ref no configured remote owns, and for `HEAD`. */
+export function splitRemoteRefname(
+  refname: string,
+  remotes: readonly string[]
+): { remote: string; remoteBranch: string } | null {
+  const prefix = "refs/remotes/";
+  if (!refname.startsWith(prefix)) return null;
+  const rest = refname.slice(prefix.length);
+  const remote = [...remotes]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => rest.startsWith(`${name}/`));
+  if (remote === undefined) return null;
+  const remoteBranch = rest.slice(remote.length + 1);
+  return remoteBranch === "" || remoteBranch === "HEAD"
+    ? null
+    : { remote, remoteBranch };
+}
+
 /** Parse the tab-delimited `git for-each-ref` output produced with BRANCH_FORMAT. */
-export function parseBranchRefs(stdout: string): BranchRef[] {
+export function parseBranchRefs(
+  stdout: string,
+  remotes: readonly string[] = []
+): BranchRef[] {
   const out: BranchRef[] = [];
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") continue;
@@ -3487,6 +3510,11 @@ export function parseBranchRefs(stdout: string): BranchRef[] {
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;
     if (subject !== "") ref.subject = subject;
+    const owner = isRemote ? splitRemoteRefname(full, remotes) : null;
+    if (owner !== null) {
+      ref.remote = owner.remote;
+      ref.remoteBranch = owner.remoteBranch;
+    }
     out.push(ref);
   }
   return out;
@@ -3501,20 +3529,25 @@ export async function listBranches(
   git: GitExec,
   cwd: string
 ): Promise<Result<BranchRef[]>> {
-  const raw = await git(
-    [
-      "for-each-ref",
-      "--sort=-committerdate",
-      `--format=${BRANCH_FORMAT}`,
-      "refs/heads",
-      "refs/remotes"
-    ],
-    cwd
-  );
+  const [raw, remotes] = await Promise.all([
+    git(
+      [
+        "for-each-ref",
+        "--sort=-committerdate",
+        `--format=${BRANCH_FORMAT}`,
+        "refs/heads",
+        "refs/remotes"
+      ],
+      cwd
+    ),
+    listRemoteNames(git, cwd)
+  ]);
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
-  return ok(parseBranchRefs(checked.value.stdout));
+  // Without the remote names a ref only loses its `remote` field — the list
+  // itself is still right, so a failed `git remote` does not fail it.
+  return ok(parseBranchRefs(checked.value.stdout, remotes.ok ? remotes.value : []));
 }
 
 const REPO_REFS_FORMAT = [
