@@ -1,32 +1,57 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BranchRef, WorktreeId } from "@pwrgit/shared";
+import type { BranchRef, TrackingChoices, TrackingOption, WorktreeId } from "@pwrgit/shared";
 import { dispatch } from "../../lib/pwrgit";
 import { useRelativeClock } from "../../lib/useRelativeClock";
+import { ChevronGlyph } from "../../lib/ChevronGlyph";
+import { CheckGlyph } from "../../lib/CheckGlyph";
+import { showInfoToast } from "../../lib/toast";
 import { guardedSwitchBranch } from "../shell/branchSwitch";
 import { shortWhen } from "./graph-view";
 import {
   hoverTooltip,
   useViewportTooltip
 } from "../../lib/useViewportTooltip";
+import { remoteBranchName, switchTarget, switcherRows, type SwitcherRow } from "./branch-switcher-model";
+import { RetrackReview, type RetrackDone } from "./RetrackReview";
 
-/** The name to hand `git switch` — a remote ref drops its remote prefix so the
- *  DWIM creates/uses the local tracking branch. */
-function switchTarget(ref: BranchRef): string {
-  return ref.isRemote ? ref.name.replace(/^[^/]+\//, "") : ref.name;
+/** A remote ref the user has chosen for a row, not yet confirmed. */
+type Pick = { remote: string; remoteBranch: string; ref: string };
+
+const pickOf = (ref: BranchRef): Pick => ({
+  remote: ref.remote ?? ref.name.split("/")[0] ?? ref.name,
+  remoteBranch: remoteBranchName(ref),
+  ref: ref.name
+});
+
+/** The menu's relation column, in Reset to Remote's words. */
+export function relationLabel(option: TrackingOption): { text: string; tone: "" | "ff" | "dv" } {
+  if (option.ahead === 0 && option.behind === 0) return { text: "same commit", tone: "" };
+  if (option.ahead === 0) return { text: `↓${option.behind} fast-forward`, tone: "ff" };
+  if (option.behind === 0) return { text: `↑${option.ahead} you're ahead`, tone: "" };
+  return { text: `↑${option.ahead} ↓${option.behind} diverged`, tone: "dv" };
+}
+
+/** The count beside a changed chip: what choosing it would do to the tip. */
+function pickHint(option: TrackingOption | undefined): string {
+  if (option === undefined) return "";
+  if (option.ahead === 0) return option.behind === 0 ? "" : `↓${option.behind}`;
+  return option.behind === 0 ? `↑${option.ahead}` : `↑${option.ahead} ↓${option.behind}`;
 }
 
 /**
- * Pick the branch a worktree checks out. Lists local heads and remote-only
- * branches (a remote whose local counterpart already exists is hidden as
- * redundant), current first. Selecting one goes through `guardedSwitchBranch`;
- * the tree, header, and graph refresh off the resulting events.
+ * Pick the branch a worktree checks out, or another remote for a branch to
+ * track. Lists local heads and remote-only branches, current first. A remote
+ * branch with a local namesake is not a row: it is one of that row's tracking
+ * choices, behind the chip's caret (`branch-switcher-model.ts`). Choosing one
+ * opens the review step in place of the list (`RetrackReview`); nothing moves
+ * until it is confirmed there.
  *
- * This overlay used to dispatch `branch:switch` itself, and so was the one
- * switch entry point in the app with no dirty guard — the busiest one. A switch
- * with uncommitted changes that do not conflict *succeeds* and carries them
- * onto the destination branch, which from a title-bar menu happened with no
- * notice at all. It also rendered git's raw "already used by worktree at …"
- * into the footer where every other surface takes you to that worktree.
+ * Selecting a row goes through `guardedSwitchBranch`; the tree, header, and
+ * graph refresh off the resulting events. This overlay used to dispatch
+ * `branch:switch` itself, and so was the one switch entry point with no dirty
+ * guard. It also rendered git's raw "already used by worktree at …" into the
+ * footer where every other surface takes you to that worktree.
+ * Design: `design/Tracking Another Remote - UX Review.dc.html`.
  */
 export function BranchSwitcher({
   worktreeId,
@@ -51,7 +76,14 @@ export function BranchSwitcher({
   const [sel, setSel] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Per local branch: the remote chosen in its chip. `null` is an explicit
+   *  "keep what it tracks", which outranks a search's pick. */
+  const [picked, setPicked] = useState<Record<string, Pick | null>>({});
+  const [choices, setChoices] = useState<Record<string, TrackingChoices | "loading">>({});
+  const [menu, setMenu] = useState<{ branch: string; sel: number; left: number; top: number } | null>(null);
+  const [review, setReview] = useState<{ branch: string; pick: Pick } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const caretRefs = useRef(new Map<string, HTMLButtonElement>());
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -64,46 +96,83 @@ export function BranchSwitcher({
     };
   }, [worktreeId]);
 
-  const ordered = useMemo<BranchRef[]>(() => {
-    const all = branches ?? [];
-    const localNames = new Set(all.filter((b) => !b.isRemote).map((b) => b.name));
-    // Drop remotes that already have a same-named local head — redundant.
-    const shown = all.filter(
-      (b) => !b.isRemote || !localNames.has(switchTarget(b))
-    );
-    const q = query.trim().toLowerCase();
-    const filtered =
-      q === ""
-        ? shown
-        : shown.filter(
-            (b) =>
-              b.name.toLowerCase().includes(q) ||
-              (!b.isRemote && b.upstream?.toLowerCase().includes(q))
-          );
-    // Current first, then other locals, then remotes — each keeping the
-    // recency order the list arrived in.
-    return [
-      ...filtered.filter((b) => b.isCurrent),
-      ...filtered.filter((b) => !b.isCurrent && !b.isRemote),
-      ...filtered.filter((b) => !b.isCurrent && b.isRemote)
-    ];
-  }, [branches, query]);
+  const rows = useMemo<SwitcherRow[]>(
+    () => switcherRows(branches ?? [], query),
+    [branches, query]
+  );
 
   useEffect(() => {
     setSel(0);
+    setMenu(null);
   }, [query]);
 
-  const pick = async (ref: BranchRef): Promise<void> => {
-    // The list is live git truth; currentBranch is what the app is showing.
-    // When they agree, picking the current branch is a no-op. When they
-    // DISAGREE (the checkout moved externally and our label is stale), fall
-    // through — the switch is a git no-op but its refresh chain reconciles
-    // the header, sidebar, and graph with reality.
-    if (ref.isCurrent && ref.name === currentBranch) {
-      onClose();
+  const pickFor = (row: SwitcherRow): Pick | null => {
+    const own = picked[row.ref.name];
+    if (own !== undefined) return own;
+    return row.searchPick === null ? null : pickOf(row.searchPick);
+  };
+
+  const loadChoices = (branch: string): void => {
+    if (choices[branch] !== undefined) return;
+    setChoices((c) => ({ ...c, [branch]: "loading" }));
+    void dispatch("remote:trackingOptions", { worktreeId, branch }).then((r) => {
+      setChoices((c) => {
+        const next = { ...c };
+        if (r.ok) next[branch] = r.value;
+        else delete next[branch];
+        return next;
+      });
+    });
+  };
+
+  // A search that landed on another remote's copy shows its count at once.
+  useEffect(() => {
+    for (const row of rows) if (row.searchPick !== null) loadChoices(row.ref.name);
+    // loadChoices skips a branch already loading or loaded, so only rows matter.
+  }, [rows]);
+
+  /** The menu's rows: what the branch tracks, then every other remote's copy.
+   *  Until the options arrive, the names alone from the branch list. */
+  const menuOptions = (row: SwitcherRow): { pick: Pick; option?: TrackingOption; tracked: boolean }[] => {
+    const loaded = choices[row.ref.name];
+    if (loaded !== undefined && loaded !== "loading") {
+      return loaded.options.map((option) => ({
+        pick: { remote: option.remote, remoteBranch: option.remoteBranch, ref: option.ref },
+        option,
+        tracked: option.tracked
+      }));
+    }
+    const upstream =
+      row.ref.upstream === undefined
+        ? []
+        : [{ pick: { remote: row.ref.upstream.split("/")[0] ?? "", remoteBranch: row.ref.name, ref: row.ref.upstream }, tracked: true }];
+    return [...upstream, ...row.alternates.map((alt) => ({ pick: pickOf(alt), tracked: false }))];
+  };
+
+  const openMenu = (row: SwitcherRow): void => {
+    const caret = caretRefs.current.get(row.ref.name);
+    if (caret === undefined) return;
+    const rect = caret.getBoundingClientRect();
+    loadChoices(row.ref.name);
+    const options = menuOptions(row);
+    const chosen = pickFor(row);
+    const at = Math.max(0, options.findIndex((o) => (chosen === null ? o.tracked : o.pick.ref === chosen.ref)));
+    setMenu({ branch: row.ref.name, sel: at, left: Math.max(12, rect.right - 340), top: rect.bottom + 6 });
+  };
+
+  /** A menu choice: the tracked ref clears the row's pick; any other opens
+   *  the review, which moves nothing until it is confirmed. */
+  const choose = (row: SwitcherRow, choice: { pick: Pick; tracked: boolean }): void => {
+    setMenu(null);
+    if (choice.tracked) {
+      setPicked((p) => ({ ...p, [row.ref.name]: null }));
       return;
     }
-    const target = switchTarget(ref);
+    setPicked((p) => ({ ...p, [row.ref.name]: choice.pick }));
+    setReview({ branch: row.ref.name, pick: choice.pick });
+  };
+
+  const switchTo = async (target: string): Promise<boolean> => {
     setBusy(target);
     setError(null);
     const outcome = await guardedSwitchBranch({
@@ -119,15 +188,99 @@ export function BranchSwitcher({
       onClose();
       onHeldElsewhere(target);
     } else if (outcome.kind === "failed") {
-      setError(outcome.message.split("\n")[0]);
+      setError(outcome.message.split("\n")[0] ?? outcome.message);
     }
     // "cancelled" means the dirty confirm was declined — the picker stays open
     // so the reader can choose differently rather than starting over.
+    return outcome.kind === "switched";
   };
+
+  const activate = async (row: SwitcherRow): Promise<void> => {
+    const chosen = pickFor(row);
+    if (chosen !== null) {
+      setReview({ branch: row.ref.name, pick: chosen });
+      return;
+    }
+    const ref = row.ref;
+    // The list is live git truth; currentBranch is what the app is showing.
+    // When they agree, picking the current branch is a no-op. When they
+    // DISAGREE (the checkout moved externally and our label is stale), fall
+    // through — the switch is a git no-op but its refresh chain reconciles
+    // the header, sidebar, and graph with reality.
+    if (ref.isCurrent && ref.name === currentBranch) {
+      onClose();
+      return;
+    }
+    await switchTo(switchTarget(ref));
+  };
+
+  const retracked = async (done: RetrackDone, isCurrent: boolean): Promise<void> => {
+    const moved = done.copied !== null
+      ? `Its old tip is on ${done.copied}.`
+      : done.arrived > 0
+        ? `Fast-forwarded ${done.arrived} ${done.arrived === 1 ? "commit" : "commits"}.`
+        : done.moved
+          ? `${done.branch} now matches ${done.ref}.`
+          : "Only its tracking changed.";
+    showInfoToast({ title: `${done.branch} tracks ${done.ref}`, message: moved });
+    setReview(null);
+    setPicked((p) => ({ ...p, [done.branch]: null }));
+    setChoices((c) => {
+      const next = { ...c };
+      delete next[done.branch];
+      return next;
+    });
+    if (isCurrent) {
+      onClose();
+      return;
+    }
+    await switchTo(done.branch);
+  };
+
+  if (review !== null) {
+    const row = rows.find((r) => r.ref.name === review.branch);
+    return (
+      <div className="overlay-backdrop" onClick={onClose}>
+        <div
+          className="overlay-panel retrack"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setReview(null);
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }
+          }}
+        >
+          <RetrackReview
+            worktreeId={worktreeId}
+            branch={review.branch}
+            remote={review.pick.remote}
+            remoteBranch={review.pick.remoteBranch}
+            onBack={() => {
+              setReview(null);
+              requestAnimationFrame(() => inputRef.current?.focus());
+            }}
+            onDone={(done) => void retracked(done, row?.ref.isCurrent ?? false)}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const selected = rows[sel];
+  const menuRow = menu === null ? undefined : rows.find((r) => r.ref.name === menu.branch);
+  const menuList = menuRow === undefined ? [] : menuOptions(menuRow);
 
   return (
     <div className="overlay-backdrop" onClick={onClose}>
-      <div className="overlay-panel" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="overlay-panel"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenu(null);
+        }}
+      >
         <div className="overlay-search">
           <svg
             width="16"
@@ -149,16 +302,43 @@ export function BranchSwitcher({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Switch from ${currentBranch}…`}
+            role="combobox"
+            aria-expanded={menu !== null}
+            aria-controls="branch-switcher-list"
             onKeyDown={(e) => {
+              if (menu !== null && menuRow !== undefined) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setMenu({ ...menu, sel: Math.min(menu.sel + 1, menuList.length - 1) });
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMenu({ ...menu, sel: Math.max(menu.sel - 1, 0) });
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  const choice = menuList[menu.sel];
+                  if (choice !== undefined) choose(menuRow, choice);
+                } else if (e.key === "ArrowLeft" || e.key === "Escape") {
+                  e.preventDefault();
+                  setMenu(null);
+                }
+                return;
+              }
               if (e.key === "ArrowDown") {
                 e.preventDefault();
-                setSel((s) => Math.min(s + 1, ordered.length - 1));
+                setSel((s) => Math.min(s + 1, rows.length - 1));
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
                 setSel((s) => Math.max(s - 1, 0));
+              } else if (
+                e.key === "ArrowRight" &&
+                selected !== undefined &&
+                selected.alternates.length > 0 &&
+                e.currentTarget.selectionStart === query.length
+              ) {
+                e.preventDefault();
+                openMenu(selected);
               } else if (e.key === "Enter") {
-                const ref = ordered[sel];
-                if (ref !== undefined) void pick(ref);
+                if (selected !== undefined && busy === null) void activate(selected);
               } else if (e.key === "Escape") {
                 onClose();
               }
@@ -167,63 +347,157 @@ export function BranchSwitcher({
           <span className="kbd">esc</span>
         </div>
 
-        <div className="overlay-results">
-          {ordered.map((b, i) => (
-            <button
-              key={b.name}
-              className={`overlay-result branch-item${i === sel ? " is-selected" : ""}`}
-              onMouseEnter={() => setSel(i)}
-              onClick={() => void pick(b)}
-              disabled={busy !== null}
-            >
-              <span
-                className={`branch-item__dot${b.isCurrent ? " is-current" : ""}`}
-              />
-              <span
-                className="branch-item__name"
-                {...hoverTooltip(
-                  tip,
-                  !b.isRemote && b.upstream
-                    ? `${b.name} · tracks ${b.upstream}`
-                    : b.name
-                )}
+        <div className="overlay-results" role="listbox" id="branch-switcher-list" aria-label="Branches">
+          {rows.map((row, i) => {
+            const b = row.ref;
+            const chosen = pickFor(row);
+            const loaded = choices[b.name];
+            const chosenOption =
+              chosen === null || loaded === undefined || loaded === "loading"
+                ? undefined
+                : loaded.options.find((o) => o.ref === chosen.ref);
+            const open = menu?.branch === b.name;
+            return (
+              <div
+                key={b.name}
+                role="option"
+                aria-selected={i === sel}
+                aria-disabled={busy !== null}
+                className={`overlay-result branch-item${i === sel ? " is-selected" : ""}`}
+                onMouseEnter={() => setSel(i)}
+                onClick={() => {
+                  if (busy === null) void activate(row);
+                }}
               >
-                {b.name}
-                {!b.isRemote && b.upstream && (
-                  <span className="branch-item__meta"> · tracks {b.upstream}</span>
-                )}
-              </span>
-              {b.isCurrent && <span className="branch-item__here">current</span>}
-              {b.isRemote && <span className="branch-item__badge">remote</span>}
-              {busy === switchTarget(b) && (
-                <span className="branch-item__meta">switching…</span>
-              )}
-              {busy !== switchTarget(b) && b.lastCommitAt !== undefined && (
-                <span className="branch-item__meta">
-                  {shortWhen(b.lastCommitAt, now)}
+                <span className={`branch-item__dot${b.isCurrent ? " is-current" : ""}`} />
+                <span
+                  className="branch-item__name"
+                  {...hoverTooltip(
+                    tip,
+                    !b.isRemote && b.upstream ? `${b.name} · tracks ${b.upstream}` : b.name
+                  )}
+                >
+                  {b.name}
+                  {row.alternates.length === 0 && !b.isRemote && b.upstream && (
+                    <span className="branch-item__meta"> · tracks {b.upstream}</span>
+                  )}
                 </span>
-              )}
-            </button>
-          ))}
-          {branches !== null && ordered.length === 0 && (
+                {row.alternates.length > 0 && (
+                  <span
+                    className={`branch-track${chosen !== null ? " is-changed" : ""}${open ? " is-open" : ""}`}
+                  >
+                    <span className="branch-track__value">
+                      {chosen !== null ? "track " : b.upstream !== undefined ? "tracks " : ""}
+                      <b>{chosen?.ref ?? b.upstream ?? "no upstream"}</b>
+                    </span>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      ref={(el) => {
+                        if (el === null) caretRefs.current.delete(b.name);
+                        else caretRefs.current.set(b.name, el);
+                      }}
+                      className="branch-track__caret"
+                      aria-label={`Track another remote for ${b.name}`}
+                      aria-haspopup="listbox"
+                      aria-expanded={open}
+                      {...hoverTooltip(tip, "Track another remote (→)")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSel(i);
+                        if (open) setMenu(null);
+                        else openMenu(row);
+                      }}
+                    >
+                      <ChevronGlyph size={9} up={open} />
+                    </button>
+                  </span>
+                )}
+                {chosen !== null && pickHint(chosenOption) !== "" && (
+                  <span className="branch-track__hint">{pickHint(chosenOption)}</span>
+                )}
+                <span className="branch-item__grow" />
+                {b.isCurrent && <span className="branch-item__here">current</span>}
+                {b.isRemote && <span className="branch-item__badge">remote</span>}
+                {busy === switchTarget(b) && <span className="branch-item__meta">switching…</span>}
+                {busy !== switchTarget(b) && b.lastCommitAt !== undefined && (
+                  <span className="branch-item__meta">{shortWhen(b.lastCommitAt, now)}</span>
+                )}
+              </div>
+            );
+          })}
+          {branches !== null && rows.length === 0 && (
             <div className="overlay-empty">
-              {query.trim() === ""
-                ? "No branches"
-                : `No branches match "${query}"`}
+              {query.trim() === "" ? "No branches" : `No branches match "${query}"`}
             </div>
           )}
           {branches === null && <div className="overlay-empty">Loading…</div>}
         </div>
 
+        {menu !== null && menuRow !== undefined && (
+          <div
+            className="branch-track-menu"
+            role="listbox"
+            aria-label={`${menuRow.ref.name} tracks`}
+            style={{ left: menu.left, top: menu.top }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="branch-track-menu__head">{menuRow.ref.name} tracks</div>
+            {menuList.map((choice, i) => {
+              const relation = choice.option === undefined ? null : relationLabel(choice.option);
+              const repo = choice.option?.nameWithOwner;
+              const cantPush = choice.option?.canPush === false;
+              return (
+                <div
+                  key={choice.pick.ref}
+                  role="option"
+                  aria-selected={i === menu.sel}
+                  className={`branch-track-menu__item${i === menu.sel ? " is-selected" : ""}`}
+                  onMouseEnter={() => setMenu({ ...menu, sel: i })}
+                  onClick={() => choose(menuRow, choice)}
+                >
+                  <span className="branch-track-menu__check">
+                    {choice.tracked && <CheckGlyph size={12} />}
+                  </span>
+                  <span className="branch-track-menu__name">
+                    {choice.pick.remote}
+                    {(repo !== undefined || cantPush) && (
+                      <small>
+                        {[repo, cantPush ? "you can't push" : undefined].filter(Boolean).join(" · ")}
+                      </small>
+                    )}
+                  </span>
+                  <span className={`branch-track-menu__rel${relation?.tone ? ` is-${relation.tone}` : ""}`}>
+                    {relation?.text ?? "…"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {error !== null ? (
           <div className="overlay-foot overlay-foot--error">{error}</div>
+        ) : menu !== null ? (
+          <div className="overlay-foot">
+            <span>↑↓ remote</span>
+            <span>↵ review</span>
+            <span>← back</span>
+            <span style={{ flex: 1 }} />
+            <span>
+              {rows.length} {rows.length === 1 ? "branch" : "branches"}
+            </span>
+          </div>
         ) : (
           <div className="overlay-foot">
             <span>↑↓ navigate</span>
-            <span>↵ switch</span>
+            <span>
+              {selected !== undefined && pickFor(selected) !== null ? "↵ review tracking change" : "↵ switch"}
+            </span>
+            {selected !== undefined && selected.alternates.length > 0 && <span>→ other remotes</span>}
             <span style={{ flex: 1 }} />
             <span>
-              {ordered.length} {ordered.length === 1 ? "branch" : "branches"}
+              {rows.length} {rows.length === 1 ? "branch" : "branches"}
             </span>
           </div>
         )}

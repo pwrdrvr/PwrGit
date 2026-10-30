@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { dispatch } from "../../lib/pwrgit";
 import {
   hoverTooltip,
@@ -31,9 +31,12 @@ import { DotGlyph } from "../../lib/DotGlyph";
 export function RemoteActivityCard({
   view,
   compact = false,
-  onClose
+  onClose,
+  children
 }: {
   view: RemoteActivityView;
+  /** A question the receipt asks, under the steps: the popover's `prompt`. */
+  children?: ReactNode;
   /** Toast placement: tighter, and without the repeated Git output block. */
   compact?: boolean;
   /**
@@ -227,6 +230,8 @@ export function RemoteActivityCard({
           {view.statusLabel}
         </p>
       )}
+
+      {children}
 
       {!compact && (
         // Git's own words, verbatim. Everything above is PwrGit's reading of

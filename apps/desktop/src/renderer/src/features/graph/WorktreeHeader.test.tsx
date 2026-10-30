@@ -2688,6 +2688,89 @@ describe("WorktreeHeader keeps a fork up with its source", () => {
     );
   });
 
+  /** The disktree report: origin moved on from upstream, which has nothing new. */
+  const movedOnFork = (): ForkStatus =>
+    behindSource({
+      ahead: 7,
+      behind: 0,
+      pushBack: {
+        remote: "origin",
+        branch: "main",
+        ref: "refs/remotes/origin/main",
+        head: "1".repeat(40),
+        overwrites: 7,
+        adds: 0
+      }
+    });
+
+  it("reports a sync that brought nothing as up to date, not as a push held back", async () => {
+    answer(behindSource(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(statusChip()).toBe("up to date");
+    expect(card()?.textContent).toContain(
+      "main is up to date with upstream/main · origin/main has 7 commits it doesn't"
+    );
+    expect(card()?.textContent).not.toContain("was not pushed");
+  });
+
+  it("pulls a fork that moved on from itself, and asks once whether to stop syncing", async () => {
+    answer(movedOnFork(), { "remote:pull": ok({ stashed: false, reappliedWithConflicts: false }) });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:pull", { worktreeId: "worktree-1" });
+    expect(bridge.dispatch).not.toHaveBeenCalledWith("remote:syncFork", expect.anything());
+    expect(card()?.textContent).toContain("has moved on from octo-labs/sparkline");
+    const only = [...document.querySelectorAll<HTMLButtonElement>(".pull-moved-on button")].find(
+      (b) => b.textContent === "Pull from origin only"
+    );
+    await act(async () => only?.click());
+    expect(window.localStorage.getItem("pwrgit.forkMovedOn.repo-1")).toBe("tracked");
+    expect(window.localStorage.getItem("pwrgit.pullChoice.repo-1")).toBe("tracked");
+    expect(card()).toBeNull();
+
+    // Answered: the next Pull asks nothing, and the menu leads with the fork.
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(document.querySelector(".pull-moved-on")).toBeNull();
+    await act(async () => document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
+    await openMenu();
+    expect(menuRows()[0]?.querySelector(".pull-menu__title")?.textContent).toBe("Pull origin/main only");
+    expect(document.querySelector(".pull-menu__note")?.textContent).toContain("Watching upstream/main");
+  });
+
+  it("keeps syncing a moved-on fork once told to, without asking again", async () => {
+    window.localStorage.setItem("pwrgit.forkMovedOn.repo-1", "sync");
+    answer(movedOnFork(), {
+      "remote:syncFork": ok({
+        ...synced,
+        arrived: 0,
+        push: { outcome: "diverged", remote: "origin", branch: "main", overwrites: 7 }
+      })
+    });
+    await remount();
+    await act(async () => {
+      pull()?.click();
+      await settle();
+    });
+    expect(bridge.dispatch).toHaveBeenCalledWith("remote:syncFork", expect.objectContaining({ push: true }));
+    expect(document.querySelector(".pull-moved-on")).toBeNull();
+  });
+
   it("offers SSH when the sync had no HTTPS credential", async () => {
     const recovery: SshRemoteRecovery = {
       remote: "origin",

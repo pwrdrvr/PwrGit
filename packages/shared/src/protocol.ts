@@ -22,6 +22,9 @@ import type {
   AgentTidyProposal,
   AgentTidyRevision,
   BranchRef,
+  RetrackMove,
+  RetrackReview,
+  TrackingChoices,
   BulkSyncMode,
   BulkSyncProgress,
   BulkSyncSummary,
@@ -2005,6 +2008,44 @@ export interface Commands {
       target?: { remote: string; nameWithOwner: string };
     };
     res: null;
+  };
+  /**
+   * The remote-tracking refs a local branch could track: every remote's
+   * same-named branch, plus the one it tracks now. Local reads only.
+   */
+  "remote:trackingOptions": {
+    req: { worktreeId: string; branch: string };
+    res: TrackingChoices;
+  };
+  /** What changing `branch` to track `remote/remoteBranch` would do. */
+  "remote:inspectRetrack": {
+    req: { worktreeId: string; branch: string; remote: string; remoteBranch: string };
+    res: RetrackReview;
+  };
+  /**
+   * Make `branch` track `remote/remoteBranch`, moving its tip first when
+   * `move` asks. Every tip the review read is re-read under the repository
+   * lock; a change since is refused with nothing changed. A tip move never
+   * stashes: in the asking worktree it is `merge --ff-only` or
+   * `reset --keep`, which keep uncommitted changes and refuse when one would
+   * be overwritten.
+   */
+  "remote:retrack": {
+    req: {
+      worktreeId: string;
+      branch: string;
+      remote: string;
+      remoteBranch: string;
+      /** Full object names the review showed. */
+      head: string;
+      targetHead: string;
+      /** The upstream refname the review showed, or null. */
+      upstreamRef: string | null;
+      move: RetrackMove;
+      /** Keep the old tip on this new branch before a `reset`. */
+      copy?: string;
+    };
+    res: { moved: boolean; copied: string | null };
   };
   /** Inspection after a denied push, or from Pull or Remotes: origin may
    *  already be the fork, and other remotes may be forks you can push to. */

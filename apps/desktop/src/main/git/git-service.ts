@@ -3472,7 +3472,12 @@ const BRANCH_FORMAT = [
 ].join("%09");
 
 /** Parse the tab-delimited `git for-each-ref` output produced with BRANCH_FORMAT. */
-export function parseBranchRefs(stdout: string): BranchRef[] {
+export function parseBranchRefs(
+  stdout: string,
+  remotes: readonly string[] = []
+): BranchRef[] {
+  // Longest first: `team` is a prefix of `team/fork`.
+  const byLength = [...remotes].sort((a, b) => b.length - a.length);
   const out: BranchRef[] = [];
   for (const line of stdout.split("\n")) {
     if (line.trim() === "") continue;
@@ -3487,6 +3492,14 @@ export function parseBranchRefs(stdout: string): BranchRef[] {
     if (upstream !== "") ref.upstream = upstream;
     if (date !== "") ref.lastCommitAt = date;
     if (subject !== "") ref.subject = subject;
+    if (isRemote) {
+      const rest = full.slice("refs/remotes/".length);
+      const remote = byLength.find((name) => rest.startsWith(`${name}/`));
+      if (remote !== undefined) {
+        ref.remote = remote;
+        ref.remoteBranch = rest.slice(remote.length + 1);
+      }
+    }
     out.push(ref);
   }
   return out;
@@ -3501,20 +3514,25 @@ export async function listBranches(
   git: GitExec,
   cwd: string
 ): Promise<Result<BranchRef[]>> {
-  const raw = await git(
-    [
-      "for-each-ref",
-      "--sort=-committerdate",
-      `--format=${BRANCH_FORMAT}`,
-      "refs/heads",
-      "refs/remotes"
-    ],
-    cwd
-  );
+  const [raw, remotes] = await Promise.all([
+    git(
+      [
+        "for-each-ref",
+        "--sort=-committerdate",
+        `--format=${BRANCH_FORMAT}`,
+        "refs/heads",
+        "refs/remotes"
+      ],
+      cwd
+    ),
+    listRemoteNames(git, cwd)
+  ]);
   if (!raw.ok) return raw;
   const checked = requireExit0(raw.value, ["for-each-ref"]);
   if (!checked.ok) return checked;
-  return ok(parseBranchRefs(checked.value.stdout));
+  // Without the remote names a ref only loses its `remote` field — the list
+  // itself is still right, so a failed `git remote` does not fail it.
+  return ok(parseBranchRefs(checked.value.stdout, remotes.ok ? remotes.value : []));
 }
 
 const REPO_REFS_FORMAT = [

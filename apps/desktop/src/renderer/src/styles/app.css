@@ -9632,7 +9632,9 @@ button.agent-menu__item:hover {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .branch-item__name {
-  flex: 1;
+  /* Shrinks first; the tracking chip sits right after it and the spacer
+     takes the slack. */
+  flex: 0 1 auto;
   min-width: 0;
   text-align: left;
   font: 600 13px/1.2 var(--font-mono);
@@ -9669,6 +9671,385 @@ button.agent-menu__item:hover {
   color: var(--status-warning);
   font-family: var(--font-sans);
   font-size: 11.5px;
+}
+
+/* The tracking chip: what a row's branch tracks, and a caret to choose another
+   remote's copy. The split control from the sync split button, at pill radius
+   in the row's mono register. The value zone is the row (clicking it acts on
+   the row); only the caret is its own button.
+   Design: design/Tracking Another Remote - UX Review.dc.html, turn 2. */
+.branch-item__grow {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.branch-track {
+  flex: 0 1 auto;
+  min-width: 48px;
+  max-width: 55%;
+  display: inline-flex;
+  align-items: stretch;
+  height: 20px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-panel-elevated);
+}
+.branch-track__value {
+  display: block;
+  min-width: 0;
+  padding: 0 8px;
+  font: 500 10px/18px var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch-track__value b {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.branch-track__caret {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.branch-track__caret > svg {
+  flex: 0 0 auto;
+}
+.branch-track:hover {
+  border-color: var(--accent-border);
+}
+.branch-track__caret:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+  border-left-color: transparent;
+}
+.branch-track.is-open {
+  border-color: var(--accent-border);
+}
+.branch-track.is-open .branch-track__caret {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-left-color: transparent;
+}
+/* Chosen, not yet confirmed: accent, "track" for "tracks", and a count. */
+.branch-track.is-changed {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.branch-track.is-changed .branch-track__value,
+.branch-track.is-changed .branch-track__value b,
+.branch-track.is-changed .branch-track__caret {
+  color: var(--accent-bright);
+}
+.branch-track.is-changed .branch-track__caret {
+  border-left-color: var(--accent-border);
+}
+.branch-track__hint {
+  flex: 0 0 auto;
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--accent-bright);
+}
+.branch-track-menu {
+  position: fixed;
+  z-index: 3;
+  width: 340px;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-menu);
+  box-shadow: var(--shadow-popover);
+}
+.branch-track-menu__head {
+  padding: 6px 9px 5px;
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.branch-track-menu__item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.branch-track-menu__item.is-selected {
+  background: var(--bg-row-active);
+}
+.branch-track-menu__check {
+  display: inline-flex;
+  color: var(--accent);
+}
+.branch-track-menu__name {
+  min-width: 0;
+  font: 600 11.5px/1.25 var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-track-menu__name small {
+  display: block;
+  margin-top: 2px;
+  font: 500 10px/1.2 var(--font-sans);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch-track-menu__rel {
+  font: 600 10px/1 var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.branch-track-menu__rel.is-ff {
+  color: var(--success-text);
+}
+.branch-track-menu__rel.is-dv {
+  color: var(--status-warning);
+}
+
+/* The review step, in place of the list inside the same overlay.
+   Design: turn 3. */
+.retrack__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.retrack__back {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.retrack__back > svg {
+  flex: 0 0 auto;
+}
+.retrack__back:hover {
+  background: var(--bg-hover-strong);
+  color: var(--text-primary);
+}
+.retrack__back:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.retrack__title {
+  flex: 1;
+  min-width: 0;
+  font: 650 14px/1.2 var(--font-sans);
+  color: var(--text-primary);
+}
+.retrack__title code {
+  font: 600 13px/1.2 var(--font-mono);
+}
+.retrack__body {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 14px 16px 4px;
+}
+.retrack__route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.retrack__stop {
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.retrack__stop--to {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.retrack__stop-kind {
+  display: block;
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.retrack__stop-ref {
+  display: block;
+  margin-top: 5px;
+  font: 600 12.5px/1.2 var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.retrack__stop-repo {
+  display: block;
+  margin-top: 3px;
+  font: 500 10.5px/1.2 var(--font-sans);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.retrack__arrow {
+  color: var(--text-subtle);
+  font: 600 14px/1 var(--font-sans);
+}
+.retrack__ledger {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reset-ledger__cell.is-warn {
+  border-color: color-mix(in srgb, var(--status-warning) 40%, transparent);
+  background: var(--warn-soft);
+}
+.reset-ledger__cell.is-good {
+  border-color: color-mix(in srgb, var(--success-text) 32%, transparent);
+  background: var(--success-soft);
+}
+.reset-ledger__cell.is-good strong {
+  color: var(--success-text);
+}
+.retrack__commits {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font: 500 11px/1.5 var(--font-mono);
+  color: var(--text-secondary);
+}
+.retrack__commits li {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.retrack__hash {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+}
+.retrack__subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+}
+.retrack__more {
+  color: var(--text-subtle);
+  font-family: var(--font-sans);
+}
+.retrack__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.retrack__choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.retrack__choice:hover {
+  background: var(--bg-panel-hover);
+}
+.retrack__choice.is-on {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.retrack__choice:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.retrack__radio {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-strong);
+}
+.retrack__choice.is-on .retrack__radio {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2.5px var(--bg-menu);
+  background: var(--accent);
+}
+.retrack__choice-title {
+  display: block;
+  font: 600 12px/1.3 var(--font-sans);
+  color: var(--text-primary);
+}
+.retrack__choice-detail {
+  display: block;
+  margin-top: 3px;
+  font: 500 11px/1.4 var(--font-sans);
+  color: var(--text-muted);
+}
+.retrack__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 10px;
+  padding: 0;
+  list-style: none;
+  font: 500 11.5px/1.4 var(--font-sans);
+  color: var(--text-secondary);
+}
+.retrack__fact {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.retrack__fact code {
+  font: 500 11px/1.4 var(--font-mono);
+}
+.retrack__fact-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 2px;
+}
+.retrack__fact--ok .retrack__fact-mark {
+  color: var(--success-text);
+}
+.retrack__fact--warn .retrack__fact-mark {
+  color: var(--status-warning);
+}
+.retrack__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+.retrack__cmd {
+  flex: 1;
+  min-width: 0;
+  font: 500 10px/1.3 var(--font-mono);
+  color: var(--text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sync-chip {
   display: inline-flex;
@@ -18931,6 +19312,38 @@ button.agent-auth-node:focus-visible,
 
 /* Stop is the action someone comes to this card for after five silent
    minutes; it should not need hunting for among three identical buttons. */
+/* The receipt's one-time question (a fork that moved on from its original).
+   Primary is the answer the card recommends. */
+.remote-activity__button--primary {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.pull-moved-on {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.pull-moved-on__text {
+  margin: 0;
+  font: 500 11.5px/1.45 var(--font-sans);
+  color: var(--text-secondary);
+}
+.pull-moved-on__text b {
+  color: var(--text-primary);
+}
+.pull-moved-on__text code {
+  font: 500 11px/1.45 var(--font-mono);
+}
+.pull-moved-on__cap {
+  margin: 0;
+  font: 500 10px/1.3 var(--font-sans);
+  color: var(--text-subtle);
+}
 .remote-activity__button--stop {
   border-color: var(--danger-border);
   color: var(--danger-text);
